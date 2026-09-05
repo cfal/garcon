@@ -22,6 +22,7 @@ export class AppShellStore {
 	showSettings = $state(false);
 	showScheduledPrompts = $state(false);
 	showSnippets = $state(false);
+	showOnboardingWizard = $state(false);
 	settingsTab = $state<SettingsTab>('providers');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
@@ -47,6 +48,7 @@ export class AppShellStore {
 	openSettings(section: string = 'providers'): void {
 		this.dismissSnippets();
 		this.showScheduledPrompts = false;
+		this.showOnboardingWizard = false;
 		this.showSettings = true;
 		this.settingsTab = normalizeSettingsTab(section);
 	}
@@ -55,9 +57,21 @@ export class AppShellStore {
 		this.showSettings = false;
 	}
 
+	openOnboardingWizard(): void {
+		this.dismissSnippets();
+		this.showSettings = false;
+		this.showScheduledPrompts = false;
+		this.showOnboardingWizard = true;
+	}
+
+	closeOnboardingWizard(): void {
+		this.showOnboardingWizard = false;
+	}
+
 	openScheduledPrompts(): void {
 		this.dismissSnippets();
 		this.showSettings = false;
+		this.showOnboardingWizard = false;
 		this.showScheduledPrompts = true;
 	}
 
@@ -68,6 +82,7 @@ export class AppShellStore {
 	openSnippets(returnFocus?: () => void): void {
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
+		this.showOnboardingWizard = false;
 		this.#snippetsReturnFocus = returnFocus ?? null;
 		this.showSnippets = true;
 	}

@@ -12,7 +12,7 @@ import {
 	terminalSurfaceId,
 	type WorkspaceWindowId,
 } from '../surface-types';
-import { CANONICAL_CHAT_SURFACE_ID } from '../canonical-layout';
+import { CANONICAL_CHAT_SURFACE_ID, CANONICAL_FILES_SURFACE_ID } from '../canonical-layout';
 import { windowIdOfSurface, windowNodeById, collectWindowNodes } from '../window-tree';
 import type { TerminalMetadata } from '$shared/terminal';
 import type { TerminalAttachmentState } from '$lib/terminal/sessions/terminal-registry.svelte.js';
@@ -20,6 +20,7 @@ import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
+import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -232,7 +233,7 @@ describe('WorkspaceCoordinator', () => {
 			anchorWindowId: 'window-main',
 		});
 
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 		const windowId = windowIdOfSurface(
 			layout.snapshot.desktopRoot,
 			fileSurfaceId('new-window-file'),
@@ -283,18 +284,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
 		await coordinator.openSingletonInNewWindow('git-history');
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 	});
 
 	it('keeps hidden window surfaces and controllers alive while fullscreen', async () => {
 		const { coordinator, layout, singletons } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 
 		await coordinator.enterWindowFullscreen('window-main');
 
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 		expect(layout.surface('singleton:git-history')).not.toBeNull();
 		expect(singletons.disposeSurface).not.toHaveBeenCalled();
 	});
@@ -311,7 +312,7 @@ describe('WorkspaceCoordinator', () => {
 		await expect(coordinator.closeSurface(mainChatSurfaceId)).resolves.toBe(true);
 
 		expect(layout.surface(mainChatSurfaceId)).toBeNull();
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 		expect(
 			Object.values(layout.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
 		).toHaveLength(1);
@@ -402,7 +403,7 @@ describe('WorkspaceCoordinator', () => {
 		).rejects.toThrow();
 
 		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
 	it('moves Chat into a Chat-less window and presents its destination identity', async () => {
@@ -534,7 +535,7 @@ describe('WorkspaceCoordinator', () => {
 			focusOwner: { kind: 'surface', surfaceId: destinationSurfaceId },
 			lastFocusedSurfaceId: destinationSurfaceId,
 		});
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
 	it('replaces and focuses an existing destination Chat presentation', async () => {
@@ -554,7 +555,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-a' });
 		expect(windowTabs(layout.snapshot, destinationWindowId).activeId).toBe(destinationSurfaceId);
 		expect(coordinator.lastFocusedSurfaceId).toBe(destinationSurfaceId);
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 	});
 
 	it('moves Chat directionally instead of copying its source presentation', async () => {
@@ -569,7 +570,7 @@ describe('WorkspaceCoordinator', () => {
 		);
 		expect(movedChat?.id).not.toBe(sourceSurfaceId);
 		expect(layout.surface(sourceSurfaceId)).toBeNull();
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 		expect(coordinator.lastFocusedSurfaceId).toBe(movedChat?.id);
 	});
 
@@ -597,7 +598,7 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.moveTabToNewWindow(chatViewSurfaceId('window-main'), 'window-main', 'right');
 
 		expect(layout.snapshot).toBe(before);
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
 	it('blocks closing the window that owns the final Chat view', async () => {
@@ -607,7 +608,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.isWindowCloseBlocked('window-main')).toBe(true);
 		await expect(coordinator.closeWindow('window-main')).resolves.toBe(false);
 		expect(layout.surface(chatViewSurfaceId('window-main'))).not.toBeNull();
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 	});
 
 	it('reconciles a hidden terminal that exits while another window is fullscreen', async () => {
@@ -628,7 +629,7 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(layout.surface(terminalSurfaceId(terminalId))).toBeNull();
 		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 	});
 
 	it('falls back from a closed last-focused window', async () => {
@@ -700,7 +701,7 @@ describe('WorkspaceCoordinator', () => {
 		]);
 
 		expect([first, second].filter(Boolean)).toHaveLength(1);
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
 	it('places files in the mobile-only presentation regardless of a desktop target', async () => {
@@ -1102,7 +1103,7 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(confirmDestructive).not.toHaveBeenCalled();
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 		expect(layout.surface(fileSurfaceId('fullscreen-reserved'))).not.toBeNull();
 	});
 
@@ -1268,6 +1269,19 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(layout.surface('singleton:git')).toBeNull();
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
+	it('returns from a removed mobile-active tab to the prior tab in its source window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.moveTabToWindow('singleton:git', 'window-files');
+		await coordinator.focusSurface('singleton:git');
+		await coordinator.enterMobilePresentation();
+
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe('singleton:git');
+		await expect(coordinator.closeSurface('singleton:git')).resolves.toBe(true);
+
+		expect(layout.surface('singleton:git')).toBeNull();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_FILES_SURFACE_ID);
 	});
 
 	it('destroys every mobile-only Git view on responsive desktop return', async () => {
@@ -1473,19 +1487,6 @@ describe('WorkspaceCoordinator', () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout, appShell } = createHarness({ surfaceFrames: frames });
 		const filesWindowId = 'window-files' as WorkspaceWindowId;
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: filesWindowId,
-					partitionId: 'partition-files',
-				},
-			]),
-		);
 		coordinator.noteSurfaceFocus('singleton:files');
 		const surfaceId = fileSurfaceId('delayed-file');
 		const placement = coordinator.placeFileSession('delayed-file', {
@@ -1514,19 +1515,6 @@ describe('WorkspaceCoordinator', () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
 		const filesWindowId = 'window-files' as WorkspaceWindowId;
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: filesWindowId,
-					partitionId: 'partition-files',
-				},
-			]),
-		);
 		const surfaceId = fileSurfaceId('delayed-file');
 		const placement = coordinator.placeFileSession('delayed-file', {
 			type: 'window',
@@ -1574,20 +1562,7 @@ describe('WorkspaceCoordinator', () => {
 
 	it('activates an inactive window synchronously and focuses its active surface after rendering', async () => {
 		const frames = new SurfaceFrameRegistry();
-		const { coordinator, layout, appShell } = createHarness({ surfaceFrames: frames });
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-files',
-					partitionId: 'partition-files',
-				},
-			]),
-		);
+		const { coordinator, appShell } = createHarness({ surfaceFrames: frames });
 		coordinator.noteWindowChromeFocus('window-files', 'singleton:files');
 
 		coordinator.activateWindow('window-main');
@@ -1600,20 +1575,7 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('promotes a presented pane when keyboard focus enters it', () => {
-		const { coordinator, layout } = createHarness();
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-files',
-					partitionId: 'partition-files',
-				},
-			]),
-		);
+		const { coordinator } = createHarness();
 
 		coordinator.noteSurfaceFocus('singleton:files');
 
@@ -1742,6 +1704,9 @@ describe('WorkspaceCoordinator', () => {
 		expect(focusSurface).toHaveBeenLastCalledWith('singleton:git-history');
 
 		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: 'singleton:git-history' });
+		expect(focusSurface).toHaveBeenLastCalledWith('singleton:files');
+
+		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: 'singleton:files' });
 		expect(focusSurface).toHaveBeenLastCalledWith(CANONICAL_CHAT_SURFACE_ID);
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
 	});
@@ -1895,7 +1860,7 @@ describe('WorkspaceCoordinator', () => {
 
 		await coordinator.openSingletonInNewWindow('git-compare');
 
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 		const windowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare');
 		expect(windowId).not.toBe('window-main');
 		expect(windowTabs(layout.snapshot, windowId!).activeId).toBe('singleton:git-compare');
@@ -1910,7 +1875,7 @@ describe('WorkspaceCoordinator', () => {
 
 		await coordinator.openSingletonInNewWindow('git-compare');
 
-		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare')).toBe(windowId);
 		expect(coordinator.lastFocusedSurfaceId).toBe('singleton:git-compare');
 	});
@@ -1920,7 +1885,7 @@ describe('WorkspaceCoordinator', () => {
 
 		await coordinator.openSingletonInNewWindow('git');
 
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git')).toBe('window-main');
 		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:git');
 	});
@@ -2106,6 +2071,89 @@ describe('WorkspaceCoordinator', () => {
 		);
 	});
 
+	it.each(['current window', 'new window'] as const)(
+		'keeps a terminal session when its %s surface closes before presentation settles',
+		async (destination) => {
+			const frames = new SurfaceFrameRegistry();
+			const { coordinator, terminals, layout } = createHarness({ surfaceFrames: frames });
+			const terminalId = `terminal-close-during-create-${destination.replace(' ', '-')}`;
+			const surfaceId = terminalSurfaceId(terminalId);
+			terminals.create.mockImplementation(async () => {
+				terminals.sessions[terminalId] = {
+					metadata: terminalMetadata(terminalId),
+					attachmentState: 'attached',
+				};
+				return terminalId;
+			});
+
+			const creating =
+				destination === 'current window'
+					? coordinator.createTerminal('window-main')
+					: coordinator.createTerminalInNewWindow('window-main');
+			await vi.waitFor(() => expect(layout.surface(surfaceId)).not.toBeNull());
+
+			await expect(Promise.all([creating, coordinator.closeSurface(surfaceId)])).resolves.toEqual([
+				terminalId,
+				true,
+			]);
+
+			expect(terminals.requestTermination).not.toHaveBeenCalled();
+			expect(terminals.disposeTerminatedSession).not.toHaveBeenCalled();
+			expect(terminals.sessions[terminalId]).toBeTruthy();
+			expect(layout.surface(surfaceId)).toBeNull();
+			expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+		},
+	);
+
+	it.each(['current window', 'new window'] as const)(
+		'does not re-present a %s terminal closed during an unchanged publication',
+		async (destination) => {
+			const terminalId = `terminal-close-during-unchanged-publication-${destination.replace(' ', '-')}`;
+			const surfaceId = terminalSurfaceId(terminalId);
+			let coordinator: WorkspaceCoordinator | null = null;
+			let closeOnPublish = false;
+			let closing: Promise<boolean> | null = null;
+			const presentSurface = vi.spyOn(
+				WorkspacePresentationController.prototype,
+				'presentSurface',
+			);
+			try {
+				const harness = createHarness({
+					onLayoutChanged: (snapshot) => {
+						if (!closeOnPublish || !snapshot.surfaces[surfaceId] || !coordinator) return;
+						closeOnPublish = false;
+						closing = coordinator.closeSurface(surfaceId);
+					},
+				});
+				coordinator = harness.coordinator;
+				const { layout, terminals } = harness;
+				terminals.sessions[terminalId] = {
+					metadata: terminalMetadata(terminalId),
+					attachmentState: 'attached',
+				};
+				await coordinator.openTerminalSession(terminalId, 'window-main');
+				await coordinator.enterWindowFullscreen('window-main');
+				presentSurface.mockClear();
+				terminals.create.mockResolvedValue(terminalId);
+				closeOnPublish = true;
+
+				const creating =
+					destination === 'current window'
+						? coordinator.createTerminal('window-main', 'terminal-retry')
+						: coordinator.createTerminalInNewWindow('window-main', 'terminal-retry');
+				await expect(creating).resolves.toBe(terminalId);
+				await expect(closing).resolves.toBe(true);
+
+				expect(layout.surface(surfaceId)).toBeNull();
+				expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+				expect(presentSurface).not.toHaveBeenCalledWith(surfaceId);
+				expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+			} finally {
+				presentSurface.mockRestore();
+			}
+		},
+	);
+
 	it('removes the launcher when New Terminal is invoked elsewhere without recording dismissal', async () => {
 		const onTerminalLauncherDismissed = vi.fn();
 		const { coordinator, terminals, layout } = createHarness({
@@ -2190,7 +2238,7 @@ describe('WorkspaceCoordinator', () => {
 		await opening;
 
 		const surfaceId = terminalSurfaceId('terminal-mobile-transition');
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBe('window-main');
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 	});
@@ -2411,6 +2459,13 @@ describe('WorkspaceCoordinator', () => {
 		frames.register(surfaceId, 'dialog', {
 			element: document.createElement('div'),
 			attachRetainedRenderer: attachDialog,
+			focusPrimary: vi.fn(),
+		});
+		// The canonical Files window becomes visible again on desktop return, so its
+		// frame must attach for the transition to settle.
+		frames.register('singleton:files', 'window-files', {
+			element: document.createElement('div'),
+			attachRetainedRenderer: vi.fn(),
 			focusPrimary: vi.fn(),
 		});
 		await exit;

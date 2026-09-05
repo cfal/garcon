@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Locator, Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import {
+  canonicalFilesWindowId,
+  collapseCanonicalFilesWindow,
+} from '../../support/chromium-workspace.js';
 
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
 const TWO_TRUNCATED_CLOSABLE_TABS_WIDTH = 178;
+const MAX_DROP_ZONE_NUDGE_PASSES = 3;
 
 function conversationPanel(page: Page, windowId: string): Locator {
   return page.locator(
@@ -51,7 +56,9 @@ async function openChat(fixture: ChromiumFixture, chatId: string): Promise<void>
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator(WINDOW_SELECTOR).waitFor({ state: 'visible' });
+  await fixture.page
+    .locator('[data-workspace-window-current="true"]')
+    .waitFor({ state: 'visible' });
   await fixture.page
     .locator(`[data-sidebar-virtual-row="${chatId}"]`)
     .waitFor({ state: 'visible' });
@@ -283,7 +290,7 @@ async function openChatTabBelow(
         `[data-workspace-window-menu="${openedWindowId}"] [data-workspace-window-tab-action="move-to-window"]`,
       )
       .count(),
-  ).toBe(1);
+  ).toBe(2);
   await page.keyboard.press('Escape');
   return openedWindowId;
 }
@@ -578,17 +585,88 @@ async function dragChatToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    // Chromium omits dragover when a dispatch changes the hit-tested element.
-    await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
-    if (input.expectBlocked) {
-      await target.getByText('4 windows max', { exact: true }).waitFor({ state: 'visible' });
-    } else {
-      const expectedLabel = input.expectedLabel ?? chatDropLabel(targetKind);
-      await target.getByText(expectedLabel, { exact: true }).waitFor({ state: 'visible' });
-    }
+    const expectedLabel = input.expectBlocked
+      ? '4 windows max'
+      : (input.expectedLabel ?? chatDropLabel(targetKind));
+    const label = target.getByText(expectedLabel, { exact: true });
+    await nudgePointerUntilVisible(
+      page,
+      label,
+      targetX,
+      targetY,
+      targetKind === 'right' ? -1 : 1,
+    );
   } finally {
     await page.mouse.up();
   }
+}
+
+// Chromium can omit dragover when a dispatch changes the hit-tested element.
+// This helper nudges through a bounded set of positions, then dispatches once
+// more at the activated position after the final DOM change.
+async function nudgePointerUntilVisible(
+  page: Page,
+  label: Locator,
+  targetX: number,
+  targetY: number,
+  nudgeX: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < MAX_DROP_ZONE_NUDGE_PASSES; attempt += 1) {
+    for (const x of [targetX + nudgeX, targetX]) {
+      await page.mouse.move(x, targetY);
+      let activated = false;
+      try {
+        await label.waitFor({ state: 'visible', timeout: 500 });
+        activated = true;
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+      }
+      if (activated) {
+        await page.mouse.move(x, targetY);
+        await label.waitFor({ state: 'visible', timeout: 500 });
+        return;
+      }
+    }
+  }
+  throw new Error(
+    `Drop zone label never activated near (${targetX}, ${targetY}) after ${MAX_DROP_ZONE_NUDGE_PASSES} nudge passes.`,
+  );
+}
+
+async function verifyCanonicalSeparatorClearance(
+  page: Page,
+  chatWindowId: string,
+  filesWindowId: string,
+): Promise<void> {
+  const resizeHitArea = page
+    .getByRole('separator', { name: 'Resize windows' })
+    .first()
+    .locator('[data-workspace-window-resize-hit-area]');
+  const chatContent = page.locator(`[data-workspace-window-content="${chatWindowId}"]`);
+  const composerBody = page.locator('[data-workspace-live-chat-body]');
+  const disclosure = page
+    .locator(`[data-workspace-window-id="${filesWindowId}"] button.file-tree-disclosure-slot`)
+    .first();
+  await disclosure.waitFor({ state: 'visible' });
+  const [hitAreaBox, chatContentBox, composerBodyBox, disclosureBox] = await Promise.all([
+    resizeHitArea.boundingBox(),
+    chatContent.boundingBox(),
+    composerBody.boundingBox(),
+    disclosure.boundingBox(),
+  ]);
+  if (!hitAreaBox || !chatContentBox || !composerBodyBox || !disclosureBox) {
+    throw new Error('Missing canonical separator clearance geometry.');
+  }
+
+  expect(hitAreaBox.width).toBeGreaterThanOrEqual(24);
+  expect(hitAreaBox.x).toBeGreaterThanOrEqual(chatContentBox.x + chatContentBox.width);
+  expect(hitAreaBox.x + hitAreaBox.width).toBeLessThan(disclosureBox.x);
+  expect(Math.abs(composerBodyBox.x - chatContentBox.x)).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(
+      composerBodyBox.x + composerBodyBox.width - (chatContentBox.x + chatContentBox.width),
+    ),
+  ).toBeLessThanOrEqual(1);
 }
 
 function chatDropLabel(target: ChatDropTarget): string {
@@ -634,9 +712,14 @@ async function dragWorkspaceTabToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    // Chromium omits dragover when a dispatch changes the hit-tested element.
-    await page.mouse.move(targetX + (input.target === 'right' ? -1 : 1), targetY);
-    await target.getByText(input.expectedLabel, { exact: true }).waitFor({ state: 'visible' });
+    const label = target.getByText(input.expectedLabel, { exact: true });
+    await nudgePointerUntilVisible(
+      page,
+      label,
+      targetX,
+      targetY,
+      input.target === 'right' ? -1 : 1,
+    );
   } finally {
     await page.mouse.up();
   }
@@ -654,20 +737,23 @@ async function workspaceWindowIds(page: Page): Promise<string[]> {
 async function resizeFirstPartition(page: Page): Promise<{ value: string; persisted: string }> {
   await page.waitForFunction(() => localStorage.getItem('workspace_layout_v2') !== null);
   const resizer = page.getByRole('separator', { name: 'Resize windows' }).first();
-  const bounds = await resizer.boundingBox();
+  const hitArea = resizer.locator('[data-workspace-window-resize-hit-area]');
+  const hitAreaBounds = await hitArea.boundingBox();
   const orientation = await resizer.getAttribute('aria-orientation');
   const initialValue = await resizer.getAttribute('aria-valuenow');
   const initialPersisted = await page.evaluate(() => localStorage.getItem('workspace_layout_v2'));
-  if (!bounds || !initialValue || !initialPersisted) {
+  if (!hitAreaBounds || !initialValue || !initialPersisted) {
     throw new Error('Missing workspace partition resize state.');
   }
 
-  const x = bounds.x + bounds.width / 2;
-  const y = bounds.y + bounds.height / 2;
+  const x = hitAreaBounds.x + hitAreaBounds.width / 2;
+  const y = hitAreaBounds.y + hitAreaBounds.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(
-    orientation === 'vertical' ? x + 80 : x,
+    // Drag toward the widened side so the far column stays wide enough for
+    // later center-drop phases.
+    orientation === 'vertical' ? x - 80 : x,
     orientation === 'horizontal' ? y + 80 : y,
     { steps: 10 },
   );
@@ -712,6 +798,12 @@ describe('Chromium workspace windows', () => {
   test('drags Chat onto any window, blocks the cap, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
       await createGitFixture(fixture.integration.dirs.project);
+      await mkdir(join(fixture.integration.dirs.project, 'src'));
+      await writeFile(
+        join(fixture.integration.dirs.project, 'src', 'workspace.ts'),
+        'export const workspace = true;\n',
+        'utf8',
+      );
       markPhase('creating source chats');
       const chatA = await createChat(
         fixture,
@@ -726,6 +818,9 @@ describe('Chromium workspace windows', () => {
         .locator('[data-workspace-window-current="true"]')
         .getAttribute('data-workspace-window-id');
       if (!chatWindowId) throw new Error('Missing initial Chat window.');
+      const filesWindowId = await canonicalFilesWindowId(fixture.page);
+      markPhase('verifying canonical separator clearance');
+      await verifyCanonicalSeparatorClearance(fixture.page, chatWindowId, filesWindowId);
       expect(await fixture.page.locator('[data-workspace-window-focus-ring]').count()).toBe(0);
       expect(
         await fixture.page.locator(`[data-workspace-window-add-trigger="${chatWindowId}"]`).count(),
@@ -744,7 +839,7 @@ describe('Chromium workspace windows', () => {
           .locator(`[data-workspace-window-titlebar="${chatWindowId}"]`)
           .evaluate((element) => element.getBoundingClientRect().height),
       ).toBe(40);
-      expect(await fixture.page.locator('[data-workspace-window-close]').count()).toBe(0);
+      expect(await fixture.page.locator('[data-workspace-window-close]').count()).toBe(2);
 
       markPhase('verifying adaptive labels and Chat tab actions');
       await openWindowTab(fixture.page, chatWindowId, 'Open Git Compare');
@@ -779,6 +874,7 @@ describe('Chromium workspace windows', () => {
       ).toEqual([
         'move-left',
         'move-right',
+        'move-to-window',
         'move-new-left',
         'move-new-right',
         'move-new-top',
@@ -796,16 +892,21 @@ describe('Chromium workspace windows', () => {
         await fixture.page.locator('[data-workspace-window-tab-actions-separator]').count(),
       ).toBe(1);
       await fixture.page.keyboard.press('Escape');
+      // The canonical split leaves the Chat tab rail below the full-label
+      // threshold, so widen the window before exercising adaptive label modes.
+      await fixture.page.getByRole('separator', { name: 'Resize windows' }).first().focus();
+      for (let step = 0; step < 8; step += 1) {
+        await fixture.page.keyboard.press('ArrowRight');
+      }
       await verifyAdaptiveTabLabels(fixture.page, chatWindowId);
       const movedChatWindowId = await openChatTabBelow(
         fixture.page,
         chatWindowId,
         'echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
       );
-      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
+      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(3);
 
       markPhase('opening a non-Chat target window');
-      const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
       await fixture.page
         .locator(`[data-workspace-window-id="${filesWindowId}"]`)
         .waitFor({ state: 'visible' });
@@ -944,6 +1045,7 @@ describe('Chromium workspace windows', () => {
       await dragChatToWindow(fixture.page, {
         chatId: chatA,
         windowId: filesWindowId,
+        target: 'bottom',
       });
       await fixture.page.waitForFunction(
         () => document.querySelectorAll('[data-workspace-window-id]').length === 4,
@@ -1351,7 +1453,7 @@ describe('Chromium workspace windows', () => {
       if (!chatWindowId) throw new Error('Missing Chat workspace window.');
 
       markPhase('opening a Files window and selecting a file row');
-      const portableWindowId = await openNewWindow(fixture.page, 'Open Files');
+      const portableWindowId = await canonicalFilesWindowId(fixture.page);
       await fixture.page.waitForFunction(
         (expectedWindowId) =>
           document
@@ -1464,6 +1566,7 @@ describe('Chromium workspace windows', () => {
           await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId);
         }
         await openChat(fixture, chatId);
+        await collapseCanonicalFilesWindow(fixture.page);
         const chatWindowId = await fixture.page
           .locator('[data-workspace-window-current="true"]')
           .getAttribute('data-workspace-window-id');
@@ -1602,7 +1705,7 @@ describe('Chromium workspace windows', () => {
           .getAttribute('data-workspace-window-id');
         if (!firstWindowId) throw new Error('Missing the first Chat window.');
 
-        const secondWindowId = await openNewWindow(fixture.page, 'Open Files');
+        const secondWindowId = await canonicalFilesWindowId(fixture.page);
         await dragChatToWindow(fixture.page, {
           chatId: secondChatId,
           windowId: secondWindowId,
@@ -1778,7 +1881,7 @@ describe('Chromium workspace windows', () => {
         const chatWindow = fixture.page.locator('[data-workspace-window-current="true"]');
         const chatWindowId = await chatWindow.getAttribute('data-workspace-window-id');
         if (!chatWindowId) throw new Error('Missing current Chat window.');
-        const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
+        const filesWindowId = await canonicalFilesWindowId(fixture.page);
         await openFile(fixture.page, filePath);
         await fixture.page.waitForFunction(() =>
           [...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]')].some(
