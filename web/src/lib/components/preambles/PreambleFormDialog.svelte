@@ -36,6 +36,7 @@
 	const appShell = getAppShell();
 	const form = new PreambleFormState();
 	let pickerKey = $state<string | null>(null);
+	let pickerFocusReturnTarget: HTMLElement | null = null;
 	let contentTextarea = $state<HTMLTextAreaElement | null>(null);
 	const contentEditor = new PromptEditorDialogState();
 
@@ -43,6 +44,7 @@
 		if (!open) return;
 		form.reset(preamble);
 		pickerKey = null;
+		pickerFocusReturnTarget = null;
 		contentEditor.close();
 	});
 
@@ -69,14 +71,28 @@
 	function closeForm(): void {
 		if (form.saving) return;
 		pickerKey = null;
+		pickerFocusReturnTarget = null;
 		contentEditor.close();
 		onClose();
+	}
+
+	function openPathPicker(key: string): void {
+		pickerFocusReturnTarget =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		pickerKey = key;
+	}
+
+	function closePathPicker(): void {
+		pickerKey = null;
+		const focusTarget = pickerFocusReturnTarget;
+		pickerFocusReturnTarget = null;
+		queueMicrotask(() => focusTarget?.focus({ preventScroll: true }));
 	}
 
 	function addPath(): void {
 		form.scopeType = 'project-paths';
 		const key = form.addPath(appShell.projectBasePath);
-		if (key) pickerKey = key;
+		if (key) openPathPicker(key);
 	}
 
 	function openExpandedEditor(): void {
@@ -112,7 +128,7 @@
 
 <Dialog.Root {open} requestClose={closeForm}>
 	<Dialog.Content
-		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-[calc(100vw-2rem)] sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(48rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[48rem] sm:pointer-fine:max-w-3xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"
+		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-screen sm:max-w-none sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(48rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[48rem] sm:pointer-fine:w-[calc(100vw-2rem)] sm:pointer-fine:max-w-3xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"
 		showCloseButton={false}
 	>
 		<Dialog.Header class="shrink-0 border-b border-border bg-background px-5 py-4 sm:px-6">
@@ -123,6 +139,7 @@
 		</Dialog.Header>
 
 		<div
+			data-slot="preambles-scroll-body"
 			class="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6"
 			inert={form.saving}
 			aria-busy={form.saving}
@@ -197,16 +214,17 @@
 										bind:value={rule.projectPath}
 										aria-label={m.preambles_project_path_label()}
 										aria-invalid={Boolean(pathError)}
-										aria-describedby={pathError
-											? `preamble-path-error-${rule.key}`
-											: undefined}
+										aria-describedby={pathError ? `preamble-path-error-${rule.key}` : undefined}
 										class="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 									/>
 									<Button
 										type="button"
 										variant="secondary"
 										size="icon"
-										onclick={() => (pickerKey = pickerKey === rule.key ? null : rule.key)}
+										onclick={() => {
+											if (pickerKey === rule.key) closePathPicker();
+											else openPathPicker(rule.key);
+										}}
 										aria-label={m.preambles_browse_path()}
 										title={m.preambles_browse_path()}
 									>
@@ -227,10 +245,7 @@
 									<input type="checkbox" bind:checked={rule.includeNested} />
 									{m.preambles_apply_nested()}
 								</label>
-								<p
-									id={`preamble-path-error-${rule.key}`}
-									class="min-h-4 text-xs text-destructive"
-								>
+								<p id={`preamble-path-error-${rule.key}`} class="min-h-4 text-xs text-destructive">
 									{pathError ?? ''}
 								</p>
 								{#if pickerKey === rule.key}
@@ -238,18 +253,13 @@
 										currentPath={rule.projectPath || appShell.projectBasePath}
 										basePath={appShell.projectBasePath}
 										onSelect={(projectPath) => form.setPath(rule.key, projectPath)}
-										onClose={() => (pickerKey = null)}
+										onClose={closePathPicker}
 										isMobile={appShell.isMobile}
 									/>
 								{/if}
 							</div>
 						{/each}
-						<Button
-							type="button"
-							variant="secondary"
-							onclick={addPath}
-							disabled={!form.canAddPath}
-						>
+						<Button type="button" variant="secondary" onclick={addPath} disabled={!form.canAddPath}>
 							<Plus class="mr-2 h-4 w-4" />
 							{m.preambles_add_path()}
 						</Button>
