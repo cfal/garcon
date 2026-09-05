@@ -77,6 +77,20 @@ describe('ChatRegistry', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
+  it('hands out deep copies that cannot mutate registry state', () => {
+    registry.addChat(newChat({
+      tags: ['source'],
+      agentSettingsById: { test: envelope('test') },
+    }));
+
+    const chat = registry.getChat(CHAT_ID);
+    chat.tags.push('injected');
+    chat.agentSettingsById.test.values.injected = true;
+
+    expect(registry.getChat(CHAT_ID).tags).toEqual(['source']);
+    expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
+  });
+
   it('adds provider-neutral records with opaque ownership defaults', () => {
     const added = mock(() => undefined);
     registry.onChatAdded(added);
