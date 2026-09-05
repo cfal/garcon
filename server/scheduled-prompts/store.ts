@@ -1,6 +1,6 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import { randomUUID } from 'crypto';
+import crypto from 'crypto';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import {
   SCHEDULED_PROMPT_MAX_COUNT,
@@ -25,6 +25,7 @@ interface NormalizedScheduledPromptsFile {
   file: ScheduledPromptsFile;
   migrated: boolean;
   ignoredPromptCount: number;
+  invalidContainerShape: boolean;
 }
 
 interface LoadedScheduledPromptsFile extends NormalizedScheduledPromptsFile {
@@ -64,6 +65,10 @@ function emptyFile(): ScheduledPromptsFile {
   return { version: SCHEDULED_PROMPTS_FILE_VERSION, revision: 0, prompts: [] };
 }
 
+function normalizeRevision(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 function normalizeVersionOneScheduledPrompt(value: unknown): ScheduledPrompt | null {
   const scheduledPrompt = normalizeScheduledPrompt(value);
   if (scheduledPrompt) return scheduledPrompt;
@@ -86,14 +91,14 @@ function normalizeVersionOneScheduledPrompt(value: unknown): ScheduledPrompt | n
 
 function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { file: emptyFile(), migrated: false, ignoredPromptCount: 0 };
+    return { file: emptyFile(), migrated: false, ignoredPromptCount: 0, invalidContainerShape: true };
   }
   const raw = value as Record<string, unknown>;
   if (raw.version !== 1 && raw.version !== SCHEDULED_PROMPTS_FILE_VERSION) {
     throw new Error(`Unsupported scheduled-prompts.json version: ${String(raw.version)}`);
   }
-  const revision =
-    typeof raw.revision === 'number' && Number.isSafeInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0;
+  const normalizedRevision = normalizeRevision(raw.revision);
+  const revision = normalizedRevision ?? 0;
   const prompts: ScheduledPrompt[] = [];
   const seen = new Set<string>();
   let ignoredPromptCount = 0;
@@ -113,6 +118,9 @@ function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
     file: { version: SCHEDULED_PROMPTS_FILE_VERSION, revision, prompts },
     migrated: raw.version === 1,
     ignoredPromptCount,
+    invalidContainerShape:
+      (raw.revision !== undefined && normalizedRevision === null) ||
+      (raw.prompts !== undefined && !Array.isArray(raw.prompts)),
   };
 }
 
@@ -122,18 +130,65 @@ async function readFile(filePath: string): Promise<LoadedScheduledPromptsFile> {
     return { ...normalizeFile(JSON.parse(sourceBytes.toString('utf8'))), sourceBytes };
   } catch (error) {
     if (hasNodeErrorCode(error, 'ENOENT')) {
-      return { file: emptyFile(), migrated: false, ignoredPromptCount: 0, sourceBytes: null };
+      return {
+        file: emptyFile(),
+        migrated: false,
+        ignoredPromptCount: 0,
+        invalidContainerShape: false,
+        sourceBytes: null,
+      };
     }
     throw error;
   }
 }
 
-async function backupVersionOneFile(filePath: string, sourceBytes: Buffer): Promise<string> {
+async function findExistingScheduledPromptsBackup(
+  filePath: string,
+  sourceBytes: Buffer,
+  sourceVersion: number,
+): Promise<string | null> {
+  const directory = path.dirname(filePath);
+  const prefix = `${path.basename(filePath)}.v${sourceVersion}-backup-`;
+  const candidateNames = (await fs.readdir(directory))
+    .filter((entry) => entry.startsWith(prefix))
+    .sort()
+    .reverse();
+
+  for (const candidateName of candidateNames) {
+    const candidatePath = path.join(directory, candidateName);
+    try {
+      const candidateStat = await fs.lstat(candidatePath);
+      if (
+        !candidateStat.isFile() ||
+        (candidateStat.mode & 0o077) !== 0 ||
+        candidateStat.size !== sourceBytes.length
+      ) {
+        continue;
+      }
+      const candidateBytes = await fs.readFile(candidatePath);
+      if (candidateBytes.equals(sourceBytes)) return candidatePath;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function backupScheduledPromptsFile(
+  filePath: string,
+  sourceBytes: Buffer,
+  sourceVersion: number,
+): Promise<string> {
+  const existingBackupPath = await findExistingScheduledPromptsBackup(filePath, sourceBytes, sourceVersion);
+  if (existingBackupPath) return existingBackupPath;
+
   const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
-  const backupPath = `${filePath}.v1-backup-${timestamp}-${randomUUID().slice(0, 8)}`;
+  const backupPath = `${filePath}.v${sourceVersion}-backup-${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
   let backupFile: Awaited<ReturnType<typeof fs.open>> | null = null;
+  let backupCreated = false;
   try {
     backupFile = await fs.open(backupPath, 'wx', 0o600);
+    backupCreated = true;
     await backupFile.writeFile(sourceBytes);
     await backupFile.sync();
     await backupFile.close();
@@ -141,7 +196,7 @@ async function backupVersionOneFile(filePath: string, sourceBytes: Buffer): Prom
     await syncDirectory(path.dirname(filePath));
   } catch (error) {
     if (backupFile) await backupFile.close().catch(() => {});
-    await fs.unlink(backupPath).catch(() => {});
+    if (backupCreated) await fs.unlink(backupPath).catch(() => {});
     throw error;
   }
   return backupPath;
@@ -171,12 +226,16 @@ export class ScheduledPromptStore {
   async init(): Promise<void> {
     const loaded = await readFile(this.#filePath);
     let backupPath: string | null = null;
-    if (loaded.migrated) {
-      if (!loaded.sourceBytes) throw new Error('Version-one scheduled-prompts.json source is unavailable');
-      backupPath = await backupVersionOneFile(this.#filePath, loaded.sourceBytes);
+    if (loaded.migrated || loaded.ignoredPromptCount > 0 || loaded.invalidContainerShape) {
+      if (!loaded.sourceBytes) throw new Error('scheduled-prompts.json source is unavailable for backup');
+      const sourceVersion = loaded.migrated ? 1 : SCHEDULED_PROMPTS_FILE_VERSION;
+      backupPath = await backupScheduledPromptsFile(this.#filePath, loaded.sourceBytes, sourceVersion);
+    }
+    const backupMessage = backupPath ? ` Original file backed up to ${backupPath}.` : '';
+    if (loaded.invalidContainerShape) {
+      logger.warn(`Found invalid scheduled-prompts.json container data while loading.${backupMessage}`);
     }
     if (loaded.ignoredPromptCount > 0) {
-      const backupMessage = backupPath ? ` Original file backed up to ${backupPath}.` : '';
       logger.warn(
         `Ignored ${loaded.ignoredPromptCount} invalid or duplicate scheduled prompt record${loaded.ignoredPromptCount === 1 ? '' : 's'} while loading scheduled-prompts.json.${backupMessage}`,
       );

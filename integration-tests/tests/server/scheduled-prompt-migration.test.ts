@@ -77,6 +77,11 @@ describe('scheduled prompt persistence migration', () => {
             entry.startsWith('scheduled-prompts.json.v1-backup-'),
           ),
         ).toEqual(backupNames);
+        expect(
+          (await readdir(fixture.dirs.workspace)).filter((entry) =>
+            entry.startsWith('scheduled-prompts.json.v2-backup-'),
+          ),
+        ).toEqual([]);
       },
       {
         prepareWorkspace: async ({ workspace }) => {
