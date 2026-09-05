@@ -64,7 +64,7 @@
 	{:else if title}
 		<span class={titleClass}>{title}</span>{@render idSuffix()}
 	{:else}
-		{chatId}
+		<span class={titleClass}>{chatId}</span>
 	{/if}
 {/snippet}
 

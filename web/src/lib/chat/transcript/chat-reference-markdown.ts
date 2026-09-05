@@ -1,12 +1,15 @@
 import { CHAT_ID_LENGTH, parseChatId } from '$shared/chat-id.js';
 import type { MarkedExtension, TokenizerExtension } from 'marked';
 
-const WORD_CHARACTER = /[\p{L}\p{N}_]/u;
+const WORD_CHARACTER = /[\p{L}\p{M}\p{N}_]/u;
 const CHAT_ID_AT_START = new RegExp(
-	`^(\\d{${CHAT_ID_LENGTH}})(?![\\p{L}\\p{N}_]|@[\\p{L}\\p{N}])`,
+	`^(\\d{${CHAT_ID_LENGTH}})(?![\\p{L}\\p{M}\\p{N}_]|@[\\p{L}\\p{N}])`,
 	'u',
 );
-const CHAT_ID_AHEAD = new RegExp(`\\d{${CHAT_ID_LENGTH}}(?![\\p{L}\\p{N}_]|@[\\p{L}\\p{N}])`, 'u');
+const CHAT_ID_AHEAD = new RegExp(
+	`\\d{${CHAT_ID_LENGTH}}(?![\\p{L}\\p{M}\\p{N}_]|@[\\p{L}\\p{N}])`,
+	'u',
+);
 
 const chatReferenceTokenizer: TokenizerExtension = {
 	name: 'chatReference',

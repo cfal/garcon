@@ -9,6 +9,7 @@
 		authoredTitle?: string | null;
 		customLabel?: boolean;
 		linkClass?: string;
+		titleClass?: string;
 		inertTooltipPolicy?: 'informative' | 'always';
 		onParentPointerDown?: () => void;
 		onParentContextMenu?: () => void;
@@ -21,6 +22,7 @@
 		authoredTitle = null,
 		customLabel = false,
 		linkClass = '',
+		titleClass = '',
 		inertTooltipPolicy = 'informative',
 		onParentPointerDown = () => {},
 		onParentContextMenu = () => {},
@@ -39,6 +41,7 @@
 		{authoredLabelText}
 		{authoredTitle}
 		{linkClass}
+		{titleClass}
 		{inertTooltipPolicy}
 	>
 		{#snippet authoredLabel()}

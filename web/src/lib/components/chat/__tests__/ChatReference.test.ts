@@ -32,11 +32,17 @@ describe('ChatReference', () => {
 	});
 
 	it('does not duplicate a missing title or add a redundant inert tooltip', () => {
-		const { container } = render(ChatReferenceTestHost, { chatId: CHAT_ID, resolution: null });
+		const { container } = render(ChatReferenceTestHost, {
+			chatId: CHAT_ID,
+			resolution: null,
+			titleClass: 'truncate text-sm',
+		});
 		const reference = container.querySelector('[data-chat-reference-id]');
 
 		expect(reference?.textContent).toBe(CHAT_ID);
 		expect(reference?.getAttribute('title')).toBeNull();
+		expect(reference?.querySelector('span')?.className).toContain('truncate');
+		expect(reference?.querySelector('span')?.className).toContain('text-sm');
 	});
 
 	it('preserves full inert tooltips for truncating participant references', () => {
@@ -75,9 +81,7 @@ describe('ChatReference', () => {
 		});
 
 		expect(container.querySelector('a')).toBeNull();
-		expect(container.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-			`Custom label (${CHAT_ID})`,
-		);
+		expect(container.textContent?.replace(/\s+/g, ' ').trim()).toBe(`Custom label (${CHAT_ID})`);
 	});
 
 	it('leaves primary, modified, and auxiliary activation uncancelled', () => {

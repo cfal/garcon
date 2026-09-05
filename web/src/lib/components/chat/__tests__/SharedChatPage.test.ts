@@ -345,8 +345,12 @@ describe('SharedChatPage', () => {
 			expect(card.parentElement?.className).toContain('sm:max-w-[85%]');
 		}
 		expect(container.querySelector('a[href^="/chat/"]')).toBeNull();
-		expect(screen.getByText(targetChatId).getAttribute('title')).toBe(targetChatId);
-		expect(screen.getByText(sourceChatId).getAttribute('title')).toBe(sourceChatId);
+		for (const chatId of [targetChatId, sourceChatId]) {
+			const idLabel = screen.getByText(chatId);
+			expect(idLabel.className).toContain('truncate');
+			expect(idLabel.className).toContain('text-sm');
+			expect(idLabel.closest('[data-chat-reference-id]')?.getAttribute('title')).toBe(chatId);
+		}
 		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull();
 	});

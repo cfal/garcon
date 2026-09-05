@@ -63,6 +63,8 @@ describe('createChatReferenceMarkdownExtension', () => {
 		`${CHAT_ID}x`,
 		`é${CHAT_ID}`,
 		`${CHAT_ID}é`,
+		`e\u0301${CHAT_ID}`,
+		`${CHAT_ID}\u0301e`,
 		`٣${CHAT_ID}`,
 		`${CHAT_ID}٣`,
 		`_${CHAT_ID}`,
