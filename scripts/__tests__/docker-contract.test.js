@@ -33,16 +33,21 @@ let dockerGuide;
 let dockerignore;
 let rootPackage;
 let integrationPackage;
+let opencodeAgentPackage;
+let opencodeSupervisor;
 
 beforeAll(async () => {
-  [dockerfile, composeFile, dockerGuide, dockerignore, rootPackage, integrationPackage] = await Promise.all([
-    readFile(path.join(repositoryRoot, 'Dockerfile'), 'utf8'),
-    readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8'),
-    readFile(path.join(repositoryRoot, 'docs/docker.md'), 'utf8'),
-    readFile(path.join(repositoryRoot, '.dockerignore'), 'utf8'),
-    readFile(path.join(repositoryRoot, 'package.json'), 'utf8').then(JSON.parse),
-    readFile(path.join(repositoryRoot, 'integration-tests/package.json'), 'utf8').then(JSON.parse),
-  ]);
+  [dockerfile, composeFile, dockerGuide, dockerignore, rootPackage, integrationPackage, opencodeAgentPackage, opencodeSupervisor] =
+    await Promise.all([
+      readFile(path.join(repositoryRoot, 'Dockerfile'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'docs/docker.md'), 'utf8'),
+      readFile(path.join(repositoryRoot, '.dockerignore'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'package.json'), 'utf8').then(JSON.parse),
+      readFile(path.join(repositoryRoot, 'integration-tests/package.json'), 'utf8').then(JSON.parse),
+      readFile(path.join(repositoryRoot, 'server-agents/opencode/package.json'), 'utf8').then(JSON.parse),
+      readFile(path.join(repositoryRoot, 'integration-tests/support/opencode-process-supervisor.ts'), 'utf8'),
+    ]);
 });
 
 describe('Docker contract', () => {
@@ -63,6 +68,8 @@ describe('Docker contract', () => {
   test('keeps coupled CLI versions aligned with the integration tier', () => {
     const openCodeVersion = integrationPackage.devDependencies['opencode-ai'];
     expect(dockerfile).toContain(`ARG OPENCODE_VERSION=${openCodeVersion}`);
+    expect(opencodeAgentPackage.dependencies['@opencode-ai/sdk']).toBe(openCodeVersion);
+    expect(opencodeSupervisor).toContain(`export const PINNED_OPENCODE_VERSION = '${openCodeVersion}';`);
     expect(dockerfile).not.toContain('@openai/codex');
     expect(dockerfile).not.toContain('pi-coding-agent');
     expect(dockerfile).not.toContain('opencode-ai@latest');
