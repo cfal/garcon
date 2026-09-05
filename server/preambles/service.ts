@@ -77,10 +77,13 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
   }
 
   async reorder(request: ReorderPreamblesRequest): Promise<PreamblesSnapshot> {
-    if (!Array.isArray(request.orderedPreambleIds)) throw this.#validationError();
-    const candidate = reorderedPreambles(this.snapshot().preambles, request.orderedPreambleIds);
-    if (!candidate) throw this.#validationError();
-    this.#assertCatalogComposition(candidate);
+    if (!isUniqueStringList(request.orderedPreambleIds)) throw this.#validationError();
+    const snapshot = this.snapshot();
+    if (request.expectedRevision === snapshot.revision) {
+      const candidate = reorderedPreambles(snapshot.preambles, request.orderedPreambleIds);
+      if (!candidate) throw this.#validationError();
+      this.#assertCatalogComposition(candidate);
+    }
     await this.deps.store.reorder(request.orderedPreambleIds, request.expectedRevision);
     return this.#changed('reordered');
   }
@@ -140,4 +143,10 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
   #now(): Date {
     return (this.deps.now ?? (() => new Date()))();
   }
+}
+
+function isUniqueStringList(value: unknown): value is string[] {
+  return Array.isArray(value)
+    && value.every((entry) => typeof entry === 'string')
+    && new Set(value).size === value.length;
 }

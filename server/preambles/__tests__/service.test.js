@@ -260,6 +260,19 @@ describe('PreambleService', () => {
     expect(preambles.snapshot()).toMatchObject({ revision: 2 });
   });
 
+  it('reports a revision conflict before comparing a stale reorder with the current catalog', async () => {
+    const { preambles } = await service();
+    await preambles.create({ expectedRevision: 0, preamble: globalDefinition('First') });
+    await preambles.create({ expectedRevision: 1, preamble: globalDefinition('Second') });
+    await preambles.remove({ expectedRevision: 2, id: 'preamble-2' });
+
+    await expect(preambles.reorder({
+      expectedRevision: 2,
+      orderedPreambleIds: ['preamble-2', 'preamble-1'],
+    })).rejects.toMatchObject({ code: 'PREAMBLE_REVISION_CONFLICT', status: 409 });
+    expect(preambles.snapshot()).toMatchObject({ revision: 3 });
+  });
+
   it('validates the maximum rule shape without quadratic path matching', () => {
     const preambles = Array.from({ length: 100 }, (_, preambleIndex) => ({
       id: `preamble-${preambleIndex}`,
