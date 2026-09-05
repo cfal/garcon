@@ -155,6 +155,17 @@ describe('WorkspaceHostGeometryState', () => {
 		harness.detach();
 	});
 
+	it('publishes the compact exit when its host detaches', () => {
+		const harness = createHarness({ width: 470, height: 700 });
+		expect(harness.geometry.compactActive).toBe(true);
+		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
+
+		harness.detach();
+
+		expect(harness.geometry.compactActive).toBe(false);
+		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true], [false]]);
+	});
+
 	it('retains the compact latch while mobile without recreating the attachment', () => {
 		const harness = createHarness({ width: 470, height: 700 });
 		harness.setMobile(true);
