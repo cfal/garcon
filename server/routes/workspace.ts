@@ -47,6 +47,11 @@ import {
   DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
   parseAgentSwitchContextWindowTokens,
 } from '../../common/handoff-sizing.js';
+import {
+  HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+  HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
+  parseHiddenBashCommandPatterns,
+} from '../../common/hidden-bash-command-patterns.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -253,6 +258,11 @@ export default function createWorkspaceRoutes(
       if (promptRefinement) patch.promptRefinement = promptRefinement;
       else delete patch.promptRefinement;
     }
+    if ('hiddenBashCommandPatterns' in patch) {
+      const patterns = parseHiddenBashCommandPatterns(patch.hiddenBashCommandPatterns);
+      if (patterns !== null) patch.hiddenBashCommandPatterns = patterns;
+      else delete patch.hiddenBashCommandPatterns;
+    }
     const notifications = asPlainObject(patch.notifications);
     const rawTelegram = notifications.telegram;
     if (rawTelegram && typeof rawTelegram === 'object' && !Array.isArray(rawTelegram)) {
@@ -287,6 +297,18 @@ export default function createWorkspaceRoutes(
       ) {
         return `promptRefinement.customPrompt must include ${PROMPT_REFINEMENT_USER_PROMPT_TOKEN}.`;
       }
+    }
+    return null;
+  }
+
+  function hiddenBashCommandPatternsPatchError(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const ui = raw as Record<string, unknown>;
+    if (
+      'hiddenBashCommandPatterns' in ui
+      && parseHiddenBashCommandPatterns(ui.hiddenBashCommandPatterns) === null
+    ) {
+      return `ui.hiddenBashCommandPatterns must contain at most ${HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT} valid regex or glob patterns of at most ${HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH} characters each`;
     }
     return null;
   }
@@ -349,6 +371,10 @@ export default function createWorkspaceRoutes(
       const promptPatchError = generationPromptPatchError(input.ui);
       if (promptPatchError) {
         return jsonError(promptPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);
+      }
+      const bashPatternsError = hiddenBashCommandPatternsPatchError(input.ui);
+      if (bashPatternsError) {
+        return jsonError(bashPatternsError, 400, 'INVALID_REMOTE_SETTINGS', false);
       }
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
       const transcriptSearchEnabled = featureEnabledPatch(input, 'transcriptSearch');

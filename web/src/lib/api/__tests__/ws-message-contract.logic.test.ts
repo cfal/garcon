@@ -500,7 +500,10 @@ describe('parseServerWsMessage', () => {
 			}),
 		).toBeNull();
 		const settingsSnapshot = makeSettingsSnapshot({
-			ui: { appIdentity: { title: 'Garcon - Work' } },
+			ui: {
+				appIdentity: { title: 'Garcon - Work' },
+				hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }],
+			},
 		});
 		const settingsChanged = parseServerWsMessage({
 			type: 'settings-changed',
@@ -516,6 +519,24 @@ describe('parseServerWsMessage', () => {
 			enabled: true,
 			chatIdDiscovery: true,
 			sendMessage: true,
+		});
+		expect(
+			(settingsChanged as SettingsChangedMessage).settings.ui.hiddenBashCommandPatterns,
+		).toEqual([{ pattern: 'git *', mode: 'glob' }]);
+
+		const malformedBashPatterns = parseServerWsMessage({
+			type: 'settings-changed',
+			settings: {
+				...settingsSnapshot,
+				ui: {
+					appIdentity: { title: 'Garcon - Work' },
+					hiddenBashCommandPatterns: [{ pattern: '([unclosed', mode: 'regex' }],
+				},
+			},
+		});
+		expect(malformedBashPatterns).toBeInstanceOf(SettingsChangedMessage);
+		expect((malformedBashPatterns as SettingsChangedMessage).settings.ui).toEqual({
+			appIdentity: { title: 'Garcon - Work' },
 		});
 		expect(
 			parseServerWsMessage({

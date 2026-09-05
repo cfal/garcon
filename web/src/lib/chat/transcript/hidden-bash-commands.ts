@@ -1,24 +1,54 @@
 import { BashToolUseMessage } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
+import {
+	HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+	HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
+	HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES,
+	dedupeHiddenBashCommandPatterns,
+	isHiddenBashCommandPatternMode,
+	validateHiddenBashCommandPattern,
+} from '$shared/hidden-bash-command-patterns';
+import type {
+	HiddenBashCommandPattern,
+	HiddenBashCommandPatternMode,
+	HiddenBashCommandPatternValidation,
+} from '$shared/hidden-bash-command-patterns';
 
-export const HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES = ['regex', 'glob'] as const;
+export {
+	HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+	HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
+	HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES,
+	dedupeHiddenBashCommandPatterns,
+	isHiddenBashCommandPatternMode,
+	validateHiddenBashCommandPattern,
+};
+export type {
+	HiddenBashCommandPattern,
+	HiddenBashCommandPatternMode,
+	HiddenBashCommandPatternValidation,
+};
 
-export type HiddenBashCommandPatternMode =
-	(typeof HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES)[number];
-
-export interface HiddenBashCommandPattern {
-	pattern: string;
-	mode: HiddenBashCommandPatternMode;
+export interface HiddenBashCommandPatternPreset {
+	id: 'garcon-amp';
+	patterns: readonly HiddenBashCommandPattern[];
 }
 
-export function isHiddenBashCommandPatternMode(value: unknown): value is HiddenBashCommandPatternMode {
-	return (
-		typeof value === 'string' &&
-		HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES.includes(value as HiddenBashCommandPatternMode)
-	);
-}
-
-export type HiddenBashCommandPatternValidation = 'ok' | 'empty' | 'invalid-regex';
+export const HIDDEN_BASH_COMMAND_PATTERN_PRESETS = [
+	{
+		id: 'garcon-amp',
+		patterns: [
+			{
+				pattern:
+					'^/tmp/garcon-amp-[0-9]+/(?:oracle|finder|librarian|reporter)(?:\\s|$)',
+				mode: 'regex',
+			},
+			{
+				pattern: '^\\./(?:oracle|finder|librarian|reporter)(?:\\s|$)',
+				mode: 'regex',
+			},
+		],
+	},
+] as const satisfies readonly HiddenBashCommandPatternPreset[];
 
 export type BashCommandMatcher = (command: string) => boolean;
 
@@ -47,39 +77,6 @@ function compilePattern({ pattern, mode }: HiddenBashCommandPattern): RegExp | n
 	}
 }
 
-export function validateHiddenBashCommandPattern(
-	pattern: string,
-	mode: HiddenBashCommandPatternMode,
-): HiddenBashCommandPatternValidation {
-	if (pattern.trim().length === 0) return 'empty';
-	if (mode === 'regex') {
-		try {
-			new RegExp(pattern);
-		} catch {
-			return 'invalid-regex';
-		}
-	}
-	return 'ok';
-}
-
-export function normalizeHiddenBashCommandPatterns(value: unknown): HiddenBashCommandPattern[] {
-	if (!Array.isArray(value)) return [];
-	const seen = new Set<string>();
-	const patterns: HiddenBashCommandPattern[] = [];
-	for (const entry of value) {
-		if (typeof entry !== 'object' || entry === null) continue;
-		const { pattern, mode } = entry as { pattern?: unknown; mode?: unknown };
-		if (typeof pattern !== 'string') continue;
-		if (!isHiddenBashCommandPatternMode(mode)) continue;
-		if (validateHiddenBashCommandPattern(pattern, mode) !== 'ok') continue;
-		const key = `${mode}:${pattern}`;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		patterns.push({ pattern, mode });
-	}
-	return patterns;
-}
-
 // Compiles once per semantic settings change so the returned reference is
 // stable for projection inputs that recompute on row churn; null means no
 // valid pattern is configured and callers skip command filtering entirely.
@@ -91,6 +88,33 @@ export function compileHiddenBashCommandPatterns(
 		.filter((regex): regex is RegExp => regex !== null);
 	if (compiled.length === 0) return null;
 	return (command) => compiled.some((regex) => regex.test(command));
+}
+
+function hiddenBashCommandPatternsEqual(
+	left: readonly HiddenBashCommandPattern[],
+	right: readonly HiddenBashCommandPattern[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every(
+			(entry, index) => entry.mode === right[index].mode && entry.pattern === right[index].pattern,
+		)
+	);
+}
+
+export function createHiddenBashCommandMatcherCache(): (
+	patterns: readonly HiddenBashCommandPattern[],
+) => BashCommandMatcher | null {
+	let previousPatterns: HiddenBashCommandPattern[] | null = null;
+	let matcher: BashCommandMatcher | null = null;
+
+	return (patterns) => {
+		if (!previousPatterns || !hiddenBashCommandPatternsEqual(previousPatterns, patterns)) {
+			previousPatterns = patterns.map((entry) => ({ ...entry }));
+			matcher = compileHiddenBashCommandPatterns(patterns);
+		}
+		return matcher;
+	};
 }
 
 export function isHiddenBashToolUse(

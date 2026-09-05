@@ -85,17 +85,28 @@ describe('settings API contract', () => {
 	});
 
 	it('updateRemoteSettings sends PUT and returns canonical snapshot', async () => {
-		const snapshot = makeSnapshot({ ui: { pinnedInsertPosition: 'bottom' } });
+		const hiddenBashCommandPatterns = [
+			{ pattern: 'git *', mode: 'glob' as const },
+			{ pattern: '^cargo', mode: 'regex' as const },
+		];
+		const snapshot = makeSnapshot({
+			ui: { pinnedInsertPosition: 'bottom', hiddenBashCommandPatterns },
+		});
 		const payload = { success: true, settings: snapshot };
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await updateRemoteSettings({ ui: { pinnedInsertPosition: 'bottom' } });
+		const result = await updateRemoteSettings({
+			ui: { pinnedInsertPosition: 'bottom', hiddenBashCommandPatterns },
+		});
 		expect(result).toEqual(payload);
+		expect(result.settings.ui.hiddenBashCommandPatterns).toEqual(hiddenBashCommandPatterns);
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/app/settings');
 		expect(opts.method).toBe('PUT');
-		expect(JSON.parse(opts.body)).toEqual({ ui: { pinnedInsertPosition: 'bottom' } });
+		expect(JSON.parse(opts.body)).toEqual({
+			ui: { pinnedInsertPosition: 'bottom', hiddenBashCommandPatterns },
+		});
 	});
 
 	it('tests only the saved generation target through the long-running endpoint', async () => {
