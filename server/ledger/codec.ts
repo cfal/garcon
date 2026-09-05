@@ -138,6 +138,14 @@ export function decodeLedgerRow(row: StoredLedgerRow): LedgerRow {
   }
 }
 
+export function decodeStoredLedgerRow(row: StoredLedgerRow): LedgerRow {
+  try {
+    return decodeLedgerRow(row);
+  } catch (error) {
+    throw new Error('Stored transcript row is invalid', { cause: error });
+  }
+}
+
 export function submissionFingerprint(detail: LedgerUserInputDetail): string {
   return stableJsonStringify({
     content: detail.message.content,
