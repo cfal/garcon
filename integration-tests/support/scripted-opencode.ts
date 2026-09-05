@@ -52,7 +52,7 @@ export const OPENCODE_TEST_THINKING_MODE = 'none';
 export const OPENCODE_TEST_REASONING_MODEL_ID = 'fake-reasoning';
 export const OPENCODE_TEST_REASONING_MODEL = `${OPENCODE_TEST_PROVIDER}/${OPENCODE_TEST_REASONING_MODEL_ID}`;
 
-// OpenCode 1.18.22 makes one initial request plus five retries for retryable failures.
+// OpenCode 1.18.29 makes one initial request plus five retries for retryable failures.
 // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/retry.ts#L31-L31
 export const OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT = 6;
 
@@ -75,7 +75,7 @@ const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
   values: {},
 };
 
-// OpenCode 1.18.22 schedules an @opencode-ai/plugin install for every config directory and
+// OpenCode 1.18.29 schedules an @opencode-ai/plugin install for every config directory and
 // skips reification only when node_modules exists and package.json plus package-lock.json
 // already declare the pinned plugin. Seeding these bytes keeps provider runtime offline; the
 // loopback npm registry trap turns any future attempt into an otherRequests() violation.
@@ -218,7 +218,7 @@ function assertFixtureOwnedPaths(paths: OpenCodePaths, fixtureRoot: string): voi
   }
 }
 
-// OpenCode 1.18.22 has no hermetic override for macOS managed-preference plist reads, so the
+// OpenCode 1.18.29 has no hermetic override for macOS managed-preference plist reads, so the
 // real-binary tier runs on Linux only; unit coverage remains cross-platform.
 export function assertScriptedOpenCodePlatform(platform: NodeJS.Platform = process.platform): void {
   if (platform !== 'linux') {
