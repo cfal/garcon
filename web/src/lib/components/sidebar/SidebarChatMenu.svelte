@@ -85,17 +85,26 @@
 	);
 	const newWindowBlockTitle = $derived.by(() => {
 		if (canOpenInNewWindow) return undefined;
-		const denial = WORKSPACE_WINDOW_EDGES.map((edge) => newWindowEdges[edge]).find(
-			(admission) => admission && !admission.allowed,
-		);
-		return denial && !denial.allowed ? workspaceSplitBlockMessage(denial.reason) : undefined;
+		for (const edge of WORKSPACE_WINDOW_EDGES) {
+			const admission = newWindowEdges[edge];
+			if (admission && !admission.allowed) {
+				return workspaceSplitBlockMessage(admission.reason);
+			}
+		}
+		return undefined;
 	});
 
 	function edgeLabel(edge: WorkspaceWindowEdge): string {
-		if (edge === 'left') return m.workspace_open_new_window_left();
-		if (edge === 'right') return m.workspace_open_new_window_right();
-		if (edge === 'top') return m.workspace_open_new_window_above();
-		return m.workspace_open_new_window_below();
+		switch (edge) {
+			case 'left':
+				return m.workspace_open_new_window_left();
+			case 'right':
+				return m.workspace_open_new_window_right();
+			case 'top':
+				return m.workspace_open_new_window_above();
+			case 'bottom':
+				return m.workspace_open_new_window_below();
+		}
 	}
 </script>
 

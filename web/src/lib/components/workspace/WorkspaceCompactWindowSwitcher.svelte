@@ -12,12 +12,9 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import type {
-		WorkspaceWindowId,
-		WorkspaceWindowNode,
-	} from '$lib/workspace/surface-types.js';
-	import { WORKSPACE_COMPACT_SWITCHER_HEIGHT_PX } from './workspace-window-chrome.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { WorkspaceWindowId, WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
+	import { WORKSPACE_COMPACT_SWITCHER_HEIGHT_PX } from './workspace-window-chrome.js';
 
 	let {
 		windows,
@@ -49,6 +46,7 @@
 	const positionLabel = $derived(
 		m.workspace_compact_window_position({ current: currentIndex + 1, count: windows.length }),
 	);
+	const showChatListRecoveryHint = $derived(showRecoveryHint && chatListConsumesWorkspaceWidth);
 	const recoveryHint = $derived(
 		canEnableChatListAutohide
 			? m.workspace_compact_recovery_hint()
@@ -87,11 +85,7 @@
 		>
 			{positionLabel}
 		</DropdownMenuTrigger>
-		<DropdownMenuContent
-			align="start"
-			class="w-72"
-			data-workspace-compact-window-list
-		>
+		<DropdownMenuContent align="start" class="w-72" data-workspace-compact-window-list>
 			{#each windows as workspaceWindow, index (workspaceWindow.id)}
 				{@const title = labelFor(workspaceWindow.tabs.activeId)}
 				<DropdownMenuItem
@@ -101,10 +95,10 @@
 					onSelect={() => onActivate(workspaceWindow.id)}
 				>
 					<span class="w-5 shrink-0 text-end text-muted-foreground">{index + 1}</span>
-					<span class="min-w-0 flex-1 truncate" title={title}>{title}</span>
+					<span class="min-w-0 flex-1 truncate" {title}>{title}</span>
 				</DropdownMenuItem>
 			{/each}
-			{#if showRecoveryHint && chatListConsumesWorkspaceWidth}
+			{#if showChatListRecoveryHint}
 				<DropdownMenuSeparator />
 				<DropdownMenuLabel class="whitespace-normal text-xs font-normal text-muted-foreground">
 					{recoveryHint}
@@ -129,7 +123,7 @@
 		</span>
 	{/if}
 
-	{#if showRecoveryHint && chatListConsumesWorkspaceWidth}
+	{#if showChatListRecoveryHint}
 		<span
 			class="compact-recovery-icon flex size-5 shrink-0 items-center justify-center text-muted-foreground"
 			role="img"
@@ -155,7 +149,7 @@
 		</button>
 	{/if}
 
-	{#if showRecoveryHint && chatListConsumesWorkspaceWidth}
+	{#if showChatListRecoveryHint}
 		<button
 			type="button"
 			class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

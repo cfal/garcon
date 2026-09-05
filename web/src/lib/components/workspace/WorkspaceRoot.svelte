@@ -138,20 +138,20 @@
 	const snapshot = $derived(workspace.layout.snapshot);
 	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
 	const currentWindowId = $derived(workspace.currentWindowId);
-	const compactActive = $derived(
-		!isMobile && !fullscreenWindowId && hostGeometry.compactActive,
-	);
+	const compactActive = $derived(!isMobile && !fullscreenWindowId && hostGeometry.compactActive);
 	const safetyProjectionActive = $derived(
 		!isMobile && !fullscreenWindowId && hostGeometry.singleWindowProjectionActive,
 	);
-	const projectedWindowId = $derived(
-		fullscreenWindowId ?? (safetyProjectionActive ? currentWindowId : null),
-	);
+	const projectedWindowId = $derived.by(() => {
+		if (fullscreenWindowId) return fullscreenWindowId;
+		if (safetyProjectionActive) return currentWindowId;
+		return null;
+	});
 	const presentedCurrentWindowId = $derived(projectedWindowId ?? currentWindowId);
 	const showCompactRecoveryHint = $derived(
 		compactActive &&
-		chatListConsumesWorkspaceWidth &&
-		dismissedCompactHintSession !== hostGeometry.compactSession,
+			chatListConsumesWorkspaceWidth &&
+			dismissedCompactHintSession !== hostGeometry.compactSession,
 	);
 	const portablePresentations = $derived(
 		visiblePortablePresentations(snapshot, isMobile, { projectedWindowId }),
@@ -159,20 +159,18 @@
 	const chatPresentations = $derived.by<ConversationPanelDescriptor[]>(() =>
 		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop', {
 			projectedWindowId,
-		}).flatMap(
-			(presentation) => {
-				const chat = sessions.byId[presentation.chatId] ?? null;
-				if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
-					return [];
-				}
-				return [
-					{
-						...presentation,
-						snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
-					},
-				];
-			},
-		),
+		}).flatMap((presentation) => {
+			const chat = sessions.byId[presentation.chatId] ?? null;
+			if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
+				return [];
+			}
+			return [
+				{
+					...presentation,
+					snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
+				},
+			];
+		}),
 	);
 	const existingChatSurfaceIds = $derived.by(
 		() =>
