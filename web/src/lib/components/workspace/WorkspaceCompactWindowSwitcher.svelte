@@ -141,17 +141,21 @@
 		<span class="compact-recovery-text min-w-0 truncate text-muted-foreground" title={recoveryHint}>
 			{recoveryHint}
 		</span>
-		{#if canEnableChatListAutohide}
-			<button
-				type="button"
-				class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				aria-label={m.workspace_compact_enable_autohide()}
-				title={m.workspace_compact_enable_autohide()}
-				onclick={onEnableChatListAutohide}
-			>
-				<PanelLeftClose class="size-3.5" aria-hidden="true" />
-			</button>
-		{/if}
+	{/if}
+
+	{#if chatListConsumesWorkspaceWidth && canEnableChatListAutohide}
+		<button
+			type="button"
+			class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			aria-label={m.workspace_compact_enable_autohide()}
+			title={m.workspace_compact_enable_autohide()}
+			onclick={onEnableChatListAutohide}
+		>
+			<PanelLeftClose class="size-3.5" aria-hidden="true" />
+		</button>
+	{/if}
+
+	{#if showRecoveryHint && chatListConsumesWorkspaceWidth}
 		<button
 			type="button"
 			class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

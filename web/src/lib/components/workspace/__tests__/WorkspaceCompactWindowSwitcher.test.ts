@@ -108,7 +108,7 @@ describe('WorkspaceCompactWindowSwitcher', () => {
 	});
 
 	it('keeps auto-hide and dismissal actions reachable in the compact row', async () => {
-		const { onDismissHint, onEnableChatListAutohide } = renderSwitcher();
+		const { onDismissHint, onEnableChatListAutohide, props, rerender } = renderSwitcher();
 		const hint = m.workspace_compact_recovery_hint();
 
 		expect(screen.getByRole('img', { name: hint })).toBeTruthy();
@@ -121,6 +121,15 @@ describe('WorkspaceCompactWindowSwitcher', () => {
 
 		expect(onEnableChatListAutohide).toHaveBeenCalledOnce();
 		expect(onDismissHint).toHaveBeenCalledOnce();
+
+		await rerender({ ...props, showRecoveryHint: false });
+		expect(screen.queryByRole('img', { name: hint })).toBeNull();
+		expect(
+			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
+		).toBeNull();
+		expect(
+			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
+		).toBeTruthy();
 	});
 
 	it('uses resize-only recovery copy when hover auto-hide is unavailable', () => {
