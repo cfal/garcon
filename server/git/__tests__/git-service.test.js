@@ -1789,6 +1789,29 @@ describe("discard", () => {
     }
   });
 
+  it("discards through a project path containing a newline", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, "sub\nline"), { recursive: true });
+      await fs.writeFile(path.join(projectPath, "sub\nline", "x.txt"), "sub content\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "--", "sub\nline/x.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add nested"]);
+      await fs.writeFile(path.join(projectPath, "sub\nline", "x.txt"), "edited\n", "utf-8");
+
+      await git.discard({ projectPath: path.join(projectPath, "sub\nline"), file: "x.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
+      expect(await fs.readFile(path.join(projectPath, "sub\nline", "x.txt"), "utf-8"))
+        .toBe("sub content\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("leaves index-only deletions untouched instead of failing restore", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),

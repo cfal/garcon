@@ -26,14 +26,12 @@ async function headHasPath(projectPath: string, file: string): Promise<boolean> 
 export async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
   await assertGitRepository(projectPath);
 
-  const { stdout: rootOutput } = await runGit(
-    projectPath,
-    ['rev-parse', '--show-toplevel', '--show-prefix'],
-    readOnlyGitOptions(),
-  );
-  const [rootLine = '', prefixLine = ''] = rootOutput.split('\n');
-  const repoRoot = rootLine || projectPath;
-  const projectPrefix = prefixLine;
+  const [rootResult, prefixResult] = await Promise.all([
+    runGit(projectPath, ['rev-parse', '--show-toplevel'], readOnlyGitOptions()),
+    runGit(projectPath, ['rev-parse', '--show-prefix'], readOnlyGitOptions()),
+  ]);
+  const repoRoot = rootResult.stdout.replace(/\n$/, '') || projectPath;
+  const projectPrefix = prefixResult.stdout.replace(/\n$/, '');
   const canonicalFile = `${projectPrefix}${file.replace(/\/+$/, '')}`;
 
   const { stdout: statusOutput } = await runGit(
