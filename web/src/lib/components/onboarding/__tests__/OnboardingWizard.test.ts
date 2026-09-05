@@ -1,0 +1,148 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { createAppShellStore } from '$lib/stores/app-shell.svelte';
+import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
+
+const OnboardingWizardTestHost = (await import('./OnboardingWizardTestHost.svelte')).default;
+
+async function waitForAnimationFrames(count: number): Promise<void> {
+	for (let index = 0; index < count; index += 1) {
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+	}
+}
+
+describe('OnboardingWizard', () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
+	function renderWizard() {
+		const appShell = createAppShellStore();
+		const localSettings = createLocalSettingsStore();
+		appShell.openOnboardingWizard();
+		render(OnboardingWizardTestHost, { appShell, localSettings });
+		return { appShell, localSettings };
+	}
+
+	async function advanceToDonePage() {
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Chat list layout' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Chat display' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: "You're all set" });
+	}
+
+	it('advances through the pages and moves focus to each page heading', async () => {
+		renderWizard();
+
+		const themeHeading = await screen.findByRole('heading', { name: 'Choose your theme' });
+		await waitForAnimationFrames(2);
+		await waitFor(() => expect(document.activeElement).toBe(themeHeading));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		const layoutHeading = await screen.findByRole('heading', { name: 'Chat list layout' });
+		await waitFor(() => expect(document.activeElement).toBe(layoutHeading));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+	});
+
+	it('writes radio selections to local settings', async () => {
+		const { localSettings } = renderWizard();
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+
+		await fireEvent.click(screen.getByRole('radio', { name: /Dark/ }));
+		expect(localSettings.theme).toBe('dark');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Chat list layout' });
+		await fireEvent.click(screen.getByRole('radio', { name: /Single line/ }));
+		expect(localSettings.sidebarChatItemLayout).toBe('single-line');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Chat display' });
+		await fireEvent.click(screen.getByRole('radio', { name: /Medium/ }));
+		expect(localSettings.chatMaxWidth).toBe('medium');
+	});
+
+	it('renders real sidebar previews for each layout option and tracks the selection', async () => {
+		const { localSettings } = renderWizard();
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Chat list layout' });
+
+		const previews = document.querySelectorAll('[data-onboarding-layout-preview]');
+		expect(previews).toHaveLength(3);
+
+		const previewFor = (layout: string) => {
+			const preview = document.querySelector(`[data-onboarding-layout-preview="${layout}"]`);
+			if (!preview) throw new Error(`Missing layout preview for ${layout}`);
+			return preview;
+		};
+
+		// Only the detailed layout renders the sample last-message line.
+		const sampleMessage = 'Draft the release notes and verify the upgrade path.';
+		expect(previewFor('default').textContent).toContain(sampleMessage);
+		expect(previewFor('compact').textContent).not.toContain(sampleMessage);
+		expect(previewFor('single-line').textContent).not.toContain(sampleMessage);
+		expect(document.body.textContent).not.toContain('/workspace/aurora');
+
+		expect(previewFor(localSettings.sidebarChatItemLayout).getAttribute('data-selected')).toBe(
+			'true',
+		);
+
+		await fireEvent.click(screen.getByRole('radio', { name: /Single line/ }));
+		expect(previewFor('single-line').getAttribute('data-selected')).toBe('true');
+		expect(previewFor('compact').getAttribute('data-selected')).toBe('false');
+	});
+
+	it('finishes by closing the wizard, or closes into provider settings', async () => {
+		const { appShell } = renderWizard();
+		await advanceToDonePage();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Set up API providers' }));
+		expect(appShell.showOnboardingWizard).toBe(false);
+		expect(appShell.showSettings).toBe(true);
+		expect(appShell.settingsTab).toBe('providers');
+	});
+
+	it('closes on the done page primary action', async () => {
+		const { appShell } = renderWizard();
+		await advanceToDonePage();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Start using Garcon' }));
+		expect(appShell.showOnboardingWizard).toBe(false);
+		expect(appShell.showSettings).toBe(false);
+	});
+
+	it('returns from the done page to revise chat display settings', async () => {
+		renderWizard();
+		await advanceToDonePage();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+		await screen.findByRole('heading', { name: 'Chat display' });
+	});
+
+	it('announces the current step position', async () => {
+		renderWizard();
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+		const stepStatus = screen.getByText('Step 1 of 4');
+		expect(stepStatus.getAttribute('aria-live')).toBe('polite');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 4'));
+	});
+
+	it('restarts on the theme page after closing', async () => {
+		const { appShell } = renderWizard();
+		await advanceToDonePage();
+		await fireEvent.click(screen.getByRole('button', { name: 'Start using Garcon' }));
+
+		appShell.openOnboardingWizard();
+
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+		expect(screen.queryByRole('heading', { name: "You're all set" })).toBeNull();
+	});
+});

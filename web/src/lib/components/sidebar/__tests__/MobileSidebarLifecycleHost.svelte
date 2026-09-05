@@ -202,6 +202,7 @@
 		onShareChat={() => {}}
 		onManageTags={() => {}}
 		onShowScheduledPrompts={() => {}}
+		onShowPreambles={() => {}}
 		onShowSettings={() => {}}
 		newWindowBlocked={false}
 	/>

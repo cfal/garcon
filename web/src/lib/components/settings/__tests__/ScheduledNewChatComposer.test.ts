@@ -69,6 +69,7 @@ function renderComposer(
 		promptError?: string | null;
 		modelSelectionError?: string | null;
 		selectableAgentIds?: readonly SessionAgentId[];
+		isMobile?: boolean;
 	} = {},
 ) {
 	const onPromptChange = vi.fn();
@@ -89,7 +90,7 @@ function renderComposer(
 		prompt: overrides.prompt ?? '',
 		promptError: overrides.promptError ?? null,
 		knownTags: ['qa', 'review-needed'],
-		isMobile: false,
+		isMobile: overrides.isMobile ?? false,
 		onPromptChange,
 		onPromptKeydown,
 	});
@@ -138,6 +139,16 @@ describe('ScheduledNewChatComposer', () => {
 
 		expect(onPromptChange).toHaveBeenCalledWith('Review the build');
 		expect(onPromptKeydown).toHaveBeenCalledOnce();
+	});
+
+	it('releases input focus before opening the directory browser on mobile', async () => {
+		const { startup } = renderComposer({ isMobile: true });
+		const projectPath = screen.getByRole('textbox', { name: 'Project Path' });
+
+		projectPath.focus();
+
+		expect(document.activeElement).not.toBe(projectPath);
+		expect(startup.handlePathFocus).toHaveBeenCalledOnce();
 	});
 
 	it('renders unavailable scheduled model feedback', () => {

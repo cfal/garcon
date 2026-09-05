@@ -8,6 +8,7 @@ const CHAT_ID = '1783725900000800';
 function createFixture() {
   const registry = {
     getChat: mock(() => undefined),
+    hasChat: mock((chatId) => registry.getChat(chatId) != null),
     addChat: mock(() => undefined),
     updateChat: mock(() => undefined),
     removeChat: mock(() => true),

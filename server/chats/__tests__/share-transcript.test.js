@@ -93,4 +93,31 @@ describe('shared transcript chat rows', () => {
     expect(rendered).toContain(`[User (CLI)] ${AT}\nCollapsed body`);
     expect(rendered).not.toContain('CLI Undefined');
   });
+
+  it('formats preamble applications from title snapshots without private catalog data', () => {
+    const notice = new TranscriptNoticeMessage(AT, 'Preambles applied', {
+      type: 'preamble-application',
+      preambles: [
+        { id: 'preamble-1', title: 'Repository conventions' },
+        { id: 'preamble-2', title: 'Security constraints' },
+      ],
+    });
+    const rendered = renderSharedChatText({
+      shareToken: 'synthetic-share-token',
+      chatId: 'synthetic-chat',
+      title: 'Synthetic preambles',
+      agentId: 'codex',
+      model: 'synthetic-model',
+      projectPath: '/synthetic/workspace',
+      sharedAt: AT,
+      messages: [notice],
+    });
+
+    expect(rendered).toContain(
+      `[Notice] ${AT}\nPreambles applied: Repository conventions; Security constraints`,
+    );
+    expect(JSON.stringify(notice)).toContain('preamble-1');
+    expect(JSON.stringify(notice)).not.toContain('private body sentinel');
+    expect(JSON.stringify(notice)).not.toContain('/private/project/path');
+  });
 });

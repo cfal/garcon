@@ -63,6 +63,7 @@ export interface RuntimeGoalPort {
   flushPendingFinish(session: RunningCodexSession): void;
   canApplyTurnAttempt(session: RunningCodexSession, generation: number): boolean;
   generationAcrossTurnBoundary(session: RunningCodexSession, generation: number): number | null;
+  recordExplicitReasoningEffort(session: RunningCodexSession, request: CodexResumeRequest): void;
 }
 
 // Owns Codex goal lifecycle orchestration: /goal command handling, queued
@@ -305,6 +306,7 @@ export class RuntimeGoalCoordinator {
     request: CodexResumeRequest,
     operation: CodexOperation,
   ): Promise<void> {
+    this.#port.recordExplicitReasoningEffort(session, request);
     if (request.codexGoalCommand) {
       await this.handleCommand(
         session.client,

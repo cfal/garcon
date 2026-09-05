@@ -14,6 +14,7 @@ import {
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
 import { collectWindowNodes, windowNodeById } from './window-tree.js';
+import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { isCanonicalFirstRunLayout } from './canonical-layout.js';
@@ -55,6 +56,7 @@ interface TerminalPlacementServiceDeps {
 	resolveMobileReturn(
 		excluding: string | ReadonlySet<string>,
 		snapshot?: WorkspaceLayoutSnapshot,
+		sourceSnapshot?: WorkspaceLayoutSnapshot,
 	): MobileReturnPlan;
 	confirmClose(request: TerminalCloseGuardRequest): Promise<boolean>;
 	clearAttachmentError(surfaceId: string): void;
@@ -120,13 +122,13 @@ export class TerminalPlacementService {
 				},
 				{ requiredPublication: true },
 			);
-			if (!this.deps.layout.surface(surfaceId)) {
+			if (!this.#placementResolved(terminalId)) {
 				throw new Error(`Terminal surface was not placed: ${surfaceId}`);
 			}
 		} catch (error) {
 			await this.#rollbackUnplaced(terminalId, error);
 		}
-		if (!current) return terminalId;
+		if (!current || !this.deps.layout.surface(surfaceId)) return terminalId;
 		this.deps.present(surfaceId);
 		return terminalId;
 	}
@@ -200,13 +202,13 @@ export class TerminalPlacementService {
 				},
 				{ requiredPublication: true },
 			);
-			if (!this.deps.layout.surface(surfaceId)) {
+			if (!this.#placementResolved(terminalId)) {
 				throw new Error(`Terminal surface was not placed: ${surfaceId}`);
 			}
 		} catch (error) {
 			await this.#rollbackUnplaced(terminalId, error);
 		}
-		if (!current) return terminalId;
+		if (!current || !this.deps.layout.surface(surfaceId)) return terminalId;
 		this.deps.present(surfaceId);
 		return terminalId;
 	}
@@ -373,7 +375,12 @@ export class TerminalPlacementService {
 				if (!latest.surfaces[surfaceId]) return [];
 				const mutations: WorkspaceLayoutMutation[] = [{ type: 'forget-terminal', terminalId }];
 				if (this.deps.isMobile() && latest.mobileActiveSurfaceId === surfaceId) {
-					const fallback = this.deps.resolveMobileReturn(surfaceId, latest);
+					// Uses post-removal availability while retaining the source-window topology.
+					const fallback = this.deps.resolveMobileReturn(
+						surfaceId,
+						reduceWorkspaceLayout(latest, mutations),
+						latest,
+					);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({
 						type: 'set-mobile-presentation',
@@ -509,7 +516,12 @@ export class TerminalPlacementService {
 				}
 			}
 			if (this.deps.isMobile() && removedSurfaceIds.has(latest.mobileActiveSurfaceId)) {
-				const fallback = this.deps.resolveMobileReturn(removedSurfaceIds, latest);
+				// Uses post-removal availability while retaining the source-window topology.
+				const fallback = this.deps.resolveMobileReturn(
+					removedSurfaceIds,
+					reduceWorkspaceLayout(latest, mutations),
+					latest,
+				);
 				mobileFallbackId = fallback.activeId;
 				mutations.push({
 					type: 'set-mobile-presentation',
@@ -605,6 +617,13 @@ export class TerminalPlacementService {
 		return this.deps.terminals.create(this.deps.currentProjectPath(), requestId);
 	}
 
+	#placementResolved(terminalId: string): boolean {
+		return (
+			Boolean(this.deps.layout.surface(terminalSurfaceId(terminalId))) ||
+			this.deps.layout.snapshot.unplacedTerminalIds.includes(terminalId)
+		);
+	}
+
 	async #requestTermination(terminalId: string): Promise<void> {
 		let requestId = this.#terminalTerminateRequestIds.get(terminalId);
 		if (!requestId) {
@@ -623,7 +642,7 @@ export class TerminalPlacementService {
 	}
 
 	async #rollbackUnplaced(terminalId: string, placementError: unknown): Promise<never> {
-		if (this.deps.layout.surface(terminalSurfaceId(terminalId))) throw placementError;
+		if (this.#placementResolved(terminalId)) throw placementError;
 		try {
 			await this.#requestTermination(terminalId);
 			this.deps.terminals.disposeTerminatedSession(terminalId);

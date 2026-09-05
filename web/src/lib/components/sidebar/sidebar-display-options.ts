@@ -14,10 +14,10 @@ export interface SidebarDisplayOptions {
 }
 
 export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
-	grouping: 'project',
+	grouping: 'project-and-activity',
 	inactivityDuration: '3-days',
 	groupNestedProjectPaths: false,
-	chatItemLayout: 'default',
+	chatItemLayout: 'compact',
 	sortMode: 'manual',
 };
 

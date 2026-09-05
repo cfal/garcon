@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage, AssistantMessage, ErrorMessage } from '../../../common/chat-types.js';
 import { forkChatFileCopy } from '../fork-chat.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
+import { createPreamblePrefix } from '../../../common/preamble-prefix.js';
 
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
@@ -552,6 +553,94 @@ describe('forkChatFileCopy', () => {
     ]);
     expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(1);
   });
+
+  it('passes selected current-binding preamble evidence to native fork import', async () => {
+    const application = createPreamblePrefix({
+      contents: ['private preamble body'],
+    });
+    const boundary = { kind: 'new-chat', ownershipEpoch: 'source-epoch' };
+    const notice = {
+      kind: 'notice',
+      viewId: transcriptViewId('source-view'),
+      ordinal: 1,
+      at: '2026-08-07T12:00:00.000Z',
+      message: 'Preambles applied',
+      detail: {
+        type: 'preamble-application',
+        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+      },
+      providerMeta: null,
+    };
+    const input = userRow(2, 'visible prompt');
+    input.detail.preambleBoundary = boundary;
+    input.detail.preamblePrefixReceipt = application.receipt;
+    const readForkedNativeHistory = mock(async () => []);
+    const deps = makeDeps({ rows: [notice, input], readForkedNativeHistory });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    });
+
+    expect(readForkedNativeHistory).toHaveBeenCalledWith(expect.objectContaining({
+      preambleEvidence: [{
+        receipt: application.receipt,
+        boundary,
+        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        requiresNativeOccurrence: false,
+      }],
+    }));
+    expect(deps.sessions.get('target-chat').pendingPreambleBoundary).toEqual({
+      kind: 'fork',
+      ownershipEpoch: deps.sessions.get('target-chat').agentOwnershipEpoch,
+    });
+  });
+
+  for (const native of [true, false]) {
+    it(`rejects a ${native ? 'native' : 'handoff'} fork cutoff between a preamble notice and input`, async () => {
+      const application = createPreamblePrefix({
+        contents: ['private preamble body'],
+      });
+      const notice = {
+        kind: 'notice',
+        viewId: transcriptViewId('source-view'),
+        ordinal: 1,
+        at: '2026-08-07T12:00:00.000Z',
+        message: 'Preambles applied',
+        detail: {
+          type: 'preamble-application',
+          preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        },
+        providerMeta: null,
+      };
+      const input = userRow(2, 'visible prompt');
+      input.detail.preambleBoundary = { kind: 'new-chat', ownershipEpoch: 'source-epoch' };
+      input.detail.preamblePrefixReceipt = application.receipt;
+      const deps = makeDeps({
+        rows: [notice, input],
+        ...(native
+          ? {}
+          : { source: sourceSession({ agentSessionId: null, nativeSession: null }) }),
+      });
+
+      await expect(forkChatFileCopy({
+        sourceSession: deps.sessions.get('source-chat'),
+        sourceChatId: 'source-chat',
+        targetChatId: 'target-chat',
+        upToOrdinal: 1,
+        ...deps,
+      })).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        status: 422,
+      });
+
+      expect(deps.forkAgentSession).not.toHaveBeenCalled();
+      expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+      expect(deps.registry.addChat).not.toHaveBeenCalled();
+    });
+  }
 
   it('keeps earlier-agent history below the content start when seeding natively', async () => {
     const imported = [

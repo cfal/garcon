@@ -984,11 +984,9 @@ describe('Codex app-server request builders', () => {
   });
 
   it.each([
-    ['gpt-6-astra', 'low'],
-    ['gpt-5.6-sol', 'low'],
-    ['gpt-5.6-terra', 'medium'],
-    ['gpt-5.6-luna', 'medium'],
-  ])('maps provider-default thinking to %s %s effort', (model, effort) => {
+    'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
+    'gpt-5.5', 'gpt-5.4', 'custom-model',
+  ])('leaves provider-default effort unset for %s', (model) => {
     const params = buildTurnStartParams({
       threadId: 'thread-1',
       command: 'hello',
@@ -998,16 +996,16 @@ describe('Codex app-server request builders', () => {
       thinkingMode: 'none',
     });
 
-    expect(params.effort).toBe(effort);
+    expect(params).not.toHaveProperty('effort');
     const target = codexThreadSettingsTarget({
       model,
       permissionMode: 'default',
       thinkingMode: 'none',
     });
-    expect(target.effort).toBe(effort);
-    expect(buildThreadSettingsUpdateParams('thread-1', target)).toMatchObject({ model, effort });
+    expect(target.effort).toBeNull();
+    expect(buildThreadSettingsUpdateParams('thread-1', target)).not.toHaveProperty('effort');
+    expect(mapThinkingModeToCodexEffort('none', model)).toBeUndefined();
     expect(mapThinkingModeToCodexEffort(undefined, model)).toBeUndefined();
-    expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
     expect(mapThinkingModeToCodexEffort('ultra', model)).toBe('ultra');
   });
 
@@ -2093,7 +2091,7 @@ describe('CodexAppServerRuntime', () => {
     };
   }
 
-  async function startSettingsSession(runtimeOptions = {}) {
+  async function startSettingsSession(runtimeOptions = {}, requestOverrides = {}) {
     const nativePath = path.join(tmpDir, 'settings-thread.jsonl');
     const fake = new FakeClient({
       startThread: async () => ({
@@ -2123,7 +2121,10 @@ describe('CodexAppServerRuntime', () => {
       ...runtimeOptions,
     });
     const published = collectOperation();
-    const started = await provider.startSession(makeRequest({ operation: published.operation }));
+    const started = await provider.startSession(makeRequest({
+      ...requestOverrides,
+      operation: published.operation,
+    }));
     return { fake, provider, published, started };
   }
 
@@ -7732,6 +7733,204 @@ describe('CodexAppServerRuntime', () => {
     expect(permissionEvents(second.events)).toEqual([]);
   });
 
+  it.each([
+    'turn', 'settings update', 'goal',
+  ])('replaces a retained source after explicit %s effort before Default', async (explicitSource) => {
+    const nativePath = path.join(tmpDir, `default-after-explicit-${explicitSource}.jsonl`);
+    let turnNumber = 0;
+    let firstClient;
+    firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: 'thread-1',
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        turnNumber += 1;
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
+      },
+      updateThreadSettings: async (params) => {
+        queueMicrotask(() => emitThreadSettings(firstClient, {
+          model: params.model,
+          effort: params.effort,
+          approvalPolicy: params.approvalPolicy,
+          approvalsReviewer: params.approvalsReviewer,
+          sandboxPolicy: params.sandboxPolicy,
+        }));
+        return {};
+      },
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => firstClient.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective, 'active') };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => {
+        expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+        return {
+          thread: makeThread({
+            id: 'thread-1',
+            path: nativePath,
+            model: 'gpt-5.4-codex',
+            reasoningEffort: 'medium',
+          }),
+          model: 'gpt-5.4-codex',
+          modelProvider: 'openai',
+          serviceTier: null,
+          cwd: '/repo',
+          reasoningEffort: 'medium',
+        };
+      },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-3', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+
+    if (explicitSource === 'turn') {
+      await provider.runTurn(makeRequest({
+        agentSessionId: started.agentSessionId,
+        nativePath,
+        thinkingMode: 'high',
+      }));
+      firstClient.emit('notification', {
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
+      });
+    } else if (explicitSource === 'settings update') {
+      await provider.updateSessionSettings(started.agentSessionId, {
+        model: 'gpt-5.4-codex',
+        permissionMode: 'default',
+        thinkingMode: 'high',
+      });
+    } else {
+      await provider.runTurn(makeRequest({
+        agentSessionId: started.agentSessionId,
+        nativePath,
+        thinkingMode: 'high',
+        codexGoalCommand: { kind: 'set', objective: 'Use explicit effort' },
+      }));
+      await expect(provider.submitGoalControl(makeRequest({
+        agentSessionId: started.agentSessionId,
+        nativePath,
+        thinkingMode: 'none',
+        codexGoalCommand: { kind: 'status' },
+      }))).resolves.toBe(true);
+      firstClient.emit('notification', {
+        method: 'thread/goal/updated',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'goal-turn',
+          goal: makeGoal('thread-1', 'Use explicit effort', 'complete'),
+        },
+      });
+      firstClient.emit('notification', {
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+      });
+    }
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      thinkingMode: 'none',
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    if (explicitSource === 'turn') {
+      expect(firstClient.startTurn).toHaveBeenCalledTimes(2);
+      expect(firstClient.startTurn.mock.calls[1][0]).toMatchObject({ effort: 'high' });
+    } else {
+      expect(firstClient.updateThreadSettings).toHaveBeenCalledTimes(1);
+      expect(firstClient.updateThreadSettings.mock.calls[0][0]).toMatchObject({ effort: 'high' });
+    }
+    if (explicitSource === 'goal') expect(firstClient.setThreadGoal).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('replaces a retained source after explicit goal-control effort before Default', async () => {
+    let firstClient;
+    firstClient = new FakeClient({
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => firstClient.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async () => { throw new Error('no active turn to steer'); },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'priority-turn', status: 'inProgress' }),
+      }),
+    });
+    const replacementClient = new FakeClient({
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'default-turn', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      thinkingMode: 'none',
+      codexGoalCommand: { kind: 'set', objective: 'Continue automatically' },
+    }));
+
+    await expect(provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      command: 'Prioritize this input',
+      thinkingMode: 'high',
+    }))).resolves.toBe(true);
+    expect(firstClient.startTurn).toHaveBeenCalledWith(expect.objectContaining({ effort: 'high' }));
+
+    firstClient.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'priority-turn',
+        goal: makeGoal('thread-1', 'Continue automatically', 'complete'),
+      },
+    });
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'priority-turn' }) },
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      thinkingMode: 'none',
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
   it('waits for interrupt acknowledgement before reusing the writer without awaiting its terminal event', async () => {
     const nativePath = path.join(tmpDir, 'interrupted-writer.jsonl');
     let turnNumber = 0;
@@ -7802,6 +8001,180 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('rechecks Default reuse after an explicit settings update during interruption', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-writer-settings-race.jsonl');
+    const interruptAcknowledgement = createDeferred();
+    const settingsResponse = createDeferred();
+    let firstClient;
+    firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+      interruptTurn: async () => {
+        await interruptAcknowledgement.promise;
+        return {};
+      },
+      updateThreadSettings: async (params) => {
+        queueMicrotask(() => emitThreadSettings(firstClient, { effort: params.effort }));
+        await settingsResponse.promise;
+        return {};
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => {
+        expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+        return {
+          thread: makeThread({ id: 'thread-1', path: nativePath }),
+          model: 'gpt-5.4-codex',
+          modelProvider: 'openai',
+          serviceTier: null,
+          cwd: '/repo',
+        };
+      },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-2', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+
+    const aborting = provider.abort(started.agentSessionId);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      thinkingMode: 'none',
+    }));
+    await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
+    const settingsUpdate = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    await waitForCondition(() => firstClient.updateThreadSettings.mock.calls.length === 1);
+    await Bun.sleep(0);
+
+    interruptAcknowledgement.resolve();
+    await expect(aborting).resolves.toBe(true);
+    await Bun.sleep(0);
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(firstClient.shutdown).not.toHaveBeenCalled();
+    expect(firstClient.startTurn).toHaveBeenCalledTimes(1);
+
+    settingsResponse.resolve();
+    await settingsUpdate;
+
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', status: 'interrupted' }),
+      },
+    });
+    await resumed;
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('does not wait on a source superseded during interrupt acknowledgement', async () => {
+    const firstPath = path.join(tmpDir, 'superseded-during-interrupt-first.jsonl');
+    const supersedingPath = path.join(tmpDir, 'superseded-during-interrupt-second.jsonl');
+    const interruptAcknowledgement = createDeferred();
+    let firstClient;
+    firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: firstPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(firstPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+      interruptTurn: async () => {
+        await interruptAcknowledgement.promise;
+        return {};
+      },
+      updateThreadSettings: async (params) => {
+        queueMicrotask(() => emitThreadSettings(firstClient, { effort: params.effort }));
+        return {};
+      },
+    });
+    const supersedingClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-2', path: supersedingPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(supersedingPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-2', status: 'inProgress' }) };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: firstPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-3', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, supersedingClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+
+    const aborting = provider.abort(started.agentSessionId);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath: firstPath,
+      thinkingMode: 'none',
+    }));
+    await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    await provider.startSession(makeRequest({
+      chatId: 'chat-1',
+      command: 'Supersede the interrupted source',
+      thinkingMode: 'none',
+    }));
+
+    interruptAcknowledgement.resolve();
+    await expect(aborting).resolves.toBe(true);
+    await resumed;
+
+    expect(createClient).toHaveBeenCalledTimes(3);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(supersedingClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
   });
 
   it('rejects genuinely concurrent same-thread use without opening a second writer', async () => {
@@ -8395,7 +8768,7 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('updates a retained idle source while preserving provider-default effort', async () => {
-    const { fake, provider, started } = await startSettingsSession();
+    const { fake, provider, started } = await startSettingsSession({}, { thinkingMode: 'none' });
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },

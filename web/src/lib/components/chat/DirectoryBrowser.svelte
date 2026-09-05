@@ -10,6 +10,7 @@
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import Search from '@lucide/svelte/icons/search';
 	import * as m from '$lib/paraglide/messages.js';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { getTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
@@ -105,7 +106,7 @@
 		return () => abortController.abort();
 	});
 
-	function handleEscape(e: KeyboardEvent): void {
+	function handlePopoverKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
@@ -168,144 +169,138 @@
 
 {#if isMobile}
 	<!-- Fullscreen mobile browser -->
-		<div
-			class="fixed inset-0 z-50 flex flex-col bg-background"
-			role="dialog"
-			tabindex="-1"
-			aria-modal="true"
+	<Dialog.Root open={true} requestClose={onClose}>
+		<Dialog.Content
+			data-slot="directory-browser"
+			showCloseButton={false}
+			class="flex h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
 			aria-label={m.chat_directory_browser_select_directory()}
-			onkeydown={handleEscape}
-			use:transientLayer={{
-				registry: transientLayers,
-				id: 'directory-browser-mobile',
-				kind: 'application-dialog',
-				modality: 'main-inert',
-				onEscape: handleLayerEscape,
-				restoreFocus: () => focusReturnTarget?.focus(),
-			}}
 		>
-		<div class="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-			<h3 class="text-sm font-medium text-foreground">
-				{m.chat_directory_browser_select_directory()}
-			</h3>
-			<button
-				type="button"
-				onclick={onClose}
-				class="text-sm text-muted-foreground hover:text-foreground"
+			<div class="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+				<h3 class="text-sm font-medium text-foreground">
+					{m.chat_directory_browser_select_directory()}
+				</h3>
+				<button
+					type="button"
+					onclick={onClose}
+					class="text-sm text-muted-foreground hover:text-foreground"
+				>
+					{m.chat_directory_browser_cancel()}
+				</button>
+			</div>
+
+			<!-- Breadcrumbs -->
+			<div
+				class="flex items-center gap-1 text-xs text-muted-foreground overflow-x-auto px-3 py-2 border-b border-border flex-shrink-0"
 			>
-				{m.chat_directory_browser_cancel()}
-			</button>
-		</div>
-
-		<!-- Breadcrumbs -->
-		<div
-			class="flex items-center gap-1 text-xs text-muted-foreground overflow-x-auto px-3 py-2 border-b border-border flex-shrink-0"
-		>
-			{#each segments as seg, i (seg.path)}
-				<span class="flex items-center gap-1 whitespace-nowrap">
-					{#if i > 0}
-						<ChevronRight class="w-3 h-3 flex-shrink-0" />
-					{/if}
-					<button
-						type="button"
-						onclick={() => handleNavigate(seg.path)}
-						class="hover:text-foreground hover:underline"
-					>
-						{seg.label}
-					</button>
-				</span>
-			{/each}
-		</div>
-
-		<!-- Filter input for mobile -->
-		<div class="flex items-center gap-2 px-3 py-2 border-b border-border flex-shrink-0">
-			<Search class="w-4 h-4 text-muted-foreground flex-shrink-0" />
-			<input
-				type="text"
-				bind:value={mobileFilter}
-				aria-label={m.chat_directory_browser_filter_placeholder()}
-				placeholder={m.chat_directory_browser_filter_placeholder()}
-				class="flex-1 bg-transparent text-base leading-6 text-foreground outline-none placeholder-muted-foreground/60"
-			/>
-		</div>
-
-		<!-- Directory list -->
-		<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
-			{#if loading}
-				<div class="flex items-center justify-center py-8">
-					<Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
-				</div>
-			{:else if error}
-				<div class="flex items-center gap-2 px-3 py-4 text-sm text-status-error-foreground">
-					<CircleAlert class="w-4 h-4 flex-shrink-0" />
-					{error}
-				</div>
-			{:else}
-				{#if parentPath !== null}
-					<button
-						type="button"
-						onclick={() => handleNavigate(parentPath)}
-						class="flex items-center gap-2 w-full px-4 py-3 text-sm hover:bg-muted/50 active:bg-muted/70 transition-colors text-muted-foreground"
-					>
-						<ArrowUp class="w-4 h-4" />
-						..
-					</button>
-				{/if}
-				{#each entries as entry, i (entry.path)}
-					<button
-						type="button"
-						onclick={() => handleNavigate(entry.path)}
-						class="flex items-center gap-2 w-full px-4 py-3 text-sm transition-colors {i ===
-						focusIndex
-							? 'bg-muted/70 text-foreground'
-							: 'hover:bg-muted/50 active:bg-muted/70 text-foreground'}"
-					>
-						<Folder class="w-4 h-4 text-primary flex-shrink-0" />
-						<span class="truncate">{entry.name}</span>
-					</button>
+				{#each segments as seg, i (seg.path)}
+					<span class="flex items-center gap-1 whitespace-nowrap">
+						{#if i > 0}
+							<ChevronRight class="w-3 h-3 flex-shrink-0" />
+						{/if}
+						<button
+							type="button"
+							onclick={() => handleNavigate(seg.path)}
+							class="hover:text-foreground hover:underline"
+						>
+							{seg.label}
+						</button>
+					</span>
 				{/each}
-				{#if entries.length === 0}
-					<div class="px-3 py-4 text-sm text-muted-foreground text-center">
-						{m.chat_directory_browser_no_subdirectories()}
-					</div>
-				{/if}
-			{/if}
-		</div>
+			</div>
 
-		<div class="border-t border-border p-3 flex-shrink-0 space-y-1.5">
-			<p class="text-xs text-muted-foreground truncate px-1">{browsePath}</p>
-			<button
-				type="button"
-				onclick={() => handleConfirm(browsePath)}
-				class="w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 active:bg-primary/80 transition-colors"
-			>
-				{m.chat_directory_browser_select_this()}
-			</button>
-		</div>
-	</div>
+			<!-- Filter input for mobile -->
+			<div class="flex items-center gap-2 px-3 py-2 border-b border-border flex-shrink-0">
+				<Search class="w-4 h-4 text-muted-foreground flex-shrink-0" />
+				<input
+					type="text"
+					bind:value={mobileFilter}
+					aria-label={m.chat_directory_browser_filter_placeholder()}
+					placeholder={m.chat_directory_browser_filter_placeholder()}
+					class="flex-1 bg-transparent text-base leading-6 text-foreground outline-none placeholder-muted-foreground/60"
+				/>
+			</div>
+
+			<!-- Directory list -->
+			<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
+				{#if loading}
+					<div class="flex items-center justify-center py-8">
+						<Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
+					</div>
+				{:else if error}
+					<div class="flex items-center gap-2 px-3 py-4 text-sm text-status-error-foreground">
+						<CircleAlert class="w-4 h-4 flex-shrink-0" />
+						{error}
+					</div>
+				{:else}
+					{#if parentPath !== null}
+						<button
+							type="button"
+							onclick={() => handleNavigate(parentPath)}
+							class="flex items-center gap-2 w-full px-4 py-3 text-sm hover:bg-muted/50 active:bg-muted/70 transition-colors text-muted-foreground"
+						>
+							<ArrowUp class="w-4 h-4" />
+							..
+						</button>
+					{/if}
+					{#each entries as entry, i (entry.path)}
+						<button
+							type="button"
+							onclick={() => handleNavigate(entry.path)}
+							class="flex items-center gap-2 w-full px-4 py-3 text-sm transition-colors {i ===
+							focusIndex
+								? 'bg-muted/70 text-foreground'
+								: 'hover:bg-muted/50 active:bg-muted/70 text-foreground'}"
+						>
+							<Folder class="w-4 h-4 text-primary flex-shrink-0" />
+							<span class="truncate">{entry.name}</span>
+						</button>
+					{/each}
+					{#if entries.length === 0}
+						<div class="px-3 py-4 text-sm text-muted-foreground text-center">
+							{m.chat_directory_browser_no_subdirectories()}
+						</div>
+					{/if}
+				{/if}
+			</div>
+
+			<div class="border-t border-border p-3 flex-shrink-0 space-y-1.5">
+				<p class="text-xs text-muted-foreground truncate px-1">{browsePath}</p>
+				<button
+					type="button"
+					onclick={() => handleConfirm(browsePath)}
+					class="w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 active:bg-primary/80 transition-colors"
+				>
+					{m.chat_directory_browser_select_this()}
+				</button>
+			</div>
+		</Dialog.Content>
+	</Dialog.Root>
 {:else}
 	<!-- Desktop dropdown browser -->
 	<button
 		type="button"
+		data-slot="directory-browser-dismiss"
 		class="fixed inset-0 z-20 border-0 bg-transparent p-0"
 		onclick={onClose}
 		aria-label={m.editor_actions_close()}
 	></button>
-		<div
-			class="absolute top-full left-0 right-0 z-30 mt-1 border border-border rounded-lg shadow-lg bg-card flex flex-col max-h-72"
-			role="dialog"
-			tabindex="-1"
-			aria-label={m.chat_directory_browser_select_directory()}
-			onkeydown={handleEscape}
-			use:transientLayer={{
-				registry: transientLayers,
-				id: 'directory-browser-popover',
-				kind: 'popover',
-				modality: 'nonmodal',
-				onEscape: handleLayerEscape,
-				restoreFocus: () => focusReturnTarget?.focus(),
-			}}
-		>
+	<div
+		data-slot="directory-browser"
+		class="absolute top-full left-0 right-0 z-30 mt-1 border border-border rounded-lg shadow-lg bg-card flex flex-col max-h-72"
+		role="dialog"
+		tabindex="-1"
+		aria-label={m.chat_directory_browser_select_directory()}
+		onkeydown={handlePopoverKeydown}
+		use:transientLayer={{
+			registry: transientLayers,
+			id: 'directory-browser-popover',
+			kind: 'popover',
+			modality: 'nonmodal',
+			onEscape: handleLayerEscape,
+			restoreFocus: () => focusReturnTarget?.focus(),
+		}}
+	>
 		<!-- Breadcrumbs -->
 		<div
 			class="flex items-center gap-1 text-xs text-muted-foreground overflow-x-auto px-3 py-2 border-b border-border flex-shrink-0"

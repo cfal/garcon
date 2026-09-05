@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
 import type {
   AgentInterruptAndSendResponse,
   AgentStopResponse,
@@ -18,7 +17,7 @@ import {
 } from '../chat-execution/control-state.ts';
 import { createLogger } from '../lib/log.js';
 import { withCurrentExecutionControl } from '../lib/command-execution-control-error.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
+import { resolveUpdatedProjectPath } from '../lib/command-project-path.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -460,7 +459,7 @@ export class SessionCommands {
     }
 
     const previousStatus = await this.deps.pathCache.resolveProjectPath(chat.projectPath);
-    const nextProjectPath = await this.resolveProjectPathForUpdate(input.projectPath);
+    const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath);
     const effectiveProjectKey = nextProjectPath;
     if (nextProjectPath === chat.projectPath) {
       return {
@@ -538,48 +537,6 @@ export class SessionCommands {
       previousProjectPath: event.previousProjectPath,
       previousEffectiveProjectKey: event.previousEffectiveProjectKey,
     };
-  }
-
-  private async resolveProjectPathForUpdate(projectPath: string): Promise<string> {
-    const requestedPath = String(projectPath || '').trim();
-    if (!requestedPath) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
-    }
-
-    let resolvedPath: string;
-    try {
-      resolvedPath = await assertRealWithinProjectBase(requestedPath);
-    } catch (error) {
-      if (isProjectBoundaryError(error)) {
-        throw new CommandValidationError(
-          'PROJECT_PATH_OUTSIDE_BASE',
-          'Project path is outside the allowed base directory',
-          403,
-        );
-      }
-      throw error;
-    }
-
-    let stat;
-    try {
-      stat = await fs.stat(resolvedPath);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'ENOTDIR') {
-        throw new CommandValidationError('PROJECT_PATH_NOT_FOUND', `Project path not found: ${resolvedPath}`, 404);
-      }
-      throw error;
-    }
-
-    if (!stat.isDirectory()) {
-      throw new CommandValidationError(
-        'PROJECT_PATH_NOT_DIRECTORY',
-        `Project path is not a directory: ${resolvedPath}`,
-        400,
-      );
-    }
-
-    return resolvedPath;
   }
 
   private async assertChatIdleForProjectPathUpdate(chatId: string, chat: ChatRegistryEntry): Promise<void> {

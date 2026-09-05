@@ -2,7 +2,7 @@ import type { ErrorCode } from './error-codes.js';
 import type { HttpErrorResponse } from './http-error.js';
 import { isRecord } from './json.js';
 import {
-  CHAT_ORDER_SORT_KEYS,
+  isChatOrderSortKey,
   type ChatOrderSortKey,
 } from './chat-order-sort.js';
 
@@ -128,17 +128,17 @@ export function parseReorderChatResponse(value: unknown): ReorderChatResponse | 
 
 export function parseSortChatOrderRequest(value: unknown): SortChatOrderRequest | null {
   if (!isRecord(value) || !hasOnlyKeys(value, SORT_REQUEST_KEYS)) return null;
-  if (!CHAT_ORDER_SORT_KEYS.includes(value.sortKey as ChatOrderSortKey)) return null;
-  return { sortKey: value.sortKey as ChatOrderSortKey };
+  if (!isChatOrderSortKey(value.sortKey)) return null;
+  return { sortKey: value.sortKey };
 }
 
 export function parseSortChatOrderResponse(value: unknown): SortChatOrderResponse | null {
   if (!isRecord(value) || !hasOnlyKeys(value, SORT_RESPONSE_KEYS)) return null;
   if (value.success !== true || typeof value.changed !== 'boolean') return null;
-  if (!CHAT_ORDER_SORT_KEYS.includes(value.sortKey as ChatOrderSortKey)) return null;
+  if (!isChatOrderSortKey(value.sortKey)) return null;
   return {
     success: true,
-    sortKey: value.sortKey as ChatOrderSortKey,
+    sortKey: value.sortKey,
     changed: value.changed,
   };
 }

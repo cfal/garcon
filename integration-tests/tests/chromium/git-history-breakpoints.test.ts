@@ -9,6 +9,7 @@ import {
 } from '../../support/integration-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
 import { requireCurrentWebBuild } from '../../support/web-build-gate.js';
+import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
@@ -273,10 +274,13 @@ async function openChatWorkspace(
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({
-    state: 'visible',
-    timeout: 20_000,
-  });
+  await fixture.page
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
+    .waitFor({
+      state: 'visible',
+      timeout: 20_000,
+    });
+  await collapseCanonicalFilesWindow(fixture.page);
 }
 
 async function openWorkspaceAddMenuItem(page: Page, label: string): Promise<void> {

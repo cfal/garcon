@@ -1,6 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RemoteSettingsSnapshot } from '$shared/settings';
 import {
 	beginTelegramRecipientLink,
 	clearTelegramBotToken,
@@ -21,6 +20,10 @@ import {
 	DEFAULT_PROMPT_REFINEMENT_PROMPT,
 	GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
 } from '$shared/generation-prompts';
+import {
+	makeRemoteSettingsSnapshot,
+	mockRemoteSettingsUpdate,
+} from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -35,155 +38,6 @@ vi.mock('$lib/api/settings.js', () => ({
 	updateRemoteSettings: vi.fn(),
 }));
 
-type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executionDefaults'>> & {
-	paths?: Partial<RemoteSettingsSnapshot['paths']>;
-	executionDefaults?: {
-		global?: Partial<RemoteSettingsSnapshot['executionDefaults']['global']>;
-		byAgent?: RemoteSettingsSnapshot['executionDefaults']['byAgent'];
-	};
-};
-
-function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
-	const snapshot: RemoteSettingsSnapshot = {
-		version: 1,
-		features: {
-			transcriptSearch: { enabled: false },
-			agentCommands: {
-				enabled: true,
-				chatIdDiscovery: true,
-				sendMessage: true,
-			},
-		},
-		ui: {},
-		uiEffective: {},
-		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
-		pinnedChatIds: [],
-		recentAgentSettings: [
-			{
-				agentId: 'claude',
-				model: 'opus',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			},
-		],
-		executionDefaults: {
-			global: {
-				permissionMode: 'default',
-				thinkingMode: 'none',
-				agentSettingsById: {},
-			},
-			byAgent: {},
-		},
-		projectBasePath: '/workspace',
-		telegram: {
-			botTokenAvailable: false,
-			botUsername: null,
-			botFirstName: null,
-			recipientUsername: null,
-			recipientDisplayName: null,
-			recipientLinked: false,
-			pendingLink: false,
-			linkUrl: null,
-		},
-	};
-	return {
-		...snapshot,
-		...overrides,
-		paths: {
-			...snapshot.paths,
-			...(overrides.paths ?? {}),
-		},
-		executionDefaults: {
-			global: {
-				...snapshot.executionDefaults.global,
-				...(overrides.executionDefaults?.global ?? {}),
-			},
-			byAgent: {
-				...snapshot.executionDefaults.byAgent,
-				...(overrides.executionDefaults?.byAgent ?? {}),
-			},
-		},
-	};
-}
-
-function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
-	vi.mocked(updateRemoteSettings).mockImplementation(async (patch) => {
-		const current = store.snapshot ?? makeSnapshot();
-		const nextUi = {
-			...current.ui,
-			...(patch.ui ?? {}),
-		};
-		const nextUiEffective = {
-			...current.uiEffective,
-		};
-		const nextFeatures = {
-			...current.features,
-			transcriptSearch: {
-				...current.features.transcriptSearch,
-				...(patch.features?.transcriptSearch ?? {}),
-			},
-			agentCommands: {
-				...current.features.agentCommands,
-				...(patch.features?.agentCommands ?? {}),
-			},
-		};
-		if (patch.ui?.chatTitle) {
-			nextUiEffective.chatTitle = {
-				...(current.uiEffective.chatTitle ?? {
-					enabled: true,
-					agentId: 'claude',
-					model: 'opus',
-					thinkingMode: 'none',
-				}),
-				...patch.ui.chatTitle,
-			};
-		}
-		if (patch.ui?.agentSwitchCompaction) {
-			nextUiEffective.agentSwitchCompaction = {
-				...(current.uiEffective.agentSwitchCompaction ?? {
-					enabled: false,
-					agentId: 'claude',
-					model: 'opus',
-					thinkingMode: 'none',
-					contextWindowTokens: 500_000,
-				}),
-				...patch.ui.agentSwitchCompaction,
-			};
-		}
-		if (patch.ui?.commitMessage) {
-			nextUiEffective.commitMessage = {
-				...(current.uiEffective.commitMessage ?? {
-					agentId: 'claude',
-					model: 'opus',
-					thinkingMode: 'none',
-				}),
-				...patch.ui.commitMessage,
-			};
-		}
-		if (patch.ui?.promptRefinement) {
-			nextUiEffective.promptRefinement = {
-				...(current.uiEffective.promptRefinement ?? {
-					agentId: 'claude',
-					model: 'opus',
-					thinkingMode: 'none',
-				}),
-				...patch.ui.promptRefinement,
-			};
-		}
-		return {
-			success: true,
-			settings: makeSnapshot({
-				...current,
-				version: current.version + 1,
-				ui: nextUi,
-				uiEffective: nextUiEffective,
-				features: nextFeatures,
-			}),
-		};
-	});
-}
-
 describe('RemoteSettingsSection', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -192,7 +46,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('enables transcript search through the remote feature patch', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
@@ -209,17 +63,21 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('shows the hidden bash commands card while remote settings have not loaded', () => {
-		setTestRemoteSettingsStore(new RemoteSettingsStore());
+	it('shows the hidden bash commands card only after remote settings load', async () => {
+		const store = new RemoteSettingsStore();
+		setTestRemoteSettingsStore(store);
 		render(RemoteSettingsSectionTestHost);
 
-		expect(screen.getByText('Hide bash commands')).toBeTruthy();
+		expect(screen.queryByText('Hide bash commands')).toBeNull();
+		store.applySnapshot(makeRemoteSettingsSnapshot());
+
+		expect(await screen.findByText('Hide bash commands')).toBeTruthy();
 		expect(screen.getByLabelText('Command pattern')).toBeTruthy();
 	});
 
 	it('persists agent command settings while the parent hides and restores them', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
@@ -259,7 +117,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('keeps agent command state unchanged when saving fails', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		vi.mocked(updateRemoteSettings).mockRejectedValueOnce(new Error('Settings are unavailable.'));
 		render(RemoteSettingsSectionTestHost);
@@ -275,7 +133,7 @@ describe('RemoteSettingsSection', () => {
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				version: 1,
 				telegram: {
 					botTokenAvailable: true,
@@ -293,7 +151,7 @@ describe('RemoteSettingsSection', () => {
 		vi.mocked(beginTelegramRecipientLink).mockResolvedValueOnce({
 			success: true,
 			linkUrl: 'https://t.me/garcon_bot?start=abc',
-			settings: makeSnapshot({
+			settings: makeRemoteSettingsSnapshot({
 				version: 2,
 				telegram: {
 					botTokenAvailable: true,
@@ -309,7 +167,7 @@ describe('RemoteSettingsSection', () => {
 		});
 		vi.mocked(resolveTelegramRecipientLink).mockResolvedValueOnce({
 			success: true,
-			settings: makeSnapshot({
+			settings: makeRemoteSettingsSnapshot({
 				version: 3,
 				telegram: {
 					botTokenAvailable: true,
@@ -363,7 +221,7 @@ describe('RemoteSettingsSection', () => {
 	it('renders prompt refinement after commit generation without an enabled switch', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				uiEffective: {
 					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
@@ -405,7 +263,7 @@ describe('RemoteSettingsSection', () => {
 	it('configures the compaction context window and preserves it across nested saves', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				ui: {
 					agentSwitchCompaction: {
 						enabled: true,
@@ -491,7 +349,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('disables the compaction context-window selector while saving', async () => {
 		const store = new RemoteSettingsStore();
-		const snapshot = makeSnapshot({
+		const snapshot = makeRemoteSettingsSnapshot({
 			uiEffective: {
 				agentSwitchCompaction: {
 					enabled: true,
@@ -527,7 +385,7 @@ describe('RemoteSettingsSection', () => {
 	it('keeps direct agents available in title and commit generation selectors', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				uiEffective: {
 					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
@@ -569,7 +427,7 @@ describe('RemoteSettingsSection', () => {
 	it('tests title, commit, and prompt-refinement models independently', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				uiEffective: {
 					chatTitle: {
 						enabled: true,
@@ -635,7 +493,7 @@ describe('RemoteSettingsSection', () => {
 			thinkingMode: 'max' as const,
 		};
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				ui: { chatTitle },
 				uiEffective: { chatTitle },
 			}),
@@ -661,7 +519,7 @@ describe('RemoteSettingsSection', () => {
 	it('keeps the Test model button name while a request is running', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				uiEffective: {
 					chatTitle: {
 						enabled: true,
@@ -695,7 +553,7 @@ describe('RemoteSettingsSection', () => {
 	it('persists title and commit effort as independent generation settings', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				ui: {
 					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: { agentId: 'codex', model: 'gpt-5.4', thinkingMode: 'low' },
@@ -738,7 +596,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('renders custom app title below Telegram notifications', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 
 		render(RemoteSettingsSectionTestHost);
@@ -752,7 +610,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('renders GitHub CLI status above pinned chats settings', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		setTestGhCapability(makeTestGhCapability());
 
@@ -791,7 +649,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('renders connected GitHub CLI status from the shared capability store', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		setTestGhCapability(makeTestGhCapability());
 
@@ -807,7 +665,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('saves a custom app title from remote settings', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 
@@ -838,7 +696,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('rejects a blank custom app title without saving', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 
@@ -862,7 +720,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('clears a saved custom app title when disabled', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot({ ui: { appIdentity: { title: 'Garcon - Work' } } }));
+		store.applySnapshot(makeRemoteSettingsSnapshot({ ui: { appIdentity: { title: 'Garcon - Work' } } }));
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 
@@ -884,7 +742,7 @@ describe('RemoteSettingsSection', () => {
 	it('persists the commit directory prefix setting through remote settings', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				ui: {
 					commitMessage: {
 						agentId: 'codex',
@@ -930,7 +788,7 @@ describe('RemoteSettingsSection', () => {
 	it('edits the commit generation prompt transactionally in a dialog', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				ui: {
 					commitMessage: {
 						agentId: 'codex',
@@ -1006,7 +864,7 @@ describe('RemoteSettingsSection', () => {
 	it('validates and persists prompt-refinement instructions', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				ui: {
 					promptRefinement: {
 						agentId: 'claude',
@@ -1068,7 +926,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('keeps a failed prompt save in the dialog for retry', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		vi.mocked(updateRemoteSettings).mockRejectedValueOnce(new Error('Settings are unavailable.'));
 		render(RemoteSettingsSectionTestHost);
@@ -1088,7 +946,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('keeps the generation prompt dialog open when Escape is pressed during save', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot());
+		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 		let rejectUpdate!: (reason?: unknown) => void;
 		const updatePromise = new Promise<Awaited<ReturnType<typeof updateRemoteSettings>>>(
@@ -1119,11 +977,11 @@ describe('RemoteSettingsSection', () => {
 
 	it('saves the Telegram bot token and applies the redacted settings snapshot', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot({ version: 1 }));
+		store.applySnapshot(makeRemoteSettingsSnapshot({ version: 1 }));
 		setTestRemoteSettingsStore(store);
 		vi.mocked(saveTelegramBotToken).mockResolvedValueOnce({
 			success: true,
-			settings: makeSnapshot({
+			settings: makeRemoteSettingsSnapshot({
 				version: 2,
 				telegram: {
 					botTokenAvailable: true,
@@ -1168,7 +1026,7 @@ describe('RemoteSettingsSection', () => {
 	it('clears the Telegram token and returns to the unset token actions', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
-			makeSnapshot({
+			makeRemoteSettingsSnapshot({
 				version: 1,
 				ui: { notifications: { telegram: { enabled: true } } },
 				telegram: {
@@ -1186,7 +1044,7 @@ describe('RemoteSettingsSection', () => {
 		setTestRemoteSettingsStore(store);
 		vi.mocked(clearTelegramBotToken).mockResolvedValueOnce({
 			success: true,
-			settings: makeSnapshot({
+			settings: makeRemoteSettingsSnapshot({
 				version: 2,
 				ui: { notifications: { telegram: { enabled: false } } },
 			}),
@@ -1208,7 +1066,7 @@ describe('RemoteSettingsSection', () => {
 
 	it('shows the token validation error code when saving fails', async () => {
 		const store = new RemoteSettingsStore();
-		store.applySnapshot(makeSnapshot({ version: 1 }));
+		store.applySnapshot(makeRemoteSettingsSnapshot({ version: 1 }));
 		setTestRemoteSettingsStore(store);
 		vi.mocked(saveTelegramBotToken).mockRejectedValueOnce(
 			new ApiError(400, 'Raw server token failure', 'telegram_token_test_failed', 'Unauthorized'),

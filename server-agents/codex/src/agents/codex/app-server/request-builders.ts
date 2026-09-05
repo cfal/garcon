@@ -35,6 +35,7 @@ interface CodexSandboxSettings {
 
 export interface CodexThreadSettingsTarget {
   readonly model: string;
+  // Represents provider-owned Default as null because Codex reports the effective concrete effort.
   readonly effort: string | null;
   readonly approvalPolicy: CodexApprovalPolicy;
   readonly approvalsReviewer: 'user';
@@ -112,7 +113,7 @@ export function buildThreadSettingsUpdateParams(
     approvalPolicy: target.approvalPolicy,
     approvalsReviewer: target.approvalsReviewer,
     sandboxPolicy: target.sandboxPolicy,
-    ...(target.effort ? { effort: target.effort } : {}),
+    ...(target.effort !== null ? { effort: target.effort } : {}),
   };
 }
 
@@ -120,6 +121,7 @@ export function threadSettingsMatch(
   settings: CodexConfirmedThreadSettings,
   target: CodexThreadSettingsTarget,
 ): boolean {
+  // Accepts any confirmed effort when Codex owns the Default omitted from the update.
   return settings.model === target.model
     && (target.effort === null || settings.effort === target.effort)
     && settings.approvalPolicy === target.approvalPolicy
@@ -176,14 +178,6 @@ function sandboxPolicyMatches(
     && (left.excludeSlashTmp ?? false) === (right.excludeSlashTmp ?? false);
 }
 
-// Resolves known defaults explicitly because thread/settings/update cannot clear an effort override.
-// https://github.com/openai/codex/blob/985641272869835d01d025ed2a218fbbce35fa9f/codex-rs/models-manager/models.json#L173-L463
-function codexModelDefaultEffort(model: string | undefined): string | undefined {
-  if (model === GPT_6_ASTRA_MODEL || model === 'gpt-5.6-sol') return 'low';
-  if (model === 'gpt-5.6-terra' || model === 'gpt-5.6-luna') return 'medium';
-  return undefined;
-}
-
 // Preserves xhigh compatibility for older models while allowing models that
 // advertise max reasoning to receive that effort explicitly.
 export function mapThinkingModeToCodexEffort(
@@ -191,7 +185,8 @@ export function mapThinkingModeToCodexEffort(
   model?: string,
 ): string | undefined {
   switch (thinkingMode) {
-    case 'none': return codexModelDefaultEffort(model);
+    // Leaves provider defaults unset so Codex can honor config and model catalog defaults.
+    case 'none': return undefined;
     case 'low': return 'low';
     case 'medium': return 'medium';
     case 'high': return 'high';

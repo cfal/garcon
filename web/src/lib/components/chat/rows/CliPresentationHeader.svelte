@@ -8,8 +8,11 @@
 	const displayTitle = $derived(title || undefined);
 </script>
 
-<div class="flex min-w-0 items-center gap-2">
-	<SquareTerminal class="size-3.5 shrink-0" aria-hidden="true" />
+<div class="flex min-w-0 items-start gap-2">
+	<SquareTerminal class="mt-px size-3.5 shrink-0" aria-hidden="true" />
 	{#if displayTitle}<span class="sr-only">{label}</span>{/if}
-	<span class="min-w-0 flex-1 truncate text-xs font-medium">{displayTitle ?? label}</span>
+	<span
+		class="min-w-0 flex-1 break-words text-xs font-medium sm:truncate"
+		title={displayTitle ?? label}>{displayTitle ?? label}</span
+	>
 </div>

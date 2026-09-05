@@ -29,6 +29,7 @@ function createRoutesFixture({
   };
   const registry = {
     getChat: mock((chatId) => sessions[chatId] ?? null),
+    hasChat: mock((chatId) => chatId in sessions),
     addChat: mock(() => true),
     updateChat: mock(() => null),
     removeChat: mock(() => true),

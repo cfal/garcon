@@ -123,6 +123,8 @@ function mixedReplayRows(
             message,
             attachments: [],
             steer: false,
+            preambleBoundary: null,
+            preamblePrefixReceipt: null,
           },
           providerMeta: null,
         };

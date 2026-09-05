@@ -20,10 +20,10 @@ describe('LocalSettingsStore', () => {
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.allowDirectChats).toBe(false);
-		expect(store.sidebarGrouping).toBe('project');
+		expect(store.sidebarGrouping).toBe('project-and-activity');
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
-		expect(store.sidebarChatItemLayout).toBe('default');
+		expect(store.sidebarChatItemLayout).toBe('compact');
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.reduceMotion).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
@@ -51,7 +51,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it('persists every chat item layout and defaults malformed values to default', () => {
+	it('persists every chat item layout and defaults malformed values to compact', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('sidebarChatItemLayout', 'single-line');
@@ -69,7 +69,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ sidebarChatItemLayout: 'condensed' }),
 		);
 		const malformed = createLocalSettingsStore();
-		expect(malformed.sidebarChatItemLayout).toBe('default');
+		expect(malformed.sidebarChatItemLayout).toBe('compact');
 		malformed.destroy();
 	});
 
@@ -420,89 +420,6 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
-	it('persists and restores hidden bash command patterns', () => {
-		const store = createLocalSettingsStore();
-		store.addHiddenBashCommandPattern({ pattern: 'git *', mode: 'glob' });
-		store.addHiddenBashCommandPattern({ pattern: '^cargo', mode: 'regex' });
-
-		expect(
-			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
-		).toMatchObject({
-			hiddenBashCommandPatterns: [
-				{ pattern: 'git *', mode: 'glob' },
-				{ pattern: '^cargo', mode: 'regex' },
-			],
-		});
-
-		const restored = createLocalSettingsStore();
-		expect(restored.hiddenBashCommandPatterns).toEqual([
-			{ pattern: 'git *', mode: 'glob' },
-			{ pattern: '^cargo', mode: 'regex' },
-		]);
-		restored.removeHiddenBashCommandPattern({ pattern: 'git *', mode: 'glob' });
-		expect(restored.hiddenBashCommandPatterns).toEqual([{ pattern: '^cargo', mode: 'regex' }]);
-
-		store.destroy();
-		restored.destroy();
-	});
-
-	it('preserves the hidden bash command pattern reference across unrelated writes', () => {
-		const store = createLocalSettingsStore();
-		store.addHiddenBashCommandPattern({ pattern: 'git *', mode: 'glob' });
-		const patterns = store.hiddenBashCommandPatterns;
-
-		store.set('sidebarWidth', 360);
-
-		expect(store.hiddenBashCommandPatterns).toBe(patterns);
-		store.destroy();
-	});
-
-	it('preserves the hidden bash command pattern reference across unrelated storage events', () => {
-		localStorage.setItem(
-			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }] }),
-		);
-		const store = createLocalSettingsStore();
-		const patterns = store.hiddenBashCommandPatterns;
-		localStorage.setItem(
-			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ ...store.snapshot(), sidebarWidth: 360 }),
-		);
-
-		window.dispatchEvent(
-			new StorageEvent('storage', {
-				key: LOCAL_STORAGE_KEYS.localSettings,
-				newValue: localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings),
-			}),
-		);
-
-		expect(store.sidebarWidth).toBe(360);
-		expect(store.hiddenBashCommandPatterns).toBe(patterns);
-		store.destroy();
-	});
-
-	it('drops malformed and duplicate persisted bash command patterns', () => {
-		localStorage.setItem(
-			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({
-				hiddenBashCommandPatterns: [
-					{ pattern: 'git *', mode: 'glob' },
-					{ pattern: 'git *', mode: 'glob' },
-					{ pattern: '', mode: 'glob' },
-					{ pattern: '([unclosed', mode: 'regex' },
-					{ pattern: 'x', mode: 'shell' },
-					'string',
-					null,
-				],
-			}),
-		);
-
-		const store = createLocalSettingsStore();
-
-		expect(store.hiddenBashCommandPatterns).toEqual([{ pattern: 'git *', mode: 'glob' }]);
-		store.destroy();
-	});
-
 	it('persists and restores the sidebar sort mode', () => {
 		const store = createLocalSettingsStore();
 		store.set('sidebarSortMode', 'recent');
@@ -569,7 +486,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ sidebarGrouping: 'project-and-time' }),
 		);
 		const oldToken = createLocalSettingsStore();
-		expect(oldToken.sidebarGrouping).toBe('project');
+		expect(oldToken.sidebarGrouping).toBe('project-and-activity');
 		oldToken.destroy();
 	});
 
@@ -625,7 +542,6 @@ describe('LocalSettingsStore', () => {
 				textEditorOpenPlacement: 'same-window',
 				imageViewerOpenPlacement: 'new-window',
 				markdownViewerOpenPlacement: 'same-window',
-				hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }],
 			}),
 		);
 		window.dispatchEvent(
@@ -649,8 +565,6 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.textEditorOpenPlacement).toBe('same-window');
 		expect(secondStore.imageViewerOpenPlacement).toBe('new-window');
 		expect(secondStore.markdownViewerOpenPlacement).toBe('same-window');
-		expect(secondStore.hiddenBashCommandPatterns).toEqual([{ pattern: 'git *', mode: 'glob' }]);
-
 		firstStore.destroy();
 		secondStore.destroy();
 	});

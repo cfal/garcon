@@ -4,6 +4,10 @@ import type {
   UserMessagePresentation,
 } from '../../../common/chat-types.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
+import {
+  isPreambleApplicationNoticeDetail,
+  type AppliedPreambleReference,
+} from '../../../common/transcript-notice-details.js';
 
 export interface TranscriptExportField {
   readonly name: string;
@@ -76,6 +80,10 @@ export function transcriptExportEntryCliPresentation(
 
 export function transcriptExportEntryText(entry: TranscriptExportEntry): string | null {
   if (entry.kind === 'run-ended') return null;
+  const preambles = transcriptExportEntryPreambles(entry);
+  if (preambles) {
+    return textSafe(`Preambles applied: ${preambles.map((preamble) => preamble.title).join('; ')}`);
+  }
   switch (entry.message.type) {
     case 'user-message':
     case 'assistant-message':
@@ -115,7 +123,19 @@ export function transcriptExportEntryFields(
       error: entry.error,
     });
   }
+  if (transcriptExportEntryPreambles(entry)) return [];
   return fieldsFromMessage(entry.message);
+}
+
+export function transcriptExportEntryPreambles(
+  entry: TranscriptExportEntry,
+): readonly AppliedPreambleReference[] | null {
+  if (
+    entry.kind !== 'message'
+    || entry.message.type !== 'transcript-notice'
+    || !isPreambleApplicationNoticeDetail(entry.message.detail)
+  ) return null;
+  return entry.message.detail.preambles;
 }
 
 function fieldsFromMessage(message: ChatMessage): TranscriptExportField[] {

@@ -19,10 +19,11 @@ import {
   withChromiumFixture,
   type ChromiumFixture as BaseChromiumFixture,
 } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 const CHAT_ROW_SELECTOR = '[data-sidebar-virtual-row][data-sidebar-virtual-list-row="normal"]';
 
-interface ReorderExchange {
+interface OrderExchange {
   request: {
     method: string;
     url: string;
@@ -35,8 +36,8 @@ interface ReorderExchange {
 }
 
 interface ChromiumFixture extends BaseChromiumFixture {
-  reorderExchanges: ReorderExchange[];
-  sortExchanges: ReorderExchange[];
+  reorderExchanges: OrderExchange[];
+  sortExchanges: OrderExchange[];
 }
 
 function isReorderRequest(request: Request): boolean {
@@ -116,8 +117,7 @@ async function sortFromChatMenu(
   await row.hover();
   await row.locator('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]').click();
   const reorderChats = fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true });
-  await reorderChats.focus();
-  await reorderChats.press('ArrowRight');
+  await reorderChats.click();
   const preset = fixture.page.getByRole('menuitem', { name: label, exact: true });
   await preset.waitFor();
   const responsePromise = fixture.page.waitForResponse(
@@ -300,18 +300,20 @@ async function withSidebarChromiumFixture<T>(
     testName,
     async (baseFixture) => {
       const fixture = Object.assign(baseFixture, {
-        reorderExchanges: [] as ReorderExchange[],
-        sortExchanges: [] as ReorderExchange[],
+        reorderExchanges: [] as OrderExchange[],
+        sortExchanges: [] as OrderExchange[],
       });
-      const exchangesByRequest = new Map<Request, ReorderExchange>();
+      const exchangesByRequest = new Map<Request, OrderExchange>();
       fixture.page.on('request', (request) => {
-        const exchanges = isReorderRequest(request)
-          ? fixture.reorderExchanges
-          : isSortRequest(request)
-            ? fixture.sortExchanges
-            : null;
-        if (!exchanges) return;
-        const exchange: ReorderExchange = {
+        let exchanges: OrderExchange[];
+        if (isReorderRequest(request)) {
+          exchanges = fixture.reorderExchanges;
+        } else if (isSortRequest(request)) {
+          exchanges = fixture.sortExchanges;
+        } else {
+          return;
+        }
+        const exchange: OrderExchange = {
           request: {
             method: request.method(),
             url: request.url(),
@@ -354,6 +356,8 @@ async function withSidebarChromiumFixture<T>(
 describe('Chromium sidebar chat reorder', () => {
   test('survives repeated inverse drags, chat creation, and subsequent reorder actions', async () => {
     await withSidebarChromiumFixture('sidebar-chat-reorder', async (fixture) => {
+      // Drag reorder is only enabled under manual sidebar sort.
+      await fixture.page.addInitScript(seedLocalSettings, { sidebarSortMode: 'manual' });
       const chatIds = await createChats(fixture.integration, 4);
       const original = await normalOrder(fixture.integration);
       expect(original).toHaveLength(chatIds.length);

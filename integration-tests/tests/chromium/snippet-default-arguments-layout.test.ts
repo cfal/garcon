@@ -35,7 +35,7 @@ async function openNewChat(page: Page, projectPath: string): Promise<Locator> {
   const dialog = page.locator('[role="dialog"]').filter({ has: composer });
   await dialog.waitFor();
   await dialog.getByRole('textbox', { name: 'Project Path' }).fill(projectPath);
-  const pathOverlay = page.locator('button.fixed.inset-0[aria-label="Close"]');
+  const pathOverlay = page.locator('[data-slot="directory-browser-dismiss"]');
   if (await pathOverlay.isVisible()) {
     await pathOverlay.click({ position: { x: 4, y: 4 } });
   }
@@ -43,10 +43,16 @@ async function openNewChat(page: Page, projectPath: string): Promise<Locator> {
 }
 
 async function openSnippetPalette(page: Page, newChat: Locator): Promise<Locator> {
-  await page.evaluate(() => {
-    document.querySelector<HTMLButtonElement>('button.fixed.inset-0[aria-label="Close"]')?.click();
-  });
-  await page.locator('button.fixed.inset-0[aria-label="Close"]').waitFor({ state: 'detached' });
+  const directoryBrowser = page.locator('[data-slot="directory-browser"]');
+  if (await directoryBrowser.isVisible()) {
+    const dismiss = page.locator('[data-slot="directory-browser-dismiss"]');
+    if (await dismiss.isVisible()) {
+      await dismiss.evaluate((element) => (element as HTMLButtonElement).click());
+    } else {
+      await directoryBrowser.getByRole('button', { name: 'Cancel', exact: true }).click();
+    }
+    await directoryBrowser.waitFor({ state: 'detached' });
+  }
   await newChat
     .getByRole('button', { name: 'Add to prompt' })
     .evaluate((element) => (element as HTMLButtonElement).click());

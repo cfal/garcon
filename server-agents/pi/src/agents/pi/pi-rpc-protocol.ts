@@ -75,7 +75,7 @@ export function occurrenceCounts(values: readonly string[]): Map<string, number>
 }
 
 // Mirrors Pi's upward-first clamp for levels unsupported by the resolved model.
-// https://github.com/earendil-works/pi-mono/blob/845d6ff1f6643aba440341cce877ce1c43ebbc39/packages/ai/src/models.ts#L661-L692
+// https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/models.ts#L913-L945
 export function resolvePiThinkingLevel(
   model: Readonly<Record<string, unknown>>,
   requested: ModelThinkingLevel,
@@ -116,7 +116,7 @@ export function classifyPiSteerRejection(error: PiRpcCommandError): AgentSteerRe
   if (/extension command|cannot be queued/i.test(message)) {
     return rejectedPiSteer('invalid-input', 'Pi rejected the steering input');
   }
-  // Defensive: Pi 0.84.2 accepts steers unconditionally, so no idle rejection exists today.
+  // Defensive: Pi 0.85.1 accepts steers unconditionally, so no idle rejection exists today.
   if (/not (?:streaming|running)|no active turn/i.test(message)) {
     return rejectedPiSteer('no-active-turn', 'No active Pi turn');
   }

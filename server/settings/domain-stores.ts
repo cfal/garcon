@@ -450,8 +450,7 @@ export class ChatOrderStore {
 
   async reconcileWithRegistry(registry: IChatRegistry): Promise<void> {
     return this.#context.mutate(async () => {
-      const sessions = registry.listAllChats();
-      const allChatIds = new Set(Object.keys(sessions));
+      const allChatIds = new Set(registry.listChatIds());
       const currentSettings = this.#context.readSettings();
       const beforePinned = dedup(currentSettings.pinnedChatIds || []);
 

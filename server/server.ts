@@ -105,6 +105,7 @@ import {
   SnippetProjectPathService,
   SnippetService,
 } from './snippets/service.js';
+import { initializePreambleService } from './preambles/setup.js';
 import {
   importNativeHistoryDrafts,
   ledgerRowsToMessages,
@@ -292,7 +293,7 @@ export async function startServer(): Promise<void> {
       path.join(workspaceDir, 'transcript-ledgers'),
     );
     transcriptStore.removeUnregisteredChatDirectories(
-      new Set(Object.keys(chatRegistry.listAllChats())),
+      new Set(chatRegistry.listChatIds()),
     );
     const transcriptLedger = new TranscriptLedgerService(transcriptStore, {
       serverInstanceId: runtimeState.identity.instanceId,
@@ -388,6 +389,8 @@ export async function startServer(): Promise<void> {
       transcriptLedger,
       transcriptAdoption,
     );
+    const preambles = await initializePreambleService(workspaceDir);
+
     agentRegistry = new AgentRegistry({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -425,6 +428,7 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
+      preambles,
     });
 
     await chatRegistry.reconcileSessions((session, chatId) =>
@@ -458,8 +462,8 @@ export async function startServer(): Promise<void> {
       service: transcriptSearchService,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
-      listChatIds: () => Object.keys(chatRegistry.listAllChats()),
-      hasChat: (chatId) => chatRegistry.getChat(chatId) !== null,
+      listChatIds: () => chatRegistry.listChatIds(),
+      hasChat: (chatId) => chatRegistry.hasChat(chatId),
       logger,
     });
     try {
@@ -515,7 +519,7 @@ export async function startServer(): Promise<void> {
       agentRegistry,
       agentRegistry,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
-      (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      (chatId) => chatRegistry.hasChat(chatId),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
       agentCommands.appendControlReceipt,
@@ -577,7 +581,13 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
-      readForkedNativeHistory: async ({ targetChatId, sourceSession, fork, signal }) => {
+      readForkedNativeHistory: async ({
+        targetChatId,
+        sourceSession,
+        fork,
+        signal,
+        preambleEvidence,
+      }) => {
         const integration = integrationRegistry.get(sourceSession.agentId);
         if (!integration?.nativeHistoryImport) return null;
         return importNativeHistoryDrafts({
@@ -591,6 +601,7 @@ export async function startServer(): Promise<void> {
           carryOverRevision: carryOver.revision([]),
           signal,
           now: () => new Date().toISOString(),
+          preambleEvidence,
         });
       },
       transcripts: transcriptLedger,
@@ -687,6 +698,7 @@ export async function startServer(): Promise<void> {
         telegramSettings,
         scheduledPrompts,
         snippets,
+        preambles,
         searchIndex: chatSearch,
       }),
       startScheduledPrompts: () => scheduledPrompts.start(),
@@ -717,6 +729,7 @@ export async function startServer(): Promise<void> {
       lastSelectedChat,
       scheduledPrompts,
       snippets,
+      preambles,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,

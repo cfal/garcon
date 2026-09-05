@@ -151,6 +151,8 @@ export async function bulkAppendCorpusRows(
               message: new UserMessage(at, body),
               attachments: [],
               steer: false,
+              preambleBoundary: null,
+              preamblePrefixReceipt: null,
             },
           }
         : {

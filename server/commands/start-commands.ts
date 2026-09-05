@@ -1,13 +1,13 @@
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
 import {
   recordsStartupPreferences,
   type StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
 
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
+import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import { createLogger } from '../lib/log.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
+import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -96,7 +96,7 @@ export class StartCommands {
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
       agentId: input.agentId,
-      projectPath: await this.resolveProjectPathForStart(input.projectPath),
+      projectPath: await resolveStartProjectPath(input.projectPath),
       idempotencyProjectPath,
       command: input.command,
       images,
@@ -156,6 +156,7 @@ export class StartCommands {
           this.deps.chats.addChat({
             id: input.chatId,
             agentId: input.agentId,
+            ...createPreambleBoundaryBinding('new-chat'),
             nativeSession: null,
             projectPath: input.projectPath,
             tags: input.tags,
@@ -171,7 +172,6 @@ export class StartCommands {
               ? null
               : { chatId: input.parentChatId, relation: 'delegation' },
           });
-          this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
           await this.deps.settings.ensureInNormal(input.chatId);
           await this.deps.chats.flush();
         },
@@ -199,6 +199,8 @@ export class StartCommands {
           agentSettings: input.agentSettings,
         }),
     });
+
+    if (!this.deps.metadata.getChatMetadata(input.chatId)) this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
 
     if (recordsStartupPreferences(input.origin)) {
       try {
@@ -262,34 +264,6 @@ export class StartCommands {
     };
   }
 
-  private async resolveProjectPathForStart(projectPath: string | undefined): Promise<string> {
-    const requestedPath = String(projectPath || '').trim();
-    if (!requestedPath) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
-    }
-
-    let resolvedPath: string;
-    try {
-      resolvedPath = await assertRealWithinProjectBase(requestedPath);
-    } catch (error) {
-      if (isProjectBoundaryError(error)) {
-        throw new CommandValidationError(
-          'PROJECT_PATH_OUTSIDE_BASE',
-          'Project path is outside the allowed base directory',
-          403,
-        );
-      }
-      throw error;
-    }
-
-    try {
-      await fs.access(resolvedPath);
-    } catch {
-      throw new CommandValidationError('VALIDATION_FAILED', `Project path not found: ${resolvedPath}`, 404);
-    }
-
-    return resolvedPath;
-  }
 }
 
 function startPayload(input: NormalizedChatStart): Record<string, unknown> {

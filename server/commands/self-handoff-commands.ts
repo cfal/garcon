@@ -14,6 +14,7 @@ import type { ForkRunCommandResponse } from '../../common/chat-command-contracts
 import type { SelfHandoffRunCommandRequest } from '../../common/self-handoff-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
+import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import { CommandSupport, CommandValidationError } from './command-support.js';
 
@@ -189,7 +190,7 @@ export class SelfHandoffCommands {
         modelProtocol: source.modelProtocol ?? null,
         projectPath: source.projectPath,
         nativeSession: null,
-        agentOwnershipEpoch: crypto.randomUUID(),
+        ...createPreambleBoundaryBinding('continuation'),
         tags: [...source.tags],
         agentSessionId: null,
         nextForkOrdinal: 1,
@@ -215,6 +216,13 @@ export class SelfHandoffCommands {
           `Session already exists: ${input.chatId}`,
           409,
         );
+      }
+      try {
+        await this.deps.chats.flush();
+      } catch (error) {
+        this.deps.chats.removeChat(input.chatId, 'start-compensation');
+        await this.deps.chats.flush();
+        throw error;
       }
       registered = true;
       onRegistered();

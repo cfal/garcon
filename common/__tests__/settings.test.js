@@ -276,3 +276,60 @@ describe('generation settings contracts', () => {
     }
   });
 });
+
+describe('remote hidden bash command settings', () => {
+  function makeSnapshot(ui) {
+    return {
+      version: 1,
+      features: { transcriptSearch: { enabled: false } },
+      ui,
+      uiEffective: {},
+      paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
+      pinnedChatIds: [],
+      recentAgentSettings: [],
+      executionDefaults: {
+        global: {
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          agentSettingsById: {},
+        },
+        byAgent: {},
+      },
+      projectBasePath: '',
+      telegram: {
+        botTokenAvailable: false,
+        botUsername: null,
+        botFirstName: null,
+        recipientUsername: null,
+        recipientDisplayName: null,
+        recipientLinked: false,
+        pendingLink: false,
+        linkUrl: null,
+      },
+    };
+  }
+
+  it('normalizes and deduplicates the canonical list', () => {
+    const snapshot = normalizeRemoteSettingsSnapshot(makeSnapshot({
+      hiddenBashCommandPatterns: [
+        { pattern: 'git *', mode: 'glob' },
+        { pattern: '^cargo', mode: 'regex' },
+        { pattern: 'git *', mode: 'glob' },
+      ],
+    }));
+
+    expect(snapshot?.ui.hiddenBashCommandPatterns).toEqual([
+      { pattern: 'git *', mode: 'glob' },
+      { pattern: '^cargo', mode: 'regex' },
+    ]);
+  });
+
+  it('drops a malformed optional list without rejecting the snapshot', () => {
+    const snapshot = normalizeRemoteSettingsSnapshot(makeSnapshot({
+      pinnedInsertPosition: 'bottom',
+      hiddenBashCommandPatterns: [{ pattern: '([unclosed', mode: 'regex' }],
+    }));
+
+    expect(snapshot?.ui).toEqual({ pinnedInsertPosition: 'bottom' });
+  });
+});

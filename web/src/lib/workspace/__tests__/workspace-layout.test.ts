@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_FILES_WINDOW_ID,
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 } from '../canonical-layout';
@@ -164,14 +165,6 @@ describe('workspace layout reducer', () => {
 				surface: portableSingletonDescriptor('git'),
 				windowId: CANONICAL_WINDOW_ID,
 			},
-			{
-				type: 'register-surface-in-new-window',
-				surface: portableSingletonDescriptor('files'),
-				targetWindowId: CANONICAL_WINDOW_ID,
-				edge: 'right',
-				newWindowId: 'window-files',
-				partitionId: 'partition-root',
-			},
 		]);
 		const reordered = reduceWorkspaceLayout(base, [
 			{
@@ -262,22 +255,12 @@ describe('workspace layout reducer', () => {
 		]);
 		expect(tabs(local, CANONICAL_WINDOW_ID)).toEqual(['singleton:git', CANONICAL_CHAT_SURFACE_ID]);
 
-		const withSecondWindow = reduceWorkspaceLayout(local, [
-			{
-				type: 'register-surface-in-new-window',
-				surface: portableSingletonDescriptor('files'),
-				targetWindowId: CANONICAL_WINDOW_ID,
-				edge: 'right',
-				newWindowId: 'window-files',
-				partitionId: 'partition-files',
-			},
-		]);
 		expect(() =>
-			reduceWorkspaceLayout(withSecondWindow, [
+			reduceWorkspaceLayout(local, [
 				{
 					type: 'move-tab',
 					surfaceId: CANONICAL_CHAT_SURFACE_ID,
-					destinationWindowId: 'window-files',
+					destinationWindowId: CANONICAL_FILES_WINDOW_ID,
 				},
 			]),
 		).toThrow('cannot move');
@@ -504,7 +487,10 @@ describe('workspace layout reducer', () => {
 			{ type: 'remove-surface', surfaceId: CANONICAL_CHAT_SURFACE_ID },
 		]);
 		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toBeUndefined();
-		expect(collectWindowNodes(next.desktopRoot).map((item) => item.id)).toEqual(['window-chat-b']);
+		expect(collectWindowNodes(next.desktopRoot).map((item) => item.id)).toEqual([
+			'window-chat-b',
+			CANONICAL_FILES_WINDOW_ID,
+		]);
 	});
 
 	it('enforces the four-window cap while allowing a net-zero edge move', () => {
@@ -650,16 +636,13 @@ describe('workspace layout reducer', () => {
 	});
 
 	it('clamps partition ratios and preserves complete MRU state', () => {
-		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{
-				type: 'register-surface-in-new-window',
-				surface: portableSingletonDescriptor('git'),
-				targetWindowId: CANONICAL_WINDOW_ID,
-				edge: 'right',
-				newWindowId: 'window-git',
-				partitionId: 'partition-root',
-			},
-		]);
+		const base = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-main', [CANONICAL_CHAT_SURFACE_ID]),
+				workspaceWindow('window-git', ['singleton:git']),
+			),
+		);
 		const next = reduceWorkspaceLayout(base, [
 			{ type: 'set-partition-ratio', partitionId: 'partition-root', ratio: 5 },
 		]);
@@ -739,9 +722,18 @@ describe('workspace layout invariants', () => {
 	});
 
 	it('rejects invalid prefixes, duplicate IDs, stale MRU, and missing fullscreen windows', () => {
+		const canonical = canonicalWorkspaceSnapshot();
+		if (canonical.desktopRoot.type !== 'partition') throw new Error('Expected partition root');
+		const [chatWindow, filesWindow] = canonical.desktopRoot.children;
+		if (chatWindow.type !== 'window' || filesWindow.type !== 'window') {
+			throw new Error('Expected window children');
+		}
 		const badPrefix = {
-			...canonicalWorkspaceSnapshot(),
-			desktopRoot: { ...canonicalWorkspaceSnapshot().desktopRoot, id: 'main' },
+			...canonical,
+			desktopRoot: {
+				...canonical.desktopRoot,
+				children: [{ ...chatWindow, id: 'main' }, filesWindow],
+			},
 		} as unknown as WorkspaceLayoutSnapshot;
 		expect(() => assertWorkspaceLayoutInvariants(badPrefix)).toThrow('invalid prefix');
 
@@ -754,13 +746,14 @@ describe('workspace layout invariants', () => {
 		);
 		expect(() => assertWorkspaceLayoutInvariants(duplicate)).toThrow('duplicated');
 
-		const staleMru = canonicalWorkspaceSnapshot();
-		if (staleMru.desktopRoot.type !== 'window') throw new Error('Expected window root');
-		const invalidMru = {
-			...staleMru,
+		const invalidMru: WorkspaceLayoutSnapshot = {
+			...canonical,
 			desktopRoot: {
-				...staleMru.desktopRoot,
-				tabs: { ...staleMru.desktopRoot.tabs, mru: ['missing'] },
+				...canonical.desktopRoot,
+				children: [
+					{ ...chatWindow, tabs: { ...chatWindow.tabs, mru: ['missing'] } },
+					filesWindow,
+				],
 			},
 		};
 		expect(() => assertWorkspaceLayoutInvariants(invalidMru)).toThrow('MRU');

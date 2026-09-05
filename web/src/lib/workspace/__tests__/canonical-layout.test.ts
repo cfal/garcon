@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_FILES_SURFACE_ID,
+	CANONICAL_FILES_WINDOW_ID,
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 	isCanonicalFirstRunLayout,
@@ -9,22 +11,44 @@ import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { singletonSurfaceId } from '../surface-types';
 
 describe('canonical workspace layout', () => {
-	it('contains one window with one empty Chat view', () => {
+	it('contains a Chat window and a Files window in a horizontal split', () => {
 		const canonical = canonicalWorkspaceSnapshot();
 		expect(canonical.desktopRoot).toEqual({
-			type: 'window',
-			id: CANONICAL_WINDOW_ID,
-			tabs: {
-				order: [CANONICAL_CHAT_SURFACE_ID],
-				activeId: CANONICAL_CHAT_SURFACE_ID,
-				mru: [CANONICAL_CHAT_SURFACE_ID],
-			},
+			type: 'partition',
+			id: 'partition-main',
+			direction: 'horizontal',
+			ratio: 0.62,
+			children: [
+				{
+					type: 'window',
+					id: CANONICAL_WINDOW_ID,
+					tabs: {
+						order: [CANONICAL_CHAT_SURFACE_ID],
+						activeId: CANONICAL_CHAT_SURFACE_ID,
+						mru: [CANONICAL_CHAT_SURFACE_ID],
+					},
+				},
+				{
+					type: 'window',
+					id: CANONICAL_FILES_WINDOW_ID,
+					tabs: {
+						order: [CANONICAL_FILES_SURFACE_ID],
+						activeId: CANONICAL_FILES_SURFACE_ID,
+						mru: [CANONICAL_FILES_SURFACE_ID],
+					},
+				},
+			],
 		});
 		expect(canonical.surfaces).toEqual({
 			[CANONICAL_CHAT_SURFACE_ID]: {
 				id: CANONICAL_CHAT_SURFACE_ID,
 				type: 'chat',
 				chatId: null,
+			},
+			[CANONICAL_FILES_SURFACE_ID]: {
+				id: CANONICAL_FILES_SURFACE_ID,
+				type: 'singleton',
+				kind: 'files',
 			},
 		});
 		expect(canonical.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
@@ -49,7 +73,7 @@ describe('canonical workspace layout', () => {
 				targetWindowId: CANONICAL_WINDOW_ID,
 				edge: 'right',
 				newWindowId: 'window-secondary',
-				partitionId: 'partition-root',
+				partitionId: 'partition-secondary',
 			},
 		]);
 
