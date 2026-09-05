@@ -1733,8 +1733,10 @@ describe("discard", () => {
       await runGitCommand(projectPath, ["add", "z.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add z"]);
       // The copy destination sorts before its source, so the copy entry is
-      // listed first and an originalPath-first lookup would hijack the
-      // source's own modification entry.
+      // listed first. The rename-only fallback gate keeps that entry from
+      // ever matching the source: this fixture pins a copy-source discard
+      // reverting the source's own modification while the copy's index
+      // entry stays untouched.
       await fs.copyFile(path.join(projectPath, "z.txt"), path.join(projectPath, "a2.txt"));
       await runGitCommand(projectPath, ["add", "-N", "a2.txt"]);
       await fs.writeFile(path.join(projectPath, "z.txt"), "one\nedit\n", "utf-8");
