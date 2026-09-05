@@ -138,7 +138,8 @@ export class TerminalPlacementService {
 	// Creates a terminal in a new window adjacent to the anchor window.
 	async createInNewWindow(anchorWindowId: WorkspaceWindowId, requestKey?: string): Promise<string> {
 		if (this.deps.isMobile()) return this.create(this.deps.defaultWindowId(), requestKey);
-		if (!requestKey) {
+		this.deps.cancelWorkspaceDrag();
+		if (!requestKey || !this.#hasPendingCreate(requestKey)) {
 			const snapshot = this.deps.layout.snapshot;
 			const currentAnchorWindowId = this.#resolveWindowId(snapshot, anchorWindowId);
 			requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, snapshot, {
@@ -146,7 +147,6 @@ export class TerminalPlacementService {
 				edge: 'right',
 			});
 		}
-		this.deps.cancelWorkspaceDrag();
 		const terminalId = requestKey
 			? await this.#retryCreate(requestKey)
 			: await this.#createWithRequestId(createRandomId());
@@ -609,6 +609,11 @@ export class TerminalPlacementService {
 		);
 		if (!firstWindow) throw new Error('Workspace has no destination window');
 		return firstWindow.id;
+	}
+
+	#hasPendingCreate(requestKey: string): boolean {
+		const requestId = this.#terminalCreateRequestIds.get(requestKey);
+		return Boolean(requestId && this.deps.terminals.pendingCreates[requestId]);
 	}
 
 	async #retryCreate(requestKey: string): Promise<string> {
