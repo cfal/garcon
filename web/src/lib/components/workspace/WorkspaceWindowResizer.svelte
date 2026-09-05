@@ -40,6 +40,11 @@
 	let pointerCleanup: (() => void) | null = null;
 
 	const isHorizontal = $derived(direction === 'horizontal');
+	const cursorClass = $derived.by(() => {
+		if (disabled) return 'cursor-default';
+		if (isHorizontal) return 'cursor-col-resize';
+		return 'cursor-row-resize';
+	});
 
 	function clampRatio(value: number): number {
 		return Math.min(maxRatio, Math.max(minRatio, value));
@@ -140,7 +145,7 @@
 	class={cn(
 		'pointer-events-none absolute z-40 flex-shrink-0 select-none touch-none outline-none group',
 		'focus-visible:ring-2 focus-visible:ring-ring rounded-full',
-		disabled ? 'cursor-default' : isHorizontal ? 'cursor-col-resize' : 'cursor-row-resize',
+		cursorClass,
 	)}
 	{style}
 	onpointerdown={handlePointerDown}
