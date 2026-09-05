@@ -83,6 +83,19 @@ describe('PreambleStore', () => {
     expect(store.snapshot()).toEqual(before);
   });
 
+  it('reports a duplicate generated ID as validation failure', async () => {
+    const directory = await temporaryDirectory();
+    const store = new PreambleStore(directory);
+    await store.init();
+    await store.create(preamble('a'), 0);
+
+    await expect(store.create(preamble('a'), 1)).rejects.toMatchObject({
+      code: 'PREAMBLE_VALIDATION_FAILED',
+      status: 400,
+    });
+    expect(store.snapshot()).toMatchObject({ revision: 1 });
+  });
+
   it('returns defensive snapshots and preserves creation identity on update', async () => {
     const directory = await temporaryDirectory();
     const store = new PreambleStore(directory);

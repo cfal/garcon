@@ -11,11 +11,10 @@ import {
   type ReorderPreamblesRequest,
   type UpdatePreambleRequest,
 } from '../../common/preambles.js';
-import { PreambleDomainError } from './errors.js';
+import { assertPreambleCatalogComposition, PreambleDomainError } from './errors.js';
 import { applicablePreambles } from './matching.js';
 import { PreambleProjectPathService } from './project-path-service.js';
 import { PreambleStore, reorderedPreambles } from './store.js';
-import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 
 interface PreambleServiceEvents {
   invalidated: [reason: PreamblesInvalidationReason];
@@ -52,7 +51,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
       createdAt: now,
       updatedAt: now,
     };
-    this.#assertCatalogComposition([...this.snapshot().preambles, preamble]);
+    assertPreambleCatalogComposition([...this.snapshot().preambles, preamble]);
     await this.deps.store.create(preamble, request.expectedRevision);
     return this.#changed('created');
   }
@@ -64,7 +63,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     const candidate = this.snapshot().preambles.map((preamble) => preamble.id === id
       ? { ...preamble, ...definition }
       : preamble);
-    this.#assertCatalogComposition(candidate);
+    assertPreambleCatalogComposition(candidate);
     await this.deps.store.update(id, definition, this.#now().toISOString(), request.expectedRevision);
     return this.#changed('updated');
   }
@@ -82,7 +81,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     if (request.expectedRevision === snapshot.revision) {
       const candidate = reorderedPreambles(snapshot.preambles, request.orderedPreambleIds);
       if (!candidate) throw this.#validationError();
-      this.#assertCatalogComposition(candidate);
+      assertPreambleCatalogComposition(candidate);
     }
     await this.deps.store.reorder(request.orderedPreambleIds, request.expectedRevision);
     return this.#changed('reordered');
@@ -104,26 +103,6 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
       );
     }
     return { ...definition, scope: { type: 'project-paths', rules: canonical } };
-  }
-
-  #assertCatalogComposition(preambles: readonly Preamble[]): void {
-    const violation = preambleCatalogCompositionViolation(preambles);
-    if (!violation) return;
-    const scope = violation.projectPath === null
-      ? 'the global scope'
-      : violation.projectPath;
-    if (violation.kind === 'file-context-separator') {
-      throw new PreambleDomainError(
-        'PREAMBLE_VALIDATION_FAILED',
-        `Combined matching preambles contain a reserved separator at ${scope}`,
-        400,
-      );
-    }
-    throw new PreambleDomainError(
-      'PREAMBLE_COMBINED_LIMIT_EXCEEDED',
-      `Combined matching preambles exceed the maximum length at ${scope}`,
-      422,
-    );
   }
 
   #changed(reason: PreamblesInvalidationReason): PreamblesSnapshot {

@@ -129,6 +129,27 @@ describe('PreambleService', () => {
     expect(preambles.snapshot()).toMatchObject({ revision: 1 });
   });
 
+  it('revalidates a future-revision mutation after serialized catalog changes', async () => {
+    const { preambles } = await service();
+    const [first, second] = await Promise.allSettled([
+      preambles.create({
+        expectedRevision: 0,
+        preamble: globalDefinition('First', 'a'.repeat(32_000)),
+      }),
+      preambles.create({
+        expectedRevision: 1,
+        preamble: globalDefinition('Second', 'b'.repeat(32_000)),
+      }),
+    ]);
+
+    expect(first.status).toBe('fulfilled');
+    expect(second).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'PREAMBLE_COMBINED_LIMIT_EXCEEDED', status: 422 },
+    });
+    expect(preambles.snapshot()).toMatchObject({ revision: 1 });
+  });
+
   it('validates the combined budget after chat ID expansion', async () => {
     const { preambles } = await service();
     const content = '{{chat_id}}'.repeat(2_700);

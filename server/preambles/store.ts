@@ -11,7 +11,7 @@ import { hasNodeErrorCode } from '../lib/errors.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { assertRealWithinProjectBase } from '../lib/path-boundary.js';
-import { PreambleDomainError } from './errors.js';
+import { assertPreambleCatalogComposition, PreambleDomainError } from './errors.js';
 import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 
 const PREAMBLES_FILE_VERSION = 1;
@@ -99,7 +99,7 @@ export class PreambleStore {
         );
       }
       if (draft.preambles.some((entry) => entry.id === preamble.id)) {
-        throw new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble ID already exists', 409);
+        throw new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble ID already exists', 400);
       }
       draft.preambles.push(structuredClone(preamble));
     });
@@ -160,6 +160,7 @@ export class PreambleStore {
       }
       const draft = structuredClone(this.#file);
       change(draft);
+      assertPreambleCatalogComposition(draft.preambles);
       draft.revision += 1;
       await writeJsonFileAtomic(this.#filePath, draft, { mode: 0o600 });
       this.#file = draft;
