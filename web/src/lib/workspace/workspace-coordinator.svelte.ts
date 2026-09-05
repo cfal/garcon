@@ -68,6 +68,7 @@ interface WorkspaceCoordinatorDeps {
 	surfaceFrames?: SurfaceFrameRegistry;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 	resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver;
+	isSingleWindowProjectionActive(): boolean;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
 	getRouteIdentity(): string;
@@ -102,6 +103,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			files: deps.files,
 			singletons: deps.singletons,
 			surfaceFrames: deps.surfaceFrames,
+			isSingleWindowProjectionActive: deps.isSingleWindowProjectionActive,
 			onLayoutChanged: deps.onLayoutChanged,
 			getRouteIdentity: deps.getRouteIdentity,
 		});
@@ -351,6 +353,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	cancelPendingWindowPointerInteraction(): void {
 		this.#presentation.cancelPendingWindowPointerInteraction();
+	}
+
+	syncProjectionVisibility(): void {
+		this.#presentation.syncProjectionVisibility();
 	}
 
 	activateWindow(windowId: WorkspaceWindowId): void {

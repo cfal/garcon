@@ -42,6 +42,7 @@ interface WorkspacePresentationControllerDeps {
 	files: FileSessionRegistry;
 	singletons: SingletonSurfaceRegistry;
 	surfaceFrames?: SurfaceFrameRegistry;
+	isSingleWindowProjectionActive(): boolean;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	getRouteIdentity(): string;
 }
@@ -162,6 +163,10 @@ export class WorkspacePresentationController {
 
 	isSurfacePresented(surfaceId: string): boolean {
 		return [...this.#visiblePresentations(this.layout.snapshot).values()].includes(surfaceId);
+	}
+
+	syncProjectionVisibility(): void {
+		this.#syncSingletonVisibility(this.layout.snapshot);
 	}
 
 	windowOf(surfaceId: string): WorkspaceWindowId | null {
@@ -298,6 +303,7 @@ export class WorkspacePresentationController {
 		this.lastFocusedWindowId = windowId;
 		this.lastFocusedSurfaceId = surfaceId;
 		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
+		if (this.deps.isSingleWindowProjectionActive()) this.syncProjectionVisibility();
 
 		void tick().then(() => {
 			if (generation !== this.#focusIntentGeneration || this.currentWindowId !== windowId) return;
@@ -506,6 +512,7 @@ export class WorkspacePresentationController {
 		if (windowId) this.lastFocusedWindowId = windowId;
 		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
 		this.#adoptComposerAnchor(surfaceId);
+		if (this.deps.isSingleWindowProjectionActive()) this.syncProjectionVisibility();
 		void tick().then(() => {
 			if (generation !== this.#focusIntentGeneration || this.lastFocusedSurfaceId !== surfaceId) {
 				return;
@@ -813,7 +820,7 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): boolean {
-		return [...visiblePresentationMap(snapshot, mode).values()].some(
+		return [...this.#visiblePresentations(snapshot, mode).values()].some(
 			(surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat',
 		);
 	}
@@ -851,6 +858,11 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): Map<PresentationHostId, string> {
-		return visiblePresentationMap(snapshot, mode);
+		if (mode === 'mobile' || !this.deps.isSingleWindowProjectionActive()) {
+			return visiblePresentationMap(snapshot, mode);
+		}
+		return visiblePresentationMap(snapshot, mode, {
+			projectedWindowId: this.resolveCurrentWindow(snapshot),
+		});
 	}
 }

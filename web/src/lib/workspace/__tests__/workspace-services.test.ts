@@ -234,6 +234,33 @@ describe('createWorkspaceServices', () => {
 		});
 	});
 
+	it('suspends singleton controllers hidden by the compact projection', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const files = services.singletonSurfaces.files();
+		expect(files.presentationVisible).toBe(true);
+
+		services.hostGeometry.size = { width: 600, height: 700 };
+		services.hostGeometry.layoutPublished(services.layout.snapshot);
+		expect(services.hostGeometry.compactActive).toBe(true);
+		expect(files.presentationVisible).toBe(false);
+		expect(services.coordinator.isChatPresented).toBe(true);
+
+		services.coordinator.activateWindow('window-files');
+		expect(files.presentationVisible).toBe(true);
+		expect(services.coordinator.isChatPresented).toBe(false);
+
+		services.coordinator.activateWindow(DEFAULT_WINDOW);
+		expect(files.presentationVisible).toBe(false);
+		await services.coordinator.focusSurface('singleton:files');
+		expect(files.presentationVisible).toBe(true);
+
+		services.hostGeometry.size = { width: 1000, height: 700 };
+		services.hostGeometry.layoutPublished(services.layout.snapshot);
+		expect(services.hostGeometry.compactActive).toBe(false);
+		expect(files.presentationVisible).toBe(true);
+	});
+
 	it('cancels root-owned window drag before a main-inert transition', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));

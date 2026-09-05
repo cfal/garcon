@@ -79,6 +79,7 @@ function createHarness(
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
+		isSingleWindowProjectionActive?: () => boolean;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -188,6 +189,7 @@ function createHarness(
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
+		isSingleWindowProjectionActive: options.isSingleWindowProjectionActive ?? (() => false),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
 		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,
