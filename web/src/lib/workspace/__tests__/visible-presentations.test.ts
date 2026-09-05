@@ -152,7 +152,7 @@ describe('visiblePortablePresentations', () => {
 	});
 
 	it('gives manual fullscreen precedence over a runtime projection', () => {
-		const snapshot = reduceWorkspaceLayout(twoWindowLayout(), [
+		const snapshot = reduceWorkspaceLayout(layoutWithGitWindow(), [
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 
@@ -162,7 +162,7 @@ describe('visiblePortablePresentations', () => {
 	});
 
 	it('retains active portable renderers hidden by a runtime projection', () => {
-		const snapshot = twoWindowLayout();
+		const snapshot = layoutWithGitWindow();
 		const options = { projectedWindowId: 'window-main' as WorkspaceWindowId };
 		const visible = visiblePortablePresentations(snapshot, false, options);
 
@@ -174,6 +174,12 @@ describe('visiblePortablePresentations', () => {
 				surfaceId: 'singleton:git',
 				presentation: 'window-2',
 				windowId: 'window-2',
+				visible: false,
+			},
+			{
+				surfaceId: 'singleton:files',
+				presentation: 'window-files',
+				windowId: 'window-files',
 				visible: false,
 			},
 		]);

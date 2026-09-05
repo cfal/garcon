@@ -1262,7 +1262,10 @@ describe('WorkspaceRoot', () => {
 		);
 		runtime.partitionRatioBounds = { min: 0.3, max: 0.7, adjustable: true };
 		renderRoot();
-		const separator = screen.getByRole('separator', { name: m.layout_resize_windows() });
+		const separator = screen
+			.getAllByRole('separator', { name: m.layout_resize_windows() })
+			.find((candidate) => candidate.getAttribute('aria-valuenow') === '50');
+		if (!separator) throw new Error('Expected nested partition separator');
 
 		expect(separator.getAttribute('aria-valuemin')).toBe('30');
 		expect(separator.getAttribute('aria-valuemax')).toBe('70');

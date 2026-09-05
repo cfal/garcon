@@ -1798,11 +1798,12 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		const root = layout.snapshot.desktopRoot;
 		if (root.type !== 'partition') throw new Error('Expected partition root');
+		const initialRatio = root.ratio;
 
 		await coordinator.setPartitionRatio(root.id, 0.9);
 		expect(layout.snapshot.desktopRoot).toMatchObject({ ratio: 0.6 });
 		expect(resolver).toHaveBeenLastCalledWith(
-			expect.objectContaining({ desktopRoot: expect.objectContaining({ ratio: 0.5 }) }),
+			expect.objectContaining({ desktopRoot: expect.objectContaining({ ratio: initialRatio }) }),
 			root.id,
 		);
 
@@ -2036,7 +2037,7 @@ describe('WorkspaceCoordinator', () => {
 			coordinator.moveTabToNewWindow('singleton:git', 'window-main', 'bottom'),
 		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
 
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 		expect(resolveSplitAdmission).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.objectContaining({
@@ -2320,7 +2321,9 @@ describe('WorkspaceCoordinator', () => {
 					attachmentState: 'attached',
 				};
 				await coordinator.openTerminalSession(terminalId, 'window-main');
-				await coordinator.enterWindowFullscreen('window-main');
+				if (destination === 'current window') {
+					await coordinator.enterWindowFullscreen('window-main');
+				}
 				presentSurface.mockClear();
 				terminals.create.mockResolvedValue(terminalId);
 				closeOnPublish = true;

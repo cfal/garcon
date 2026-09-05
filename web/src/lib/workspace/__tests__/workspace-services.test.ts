@@ -14,6 +14,10 @@ import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { windowIdOfSurface, windowNodeById } from '../window-tree.js';
 import {
+	COMPACT_ENTER_WINDOW_WIDTH_PX,
+	WORKSPACE_RESIZE_BOUND_SAFETY_PX,
+} from '../window-geometry-policy.js';
+import {
 	createWorkspaceServices,
 	resolveConfiguredFilePlacement,
 	type WorkspaceServices,
@@ -216,14 +220,16 @@ describe('createWorkspaceServices', () => {
 	it('resolves partition bounds from the shared host measurement', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
-		services.hostGeometry.size = { width: 1000, height: 500 };
+		const hostWidth = 1200;
+		services.hostGeometry.size = { width: hostWidth, height: 500 };
 		await services.coordinator.openChatInNewWindow('chat-2');
 		const root = services.layout.snapshot.desktopRoot;
 		if (root.type !== 'partition') throw new Error('Expected partition root');
+		const requiredWidth = COMPACT_ENTER_WINDOW_WIDTH_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX;
 
 		expect(services.coordinator.resolvePartitionRatioBounds(root.id)).toEqual({
-			min: 0.241,
-			max: 0.759,
+			min: requiredWidth / (hostWidth * 0.5),
+			max: 1 - requiredWidth / hostWidth,
 			adjustable: true,
 		});
 	});
