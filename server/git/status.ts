@@ -777,9 +777,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       } else {
         await fs.unlink(filePath);
       }
-    } else if (status[0] === 'A') {
+    } else if (status[0] === 'A' || status[1] === 'A') {
       // Unstage first so staged-added states (A, AM, AD) fully discard;
       // restore would resurrect an AD file or leave an AM file staged.
+      // The second-column check keeps unmerged-added (UA) files clearing
+      // their conflict instead of falling through as a silent no-op.
       await runGit(projectPath, ['reset', 'HEAD', '--', file]);
     } else if (status.includes('M') || status.includes('D')) {
       await runGit(projectPath, ['restore', '--', file]);

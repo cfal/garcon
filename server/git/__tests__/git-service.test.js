@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
 import { createGitService as createProductionGitService } from "../git-service.js";
+import { runGitWithStdin } from "../run.ts";
 import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
@@ -1102,6 +1103,37 @@ describe("discard", () => {
 
       expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
         .toBe("");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves unmerged added-by-them files instead of silently no-opping", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "u.txt"), "theirs\n", "utf-8");
+      const { stdout: hash } = await runGitCommand(
+        projectPath,
+        ["hash-object", "-w", "u.txt"],
+      );
+      // Plants a stage-3-only index entry, the layout behind UA status.
+      await runGitWithStdin(
+        projectPath,
+        ["update-index", "--index-info"],
+        `100644 ${hash.trim()} 3\tu.txt\n`,
+      );
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("UA u.txt");
+
+      await git.discard({ projectPath, file: "u.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? u.txt");
+      expect(await fs.readFile(path.join(projectPath, "u.txt"), "utf-8"))
+        .toBe("theirs\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
