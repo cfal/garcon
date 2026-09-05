@@ -7,6 +7,10 @@ export function buildOpenCodeServerEnv(
   const { OPENCODE_PURE: _pureMode, ...serverEnv } = baseEnv;
   return {
     ...serverEnv,
+    // Empty content keeps OpenCode's built-in provider defaults active, including
+    // the five-minute header and inter-chunk stream timeouts adopted in 1.18.29;
+    // Garcon sets no turn deadline of its own, and chunk stalls stay retryable
+    // inside OpenCode.
     OPENCODE_CONFIG_CONTENT: '{}',
     OPENCODE_DISABLE_AUTOUPDATE: '1',
   };

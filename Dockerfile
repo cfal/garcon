@@ -61,7 +61,7 @@ FROM base AS runtime
 
 ARG GARCON_UID=1000
 ARG GARCON_GID=1000
-ARG OPENCODE_VERSION=1.18.22
+ARG OPENCODE_VERSION=1.18.29
 
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" && npm cache clean --force
 RUN set -eu; \
