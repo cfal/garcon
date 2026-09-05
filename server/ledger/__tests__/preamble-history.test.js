@@ -244,6 +244,17 @@ describe('preamble native-history sanitation', () => {
     }
   });
 
+  it('fails closed when native history replaces an unpaired UTF-16 surrogate', () => {
+    const applied = application(['\ud800']);
+    const evidence = collectPreambleHistoryEvidence(rowGroup({ applied }));
+    const changedPrefix = application(['\ufffd']).prefix;
+
+    expect(sanitizeRecordedPreamblePrefixes({
+      messages: [new UserMessage(AT, `${changedPrefix}Visible prompt`)],
+      evidence,
+    })).toEqual({ kind: 'mismatch', reason: 'preamble prefix hash mismatch' });
+  });
+
   it('allows ledger evidence with no native occurrence after a pre-dispatch crash', () => {
     const message = new UserMessage(AT, 'Earlier visible prompt');
     expect(sanitizeRecordedPreamblePrefixes({

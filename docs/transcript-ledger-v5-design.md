@@ -1,10 +1,17 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 32 integrated design. Supersedes
+Status: revision 33 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 33 defines preamble receipt SHA-256 over the exact JavaScript UTF-16
+code units of the complete prefix, serialized as unsigned 16-bit little-endian
+values. Receipt creation and native sanitation use one shared helper. This
+prevents UTF-8 encoding from replacing lone surrogates with U+FFFD and making
+distinct same-length prefixes share a receipt; the frame and receipt shape
+remain version one.
 
 Revision 32 adds target-chat substitution to preamble bodies. At boundary
 composition, core expands the shared `{{chat_id}}` token to the target chat's
@@ -647,7 +654,9 @@ Kind semantics:
   matched. `preamblePrefixReceipt` is
   `{format: 'preamble-v1', codeUnitLength, sha256}` and proves
   the exact leading prefix for native sanitation without storing its authored
-  body template or target-chat-expanded body.
+  body template or target-chat-expanded body. The digest covers the prefix's
+  exact JavaScript UTF-16 code units serialized as unsigned 16-bit
+  little-endian values, so lone surrogates remain distinct from U+FFFD.
 - `notice`: durable advisory. An accepted active-run producer advisory is an
   ordinary notice; its optional title is presentation metadata, and its
   `runId` is never stored. Native drift is not represented by this row; its
@@ -1802,7 +1811,8 @@ received. Before staging, core sanitizes the normalized native stream in two
 ordered passes: exact carried-context removal, then exact preamble-prefix
 removal. Preamble evidence comes only from an adjacent typed application
 notice and receipt-bearing boundary input in the selected current binding.
-The sanitizer hashes exactly each receipt's `codeUnitLength`, requires one
+The sanitizer hashes exactly each receipt's `codeUnitLength` using the shared
+UTF-16LE code-unit helper, requires one
 distinct matching length/hash signature, selects its earliest unused receipt
 in ledger order, restores that private receipt
 and boundary proof on the imported input, and reconstructs the immutable
@@ -2493,7 +2503,8 @@ The catalog cites this revision, but its inventory is not repeated here.
   `TLV5-PREAMBLE.03-SERVER-01` exercises ordered enabled matching and
   exactly-once application across new chat, fork, continuation, and in-place
   agent-switch boundaries through the server boundary;
-  `TLV5-PREAMBLE.04-NATIVE-UNIT-01` proves exact receipt sanitation and
+  `TLV5-PREAMBLE.04-NATIVE-UNIT-01` proves exact receipt sanitation, including
+  exact UTF-16 code-unit hashing without lone-surrogate replacement, and
   reconstructed immutable evidence;
   `TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01` proves presentation/export
   inclusion and exclusion from every conversational fold; and
@@ -2876,7 +2887,8 @@ stabilization defects. The current case inventory and gate status live in
     validation applies the same fixed-length rendering before persistence. A nonempty slash-leading provider
     command is rejected before admission and leaves the boundary armed; core
     does not change native slash-command parsing. A matched application is one
-    adjacent atomic notice/input group with a transient receipt-covered prefix;
+    adjacent atomic notice/input group with a transient receipt-covered prefix
+    whose digest hashes exact UTF-16 code units in little-endian order;
     a zero match still stores the boundary proof. Reload and native-fidelity
     fork use exact ledger evidence to strip and reconstruct the application,
     fail closed on an unprovable leading Garcon frame, and tolerate evidence

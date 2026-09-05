@@ -15,6 +15,7 @@ import {
 import {
   createPreamblePrefix,
   parsePreamblePrefixReceipt,
+  preamblePrefixSha256,
   renderPreamblePrefix,
 } from '../preamble-prefix.js';
 
@@ -170,5 +171,16 @@ describe('preamble prefix contract', () => {
     expect(createPreamblePrefix({
       contents: [],
     })).toBeNull();
+  });
+
+  it('hashes exact UTF-16 code units without surrogate replacement collisions', () => {
+    const unpairedSurrogate = createPreamblePrefix({ contents: ['\ud800'] });
+    const replacementCharacter = createPreamblePrefix({ contents: ['\ufffd'] });
+
+    expect(preamblePrefixSha256('A\ud800\ufffd')).toBe(
+      'c5c20e249fb6e2f199df43e7379e58eb6ebff17d73f21d96cf61aa2fba6afaca',
+    );
+    expect(unpairedSurrogate.prefix.length).toBe(replacementCharacter.prefix.length);
+    expect(unpairedSurrogate.receipt.sha256).not.toBe(replacementCharacter.receipt.sha256);
   });
 });

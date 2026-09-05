@@ -38,9 +38,19 @@ export function createPreamblePrefix(input: {
     receipt: {
       format: 'preamble-v1',
       codeUnitLength: prefix.length,
-      sha256: crypto.createHash('sha256').update(prefix).digest('hex'),
+      sha256: preamblePrefixSha256(prefix),
     },
   };
+}
+
+export function preamblePrefixSha256(prefix: string): string {
+  const bytes = new Uint8Array(prefix.length * 2);
+  for (let index = 0; index < prefix.length; index += 1) {
+    const codeUnit = prefix.charCodeAt(index);
+    bytes[index * 2] = codeUnit & 0xff;
+    bytes[index * 2 + 1] = codeUnit >>> 8;
+  }
+  return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
 export function parsePreamblePrefixReceipt(value: unknown): PreamblePrefixReceipt | null {

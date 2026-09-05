@@ -1,7 +1,7 @@
-import crypto from 'node:crypto';
 import { UserMessage, type ChatMessage } from '../../common/chat-types.js';
 import {
   PREAMBLE_OPEN_PREFIX,
+  preamblePrefixSha256,
   type PreamblePrefixReceipt,
 } from '../../common/preamble-prefix.js';
 import {
@@ -78,7 +78,7 @@ export function sanitizeRecordedPreamblePrefixes(input: {
     const matchingSignatures = new Map<string, number[]>();
     for (const [index, candidate] of input.evidence.entries()) {
       const prefix = message.content.slice(0, candidate.receipt.codeUnitLength);
-      if (crypto.createHash('sha256').update(prefix).digest('hex') !== candidate.receipt.sha256) {
+      if (preamblePrefixSha256(prefix) !== candidate.receipt.sha256) {
         continue;
       }
       const signature = `${candidate.receipt.codeUnitLength}:${candidate.receipt.sha256}`;
