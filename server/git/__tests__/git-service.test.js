@@ -1131,6 +1131,28 @@ describe("getStatus", () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("drops rename entries instead of leaking the arrow string as a path", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-status-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["mv", "a.txt", "moved.txt"]);
+      await fs.writeFile(path.join(projectPath, "moved.txt"), "two\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("RM a.txt -> moved.txt");
+
+      const status = await git.getStatus({ projectPath });
+
+      expect(status.modified).toEqual([]);
+      expect(status.added).toEqual([]);
+      expect(status.deleted).toEqual([]);
+      expect(status.untracked).toEqual([]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("discard", () => {
@@ -1332,6 +1354,9 @@ describe("discard", () => {
         [2, "ours\n"],
         [3, "theirs\n"],
       ]);
+      // The merge leaves conflict markers in the worktree; without this,
+      // reset alone would already match the assertions below.
+      await fs.writeFile(path.join(projectPath, "a.txt"), "<<<<<<< ours\n", "utf-8");
       expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
         .toBe("UU a.txt");
 
@@ -1356,6 +1381,7 @@ describe("discard", () => {
         [1, "base\n"],
         [2, "ours\n"],
       ]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "<<<<<<< ours\n", "utf-8");
       expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
         .toBe("UD a.txt");
 

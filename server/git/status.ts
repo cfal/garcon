@@ -404,10 +404,14 @@ export function createStatusOperations(agents: GitAgentRunner) {
       if (!file) return;
       // Classifies by letter so every porcelain variant lands somewhere:
       // T (typechange) and U (unmerged) count as modifications of a tracked
-      // path, and any A wins because the index still holds an addition.
-      // Renames (R/C) still drop out, as before.
+      // path, and any A wins because the index still holds an addition. Index
+      // intent also wins over worktree deletion, so AD/MD read as added or
+      // modified rather than deleted. Renames and copies drop out as before:
+      // their porcelain line carries "old -> new", which is not a path this
+      // endpoint's consumers could act on.
       const staged = status[0];
       const unstaged = status[1];
+      if (staged === 'R' || staged === 'C') return;
       if (staged === 'A' || unstaged === 'A') {
         added.push(file);
       } else if (
