@@ -28,6 +28,7 @@ import type {
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import type { ChatMessagesRequest } from '$lib/api/chats.js';
 import * as m from '$lib/paraglide/messages.js';
+import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -275,6 +276,16 @@ function installContext() {
 			commit([{ type: 'set-fullscreen-window', windowId: null }]);
 		}),
 		setPartitionRatio: vi.fn(async () => undefined),
+		resolveSplitAdmission: (
+			targetWindowId: WorkspaceWindowId,
+			edge: WorkspaceWindowEdge,
+			movingSurfaceId?: string,
+		) =>
+			resolveUnmeasuredWorkspaceSplit(layout.snapshot, {
+				targetWindowId,
+				edge,
+				movingSurfaceId,
+			}),
 		moveTabToWindow: vi.fn(
 			async (surfaceId: string, destinationWindowId: WorkspaceWindowId, index?: number) => {
 				const surface = layout.snapshot.surfaces[surfaceId];
@@ -375,7 +386,7 @@ function installContext() {
 		terminalFontSize: '13',
 		set: vi.fn(),
 	};
-	const windowDnd = new WorkspaceWindowDndController(layout);
+	const windowDnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 	testContext.current = {
 		hostGeometry: {
 			size: null,

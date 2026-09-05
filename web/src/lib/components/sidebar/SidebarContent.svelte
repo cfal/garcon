@@ -12,6 +12,7 @@
 	} from './sidebar-display-options';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarContentProps {
@@ -39,7 +40,7 @@
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
-		newWindowBlocked?: boolean;
+		newWindowEdges: WorkspaceSplitAdmissions;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onQuickMove: (
@@ -77,7 +78,7 @@
 		onTagClick,
 		onManageTags,
 		onOpenInNewWindow,
-		newWindowBlocked = false,
+		newWindowEdges,
 		onTogglePinned,
 		onToggleArchive,
 		onQuickMove,
@@ -124,7 +125,7 @@
 		{onTagClick}
 		{onManageTags}
 		{onOpenInNewWindow}
-		{newWindowBlocked}
+		{newWindowEdges}
 		{onTogglePinned}
 		{onToggleArchive}
 		{onQuickMove}

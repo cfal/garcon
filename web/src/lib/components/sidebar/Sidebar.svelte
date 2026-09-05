@@ -45,6 +45,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 
 	interface QuickMoveWrite {
 		list: PersistedChatOrderGroup;
@@ -80,7 +81,7 @@
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
 		onShowSettings: () => void;
-		newWindowBlocked: boolean;
+		newWindowEdges: WorkspaceSplitAdmissions;
 	}
 
 	let {
@@ -106,7 +107,7 @@
 		onShowScheduledPrompts,
 		onShowPreambles,
 		onShowSettings,
-		newWindowBlocked,
+		newWindowEdges,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
 	const notifications = getNotifications();
@@ -525,7 +526,7 @@
 			onTagClick={handleTagClick}
 			{onManageTags}
 			onOpenInNewWindow={onOpenChatInNewWindow}
-			{newWindowBlocked}
+			{newWindowEdges}
 			onQuickMove={handleQuickMove}
 			onSortChatOrder={handleSortChatOrder}
 		/>

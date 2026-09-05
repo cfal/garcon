@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
+import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
 import type {
@@ -89,6 +90,10 @@ vi.mock('$lib/context', () => ({
 		focusSurface,
 		moveTabToWindow,
 		moveTabToNewWindow,
+		resolveSplitAdmission: () =>
+			runtime.windowCount >= 4
+				? { allowed: false, reason: 'resource-ceiling' as const }
+				: { allowed: true as const },
 		openSingletonAsTab,
 		createTerminal,
 		openTerminalSession: vi.fn(async () => undefined),
@@ -241,7 +246,10 @@ function renderTitleBar(
 	return render(WorkspaceWindowTitleBar, {
 		workspaceWindow: node,
 		labelFor: resolveLabel,
-		dnd: new WorkspaceWindowDndController(createWorkspaceLayoutStore()),
+		dnd: new WorkspaceWindowDndController(
+			createWorkspaceLayoutStore(),
+			resolveUnmeasuredWorkspaceSplit,
+		),
 		isCurrent,
 	});
 }

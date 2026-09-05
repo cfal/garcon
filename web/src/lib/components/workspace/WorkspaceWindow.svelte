@@ -138,11 +138,17 @@
 
 	function resultLabel(): string {
 		if (!activeDropTarget) return '';
-		if (activeDropTarget.blockedReason === 'max-windows') {
-			return m.workspace_drop_zone_max_windows();
-		}
 		if (activeDropTarget.blockedReason === 'same-window') {
 			return m.workspace_drop_zone_same_window();
+		}
+		if (activeDropTarget.blockedReason === 'too-small') {
+			return m.workspace_drop_zone_too_small();
+		}
+		if (activeDropTarget.blockedReason === 'resource-ceiling') {
+			return m.workspace_drop_zone_window_limit();
+		}
+		if (activeDropTarget.blockedReason === 'fullscreen') {
+			return m.workspace_drop_zone_exit_fullscreen();
 		}
 		if (
 			activeDropTarget.zone === 'center' &&

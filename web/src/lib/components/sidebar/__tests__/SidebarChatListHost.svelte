@@ -12,6 +12,7 @@
 	} from '$shared/chat-order-contracts';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 	interface SidebarChatListHostProps {
 		chats: ChatSessionRecord[];
@@ -118,5 +119,6 @@
 		onToggleArchive={() => {}}
 		{onQuickMove}
 		{onSortChatOrder}
+		newWindowEdges={workspaceSplitAdmissions()}
 	/>
 </div>

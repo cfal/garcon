@@ -4,7 +4,6 @@ import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-nam
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {
-	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	TERMINAL_LAUNCHER_ID,
 	terminalSurfaceId,
 	type WorkspaceWindowId,
@@ -18,6 +17,8 @@ import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { isCanonicalFirstRunLayout } from './canonical-layout.js';
+import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
+import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 
 interface SurfaceReservations {
 	has(surfaceId: string): boolean;
@@ -60,6 +61,7 @@ interface TerminalPlacementServiceDeps {
 	): MobileReturnPlan;
 	confirmClose(request: TerminalCloseGuardRequest): Promise<boolean>;
 	clearAttachmentError(surfaceId: string): void;
+	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 }
 
 export class TerminalPlacementService {
@@ -136,6 +138,14 @@ export class TerminalPlacementService {
 	// Creates a terminal in a new window adjacent to the anchor window.
 	async createInNewWindow(anchorWindowId: WorkspaceWindowId, requestKey?: string): Promise<string> {
 		if (this.deps.isMobile()) return this.create(this.deps.defaultWindowId(), requestKey);
+		if (!requestKey) {
+			const snapshot = this.deps.layout.snapshot;
+			const currentAnchorWindowId = this.#resolveWindowId(snapshot, anchorWindowId);
+			requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, snapshot, {
+				targetWindowId: currentAnchorWindowId,
+				edge: 'right',
+			});
+		}
 		this.deps.cancelWorkspaceDrag();
 		const terminalId = requestKey
 			? await this.#retryCreate(requestKey)
@@ -187,10 +197,13 @@ export class TerminalPlacementService {
 						);
 						return mutations;
 					}
-					if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
-						throw new Error(
-							m.workspace_window_limit_reached({ count: WORKSPACE_WINDOW_RESOURCE_CEILING }),
-						);
+					if (
+						!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
+							targetWindowId: currentAnchorWindowId,
+							edge: 'right',
+						})
+					) {
+						return [];
 					}
 					mutations.push({
 						type: 'register-surface-in-new-window',

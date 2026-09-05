@@ -20,6 +20,7 @@
 	import { sortChatsByRecencyDesc } from './chat-recency-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type {
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
@@ -54,7 +55,7 @@
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
-		newWindowBlocked?: boolean;
+		newWindowEdges: WorkspaceSplitAdmissions;
 		onQuickMove: (
 			list: PersistedChatOrderGroup,
 			chatId: string,
@@ -93,7 +94,7 @@
 		onTagClick,
 		onManageTags,
 		onOpenInNewWindow,
-		newWindowBlocked = false,
+		newWindowEdges,
 		onQuickMove,
 		onSortChatOrder,
 	}: SidebarChatListProps = $props();
@@ -229,7 +230,7 @@
 		{onTagClick}
 		{onManageTags}
 		{onOpenInNewWindow}
-		{newWindowBlocked}
+		{newWindowEdges}
 		{onSortChatOrder}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}

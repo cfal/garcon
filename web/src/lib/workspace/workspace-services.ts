@@ -193,7 +193,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		};
 	};
-	const windowDnd = new WorkspaceWindowDndController(layout);
+	const windowDnd = new WorkspaceWindowDndController(layout, resolveSplitAdmission);
 	const unregisterWorkspaceInteraction = workspaceInteractionGate.register({
 		cancelApplicationDrag: () => windowDnd.endDrag(),
 	});
