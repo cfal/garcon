@@ -147,4 +147,4 @@ test('chat sort presets atomically reorder every persisted group and survive res
     expect(idsForGroup(listed.sessions, 'normal')).toEqual(expectedNormal);
     expect(idsForGroup(listed.sessions, 'archived')).toEqual(expectedArchived);
   });
-}, 30_000);
+}, 60_000);

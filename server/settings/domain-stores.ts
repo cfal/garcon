@@ -717,7 +717,7 @@ export class ChatOrderStore {
 
       const remoteSettingsChanged = bumpRemoteSettingsVersionForPinnedChange(
         settings,
-        before.pinnedChatIds,
+        dedup(before.pinnedChatIds),
       );
       await this.#context.saveAndMaybeEmitRemote(settings, remoteSettingsChanged);
       this.#context.emitListChanged('chats-reordered', anchorChatId);

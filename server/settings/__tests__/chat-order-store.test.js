@@ -328,6 +328,25 @@ describe('ChatOrderStore.sortChatOrder', () => {
     expect(harness.listChanges[0].chatId).toBe('n-new');
   });
 
+  it('ignores legacy pinned duplicates when only another group changes', async () => {
+    const harness = createHarness({
+      pinnedChatIds: ['p', 'p'],
+      normalChatIds: ['n-old', 'n-new'],
+    });
+    const rank = new Map([
+      ['n-old', 1], ['n-new', 2],
+    ]);
+
+    await harness.store.sortChatOrder((left, right) => (
+      (rank.get(right) ?? 0) - (rank.get(left) ?? 0)
+    ));
+
+    expect(harness.settings.pinnedChatIds).toEqual(['p', 'p']);
+    expect(harness.settings.normalChatIds).toEqual(['n-new', 'n-old']);
+    expect(harness.saveCalls).toEqual([false]);
+    expect(harness.settings.remoteSettingsVersion).toBe(0);
+  });
+
   it('serializes sorting with other order mutations', async () => {
     const harness = createHarness({ normalChatIds: ['a', 'b', 'c'] });
     const rank = new Map([['a', 1], ['b', 2], ['c', 3]]);

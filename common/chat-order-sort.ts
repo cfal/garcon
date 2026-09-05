@@ -33,6 +33,10 @@ export function chatCreationTimeMs(chat: ChatOrderTimestamps): number {
   return validTimeMs(chat.createdAt) ?? chatIdTimeMs(chat.id) ?? 0;
 }
 
+/**
+ * Uses the newest activity, creation, or ID time so clock skew and null
+ * metadata cannot rank a chat below its own browser-created ID.
+ */
 export function chatActivityTimeMs(chat: ChatOrderTimestamps): number {
   return Math.max(
     validTimeMs(chat.lastActivityAt) ?? 0,

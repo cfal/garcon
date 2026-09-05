@@ -5,8 +5,6 @@
 import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
-export { chatActivityTimeMs };
-
 /** Comparator ordering chats newest-first by activity, then creation time. */
 export function compareChatsByRecencyDesc(a: ChatSessionRecord, b: ChatSessionRecord): number {
 	const aIsDraft = a.status === 'draft';
