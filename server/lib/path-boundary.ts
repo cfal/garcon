@@ -22,7 +22,11 @@ function normalizedProjectBase(): string {
 
 function isWithinResolvedRoot(rootPath: string, targetPath: string): boolean {
   const relative = path.relative(rootPath, targetPath);
-  return relative === '' || (relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative));
+  return relative === '' || (
+    relative !== '..'
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative)
+  );
 }
 
 function isMissingPathError(error: unknown): boolean {
