@@ -1154,7 +1154,7 @@ describe('Chromium workspace windows', () => {
         .locator('[data-workspace-window-current="true"]')
         .getAttribute('data-workspace-window-id');
       if (!mainWindowId) throw new Error('Missing initial Chat window.');
-      const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
+      const filesWindowId = await canonicalFilesWindowId(fixture.page);
       await fixture.page
         .locator(`[data-workspace-window-titlebar="${mainWindowId}"]`)
         .click({ position: { x: 3, y: 3 } });
@@ -1186,7 +1186,7 @@ describe('Chromium workspace windows', () => {
       );
 
       markPhase('entering compact projection after host shrink');
-      await fixture.page.setViewportSize({ width: 780, height: 900 });
+      await fixture.page.setViewportSize({ width: 800, height: 900 });
       const host = fixture.page.locator('.workspace-host-region');
       await waitForCompactWorkspace(fixture.page);
       expect(await host.getAttribute('data-workspace-single-window-projection')).toBe('true');
@@ -1228,8 +1228,8 @@ describe('Chromium workspace windows', () => {
           liveChatTop: liveChatBody.getBoundingClientRect().top - windowRect.top,
         };
       }, mainWindowId);
-      expect(compactGeometry.hostWidth).toBe(460);
-      expect(compactGeometry.windowWidth).toBe(460);
+      expect(compactGeometry.hostWidth).toBe(480);
+      expect(compactGeometry.windowWidth).toBe(480);
       expect(compactGeometry.windowLeft).toBe(0);
       expect(compactGeometry.titlebarHeight).toBe(40);
       expect(compactGeometry.switcherHeight).toBe(36);
@@ -1305,7 +1305,7 @@ describe('Chromium workspace windows', () => {
       await fixture.page.getByRole('button', { name: 'Turn on auto-hide' }).click();
       await waitForTiledWorkspace(fixture.page);
       expect(await fixture.page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(1);
-      expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(780);
+      expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(800);
       expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
         initialPersisted,
       );
@@ -1326,13 +1326,13 @@ describe('Chromium workspace windows', () => {
       await fixture.page.getByRole('button', { name: 'Dismiss' }).click();
       expect(await fixture.page.getByRole('button', { name: 'Dismiss' }).count()).toBe(0);
 
-      await fixture.page.setViewportSize({ width: 850, height: 900 });
+      await fixture.page.setViewportSize({ width: 1000, height: 900 });
       await waitForCompactWorkspace(fixture.page);
-      await fixture.page.setViewportSize({ width: 920, height: 900 });
+      await fixture.page.setViewportSize({ width: 1120, height: 900 });
       await waitForTiledWorkspace(fixture.page);
-      await fixture.page.setViewportSize({ width: 850, height: 900 });
+      await fixture.page.setViewportSize({ width: 1000, height: 900 });
       expect(await host.getAttribute('data-workspace-compact')).toBeNull();
-      await fixture.page.setViewportSize({ width: 780, height: 900 });
+      await fixture.page.setViewportSize({ width: 800, height: 900 });
       await waitForCompactWorkspace(fixture.page);
 
       markPhase('giving manual fullscreen priority and restoring compact projection');
@@ -1368,7 +1368,7 @@ describe('Chromium workspace windows', () => {
         initialPersisted,
       );
 
-      await fixture.page.setViewportSize({ width: 780, height: 900 });
+      await fixture.page.setViewportSize({ width: 800, height: 900 });
       await waitForCompactWorkspace(fixture.page);
       await fixture.page.reload({ waitUntil: 'domcontentloaded' });
       await waitForCompactWorkspace(fixture.page);
@@ -1384,19 +1384,23 @@ describe('Chromium workspace windows', () => {
     await withChromiumFixture(
       'workspace-window-nested-resize-bounds',
       async (fixture, markPhase) => {
-        await fixture.page.setViewportSize({ width: 1760, height: 900 });
+        await fixture.page.setViewportSize({ width: 2240, height: 900 });
         await createGitFixture(fixture.integration.dirs.project);
         const chatId = await createChat(fixture, 'workspace-window-nested-resize-bounds');
         await openChat(fixture, chatId);
 
         markPhase('creating three nested horizontal windows');
-        await openNewWindow(fixture.page, 'Open Files');
+        const filesWindowId = await canonicalFilesWindowId(fixture.page);
+        await fixture.page
+          .locator(`[data-workspace-window-titlebar="${filesWindowId}"]`)
+          .click({ position: { x: 3, y: 3 } });
+        await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
         await openNewWindow(fixture.page, 'Open Git Workbench');
         await fixture.page.waitForFunction(
           () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
         );
         const host = fixture.page.locator('.workspace-host-region');
-        expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(1440);
+        expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(1920);
         const verticalResizers = fixture.page.locator(
           '[role="separator"][aria-label="Resize windows"][aria-orientation="vertical"]',
         );
