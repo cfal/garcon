@@ -141,4 +141,105 @@ describe('PreamblesSection', () => {
 		await fireEvent.click(saveButton);
 		expect(update).toHaveBeenCalledOnce();
 	});
+
+	it('stale-locks an edit when the revision-conflict refresh fails', async () => {
+		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
+		const update = vi.fn().mockRejectedValue(conflict);
+		const get = vi.fn().mockRejectedValue(new Error('refresh unavailable'));
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get, update },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Save Preamble' }));
+
+		expect(await screen.findByText(/changed while the editor was open/i)).toBeTruthy();
+		expect((screen.getByRole('button', { name: 'Save Preamble' }) as HTMLButtonElement).disabled)
+			.toBe(true);
+		await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Preamble text' }), {
+			key: 'Enter',
+			ctrlKey: true,
+		});
+		expect(update).toHaveBeenCalledOnce();
+	});
+
+	it('disables catalog entry points while a row mutation is pending', async () => {
+		let resolveReorder!: (value: {
+			success: true;
+			snapshot: PreamblesSnapshot;
+		}) => void;
+		const reorder = vi.fn(() => new Promise<{
+			success: true;
+			snapshot: PreamblesSnapshot;
+		}>((resolve) => { resolveReorder = resolve; }));
+		const first = preamble('first', 'First conventions', 'First body.');
+		const second = preamble('second', 'Second conventions', 'Second body.');
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [first, second] },
+			deps: { reorder },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Move Second conventions up' }));
+		await waitFor(() => expect(reorder).toHaveBeenCalledOnce());
+		expect((screen.getByRole('button', { name: 'Add preamble' }) as HTMLButtonElement).disabled)
+			.toBe(true);
+		expect((screen.getByRole('button', { name: 'Refresh preambles' }) as HTMLButtonElement).disabled)
+			.toBe(true);
+
+		resolveReorder({
+			success: true,
+			snapshot: { revision: 2, preambles: [second, first] },
+		});
+		await waitFor(() => {
+			expect((screen.getByRole('button', { name: 'Add preamble' }) as HTMLButtonElement).disabled)
+				.toBe(false);
+		});
+	});
+
+	it('associates scope errors with each invalid project path input', async () => {
+		const scoped = preamble('path', 'Project conventions', 'Project body.');
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [scoped] },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Project conventions' }));
+		const pathInput = await screen.findByRole('textbox', { name: 'Project path' });
+		await fireEvent.input(pathInput, { target: { value: '' } });
+		const error = screen.getByText('Add at least one project path.');
+
+		expect(pathInput.getAttribute('aria-invalid')).toBe('true');
+		expect(pathInput.getAttribute('aria-describedby')).toContain(error.id);
+	});
+
+	it('associates mixed blank and duplicate paths with their specific errors', async () => {
+		const scoped = {
+			...preamble('path', 'Project conventions', 'Project body.'),
+			scope: {
+				type: 'project-paths' as const,
+				rules: [
+					{ projectPath: '/workspace/first', includeNested: false },
+					{ projectPath: '/workspace/second', includeNested: false },
+					{ projectPath: '/workspace/third', includeNested: false },
+				],
+			},
+		};
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [scoped] },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Project conventions' }));
+		const pathInputs = await screen.findAllByRole('textbox', { name: 'Project path' });
+		await fireEvent.input(pathInputs[0]!, { target: { value: '' } });
+		await fireEvent.input(pathInputs[1]!, { target: { value: '/workspace/duplicate' } });
+		await fireEvent.input(pathInputs[2]!, { target: { value: '/workspace/duplicate' } });
+
+		const descriptions = pathInputs.map((input) => document.getElementById(
+			input.getAttribute('aria-describedby') ?? '',
+		)?.textContent);
+		expect(descriptions[0]).toContain('at least one');
+		expect(descriptions[1]).toContain('unique');
+		expect(descriptions[2]).toContain('unique');
+	});
 });

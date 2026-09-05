@@ -155,7 +155,10 @@
 				</p>
 			</div>
 
-			<fieldset class="space-y-3">
+			<fieldset
+				class="space-y-3"
+				aria-describedby={form.scopeGroupError ? 'preamble-scope-error' : undefined}
+			>
 				<legend class="text-sm font-medium text-foreground">{m.preambles_scope_label()}</legend>
 				<div class="grid gap-2 sm:grid-cols-2">
 					<label class="flex cursor-pointer gap-3 rounded-md border border-border p-3">
@@ -186,12 +189,17 @@
 				{#if form.scopeType === 'project-paths'}
 					<div class="space-y-3">
 						{#each form.pathRules as rule (rule.key)}
+							{@const pathError = form.pathRuleError(rule.key)}
 							<div class="relative space-y-2 rounded-md border border-border p-3">
 								<div class="flex min-w-0 gap-2">
 									<input
 										type="text"
 										bind:value={rule.projectPath}
 										aria-label={m.preambles_project_path_label()}
+										aria-invalid={Boolean(pathError)}
+										aria-describedby={pathError
+											? `preamble-path-error-${rule.key}`
+											: undefined}
 										class="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 									/>
 									<Button
@@ -219,6 +227,12 @@
 									<input type="checkbox" bind:checked={rule.includeNested} />
 									{m.preambles_apply_nested()}
 								</label>
+								<p
+									id={`preamble-path-error-${rule.key}`}
+									class="min-h-4 text-xs text-destructive"
+								>
+									{pathError ?? ''}
+								</p>
 								{#if pickerKey === rule.key}
 									<DirectoryBrowser
 										currentPath={rule.projectPath || appShell.projectBasePath}
@@ -239,7 +253,9 @@
 							<Plus class="mr-2 h-4 w-4" />
 							{m.preambles_add_path()}
 						</Button>
-						<p class="min-h-4 text-xs text-destructive">{form.scopeError ?? ''}</p>
+						<p id="preamble-scope-error" class="min-h-4 text-xs text-destructive">
+							{form.scopeGroupError ?? ''}
+						</p>
 					</div>
 				{/if}
 			</fieldset>

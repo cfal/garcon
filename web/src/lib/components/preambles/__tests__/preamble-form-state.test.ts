@@ -68,7 +68,24 @@ describe('PreambleFormState', () => {
 
 		expect(form.contentError).toContain('reserved');
 		expect(form.scopeError).toContain('unique');
+		expect(form.pathRules.every((rule) => form.pathRuleError(rule.key)?.includes('unique')))
+			.toBe(true);
 		expect(form.canSave).toBe(false);
+	});
+
+	it('identifies only blank or duplicate path rows as invalid', () => {
+		const form = new PreambleFormState();
+		form.scopeType = 'project-paths';
+		const first = form.addPath('/workspace/project');
+		const duplicate = form.addPath(' /workspace/project ');
+		const blank = form.addPath(' ');
+		const valid = form.addPath('/workspace/other');
+		if (!first || !duplicate || !blank || !valid) throw new Error('Expected path rules');
+
+		expect(form.pathRuleError(first)).toContain('unique');
+		expect(form.pathRuleError(duplicate)).toContain('unique');
+		expect(form.pathRuleError(blank)).toContain('at least one');
+		expect(form.pathRuleError(valid)).toBeNull();
 	});
 
 	it('does not conflate backslashes with path separators', () => {

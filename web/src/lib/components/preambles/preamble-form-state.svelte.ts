@@ -46,15 +46,17 @@ export class PreambleFormState {
 	}
 
 	get scopeError(): string | null {
+		return this.scopeGroupError
+			?? this.pathRules.map((rule) => this.pathRuleError(rule.key)).find(Boolean)
+			?? null;
+	}
+
+	get scopeGroupError(): string | null {
 		if (this.scopeType === 'global') return null;
 		if (this.pathRules.length === 0) return m.preambles_path_required();
-		if (this.pathRules.length > PREAMBLE_PATH_RULE_MAX_COUNT) {
-			return m.preambles_too_many_paths();
-		}
-		const paths = this.pathRules.map((rule) => rule.projectPath.trim());
-		if (paths.some((projectPath) => !projectPath)) return m.preambles_path_required();
-		if (new Set(paths).size !== paths.length) return m.preambles_duplicate_path();
-		return null;
+		return this.pathRules.length > PREAMBLE_PATH_RULE_MAX_COUNT
+			? m.preambles_too_many_paths()
+			: null;
 	}
 
 	get canSave(): boolean {
@@ -63,6 +65,16 @@ export class PreambleFormState {
 
 	get canAddPath(): boolean {
 		return this.pathRules.length < PREAMBLE_PATH_RULE_MAX_COUNT;
+	}
+
+	pathRuleError(key: string): string | null {
+		if (this.scopeType !== 'project-paths') return null;
+		const rule = this.pathRules.find((candidate) => candidate.key === key);
+		const projectPath = rule?.projectPath.trim() ?? '';
+		if (!projectPath) return m.preambles_path_required();
+		return this.pathRules.filter((candidate) => candidate.projectPath.trim() === projectPath).length > 1
+			? m.preambles_duplicate_path()
+			: null;
 	}
 
 	reset(preamble: Preamble | null): void {

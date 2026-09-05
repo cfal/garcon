@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ApiError } from '$lib/api/client.js';
 	import { Button } from '$lib/components/ui/button';
 	import { getPreambles } from '$lib/context';
 	import { filterPreambles } from '$lib/preambles/preamble-filter.js';
@@ -28,16 +29,21 @@
 	let removePreamble = $state<Preamble | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
-	let movingPreambleId = $state<string | null>(null);
-	let togglingPreambleId = $state<string | null>(null);
+	let catalogMutationBusy = $state(false);
+	let editConflict = $state(false);
 	let operationError = $state<string | null>(null);
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
 	let formIsStale = $derived(
 		editingPreamble !== null
 			&& editingRevision !== null
-			&& preambles.snapshot !== null
-			&& preambles.snapshot.revision !== editingRevision,
+			&& (
+				editConflict
+				|| (
+					preambles.snapshot !== null
+					&& preambles.snapshot.revision !== editingRevision
+				)
+			),
 	);
 
 	$effect(() => {
@@ -46,29 +52,44 @@
 	});
 
 	function openCreate(): void {
+		if (catalogMutationBusy || preambles.isRefreshing) return;
 		editingPreamble = null;
 		editingRevision = null;
+		editConflict = false;
 		operationError = null;
 		formOpen = true;
 	}
 
 	function openEdit(preamble: Preamble): void {
+		if (catalogMutationBusy || preambles.isRefreshing) return;
 		editingPreamble = preamble;
 		editingRevision = preambles.snapshot?.revision ?? null;
+		editConflict = false;
 		operationError = null;
 		formOpen = true;
 	}
 
 	async function save(definition: PreambleDefinitionInput): Promise<void> {
-		if (editingPreamble) {
-			if (editingRevision === null) throw new Error(m.preambles_edit_stale());
-			await preambles.update(editingPreamble.id, definition, editingRevision);
+		catalogMutationBusy = true;
+		try {
+			if (editingPreamble) {
+				if (editingRevision === null) throw new Error(m.preambles_edit_stale());
+				await preambles.update(editingPreamble.id, definition, editingRevision);
+			}
+			else await preambles.create(definition);
+		} catch (error) {
+			if (editingPreamble && error instanceof ApiError && error.status === 409) {
+				editConflict = true;
+			}
+			throw error;
+		} finally {
+			catalogMutationBusy = false;
 		}
-		else await preambles.create(definition);
 	}
 
 	async function confirmRemove(): Promise<void> {
-		if (!removePreamble || removing) return;
+		if (!removePreamble || catalogMutationBusy) return;
+		catalogMutationBusy = true;
 		removing = true;
 		removeError = null;
 		try {
@@ -78,27 +99,28 @@
 			removeError = error instanceof Error ? error.message : m.preambles_remove_error();
 		} finally {
 			removing = false;
+			catalogMutationBusy = false;
 		}
 	}
 
 	async function move(preamble: Preamble, direction: 'up' | 'down'): Promise<void> {
-		if (movingPreambleId || normalizedQuery) return;
-		movingPreambleId = preamble.id;
+		if (catalogMutationBusy || normalizedQuery) return;
+		catalogMutationBusy = true;
 		operationError = null;
 		try {
 			await preambles.move(preamble.id, direction);
 		} catch (error) {
 			operationError = error instanceof Error ? error.message : m.preambles_reorder_error();
 		} finally {
-			movingPreambleId = null;
+			catalogMutationBusy = false;
 		}
 	}
 
 	async function setEnabled(preamble: Preamble, enabled: boolean): Promise<void> {
-		if (togglingPreambleId || preamble.enabled === enabled) return;
+		if (catalogMutationBusy || preamble.enabled === enabled) return;
 		const revision = preambles.snapshot?.revision;
 		if (revision === undefined) return;
-		togglingPreambleId = preamble.id;
+		catalogMutationBusy = true;
 		operationError = null;
 		try {
 			await preambles.update(preamble.id, {
@@ -110,14 +132,22 @@
 		} catch (error) {
 			operationError = error instanceof Error ? error.message : m.preambles_toggle_error();
 		} finally {
-			togglingPreambleId = null;
+			catalogMutationBusy = false;
 		}
+	}
+
+	async function refresh(): Promise<void> {
+		if (catalogMutationBusy) return;
+		await preambles.refresh();
 	}
 </script>
 
 <div class="space-y-4">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<Button onclick={openCreate} disabled={!preambles.hasLoaded}>
+		<Button
+			onclick={openCreate}
+			disabled={!preambles.hasLoaded || catalogMutationBusy || preambles.isRefreshing}
+		>
 			<Plus class="mr-2 h-4 w-4" />
 			{m.preambles_add()}
 		</Button>
@@ -125,8 +155,8 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={() => void preambles.refresh().catch(() => {})}
-				disabled={preambles.isRefreshing}
+				onclick={() => void refresh().catch(() => {})}
+				disabled={preambles.isRefreshing || catalogMutationBusy}
 				title={m.preambles_refresh()}
 				aria-label={m.preambles_refresh()}
 			>
@@ -216,7 +246,7 @@
 						{preamble}
 						index={catalogIndex}
 						total={preambles.preambles.length}
-						disabled={movingPreambleId !== null || togglingPreambleId !== null}
+						disabled={catalogMutationBusy || preambles.isRefreshing}
 						reorderDisabled={Boolean(normalizedQuery)}
 						onEdit={() => openEdit(preamble)}
 						onRemove={() => {

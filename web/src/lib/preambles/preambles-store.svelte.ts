@@ -69,15 +69,15 @@ export class PreamblesStore {
 		this.#refreshRequested = true;
 		if (this.#refreshLoopPromise) return this.#refreshLoopPromise;
 		this.#refreshLoopPromise = untrack(async () => {
-			do {
-				this.#refreshRequested = false;
-				const joinedExistingLoad = this.#loadPromise !== null;
-				try {
-					await this.refresh();
-				} catch {
-					return;
-				}
-				if (joinedExistingLoad) this.#refreshRequested = true;
+				do {
+					this.#refreshRequested = false;
+					const joinedExistingLoad = this.#loadPromise !== null;
+					try {
+						await this.refresh();
+					} catch {
+						if (!joinedExistingLoad && !this.#refreshRequested) return;
+					}
+					if (joinedExistingLoad) this.#refreshRequested = true;
 			} while (this.#refreshRequested);
 		}).finally(() => {
 			this.#refreshLoopPromise = null;
@@ -170,11 +170,7 @@ export class PreamblesStore {
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {
 		if (!(error instanceof ApiError) || error.status !== 409) return;
-		try {
-			await this.refresh();
-		} catch {
-			// The mutation conflict remains the actionable error.
-		}
+		await this.refreshIfLoaded();
 	}
 }
 
