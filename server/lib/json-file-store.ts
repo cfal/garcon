@@ -141,30 +141,3 @@ function isUnsupportedDirectorySyncError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === 'EISDIR' || code === 'EINVAL' || code === 'EPERM' || code === 'ENOTSUP';
 }
-
-export class JsonFileStore<T> {
-  constructor(private readonly options: {
-    filePath: string;
-    empty(): T;
-    normalize(value: unknown): T;
-    mode?: number;
-  }) {}
-
-  async read(): Promise<T> {
-    try {
-      const raw = await fs.readFile(this.options.filePath, 'utf8');
-      return this.options.normalize(JSON.parse(raw));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return this.options.empty();
-      }
-      throw error;
-    }
-  }
-
-  async write(value: T): Promise<void> {
-    await writeJsonFileAtomic(this.options.filePath, value, {
-      mode: this.options.mode,
-    });
-  }
-}

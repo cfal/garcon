@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import crypto, { randomUUID } from 'crypto';
 import { ScheduledPromptRunLog } from '../run-log.ts';
 import { ScheduledPromptStore } from '../store.ts';
 
@@ -24,6 +24,18 @@ function scheduledPrompt(id, schedule) {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
+}
+
+async function seedScheduledPrompts(dir, file) {
+  const filePath = path.join(dir, 'scheduled-prompts.json');
+  await fs.writeFile(filePath, JSON.stringify(file));
+  return filePath;
+}
+
+async function scheduledPromptBackupPaths(dir) {
+  return (await fs.readdir(dir))
+    .filter((entry) => entry.startsWith('scheduled-prompts.json.v1-backup-'))
+    .map((entry) => path.join(dir, entry));
 }
 
 describe('scheduled prompt persistence', () => {
@@ -100,6 +112,275 @@ describe('scheduled prompt persistence', () => {
     await store.init();
 
     expect(store.list()[0].target.tags).toEqual([]);
+  });
+
+  it('atomically migrates the saved day-based recurring prompts without dropping records', async () => {
+    const dir = await tempDir();
+    const intervalDays = [14, 14, 21, 7, 1];
+    const filePath = await seedScheduledPrompts(dir, {
+      version: 1,
+      revision: 50,
+      prompts: intervalDays.map((days, index) =>
+        scheduledPrompt(`legacy-${index}`, {
+          type: 'recurring',
+          intervalDays: days,
+          nextRunAt: `2030-0${index + 1}-01T09:00:00.000Z`,
+          endAt: null,
+        }),
+      ),
+    });
+    const originalContents = await fs.readFile(filePath, 'utf8');
+
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+
+    expect(store.revision).toBe(50);
+    const prompts = store.list();
+    expect(prompts).toHaveLength(5);
+    expect(prompts.map((entry) => entry.schedule.intervalHours)).toEqual([14 * 24, 14 * 24, 21 * 24, 7 * 24, 24]);
+    const migrated = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(migrated.version).toBe(2);
+    expect(migrated.revision).toBe(50);
+    expect(migrated.prompts).toHaveLength(5);
+    expect(migrated.prompts.every((entry) => !('intervalDays' in entry.schedule))).toBe(true);
+    expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
+    const backupPaths = await scheduledPromptBackupPaths(dir);
+    expect(backupPaths).toHaveLength(1);
+    expect(await fs.readFile(backupPaths[0], 'utf8')).toBe(originalContents);
+    expect((await fs.stat(backupPaths[0])).mode & 0o777).toBe(0o600);
+
+    const migratedContents = await fs.readFile(filePath, 'utf8');
+    await new ScheduledPromptStore(dir).init();
+    expect(await fs.readFile(filePath, 'utf8')).toBe(migratedContents);
+    expect(await scheduledPromptBackupPaths(dir)).toEqual(backupPaths);
+  });
+
+  it('migrates mixed version-one schedules and prefers valid intervalHours', async () => {
+    const dir = await tempDir();
+    await seedScheduledPrompts(dir, {
+      version: 1,
+      revision: 8,
+      prompts: [
+        scheduledPrompt('legacy', {
+          type: 'recurring',
+          intervalDays: 7,
+          nextRunAt: '2030-01-01T09:00:00.000Z',
+          endAt: null,
+        }),
+        scheduledPrompt('hours', {
+          type: 'recurring',
+          intervalDays: 99,
+          intervalHours: 6,
+          nextRunAt: '2030-01-02T09:00:00.000Z',
+          endAt: null,
+        }),
+        scheduledPrompt('invalid-hours', {
+          type: 'recurring',
+          intervalDays: 2,
+          intervalHours: 0,
+          nextRunAt: '2030-01-03T09:00:00.000Z',
+          endAt: null,
+        }),
+        scheduledPrompt('once', {
+          type: 'once',
+          nextRunAt: '2030-01-04T09:00:00.000Z',
+        }),
+      ],
+    });
+
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+
+    expect(store.list().map((entry) => entry.schedule)).toEqual([
+      {
+        type: 'recurring',
+        intervalHours: 7 * 24,
+        nextRunAt: '2030-01-01T09:00:00.000Z',
+        endAt: null,
+      },
+      {
+        type: 'recurring',
+        intervalHours: 6,
+        nextRunAt: '2030-01-02T09:00:00.000Z',
+        endAt: null,
+      },
+      {
+        type: 'recurring',
+        intervalHours: 2 * 24,
+        nextRunAt: '2030-01-03T09:00:00.000Z',
+        endAt: null,
+      },
+      { type: 'once', nextRunAt: '2030-01-04T09:00:00.000Z' },
+    ]);
+  });
+
+  it('backs up invalid legacy intervals before excluding them from the migrated file', async () => {
+    const dir = await tempDir();
+    const invalidIntervals = [0, -3, 1.5, 3_651, '7'];
+    const filePath = await seedScheduledPrompts(dir, {
+      version: 1,
+      revision: 4,
+      prompts: [
+        scheduledPrompt('valid', {
+          type: 'recurring',
+          intervalDays: 1,
+          nextRunAt: '2030-01-01T09:00:00.000Z',
+          endAt: null,
+        }),
+        ...invalidIntervals.map((interval, index) =>
+          scheduledPrompt(`invalid-${index}`, {
+            type: 'recurring',
+            intervalDays: interval,
+            nextRunAt: '2030-01-01T09:00:00.000Z',
+            endAt: null,
+          }),
+        ),
+      ],
+    });
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const store = new ScheduledPromptStore(dir);
+      await store.init();
+
+      expect(store.list().map((entry) => entry.id)).toEqual(['valid']);
+      const backupPaths = await scheduledPromptBackupPaths(dir);
+      expect(backupPaths).toHaveLength(1);
+      const backupPath = backupPaths[0];
+      const backup = JSON.parse(await fs.readFile(backupPath, 'utf8'));
+      expect(backup.version).toBe(1);
+      expect(backup.prompts).toHaveLength(6);
+      expect((await fs.stat(backupPath)).mode & 0o777).toBe(0o600);
+      expect(warn).toHaveBeenCalledWith(
+        '[scheduled-prompts]',
+        `Ignored 5 invalid or duplicate scheduled prompt records while loading scheduled-prompts.json. Original file backed up to ${backupPath}.`,
+      );
+      expect(JSON.parse(await fs.readFile(filePath, 'utf8')).prompts).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps version one intact when its migration write fails', async () => {
+    const dir = await tempDir();
+    const filePath = path.join(dir, 'scheduled-prompts.json');
+    const persisted = JSON.stringify({
+      version: 1,
+      revision: 2,
+      prompts: [
+        scheduledPrompt('legacy', {
+          type: 'recurring',
+          intervalDays: 1,
+          nextRunAt: '2030-01-01T09:00:00.000Z',
+          endAt: null,
+        }),
+      ],
+    });
+    await fs.writeFile(filePath, persisted);
+
+    await fs.mkdir(path.join(dir, `.scheduled-prompts.json.${process.pid}.migration-write-failure.tmp`));
+    const originalRandomUUID = crypto.randomUUID;
+    crypto.randomUUID = () => 'migration-write-failure';
+    try {
+      await expect(new ScheduledPromptStore(dir).init()).rejects.toMatchObject({ code: 'EISDIR' });
+    } finally {
+      crypto.randomUUID = originalRandomUUID;
+    }
+
+    expect(await fs.readFile(filePath, 'utf8')).toBe(persisted);
+  });
+
+  it('uses the migrated interval for occurrence advancement', async () => {
+    const dir = await tempDir();
+    await seedScheduledPrompts(dir, {
+      version: 1,
+      revision: 6,
+      prompts: [
+        scheduledPrompt('weekly', {
+          type: 'recurring',
+          intervalDays: 7,
+          nextRunAt: '2030-01-01T09:00:00.000Z',
+          endAt: null,
+        }),
+      ],
+    });
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+
+    const result = await store.claimOccurrence('weekly', '2030-01-01T09:00:00.000Z');
+
+    expect(result?.nextScheduledPrompt?.schedule.nextRunAt).toBe('2030-01-08T09:00:00.000Z');
+  });
+
+  it('uses the migrated interval for missed-run reconciliation', async () => {
+    const dir = await tempDir();
+    await seedScheduledPrompts(dir, {
+      version: 1,
+      revision: 50,
+      prompts: [
+        scheduledPrompt('weekly', {
+          type: 'recurring',
+          intervalDays: 7,
+          nextRunAt: '2030-01-01T09:00:00.000Z',
+          endAt: null,
+        }),
+      ],
+    });
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+
+    const result = await store.reconcileMissed(new Date('2030-01-15T09:00:00.000Z'), {
+      includeCurrentMinute: true,
+    });
+
+    expect(result).toEqual({
+      changed: true,
+      events: [
+        {
+          scheduledPromptId: 'weekly',
+          message: 'Skipped 3 missed occurrences; next run is 2030-01-22T09:00:00.000Z.',
+        },
+      ],
+    });
+    expect(store.revision).toBe(51);
+    expect(store.get('weekly')?.schedule.nextRunAt).toBe('2030-01-22T09:00:00.000Z');
+  });
+
+  it('does not apply the day-based migration to version-two files', async () => {
+    const dir = await tempDir();
+    const filePath = await seedScheduledPrompts(dir, {
+      version: 2,
+      revision: 9,
+      prompts: [
+        scheduledPrompt('days-only', {
+          type: 'recurring',
+          intervalDays: 7,
+          nextRunAt: '2030-01-01T09:00:00.000Z',
+          endAt: null,
+        }),
+      ],
+    });
+    const persisted = await fs.readFile(filePath, 'utf8');
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const store = new ScheduledPromptStore(dir);
+      await store.init();
+
+      expect(store.list()).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        '[scheduled-prompts]',
+        'Ignored 1 invalid or duplicate scheduled prompt record while loading scheduled-prompts.json.',
+      );
+      expect(await fs.readFile(filePath, 'utf8')).toBe(persisted);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('rejects future scheduled prompt file versions', async () => {
+    const dir = await tempDir();
+    await seedScheduledPrompts(dir, { version: 3, revision: 0, prompts: [] });
+
+    await expect(new ScheduledPromptStore(dir).init()).rejects.toThrow('Unsupported scheduled-prompts.json version: 3');
   });
 
   it('claims once and recurring occurrences before dispatch', async () => {
