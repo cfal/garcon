@@ -20,6 +20,11 @@ const CARRY_OVER_HEAD_WINDOW = 25;
 // Agent previews each spawn work; an unbounded repair fan-out stalls startup
 // on large registries, so repairs run through a bounded pool.
 const METADATA_REPAIR_CONCURRENCY = 6;
+// The pool bounds concurrency, not total time: ceil(N/6) stalled previews
+// would stretch init() - which runs before the listener starts - into
+// minutes. An overall deadline abandons the rest; prune passes and live
+// events backfill anything left unrepaired.
+const DEFAULT_REPAIR_DEADLINE_MS = 30_000;
 
 type MetadataSource = 'live' | 'agent-preview' | 'startup';
 
@@ -52,6 +57,7 @@ interface MetadataIndexOptions {
   previewTimeoutMs?: number;
   metadataPath?: string | null;
   saveDelayMs?: number;
+  repairDeadlineMs?: number;
 }
 
 interface MetadataAgentSource {
@@ -79,6 +85,7 @@ export class MetadataIndex {
   #previewTimeoutMs: number;
   #metadataPath: string | null;
   #saveDelayMs: number;
+  #repairDeadlineMs: number;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #savePromise: Promise<void> = Promise.resolve();
 
@@ -94,6 +101,7 @@ export class MetadataIndex {
     this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
+    this.#repairDeadlineMs = options.repairDeadlineMs ?? DEFAULT_REPAIR_DEADLINE_MS;
   }
 
   async init(): Promise<void> {
@@ -207,7 +215,8 @@ export class MetadataIndex {
     // Workers never reject: each returns an ok/error union so the bounded pool
     // cannot be torn down by one failing preview, and per-entry timeouts start
     // when the entry actually begins processing rather than at fan-out time.
-    const results = await mapWithConcurrencyResult(
+    let settled = 0;
+    const repairs = mapWithConcurrencyResult(
       repairEntries,
       METADATA_REPAIR_CONCURRENCY,
       async ([chatId, session]): Promise<
@@ -218,9 +227,27 @@ export class MetadataIndex {
           return { ok: true, metadata: await this.#buildMetadataFromPreviewWithTimeout(chatId, session) };
         } catch (error) {
           return { ok: false, error };
+        } finally {
+          settled += 1;
         }
       },
     );
+
+    // Deadline wins leave the pool running detached; workers only read, and
+    // their results are dropped here, so nothing writes past the deadline.
+    const deadline = new Promise<'deadline'>((resolve) => {
+      setTimeout(() => resolve('deadline'), this.#repairDeadlineMs).unref?.();
+    });
+    const outcome = await Promise.race([repairs, deadline]);
+    if (outcome === 'deadline') {
+      const pending = repairEntries.length - settled;
+      logger.warn(
+        `metadata: repair deadline of ${this.#repairDeadlineMs}ms exceeded; ` +
+          `${pending} of ${repairEntries.length} chats left for live events or the next startup`,
+      );
+      return;
+    }
+    const results = outcome;
 
     for (let i = 0; i < results.length; i++) {
       const [chatId] = repairEntries[i];

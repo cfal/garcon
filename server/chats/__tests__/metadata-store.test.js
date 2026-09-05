@@ -291,6 +291,28 @@ describe('metadata-store', () => {
       expect(index.getChatMetadata('stalled-chat')).toBeNull();
     });
 
+    it('abandons stalled repairs at the overall deadline instead of stretching init', async () => {
+      const sessions = {};
+      for (let i = 0; i < 8; i += 1) {
+        sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
+      }
+      const stalledAgents = {
+        getPreview: mock(() => new Promise(() => {})),
+      };
+      const index = new MetadataIndex(makeRegistry(sessions), stalledAgents, mockCarryOver, {
+        previewTimeoutMs: 200,
+        repairDeadlineMs: 30,
+      });
+      const startedAt = Date.now();
+
+      await index.init();
+
+      // The deadline must beat the first per-preview timeout, proving init
+      // returned via the deadline rather than by draining the stalled pool.
+      expect(Date.now() - startedAt).toBeLessThan(200);
+      expect(index.getChatMetadata('stall-0')).toBeNull();
+    });
+
     it('keeps persisted metadata when agent preview repair would stall', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
