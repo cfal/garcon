@@ -1148,6 +1148,33 @@ describe("discard", () => {
     }
   });
 
+  it("restores unstaged typechanges on tracked files", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      await fs.symlink("elsewhere.txt", path.join(projectPath, "a.txt"));
+      // Strips only the trailing newline: trim() would eat the leading space
+      // that carries the unstaged half of the status.
+      const porcelain = async () =>
+        (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout
+          .replace(/\n$/, "");
+      expect(await porcelain()).toBe(" T a.txt");
+
+      await git.discard({ projectPath, file: "a.txt" });
+
+      expect(await porcelain()).toBe("");
+      const stats = await fs.lstat(path.join(projectPath, "a.txt"));
+      expect(stats.isSymbolicLink()).toBe(false);
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("unstages index-only staged additions, which have no worktree changes to restore", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),

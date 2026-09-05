@@ -797,9 +797,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       // clears the conflict instead of falling through as a silent no-op.
       await runGit(projectPath, ['reset', 'HEAD', '--', file]);
     } else if (status.includes('M') || status.includes('D') || status.includes('T')) {
-      // T covers worktree typechanges (regular file, symlink, or submodule
-      // swapping type); restore rewrites the worktree entry back to the
-      // indexed type, so AT lands back at a staged addition.
+      // T routes worktree typechanges (regular file versus symlink) through
+      // restore, which rewrites the worktree entry back to the indexed type,
+      // so AT lands back at a staged addition. Staged-only typechanges ('T ')
+      // land here as a no-op, exactly like 'M ', because the workbench only
+      // offers discard on unstaged changes.
       await runGit(projectPath, ['restore', '--', file]);
     }
 
