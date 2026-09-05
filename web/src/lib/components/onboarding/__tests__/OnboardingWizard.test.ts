@@ -85,6 +85,7 @@ describe('OnboardingWizard', () => {
 		expect(previewFor('default').textContent).toContain(sampleMessage);
 		expect(previewFor('compact').textContent).not.toContain(sampleMessage);
 		expect(previewFor('single-line').textContent).not.toContain(sampleMessage);
+		expect(document.body.textContent).not.toContain('/workspace/aurora');
 
 		expect(previewFor(localSettings.sidebarChatItemLayout).getAttribute('data-selected')).toBe(
 			'true',

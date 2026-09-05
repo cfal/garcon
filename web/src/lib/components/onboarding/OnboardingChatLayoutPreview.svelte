@@ -60,7 +60,7 @@
 		{isSelected}
 		currentTime={PREVIEW_NOW}
 		showTimestamp={true}
-		showProjectPath={true}
+		showProjectPath={false}
 		chatItemLayout={layout}
 	/>
 </div>
