@@ -7,7 +7,9 @@ import { createStatusOperations } from "../status.js";
 // The network timeout derives from the HTTP idle budget. Config re-reads the
 // environment on every call until initializeServerConfig() pins a value, so
 // setting the budget at file scope reaches the operations under test; 4s
-// yields a 2s bound (4s - 2s margin).
+// yields a 2s bound (4s - 2s margin). The inherited value is captured before
+// the assignment so teardown can restore it exactly.
+const inheritedIdleTimeout = process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS;
 process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS = "4";
 
 const fakeGitScript = `#!${process.execPath}
@@ -42,7 +44,6 @@ describe("network git options wiring", () => {
   let projectPath;
   let originalPath;
   let originalTerminalPrompt;
-  let originalIdleTimeout;
   let operations;
 
   beforeAll(() => {
@@ -51,7 +52,6 @@ describe("network git options wiring", () => {
     writeFileSync(fakeGitPath, fakeGitScript, { mode: 0o755 });
     projectPath = mkdtempSync(path.join(os.tmpdir(), "garcon-net-project-"));
     originalPath = process.env.PATH;
-    originalIdleTimeout = process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS;
     // An inherited value would satisfy the spawn env even with the option
     // unwired, masking the regression this suite pins.
     originalTerminalPrompt = process.env.GIT_TERMINAL_PROMPT ?? null;
@@ -66,8 +66,8 @@ describe("network git options wiring", () => {
 
   afterAll(() => {
     process.env.PATH = originalPath;
-    if (originalIdleTimeout === undefined) delete process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS;
-    else process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS = originalIdleTimeout;
+    if (inheritedIdleTimeout === undefined) delete process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS;
+    else process.env.GARCON_HTTP_IDLE_TIMEOUT_SECONDS = inheritedIdleTimeout;
     if (originalTerminalPrompt !== null) process.env.GIT_TERMINAL_PROMPT = originalTerminalPrompt;
     delete process.env.FAKE_GIT_SLEEP;
     delete process.env.FAKE_GIT_RECORD;
