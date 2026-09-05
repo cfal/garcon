@@ -1065,6 +1065,10 @@ describe("network git timeout", () => {
     expect(resolveNetworkGitTimeoutMs(20)).toBe(18_000);
     expect(resolveNetworkGitTimeoutMs(2)).toBe(1_000);
   });
+
+  it("does not tighten when the idle budget is disabled", () => {
+    expect(resolveNetworkGitTimeoutMs(0)).toBe(30_000);
+  });
 });
 
 describe("discard", () => {

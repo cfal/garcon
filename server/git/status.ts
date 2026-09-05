@@ -59,6 +59,9 @@ const NETWORK_GIT_TIMEOUT_MARGIN_MS = 2_000;
 const NETWORK_GIT_DEFAULT_TIMEOUT_MS = 30_000;
 
 export function resolveNetworkGitTimeoutMs(idleSeconds: number): number {
+  // A disabled budget (0) must not tighten anything; without this guard it
+  // would clamp every network command to the 1s floor.
+  if (idleSeconds <= 0) return NETWORK_GIT_DEFAULT_TIMEOUT_MS;
   return Math.min(
     NETWORK_GIT_DEFAULT_TIMEOUT_MS,
     Math.max(1_000, idleSeconds * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
