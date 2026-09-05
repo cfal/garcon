@@ -174,7 +174,7 @@ function installContext() {
 		commit([{ type: 'activate-window-tab', windowId, surfaceId }]);
 	});
 	let chatSurfaceTransferPort: ChatSurfaceTransferPort | null = null;
-	const activateWindow = vi.fn((windowId: WorkspaceWindowId) => {
+	const activateWindowFromCompactNavigation = vi.fn((windowId: WorkspaceWindowId) => {
 		const workspaceWindow = collectWindowNodes(layout.snapshot.desktopRoot).find(
 			(item) => item.id === windowId,
 		);
@@ -233,7 +233,8 @@ function installContext() {
 		noteWindowChromeFocus: vi.fn((windowId: WorkspaceWindowId) => {
 			runtime.currentWindowId = windowId;
 		}),
-		activateWindow,
+		activateWindow: vi.fn(),
+		activateWindowFromCompactNavigation,
 		beginWindowPointerInteraction: vi.fn((windowId: WorkspaceWindowId) => {
 			const activeId = collectWindowNodes(layout.snapshot.desktopRoot).find(
 				(item) => item.id === windowId,
@@ -1200,7 +1201,9 @@ describe('WorkspaceRoot', () => {
 		});
 		nextButton.focus();
 		await fireEvent.click(nextButton);
-		await waitFor(() => expect(workspace.activateWindow).toHaveBeenCalledWith('window-2'));
+		await waitFor(() =>
+			expect(workspace.activateWindowFromCompactNavigation).toHaveBeenCalledWith('window-2'),
+		);
 		await waitFor(() => expect(gitWindow.classList.contains('hidden')).toBe(false));
 		const remountedNextButton = screen.getByRole('button', {
 			name: m.workspace_compact_next_window(),
