@@ -10,6 +10,7 @@ import {
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { assertRealWithinProjectBase } from '../lib/path-boundary.js';
 import { PreambleDomainError } from './errors.js';
 import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 
@@ -44,10 +45,17 @@ function normalizeFile(value: unknown): PreamblesFile {
   const preambles = raw.preambles.map((valuePreamble) => {
     const preamble = normalizePreamble(valuePreamble);
     if (!preamble || ids.has(preamble.id)) throw new Error('preambles.json contains an invalid preamble');
+    const rawRules = preamble.scope.type === 'project-paths'
+      ? (valuePreamble as { scope: { rules: { projectPath: string }[] } }).scope.rules
+      : [];
     if (
       preamble.scope.type === 'project-paths'
-      && preamble.scope.rules.some((rule) => !path.isAbsolute(rule.projectPath))
-    ) throw new Error('preambles.json contains a non-absolute project path');
+      && preamble.scope.rules.some((rule, index) => (
+        rawRules[index]?.projectPath !== rule.projectPath
+        || !path.isAbsolute(rule.projectPath)
+        || path.resolve(rule.projectPath) !== rule.projectPath
+      ))
+    ) throw new Error('preambles.json contains a non-canonical project path');
     ids.add(preamble.id);
     return preamble;
   });
@@ -68,7 +76,9 @@ export class PreambleStore {
 
   async init(): Promise<void> {
     try {
-      this.#file = normalizeFile(JSON.parse(await fs.readFile(this.#filePath, 'utf8')));
+      const file = normalizeFile(JSON.parse(await fs.readFile(this.#filePath, 'utf8')));
+      await assertCanonicalProjectPaths(file.preambles);
+      this.#file = file;
     } catch (error) {
       if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
       this.#file = emptyFile();
@@ -159,6 +169,22 @@ export class PreambleStore {
   #notFound(): PreambleDomainError {
     return new PreambleDomainError('PREAMBLE_NOT_FOUND', 'Preamble not found', 404);
   }
+}
+
+async function assertCanonicalProjectPaths(preambles: readonly Preamble[]): Promise<void> {
+  const projectPaths = new Set(preambles.flatMap((preamble) => preamble.scope.type === 'project-paths'
+    ? preamble.scope.rules.map((rule) => rule.projectPath)
+    : []));
+  await Promise.all([...projectPaths].map(async (projectPath) => {
+    let canonicalProjectPath: string;
+    try {
+      canonicalProjectPath = await assertRealWithinProjectBase(projectPath);
+    } catch (error) {
+      throw new Error('preambles.json contains a non-canonical project path', { cause: error });
+    }
+    if (canonicalProjectPath === projectPath) return;
+    throw new Error('preambles.json contains a non-canonical project path');
+  }));
 }
 
 export function reorderedPreambles(

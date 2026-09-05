@@ -3,10 +3,12 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { resetServerConfigForTests } from '../../config.ts';
 import { PreambleStore } from '../store.ts';
 
 const createdDirectories = [];
 const AT = '2026-09-03T10:00:00.000Z';
+const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
 
 async function temporaryDirectory() {
   const directory = path.join(os.tmpdir(), `garcon-preambles-${randomUUID()}`);
@@ -32,6 +34,12 @@ afterEach(async () => {
   for (const directory of createdDirectories.splice(0)) {
     await fs.rm(directory, { recursive: true, force: true });
   }
+  if (originalProjectBaseDir === undefined) {
+    delete process.env.GARCON_PROJECT_BASE_DIR;
+  } else {
+    process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+  }
+  resetServerConfigForTests();
 });
 
 describe('PreambleStore', () => {
@@ -116,6 +124,16 @@ describe('PreambleStore', () => {
       {
         version: 1,
         revision: 0,
+        preambles: [preamble('a', {
+          scope: {
+            type: 'project-paths',
+            rules: [{ projectPath: '/workspace/project/../project', includeNested: true }],
+          },
+        })],
+      },
+      {
+        version: 1,
+        revision: 0,
         preambles: [
           preamble('a', { content: 'a'.repeat(32_000) }),
           preamble('b', { content: 'b'.repeat(32_000) }),
@@ -145,5 +163,70 @@ describe('PreambleStore', () => {
       await fs.writeFile(path.join(directory, 'preambles.json'), JSON.stringify(persisted));
       await expect(new PreambleStore(directory).init()).rejects.toThrow();
     }
+  });
+
+  it('requires persisted paths to retain server canonicalization and project containment', async () => {
+    const projectBase = await temporaryDirectory();
+    process.env.GARCON_PROJECT_BASE_DIR = projectBase;
+    resetServerConfigForTests();
+    const projectPath = path.join(projectBase, 'project');
+    const aliasPath = path.join(projectBase, 'alias');
+    const danglingPath = path.join(projectBase, 'dangling');
+    const danglingAncestorPath = path.join(projectBase, 'dangling-ancestor');
+    await fs.mkdir(projectPath);
+    await fs.symlink(projectPath, aliasPath);
+    await fs.symlink(path.join(projectBase, 'missing'), danglingPath);
+    await fs.symlink(path.join(projectBase, 'missing-ancestor'), danglingAncestorPath);
+
+    for (const storedPath of [
+      aliasPath,
+      path.dirname(projectBase),
+      danglingPath,
+      path.join(danglingAncestorPath, 'project'),
+      ` ${projectPath} `,
+    ]) {
+      const directory = await temporaryDirectory();
+      await fs.writeFile(path.join(directory, 'preambles.json'), JSON.stringify({
+        version: 1,
+        revision: 1,
+        preambles: [preamble('a', {
+          scope: {
+            type: 'project-paths',
+            rules: [{ projectPath: storedPath, includeNested: true }],
+          },
+        })],
+      }));
+      await expect(new PreambleStore(directory).init()).rejects.toThrow(
+        'preambles.json contains a non-canonical project path',
+      );
+    }
+  });
+
+  it('retains a canonical persisted rule after its directory is deleted', async () => {
+    const projectBase = await temporaryDirectory();
+    process.env.GARCON_PROJECT_BASE_DIR = projectBase;
+    resetServerConfigForTests();
+    const projectPath = path.join(projectBase, 'project');
+    await fs.mkdir(projectPath);
+    const canonicalProjectPath = await fs.realpath(projectPath);
+    await fs.rmdir(projectPath);
+    const directory = await temporaryDirectory();
+    await fs.writeFile(path.join(directory, 'preambles.json'), JSON.stringify({
+      version: 1,
+      revision: 1,
+      preambles: [preamble('a', {
+        scope: {
+          type: 'project-paths',
+          rules: [{ projectPath: canonicalProjectPath, includeNested: true }],
+        },
+      })],
+    }));
+
+    const store = new PreambleStore(directory);
+    await store.init();
+    expect(store.snapshot().preambles[0]?.scope).toEqual({
+      type: 'project-paths',
+      rules: [{ projectPath: canonicalProjectPath, includeNested: true }],
+    });
   });
 });
