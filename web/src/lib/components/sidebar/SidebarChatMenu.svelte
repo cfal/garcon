@@ -146,7 +146,7 @@
 			{m.sidebar_chat_open_new_window()}
 		</DropdownMenuSubTrigger>
 		<DropdownMenuSubContent class="w-56">
-			{#each WORKSPACE_WINDOW_EDGES as edge}
+			{#each WORKSPACE_WINDOW_EDGES as edge (edge)}
 				{@const admission = newWindowEdges[edge]}
 				<DropdownMenuItem
 					disabled={admission?.allowed !== true}
