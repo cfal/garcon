@@ -23,7 +23,7 @@ import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 const CHAT_ROW_SELECTOR = '[data-sidebar-virtual-row][data-sidebar-virtual-list-row="normal"]';
 
-interface ReorderExchange {
+interface OrderExchange {
   request: {
     method: string;
     url: string;
@@ -36,8 +36,8 @@ interface ReorderExchange {
 }
 
 interface ChromiumFixture extends BaseChromiumFixture {
-  reorderExchanges: ReorderExchange[];
-  sortExchanges: ReorderExchange[];
+  reorderExchanges: OrderExchange[];
+  sortExchanges: OrderExchange[];
 }
 
 function isReorderRequest(request: Request): boolean {
@@ -300,18 +300,20 @@ async function withSidebarChromiumFixture<T>(
     testName,
     async (baseFixture) => {
       const fixture = Object.assign(baseFixture, {
-        reorderExchanges: [] as ReorderExchange[],
-        sortExchanges: [] as ReorderExchange[],
+        reorderExchanges: [] as OrderExchange[],
+        sortExchanges: [] as OrderExchange[],
       });
-      const exchangesByRequest = new Map<Request, ReorderExchange>();
+      const exchangesByRequest = new Map<Request, OrderExchange>();
       fixture.page.on('request', (request) => {
-        const exchanges = isReorderRequest(request)
-          ? fixture.reorderExchanges
-          : isSortRequest(request)
-            ? fixture.sortExchanges
-            : null;
-        if (!exchanges) return;
-        const exchange: ReorderExchange = {
+        let exchanges: OrderExchange[];
+        if (isReorderRequest(request)) {
+          exchanges = fixture.reorderExchanges;
+        } else if (isSortRequest(request)) {
+          exchanges = fixture.sortExchanges;
+        } else {
+          return;
+        }
+        const exchange: OrderExchange = {
           request: {
             method: request.method(),
             url: request.url(),
