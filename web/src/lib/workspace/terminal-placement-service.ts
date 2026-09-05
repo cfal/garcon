@@ -122,13 +122,13 @@ export class TerminalPlacementService {
 				},
 				{ requiredPublication: true },
 			);
-			if (!this.deps.layout.surface(surfaceId)) {
+			if (!this.#placementResolved(terminalId)) {
 				throw new Error(`Terminal surface was not placed: ${surfaceId}`);
 			}
 		} catch (error) {
 			await this.#rollbackUnplaced(terminalId, error);
 		}
-		if (!current) return terminalId;
+		if (!current || !this.deps.layout.surface(surfaceId)) return terminalId;
 		this.deps.present(surfaceId);
 		return terminalId;
 	}
@@ -202,13 +202,13 @@ export class TerminalPlacementService {
 				},
 				{ requiredPublication: true },
 			);
-			if (!this.deps.layout.surface(surfaceId)) {
+			if (!this.#placementResolved(terminalId)) {
 				throw new Error(`Terminal surface was not placed: ${surfaceId}`);
 			}
 		} catch (error) {
 			await this.#rollbackUnplaced(terminalId, error);
 		}
-		if (!current) return terminalId;
+		if (!current || !this.deps.layout.surface(surfaceId)) return terminalId;
 		this.deps.present(surfaceId);
 		return terminalId;
 	}
@@ -617,6 +617,13 @@ export class TerminalPlacementService {
 		return this.deps.terminals.create(this.deps.currentProjectPath(), requestId);
 	}
 
+	#placementResolved(terminalId: string): boolean {
+		return (
+			Boolean(this.deps.layout.surface(terminalSurfaceId(terminalId))) ||
+			this.deps.layout.snapshot.unplacedTerminalIds.includes(terminalId)
+		);
+	}
+
 	async #requestTermination(terminalId: string): Promise<void> {
 		let requestId = this.#terminalTerminateRequestIds.get(terminalId);
 		if (!requestId) {
@@ -635,7 +642,7 @@ export class TerminalPlacementService {
 	}
 
 	async #rollbackUnplaced(terminalId: string, placementError: unknown): Promise<never> {
-		if (this.deps.layout.surface(terminalSurfaceId(terminalId))) throw placementError;
+		if (this.#placementResolved(terminalId)) throw placementError;
 		try {
 			await this.#requestTermination(terminalId);
 			this.deps.terminals.disposeTerminatedSession(terminalId);

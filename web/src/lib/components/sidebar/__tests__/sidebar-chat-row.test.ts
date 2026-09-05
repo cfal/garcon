@@ -82,6 +82,7 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			isPinned: true,
+			displayOptions: { chatItemLayout: 'default' },
 			onTagClick,
 			onManageTags,
 		});
@@ -143,6 +144,7 @@ describe('shared sidebar chat row', () => {
 	it('uses independent unread emphasis and activity treatments', async () => {
 		const { rerender } = render(SidebarChatItemHost, {
 			session: createChat({ isUnread: true, isProcessing: true }),
+			displayOptions: { chatItemLayout: 'default' },
 		});
 
 		const title = screen.getByText('Shared row chat');

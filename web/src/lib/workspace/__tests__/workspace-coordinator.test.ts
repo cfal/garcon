@@ -20,6 +20,7 @@ import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
+import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -2069,6 +2070,89 @@ describe('WorkspaceCoordinator', () => {
 			terminalSurfaceId('terminal-2'),
 		);
 	});
+
+	it.each(['current window', 'new window'] as const)(
+		'keeps a terminal session when its %s surface closes before presentation settles',
+		async (destination) => {
+			const frames = new SurfaceFrameRegistry();
+			const { coordinator, terminals, layout } = createHarness({ surfaceFrames: frames });
+			const terminalId = `terminal-close-during-create-${destination.replace(' ', '-')}`;
+			const surfaceId = terminalSurfaceId(terminalId);
+			terminals.create.mockImplementation(async () => {
+				terminals.sessions[terminalId] = {
+					metadata: terminalMetadata(terminalId),
+					attachmentState: 'attached',
+				};
+				return terminalId;
+			});
+
+			const creating =
+				destination === 'current window'
+					? coordinator.createTerminal('window-main')
+					: coordinator.createTerminalInNewWindow('window-main');
+			await vi.waitFor(() => expect(layout.surface(surfaceId)).not.toBeNull());
+
+			await expect(Promise.all([creating, coordinator.closeSurface(surfaceId)])).resolves.toEqual([
+				terminalId,
+				true,
+			]);
+
+			expect(terminals.requestTermination).not.toHaveBeenCalled();
+			expect(terminals.disposeTerminatedSession).not.toHaveBeenCalled();
+			expect(terminals.sessions[terminalId]).toBeTruthy();
+			expect(layout.surface(surfaceId)).toBeNull();
+			expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+		},
+	);
+
+	it.each(['current window', 'new window'] as const)(
+		'does not re-present a %s terminal closed during an unchanged publication',
+		async (destination) => {
+			const terminalId = `terminal-close-during-unchanged-publication-${destination.replace(' ', '-')}`;
+			const surfaceId = terminalSurfaceId(terminalId);
+			let coordinator: WorkspaceCoordinator | null = null;
+			let closeOnPublish = false;
+			let closing: Promise<boolean> | null = null;
+			const presentSurface = vi.spyOn(
+				WorkspacePresentationController.prototype,
+				'presentSurface',
+			);
+			try {
+				const harness = createHarness({
+					onLayoutChanged: (snapshot) => {
+						if (!closeOnPublish || !snapshot.surfaces[surfaceId] || !coordinator) return;
+						closeOnPublish = false;
+						closing = coordinator.closeSurface(surfaceId);
+					},
+				});
+				coordinator = harness.coordinator;
+				const { layout, terminals } = harness;
+				terminals.sessions[terminalId] = {
+					metadata: terminalMetadata(terminalId),
+					attachmentState: 'attached',
+				};
+				await coordinator.openTerminalSession(terminalId, 'window-main');
+				await coordinator.enterWindowFullscreen('window-main');
+				presentSurface.mockClear();
+				terminals.create.mockResolvedValue(terminalId);
+				closeOnPublish = true;
+
+				const creating =
+					destination === 'current window'
+						? coordinator.createTerminal('window-main', 'terminal-retry')
+						: coordinator.createTerminalInNewWindow('window-main', 'terminal-retry');
+				await expect(creating).resolves.toBe(terminalId);
+				await expect(closing).resolves.toBe(true);
+
+				expect(layout.surface(surfaceId)).toBeNull();
+				expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+				expect(presentSurface).not.toHaveBeenCalledWith(surfaceId);
+				expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+			} finally {
+				presentSurface.mockRestore();
+			}
+		},
+	);
 
 	it('removes the launcher when New Terminal is invoked elsewhere without recording dismissal', async () => {
 		const onTerminalLauncherDismissed = vi.fn();
