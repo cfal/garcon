@@ -109,6 +109,10 @@
 	function closeTab(): void {
 		void workspace.closeSurface(surfaceId).catch(notifyFailure);
 	}
+
+	function closeOtherWindows(): void {
+		void workspace.closeOtherWindows(windowId).catch(notifyFailure);
+	}
 </script>
 
 {#snippet menuItems()}
@@ -185,7 +189,7 @@
 	<menu.Item
 		data-workspace-window-tab-action="close-other-windows"
 		disabled={workspace.isOtherWindowsCloseBlocked(windowId)}
-		onSelect={() => void workspace.closeOtherWindows(windowId).catch(notifyFailure)}
+		onSelect={closeOtherWindows}
 	>
 		<X />
 		{m.workspace_close_other_windows()}
