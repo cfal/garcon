@@ -7,6 +7,7 @@ interface WorkspaceHostGeometryStateDeps {
 	getSnapshot(): WorkspaceLayoutSnapshot;
 	getIsMobile(): boolean;
 	beforeCompactProjection(): void;
+	onSingleWindowProjectionChanged(active: boolean): void;
 }
 
 export class WorkspaceHostGeometryState {
@@ -18,6 +19,7 @@ export class WorkspaceHostGeometryState {
 	#measureFrame: number | null = null;
 	#lastFullscreenWindowId: WorkspaceWindowId | null;
 	#lastIsMobile: boolean;
+	#lastNotifiedSingleWindowProjectionActive = false;
 
 	constructor(private readonly deps: WorkspaceHostGeometryStateDeps) {
 		this.#lastFullscreenWindowId = deps.getSnapshot().fullscreenWindowId;
@@ -40,6 +42,7 @@ export class WorkspaceHostGeometryState {
 		untrack(() => {
 			this.#element = element;
 			this.#measure();
+			this.#notifySingleWindowProjectionChange();
 			const observer = new ResizeObserver(() => this.#scheduleMeasure());
 			observer.observe(element);
 			return () => {
@@ -55,6 +58,7 @@ export class WorkspaceHostGeometryState {
 
 	layoutPublished(snapshot: WorkspaceLayoutSnapshot): void {
 		const isMobile = this.deps.getIsMobile();
+		this.#notifySingleWindowProjectionChange();
 		const returnedToDesktop = this.#lastIsMobile && !isMobile;
 		this.#lastIsMobile = isMobile;
 		const exitedFullscreen =
@@ -89,7 +93,10 @@ export class WorkspaceHostGeometryState {
 		const snapshot = this.deps.getSnapshot();
 		if (this.deps.getIsMobile() || snapshot.fullscreenWindowId) return;
 		this.#reconcile(snapshot);
-		this.#awaitingTiledMeasurement = false;
+		if (this.#awaitingTiledMeasurement) {
+			this.#awaitingTiledMeasurement = false;
+			this.#notifySingleWindowProjectionChange();
+		}
 	}
 
 	#reconcile(snapshot: WorkspaceLayoutSnapshot): void {
@@ -107,6 +114,7 @@ export class WorkspaceHostGeometryState {
 			this.deps.beforeCompactProjection();
 		}
 		this.#awaitingTiledMeasurement = true;
+		this.#notifySingleWindowProjectionChange();
 	}
 
 	#setCompact(next: boolean): void {
@@ -116,5 +124,13 @@ export class WorkspaceHostGeometryState {
 			this.#compactSession += 1;
 		}
 		this.#compact = next;
+		this.#notifySingleWindowProjectionChange();
+	}
+
+	#notifySingleWindowProjectionChange(): void {
+		const active = this.singleWindowProjectionActive;
+		if (active === this.#lastNotifiedSingleWindowProjectionActive) return;
+		this.#lastNotifiedSingleWindowProjectionActive = active;
+		this.deps.onSingleWindowProjectionChanged(active);
 	}
 }

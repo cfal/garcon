@@ -162,6 +162,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			workspaceInteractionGate.cancelBeforeInertTransition();
 			placement?.cancelPendingWindowPointerInteraction();
 		},
+		onSingleWindowProjectionChanged: () => placement?.syncProjectionVisibility(),
 	});
 	const resolveSplitAdmission: WorkspaceSplitAdmissionResolver = (snapshot, request) =>
 		resolveWorkspaceSplitAdmission({
@@ -312,6 +313,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		surfaceFrames,
 		resolveSplitAdmission,
 		resolvePartitionRatioBounds,
+		isSingleWindowProjectionActive: () => hostGeometry.singleWindowProjectionActive,
 		onLayoutChanged: (snapshot) => {
 			hostGeometry.layoutPublished(snapshot);
 			persistence.schedule(snapshot);
