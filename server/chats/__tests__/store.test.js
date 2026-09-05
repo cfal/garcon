@@ -98,13 +98,22 @@ describe('ChatRegistry', () => {
   it('clones caller-owned collections on ingest', () => {
     const tags = ['source'];
     const agentSettingsById = { test: envelope('test') };
-    registry.addChat(newChat({ tags, agentSettingsById }));
+    const session = nativeSession('test');
+    registry.addChat(newChat({ tags, agentSettingsById, nativeSession: session }));
 
     tags.push('injected');
     agentSettingsById.test.values.injected = true;
+    session.value.injected = true;
 
-    expect(registry.getChat(CHAT_ID).tags).toEqual(['source']);
+    const updateTags = ['via-update'];
+    const updateSettings = { test: envelope('test') };
+    registry.updateChat(CHAT_ID, { tags: updateTags, agentSettingsById: updateSettings });
+    updateTags.push('injected');
+    updateSettings.test.values.injected = true;
+
+    expect(registry.getChat(CHAT_ID).tags).toEqual(['via-update']);
     expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
+    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/native.jsonl' });
   });
 
   it('adds provider-neutral records with opaque ownership defaults', () => {

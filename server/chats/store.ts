@@ -671,6 +671,17 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     if ('agentSettingsById' in normalizedPatch && !parseAgentSettingsById(normalizedPatch.agentSettingsById)) {
       throw new Error(`Invalid agent settings for ${id}`);
     }
+    // Caller-owned collections are cloned before entering the registry so
+    // later caller mutations cannot alias registry state.
+    if (normalizedPatch.agentSettingsById) {
+      normalizedPatch.agentSettingsById = structuredClone(normalizedPatch.agentSettingsById);
+    }
+    if (normalizedPatch.tags) {
+      normalizedPatch.tags = [...normalizedPatch.tags];
+    }
+    if (normalizedPatch.nativeSession) {
+      normalizedPatch.nativeSession = structuredClone(normalizedPatch.nativeSession);
+    }
     if ('carryOverSegments' in normalizedPatch) {
       normalizedPatch.carryOverSegments = parseCarryOverSegmentRefs(normalizedPatch.carryOverSegments);
     }
