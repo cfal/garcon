@@ -1133,10 +1133,11 @@ export default function createChatRoutes({
         }
         patch.agentSettingsPatch = body.agentSettingsPatch as JsonObject;
       }
-      const updated = Object.keys(patch).length > 0
+      const hasPatch = Object.keys(patch).length > 0;
+      const updated = hasPatch
         ? await agents.updateSessionSettings(chatId, patch)
         : chat;
-      if (Object.keys(patch).length > 0) searchIndex?.catalogMayHaveChanged(chatId);
+      if (hasPatch) searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
         success: true,
         chatId,
