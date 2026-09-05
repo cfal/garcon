@@ -9,11 +9,15 @@ import {
 	serializeWorkspaceLayout,
 	WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
 	WORKSPACE_LAYOUT_MAX_PARSE_NODES,
+	WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW,
 } from '../layout-schema';
 import { portableSingletonDescriptor } from '../surface-types';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { collectWindowNodes, windowNodeById } from '../window-tree';
-import type { PersistedWorkspaceLayoutNode } from '$shared/workspace-layout';
+import type {
+	PersistedWorkspaceLayoutNode,
+	PersistedWorkspaceSurfaceRef,
+} from '$shared/workspace-layout';
 
 function persistedWindow(index: number): PersistedWorkspaceLayoutNode {
 	return {
@@ -383,6 +387,40 @@ describe('workspace layout V2 schema', () => {
 		);
 		expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
 	});
+
+	it.each(['order', 'mru'] as const)(
+		'accepts the per-window %s budget and rejects the next reference',
+		(field) => {
+			const refs: PersistedWorkspaceSurfaceRef[] = Array.from(
+				{ length: WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW },
+				(_, index) =>
+					index === 0
+						? { type: 'chat', chatId: 'chat-budget' }
+						: { type: 'terminal', terminalId: `terminal-budget-${index}` },
+			);
+			const root = {
+				type: 'window' as const,
+				id: 'window-main',
+				order: field === 'order' ? refs : [refs[0]],
+				active: refs[0],
+				mru: field === 'mru' ? refs : [],
+			};
+
+			const accepted = parsePersistedWorkspaceLayout(
+				JSON.stringify({ version: 2, root, unplacedTerminalIds: [] }),
+			);
+			expect(accepted.source).toBe('valid');
+
+			const oversizedRoot = {
+				...root,
+				[field]: [...refs, { type: 'terminal', terminalId: 'terminal-over-budget' }],
+			};
+			const rejected = parsePersistedWorkspaceLayout(
+				JSON.stringify({ version: 2, root: oversizedRoot, unplacedTerminalIds: [] }),
+			);
+			expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
+		},
+	);
 
 	it('falls back for malformed current roots and unsupported versions', () => {
 		for (const raw of [
