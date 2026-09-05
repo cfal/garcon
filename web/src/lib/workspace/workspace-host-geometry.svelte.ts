@@ -47,9 +47,9 @@ export class WorkspaceHostGeometryState {
 				observer.disconnect();
 				if (this.#measureFrame !== null) cancelAnimationFrame(this.#measureFrame);
 				this.#measureFrame = null;
+				this.#setCompact(false);
 				this.#element = null;
 				this.size = null;
-				this.#compact = false;
 				this.#awaitingTiledMeasurement = false;
 			};
 		});
