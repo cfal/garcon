@@ -221,8 +221,7 @@ export class MetadataIndex {
       repairEntries,
       METADATA_REPAIR_CONCURRENCY,
       async ([chatId, session]): Promise<
-        | { ok: true; metadata: ChatMetadata }
-        | { ok: false; error: unknown }
+        { ok: true } | { ok: false; error: unknown }
       > => {
         if (deadlineHit) return { ok: false, error: new Error('metadata repair deadline exceeded') };
         try {
@@ -230,7 +229,7 @@ export class MetadataIndex {
           // Recorded at completion so repairs finished inside the budget
           // survive a deadline win instead of being rebuilt every startup.
           repaired.set(String(chatId), metadata);
-          return { ok: true, metadata };
+          return { ok: true };
         } catch (error) {
           return { ok: false, error };
         }
