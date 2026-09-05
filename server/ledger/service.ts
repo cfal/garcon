@@ -472,6 +472,7 @@ export class TranscriptLedgerService {
         chatId,
         viewId,
         current.contentStartOrdinal - 1,
+        'notice',
       ).find((row): row is LedgerNoticeRow => (
         row.kind === 'notice'
         && row.message === notice.content

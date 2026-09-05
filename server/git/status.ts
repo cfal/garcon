@@ -4,10 +4,11 @@ import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import { getHttpIdleTimeoutSeconds } from '../config.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
-import { GIT_REF_RESULT_LIMITS } from './types.js';
+import { GIT_REF_RESULT_LIMITS, type GitCommandOptions } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { probeWorktreeLayout } from './worktree-layout.js';
@@ -40,7 +41,6 @@ import {
   resolvePathWithinProject,
   runGit,
   runGitWithStdin,
-  stripDiffHeaders,
 } from './run.js';
 import {
   assertExistingCommitRef,
@@ -52,6 +52,29 @@ const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
 const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
+// Network commands run within the HTTP idle budget minus a margin, so a slow
+// remote surfaces a git error before the idle timeout drops the response.
+// The budget only tightens the runner's 30s default; it never loosens it.
+const NETWORK_GIT_TIMEOUT_MARGIN_MS = 2_000;
+const NETWORK_GIT_DEFAULT_TIMEOUT_MS = 30_000;
+
+export function resolveNetworkGitTimeoutMs(idleSeconds: number): number {
+  // A disabled budget (0) must not tighten anything; without this guard it
+  // would clamp every network command to the 1s floor.
+  if (idleSeconds <= 0) return NETWORK_GIT_DEFAULT_TIMEOUT_MS;
+  return Math.min(
+    NETWORK_GIT_DEFAULT_TIMEOUT_MS,
+    Math.max(1_000, idleSeconds * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
+  );
+}
+
+function networkGitOptions(): GitCommandOptions {
+  return {
+    timeoutMs: resolveNetworkGitTimeoutMs(getHttpIdleTimeoutSeconds()),
+    // Fails fast on credential prompts instead of hanging until the timeout.
+    env: { GIT_TERMINAL_PROMPT: '0' },
+  };
+}
 const repositoryCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
@@ -330,42 +353,45 @@ export async function collectCommitMessageDiffContext(
   return diffContext;
 }
 
+// Resolves the display branch and whether the repository has any commits.
+// Detached HEAD falls back to a descriptive label.
+async function resolveStatusBranch(projectPath: string): Promise<{ branch: string; hasCommits: boolean }> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
+    let branch = stdout.trim();
+    if (branch === 'HEAD') {
+      const { stdout: headOutput } = await runGit(
+        projectPath,
+        ['rev-parse', '--verify', 'HEAD'],
+        readOnlyGitOptions(),
+      );
+      branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
+    }
+    return { branch, hasCommits: true };
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
+      return { branch: 'main', hasCommits: false };
+    }
+    throw error;
+  }
+}
+
 export function createStatusOperations(agents: GitAgentRunner) {
   async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    let branch = 'main';
-    let hasCommits = true;
-    try {
-      const { stdout: branchOutput } = await runGit(
-        projectPath,
-        ['rev-parse', '--abbrev-ref', 'HEAD'],
-        readOnlyGitOptions(),
-      );
-      branch = branchOutput.trim();
-      if (branch === 'HEAD') {
-        const { stdout: headOutput } = await runGit(
-          projectPath,
-          ['rev-parse', '--verify', 'HEAD'],
-          readOnlyGitOptions(),
-        );
-        branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
-      }
-    } catch (error) {
-      const message = errorMessage(error);
-      if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
-        hasCommits = false;
-        branch = 'main';
-      } else {
-        throw error;
-      }
-    }
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '-uall'],
-      readOnlyGitOptions(),
-    );
+    // Branch resolution and the working-tree scan are independent reads;
+    // run them concurrently instead of paying sequential spawn latency.
+    const [branchInfo, { stdout: statusOutput }] = await Promise.all([
+      resolveStatusBranch(projectPath),
+      runGit(projectPath, ['status', '--porcelain', '-uall'], readOnlyGitOptions()),
+    ]);
+    const { branch, hasCommits } = branchInfo;
 
     const modified: string[] = [];
     const added: string[] = [];
@@ -388,103 +414,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
     });
 
     return { branch, hasCommits, modified, added, deleted, untracked };
-  }
-
-  async function getDiff({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    const isUntracked = statusOutput.startsWith('??');
-    const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
-
-    let diff;
-    if (isUntracked) {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        diff = `--- directory: ${file}`;
-      } else {
-        const fileContent = await fs.readFile(filePath, 'utf-8');
-        const lines = fileContent.split('\n');
-        diff = `--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
-      }
-    } else if (isDeleted) {
-      const { stdout: fileContent } = await runGit(
-        projectPath,
-        ['show', `HEAD:${file}`],
-        readOnlyGitOptions(),
-      );
-      const lines = fileContent.split('\n');
-      diff = `--- a/${file}\n+++ /dev/null\n@@ -1,${lines.length} +0,0 @@\n${lines.map((line) => `-${line}`).join('\n')}`;
-    } else {
-      const { stdout: unstagedDiff } = await runGit(
-        projectPath,
-        ['diff', '--', file],
-        readOnlyGitOptions(),
-      );
-      if (unstagedDiff) {
-        diff = stripDiffHeaders(unstagedDiff);
-      } else {
-        const { stdout: stagedDiff } = await runGit(
-          projectPath,
-          ['diff', '--cached', '--', file],
-          readOnlyGitOptions(),
-        );
-        diff = stripDiffHeaders(stagedDiff) || '';
-      }
-    }
-
-    return { diff };
-  }
-
-  async function getFileWithDiff({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    const isUntracked = statusOutput.startsWith('??');
-    const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
-
-    let currentContent = '';
-    let oldContent = '';
-
-    if (isDeleted) {
-      const { stdout: headContent } = await runGit(
-        projectPath,
-        ['show', `HEAD:${file}`],
-        readOnlyGitOptions(),
-      );
-      oldContent = headContent;
-      currentContent = headContent;
-    } else {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        throw new GitDomainError('INVALID_INPUT', 'Cannot generate a line diff for a directory. Select a file instead.');
-      }
-      currentContent = await fs.readFile(filePath, 'utf-8');
-      if (!isUntracked) {
-        try {
-          const { stdout: headContent } = await runGit(
-            projectPath,
-            ['show', `HEAD:${file}`],
-            readOnlyGitOptions(),
-          );
-          oldContent = headContent;
-        } catch {
-          oldContent = '';
-        }
-      }
-    }
-
-    return { currentContent, oldContent, isDeleted, isUntracked };
   }
 
   async function initialCommit({ projectPath }: ProjectOptions): Promise<unknown> {
@@ -748,7 +677,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['fetch', remoteName]);
+    const { stdout } = await runGit(projectPath, ['fetch', remoteName], networkGitOptions());
     return { success: true, output: stdout || 'Fetch completed successfully', remoteName };
   }
 
@@ -777,7 +706,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin/branch as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['pull', remoteName, remoteBranch]);
+    const { stdout } = await runGit(
+      projectPath,
+      ['pull', remoteName, remoteBranch],
+      networkGitOptions(),
+    );
     return {
       success: true,
       output: stdout || 'Pull completed successfully',
@@ -822,7 +755,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       }
     }
 
-    const { stdout } = await runGit(projectPath, ['push', targetRemote, `${branch}:${targetBranch}`]);
+    const { stdout } = await runGit(
+      projectPath,
+      ['push', targetRemote, `${branch}:${targetBranch}`],
+      networkGitOptions(),
+    );
     return {
       success: true,
       output: stdout || 'Push completed successfully',
@@ -852,10 +789,20 @@ export function createStatusOperations(agents: GitAgentRunner) {
       } else {
         await fs.unlink(filePath);
       }
-    } else if (status.includes('M') || status.includes('D')) {
-      await runGit(projectPath, ['restore', '--', file]);
-    } else if (status.includes('A')) {
+    } else if (status === 'A ' || status[1] === 'A' || status === 'AU') {
+      // The workbench only offers discard on unstaged changes, so AM/AD/AT land
+      // in the restore branch below and keep their staged addition. Reset
+      // remains for index-only additions (endpoint-reachable, no worktree
+      // changes to restore) and unmerged-added states (AA/AU/UA), where it
+      // clears the conflict instead of falling through as a silent no-op.
       await runGit(projectPath, ['reset', 'HEAD', '--', file]);
+    } else if (status.includes('M') || status.includes('D') || status.includes('T')) {
+      // T routes worktree typechanges (regular file versus symlink) through
+      // restore, which rewrites the worktree entry back to the indexed type,
+      // so AT lands back at a staged addition. Staged-only typechanges ('T ')
+      // land here as a no-op, exactly like 'M ', because the workbench only
+      // offers discard on unstaged changes.
+      await runGit(projectPath, ['restore', '--', file]);
     }
 
     return { success: true, message: `Changes discarded for ${file}` };
@@ -951,8 +898,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
   return {
     getStatus,
-    getDiff,
-    getFileWithDiff,
     initialCommit,
     commit,
     getBranches,

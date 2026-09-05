@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
-import { chmodSync, lstatSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   parseChatRowContent,
@@ -48,7 +48,7 @@ import {
   TranscriptViewNotInitializedError,
 } from './errors.js';
 import { LedgerFailureFences } from './failure-fences.js';
-import { statSizeIfExists } from './file-stat.js';
+import { lstatIfExists, statSizeIfExists } from './file-stat.js';
 import { readProviderActivityWatermark } from './native-activity-query.js';
 import {
   asError,
@@ -343,6 +343,7 @@ export class TranscriptLedgerStore {
     chatId: string,
     viewId: TranscriptViewId,
     afterOrdinal: number,
+    kind?: LedgerRow['kind'],
   ): readonly LedgerRow[] {
     if (!Number.isSafeInteger(afterOrdinal) || afterOrdinal < 0) {
       throw new TypeError('Transcript replay cursor must be a non-negative integer');
@@ -353,12 +354,13 @@ export class TranscriptLedgerStore {
       if (afterOrdinal > highWatermark) {
         throw new TypeError('Transcript replay cursor is ahead of the current view');
       }
-      return entry.db.query<StoredLedgerRow, [string, number]>(`
+      const params: (string | number)[] = kind === undefined ? [viewId, afterOrdinal] : [viewId, afterOrdinal, kind];
+      return entry.db.query<StoredLedgerRow, (string | number)[]>(`
         SELECT view_id, ordinal, kind, at, client_message_id, payload_json
         FROM transcript_rows
-        WHERE view_id = ? AND ordinal > ?
+        WHERE view_id = ? AND ordinal > ?${kind === undefined ? '' : ' AND kind = ?'}
         ORDER BY ordinal
-      `).all(viewId, afterOrdinal).map(decodeStoredLedgerRow);
+      `).all(...params).map(decodeStoredLedgerRow);
     });
   }
 
@@ -596,7 +598,8 @@ export class TranscriptLedgerStore {
     for (const name of readdirSync(this.#rootDirectory)) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
-      const stats = lstatSync(directory);
+      const stats = lstatIfExists(directory);
+      if (!stats) continue;
       const isDirectory = stats.isDirectory();
       if (!isDirectory && !stats.isSymbolicLink()) continue;
       if (isDirectory) {
@@ -703,7 +706,8 @@ export class TranscriptLedgerStore {
       const oldest = this.#connections.entries().next().value as [string, ConnectionEntry] | undefined;
       if (!oldest) break;
       this.#connections.delete(oldest[0]);
-      this.#closeConnectionEntry(oldest[1]);
+      const failure = this.#closeConnectionEntry(oldest[1]);
+      if (failure) logger.error('Ledger connection eviction failed; chat is fenced', oldest[0], failure);
     }
     return opened;
   }

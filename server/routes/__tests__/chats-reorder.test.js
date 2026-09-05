@@ -26,6 +26,7 @@ import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
   getChat: mock(() => null),
+  hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
   updateChat: mock(() => undefined),
   removeChat: mock(() => undefined),

@@ -180,9 +180,11 @@ export type ResolveNativeSession = (
 
 export interface IChatRegistry {
   init(): Promise<ChatRegistrySnapshot>;
-  getRegistry(): ChatRegistrySnapshot;
   reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean>;
   listAllChats(): Record<string, ChatRegistryEntry>;
+  // Ids are unique by construction (object keys).
+  listChatIds(): string[];
+  hasChat(id: string): boolean;
   getChat(id: string): ChatRegistryEntry | null;
   addChat(entry: NewChatRegistryEntry): boolean;
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
@@ -532,7 +534,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     }
   }
 
-  getRegistry(): ChatRegistrySnapshot {
+  // Hands out the live snapshot; private because it bypasses the clone-on-
+  // hand-out protection every public accessor upholds.
+  private getRegistry(): ChatRegistrySnapshot {
     if (!this.#registry) {
       throw new Error('Registry cache not initialized. Call init() during startup.');
     }
@@ -566,7 +570,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       }
       if (isDeepStrictEqual(resolved, session.nativeSession)) continue;
 
-      session.nativeSession = resolved;
+      // Resolver-supplied refs are plugin-owned; clone on ingest so the
+      // plugin cannot mutate registry state through the object it returned.
+      session.nativeSession = structuredClone(resolved);
       this.#advanceChatMutationRevision(chatId);
       dirty = true;
     }
@@ -588,9 +594,25 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     );
   }
 
+  // Ids-only read for callers that never touch entry data; avoids the
+  // per-entry cloning cost of listAllChats on hot paths. Ids are unique
+  // by construction (object keys).
+  listChatIds(): string[] {
+    return Object.keys(this.getRegistry().sessions);
+  }
+
+  // Existence check that skips the per-entry clone getChat pays. Own-keys
+  // only: sessions is a plain object, so a bare lookup would report
+  // Object.prototype names like "toString" as existing chats.
+  hasChat(id: string): boolean {
+    return Object.hasOwn(this.getRegistry().sessions, id);
+  }
+
   getChat(id: string): ChatRegistryEntry | null {
     const registry = this.getRegistry();
-    const entry = registry.sessions[id];
+    // Own-keys only, matching hasChat: a bare lookup hands back
+    // Object.prototype for names like "toString" and the clone throws.
+    const entry = Object.hasOwn(registry.sessions, id) ? registry.sessions[id] : null;
     return entry ? cloneRegistryEntry(entry) : null;
   }
 
@@ -645,11 +667,11 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     });
     registry.sessions[chatId] = {
       agentId,
-      nativeSession,
+      nativeSession: nativeSession ? structuredClone(nativeSession) : null,
       agentOwnershipEpoch,
-      agentSettingsById,
+      agentSettingsById: structuredClone(agentSettingsById),
       projectPath,
-      tags,
+      tags: [...tags],
       agentSessionId,
       nextForkOrdinal: normalizeNextForkOrdinal(nextForkOrdinal) ?? 1,
       model,
@@ -696,6 +718,17 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     if ('agentSettingsById' in normalizedPatch && !parseAgentSettingsById(normalizedPatch.agentSettingsById)) {
       throw new Error(`Invalid agent settings for ${id}`);
     }
+    // Caller-owned collections are cloned before entering the registry so
+    // later caller mutations cannot alias registry state.
+    if (normalizedPatch.agentSettingsById) {
+      normalizedPatch.agentSettingsById = structuredClone(normalizedPatch.agentSettingsById);
+    }
+    if (normalizedPatch.tags) {
+      normalizedPatch.tags = [...normalizedPatch.tags];
+    }
+    if (normalizedPatch.nativeSession) {
+      normalizedPatch.nativeSession = structuredClone(normalizedPatch.nativeSession);
+    }
     if ('carryOverSegments' in normalizedPatch) {
       normalizedPatch.carryOverSegments = parseCarryOverSegmentRefs(normalizedPatch.carryOverSegments);
     }
@@ -737,7 +770,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         this.#emitChatTagsUpdated(id);
       }
     };
-    const resolved = { id, ...existing };
+    const resolved = { id, ...cloneRegistryEntry(existing) };
     if (options.flush) {
       const restoreIfCurrent = (): void => {
         if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
@@ -792,7 +825,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       if (update.nativeSession?.ownerId !== existing.agentId && update.nativeSession !== null) {
         throw new Error(`Native session owner mismatch for ${id}`);
       }
-      existing.nativeSession = update.nativeSession ?? null;
+      // Update-supplied refs stay reachable to the caller (the command layer
+      // retains one for its published session fact); clone on ingest to match
+      // addChat/updateChat aliasing protection.
+      existing.nativeSession = update.nativeSession
+        ? structuredClone(update.nativeSession)
+        : null;
     }
     const mutationRevision = this.#advanceChatMutationRevision(id);
     const restoreIfCurrent = (): void => {
@@ -934,6 +972,14 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
   return {
     ...entry,
-    carryOverSegments: entry.carryOverSegments,
+    // Frozen fields (parentChat, carryOverSegments) are safe to share; copy the mutable ones
+    // so callers cannot mutate registry state through a handed-out entry.
+    agentSettingsById: structuredClone(entry.agentSettingsById),
+    tags: [...entry.tags],
+    nativeSession: entry.nativeSession ? structuredClone(entry.nativeSession) : null,
+    nativeSeedReceipt: entry.nativeSeedReceipt ? { ...entry.nativeSeedReceipt } : null,
+    carryOverMigrationQuarantine: entry.carryOverMigrationQuarantine
+      ? { ...entry.carryOverMigrationQuarantine }
+      : null,
   };
 }

@@ -293,7 +293,7 @@ export async function startServer(): Promise<void> {
       path.join(workspaceDir, 'transcript-ledgers'),
     );
     transcriptStore.removeUnregisteredChatDirectories(
-      new Set(Object.keys(chatRegistry.listAllChats())),
+      new Set(chatRegistry.listChatIds()),
     );
     const transcriptLedger = new TranscriptLedgerService(transcriptStore, {
       serverInstanceId: runtimeState.identity.instanceId,
@@ -462,8 +462,8 @@ export async function startServer(): Promise<void> {
       service: transcriptSearchService,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
-      listChatIds: () => Object.keys(chatRegistry.listAllChats()),
-      hasChat: (chatId) => chatRegistry.getChat(chatId) !== null,
+      listChatIds: () => chatRegistry.listChatIds(),
+      hasChat: (chatId) => chatRegistry.hasChat(chatId),
       logger,
     });
     try {
@@ -519,7 +519,7 @@ export async function startServer(): Promise<void> {
       agentRegistry,
       agentRegistry,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
-      (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      (chatId) => chatRegistry.hasChat(chatId),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
       agentCommands.appendControlReceipt,

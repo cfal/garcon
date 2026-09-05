@@ -45,6 +45,7 @@ function createFixture(overrides = {}) {
   };
   const chatRegistry = {
     getChat: mock(() => chatPresent ? { chatId: 'chat-1' } : null),
+    hasChat: mock(() => chatPresent),
     onChatAdded: mock((callback) => { chats.added = callback; }),
     onChatRemoved: mock((callback) => { chats.removed = callback; }),
     onChatReadUpdated: mock((callback) => { chats.read = callback; }),

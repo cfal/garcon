@@ -328,7 +328,7 @@ export function wireServerEvents({
     await markPublicTurnTerminal(chatId, options);
   }
 
-  const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
+  const chatExists = (chatId: string) => chatRegistry.hasChat(chatId);
 
   const transcriptFanout = createTranscriptEventFanout({
     chatExists,
