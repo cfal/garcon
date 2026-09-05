@@ -178,12 +178,12 @@
 								checked={ls.sidebarChatItemLayout === option.value}
 								onchange={() => wizard.selectChatItemLayout(option.value)}
 							/>
-							<span class="flex w-full flex-1 items-center">
+							<div class="flex w-full flex-1 items-center">
 								<OnboardingChatLayoutPreview
 									layout={option.value}
 									isSelected={ls.sidebarChatItemLayout === option.value}
 								/>
-							</span>
+							</div>
 							<span class="flex flex-col items-center gap-1">
 								<span class="text-sm font-medium text-foreground">{option.label()}</span>
 								<span class="text-xs text-muted-foreground">{option.hint()}</span>

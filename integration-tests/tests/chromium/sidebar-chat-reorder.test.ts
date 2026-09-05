@@ -117,8 +117,7 @@ async function sortFromChatMenu(
   await row.hover();
   await row.locator('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]').click();
   const reorderChats = fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true });
-  await reorderChats.focus();
-  await reorderChats.press('ArrowRight');
+  await reorderChats.click();
   const preset = fixture.page.getByRole('menuitem', { name: label, exact: true });
   await preset.waitFor();
   const responsePromise = fixture.page.waitForResponse(
