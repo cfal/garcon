@@ -5,26 +5,31 @@ import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
 import PreamblesSectionTestHost from './PreamblesSectionTestHost.svelte';
 
-function preamble(id: string, title: string, content: string): Preamble {
+function globalPreamble(id: string, title: string, content: string): Preamble {
 	return {
 		id,
 		enabled: true,
 		title,
 		content,
-		scope: id === 'path'
-			? {
-					type: 'project-paths',
-					rules: [{ projectPath: '/workspace/project', includeNested: true }],
-				}
-			: { type: 'global' },
+		scope: { type: 'global' },
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
 	};
 }
 
+function projectPreamble(id: string, title: string, content: string): Preamble {
+	return {
+		...globalPreamble(id, title, content),
+		scope: {
+			type: 'project-paths',
+			rules: [{ projectPath: '/workspace/project', includeNested: true }],
+		},
+	};
+}
+
 describe('PreamblesSection', () => {
 	it('renders singular and plural project path counts', () => {
-		const single = preamble('path', 'Single path', 'Single path body.');
+		const single = projectPreamble('single-path', 'Single path', 'Single path body.');
 		const multiple: Preamble = {
 			...single,
 			id: 'paths',
@@ -49,8 +54,8 @@ describe('PreamblesSection', () => {
 		const snapshot: PreamblesSnapshot = {
 			revision: 1,
 			preambles: [
-				preamble('global', 'Global conventions', 'Use the shared defaults.'),
-				preamble('path', 'Project conventions', 'Run project checks.'),
+				globalPreamble('global', 'Global conventions', 'Use the shared defaults.'),
+				projectPreamble('path', 'Project conventions', 'Run project checks.'),
 			],
 		};
 		render(PreamblesSectionTestHost, { snapshot });
@@ -70,7 +75,7 @@ describe('PreamblesSection', () => {
 	});
 
 	it('disables a preamble directly from its catalog row', async () => {
-		const enabled = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		const enabled = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
 		const disabled = { ...enabled, enabled: false };
 		const update = vi.fn().mockResolvedValue({
 			success: true,
@@ -98,7 +103,7 @@ describe('PreamblesSection', () => {
 	});
 
 	it('marks an open edit stale when the catalog revision changes', async () => {
-		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
 		let store!: PreamblesStore;
 		render(PreamblesSectionTestHost, {
 			snapshot: { revision: 1, preambles: [original] },
@@ -121,7 +126,7 @@ describe('PreamblesSection', () => {
 	});
 
 	it('shows the chat ID placeholder legend under the preamble composer', async () => {
-		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
 		render(PreamblesSectionTestHost, {
 			snapshot: { revision: 1, preambles: [original] },
 		});
@@ -136,7 +141,7 @@ describe('PreamblesSection', () => {
 	});
 
 	it('keeps an edit stale after a revision-conflict refresh', async () => {
-		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
 		const update = vi.fn().mockRejectedValue(conflict);
 		const get = vi.fn().mockResolvedValue({
@@ -165,7 +170,7 @@ describe('PreamblesSection', () => {
 	});
 
 	it('stale-locks an edit when the revision-conflict refresh fails', async () => {
-		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
 		const update = vi.fn().mockRejectedValue(conflict);
 		const get = vi.fn().mockRejectedValue(new Error('refresh unavailable'));
@@ -196,8 +201,8 @@ describe('PreamblesSection', () => {
 			success: true;
 			snapshot: PreamblesSnapshot;
 		}>((resolve) => { resolveReorder = resolve; }));
-		const first = preamble('first', 'First conventions', 'First body.');
-		const second = preamble('second', 'Second conventions', 'Second body.');
+		const first = globalPreamble('first', 'First conventions', 'First body.');
+		const second = globalPreamble('second', 'Second conventions', 'Second body.');
 		render(PreamblesSectionTestHost, {
 			snapshot: { revision: 1, preambles: [first, second] },
 			deps: { reorder },
@@ -221,7 +226,7 @@ describe('PreamblesSection', () => {
 	});
 
 	it('associates scope errors with each invalid project path input', async () => {
-		const scoped = preamble('path', 'Project conventions', 'Project body.');
+		const scoped = projectPreamble('path', 'Project conventions', 'Project body.');
 		render(PreamblesSectionTestHost, {
 			snapshot: { revision: 1, preambles: [scoped] },
 		});
@@ -237,7 +242,7 @@ describe('PreamblesSection', () => {
 
 	it('associates mixed blank and duplicate paths with their specific errors', async () => {
 		const scoped = {
-			...preamble('path', 'Project conventions', 'Project body.'),
+			...projectPreamble('path', 'Project conventions', 'Project body.'),
 			scope: {
 				type: 'project-paths' as const,
 				rules: [

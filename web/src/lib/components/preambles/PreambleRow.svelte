@@ -33,6 +33,11 @@
 		onMoveDown,
 		onEnabledChange,
 	}: Props = $props();
+
+	function projectPathBadgeLabel(count: number): string {
+		if (count === 1) return m.preambles_project_path_badge_singular();
+		return m.preambles_project_path_badge_plural({ count });
+	}
 </script>
 
 <article
@@ -52,9 +57,7 @@
 					</span>
 				{:else}
 					<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-						{preamble.scope.rules.length === 1
-							? m.preambles_project_path_badge_singular()
-							: m.preambles_project_path_badge_plural({ count: preamble.scope.rules.length })}
+						{projectPathBadgeLabel(preamble.scope.rules.length)}
 					</span>
 				{/if}
 				{#if !preamble.enabled}
