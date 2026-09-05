@@ -188,7 +188,7 @@ export class QueueDrainer {
     try {
       return await Promise.race([
         this.deps.turnRunner.runAgentTurn(chatId, entry.content, options)
-          .then(() => ({ kind: 'completed' as const })),
+          .then<ProviderDispatchResult>(() => ({ kind: 'completed' }), (error) => ({ kind: 'failed', error })),
         attempt.waitUntilSettled().then((): ProviderDispatchResult => ({ kind: 'retired' })),
       ]);
     } catch (error) {
