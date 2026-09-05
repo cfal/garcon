@@ -4,6 +4,7 @@ import {
   createNativeSeedReceipt,
   renderCarriedContext,
 } from '../../../common/transcript-seed.ts';
+import { createPreamblePrefix } from '../../../common/preamble-prefix.ts';
 import { importNativeHistoryDrafts } from '../native-history-seed.ts';
 
 const AT = '2026-08-15T00:00:00.000Z';
@@ -76,6 +77,133 @@ describe('native history ledger seed', () => {
       retryable: false,
     });
   });
+
+  it('strips carried context before reconstructing an exact preamble application', async () => {
+    const carriedPrefix = carriedContextPrefix();
+    const receipt = createNativeSeedReceipt({
+      agentSessionId: SESSION_ID,
+      placement: 'user-prefix',
+      prefix: carriedPrefix,
+    });
+    const application = createPreamblePrefix({
+      contents: ['private preamble body'],
+    });
+    const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
+
+    const drafts = await importNativeHistoryDrafts(seedInput({
+      receipt,
+      preambleEvidence: [{
+        receipt: application.receipt,
+        boundary,
+        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        requiresNativeOccurrence: false,
+      }],
+      async *load() {
+        yield [{
+          message: new UserMessage(
+            AT,
+            `${carriedPrefix}${application.prefix}visible prompt`,
+          ),
+          providerMeta: { nativeItemId: 'prefixed-input' },
+        }];
+      },
+    }));
+
+    expect(drafts).toMatchObject([
+      {
+        kind: 'notice',
+        message: 'Preambles applied',
+        detail: {
+          type: 'preamble-application',
+          preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        },
+      },
+      {
+        kind: 'user-input',
+        detail: {
+          message: { content: 'visible prompt' },
+          preambleBoundary: boundary,
+          preamblePrefixReceipt: application.receipt,
+        },
+        providerMeta: { nativeItemId: 'prefixed-input' },
+      },
+    ]);
+    expect(JSON.stringify(drafts)).not.toContain('private preamble body');
+  });
+
+  it('allows receipt-bearing ledger evidence absent from native history after a pre-dispatch crash', async () => {
+    const application = createPreamblePrefix({
+      contents: ['private preamble body'],
+    });
+    const preambleEvidence = [{
+      receipt: application.receipt,
+      boundary: { kind: 'fork', ownershipEpoch: 'ownership-1' },
+      preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+      requiresNativeOccurrence: false,
+    }];
+
+    await expect(importNativeHistoryDrafts(seedInput({
+      receipt: null,
+      preambleEvidence,
+      async *load() {
+        yield [{ message: new UserMessage(AT, 'visible prompt') }];
+      },
+    }))).resolves.toMatchObject([{
+      kind: 'user-input',
+      detail: {
+        message: { content: 'visible prompt' },
+        preambleBoundary: null,
+        preamblePrefixReceipt: null,
+      },
+    }]);
+  });
+
+  it('retries when native history omits a completed preamble application turn', async () => {
+    const application = createPreamblePrefix({
+      contents: ['private preamble body'],
+    });
+
+    await expect(importNativeHistoryDrafts(seedInput({
+      receipt: null,
+      preambleEvidence: [{
+        receipt: application.receipt,
+        boundary: { kind: 'new-chat', ownershipEpoch: 'ownership-1' },
+        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        requiresNativeOccurrence: true,
+      }],
+      async *load() {
+        yield [{ message: new UserMessage(AT, 'earlier visible prompt') }];
+      },
+    }))).rejects.toMatchObject({
+      code: 'HISTORY_LOAD_FAILED',
+      retryable: true,
+    });
+  });
+
+  it('fails closed when a receipt-bearing native prefix was changed', async () => {
+    const application = createPreamblePrefix({
+      contents: ['private preamble body'],
+    });
+    const preambleEvidence = [{
+      receipt: application.receipt,
+      boundary: { kind: 'fork', ownershipEpoch: 'ownership-1' },
+      preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+      requiresNativeOccurrence: false,
+    }];
+
+    await expect(importNativeHistoryDrafts(seedInput({
+      receipt: null,
+      preambleEvidence,
+      async *load() {
+        yield [{
+          message: new UserMessage(
+            AT,
+            `${application.prefix.replace('private preamble body', 'changed preamble body')}visible prompt`,
+          ),
+        }];
+      },
+    }))).rejects.toMatchObject({ code: 'PREAMBLE_ENVELOPE_MISMATCH' });
+  });
 });
 
 function carriedContextPrefix() {
@@ -84,7 +212,7 @@ function carriedContextPrefix() {
   return context.prefix;
 }
 
-function seedInput({ receipt, load }) {
+function seedInput({ receipt, load, preambleEvidence = [] }) {
   const settings = { ownerId: 'test', schemaVersion: 1, values: {} };
   return {
     chatId: 'chat-1',
@@ -111,6 +239,7 @@ function seedInput({ receipt, load }) {
       nativeSeedReceipt: receipt,
     },
     carryOverRevision: 'carryover-1',
+    preambleEvidence,
     signal: new AbortController().signal,
     now: () => AT,
   };

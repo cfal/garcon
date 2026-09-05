@@ -17,6 +17,7 @@ describe('sidebar mark all as read menu', () => {
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 

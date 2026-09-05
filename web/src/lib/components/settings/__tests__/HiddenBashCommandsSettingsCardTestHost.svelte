@@ -1,11 +1,9 @@
 <script lang="ts">
 	import HiddenBashCommandsSettingsCard from '../HiddenBashCommandsSettingsCard.svelte';
-	import { setLocalSettings } from '$lib/context';
-	import { getTestLocalSettingsStore } from './local-settings-test-context';
-	import { onDestroy } from 'svelte';
+	import { setRemoteSettings } from '$lib/context';
+	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
 
-	setLocalSettings(getTestLocalSettingsStore());
-	onDestroy(() => getTestLocalSettingsStore().destroy());
+	setRemoteSettings(getTestRemoteSettingsStore());
 </script>
 
 <HiddenBashCommandsSettingsCard />

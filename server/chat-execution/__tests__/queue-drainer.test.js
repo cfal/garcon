@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { QueueDrainer } from '../queue-drainer.ts';
+import { DomainError } from '../../lib/domain-error.ts';
 
 const TS = '2026-08-15T00:00:00.000Z';
 
@@ -106,5 +107,149 @@ describe('QueueDrainer', () => {
     expect(settle).toHaveBeenCalledWith('not-committed');
     expect(retireAttempt).toHaveBeenCalledOnce();
     expect(runAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it('removes a blocked preamble slash command and drains the next queued turn', async () => {
+    const entries = [
+      {
+        id: 'entry-1',
+        content: '/provider-command',
+        revision: 1,
+        createdAt: TS,
+        updatedAt: TS,
+        status: 'queued',
+        submission: null,
+      },
+      {
+        id: 'entry-2',
+        content: 'regular input',
+        revision: 1,
+        createdAt: TS,
+        updatedAt: TS,
+        status: 'queued',
+        submission: null,
+      },
+    ];
+    const publishTurnFailed = mock(() => undefined);
+    const runAgentTurn = mock(async () => undefined);
+    const registerQueued = mock((_chatId, content) => {
+      if (content.startsWith('/')) {
+        throw new DomainError(
+          'PREAMBLE_SLASH_COMMAND_BLOCKED',
+          'Matching preambles haven’t been sent yet.',
+          422,
+        );
+      }
+      return true;
+    });
+    const drainer = new QueueDrainer({
+      ownership: {
+        hasSuppression: () => false,
+        hasDirect: () => false,
+        attempt: () => null,
+        installAttempt: () => ({ signal: new AbortController().signal }),
+        beginFinalization: () => ({ settle: mock(() => undefined) }),
+        setActiveDrainEntry: mock(() => undefined),
+      },
+      controls: {
+        dequeueNextTurn: mock(async (_chatId, admit) => {
+          const entry = entries.shift();
+          if (!entry) return null;
+          const input = { kind: 'user', entry };
+          return { input, control: {}, inserted: admit(input) };
+        }),
+        read: mock(async () => ({
+          serverInstanceId: 'server-1',
+          entries: [],
+          controlEntries: [],
+          recentlyDispatched: [],
+          appliedCommands: [],
+          pause: null,
+          reorderRevision: 0,
+          version: 1,
+          updatedAt: TS,
+        })),
+      },
+      turnRunner: {
+        isChatRunning: () => false,
+        runAgentTurn,
+      },
+      getDrainOptions: () => ({}),
+      callbacks: {
+        isShuttingDown: () => false,
+        registerQueued,
+        appendControlReceipt: mock(() => undefined),
+        discardPreparedInput: mock(() => undefined),
+        publishIdle: mock(() => undefined),
+        publishTurnFailed,
+        retireAttempt: mock(() => undefined),
+      },
+    });
+
+    await drainer.run('chat-1');
+
+    expect(entries).toHaveLength(0);
+    expect(publishTurnFailed).toHaveBeenCalledTimes(1);
+    expect(publishTurnFailed.mock.calls[0]?.[1]).toContain('preambles');
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
+    expect(runAgentTurn.mock.calls[0]?.[1]).toBe('regular input');
+  });
+
+  it('observes a provider rejection after the execution attempt settles first', async () => {
+    const entry = {
+      id: 'entry-1',
+      content: 'queued input',
+      revision: 1,
+      createdAt: TS,
+      updatedAt: TS,
+      status: 'queued',
+      submission: null,
+    };
+    let rejectProvider;
+    const providerRun = new Promise((_resolve, reject) => {
+      rejectProvider = reject;
+    });
+    let attempt;
+    const publishTurnFailed = mock(() => undefined);
+    const drainer = new QueueDrainer({
+      ownership: {
+        hasSuppression: () => false,
+        hasDirect: () => false,
+        attempt: () => null,
+        installAttempt: (_chatId, installedAttempt) => {
+          attempt = installedAttempt;
+          queueMicrotask(() => installedAttempt.markSettled());
+          return { signal: new AbortController().signal };
+        },
+        beginFinalization: () => ({ settle: mock(() => undefined) }),
+        setActiveDrainEntry: mock(() => undefined),
+      },
+      controls: {
+        dequeueNextTurn: mock(async (_chatId, admit) => {
+          const input = { kind: 'user', entry };
+          return { input, control: {}, inserted: admit(input) };
+        }),
+      },
+      turnRunner: {
+        isChatRunning: () => attempt?.isSettled ?? false,
+        runAgentTurn: mock(() => providerRun),
+      },
+      getDrainOptions: () => ({}),
+      callbacks: {
+        isShuttingDown: () => false,
+        registerQueued: mock(() => true),
+        appendControlReceipt: mock(() => undefined),
+        discardPreparedInput: mock(() => undefined),
+        publishIdle: mock(() => undefined),
+        publishTurnFailed,
+        retireAttempt: mock(() => undefined),
+      },
+    });
+
+    await drainer.run('chat-1');
+    rejectProvider(new Error('late provider rejection'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(publishTurnFailed).not.toHaveBeenCalled();
   });
 });

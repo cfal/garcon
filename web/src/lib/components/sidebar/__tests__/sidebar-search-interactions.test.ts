@@ -68,6 +68,7 @@ describe('sidebar search interactions', () => {
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -473,6 +474,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts,
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -518,7 +520,8 @@ describe('sidebar search interactions', () => {
 		expect(items[13]?.textContent).toContain('Autohide sidebar');
 		expect(items[14]?.textContent).toContain('Dock sidebar on the right');
 		expect(items[15]?.textContent).toContain('Scheduled prompts');
-		expect(items[16]?.textContent).toContain('Settings');
+		expect(items[16]?.textContent).toContain('Preambles');
+		expect(items[17]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(6);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
@@ -549,6 +552,7 @@ describe('sidebar search interactions', () => {
 			onSetChatItemLayout,
 			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -614,7 +618,8 @@ describe('sidebar search interactions', () => {
 		expect(dockOnRight.getAttribute('aria-checked')).toBe('true');
 		expect(items[12]?.textContent).toContain('Dock sidebar on the right');
 		expect(items[13]?.textContent).toContain('Scheduled prompts');
-		expect(items[14]?.textContent).toContain('Settings');
+		expect(items[14]?.textContent).toContain('Preambles');
+		expect(items[15]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 		expect(projectGrouping.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(projectGrouping.className).toContain('pe-8');
@@ -655,6 +660,7 @@ describe('sidebar search interactions', () => {
 			onApplySidebarMenuSearch: vi.fn(),
 			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -686,6 +692,7 @@ describe('sidebar search interactions', () => {
 				onApplySidebarMenuSearch: vi.fn(),
 				onToggleGroupNestedProjectPaths,
 				onShowScheduledPrompts: vi.fn(),
+				onShowPreambles: vi.fn(),
 				onShowSettings: vi.fn(),
 			});
 
@@ -712,6 +719,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onToggleChatListAutohide,
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -739,6 +747,7 @@ describe('sidebar search interactions', () => {
 			onToggleChatListAutohide,
 			onSetDockOnRight,
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -775,6 +784,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -792,6 +802,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -906,6 +917,7 @@ describe('sidebar search interactions', () => {
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 

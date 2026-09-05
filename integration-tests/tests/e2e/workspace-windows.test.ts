@@ -152,7 +152,7 @@ describe('Lightpanda workspace windows', () => {
       await fixture.integration.client.waitForTurnTerminal(chatCId, startedChatC.turnId);
       await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatCId}"]`);
       expect(await app.currentWorkspaceWindowId()).toBe(secondWindowId);
-      await app.clickSidebarChatContaining('workspace-chat-c');
+      await app.clickSidebarChatById(chatCId);
       await app.waitForSelectedChat(chatCId);
       await app.fill(
         `[data-workspace-surface-id="chat-view:${secondWindowId}"] textarea[placeholder="Reply..."]`,
@@ -166,7 +166,7 @@ describe('Lightpanda workspace windows', () => {
           `[data-conversation-panel="chat-view:${secondWindowId}"] textarea`,
         ),
       ).toBeNull();
-      await app.clickSidebarChatContaining('workspace-chat-a');
+      await app.clickSidebarChatById(chatA.id);
       await app.waitForSelectedChat(chatA.id);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,
@@ -217,7 +217,7 @@ describe('Lightpanda workspace windows', () => {
       });
       await fixture.integration.client.waitForTurnTerminal(chatBId, startedChatB.turnId);
       await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatBId}"]`);
-      await app.clickSidebarChatContaining('workspace-chat-move-b');
+      await app.clickSidebarChatById(chatBId);
       await app.waitForSelectedChat(chatBId);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,
@@ -235,7 +235,7 @@ describe('Lightpanda workspace windows', () => {
       });
 
       await app.focusWorkspaceWindow(secondChatWindowId);
-      await app.clickSidebarChatContaining('workspace-chat-move-b');
+      await app.clickSidebarChatById(chatBId);
       await app.waitForSelectedChat(chatBId);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,

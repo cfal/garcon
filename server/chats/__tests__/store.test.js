@@ -48,6 +48,7 @@ function persistedEntry(overrides = {}) {
     carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
     parentChat: null,
     ...overrides,
   };
@@ -736,6 +737,12 @@ describe('ChatRegistry', () => {
   it('rejects malformed ownership, settings, and native-session records', async () => {
     for (const entry of [
       persistedEntry({ agentOwnershipEpoch: '' }),
+      persistedEntry({
+        pendingPreambleBoundary: {
+          kind: 'new-chat',
+          ownershipEpoch: 'stale-epoch',
+        },
+      }),
       persistedEntry({ agentSettingsById: null }),
       persistedEntry({ nativeSession: nativeSession('other') }),
     ]) {

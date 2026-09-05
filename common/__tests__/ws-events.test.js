@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ChatOperationalNoticeMessage,
+  PreamblesInvalidatedMessage,
   parseServerWsMessage,
   TranscriptSearchStatusMessage,
 } from '../ws-events.ts';
+
+describe('parseServerWsMessage preambles-invalidated', () => {
+  it('parses only the closed invalidation reasons', () => {
+    expect(parseServerWsMessage({
+      type: 'preambles-invalidated',
+      reason: 'reordered',
+    })).toEqual(new PreamblesInvalidatedMessage('reordered'));
+    expect(parseServerWsMessage({
+      type: 'preambles-invalidated',
+      reason: 'applied',
+    })).toBeNull();
+  });
+});
 
 describe('parseServerWsMessage chat-operational-notice', () => {
   it('parses a complete notice payload', () => {

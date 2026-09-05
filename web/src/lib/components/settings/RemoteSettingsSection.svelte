@@ -35,15 +35,13 @@
 <div class="space-y-3">
 	<GitHubCliSettingsCard />
 
-	<!-- Keeps this browser-local preference outside the remote snapshot gate
-	     so it remains usable while remote settings load or fail. -->
-	<HiddenBashCommandsSettingsCard />
-
 	{#if !remoteSettings.hasSnapshot}
 		<div class="py-12 flex items-center justify-center text-muted-foreground">
 			{m.status_loading()}
 		</div>
 	{:else}
+		<HiddenBashCommandsSettingsCard />
+
 		{#if saveError}
 			<div
 				class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"

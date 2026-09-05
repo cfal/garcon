@@ -7,6 +7,8 @@ import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
+import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture.js';
 
 async function showFeedScrollbar(container: HTMLElement): Promise<{
 	scrollbar: HTMLElement;
@@ -493,5 +495,37 @@ describe('ConversationFeed', () => {
 		} finally {
 			restoreResizeObserver();
 		}
+	});
+
+	it('updates Bash filtering from remote settings snapshots', async () => {
+		const remoteSettingsStore = new RemoteSettingsStore();
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'bash-filter',
+			remoteSettingsStore,
+		});
+
+		await waitFor(() => {
+			expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(1);
+		});
+
+		remoteSettingsStore.applySnapshot(
+			makeRemoteSettingsSnapshot({
+				version: 1,
+				ui: { hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }] },
+			}),
+		);
+		await waitFor(() => {
+			expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0);
+		});
+
+		remoteSettingsStore.applySnapshot(
+			makeRemoteSettingsSnapshot({
+				version: 2,
+				ui: { hiddenBashCommandPatterns: [] },
+			}),
+		);
+		await waitFor(() => {
+			expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(1);
+		});
 	});
 });

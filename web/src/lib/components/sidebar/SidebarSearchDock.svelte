@@ -34,6 +34,7 @@
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
 		onShowScheduledPrompts: () => void;
+		onShowPreambles: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -63,6 +64,7 @@
 		onApplyPillSearch,
 		onClearActiveQuery,
 		onShowScheduledPrompts,
+		onShowPreambles,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -96,6 +98,7 @@
 		{onSetDockOnRight}
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}
+		{onShowPreambles}
 		{onShowSettings}
 	/>
 	<SidebarSearchContext

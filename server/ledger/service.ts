@@ -29,12 +29,14 @@ import type {
   LedgerRowDraft,
   LedgerRunEndedRow,
   LedgerSessionRow,
+  LedgerUserInputDetail,
   TranscriptPage,
   TranscriptNativeActivityState,
   TranscriptView,
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
+import type { PendingPreambleBoundary, Preamble } from '../../common/preambles.js';
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
 import {
   canonicalizeGarconProducerRows,
@@ -260,6 +262,21 @@ export class TranscriptLedgerService {
     return this.#appendRunEnd(chatId, runId, 'failed', 'core', error);
   }
 
+  hasMatchingInputSubmission(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly message: UserMessage;
+    readonly attachments: readonly AgentAttachment[];
+    readonly clientMessageId: string | null;
+    readonly steer: boolean;
+  }): boolean {
+    return this.#store.hasMatchingInputSubmission(
+      input.chatId,
+      input.viewId,
+      inputDetail(input),
+    );
+  }
+
   appendInputAndCompose(input: {
     readonly chatId: string;
     readonly viewId: TranscriptViewId;
@@ -268,32 +285,34 @@ export class TranscriptLedgerService {
     readonly clientMessageId: string | null;
     readonly steer: boolean;
     readonly excludedOrdinals?: ReadonlySet<number>;
+    readonly preambleBoundary?: PendingPreambleBoundary | null;
+    readonly preambles?: readonly Preamble[];
   }): InputComposition {
     const composition = this.#store.appendInputAndCompose(input.chatId, {
       viewId: input.viewId,
       at: input.message.timestamp,
-      detail: {
-        clientMessageId: input.clientMessageId,
-        message: input.message,
-        attachments: input.attachments,
-        steer: input.steer,
-      },
+      detail: inputDetail(input),
       excludedOrdinals: input.excludedOrdinals,
+      preambleBoundary: input.preambleBoundary ?? null,
+      preambles: input.preambles ?? [],
     });
     if (composition.inserted) {
       this.#notify({
         type: 'rows',
         chatId: input.chatId,
         viewId: input.viewId,
-        rows: [composition.input],
+        rows: composition.committedRows,
       });
     }
     if (input.clientMessageId) {
       const key = inputKey(input.chatId, input.clientMessageId);
       if (composition.inserted) this.#preparedInputs.set(key, composition);
-      else this.#preparedInputs.delete(key);
     }
     return composition;
+  }
+
+  hasPreambleBoundaryProof(chatId: string, boundary: PendingPreambleBoundary): boolean {
+    return this.#store.hasPreambleBoundaryProof(chatId, boundary);
   }
 
   takePreparedInput(chatId: string, clientMessageId: string | null | undefined): InputComposition | null {
@@ -884,6 +903,22 @@ function normalizeNotice(input: TranscriptNoticeInput): NormalizedTranscriptNoti
 
 function inputKey(chatId: string, clientMessageId: string): string {
   return `${chatId}\u0000${clientMessageId}`;
+}
+
+function inputDetail(input: {
+  readonly message: UserMessage;
+  readonly attachments: readonly AgentAttachment[];
+  readonly clientMessageId: string | null;
+  readonly steer: boolean;
+}): LedgerUserInputDetail {
+  return {
+    clientMessageId: input.clientMessageId,
+    message: input.message,
+    attachments: input.attachments,
+    steer: input.steer,
+    preambleBoundary: null,
+    preamblePrefixReceipt: null,
+  };
 }
 
 function timestampAtOrAfter(candidate: string, floor: string | null): string {
