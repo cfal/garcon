@@ -158,7 +158,9 @@ function diffArgs(
     '--find-renames',
     '--submodule=short',
     ...(cached ? ['--cached'] : []),
-    ...(fallback && files[0]?.originalPath ? ['--diff-filter=RC'] : []),
+    ...(fallback && files[0] && expectedRenameSource(document, files[0])
+      ? ['--diff-filter=RC']
+      : []),
     ...endpoints,
     '--',
     ...exactGitPathspecs(paths),
