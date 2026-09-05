@@ -562,9 +562,7 @@
 										fileLinkBasePath={projectBasePath}
 										onLinkNavigate={handleLinkNavigate}
 										{resolveChatReference}
-										chatReferencePolicy={userMessagePresentation
-											? 'explicit'
-											: 'explicit-and-bare'}
+										chatReferencePolicy={userMessagePresentation ? 'explicit' : 'explicit-and-bare'}
 										{acquireTransientActivity}
 									/>
 								</div>

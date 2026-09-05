@@ -143,11 +143,7 @@ describe('PermissionRequestRow', () => {
 		const request = new PermissionRequestMessage(
 			TS,
 			'incarnation-plan',
-			new ExitPlanModeToolUseMessage(
-				TS,
-				'tool-plan',
-				`${chatId} [Open target](/chat/${chatId})`,
-			),
+			new ExitPlanModeToolUseMessage(TS, 'tool-plan', `${chatId} [Open target](/chat/${chatId})`),
 		);
 		const { container } = render(PermissionRequestRowTestHost, {
 			request,

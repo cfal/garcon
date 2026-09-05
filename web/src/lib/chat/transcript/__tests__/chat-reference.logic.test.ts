@@ -28,7 +28,9 @@ describe('chat references', () => {
 	});
 
 	it('resolves a known target and normalizes its title', () => {
-		expect(resolveChatReferenceTarget(CHAT_ID, '1788592720180600', { title: '  Design  ' })).toEqual({
+		expect(
+			resolveChatReferenceTarget(CHAT_ID, '1788592720180600', { title: '  Design  ' }),
+		).toEqual({
 			title: 'Design',
 			isCurrent: false,
 		});

@@ -54,11 +54,7 @@ describe('CompactionRow', () => {
 	it('resolves explicit chat links without autolinking bare IDs in summaries', () => {
 		const chatId = '1788592720180699';
 		const { container } = render(CompactionRow, {
-			message: new CompactionMessage(
-				TS,
-				'manual',
-				`${chatId} [Open target](/chat/${chatId})`,
-			),
+			message: new CompactionMessage(TS, 'manual', `${chatId} [Open target](/chat/${chatId})`),
 			open: true,
 			resolveChatReference: () => ({ title: 'Target chat', isCurrent: false }),
 		});

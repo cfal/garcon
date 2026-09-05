@@ -178,8 +178,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		{/snippet}
 
 		{#snippet link({ href, title, text, children })}
-			{@const chatId =
-				chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
+			{@const chatId = chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
 			{#if chatId}
 				<ChatReference
 					{chatId}

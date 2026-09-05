@@ -34,18 +34,15 @@ describe('ConversationMessage chat links', () => {
 		});
 
 		expect(
-			screen.getByRole('link', { name: `${TARGET_TITLE} (${TARGET_CHAT_ID})` }).getAttribute(
-				'href',
-			),
+			screen
+				.getByRole('link', { name: `${TARGET_TITLE} (${TARGET_CHAT_ID})` })
+				.getAttribute('href'),
 		).toBe(`/chat/${TARGET_CHAT_ID}`);
 	});
 
 	it('keeps thinking bare IDs inert while resolving explicit chat destinations', () => {
 		const { container } = render(ConversationMessageHost, {
-			message: new ThinkingMessage(
-				AT,
-				`${TARGET_CHAT_ID} [Open target](/chat/${TARGET_CHAT_ID})`,
-			),
+			message: new ThinkingMessage(AT, `${TARGET_CHAT_ID} [Open target](/chat/${TARGET_CHAT_ID})`),
 			chatTitles: { [TARGET_CHAT_ID]: TARGET_TITLE },
 		});
 

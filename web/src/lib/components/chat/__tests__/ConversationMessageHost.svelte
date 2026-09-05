@@ -144,7 +144,11 @@
 {/if}
 
 {#if removableChatId}
-	<button type="button" aria-label="Remove chat" onclick={() => chatSessions.removeChat(removableChatId)}>
+	<button
+		type="button"
+		aria-label="Remove chat"
+		onclick={() => chatSessions.removeChat(removableChatId)}
+	>
 		Remove chat
 	</button>
 {/if}
