@@ -190,9 +190,7 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('Parser cleanup')).toBeTruthy();
 		expect(screen.getByText(`(${TARGET_CHAT_ID})`)).toBeTruthy();
 		expect(
-			screen.getByRole('link', { name: `Parser cleanup (${TARGET_CHAT_ID})` }).getAttribute(
-				'href',
-			),
+			screen.getByRole('link', { name: `Parser cleanup (${TARGET_CHAT_ID})` }).getAttribute('href'),
 		).toBe(`/chat/${TARGET_CHAT_ID}`);
 		expect(screen.getByRole('img', { name: 'Sent' })).toBeTruthy();
 		expect(screen.getByText('focused fix').tagName).toBe('CODE');
@@ -222,9 +220,7 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('Sent Message')).toBeTruthy();
 		const participantLabel = screen.getByText('To');
 		const participantList = participantLabel.nextElementSibling;
-		expect(participantLabel.parentElement?.className).toContain(
-			'grid-cols-[auto_minmax(0,1fr)]',
-		);
+		expect(participantLabel.parentElement?.className).toContain('grid-cols-[auto_minmax(0,1fr)]');
 		expect(participantList?.tagName).toBe('UL');
 		expect(participantList?.querySelectorAll('li')).toHaveLength(2);
 		const deliveredRecipient = screen.getByText('Build verification').closest('li');
@@ -307,9 +303,7 @@ describe('ConversationMessage chat rows', () => {
 			selectedChatId: SOURCE_CHAT_ID,
 		});
 
-		const participant = container.querySelector(
-			`[data-chat-reference-id="${SOURCE_CHAT_ID}"]`,
-		);
+		const participant = container.querySelector(`[data-chat-reference-id="${SOURCE_CHAT_ID}"]`);
 		expect(participant?.tagName).toBe('SPAN');
 		expect(participant?.getAttribute('title')).toBe(`Current chat (${SOURCE_CHAT_ID})`);
 		expect(participant?.className).not.toContain('text-primary');
