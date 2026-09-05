@@ -156,6 +156,7 @@ stream.write(output);
 
   it('reports a caller abort that fires during the lock retry delay as aborted', async () => {
     const controller = new AbortController();
+    const kill = mock(() => undefined);
     let attempts = 0;
     spawnMock.mockImplementation(() => {
       attempts += 1;
@@ -167,7 +168,7 @@ stream.write(output);
         stdout: textStream(''),
         stderr: textStream("fatal: Unable to create '.git/index.lock': File exists."),
         exited: Promise.resolve(128),
-        kill: mock(() => undefined),
+        kill,
       };
     });
 
@@ -175,6 +176,9 @@ stream.write(output);
       runGit('/repo', ['reset', 'HEAD', '--', 'a.txt'], { signal: controller.signal }),
     ).rejects.toMatchObject({ aborted: true });
     expect(attempts).toBe(1);
+    // An untouched kill proves the abort fired after cleanup detached the kill
+    // listener, inside the retry delay rather than during the attempt.
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it('does not translate an aborted repository probe into a repository error', async () => {
