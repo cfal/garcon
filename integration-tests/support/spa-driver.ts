@@ -2,6 +2,7 @@ import type { Page } from 'puppeteer-core';
 import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
+import { assertLightpandaWorkspaceGeometry } from './lightpanda-workspace-geometry.js';
 
 interface ClickOptions {
   contains?: boolean;
@@ -56,6 +57,7 @@ export class SpaDriver {
     });
     if (!response?.ok()) throw new Error(`SPA navigation failed with status ${response?.status()}`);
     await this.#page.waitForFunction(() => document.querySelector('button') !== null);
+    await assertLightpandaWorkspaceGeometry(this.#page);
   }
 
   async startOpenAiDirectChat(
