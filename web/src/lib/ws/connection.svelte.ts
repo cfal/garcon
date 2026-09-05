@@ -720,13 +720,6 @@ export class WsConnection {
 			const episodeId = this.#beginOutage();
 			this.#rejectAllPending();
 			this.#closeExisting({ rejectPending: false });
-			this.#setConnectionStatus({
-				phase: 'reconnecting',
-				reason: 'connect-timeout',
-				episodeId,
-				nextRetryAt: null,
-				lastDisconnectedAt: this.#lastDisconnectedAt,
-			});
 			this.#scheduleReconnect('connect-timeout', episodeId);
 		}, CONNECT_ATTEMPT_TIMEOUT_MS);
 	}

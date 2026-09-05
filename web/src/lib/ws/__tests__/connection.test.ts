@@ -931,4 +931,75 @@ describe('WsConnection', () => {
 		expect(mockSockets).toHaveLength(2);
 		connection.disconnect();
 	});
+
+	it('clears the connect watchdog on disconnect', async () => {
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const connection = new WsConnection();
+		connection.connect('token');
+		await vi.advanceTimersByTimeAsync(5_000);
+
+		connection.disconnect();
+		await vi.advanceTimersByTimeAsync(10_000);
+
+		expect(mockSockets).toHaveLength(1);
+		expect(mockSockets[0].close).toHaveBeenCalledOnce();
+		expect(connection.connectionStatus.phase).toBe('destroyed');
+		expect(warning).not.toHaveBeenCalledWith('WebSocket connection attempt timed out');
+	});
+
+	it('clears the connect watchdog when a replacement attempt starts', async () => {
+		vi.setSystemTime(0);
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const connection = new WsConnection();
+		connection.connect('token');
+		await vi.advanceTimersByTimeAsync(5_000);
+
+		connection.connect('token');
+		const replacement = mockSockets[1];
+		expect(mockSockets[0].close).toHaveBeenCalledOnce();
+
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(replacement.close).not.toHaveBeenCalled();
+		expect(connection.connectionStatus.phase).toBe('connecting');
+
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(replacement.close).toHaveBeenCalledOnce();
+		expect(warning).toHaveBeenCalledWith('WebSocket connection attempt timed out');
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'connect-timeout',
+			episodeId: 0,
+			reconnectAttempt: 1,
+			nextRetryAt: 15_250,
+			lastDisconnectedAt: 15_000,
+		});
+		connection.disconnect();
+	});
+
+	it('preserves the failed phase when a timed-out attempt outlives missing auth', async () => {
+		vi.setSystemTime(0);
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const connection = new WsConnection();
+		connection.connect('token');
+		await vi.advanceTimersByTimeAsync(5_000);
+
+		connection.connect(null);
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'failed',
+			reason: 'missing-auth',
+		});
+
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(mockSockets[0].close).toHaveBeenCalledOnce();
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'failed',
+			reason: 'connect-timeout',
+			episodeId: 0,
+			reconnectAttempt: 1,
+			nextRetryAt: 10_250,
+			lastDisconnectedAt: 5_000,
+		});
+		expect(mockSockets).toHaveLength(1);
+		connection.disconnect();
+	});
 });
