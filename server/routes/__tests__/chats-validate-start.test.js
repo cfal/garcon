@@ -15,6 +15,7 @@ import { createRouteChatListProjector, createRouteCommandLedger, createRouteComm
 
 const registry = {
   getChat: mock(() => undefined),
+  hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
   updateChat: mock(() => undefined),
   removeChat: mock(() => undefined),

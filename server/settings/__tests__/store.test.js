@@ -693,7 +693,6 @@ describe('settings store', () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {}, 'c': {} }),
         listChatIds: () => ['a', 'b', 'c'],
-        hasChat: (chatId) => ['a', 'b', 'c'].includes(chatId),
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -715,7 +714,6 @@ describe('settings store', () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {} }),
         listChatIds: () => ['a'],
-        hasChat: (chatId) => chatId === 'a',
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -736,7 +734,6 @@ describe('settings store', () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {} }),
         listChatIds: () => ['a', 'b'],
-        hasChat: (chatId) => ['a', 'b'].includes(chatId),
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
