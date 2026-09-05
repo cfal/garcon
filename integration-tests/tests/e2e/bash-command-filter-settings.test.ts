@@ -32,6 +32,7 @@ describe('Lightpanda hidden Bash command settings', () => {
 
       await app.open();
       await fixture.waitForSpaWebSocket();
+      await app.setRecentActivitySort(true);
       await openRemoteSettings(app);
       await fixture.page.waitForFunction(
         () => document.querySelector('[data-testid="hidden-bash-command-patterns"]')
@@ -68,6 +69,10 @@ describe('Lightpanda hidden Bash command settings', () => {
         GARCON_AMP_PATTERNS.map((entry) => entry.pattern),
       );
 
+      await app.clickButton('Add preset');
+      await app.waitForMenuItemEnabled('Garcon-amp rules');
+      await app.clickMenuItem('Garcon-amp rules');
+
       const settings = await fixture.integration.client.get<RemoteSettingsSnapshot>(
         '/api/v1/app/settings',
       );
@@ -82,6 +87,7 @@ describe('Lightpanda hidden Bash command settings', () => {
           unknown
         >,
       );
+      expect(localSettings).toHaveProperty('sidebarSortMode', 'recent');
       expect(localSettings).not.toHaveProperty('hiddenBashCommandPatterns');
 
       const connectionCount = await fixture.spaWebSocketConnectionCount();
