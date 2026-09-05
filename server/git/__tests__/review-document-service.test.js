@@ -438,6 +438,76 @@ describe('Git review documents', () => {
     }
   });
 
+  it('loads the staged deletion behind a worktree rename destination', async () => {
+    const projectPath = await createRepository();
+    const service = createService();
+    await git(projectPath, ['config', 'status.renames', 'true']);
+    // DR: the index deletes the destination while the worktree renames the
+    // source onto it, so the staged facet is a plain deletion with no source.
+    await fs.copyFile(path.join(projectPath, 'a.txt'), path.join(projectPath, 'dst.txt'));
+    await git(projectPath, ['add', 'dst.txt']);
+    await git(projectPath, ['commit', '-m', 'add dst']);
+    await git(projectPath, ['rm', '--cached', 'dst.txt']);
+    await git(projectPath, ['add', '-N', 'dst.txt']);
+    await fs.rm(path.join(projectPath, 'a.txt'));
+
+    const snapshot = await service.getWorkbenchSnapshot({
+      projectPath,
+      mode: 'staged',
+      context: 3,
+    });
+    expect(snapshot.status).toBe('ready');
+    if (snapshot.status !== 'ready') return;
+    expect(snapshot.reviewSummary.files).toContainEqual(
+      expect.objectContaining({ path: 'dst.txt', originalPath: 'a.txt', indexStatus: 'D' }),
+    );
+
+    const response = await service.getReviewDocumentFileBodies({
+      projectPath,
+      documentId: snapshot.reviewSummary.documentId,
+      files: ['dst.txt'],
+      purpose: 'visible',
+    });
+
+    expect(response.status).toBe('ready');
+    if (response.status !== 'ready') return;
+    expect(response.files['dst.txt']).toMatchObject({ bodyState: 'loaded' });
+    expect(response.files['dst.txt'].patch).toContain('-initial a.txt');
+  });
+
+  it('loads the worktree deletion of a staged rename destination', async () => {
+    const projectPath = await createRepository();
+    const service = createService();
+    await git(projectPath, ['config', 'status.renames', 'true']);
+    // RD: the rename is staged and the destination is then deleted from the
+    // worktree, so the working facet is a plain deletion with no source.
+    await git(projectPath, ['mv', 'a.txt', 'renamed.txt']);
+    await fs.rm(path.join(projectPath, 'renamed.txt'));
+
+    const snapshot = await service.getWorkbenchSnapshot({
+      projectPath,
+      mode: 'working',
+      context: 3,
+    });
+    expect(snapshot.status).toBe('ready');
+    if (snapshot.status !== 'ready') return;
+    expect(snapshot.reviewSummary.files).toContainEqual(
+      expect.objectContaining({ path: 'renamed.txt', originalPath: 'a.txt', workTreeStatus: 'D' }),
+    );
+
+    const response = await service.getReviewDocumentFileBodies({
+      projectPath,
+      documentId: snapshot.reviewSummary.documentId,
+      files: ['renamed.txt'],
+      purpose: 'visible',
+    });
+
+    expect(response.status).toBe('ready');
+    if (response.status !== 'ready') return;
+    expect(response.files['renamed.txt']).toMatchObject({ bodyState: 'loaded' });
+    expect(response.files['renamed.txt'].patch).toContain('-initial a.txt');
+  });
+
   it('returns a typed response for an expired document', async () => {
     const projectPath = await createRepository();
     const response = await createService().getReviewDocumentFileBodies({
