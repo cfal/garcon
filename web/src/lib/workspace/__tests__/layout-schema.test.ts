@@ -389,7 +389,7 @@ describe('workspace layout V2 schema', () => {
 	});
 
 	it.each(['order', 'mru'] as const)(
-		'accepts the per-window %s budget and rejects the next reference',
+		'accepts the per-window %s budget and truncates the next reference',
 		(field) => {
 			const refs: PersistedWorkspaceSurfaceRef[] = Array.from(
 				{ length: WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW },
@@ -401,7 +401,7 @@ describe('workspace layout V2 schema', () => {
 			const root = {
 				type: 'window' as const,
 				id: 'window-main',
-				order: field === 'order' ? refs : [refs[0]],
+				order: refs,
 				active: refs[0],
 				mru: field === 'mru' ? refs : [],
 			};
@@ -415,10 +415,14 @@ describe('workspace layout V2 schema', () => {
 				...root,
 				[field]: [...refs, { type: 'terminal', terminalId: 'terminal-over-budget' }],
 			};
-			const rejected = parsePersistedWorkspaceLayout(
+			const truncated = parsePersistedWorkspaceLayout(
 				JSON.stringify({ version: 2, root: oversizedRoot, unplacedTerminalIds: [] }),
 			);
-			expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
+			expect(truncated.source).toBe('valid');
+			const restoredWindow = windowNodeById(truncated.snapshot.desktopRoot, 'window-main');
+			expect(restoredWindow?.tabs.order).toHaveLength(WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
+			expect(restoredWindow?.tabs.mru).toHaveLength(WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
+			expect(truncated.snapshot.surfaces['terminal:terminal-over-budget']).toBeUndefined();
 		},
 	);
 
