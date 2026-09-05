@@ -56,6 +56,7 @@ interface TerminalPlacementServiceDeps {
 	resolveMobileReturn(
 		excluding: string | ReadonlySet<string>,
 		snapshot?: WorkspaceLayoutSnapshot,
+		sourceSnapshot?: WorkspaceLayoutSnapshot,
 	): MobileReturnPlan;
 	confirmClose(request: TerminalCloseGuardRequest): Promise<boolean>;
 	clearAttachmentError(surfaceId: string): void;
@@ -374,11 +375,11 @@ export class TerminalPlacementService {
 				if (!latest.surfaces[surfaceId]) return [];
 				const mutations: WorkspaceLayoutMutation[] = [{ type: 'forget-terminal', terminalId }];
 				if (this.deps.isMobile() && latest.mobileActiveSurfaceId === surfaceId) {
-					// Resolve against the post-removal snapshot so window active/MRU
-					// fallbacks no longer name the removed surface.
+					// Uses post-removal availability while retaining the source-window topology.
 					const fallback = this.deps.resolveMobileReturn(
 						surfaceId,
 						reduceWorkspaceLayout(latest, mutations),
+						latest,
 					);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({
@@ -515,11 +516,11 @@ export class TerminalPlacementService {
 				}
 			}
 			if (this.deps.isMobile() && removedSurfaceIds.has(latest.mobileActiveSurfaceId)) {
-				// Resolve against the post-removal snapshot so window active/MRU
-				// fallbacks no longer name a removed surface.
+				// Uses post-removal availability while retaining the source-window topology.
 				const fallback = this.deps.resolveMobileReturn(
 					removedSurfaceIds,
 					reduceWorkspaceLayout(latest, mutations),
+					latest,
 				);
 				mobileFallbackId = fallback.activeId;
 				mutations.push({

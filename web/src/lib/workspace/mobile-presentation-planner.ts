@@ -50,6 +50,7 @@ export class MobilePresentationPlanner {
 	resolveReturn(
 		excluding: string | ReadonlySet<string>,
 		snapshot: WorkspaceLayoutSnapshot,
+		sourceSnapshot: WorkspaceLayoutSnapshot = snapshot,
 	): MobileReturnPlan {
 		const context = this.deps.getContext();
 		const routeIdentity = this.deps.getRouteIdentity();
@@ -74,7 +75,7 @@ export class MobilePresentationPlanner {
 		}
 		const recentSurfaceId = this.#mostRecentSurfaceIds.find(isAvailable);
 		const workspaceWindows = collectWindowNodes(snapshot.desktopRoot);
-		const sourceWindowRecentSurfaceId = workspaceWindows
+		const sourceWindowRecentSurfaceId = collectWindowNodes(sourceSnapshot.desktopRoot)
 			.filter((workspaceWindow) => workspaceWindow.tabs.order.some(isExcluded))
 			.flatMap((workspaceWindow) => workspaceWindow.tabs.mru)
 			.find(isAvailable);

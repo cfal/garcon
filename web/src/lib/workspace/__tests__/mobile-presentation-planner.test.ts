@@ -140,6 +140,38 @@ describe('MobilePresentationPlanner', () => {
 		});
 	});
 
+	it("retains the source window's prior tab after close removes the source topology", () => {
+		const planner = new MobilePresentationPlanner({
+			getContext: () => null,
+			getRouteIdentity: () => '/',
+		});
+		const commitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-files',
+			},
+			{
+				type: 'activate-window-tab',
+				windowId: 'window-files',
+				surfaceId: 'singleton:commit',
+			},
+			{
+				type: 'set-mobile-presentation',
+				activeId: 'singleton:commit',
+				returnStack: [],
+			},
+		]);
+		const afterClose = reduceWorkspaceLayout(commitActive, [
+			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
+		]);
+
+		expect(planner.resolveReturn('singleton:commit', afterClose, commitActive)).toEqual({
+			activeId: CANONICAL_FILES_SURFACE_ID,
+			returnStack: [],
+		});
+	});
+
 	it('falls back to an inactive window tab when no other window is active', () => {
 		const planner = new MobilePresentationPlanner({
 			getContext: () => null,

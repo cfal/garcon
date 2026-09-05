@@ -148,8 +148,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
 			focusSurface: (surfaceId) => this.focusSurface(surfaceId),
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
-			resolveMobileReturn: (excluding, snapshot) =>
-				this.#presentation.resolveMobileReturn(excluding, snapshot),
+			resolveMobileReturn: (excluding, snapshot, sourceSnapshot) =>
+				this.#presentation.resolveMobileReturn(excluding, snapshot, sourceSnapshot),
 			confirmClose: (request) => this.#confirmClose(request),
 			clearAttachmentError: (surfaceId) => this.#presentation.clearAttachmentError(surfaceId),
 		});
@@ -592,11 +592,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 						: { type: 'remove-surface', surfaceId };
 				const mutations: WorkspaceLayoutMutation[] = [removalMutation];
 				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
-					// Resolve against the post-removal snapshot so window active/MRU
-					// fallbacks no longer name the removed surface.
+					// Uses post-removal availability while retaining the source-window topology.
 					const fallback = this.#presentation.resolveMobileReturn(
 						surfaceId,
 						reduceWorkspaceLayout(latest, [removalMutation]),
+						latest,
 					);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({

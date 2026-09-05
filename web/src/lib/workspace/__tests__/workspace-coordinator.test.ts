@@ -12,7 +12,7 @@ import {
 	terminalSurfaceId,
 	type WorkspaceWindowId,
 } from '../surface-types';
-import { CANONICAL_CHAT_SURFACE_ID } from '../canonical-layout';
+import { CANONICAL_CHAT_SURFACE_ID, CANONICAL_FILES_SURFACE_ID } from '../canonical-layout';
 import { windowIdOfSurface, windowNodeById, collectWindowNodes } from '../window-tree';
 import type { TerminalMetadata } from '$shared/terminal';
 import type { TerminalAttachmentState } from '$lib/terminal/sessions/terminal-registry.svelte.js';
@@ -1268,6 +1268,19 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(layout.surface('singleton:git')).toBeNull();
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
+	it('returns from a removed mobile-active tab to the prior tab in its source window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.moveTabToWindow('singleton:git', 'window-files');
+		await coordinator.focusSurface('singleton:git');
+		await coordinator.enterMobilePresentation();
+
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe('singleton:git');
+		await expect(coordinator.closeSurface('singleton:git')).resolves.toBe(true);
+
+		expect(layout.surface('singleton:git')).toBeNull();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_FILES_SURFACE_ID);
 	});
 
 	it('destroys every mobile-only Git view on responsive desktop return', async () => {

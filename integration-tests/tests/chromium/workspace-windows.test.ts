@@ -3,7 +3,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Locator, Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
-import { canonicalFilesWindowId } from '../../support/chromium-workspace.js';
+import {
+  canonicalFilesWindowId,
+  collapseCanonicalFilesWindow,
+} from '../../support/chromium-workspace.js';
 
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
 const TWO_TRUNCATED_CLOSABLE_TABS_WIDTH = 178;
@@ -1563,6 +1566,7 @@ describe('Chromium workspace windows', () => {
           await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId);
         }
         await openChat(fixture, chatId);
+        await collapseCanonicalFilesWindow(fixture.page);
         const chatWindowId = await fixture.page
           .locator('[data-workspace-window-current="true"]')
           .getAttribute('data-workspace-window-id');
@@ -1609,16 +1613,6 @@ describe('Chromium workspace windows', () => {
         });
 
         markPhase('opening and activating a Files window');
-        // The shrink assertion needs the canonical Files window to open mid-test.
-        const canonicalFilesId = await canonicalFilesWindowId(fixture.page);
-        await fixture.page
-          .locator(`[data-workspace-window-close="${canonicalFilesId}"]`)
-          .click();
-        await fixture.page.waitForFunction(
-          (expectedCount) =>
-            document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
-          1,
-        );
         const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
         await fixture.page
           .locator(`[data-file-tree-row] [role="rowheader"][title="${filePath}"]`)
