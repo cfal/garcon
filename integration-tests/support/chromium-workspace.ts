@@ -16,8 +16,11 @@ export async function collapseCanonicalFilesWindow(page: Page): Promise<void> {
   if ((await filesWindow.count()) === 0) return;
   const windowId = await filesWindow.getAttribute('data-workspace-window-id');
   if (!windowId) return;
+  const windowCount = await page.locator('[data-workspace-window-id]').count();
   await page.locator(`[data-workspace-window-close="${windowId}"]`).click();
   await page.waitForFunction(
-    () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+    (expectedCount) =>
+      document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
+    windowCount - 1,
   );
 }

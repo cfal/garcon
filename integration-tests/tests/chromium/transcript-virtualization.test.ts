@@ -4319,8 +4319,9 @@ async function verifyWindowCountGeometryStability(
     ),
   ).toBeLessThanOrEqual(1);
 
-  // Splits the existing terminal so the Files default does not halve Chat below
-  // the four-window width this regression originally covered.
+  // The pre-canonical four-window case left Chat at 25% width. Splitting Chat
+  // again here would reduce it to 15.5%, adding a narrower layout than this
+  // geometry regression covers. Split Terminal instead, leaving Chat at 31%.
   await focusWorkspaceWindow(fixture.page, terminalWindowId);
   const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   // The canonical desktop layout already provides the fourth window (Files).

@@ -26,6 +26,7 @@
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
+	import { resolveFirstRegistrationOnboarding } from '$lib/onboarding/first-registration-onboarding.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -443,13 +444,16 @@
 	// sessions do not receive a blocking onboarding modal.
 	let onboardingAutoOpened = $state(false);
 	$effect(() => {
-		if (auth.isLoading || !auth.isAuthenticated || onboardingAutoOpened) return;
-		if (auth.authDisabled) {
-			onboardingAutoOpened = true;
-			return;
-		}
+		if (onboardingAutoOpened) return;
+		const decision = resolveFirstRegistrationOnboarding({
+			isLoading: auth.isLoading,
+			isAuthenticated: auth.isAuthenticated,
+			authDisabled: auth.authDisabled,
+			justRegistered: getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1',
+		});
+		if (decision === 'wait') return;
 		onboardingAutoOpened = true;
-		if (getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1') {
+		if (decision === 'open') {
 			removeLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered);
 			appShell.openOnboardingWizard();
 		}
