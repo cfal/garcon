@@ -4301,24 +4301,27 @@ async function verifyWindowCountGeometryStability(
   await scrollToPosition(fixture.page, 'middle');
   const chatIdentity = await currentWorkspaceIdentity(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);
-  const singleWindowAnchor = await readingAnchor(fixture.page);
-  const singleWindowLayout = await transcriptLayoutSnapshot(fixture.page, singleWindowAnchor.key);
+  const canonicalAnchor = await readingAnchor(fixture.page);
+  const canonicalLayout = await transcriptLayoutSnapshot(fixture.page, canonicalAnchor.key);
 
   const terminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);
-  const twoWindowAnchor = await anchorByKey(fixture.page, singleWindowAnchor.key);
-  const twoWindowLayout = await transcriptLayoutSnapshot(fixture.page, singleWindowAnchor.key);
+  const threeWindowAnchor = await anchorByKey(fixture.page, canonicalAnchor.key);
+  const threeWindowLayout = await transcriptLayoutSnapshot(fixture.page, canonicalAnchor.key);
   expect(
-    Math.abs(twoWindowAnchor.offset - singleWindowAnchor.offset),
+    Math.abs(threeWindowAnchor.offset - canonicalAnchor.offset),
     JSON.stringify(
-      { singleWindowAnchor, twoWindowAnchor, singleWindowLayout, twoWindowLayout },
+      { canonicalAnchor, threeWindowAnchor, canonicalLayout, threeWindowLayout },
       null,
       2,
     ),
   ).toBeLessThanOrEqual(1);
 
+  // Splits the existing terminal so the Files default does not halve Chat below
+  // the four-window width this regression originally covered.
+  await focusWorkspaceWindow(fixture.page, terminalWindowId);
   const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   // The canonical desktop layout already provides the fourth window (Files).
   const filesWindowId = await canonicalFilesWindowId(fixture.page);
