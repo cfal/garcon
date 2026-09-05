@@ -109,15 +109,10 @@ function restoreWindow(
 ): WorkspaceWindowNode | null {
 	const id = asWindowId(node.id);
 	if (!id || !Array.isArray(node.order)) return null;
-	if (
-		node.order.length > WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW ||
-		(Array.isArray(node.mru) && node.mru.length > WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW)
-	) {
-		throw new WorkspaceLayoutBudgetExceeded();
-	}
+	const orderRefs = node.order.slice(0, WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
 	const order: string[] = [];
 	let chatPlaced = false;
-	for (const rawRef of node.order) {
+	for (const rawRef of orderRefs) {
 		const ref = parseV2Ref(rawRef);
 		if (!ref) continue;
 		if (ref.type === 'chat') {
@@ -142,7 +137,7 @@ function restoreWindow(
 	const persistedMru: string[] = [];
 	const persistedMruSet = new Set<string>();
 	if (Array.isArray(node.mru)) {
-		for (const rawRef of node.mru) {
+		for (const rawRef of node.mru.slice(0, WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW)) {
 			const ref = parseV2Ref(rawRef);
 			if (!ref) continue;
 			const surfaceId = restoredRefSurfaceId(ref, id);
