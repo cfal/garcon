@@ -37,6 +37,10 @@ export type WorkspaceSplitAdmission =
 	| { readonly allowed: true }
 	| { readonly allowed: false; readonly reason: WorkspaceSplitBlockReason };
 
+export type WorkspaceSplitAdmissions = Readonly<
+	Record<WorkspaceWindowEdge, WorkspaceSplitAdmission | null>
+>;
+
 export interface WorkspaceSplitRequest {
 	readonly targetWindowId: WorkspaceWindowId;
 	readonly edge: WorkspaceWindowEdge;

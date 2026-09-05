@@ -1,23 +1,20 @@
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
-	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	type WorkspaceLayoutReader,
 	type WorkspacePartitionId,
 	type WorkspaceWindowEdge,
 	type WorkspaceWindowId,
 } from './surface-types.js';
-import {
-	projectedWindowCountAfterTabMove,
-	windowIdOfSurface,
-	windowNodeById,
-} from './window-tree.js';
+import { windowIdOfSurface, windowNodeById } from './window-tree.js';
 import type { WorkspaceCommitOptions, WorkspacePublication } from './workspace-commit.js';
 import {
 	deferredChatSurfaceTransferPublication,
 	type ChatSurfaceTransferPort,
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
+import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
+import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 
 interface ReservationSet<T> {
 	has(value: T): boolean;
@@ -34,7 +31,7 @@ interface WorkspaceTabMovementServiceDeps {
 		resolveTarget: () => string | null,
 		options?: WorkspaceCommitOptions,
 	): Promise<boolean>;
-	createWindowLimitError(): Error;
+	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 	present(surfaceId: string): void;
 }
 
@@ -156,21 +153,22 @@ export class WorkspaceTabMovementService {
 					return [];
 				}
 				const sourceWindow = windowNodeById(latest.desktopRoot, sourceWindowId);
+				if (sourceWindowId === targetWindowId && sourceWindow?.tabs.order.length === 1) {
+					return [];
+				}
 				let movingChatId: string | null = null;
 				if (surface.type === 'chat') {
 					movingChatId = surface.chatId;
-					if (
-						!movingChatId ||
-						(sourceWindowId === targetWindowId && sourceWindow?.tabs.order.length === 1)
-					) {
-						return [];
-					}
+					if (!movingChatId) return [];
 				}
 				if (
-					projectedWindowCountAfterTabMove(latest.desktopRoot, sourceWindowId, targetWindowId) >
-					WORKSPACE_WINDOW_RESOURCE_CEILING
+					!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
+						targetWindowId,
+						edge,
+						movingSurfaceId: surfaceId,
+					})
 				) {
-					throw this.deps.createWindowLimitError();
+					return [];
 				}
 				if (surface.type === 'chat' && movingChatId) {
 					const destinationSurfaceId = chatViewSurfaceId(newWindowId);

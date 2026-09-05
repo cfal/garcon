@@ -8,6 +8,8 @@
 	} from '../sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemHostProps {
@@ -30,7 +32,7 @@
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onForkChat?: (sourceChatId: string) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
-		newWindowBlocked?: boolean;
+		newWindowEdges?: WorkspaceSplitAdmissions;
 		supportsFork?: boolean;
 		supportsForkWhileRunning?: boolean;
 	}
@@ -55,7 +57,7 @@
 		onSortChatOrder,
 		onForkChat = () => {},
 		onOpenInNewWindow,
-		newWindowBlocked = false,
+		newWindowEdges = workspaceSplitAdmissions(),
 		supportsFork = true,
 		supportsForkWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
@@ -114,5 +116,5 @@
 	{onMoveToBottom}
 	{onSortChatOrder}
 	{onOpenInNewWindow}
-	{newWindowBlocked}
+	{newWindowEdges}
 />

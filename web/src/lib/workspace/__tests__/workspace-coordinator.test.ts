@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
-import { WorkspaceCoordinator, WorkspaceWindowLimitError } from '../workspace-coordinator.svelte';
+import { WorkspaceCoordinator } from '../workspace-coordinator.svelte';
+import { WorkspaceSplitBlockedError } from '../workspace-split-blocked-error';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import {
 	chatViewSurfaceId,
@@ -20,6 +21,8 @@ import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
+import type { WorkspaceSplitAdmissionResolver } from '../window-geometry-policy';
+import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
 
 function deferred<T>() {
@@ -71,6 +74,7 @@ function createHarness(
 		onTerminalLauncherDismissed?: () => void;
 		failLayoutPublishAt?: number;
 		includePortableTabs?: boolean;
+		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -178,7 +182,7 @@ function createHarness(
 				options.pendingGitSurfaceIds?.includes(surfaceId) ? 1 : 0,
 		} as never,
 		surfaceFrames: options.surfaceFrames,
-		resolveSplitAdmission: () => ({ allowed: true }),
+		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
 		resolvePartitionRatioBounds: () => null,
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
@@ -279,14 +283,16 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.surfaces).toBe(before.surfaces);
 	});
 
-	it('exits fullscreen when a new window opens', async () => {
+	it('blocks new windows until fullscreen exits', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.enterWindowFullscreen('window-main');
 
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
-		await coordinator.openSingletonInNewWindow('git-history');
-		expect(layout.snapshot.fullscreenWindowId).toBeNull();
-		expect(windowCountOf(layout.snapshot)).toBe(3);
+		await expect(coordinator.openSingletonInNewWindow('git-history')).rejects.toMatchObject({
+			message: 'Exit fullscreen to open a new window.',
+		});
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
 	it('keeps hidden window surfaces and controllers alive while fullscreen', async () => {
@@ -1900,7 +1906,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowCountOf(layout.snapshot)).toBe(4);
 
 		await expect(coordinator.openSingletonInNewWindow('commit')).rejects.toBeInstanceOf(
-			WorkspaceWindowLimitError,
+			WorkspaceSplitBlockedError,
 		);
 		expect(layout.surface('singleton:commit')).toBeNull();
 	});
@@ -1915,8 +1921,47 @@ describe('WorkspaceCoordinator', () => {
 
 		await expect(
 			coordinator.moveTabToNewWindow(chatViewSurfaceId('window-main'), 'window-main', 'right'),
-		).rejects.toBeInstanceOf(WorkspaceWindowLimitError);
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
 		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+	});
+
+	it('applies the shared geometry denial to every new-window planner', async () => {
+		const resolveSplitAdmission = vi.fn<WorkspaceSplitAdmissionResolver>(() => ({
+			allowed: false,
+			reason: 'too-small',
+		}));
+		const { coordinator, layout, terminals } = createHarness({ resolveSplitAdmission });
+		terminals.create.mockResolvedValue('terminal-blocked');
+
+		await expect(
+			coordinator.openChatInNewWindow('chat-blocked', 'window-main', 'left'),
+		).rejects.toMatchObject({ message: 'Not enough space to split this window.' });
+		await expect(
+			coordinator.openSingletonInNewWindow('git-history', 'window-main'),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
+		await expect(
+			coordinator.placeFileSession('file-blocked', {
+				type: 'new-window',
+				anchorWindowId: 'window-main',
+			}),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
+		await expect(coordinator.createTerminalInNewWindow('window-main')).rejects.toBeInstanceOf(
+			WorkspaceSplitBlockedError,
+		);
+		expect(terminals.create).not.toHaveBeenCalled();
+		await expect(
+			coordinator.moveTabToNewWindow('singleton:git', 'window-main', 'bottom'),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
+
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(resolveSplitAdmission).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				targetWindowId: 'window-main',
+				edge: 'bottom',
+				movingSurfaceId: 'singleton:git',
+			}),
+		);
 	});
 
 	it('coalesces concurrent singleton opens into one placement', async () => {
@@ -1978,6 +2023,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).not.toBe(
 			sourceWindowId,
 		);
+	});
+
+	it('treats a sole non-Chat tab moved beside its own window as an identity no-op', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewWindow('files');
+		const sourceWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
+		const before = layout.snapshot;
+
+		await coordinator.moveTabToNewWindow('singleton:files', sourceWindowId, 'left');
+
+		expect(layout.snapshot).toBe(before);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).toBe(sourceWindowId);
 	});
 
 	it('derives the Terminal launcher only while first-run layout is still canonical', async () => {

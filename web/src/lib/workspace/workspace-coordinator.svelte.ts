@@ -3,7 +3,7 @@ import { SvelteSet } from 'svelte/reactivity';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
-	WORKSPACE_WINDOW_RESOURCE_CEILING,
+	WORKSPACE_WINDOW_EDGES,
 	chatViewSurfaceId,
 	fileSurfaceId,
 	portableSingletonDescriptor,
@@ -49,8 +49,10 @@ import type {
 	WorkspacePartitionRatioBounds,
 	WorkspacePartitionRatioBoundsResolver,
 	WorkspaceSplitAdmission,
+	WorkspaceSplitAdmissions,
 	WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
+import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 
 interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
@@ -68,13 +70,6 @@ interface WorkspaceCoordinatorDeps {
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
 	getRouteIdentity(): string;
-}
-
-export class WorkspaceWindowLimitError extends Error {
-	constructor() {
-		super(m.workspace_window_limit_reached({ count: WORKSPACE_WINDOW_RESOURCE_CEILING }));
-		this.name = 'WorkspaceWindowLimitError';
-	}
 }
 
 export class WorkspaceCoordinator implements FilePlacementPort {
@@ -119,7 +114,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			cancelWorkspaceDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
 			commitWithPresentationTarget: (mutations, resolveTarget, options) =>
 				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget, options),
-			createWindowLimitError: () => new WorkspaceWindowLimitError(),
+			resolveSplitAdmission: deps.resolveSplitAdmission,
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
 		this.#fileDialog = new FileDialogCoordinator({
@@ -160,6 +155,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#presentation.resolveMobileReturn(excluding, snapshot, sourceSnapshot),
 			confirmClose: (request) => this.#confirmClose(request),
 			clearAttachmentError: (surfaceId) => this.#presentation.clearAttachmentError(surfaceId),
+			resolveSplitAdmission: deps.resolveSplitAdmission,
 		});
 		this.#windowDestruction = new WorkspaceWindowDestructionService({
 			layout: deps.arbiter.layout,
@@ -243,10 +239,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#tabMovement.registerChatSurfaceTransferPort(port);
 	}
 
-	get canOpenNewWindow(): boolean {
-		return this.windowCount < WORKSPACE_WINDOW_RESOURCE_CEILING;
-	}
-
 	resolveSplitAdmission(
 		targetWindowId: WorkspaceWindowId,
 		edge: WorkspaceWindowEdge,
@@ -257,6 +249,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			edge,
 			movingSurfaceId,
 		});
+	}
+
+	resolveSplitAdmissions(
+		targetWindowId: WorkspaceWindowId,
+		movingSurfaceId?: string,
+	): WorkspaceSplitAdmissions {
+		return Object.fromEntries(
+			WORKSPACE_WINDOW_EDGES.map((edge) => [
+				edge,
+				this.resolveSplitAdmission(targetWindowId, edge, movingSurfaceId),
+			]),
+		) as WorkspaceSplitAdmissions;
 	}
 
 	resolvePartitionRatioBounds(
@@ -436,14 +440,19 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 		let opened = false;
 		const current = await this.#presentation.commit((latest) => {
-			if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
-				throw new WorkspaceWindowLimitError();
-			}
 			const anchor = this.#resolveWindowId(
 				latest,
 				targetWindowId ?? this.#presentation.lastFocusedWindowId,
 			);
 			if (this.#reservedWindowIds.has(anchor)) return [];
+			if (
+				!requireWorkspaceSplitAdmission(this.#deps.resolveSplitAdmission, latest, {
+					targetWindowId: anchor,
+					edge,
+				})
+			) {
+				return [];
+			}
 			opened = true;
 			return [
 				{
@@ -528,9 +537,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const current = await this.#presentation.commit((latest) => {
 			if (latest.surfaces[surfaceId] || this.#reservedSurfaceIds.has(surfaceId)) return [];
-			if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
-				throw new WorkspaceWindowLimitError();
-			}
 			if (
 				collectWindowNodes(latest.desktopRoot).every((workspaceWindow) =>
 					this.#reservedWindowIds.has(workspaceWindow.id),
@@ -543,6 +549,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				anchorWindowId ?? this.#presentation.lastFocusedWindowId,
 			);
 			if (this.#reservedWindowIds.has(anchor)) return [];
+			if (
+				!requireWorkspaceSplitAdmission(this.#deps.resolveSplitAdmission, latest, {
+					targetWindowId: anchor,
+					edge: 'right',
+				})
+			) {
+				return [];
+			}
 			return [
 				{
 					type: 'register-surface-in-new-window',
@@ -739,11 +753,16 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 			const current = await this.#presentation.commit(
 				(latest) => {
-					if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
-						throw new WorkspaceWindowLimitError();
-					}
 					const anchor = this.#resolveWindowId(latest, destination.anchorWindowId);
 					if (this.#reservedWindowIds.has(anchor)) return [];
+					if (
+						!requireWorkspaceSplitAdmission(this.#deps.resolveSplitAdmission, latest, {
+							targetWindowId: anchor,
+							edge: 'right',
+						})
+					) {
+						return [];
+					}
 					return [
 						{
 							type: 'register-surface-in-new-window',

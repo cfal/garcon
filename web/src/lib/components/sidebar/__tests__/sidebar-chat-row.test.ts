@@ -6,6 +6,10 @@ import SidebarChatItemHost from './SidebarChatItemHost.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import {
+	deniedWorkspaceSplits,
+	workspaceSplitAdmissions,
+} from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -576,14 +580,40 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			onOpenInNewWindow: vi.fn(),
-			newWindowBlocked: true,
+			newWindowEdges: deniedWorkspaceSplits('resource-ceiling'),
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 		const openItem = screen.getByRole('menuitem', { name: 'Open in new window' });
 		expect(openItem.getAttribute('aria-disabled')).toBe('true');
-		expect(openItem.getAttribute('title')).toBe('4 windows max');
+		expect(openItem.getAttribute('title')).toBe('Window limit reached (maximum 4)');
 		expect(screen.queryByRole('menuitem', { name: 'Open in new window at edge' })).toBeNull();
+	});
+
+	it('keeps the new-window submenu available when only one edge fits', async () => {
+		const onOpenInNewWindow = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onOpenInNewWindow,
+			newWindowEdges: {
+				...workspaceSplitAdmissions({ allowed: false, reason: 'too-small' }),
+				top: { allowed: true },
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		const openSubmenu = screen.getByRole('menuitem', { name: 'Open in new window' });
+		expect(openSubmenu.getAttribute('aria-disabled')).not.toBe('true');
+		openSubmenu.focus();
+		await fireEvent.keyDown(openSubmenu, { key: 'ArrowRight' });
+		const left = await screen.findByRole('menuitem', { name: 'Open new window left' });
+		const top = await screen.findByRole('menuitem', { name: 'Open new window above' });
+		expect(left.getAttribute('aria-disabled')).toBe('true');
+		expect(left.getAttribute('title')).toBe('Not enough space to split this window.');
+		expect(top.getAttribute('aria-disabled')).not.toBe('true');
+
+		await fireEvent.click(top);
+		expect(onOpenInNewWindow).toHaveBeenCalledWith('chat-1', 'top');
 	});
 
 	it('disables sidebar fork while processing when running fork is unsupported', async () => {
