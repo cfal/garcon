@@ -136,14 +136,16 @@ export class CodexExecution implements AgentRuntimeExecution {
       configuration.thinkingMode,
       configuration.model,
     );
+    if (!this.runtime.hasSource(agentSessionId)) return;
     if (previousEffort !== undefined && nextEffort === undefined) {
+      // Defers the whole update because the runtime replaces explicit-effort sources before Default turns.
+      if (!this.runtime.isRunning(agentSessionId)) return;
       throw new AgentIntegrationError(
         'INVALID_SETTINGS',
-        'Codex cannot clear a concrete reasoning effort on an established session',
+        'Codex cannot clear a concrete reasoning effort during an active turn',
         false,
       );
     }
-    if (!this.runtime.hasSource(agentSessionId)) return;
     if (!sameEndpoint(configuration.endpoint, previousConfiguration.endpoint)) {
       if (!this.runtime.isRunning(agentSessionId)) return;
       throw new AgentIntegrationError(
