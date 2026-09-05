@@ -692,6 +692,7 @@ describe('settings store', () => {
     it('adds missing chat IDs to normalChatIds', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {}, 'c': {} }),
+        listChatIds: () => ['a', 'b', 'c'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -712,6 +713,7 @@ describe('settings store', () => {
     it('removes unknown IDs from ordering lists', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {} }),
+        listChatIds: () => ['a'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -731,6 +733,7 @@ describe('settings store', () => {
     it('resolves cross-list duplicates by precedence', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {} }),
+        listChatIds: () => ['a', 'b'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},

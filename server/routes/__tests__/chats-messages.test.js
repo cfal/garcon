@@ -59,6 +59,7 @@ function createRoutesFixture(overrides = {}) {
   };
   const registry = overrides.registry ?? {
     getChat: mock((chatId) => chatId === CHAT_ID ? entry : null),
+    hasChat: mock((chatId) => chatId === CHAT_ID),
     addChat: mock(() => true),
     updateChat: mock(() => null),
     removeChat: mock(() => true),

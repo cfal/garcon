@@ -9,6 +9,7 @@ import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { isRecord } from '../../common/json.js';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -16,6 +17,14 @@ const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
 const METADATA_VERSION = 1;
 const CARRY_OVER_HEAD_WINDOW = 25;
+// Agent previews each spawn work; an unbounded repair fan-out stalls startup
+// on large registries, so repairs run through a bounded pool.
+const METADATA_REPAIR_CONCURRENCY = 6;
+// The pool bounds concurrency, not total time: ceil(N/6) stalled previews
+// would stretch init() - which runs before the listener starts - into
+// minutes. An overall deadline abandons the rest; prune passes and live
+// events backfill anything left unrepaired.
+const DEFAULT_REPAIR_DEADLINE_MS = 30_000;
 
 type MetadataSource = 'live' | 'agent-preview' | 'startup';
 
@@ -48,6 +57,7 @@ interface MetadataIndexOptions {
   previewTimeoutMs?: number;
   metadataPath?: string | null;
   saveDelayMs?: number;
+  repairDeadlineMs?: number;
 }
 
 interface MetadataAgentSource {
@@ -75,6 +85,7 @@ export class MetadataIndex {
   #previewTimeoutMs: number;
   #metadataPath: string | null;
   #saveDelayMs: number;
+  #repairDeadlineMs: number;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #savePromise: Promise<void> = Promise.resolve();
 
@@ -90,6 +101,7 @@ export class MetadataIndex {
     this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
+    this.#repairDeadlineMs = options.repairDeadlineMs ?? DEFAULT_REPAIR_DEADLINE_MS;
   }
 
   async init(): Promise<void> {
@@ -200,17 +212,57 @@ export class MetadataIndex {
       return !existing || this.#isCheaplyStale(existing, session);
     });
 
-    const results = await Promise.allSettled(
-      repairEntries.map(([chatId, session]) => this.#buildMetadataFromPreviewWithTimeout(chatId, session)),
+    // Workers never reject: each returns an ok/error union so the bounded pool
+    // cannot be torn down by one failing preview, and per-entry timeouts start
+    // when the entry actually begins processing rather than at fan-out time.
+    let deadlineHit = false;
+    const repaired = new Map<string, ChatMetadata>();
+    const repairs = mapWithConcurrencyResult(
+      repairEntries,
+      METADATA_REPAIR_CONCURRENCY,
+      async ([chatId, session]): Promise<
+        { ok: true } | { ok: false; error: unknown }
+      > => {
+        if (deadlineHit) return { ok: false, error: new Error('metadata repair deadline exceeded') };
+        try {
+          const metadata = await this.#buildMetadataFromPreviewWithTimeout(chatId, session);
+          // Recorded at completion so repairs finished inside the budget
+          // survive a deadline win instead of being rebuilt every startup.
+          repaired.set(String(chatId), metadata);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
     );
+
+    // The race does not cancel the pool; the flag only stops queued workers
+    // from starting new preview work. Successes are applied below on either
+    // outcome, so a deadline abandons only chats whose previews never
+    // finished; in-flight adoption writes are serialized per chat and
+    // ownership-checked.
+    const deadline = new Promise<'deadline'>((resolve) => {
+      setTimeout(() => resolve('deadline'), this.#repairDeadlineMs).unref?.();
+    });
+    const outcome = await Promise.race([repairs, deadline]);
+    for (const [chatId, metadata] of repaired) {
+      this.#metadataByChatId.set(chatId, metadata);
+    }
+    if (outcome === 'deadline') {
+      deadlineHit = true;
+      logger.warn(
+        `metadata: repair deadline of ${this.#repairDeadlineMs}ms exceeded; ` +
+          `${repairEntries.length - repaired.size} of ${repairEntries.length} chats left for live events or the next startup`,
+      );
+      return;
+    }
+    const results = outcome;
 
     for (let i = 0; i < results.length; i++) {
       const [chatId] = repairEntries[i];
       const result = results[i];
-      if (result.status === 'fulfilled') {
-        this.#metadataByChatId.set(String(chatId), result.value);
-      } else {
-        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.reason));
+      if (!result.ok) {
+        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.error));
       }
     }
   }
@@ -282,8 +334,7 @@ export class MetadataIndex {
   }
 
   #pruneMissingRegistryEntries(): void {
-    const sessions = this.#registry.listAllChats();
-    const validIds = new Set(Object.keys(sessions).map(String));
+    const validIds = new Set(this.#registry.listChatIds().map(String));
     let dirty = false;
     for (const chatId of this.#metadataByChatId.keys()) {
       if (validIds.has(chatId)) continue;

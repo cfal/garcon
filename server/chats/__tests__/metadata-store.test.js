@@ -6,6 +6,8 @@ import { MetadataIndex } from '../metadata-store.js';
 
 const mockRegistry = {
   listAllChats: () => ({}),
+  listChatIds: () => [],
+  hasChat: () => false,
   onChatRemoved: mock(() => {}),
 };
 const mockAgents = {
@@ -37,6 +39,8 @@ let chatCounter = 0;
 function makeRegistry(sessions = {}) {
   return {
     listAllChats: mock(() => sessions),
+    listChatIds: mock(() => Object.keys(sessions)),
+    hasChat: (chatId) => chatId in sessions,
     onChatRemoved: mock(() => {}),
   };
 }
@@ -287,6 +291,68 @@ describe('metadata-store', () => {
 
       expect(stalledAgents.getPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('stalled-chat')).toBeNull();
+    });
+
+    it('abandons stalled repairs at the overall deadline instead of stretching init', async () => {
+      const sessions = {};
+      for (let i = 0; i < 8; i += 1) {
+        sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
+      }
+      const stalledAgents = {
+        getPreview: mock(() => new Promise(() => {})),
+      };
+      const index = new MetadataIndex(makeRegistry(sessions), stalledAgents, mockCarryOver, {
+        previewTimeoutMs: 200,
+        repairDeadlineMs: 30,
+      });
+      const startedAt = Date.now();
+
+      await index.init();
+
+      // The deadline must beat the first per-preview timeout, proving init
+      // returned via the deadline rather than by draining the stalled pool.
+      expect(Date.now() - startedAt).toBeLessThan(200);
+      expect(index.getChatMetadata('stall-0')).toBeNull();
+
+      // Past the deadline the pool must not dequeue the remaining entries:
+      // once the in-flight previews time out, the two queued chats stay
+      // unrepaired instead of starting a second wave of preview work.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(stalledAgents.getPreview).toHaveBeenCalledTimes(6);
+    });
+
+    it('keeps repairs completed inside the deadline when others stall', async () => {
+      const sessions = {};
+      for (let i = 0; i < 6; i += 1) {
+        sessions[`fast-${i}`] = session({ agentId: 'claude', agentSessionId: `claude-${i}` });
+      }
+      for (let i = 0; i < 2; i += 1) {
+        sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
+      }
+      const agents = {
+        getPreview: mock((entry) => (
+          entry.agentId === 'claude'
+            ? Promise.resolve(previewResult({
+              firstMessage: 'first repaired',
+              lastMessage: 'last repaired',
+              createdAt: '2026-01-01T00:00:00Z',
+              lastActivity: '2026-01-02T00:00:00Z',
+            }))
+            : new Promise(() => {})
+        )),
+      };
+      const index = new MetadataIndex(makeRegistry(sessions), agents, mockCarryOver, {
+        previewTimeoutMs: 200,
+        repairDeadlineMs: 30,
+      });
+
+      await index.init();
+
+      for (let i = 0; i < 6; i += 1) {
+        expect(index.getChatMetadata(`fast-${i}`)?.lastMessage).toBe('last repaired');
+      }
+      expect(index.getChatMetadata('stall-0')).toBeNull();
+      expect(index.getChatMetadata('stall-1')).toBeNull();
     });
 
     it('keeps persisted metadata when agent preview repair would stall', async () => {
