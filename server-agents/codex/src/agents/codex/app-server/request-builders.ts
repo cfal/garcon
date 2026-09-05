@@ -176,6 +176,14 @@ function sandboxPolicyMatches(
     && (left.excludeSlashTmp ?? false) === (right.excludeSlashTmp ?? false);
 }
 
+// Resolves known defaults explicitly because thread/settings/update cannot clear an effort override.
+// https://github.com/openai/codex/blob/985641272869835d01d025ed2a218fbbce35fa9f/codex-rs/models-manager/models.json#L173-L463
+function codexModelDefaultEffort(model: string | undefined): string | undefined {
+  if (model === GPT_6_ASTRA_MODEL || model === 'gpt-5.6-sol') return 'low';
+  if (model === 'gpt-5.6-terra' || model === 'gpt-5.6-luna') return 'medium';
+  return undefined;
+}
+
 // Preserves xhigh compatibility for older models while allowing models that
 // advertise max reasoning to receive that effort explicitly.
 export function mapThinkingModeToCodexEffort(
@@ -183,7 +191,7 @@ export function mapThinkingModeToCodexEffort(
   model?: string,
 ): string | undefined {
   switch (thinkingMode) {
-    case 'none': return model === GPT_6_ASTRA_MODEL ? 'low' : undefined;
+    case 'none': return codexModelDefaultEffort(model);
     case 'low': return 'low';
     case 'medium': return 'medium';
     case 'high': return 'high';
