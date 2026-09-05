@@ -1122,6 +1122,32 @@ describe("discard", () => {
     }
   });
 
+  it("restores typechanged staged-added files instead of silently no-opping", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      await fs.rm(path.join(projectPath, "added.txt"));
+      await fs.symlink("elsewhere.txt", path.join(projectPath, "added.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AT added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  added.txt");
+      const stats = await fs.lstat(path.join(projectPath, "added.txt"));
+      expect(stats.isSymbolicLink()).toBe(false);
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("unstages index-only staged additions, which have no worktree changes to restore", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),

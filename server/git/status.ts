@@ -790,13 +790,16 @@ export function createStatusOperations(agents: GitAgentRunner) {
         await fs.unlink(filePath);
       }
     } else if (status === 'A ' || status[1] === 'A' || status === 'AU') {
-      // The workbench only offers discard on unstaged changes, so AM/AD land
+      // The workbench only offers discard on unstaged changes, so AM/AD/AT land
       // in the restore branch below and keep their staged addition. Reset
       // remains for index-only additions (endpoint-reachable, no worktree
       // changes to restore) and unmerged-added states (AA/AU/UA), where it
       // clears the conflict instead of falling through as a silent no-op.
       await runGit(projectPath, ['reset', 'HEAD', '--', file]);
-    } else if (status.includes('M') || status.includes('D')) {
+    } else if (status.includes('M') || status.includes('D') || status.includes('T')) {
+      // T covers worktree typechanges (regular file, symlink, or submodule
+      // swapping type); restore rewrites the worktree entry back to the
+      // indexed type, so AT lands back at a staged addition.
       await runGit(projectPath, ['restore', '--', file]);
     }
 
