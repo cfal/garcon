@@ -53,7 +53,12 @@ function parsePorcelainStatus(output: string): Array<{ path: string; status: str
     const status = `${token[0] || ' '}${token[1] || ' '}`;
     const filePath = token.slice(3);
     entries.push({ path: filePath, status });
-    if (status[0] === 'R' || status[0] === 'C') index += 1;
+    // Either column can carry the rename/copy marker; both forms append the
+    // original path as a second token that must be consumed.
+    if (
+      status[0] === 'R' || status[0] === 'C' ||
+      status[1] === 'R' || status[1] === 'C'
+    ) index += 1;
   }
   return entries;
 }
