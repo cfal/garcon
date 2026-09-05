@@ -10,6 +10,8 @@ let lifecycleEpoch = '';
 let closing = false;
 const searches = new Map<number, {
   readonly query: Extract<ReaderRequest, { type: 'search-start' }>['query'];
+  readonly order: Extract<ReaderRequest, { type: 'search-start' }>['order'];
+  readonly offset: number;
   readonly limit: number;
   readonly allowedChats: TranscriptSearchAllowedChat[];
   nextChunkIndex: number;
@@ -40,6 +42,8 @@ function handle(request: ReaderRequest): void {
         }
         searches.set(request.requestId, {
           query: request.query,
+          order: request.order,
+          offset: request.offset,
           limit: request.limit,
           allowedChats: [],
           nextChunkIndex: 0,
@@ -62,6 +66,8 @@ function handle(request: ReaderRequest): void {
         const result = searchTranscriptIndexV1(db, {
           query: search.query,
           allowedChats: search.allowedChats,
+          order: search.order,
+          offset: search.offset,
           limit: search.limit,
         });
         post({ type: 'search-result', ...response(request), ...result });

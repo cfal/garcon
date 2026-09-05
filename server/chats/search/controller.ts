@@ -1,8 +1,11 @@
 import {
+  CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MIN_PREFIX_CHARS,
   type ChatSearchIndexStatus,
+  type ChatSearchPage,
   type ChatSearchQueryV1,
   type ChatSearchResult,
+  type ChatSearchSort,
   type TranscriptSearchAllowedChat,
   type TranscriptSearchStatusV1,
 } from '@garcon/common/chat-search';
@@ -147,9 +150,15 @@ export class TranscriptSearchController {
     readonly query: string;
     readonly textTokens?: string[];
     readonly allowedChatIds: string[];
+    readonly sort: ChatSearchSort;
+    readonly offset: number;
     readonly limit?: number;
     readonly signal?: AbortSignal;
-  }): Promise<{ results: ChatSearchResult[]; index: ChatSearchIndexStatus }> {
+  }): Promise<{
+    results: ChatSearchResult[];
+    page: ChatSearchPage;
+    index: ChatSearchIndexStatus;
+  }> {
     if (!this.#enabled || this.#closed) {
       const unavailable = this.#admissionFailed || this.#closed;
       throw new TranscriptSearchUnavailableError(
@@ -158,19 +167,19 @@ export class TranscriptSearchController {
         unavailable,
       );
     }
-    const abort = new AbortController();
+    const executionAbort = new AbortController();
     const enableSignal = this.#enableAbort?.signal;
-    const forwardAbort = () => abort.abort();
-    options.signal?.addEventListener('abort', forwardAbort, { once: true });
-    enableSignal?.addEventListener('abort', forwardAbort, { once: true });
-    if (options.signal?.aborted || enableSignal?.aborted) forwardAbort();
+    const abortExecution = () => executionAbort.abort();
+    enableSignal?.addEventListener('abort', abortExecution, { once: true });
+    if (enableSignal?.aborted) abortExecution();
     const timeout = setTimeout(
-      () => abort.abort(),
+      abortExecution,
       this.#deps.searchTimeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS,
     );
     timeout.unref?.();
     try {
-      abort.signal.throwIfAborted();
+      options.signal?.throwIfAborted();
+      executionAbort.signal.throwIfAborted();
       const allowedViews = new Map<string, TranscriptViewId>();
       const allowedChats: TranscriptSearchAllowedChat[] = [];
       const fencedChatIds = new Set<string>();
@@ -194,14 +203,18 @@ export class TranscriptSearchController {
       const response = await this.#deps.service.search({
         query: compileQuery(options.query, options.textTokens),
         allowedChats,
+        order: (options.sort ?? 'relevance') === 'relevance' ? 'relevance' : 'allowlist',
+        offset: clampOffset(options.offset),
         limit: clampLimit(options.limit),
-        signal: abort.signal,
+        admissionSignal: options.signal,
+        executionSignal: executionAbort.signal,
       });
       return {
         results: response.results.filter((result) => (
           allowedViews.get(result.chatId) === result.transcriptViewId
           && this.validateResultView(result.chatId, result.transcriptViewId)
         )),
+        page: response.page,
         index: {
           ...response.index,
           failedChatCount: response.index.failedChatCount
@@ -211,11 +224,11 @@ export class TranscriptSearchController {
         },
       };
     } catch (error) {
+      if (isAbortError(error) && options.signal?.aborted) throw error;
       throw translateSearchError(error, this.#deps.logger);
     } finally {
       clearTimeout(timeout);
-      options.signal?.removeEventListener('abort', forwardAbort);
-      enableSignal?.removeEventListener('abort', forwardAbort);
+      enableSignal?.removeEventListener('abort', abortExecution);
     }
   }
 
@@ -759,4 +772,10 @@ function clampLimit(limit: number | undefined): number {
   return Number.isInteger(limit)
     ? Math.min(MAX_LIMIT, Math.max(1, Number(limit)))
     : DEFAULT_LIMIT;
+}
+
+function clampOffset(offset: number | undefined): number {
+  return Number.isInteger(offset)
+    ? Math.min(CHAT_SEARCH_MAX_OFFSET, Math.max(0, Number(offset)))
+    : 0;
 }

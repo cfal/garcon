@@ -7,6 +7,7 @@ import { createRouteCommandLedger, createRouteCommandService } from './chat-rout
 function createRoutesFixture({
   unavailableProjectPaths = [],
   lastActivityAtByChat = {},
+  createdAtByChat = {},
   withoutSearchIndex = false,
 } = {}) {
   const sessions = {
@@ -149,6 +150,13 @@ function createRoutesFixture({
           snippets: [],
         },
       ] : [],
+      page: {
+        offset: request.offset,
+        limit: request.limit ?? 20,
+        total: request.allowedChatIds.length > 0 ? 1 : 0,
+        hasMore: false,
+        nextOffset: null,
+      },
       index: {
         indexedChatCount: request.allowedChatIds.length,
         pendingChatCount: 0,
@@ -166,7 +174,7 @@ function createRoutesFixture({
         return status?.available && status.effectiveProjectKey ? [[chatId, {
           id: chatId,
           activity: {
-            createdAt: null,
+            createdAt: createdAtByChat[chatId] ?? null,
             lastActivityAt: lastActivityAtByChat[chatId] ?? null,
             lastReadAt: null,
           },
@@ -230,6 +238,18 @@ describe('POST /api/v1/chats/search', () => {
     expect(forwarded.aborted).toBe(true);
   });
 
+  it('returns a quiet client-closed response for caller cancellation', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const abort = new AbortController();
+    abort.abort();
+    searchIndex.search.mockImplementationOnce(({ signal }) => signal.throwIfAborted());
+
+    const response = await postSearch(routes, { query: 'needle' }, abort.signal);
+
+    expect(response.status).toBe(499);
+    expect(await response.text()).toBe('');
+  });
+
   it('searches only requested chats that still exist in the registry', async () => {
     const { routes, searchIndex } = createRoutesFixture();
 
@@ -243,13 +263,15 @@ describe('POST /api/v1/chats/search', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       query: 'needle',
-      total: 1,
+      page: { offset: 0, limit: 5, total: 1, hasMore: false, nextOffset: null },
       index: { indexedChatCount: 1, pendingChatCount: 0 },
     });
     expect(searchIndex.search).toHaveBeenCalledWith({
       query: 'needle',
       textTokens: ['needle'],
       allowedChatIds: ['c2'],
+      sort: 'relevance',
+      offset: 0,
       limit: 5,
       signal: expect.any(AbortSignal),
     });
@@ -279,10 +301,12 @@ describe('POST /api/v1/chats/search', () => {
     expect(response.status).toBe(200);
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
       allowedChatIds: ['c1', 'c2'],
+      sort: 'relevance',
+      offset: 0,
     }));
   });
 
-  it('orders default search candidates by recent activity', async () => {
+  it('orders activity search candidates by recent activity', async () => {
     const { routes, searchIndex } = createRoutesFixture({
       lastActivityAtByChat: {
         c1: '2026-01-01T00:00:00.000Z',
@@ -290,7 +314,7 @@ describe('POST /api/v1/chats/search', () => {
       },
     });
 
-    const response = await postSearch(routes, { query: 'needle' });
+    const response = await postSearch(routes, { query: 'needle', sort: 'activity' });
 
     expect(response.status).toBe(200);
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
@@ -304,10 +328,41 @@ describe('POST /api/v1/chats/search', () => {
     const response = await postSearch(routes, { query: 'needle', chatIds: [] });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ total: 0 });
+    await expect(response.json()).resolves.toMatchObject({ page: { total: 0 } });
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
       allowedChatIds: [],
     }));
+  });
+
+  it('orders explicit candidates by creation time and preserves page metadata', async () => {
+    const { routes, searchIndex } = createRoutesFixture({
+      createdAtByChat: {
+        c1: '2026-01-01T00:00:00.000Z',
+        c2: '2026-07-01T00:00:00.000Z',
+      },
+    });
+    searchIndex.search.mockResolvedValueOnce({
+      results: [],
+      page: { offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75 },
+      index: {
+        indexedChatCount: 2,
+        pendingChatCount: 0,
+        failedChatCount: 0,
+        unindexedChatCount: 0,
+        unsupportedChatCount: 0,
+        resultsTruncated: false,
+      },
+    });
+    const response = await postSearch(routes, {
+      query: 'needle', chatIds: ['c1', 'missing', 'c2'], sort: 'created', offset: 50, limit: 50,
+    });
+    expect(response.status).toBe(200);
+    expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChatIds: ['c2', 'c1'], sort: 'created', offset: 50, limit: 50,
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      page: { offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75 },
+    });
   });
 
   it('rejects empty search requests', async () => {
@@ -326,6 +381,17 @@ describe('POST /api/v1/chats/search', () => {
       { query: Array(33).fill('word').join(' ') },
       { textTokens: Array(16).fill('one two three') },
       { query: 'needle', chatIds: Array(10_001).fill('c1') },
+      { query: 'needle', sort: 'oldest' },
+      { query: 'needle', sort: [] },
+      { query: 'needle', offset: -1 },
+      { query: 'needle', offset: 1.5 },
+      { query: 'needle', offset: '0' },
+      { query: 'needle', offset: 10_000 },
+      { query: 'needle', limit: -1 },
+      { query: 'needle', limit: 0 },
+      { query: 'needle', limit: 1.5 },
+      { query: 'needle', limit: '50' },
+      { query: 'needle', limit: 101 },
     ];
 
     for (const request of requests) {

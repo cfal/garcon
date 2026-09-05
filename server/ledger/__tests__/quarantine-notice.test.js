@@ -155,6 +155,7 @@ async function collectSearchRows(ledger, rows) {
       deleteChat: async () => undefined,
       search: async () => ({
         results: [],
+        page: { offset: 0, limit: 20, total: 0, hasMore: false, nextOffset: null },
         index: {
           indexedChatCount: 0,
           pendingChatCount: 0,

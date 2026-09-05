@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type {
   ChatSearchIndexStatus,
+  ChatSearchPage,
   ChatSearchClauseV1,
   ChatSearchQueryV1,
   ChatSearchResult,
@@ -9,12 +10,15 @@ import type {
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
+  CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
 } from '@garcon/common/chat-search';
+import type { TranscriptSearchOrder } from './worker-protocol.js';
 
 const DEFAULT_RESULT_LIMIT = 20;
-const MAX_RESULT_LIMIT = 100;
+const MAX_RESULT_LIMIT = CHAT_SEARCH_MAX_PAGE_SIZE;
 const SNIPPETS_PER_CHAT = 3;
 const MAX_SNIPPET_CHARS = 512;
 export const SEARCH_QUERY_MATCH_ROW_LIMIT = 10_000;
@@ -198,6 +202,11 @@ function clampLimit(limit: number | undefined): number {
   return Math.min(MAX_RESULT_LIMIT, Math.max(1, Number(limit)));
 }
 
+function clampOffset(offset: number | undefined): number {
+  if (!Number.isSafeInteger(offset)) return 0;
+  return Math.min(CHAT_SEARCH_MAX_OFFSET, Math.max(0, Number(offset)));
+}
+
 function prepareAllowed(allowedChats: readonly TranscriptSearchAllowedChat[]): TranscriptSearchAllowedChat[] {
   const prepared = new Map<string, TranscriptSearchAllowedChat>();
   for (const entry of allowedChats) {
@@ -365,31 +374,56 @@ function collectBoundedTermMatches(
   return { matches, truncated };
 }
 
+function compareResultRows(
+  left: ResultRow,
+  right: ResultRow,
+  order: TranscriptSearchOrder,
+  priorityByChatId: ReadonlyMap<string, number>,
+): number {
+  if (order === 'allowlist') {
+    const priority = (priorityByChatId.get(left.chatId) ?? Number.MAX_SAFE_INTEGER)
+      - (priorityByChatId.get(right.chatId) ?? Number.MAX_SAFE_INTEGER);
+    if (priority !== 0) return priority;
+  } else {
+    const rank = left.rank - right.rank;
+    if (rank !== 0) return rank;
+  }
+  return left.chatId.localeCompare(right.chatId)
+    || left.transcriptViewId.localeCompare(right.transcriptViewId);
+}
+
 function collectBoundedSearch(
   db: Database,
   terms: CompiledTerm[],
-  limit: number,
+  allowed: readonly TranscriptSearchAllowedChat[],
+  options: {
+    readonly order: TranscriptSearchOrder;
+    readonly offset: number;
+    readonly limit: number;
+  },
 ): {
   resultRows: ResultRow[];
   snippetByChat: Map<string, {
     matchedMessageCount: number;
     snippets: ChatSearchResult['snippets'];
   }>;
+  page: ChatSearchPage;
   truncated: boolean;
 } {
   const termMatches = terms.map((term) => collectBoundedTermMatches(db, term));
   const first = termMatches[0]?.matches ?? new Map<string, TermMatch>();
-  const resultRows = [...first.entries()]
+  const priorityByChatId = new Map(allowed.map((entry, index) => [entry.chatId, index]));
+  const orderedRows = [...first.entries()]
     .filter(([key]) => termMatches.every((term) => term.matches.has(key)))
     .map(([key, match]) => ({
       chatId: match.chatId,
       transcriptViewId: match.transcriptViewId,
       rank: termMatches.reduce((sum, term) => sum + term.matches.get(key)!.rank, 0),
     }))
-    .sort((left, right) => left.rank - right.rank
-      || left.chatId.localeCompare(right.chatId)
-      || left.transcriptViewId.localeCompare(right.transcriptViewId))
-    .slice(0, limit);
+    .sort((left, right) => compareResultRows(left, right, options.order, priorityByChatId));
+  const resultRows = orderedRows.slice(options.offset, options.offset + options.limit);
+  const nextOffset = options.offset + resultRows.length;
+  const hasMore = nextOffset < orderedRows.length;
   const snippets = new Map<string, SnippetMatch>();
   for (const result of resultRows) {
     const key = resultKey(result.chatId, result.transcriptViewId);
@@ -404,6 +438,13 @@ function collectBoundedSearch(
   return {
     resultRows,
     snippetByChat: hydrateSnippets(db, resultRows, terms, snippets),
+    page: {
+      offset: options.offset,
+      limit: options.limit,
+      total: orderedRows.length,
+      hasMore,
+      nextOffset: hasMore ? nextOffset : null,
+    },
     truncated: termMatches.some((term) => term.truncated),
   };
 }
@@ -413,16 +454,33 @@ export function searchTranscriptIndexV1(
   options: {
     query: ChatSearchQueryV1;
     allowedChats: readonly TranscriptSearchAllowedChat[];
+    order?: TranscriptSearchOrder;
+    offset?: number;
     limit?: number;
   },
-): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
+): { results: ChatSearchResult[]; page: ChatSearchPage; index: ChatSearchIndexStatus } {
   const allowed = prepareAllowed(options.allowedChats);
   stageAllowedChats(db, allowed);
   const index = searchIndexStatusForPreparedAllowed(db, allowed);
   const terms = compileStructuredTerms(options.query);
-  if (allowed.length === 0 || terms.length === 0) return { results: [], index };
   const limit = clampLimit(options.limit);
-  const { resultRows, snippetByChat, truncated } = collectBoundedSearch(db, terms, limit);
+  const offset = clampOffset(options.offset);
+  const emptyPage: ChatSearchPage = {
+    offset,
+    limit,
+    total: 0,
+    hasMore: false,
+    nextOffset: null,
+  };
+  if (allowed.length === 0 || terms.length === 0) {
+    return { results: [], page: emptyPage, index };
+  }
+  const { resultRows, snippetByChat, page, truncated } = collectBoundedSearch(
+    db,
+    terms,
+    allowed,
+    { order: options.order ?? 'relevance', offset, limit },
+  );
   return {
     results: resultRows.map((row) => {
       const snippets = snippetByChat.get(resultKey(row.chatId, row.transcriptViewId))
@@ -435,6 +493,7 @@ export function searchTranscriptIndexV1(
         snippets: snippets.snippets,
       };
     }),
+    page,
     index: { ...index, resultsTruncated: truncated },
   };
 }

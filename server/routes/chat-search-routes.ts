@@ -3,11 +3,21 @@ import type {
   ChatSearchNavigateResponse,
   ChatSearchRequest,
   ChatSearchResponse,
+  ChatSearchSort,
   TranscriptSearchQueryStatsV1,
   TranscriptSearchStatusResponse,
   TranscriptSearchStatusV1,
 } from '../../common/chat-search.js';
-import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
+import {
+  CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_TERMS,
+  CHAT_SEARCH_MAX_WORDS,
+  CHAT_SEARCH_SORT_VALUES,
+} from '../../common/chat-search.js';
+import type { ChatListEntry } from '../../common/chat-list.js';
+import type { ChatOrderTimestamps } from '../../common/chat-order-sort.js';
+import { compareChatOrderNewestFirst } from '../../common/chat-order-sort.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -29,10 +39,13 @@ export interface ChatSearchDep {
     query: string;
     textTokens?: string[];
     allowedChatIds: string[];
+    sort: ChatSearchSort;
+    offset: number;
     limit?: number;
     signal?: AbortSignal;
   }): Promise<{
     results: ChatSearchResponse['results'];
+    page: ChatSearchResponse['page'];
     index: ChatSearchResponse['index'];
   }>;
 }
@@ -47,6 +60,13 @@ interface ChatSearchRouteDeps {
   chatListProjector: ChatListProjector;
   searchIndex?: ChatSearchDep;
 }
+
+interface NormalizedChatSearchRequest extends ChatSearchRequest {
+  sort: ChatSearchSort;
+  offset: number;
+}
+
+const CLIENT_CLOSED_REQUEST_STATUS = 499;
 
 export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   postSearchChats(body: unknown, request?: Request): Promise<Response>;
@@ -73,17 +93,23 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
           pathCache,
           chatListProjector,
           search.chatIds,
+          search.sort,
         ),
+        sort: search.sort,
+        offset: search.offset,
         limit: search.limit,
         signal: request?.signal,
       });
       return Response.json({
         query: search.query,
         results: result.results,
-        total: result.results.length,
+        page: result.page,
         index: result.index,
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
+      if (request?.signal.aborted && isAbortError(error)) {
+        return new Response(null, { status: CLIENT_CLOSED_REQUEST_STATUS });
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -136,6 +162,10 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   return { postSearchChats, postSearchNavigate, getSearchStatus };
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 function parseSearchNavigateRequest(body: unknown): ChatSearchNavigateRequest {
   const raw = body && typeof body === 'object' ? body as Record<string, unknown> : null;
   if (
@@ -154,7 +184,7 @@ function parseSearchNavigateRequest(body: unknown): ChatSearchNavigateRequest {
   };
 }
 
-function parseSearchRequest(body: unknown): ChatSearchRequest {
+function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   const input = body && typeof body === 'object' && !Array.isArray(body)
     ? body as Record<string, unknown>
     : {};
@@ -192,7 +222,9 @@ function parseSearchRequest(body: unknown): ChatSearchRequest {
       maxItemChars: MAX_SEARCH_CHAT_ID_CHARS,
       maxTotalChars: MAX_SEARCH_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
     }),
-    limit: optionalNonNegativeIntegerField(input, 'limit'),
+    sort: optionalSearchSort(input.sort) ?? 'relevance',
+    offset: optionalBoundedOffset(input.offset) ?? 0,
+    limit: optionalPageLimit(input.limit),
   };
 }
 
@@ -201,6 +233,7 @@ async function searchableChatIds(
   pathCache: ChatSearchRouteDeps['pathCache'],
   chatListProjector: ChatListProjector,
   requestedChatIds: string[] | undefined,
+  sort: ChatSearchSort,
 ): Promise<string[]> {
   const sessions = registry.listAllChats();
   const sessionEntries = Object.entries(sessions);
@@ -208,16 +241,46 @@ async function searchableChatIds(
     sessionEntries.map(([, session]) => session.projectPath),
   );
   const visibleEntries = await chatListProjector.buildMany(sessionEntries, statuses);
-  if (requestedChatIds !== undefined) {
-    return requestedChatIds.filter((chatId) => visibleEntries.has(chatId));
-  }
-  return [...visibleEntries.values()]
-    .sort((left, right) => {
-      const leftActivity = left.activity.lastActivityAt ?? left.activity.createdAt ?? '';
-      const rightActivity = right.activity.lastActivityAt ?? right.activity.createdAt ?? '';
-      return rightActivity.localeCompare(leftActivity) || left.id.localeCompare(right.id);
-    })
+  const entries = requestedChatIds === undefined
+    ? [...visibleEntries.values()]
+    : [...new Set(requestedChatIds)]
+      .map((chatId) => visibleEntries.get(chatId))
+      .filter((entry): entry is ChatListEntry => entry !== undefined);
+  if (sort === 'relevance') return entries.map((entry) => entry.id);
+  const compareTime = compareChatOrderNewestFirst(sort);
+  const timestamps = (entry: ChatListEntry): ChatOrderTimestamps => ({
+    id: entry.id,
+    createdAt: entry.activity.createdAt,
+    lastActivityAt: entry.activity.lastActivityAt,
+  });
+  return entries
+    .sort((left, right) => compareTime(timestamps(left), timestamps(right))
+      || left.id.localeCompare(right.id))
     .map((entry) => entry.id);
+}
+
+function optionalSearchSort(value: unknown): ChatSearchSort | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !CHAT_SEARCH_SORT_VALUES.includes(value as ChatSearchSort)) {
+    throw new ValidationDomainError('sort must be relevance, activity, or created');
+  }
+  return value as ChatSearchSort;
+}
+
+function optionalBoundedOffset(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > CHAT_SEARCH_MAX_OFFSET) {
+    throw new ValidationDomainError(`offset must be an integer from 0 to ${CHAT_SEARCH_MAX_OFFSET}`);
+  }
+  return Number(value);
+}
+
+function optionalPageLimit(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > CHAT_SEARCH_MAX_PAGE_SIZE) {
+    throw new ValidationDomainError(`limit must be an integer from 1 to ${CHAT_SEARCH_MAX_PAGE_SIZE}`);
+  }
+  return Number(value);
 }
 
 function stringArrayOrNull(value: unknown): string[] | null {
@@ -246,16 +309,4 @@ function optionalBoundedStringArrayField(
     }
   }
   return values.map((value) => value.trim()).filter(Boolean);
-}
-
-function optionalNonNegativeIntegerField(
-  body: Record<string, unknown>,
-  field: string,
-): number | undefined {
-  if (body[field] === undefined) return undefined;
-  const value = body[field];
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throw new ValidationDomainError(`${field} must be a non-negative integer`);
-  }
-  return value;
 }

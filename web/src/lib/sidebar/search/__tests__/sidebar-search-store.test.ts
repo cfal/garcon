@@ -10,6 +10,10 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { ApiError } from '$lib/api/client';
 import type { TranscriptSearchStatusV1 } from '$shared/chat-search';
 
+function makeSearchPage(total: number) {
+	return { offset: 0, limit: 50, total, hasMore: false, nextOffset: null };
+}
+
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
 		id: 'chat-1',
@@ -261,7 +265,7 @@ describe('SidebarSearchStore', () => {
 							],
 						},
 					],
-					total: 1,
+					page: makeSearchPage(1),
 					index: {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
@@ -301,7 +305,7 @@ describe('SidebarSearchStore', () => {
 				.mockResolvedValue({
 					query: 'needle is:!archived',
 					results: [],
-					total: 0,
+					page: makeSearchPage(0),
 					index: {
 						indexedChatCount: 2,
 						pendingChatCount: 0,
@@ -398,7 +402,7 @@ describe('SidebarSearchStore', () => {
 				.mockResolvedValueOnce({
 					query: 'needle',
 					results: [],
-					total: 0,
+					page: makeSearchPage(0),
 					index: {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
@@ -435,7 +439,7 @@ describe('SidebarSearchStore', () => {
 				.mockResolvedValueOnce({
 					query: 'needle',
 					results: [],
-					total: 0,
+					page: makeSearchPage(0),
 					index: {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
@@ -488,7 +492,7 @@ describe('SidebarSearchStore', () => {
 				.mockResolvedValueOnce({
 					query: 'needle',
 					results: [],
-					total: 0,
+					page: makeSearchPage(0),
 					index: {
 						indexedChatCount: 0,
 						pendingChatCount: 1,
@@ -509,7 +513,7 @@ describe('SidebarSearchStore', () => {
 							snippets: [],
 						},
 					],
-					total: 1,
+					page: makeSearchPage(1),
 					index: {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
@@ -557,7 +561,7 @@ describe('SidebarSearchStore', () => {
 				.mockResolvedValue({
 					query: 'needle',
 					results: [],
-					total: 0,
+					page: makeSearchPage(0),
 					index: {
 						indexedChatCount: 0,
 						pendingChatCount: 1,
@@ -590,7 +594,7 @@ describe('SidebarSearchStore', () => {
 				const pending = {
 					query: 'needle',
 					results: [],
-					total: 0,
+					page: makeSearchPage(0),
 					index: {
 						indexedChatCount: 0,
 						pendingChatCount: 1,
@@ -677,7 +681,7 @@ describe('SidebarSearchStore', () => {
 							],
 						},
 					],
-					total: 1,
+					page: makeSearchPage(1),
 					index: {
 						indexedChatCount: 2,
 						pendingChatCount: 0,
@@ -711,7 +715,7 @@ describe('SidebarSearchStore', () => {
 							snippets: [],
 						},
 					],
-					total: 1,
+					page: makeSearchPage(1),
 					index: {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
@@ -735,7 +739,7 @@ describe('SidebarSearchStore', () => {
 			const deferred = Promise.withResolvers<{
 				query: string;
 				results: [];
-				total: number;
+				page: ReturnType<typeof makeSearchPage>;
 				index: {
 					indexedChatCount: number;
 					pendingChatCount: number;
@@ -765,7 +769,7 @@ describe('SidebarSearchStore', () => {
 							],
 						},
 					],
-					total: 1,
+					page: makeSearchPage(1),
 					index: {
 						indexedChatCount: 2,
 						pendingChatCount: 0,
@@ -793,7 +797,7 @@ describe('SidebarSearchStore', () => {
 			deferred.resolve({
 				query: 'other',
 				results: [],
-				total: 0,
+				page: makeSearchPage(0),
 				index: {
 					indexedChatCount: 2,
 					pendingChatCount: 0,
@@ -1024,7 +1028,7 @@ describe('openTranscriptResult', () => {
 		const search = vi.fn(async () => ({
 			query: 'needle',
 			results: [],
-			total: 0,
+			page: makeSearchPage(0),
 			index: {
 				indexedChatCount: 1,
 				pendingChatCount: 0,

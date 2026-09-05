@@ -1,10 +1,13 @@
 import type {
   ChatSearchIndexStatus,
+  ChatSearchPage,
   ChatSearchQueryV1,
   ChatSearchResult,
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
+  CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
   CHAT_SEARCH_MIN_PREFIX_CHARS,
@@ -20,6 +23,8 @@ import {
 export const MAX_ROWS_PER_FRAME = 250;
 export const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 export const MAX_ALLOWLIST_PER_FRAME = 2_000;
+
+export type TranscriptSearchOrder = 'relevance' | 'allowlist';
 
 interface RequestBase {
   readonly requestId: number;
@@ -91,6 +96,8 @@ export type ReaderRequest =
   | (RequestBase & {
       readonly type: 'search-start';
       readonly query: ChatSearchQueryV1;
+      readonly order: TranscriptSearchOrder;
+      readonly offset: number;
       readonly limit: number;
     })
   | (RequestBase & {
@@ -106,6 +113,7 @@ export type ReaderEvent =
   | (RequestBase & {
       readonly type: 'search-result';
       readonly results: readonly ChatSearchResult[];
+      readonly page: ChatSearchPage;
       readonly index: ChatSearchIndexStatus;
     })
   | (RequestBase & { readonly type: 'error'; readonly code: string; readonly retryable: boolean });
@@ -308,6 +316,31 @@ function searchResult(value: unknown): value is ChatSearchResult {
   });
 }
 
+function searchPage(value: unknown): value is ChatSearchPage {
+  const candidate = record(value);
+  if (!candidate
+      || Object.keys(candidate).length !== 5
+      || !['offset', 'limit', 'total', 'hasMore', 'nextOffset']
+        .every((key) => Object.hasOwn(candidate, key))
+      || !nonNegativeInteger(candidate.offset)
+      || Number(candidate.offset) > CHAT_SEARCH_MAX_OFFSET
+      || !positiveInteger(candidate.limit)
+      || Number(candidate.limit) > CHAT_SEARCH_MAX_PAGE_SIZE
+      || !nonNegativeInteger(candidate.total)
+      || typeof candidate.hasMore !== 'boolean'
+      || (candidate.nextOffset !== null && !positiveInteger(candidate.nextOffset))) {
+    return false;
+  }
+  if (candidate.hasMore !== (candidate.nextOffset !== null)) return false;
+  if (candidate.nextOffset !== null) {
+    return Number(candidate.nextOffset) > Number(candidate.offset)
+      && Number(candidate.nextOffset) <= CHAT_SEARCH_MAX_OFFSET
+      && Number(candidate.nextOffset) <= Number(candidate.offset) + Number(candidate.limit)
+      && Number(candidate.nextOffset) <= Number(candidate.total);
+  }
+  return true;
+}
+
 export function workerRequestIdentity(
   value: unknown,
 ): { readonly requestId: number; readonly lifecycleEpoch: string } | null {
@@ -418,11 +451,13 @@ export function isReaderRequest(value: unknown): value is ReaderRequest {
         && typeof candidate.dbPath === 'string'
         && candidate.dbPath.length > 0;
     case 'search-start':
-      return exactKeys(candidate, 'query', 'limit')
+      return exactKeys(candidate, 'query', 'order', 'offset', 'limit')
         && searchQuery(candidate.query)
-        && Number.isSafeInteger(candidate.limit)
-        && Number(candidate.limit) >= 1
-        && Number(candidate.limit) <= 100;
+        && (candidate.order === 'relevance' || candidate.order === 'allowlist')
+        && nonNegativeInteger(candidate.offset)
+        && Number(candidate.offset) <= CHAT_SEARCH_MAX_OFFSET
+        && positiveInteger(candidate.limit)
+        && Number(candidate.limit) <= CHAT_SEARCH_MAX_PAGE_SIZE;
     case 'search-allowlist-chunk':
       return exactKeys(candidate, 'chunkIndex', 'allowedChats', 'done')
         && nonNegativeInteger(candidate.chunkIndex)
@@ -449,11 +484,21 @@ export function isReaderEvent(value: unknown): value is ReaderEvent {
         && failureCode(candidate.code)
         && typeof candidate.retryable === 'boolean';
     case 'search-result':
-      return exactKeys(candidate, 'results', 'index')
+      if (!(exactKeys(candidate, 'results', 'page', 'index')
         && Array.isArray(candidate.results)
-        && candidate.results.length <= 100
+        && candidate.results.length <= CHAT_SEARCH_MAX_PAGE_SIZE
         && candidate.results.every(searchResult)
-        && indexStatus(candidate.index);
+        && searchPage(candidate.page)
+        && candidate.results.length <= candidate.page.limit
+        && indexStatus(candidate.index))) return false;
+      if (candidate.page.hasMore) {
+        return candidate.page.nextOffset === candidate.page.offset + candidate.results.length
+          && candidate.page.nextOffset < candidate.page.total;
+      }
+      return candidate.page.nextOffset === null
+        && (candidate.page.offset >= candidate.page.total
+          ? candidate.results.length === 0
+          : candidate.page.offset + candidate.results.length >= candidate.page.total);
     default:
       return false;
   }
