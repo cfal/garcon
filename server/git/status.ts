@@ -402,11 +402,21 @@ export function createStatusOperations(agents: GitAgentRunner) {
       const status = line.substring(0, 2);
       const file = line.substring(3).trim().replace(/\/+$/g, '');
       if (!file) return;
-      if (status === 'M ' || status === ' M' || status === 'MM') {
-        modified.push(file);
-      } else if (status === 'A ' || status === 'AM') {
+      // Classifies by letter so every porcelain variant lands somewhere:
+      // T (typechange) and U (unmerged) count as modifications of a tracked
+      // path, and any A wins because the index still holds an addition.
+      // Renames (R/C) still drop out, as before.
+      const staged = status[0];
+      const unstaged = status[1];
+      if (staged === 'A' || unstaged === 'A') {
         added.push(file);
-      } else if (status === 'D ' || status === ' D') {
+      } else if (
+        staged === 'U' || unstaged === 'U' ||
+        staged === 'M' || unstaged === 'M' ||
+        staged === 'T' || unstaged === 'T'
+      ) {
+        modified.push(file);
+      } else if (staged === 'D' || unstaged === 'D') {
         deleted.push(file);
       } else if (status === '??') {
         untracked.push(file);
@@ -796,6 +806,16 @@ export function createStatusOperations(agents: GitAgentRunner) {
       // changes to restore) and unmerged-added states (AA/AU/UA), where it
       // clears the conflict instead of falling through as a silent no-op.
       await runGit(projectPath, ['reset', 'HEAD', '--', file]);
+    } else if (status === 'UU' || status === 'UD' || status === 'DU' || status === 'DD') {
+      // Unmerged conflicts resolve by reverting to HEAD. Reset clears the
+      // conflict stages; when our side kept the file (X=U: UU/UD) restore also
+      // rewrites the worktree to HEAD's version. When our side deleted it
+      // (X=D: DU/DD) HEAD has no version to restore to, so reset leaves any
+      // worktree leftover untracked, matching the AA/AU/UA behavior above.
+      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
+      if (status[0] === 'U') {
+        await runGit(projectPath, ['restore', '--', file]);
+      }
     } else if (status.includes('M') || status.includes('D') || status.includes('T')) {
       // T routes worktree typechanges (regular file versus symlink) through
       // restore, which rewrites the worktree entry back to the indexed type,
