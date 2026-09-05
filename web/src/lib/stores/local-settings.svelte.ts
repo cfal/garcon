@@ -634,7 +634,12 @@ export class LocalSettingsStore {
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
-		if (!hiddenBashCommandPatternsEqual(this.hiddenBashCommandPatterns, snap.hiddenBashCommandPatterns)) {
+		if (
+			!hiddenBashCommandPatternsEqual(
+				this.hiddenBashCommandPatterns,
+				snap.hiddenBashCommandPatterns,
+			)
+		) {
 			this.hiddenBashCommandPatterns = snap.hiddenBashCommandPatterns;
 		}
 		this.globalShortcuts = { ...snap.globalShortcuts };

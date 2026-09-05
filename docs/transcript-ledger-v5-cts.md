@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 28 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 29 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -9,13 +9,15 @@ legacy-absence correction, and the revision 21 OpenCode native-fidelity fork.
 The revision 22 active-run producer-notice correction is proposed by PR #538
 and has no merge anchor yet. Revision 23 adds ordinary user transcript export;
 revision 24 makes its rendered artifacts transcript-first and succinct.
+Revision 29 permits a settled chat-ID request to dispatch again within the same
+long-lived provider turn.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 28, SHA-256
-  `8c6c1a937bb46495519c00c5df79137ca03dd91a7cf762c562d3a17db7ae1abe`
+- `docs/transcript-ledger-v5-design.md`, revision 29, SHA-256
+  `ddfcd00add9ae059d07b98bb3acdd1a0903fe1fa184d01d967a236a909f4c606`
 
-Current inventory: 410 discovered stable IDs, validated by
+Current inventory: 411 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -378,7 +380,7 @@ routine local testing.
 | TLV5-CHAT-ID-DISCOVERY.02     | The request row is hidden from every public and conversational fold but qualifies as native evidence; public discovery outcomes render and export only as diagnostics. | Read-fold matrix |
 | TLV5-CHAT-ID-DISCOVERY.03     | Native import reconstructs the hidden request row and maps an exact disclosure input to one public notice without exposing or redispatching control. | Import unit |
 | TLV5-CHAT-ID-DISCOVERY.04     | Control delivery steers only the emitting run once, permits one direct control turn only after definitive non-delivery and exact-attempt settlement, creates no user-input, prepared-input, or queue work, and retains its view-scoped recursion fence. | Core control unit, server integration |
-| TLV5-CHAT-ID-DISCOVERY.05     | Every reference provider immediately receives one disclosure steer during the requesting run and no synthetic user row becomes durable. | Claude, Codex, OpenCode, Pi scripted |
+| TLV5-CHAT-ID-DISCOVERY.05     | Every reference provider immediately receives one disclosure steer per eligible request during the requesting run; settled sequential same-run requests each receive one, and no synthetic user row becomes durable. | Claude, Codex, OpenCode, Pi scripted |
 | TLV5-CHAT-ID-DISCOVERY.06     | Disabled discovery strips the marker, emits exactly one typed error, and sends no disclosure to the provider.                           | Core unit, Claude scripted         |
 | TLV5-CHAT-ID-DISCOVERY.07     | Typed generic discovery failures render with error semantics.                                                                            | Web component                      |
 
@@ -850,7 +852,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-CHAT-ID-DISCOVERY.04-CORE-RECURSION-UNIT-01 | `server/chats/__tests__/chat-id-discovery-controller.test.js`: the control turn and later uncorrelated markers remain fenced while a marker from another correlated run stays eligible | CHAT-ID-DISCOVERY.04 |
 | TLV5-CHAT-ID-DISCOVERY.04-DIRECT-SERVER-01 | `integration-tests/tests/server/chat-lifecycle.test.ts`: a non-steering integration receives the exact disclosure in one direct control turn with one visible outcome notice | CHAT-ID-DISCOVERY.04 |
 | TLV5-CHAT-ID-DISCOVERY.05-CLAUDE-SCRIPTED-01 | `integration-tests/tests/server/claude-scripted-chat-id-discovery.test.ts`: the real Claude CLI receives the immediate disclosure steer with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
-| TLV5-CHAT-ID-DISCOVERY.05-CODEX-SCRIPTED-01 | `integration-tests/tests/server/codex-scripted-steer.test.ts`: the real Codex binary receives the immediate disclosure at an active tool boundary with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
+| TLV5-CHAT-ID-DISCOVERY.05-CODEX-SCRIPTED-01 | `integration-tests/tests/server/codex-scripted-steer.test.ts`: the real Codex binary receives an immediate disclosure for each of two sequential same-run markers at active tool boundaries within one outer turn, with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
 | TLV5-CHAT-ID-DISCOVERY.05-OPENCODE-SCRIPTED-01 | `integration-tests/tests/server/opencode-scripted-steer.test.ts`: the real OpenCode binary receives the immediate disclosure at an active tool boundary with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
 | TLV5-CHAT-ID-DISCOVERY.05-PI-SCRIPTED-01 | `integration-tests/tests/server/pi-scripted-queue.test.ts`: the real Pi CLI receives the immediate disclosure at an active tool boundary with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
 | TLV5-CHAT-ID-DISCOVERY.06-CLAUDE-SCRIPTED-01 | `integration-tests/tests/server/claude-scripted-chat-id-discovery.test.ts`: disabled discovery strips the marker, records the error, and sends no provider disclosure | CHAT-ID-DISCOVERY.06 |

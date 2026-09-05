@@ -13,7 +13,9 @@
 		variant?: ChatEventCardVariant;
 		compact?: boolean;
 		header?: Snippet;
-		body: Snippet;
+		// Omitted while a disclosure body is hidden so the card does not
+		// reserve the header gap for content it is not showing.
+		body?: Snippet;
 		footer?: Snippet;
 		class?: string;
 	}
@@ -34,14 +36,16 @@
 
 <article class={cn('rounded-xl border shadow-sm', variantClass, paddingClass, className)}>
 	{#if header}
-		<div class="mb-2 flex items-start justify-between gap-2">
+		<div class={cn('flex items-start justify-between gap-2', body && 'mb-2')}>
 			{@render header()}
 		</div>
 	{/if}
 
-	<div class="min-w-0">
-		{@render body()}
-	</div>
+	{#if body}
+		<div class="min-w-0">
+			{@render body()}
+		</div>
+	{/if}
 
 	{#if footer}
 		<div class="mt-3">

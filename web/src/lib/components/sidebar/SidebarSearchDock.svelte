@@ -11,7 +11,6 @@
 	interface SidebarSearchDockProps {
 		isLoading: boolean;
 		visibleUnreadCount: number;
-		isMarkingAllRead?: boolean;
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
@@ -41,7 +40,6 @@
 	let {
 		isLoading,
 		visibleUnreadCount,
-		isMarkingAllRead = false,
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
@@ -78,7 +76,6 @@
 	<SidebarControlsRow
 		{isLoading}
 		{visibleUnreadCount}
-		{isMarkingAllRead}
 		{chatGrouping}
 		{groupNestedProjectPaths}
 		{chatItemLayout}

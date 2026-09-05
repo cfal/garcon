@@ -1,6 +1,5 @@
 import {
 	AssistantMessage,
-	BashToolUseMessage,
 	CliRowMessage,
 	ExternalToolUseMessage,
 	McpToolUseMessage,
@@ -10,7 +9,10 @@ import {
 	isToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import type { BashCommandMatcher } from '$lib/chat/transcript/hidden-bash-commands.js';
+import {
+	isHiddenBashToolUse,
+	type BashCommandMatcher,
+} from '$lib/chat/transcript/hidden-bash-commands.js';
 import { cliPresentationLabel } from '$lib/chat/transcript/cli-presentation-style';
 import {
 	conversationFeedMutationKindsSince,
@@ -151,11 +153,7 @@ export function announcementForAppendedRow(
 	}
 	if (message instanceof PermissionRequestMessage) return m.chat_permission_permission_required();
 	if (!isToolUseMessage(message)) return null;
-	if (
-		message instanceof BashToolUseMessage &&
-		hiddenBashCommands &&
-		hiddenBashCommands(message.command)
-	) {
+	if (hiddenBashCommands && isHiddenBashToolUse(message, hiddenBashCommands)) {
 		return null;
 	}
 	if (

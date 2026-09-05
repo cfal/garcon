@@ -20,7 +20,7 @@ async function tempDir() {
 function recurringPrompt(nextRunAt) {
   return {
     id: 'repeat',
-    schedule: { type: 'recurring', intervalDays: 1, nextRunAt, endAt: null },
+    schedule: { type: 'recurring', intervalHours: 1, nextRunAt, endAt: null },
     target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
     prompt: 'Continue the work',
     createdAt: '2029-01-01T00:00:00.000Z',
@@ -28,11 +28,11 @@ function recurringPrompt(nextRunAt) {
   };
 }
 
-function recurringDefinition(firstRunAtUtc) {
+function recurringDefinition(firstRunAtUtc, intervalHours = 24) {
   return {
     schedule: {
       type: 'recurring',
-      intervalDays: 1,
+      intervalHours,
       firstRunAtUtc,
       endAtUtc: null,
     },
@@ -45,7 +45,7 @@ function newChatDefinition(firstRunAtUtc, thinkingMode = 'none') {
   return {
     schedule: {
       type: 'recurring',
-      intervalDays: 1,
+      intervalHours: 24,
       firstRunAtUtc,
       endAtUtc: null,
     },
@@ -171,8 +171,44 @@ describe('scheduled prompt scheduler', () => {
     }
 
     expect(observations).toHaveLength(1);
-    expect(observations[0].persisted.schedule.nextRunAt).toBe('2030-01-02T09:00:00.000Z');
+    expect(observations[0].persisted.schedule.nextRunAt).toBe('2030-01-01T10:00:00.000Z');
     expect(runLog.list().at(-1)).toContain('Prompt sent to chat 123.');
+  });
+
+  it('persists an hourly recurring definition and registers its first run', async () => {
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir);
+    const cron = new FakeCron();
+    const scheduler = new ScheduledPromptScheduler({
+      store,
+      runLog: new ScheduledPromptRunLog(),
+      dispatcher: {
+        async dispatch() {
+          return { message: 'sent' };
+        },
+      },
+      chats: {
+        getChat() {
+          return {};
+        },
+      },
+      agents: agentCapabilities(),
+      cron,
+    });
+    await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));
+
+    const snapshot = await scheduler.create({
+      expectedRevision: 0,
+      scheduledPrompt: recurringDefinition('2030-01-01T09:15:00.000Z', 6),
+    });
+
+    expect(snapshot.prompts[0]?.schedule).toMatchObject({
+      type: 'recurring',
+      intervalHours: 6,
+      nextRunAt: '2030-01-01T09:15:00.000Z',
+    });
+    expect(cron.jobs.some((job) => job.expression === '15 9 1 1 *')).toBe(true);
+    scheduler.stop();
   });
 
   it('creates a server-timed one-off prompt for the current chat with skip behavior', async () => {
