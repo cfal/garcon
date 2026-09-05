@@ -41,6 +41,17 @@ export type WorkspaceSplitAdmissions = Readonly<
 	Record<WorkspaceWindowEdge, WorkspaceSplitAdmission | null>
 >;
 
+export function mapWorkspaceSplitAdmissions(
+	admissionForEdge: (edge: WorkspaceWindowEdge) => WorkspaceSplitAdmission | null,
+): WorkspaceSplitAdmissions {
+	return {
+		left: admissionForEdge('left'),
+		right: admissionForEdge('right'),
+		top: admissionForEdge('top'),
+		bottom: admissionForEdge('bottom'),
+	};
+}
+
 export interface WorkspaceSplitRequest {
 	readonly targetWindowId: WorkspaceWindowId;
 	readonly edge: WorkspaceWindowEdge;
