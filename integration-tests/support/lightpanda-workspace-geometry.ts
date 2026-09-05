@@ -7,7 +7,7 @@ export async function installLightpandaWorkspaceGeometry(page: Page): Promise<vo
       const nativeRect = nativeGetBoundingClientRect.call(this);
       if (!this.classList.contains('workspace-host-region')) return nativeRect;
       // Replaces Lightpanda's 10x10 placeholder for an otherwise uncomputed flex remainder.
-      if (nativeRect.width > 10 && nativeRect.height > 10) return nativeRect;
+      if (nativeRect.width !== 10 || nativeRect.height !== 10) return nativeRect;
 
       const mobile = matchMedia('(max-width: 768px)').matches;
       const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');

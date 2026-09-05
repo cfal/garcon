@@ -18,6 +18,32 @@ function conversationPanel(page: Page, windowId: string): Locator {
   );
 }
 
+async function waitForCurrentWorkspaceWindow(page: Page, windowId: string): Promise<void> {
+  await page.waitForFunction(
+    (expectedWindowId) =>
+      document
+        .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+        ?.getAttribute('data-workspace-window-current') === 'true',
+    windowId,
+  );
+}
+
+async function waitForCompactWorkspace(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('.workspace-host-region')
+        ?.getAttribute('data-workspace-compact') === 'true',
+  );
+}
+
+async function waitForTiledWorkspace(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const host = document.querySelector('.workspace-host-region');
+    return host !== null && !host.hasAttribute('data-workspace-single-window-projection');
+  });
+}
+
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const child = Bun.spawn(['git', ...args], {
     cwd: projectPath,
@@ -1132,13 +1158,7 @@ describe('Chromium workspace windows', () => {
       await fixture.page
         .locator(`[data-workspace-window-titlebar="${mainWindowId}"]`)
         .click({ position: { x: 3, y: 3 } });
-      await fixture.page.waitForFunction(
-        (expectedWindowId) =>
-          document
-            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
-            ?.getAttribute('data-workspace-window-current') === 'true',
-        mainWindowId,
-      );
+      await waitForCurrentWorkspaceWindow(fixture.page, mainWindowId);
       const composer = fixture.page.locator('textarea[placeholder="Reply..."]');
       await composer.fill('draft retained through compact projection');
 
@@ -1168,12 +1188,7 @@ describe('Chromium workspace windows', () => {
       markPhase('entering compact projection after host shrink');
       await fixture.page.setViewportSize({ width: 780, height: 900 });
       const host = fixture.page.locator('.workspace-host-region');
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('.workspace-host-region')
-            ?.getAttribute('data-workspace-compact') === 'true',
-      );
+      await waitForCompactWorkspace(fixture.page);
       expect(await host.getAttribute('data-workspace-single-window-projection')).toBe('true');
       expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
       expect(await fixture.page.locator(`${WINDOW_SELECTOR}:visible`).count()).toBe(1);
@@ -1226,38 +1241,14 @@ describe('Chromium workspace windows', () => {
 
       markPhase('switching every compact navigation path');
       await fixture.page.getByRole('button', { name: 'Next window' }).click();
-      await fixture.page.waitForFunction(
-        (expectedWindowId) =>
-          document
-            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
-            ?.getAttribute('data-workspace-window-current') === 'true',
-        filesWindowId,
-      );
+      await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
       await fixture.page.getByRole('button', { name: 'Window 2 of 2' }).click();
       await fixture.page.locator(`[data-workspace-compact-window-id="${mainWindowId}"]`).click();
-      await fixture.page.waitForFunction(
-        (expectedWindowId) =>
-          document
-            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
-            ?.getAttribute('data-workspace-window-current') === 'true',
-        mainWindowId,
-      );
+      await waitForCurrentWorkspaceWindow(fixture.page, mainWindowId);
       await fixture.page.keyboard.press('Control+Shift+O');
-      await fixture.page.waitForFunction(
-        (expectedWindowId) =>
-          document
-            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
-            ?.getAttribute('data-workspace-window-current') === 'true',
-        filesWindowId,
-      );
+      await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
       await fixture.page.getByRole('button', { name: 'Previous window' }).click();
-      await fixture.page.waitForFunction(
-        (expectedWindowId) =>
-          document
-            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
-            ?.getAttribute('data-workspace-window-current') === 'true',
-        mainWindowId,
-      );
+      await waitForCurrentWorkspaceWindow(fixture.page, mainWindowId);
       await fixture.page.waitForFunction(() => {
         const input = document.querySelector<HTMLTextAreaElement>(
           'textarea[placeholder="Reply..."]',
@@ -1312,12 +1303,7 @@ describe('Chromium workspace windows', () => {
 
       markPhase('recovering width with chat-list auto-hide');
       await fixture.page.getByRole('button', { name: 'Turn on auto-hide' }).click();
-      await fixture.page.waitForFunction(
-        () =>
-          !document
-            .querySelector('.workspace-host-region')
-            ?.hasAttribute('data-workspace-single-window-projection'),
-      );
+      await waitForTiledWorkspace(fixture.page);
       expect(await fixture.page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(1);
       expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(780);
       expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
@@ -1336,38 +1322,18 @@ describe('Chromium workspace windows', () => {
       );
       await chatListPanel.getByRole('button', { name: 'More actions' }).first().click();
       await fixture.page.getByRole('menuitemcheckbox', { name: 'Autohide sidebar' }).click();
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('.workspace-host-region')
-            ?.getAttribute('data-workspace-compact') === 'true',
-      );
+      await waitForCompactWorkspace(fixture.page);
       await fixture.page.getByRole('button', { name: 'Dismiss' }).click();
       expect(await fixture.page.getByRole('button', { name: 'Dismiss' }).count()).toBe(0);
 
       await fixture.page.setViewportSize({ width: 850, height: 900 });
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('.workspace-host-region')
-            ?.getAttribute('data-workspace-compact') === 'true',
-      );
+      await waitForCompactWorkspace(fixture.page);
       await fixture.page.setViewportSize({ width: 920, height: 900 });
-      await fixture.page.waitForFunction(
-        () =>
-          !document
-            .querySelector('.workspace-host-region')
-            ?.hasAttribute('data-workspace-single-window-projection'),
-      );
+      await waitForTiledWorkspace(fixture.page);
       await fixture.page.setViewportSize({ width: 850, height: 900 });
       expect(await host.getAttribute('data-workspace-compact')).toBeNull();
       await fixture.page.setViewportSize({ width: 780, height: 900 });
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('.workspace-host-region')
-            ?.getAttribute('data-workspace-compact') === 'true',
-      );
+      await waitForCompactWorkspace(fixture.page);
 
       markPhase('giving manual fullscreen priority and restoring compact projection');
       await projectedWindow.locator(`[data-workspace-window-fullscreen="${mainWindowId}"]`).click();
@@ -1378,22 +1344,12 @@ describe('Chromium workspace windows', () => {
       );
       expect(await fixture.page.locator('[data-workspace-compact-switcher]').count()).toBe(0);
       await projectedWindow.locator(`[data-workspace-window-fullscreen="${mainWindowId}"]`).click();
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('.workspace-host-region')
-            ?.getAttribute('data-workspace-compact') === 'true',
-      );
+      await waitForCompactWorkspace(fixture.page);
       expect(await fixture.page.locator('[data-workspace-compact-switcher]').count()).toBe(1);
 
       markPhase('restoring exact tiled identity and reloading narrow');
       await fixture.page.setViewportSize({ width: 1600, height: 900 });
-      await fixture.page.waitForFunction(
-        () =>
-          !document
-            .querySelector('.workspace-host-region')
-            ?.hasAttribute('data-workspace-single-window-projection'),
-      );
+      await waitForTiledWorkspace(fixture.page);
       expect(await workspaceWindowIds(fixture.page)).toEqual(initialWindowIds);
       expect(
         await fixture.page
@@ -1413,19 +1369,9 @@ describe('Chromium workspace windows', () => {
       );
 
       await fixture.page.setViewportSize({ width: 780, height: 900 });
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('.workspace-host-region')
-            ?.getAttribute('data-workspace-compact') === 'true',
-      );
+      await waitForCompactWorkspace(fixture.page);
       await fixture.page.reload({ waitUntil: 'domcontentloaded' });
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('.workspace-host-region')
-            ?.getAttribute('data-workspace-compact') === 'true',
-      );
+      await waitForCompactWorkspace(fixture.page);
       expect(await workspaceWindowIds(fixture.page)).toEqual(initialWindowIds);
       expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
         initialPersisted,
