@@ -1,6 +1,6 @@
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	type SurfaceDescriptor,
 	type WorkspaceLayoutSnapshot,
 	type WorkspaceWindowEdge,
@@ -31,7 +31,7 @@ export function resolveWorkspaceWindowTabActions(
 	const hasRequiredChatId = surface?.type !== 'chat' || Boolean(surface.chatId);
 	const canMoveBetweenWindows = canReorder && hasRequiredChatId;
 	const windows = collectWindowNodes(snapshot.desktopRoot);
-	const canCreateWindow = windows.length < MAX_WORKSPACE_WINDOWS;
+	const canCreateWindow = windows.length < WORKSPACE_WINDOW_RESOURCE_CEILING;
 	return {
 		surface,
 		index,

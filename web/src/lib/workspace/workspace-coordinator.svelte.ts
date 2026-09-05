@@ -3,7 +3,7 @@ import { SvelteSet } from 'svelte/reactivity';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	fileSurfaceId,
 	portableSingletonDescriptor,
@@ -64,7 +64,7 @@ interface WorkspaceCoordinatorDeps {
 
 export class WorkspaceWindowLimitError extends Error {
 	constructor() {
-		super(m.workspace_window_limit_reached({ count: MAX_WORKSPACE_WINDOWS }));
+		super(m.workspace_window_limit_reached({ count: WORKSPACE_WINDOW_RESOURCE_CEILING }));
 		this.name = 'WorkspaceWindowLimitError';
 	}
 }
@@ -236,7 +236,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	get canOpenNewWindow(): boolean {
-		return this.windowCount < MAX_WORKSPACE_WINDOWS;
+		return this.windowCount < WORKSPACE_WINDOW_RESOURCE_CEILING;
 	}
 
 	get isChatPresented(): boolean {
@@ -404,7 +404,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 		let opened = false;
 		const current = await this.#presentation.commit((latest) => {
-			if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
+			if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
 				throw new WorkspaceWindowLimitError();
 			}
 			const anchor = this.#resolveWindowId(
@@ -496,7 +496,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const current = await this.#presentation.commit((latest) => {
 			if (latest.surfaces[surfaceId] || this.#reservedSurfaceIds.has(surfaceId)) return [];
-			if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
+			if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
 				throw new WorkspaceWindowLimitError();
 			}
 			if (
@@ -707,7 +707,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 			const current = await this.#presentation.commit(
 				(latest) => {
-					if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
+					if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
 						throw new WorkspaceWindowLimitError();
 					}
 					const anchor = this.#resolveWindowId(latest, destination.anchorWindowId);

@@ -4,11 +4,67 @@ import {
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 } from '../canonical-layout';
-import { parsePersistedWorkspaceLayout, serializeWorkspaceLayout } from '../layout-schema';
+import {
+	parsePersistedWorkspaceLayout,
+	serializeWorkspaceLayout,
+	WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
+	WORKSPACE_LAYOUT_MAX_PARSE_NODES,
+} from '../layout-schema';
 import { portableSingletonDescriptor } from '../surface-types';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { collectWindowNodes, windowNodeById } from '../window-tree';
 import type { PersistedWorkspaceLayoutNode } from '$shared/workspace-layout';
+
+function persistedWindow(index: number): PersistedWorkspaceLayoutNode {
+	return {
+		type: 'window',
+		id: `window-budget-${index}`,
+		order: [{ type: 'chat', chatId: `chat-budget-${index}` }],
+		active: { type: 'chat', chatId: `chat-budget-${index}` },
+		mru: [],
+	};
+}
+
+function skewedTree(depth: number): PersistedWorkspaceLayoutNode {
+	let root = persistedWindow(1);
+	for (let level = 2; level <= depth; level += 1) {
+		root = {
+			type: 'partition',
+			id: `partition-depth-${level}`,
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [persistedWindow(level), root],
+		};
+	}
+	return root;
+}
+
+function fullTreeWithNodes(nodeCount: number): PersistedWorkspaceLayoutNode {
+	const leafCount = (nodeCount + 1) / 2;
+	let level = Array.from({ length: leafCount }, (_, index) => persistedWindow(index + 1));
+	let partitionIndex = 0;
+	while (level.length > 1) {
+		const next: PersistedWorkspaceLayoutNode[] = [];
+		for (let index = 0; index < level.length; index += 2) {
+			const first = level[index]!;
+			const second = level[index + 1];
+			if (!second) {
+				next.push(first);
+				continue;
+			}
+			partitionIndex += 1;
+			next.push({
+				type: 'partition',
+				id: `partition-node-${partitionIndex}`,
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [first, second],
+			});
+		}
+		level = next;
+	}
+	return level[0]!;
+}
 
 describe('workspace layout V2 schema', () => {
 	it('round-trips mixed window topology, local tab MRU, ratios, terminals, and Chat IDs', () => {
@@ -283,6 +339,49 @@ describe('workspace layout V2 schema', () => {
 			Object.values(result.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
 		).toHaveLength(3);
 		expect(result.snapshot.surfaces['chat-view:window-5']).toBeUndefined();
+	});
+
+	it('accepts the maximum restore depth and falls back one level beyond it', () => {
+		const accepted = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: skewedTree(WORKSPACE_LAYOUT_MAX_PARSE_DEPTH),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(accepted.source).toBe('valid');
+
+		const rejected = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: skewedTree(WORKSPACE_LAYOUT_MAX_PARSE_DEPTH + 1),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
+	});
+
+	it('bounds total restored nodes before resource-ceiling repair', () => {
+		const largestFullTreeBelowBudget = WORKSPACE_LAYOUT_MAX_PARSE_NODES - 1;
+		const accepted = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: fullTreeWithNodes(largestFullTreeBelowBudget),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(accepted.source).toBe('valid');
+		expect(collectWindowNodes(accepted.snapshot.desktopRoot)).toHaveLength(4);
+
+		const firstFullTreeAboveBudget = WORKSPACE_LAYOUT_MAX_PARSE_NODES + 1;
+		const rejected = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: fullTreeWithNodes(firstFullTreeAboveBudget),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
 	});
 
 	it('falls back for malformed current roots and unsupported versions', () => {
