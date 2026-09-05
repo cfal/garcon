@@ -178,6 +178,8 @@ function createHarness(
 				options.pendingGitSurfaceIds?.includes(surfaceId) ? 1 : 0,
 		} as never,
 		surfaceFrames: options.surfaceFrames,
+		resolveSplitAdmission: () => ({ allowed: true }),
+		resolvePartitionRatioBounds: () => null,
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
 		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,

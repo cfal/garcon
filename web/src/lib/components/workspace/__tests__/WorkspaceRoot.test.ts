@@ -47,6 +47,7 @@ vi.mock('$lib/context', () => ({
 	getSurfaceFrames: () => testContext.current?.surfaceFrames,
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
+	getWorkspaceHostGeometry: () => testContext.current?.hostGeometry,
 	getWorkspaceWindowDnd: () => testContext.current?.windowDnd,
 	getOptionalTransientLayers: () => null,
 	setConversationUi: (value: unknown) => {
@@ -376,6 +377,13 @@ function installContext() {
 	};
 	const windowDnd = new WorkspaceWindowDndController(layout);
 	testContext.current = {
+		hostGeometry: {
+			size: null,
+			compactActive: false,
+			singleWindowProjectionActive: false,
+			compactSession: 0,
+			attach: () => undefined,
+		},
 		appShell: { isMobile: false, openNewChatDialog: vi.fn() },
 		workspace,
 		windowDnd,

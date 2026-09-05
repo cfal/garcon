@@ -281,6 +281,10 @@ export class WorkspacePresentationController {
 		this.#clearPointerInteraction();
 	}
 
+	cancelPendingWindowPointerInteraction(): void {
+		this.#clearPointerInteraction();
+	}
+
 	activateWindow(windowId: WorkspaceWindowId): void {
 		if (this.isMobile) return;
 		const snapshot = this.layout.snapshot;
