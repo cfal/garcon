@@ -341,6 +341,74 @@ describe('Git review documents', () => {
     if (response.status === 'ready') expect(response.files['a.txt'].patch).toContain('+staged a');
   });
 
+  it('loads workbench rename bodies whose source still sits in the index', async () => {
+    const projectPath = await createRepository();
+    const service = createService();
+    await git(projectPath, ['config', 'status.renames', 'true']);
+    // DR: the destination becomes an intent-to-add entry while the source
+    // stays in the index, so the source path is not a status destination and
+    // its freshness token must come from a live index lookup.
+    await fs.copyFile(path.join(projectPath, 'a.txt'), path.join(projectPath, 'dst.txt'));
+    await git(projectPath, ['add', 'dst.txt']);
+    await git(projectPath, ['commit', '-m', 'add dst']);
+    await git(projectPath, ['rm', '--cached', 'dst.txt']);
+    await git(projectPath, ['add', '-N', 'dst.txt']);
+    await fs.rm(path.join(projectPath, 'a.txt'));
+
+    const snapshot = await service.getWorkbenchSnapshot({
+      projectPath,
+      mode: 'working',
+      context: 3,
+    });
+    expect(snapshot.status).toBe('ready');
+    if (snapshot.status !== 'ready') return;
+    expect(snapshot.reviewSummary.files).toContainEqual(
+      expect.objectContaining({ path: 'dst.txt', originalPath: 'a.txt' }),
+    );
+
+    const response = await service.getReviewDocumentFileBodies({
+      projectPath,
+      documentId: snapshot.reviewSummary.documentId,
+      files: ['dst.txt'],
+      purpose: 'visible',
+    });
+
+    expect(response.status).toBe('ready');
+    if (response.status === 'ready') expect(response.files['dst.txt'].patch).toBeTruthy();
+  });
+
+  it('loads workbench unstaged rename bodies through an intent-to-add destination', async () => {
+    const projectPath = await createRepository(['src.txt']);
+    const service = createService();
+    await git(projectPath, ['config', 'status.renames', 'true']);
+    // Worktree-column R: the source stays in the index and is only reachable
+    // through the rename's original path.
+    await fs.copyFile(path.join(projectPath, 'src.txt'), path.join(projectPath, 'other.txt'));
+    await git(projectPath, ['add', '-N', 'other.txt']);
+    await fs.rm(path.join(projectPath, 'src.txt'));
+
+    const snapshot = await service.getWorkbenchSnapshot({
+      projectPath,
+      mode: 'working',
+      context: 3,
+    });
+    expect(snapshot.status).toBe('ready');
+    if (snapshot.status !== 'ready') return;
+    expect(snapshot.reviewSummary.files).toContainEqual(
+      expect.objectContaining({ path: 'other.txt', originalPath: 'src.txt' }),
+    );
+
+    const response = await service.getReviewDocumentFileBodies({
+      projectPath,
+      documentId: snapshot.reviewSummary.documentId,
+      files: ['other.txt'],
+      purpose: 'visible',
+    });
+
+    expect(response.status).toBe('ready');
+    if (response.status === 'ready') expect(response.files['other.txt'].patch).toBeTruthy();
+  });
+
   it('returns a typed response for an expired document', async () => {
     const projectPath = await createRepository();
     const response = await createService().getReviewDocumentFileBodies({
