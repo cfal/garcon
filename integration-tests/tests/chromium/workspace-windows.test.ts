@@ -1078,7 +1078,7 @@ describe('Chromium workspace windows', () => {
       markPhase('opening a fourth window with a sidebar Chat copy');
       await dragChatToWindow(fixture.page, {
         chatId: chatA,
-        windowId: filesWindowId,
+        windowId: edgeChatWindowId,
         target: 'bottom',
       });
       await fixture.page.waitForFunction(
