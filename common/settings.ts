@@ -20,6 +20,10 @@ import {
   parseAgentSwitchContextWindowTokens,
   type AgentSwitchContextWindowTokens,
 } from './handoff-sizing';
+import {
+  parseHiddenBashCommandPatterns,
+  type HiddenBashCommandPattern,
+} from './hidden-bash-command-patterns';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 export const DEFAULT_APP_TITLE = 'Garcon';
@@ -76,6 +80,7 @@ export interface RemoteTelegramStatus {
 
 export interface RemoteUiSettings {
   pinnedInsertPosition?: PinnedInsertPosition;
+  hiddenBashCommandPatterns?: HiddenBashCommandPattern[];
   chatTitle?: ChatTitleUiSettings;
   agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
@@ -427,6 +432,11 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
   const normalized: RemoteUiSettings = {};
   if (raw.pinnedInsertPosition === 'top' || raw.pinnedInsertPosition === 'bottom') {
     normalized.pinnedInsertPosition = raw.pinnedInsertPosition;
+  }
+
+  if ('hiddenBashCommandPatterns' in raw) {
+    const patterns = parseHiddenBashCommandPatterns(raw.hiddenBashCommandPatterns);
+    if (patterns) normalized.hiddenBashCommandPatterns = patterns;
   }
 
   const chatTitle = normalizeChatTitleUiSettings(raw.chatTitle);

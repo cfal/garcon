@@ -713,6 +713,70 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ fontSize: 14 });
   });
 
+  it('canonicalizes hidden bash command patterns before persistence', async () => {
+    const input = [
+      { pattern: 'git *', mode: 'glob' },
+      { pattern: '^cargo', mode: 'regex' },
+      { pattern: 'git *', mode: 'glob' },
+    ];
+    const expected = input.slice(0, 2);
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { hiddenBashCommandPatterns: input },
+    }));
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      ui: { hiddenBashCommandPatterns: expected },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      hiddenBashCommandPatterns: expected,
+    });
+    expect(body.settings.ui.hiddenBashCommandPatterns).toEqual(expected);
+  });
+
+  it('clears hidden bash command patterns with an empty list', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { hiddenBashCommandPatterns: [] },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ hiddenBashCommandPatterns: [] });
+  });
+
+  it('rejects malformed hidden bash command patterns before persistence', async () => {
+    const validBoundary = Array.from(
+      { length: 200 },
+      (_, index) => ({ pattern: `command-${index}`, mode: 'glob' }),
+    );
+    const invalidLists = [
+      'git *',
+      [{ pattern: 'git *', mode: 'shell' }],
+      [{ pattern: '', mode: 'glob' }],
+      [{ pattern: '([unclosed', mode: 'regex' }],
+      [...validBoundary, { ...validBoundary[0] }],
+      [{ pattern: 'x'.repeat(1_001), mode: 'glob' }],
+    ];
+
+    for (const hiddenBashCommandPatterns of invalidLists) {
+      ctx.settings.setUiSettings.mockClear();
+      parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+        ui: { hiddenBashCommandPatterns },
+      }));
+
+      const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+      expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+    }
+  });
+
   it('patches paths settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ paths: { lastDir: '/tmp' } }));
     ctx.settings.getUiSettings.mockImplementation(() => ({}));

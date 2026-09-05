@@ -12,8 +12,11 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import TrashIcon from '@lucide/svelte/icons/trash';
-	import { getLocalSettings } from '$lib/context';
+	import { getRemoteSettings } from '$lib/context';
 	import {
+		dedupeHiddenBashCommandPatterns,
+		HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+		HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
 		HIDDEN_BASH_COMMAND_PATTERN_PRESETS,
 		HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES,
 		validateHiddenBashCommandPattern,
@@ -25,45 +28,96 @@
 
 	type PatternValidationError = Exclude<HiddenBashCommandPatternValidation, 'ok'>;
 
-	const localSettings = getLocalSettings();
+	const remoteSettings = getRemoteSettings();
 
 	let draft = $state('');
 	let mode = $state<HiddenBashCommandPatternMode>('glob');
-	let error = $state<string | null>(null);
+	let isSaving = $state(false);
+	let validationError = $state<string | null>(null);
+	let saveError = $state<string | null>(null);
 
-	const patterns = $derived(localSettings.hiddenBashCommandPatterns);
+	const patterns = $derived(remoteSettings.snapshot?.ui.hiddenBashCommandPatterns ?? []);
+	const errorText = $derived(validationError ?? saveError);
 
 	function validationErrorText(validation: PatternValidationError): string {
 		switch (validation) {
 			case 'empty':
 				return m.settings_hidden_bash_commands_error_empty();
+			case 'too-long':
+				return m.settings_hidden_bash_commands_error_too_long({
+					maxLength: HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
+				});
 			case 'invalid-regex':
 				return m.settings_hidden_bash_commands_error_invalid_regex();
 		}
 	}
 
-	function addPattern(event: SubmitEvent) {
+	async function persistPatterns(next: readonly HiddenBashCommandPattern[]): Promise<boolean> {
+		if (isSaving) return false;
+		isSaving = true;
+		saveError = null;
+		try {
+			await remoteSettings.update({
+				ui: { hiddenBashCommandPatterns: dedupeHiddenBashCommandPatterns(next) },
+			});
+			return true;
+		} catch (error) {
+			saveError = error instanceof Error ? error.message : m.settings_save_failed();
+			return false;
+		} finally {
+			isSaving = false;
+		}
+	}
+
+	async function addPattern(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
+		if (isSaving) return;
+		saveError = null;
 		const validation = validateHiddenBashCommandPattern(draft, mode);
 		if (validation !== 'ok') {
-			error = validationErrorText(validation);
+			validationError = validationErrorText(validation);
 			return;
 		}
 		if (patterns.some((entry) => entry.pattern === draft && entry.mode === mode)) {
-			error = m.settings_hidden_bash_commands_error_duplicate();
+			validationError = m.settings_hidden_bash_commands_error_duplicate();
 			return;
 		}
-		localSettings.addHiddenBashCommandPattern({ pattern: draft, mode });
-		draft = '';
-		error = null;
+		if (patterns.length >= HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT) {
+			validationError = null;
+			saveError = m.settings_hidden_bash_commands_error_limit({
+				maxCount: HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+			});
+			return;
+		}
+		validationError = null;
+		if (await persistPatterns([...patterns, { pattern: draft, mode }])) {
+			draft = '';
+		}
 	}
 
-	function removePattern(pattern: HiddenBashCommandPattern) {
-		localSettings.removeHiddenBashCommandPattern(pattern);
+	async function removePattern(pattern: HiddenBashCommandPattern): Promise<void> {
+		if (isSaving) return;
+		validationError = null;
+		await persistPatterns(
+			patterns.filter(
+				(entry) => entry.pattern !== pattern.pattern || entry.mode !== pattern.mode,
+			),
+		);
 	}
 
-	function addPreset(preset: HiddenBashCommandPatternPreset) {
-		localSettings.addHiddenBashCommandPatterns(preset.patterns);
+	async function addPreset(preset: HiddenBashCommandPatternPreset): Promise<void> {
+		if (isSaving) return;
+		validationError = null;
+		saveError = null;
+		const next = dedupeHiddenBashCommandPatterns([...patterns, ...preset.patterns]);
+		if (next.length === patterns.length) return;
+		if (next.length > HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT) {
+			saveError = m.settings_hidden_bash_commands_error_limit({
+				maxCount: HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+			});
+			return;
+		}
+		await persistPatterns(next);
 	}
 
 	function presetLabel(preset: HiddenBashCommandPatternPreset): string {
@@ -88,6 +142,7 @@
 				class={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
 				aria-label={m.settings_hidden_bash_commands_add_preset()}
 				title={m.settings_hidden_bash_commands_add_preset()}
+				disabled={isSaving}
 			>
 				<PlusIcon class="mr-2 size-4" />
 				{m.settings_hidden_bash_commands_add_preset()}
@@ -95,7 +150,7 @@
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
 				{#each HIDDEN_BASH_COMMAND_PATTERN_PRESETS as preset (preset.id)}
-					<DropdownMenuItem onclick={() => addPreset(preset)}>
+					<DropdownMenuItem onclick={() => addPreset(preset)} disabled={isSaving}>
 						{presetLabel(preset)}
 					</DropdownMenuItem>
 				{/each}
@@ -124,6 +179,7 @@
 							size="icon-sm"
 							aria-label={`${m.settings_hidden_bash_commands_remove()}: ${pattern.pattern} (${modeLabel(pattern.mode)})`}
 							onclick={() => removePattern(pattern)}
+							disabled={isSaving}
 						>
 							<TrashIcon class="size-4" />
 						</Button>
@@ -143,25 +199,27 @@
 				autocomplete="off"
 				spellcheck="false"
 				bind:value={draft}
-				aria-invalid={error !== null}
-				oninput={() => (error = null)}
+				aria-invalid={validationError !== null}
+				readonly={isSaving}
+				oninput={() => (validationError = null)}
 			/>
 			<select
 				class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
 				aria-label={m.settings_hidden_bash_commands_mode_label()}
 				bind:value={mode}
-				onchange={() => (error = null)}
+				disabled={isSaving}
+				onchange={() => (validationError = null)}
 			>
 				{#each HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES as modeValue (modeValue)}
 					<option value={modeValue}>{modeLabel(modeValue)}</option>
 				{/each}
 			</select>
-			<Button type="submit" variant="secondary" size="sm">
+			<Button type="submit" variant="secondary" size="sm" disabled={isSaving}>
 				{m.settings_hidden_bash_commands_add()}
 			</Button>
 		</div>
-		{#if error}
-			<p class="text-xs text-destructive" role="alert">{error}</p>
+		{#if errorText}
+			<p class="text-xs text-destructive" role="alert">{errorText}</p>
 		{/if}
 	</form>
 </div>

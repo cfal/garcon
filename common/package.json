@@ -40,6 +40,7 @@
     "./gh": "./gh.ts",
     "./git-refs": "./git-refs.ts",
     "./handoff-sizing": "./handoff-sizing.ts",
+    "./hidden-bash-command-patterns": "./hidden-bash-command-patterns.ts",
     "./http-error": "./http-error.ts",
     "./json": "./json.ts",
     "./model-catalog": "./model-catalog.ts",
