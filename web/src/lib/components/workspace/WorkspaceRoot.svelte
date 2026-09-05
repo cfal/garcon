@@ -14,6 +14,7 @@
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindow from './WorkspaceWindow.svelte';
 	import WorkspaceWindowResizer from './WorkspaceWindowResizer.svelte';
+	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
 	import {
 		getChatSessions,
@@ -25,6 +26,7 @@
 		getSurfaceFrames,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
+		getWorkspaceHostGeometry,
 		setConversationUi,
 		setConversationLifecycles,
 		setConversationPanels,
@@ -84,6 +86,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const hostGeometry = getWorkspaceHostGeometry();
 	const terminals = getTerminalRegistry();
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
@@ -125,22 +128,24 @@
 	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
+	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
+	const currentWindowId = $derived(workspace.currentWindowId);
+	const projectedWindowId = $derived(fullscreenWindowId);
+	const presentedCurrentWindowId = $derived(projectedWindowId ?? currentWindowId);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
 	const chatPresentations = $derived.by<ConversationPanelDescriptor[]>(() =>
-		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').flatMap(
-			(presentation) => {
-				const chat = sessions.byId[presentation.chatId] ?? null;
-				if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
-					return [];
-				}
-				return [
-					{
-						...presentation,
-						snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
-					},
-				];
-			},
-		),
+		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').flatMap((presentation) => {
+			const chat = sessions.byId[presentation.chatId] ?? null;
+			if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
+				return [];
+			}
+			return [
+				{
+					...presentation,
+					snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
+				},
+			];
+		}),
 	);
 	const existingChatSurfaceIds = $derived.by(
 		() =>
@@ -185,9 +190,7 @@
 			rootState.partitionRatio(partitionId, ratio),
 		),
 	);
-	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
-	const currentWindowId = $derived(workspace.currentWindowId);
-	const presentedCurrentWindowId = $derived(fullscreenWindowId ?? currentWindowId);
+	const liveChatBodyTopPx = WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX;
 	const WINDOW_EDGE_EPSILON = 1e-6;
 
 	function hasLeftSeparator(rect: WorkspaceWindowRect): boolean {
@@ -214,7 +217,7 @@
 					: null;
 			}
 			const windowId = workspace.windowOf(anchorSurfaceId);
-			if (!windowId || (fullscreenWindowId && fullscreenWindowId !== windowId)) return null;
+			if (!windowId || (projectedWindowId && projectedWindowId !== windowId)) return null;
 			const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
 			if (!workspaceWindow || workspaceWindow.tabs.activeId !== anchorSurfaceId) return null;
 			const rect = geometry.windows.find(
@@ -357,7 +360,7 @@
 		windowId: WorkspaceWindowId,
 		rect: WorkspaceWindowRect,
 	): WorkspaceWindowRect {
-		return fullscreenWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
+		return projectedWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
 	}
 
 	function resizerStyle(partition: WorkspacePartitionNode, bounds: WorkspaceWindowRect): string {
@@ -441,6 +444,7 @@
 	role="region"
 	aria-label={m.workspace_workspace_region()}
 	tabindex="-1"
+	{@attach hostGeometry.attach}
 >
 	<div
 		class="relative min-h-0 min-w-0 flex-1"
@@ -453,7 +457,7 @@
 			<WorkspaceWindow
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
-				isVisible={!isMobile && (!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id)}
+				isVisible={!isMobile && (!projectedWindowId || projectedWindowId === workspaceWindow.id)}
 				hasLeftSeparator={hasLeftSeparator(renderedRect)}
 				hasRightSeparator={hasRightSeparator(renderedRect)}
 				presentations={renderedPresentations}
@@ -469,16 +473,23 @@
 				onAppendToChatDraft={appendToChatDraft}
 			/>
 		{/each}
-		{#if !fullscreenWindowId}
+		{#if !projectedWindowId}
 			{#each geometry.partitions as { partition, bounds } (partition.id)}
+				{@const ratioBounds = workspace.resolvePartitionRatioBounds(partition.id) ?? {
+					min: partition.ratio,
+					max: partition.ratio,
+					adjustable: false,
+				}}
 				<WorkspaceWindowResizer
 					direction={partition.direction}
 					ratio={rootState.partitionRatio(partition.id, partition.ratio)}
 					style={resizerStyle(partition, bounds)}
 					boundsFraction={partition.direction === 'horizontal' ? bounds.width : bounds.height}
+					minRatio={ratioBounds.min}
+					maxRatio={ratioBounds.max}
+					disabled={!ratioBounds.adjustable}
 					onPreview={(next) => rootState.setPartitionRatioPreview(partition.id, next)}
 					onCommit={(next) => void workspace.setPartitionRatio(partition.id, next)}
-					onReset={() => void workspace.setPartitionRatio(partition.id, 0.5)}
 				/>
 			{/each}
 		{/if}
@@ -522,11 +533,15 @@
 		<div
 			class={cn(
 				'pointer-events-none absolute overflow-visible',
-				composerPlacement && !isMobile ? 'inset-x-0 bottom-0 top-10' : 'inset-0',
+				composerPlacement && !isMobile ? 'inset-x-0 bottom-0' : 'inset-0',
 				composerHasLeftSeparator && 'ml-3',
 				composerHasRightSeparator && 'mr-3',
 			)}
+			style:top={composerPlacement && !isMobile ? `${liveChatBodyTopPx}px` : undefined}
 			data-workspace-live-chat-body
+			data-workspace-live-chat-body-top-px={composerPlacement && !isMobile
+				? liveChatBodyTopPx
+				: undefined}
 			data-workspace-surface-id={composerPlacement?.surface.id}
 			onpointerdowncapture={() => {
 				if (composerPlacement) workspace.noteSurfaceFocus(composerPlacement.surface.id);

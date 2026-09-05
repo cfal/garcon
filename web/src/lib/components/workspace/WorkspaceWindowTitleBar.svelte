@@ -12,6 +12,7 @@
 	import WorkspaceWindowAddMenu from './WorkspaceWindowAddMenu.svelte';
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
+	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -95,9 +96,10 @@
 	tabindex="-1"
 	data-workspace-window-titlebar={workspaceWindow.id}
 	class={cn(
-		'relative z-50 flex h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-workspace-window-titlebar px-1.5 transition-colors',
+		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-workspace-window-titlebar px-1.5 transition-colors',
 		showActiveTreatment && 'bg-workspace-window-titlebar-active',
 	)}
+	style:height={`${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px`}
 	onfocusin={noteFocus}
 	onpointerdown={handleChromePointerDown}
 >

@@ -101,20 +101,14 @@
 				label: m.command_switch_to_files(),
 				description: m.command_open_panel({ panel: m.workspace_surface_files() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('files')
-						: workspace.openSingletonInNewWindow('files').catch(reportOpenError)),
+				action: () => void workspace.openSingleton('files').catch(reportOpenError),
 			},
 			{
 				id: 'workspace-chat-map',
 				label: m.workspace_open_chat_map(),
 				description: m.command_open_panel({ panel: m.workspace_surface_chat_map() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('chat-map')
-						: workspace.openSingletonInNewWindow('chat-map').catch(reportOpenError)),
+				action: () => void workspace.openSingleton('chat-map').catch(reportOpenError),
 			},
 			{
 				id: 'workspace-terminal',
@@ -133,7 +127,7 @@
 							category: categories.workspace,
 							action: () =>
 								reportTerminalAction(
-									workspace.createTerminalInNewWindow(undefined, 'command-menu:new-terminal'),
+									workspace.createTerminalInAvailableSpace('command-menu:new-terminal'),
 								),
 						},
 					]
@@ -143,30 +137,21 @@
 				label: m.command_switch_to_git(),
 				description: m.command_open_panel({ panel: m.workspace_surface_git_workbench() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('git')
-						: workspace.openSingletonInNewWindow('git').catch(reportOpenError)),
+				action: () => void workspace.openSingleton('git').catch(reportOpenError),
 			},
 			{
 				id: 'workspace-git-history',
 				label: m.workspace_surface_git_history(),
 				description: m.command_open_panel({ panel: m.workspace_surface_git_history() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('git-history')
-						: workspace.openSingletonInNewWindow('git-history').catch(reportOpenError)),
+				action: () => void workspace.openSingleton('git-history').catch(reportOpenError),
 			},
 			{
 				id: 'workspace-git-compare',
 				label: m.workspace_surface_git_compare(),
 				description: m.command_open_panel({ panel: m.workspace_surface_git_compare() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('git-compare')
-						: workspace.openSingletonInNewWindow('git-compare').catch(reportOpenError)),
+				action: () => void workspace.openSingleton('git-compare').catch(reportOpenError),
 			},
 			...(ghCapability.available || !ghCapability.hasChecked
 				? [
@@ -175,10 +160,7 @@
 							label: m.workspace_surface_pull_requests(),
 							description: m.command_open_panel({ panel: m.workspace_surface_pull_requests() }),
 							category: categories.workspace,
-							action: () =>
-								void (workspace.isMobile
-									? workspace.focusMobileSingleton('pull-requests')
-									: workspace.openSingletonInNewWindow('pull-requests').catch(reportOpenError)),
+							action: () => void workspace.openSingleton('pull-requests').catch(reportOpenError),
 						},
 					]
 				: []),
@@ -187,10 +169,7 @@
 				label: m.workspace_surface_commit(),
 				description: m.command_open_panel({ panel: m.workspace_surface_commit() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('commit')
-						: workspace.openSingletonInNewWindow('commit').catch(reportOpenError)),
+				action: () => void workspace.openSingleton('commit').catch(reportOpenError),
 			},
 		];
 	});

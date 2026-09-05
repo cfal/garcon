@@ -9,6 +9,7 @@ import {
 	type WorkspacePartitionId,
 	type WorkspaceWindowId,
 } from '../surface-types.js';
+import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures.js';
 
 function dragEvent(
 	type: string,
@@ -23,9 +24,7 @@ function dragEvent(
 	Object.defineProperties(event, {
 		clientX: { value: options.clientX ?? 0 },
 		clientY: { value: options.clientY ?? 0 },
-		...('relatedTarget' in options
-			? { relatedTarget: { value: options.relatedTarget } }
-			: {}),
+		...('relatedTarget' in options ? { relatedTarget: { value: options.relatedTarget } } : {}),
 	});
 	Object.defineProperty(event, 'currentTarget', { value: currentTarget });
 	return event;
@@ -72,7 +71,7 @@ afterEach(() => {
 describe('WorkspaceWindowDndController', () => {
 	it('returns a surface move and center destination before clearing drag state', () => {
 		const layout = twoWindowLayout();
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const source = windowElement('window-main');
 		const destination = windowElement('window-files');
 		dnd.beginSurfaceTabDrag('singleton:git', 'window-main', 1, dragEvent('dragstart', source));
@@ -150,7 +149,7 @@ describe('WorkspaceWindowDndController', () => {
 
 	it('blocks opening the sole tab from a window beside itself', () => {
 		const layout = twoWindowLayout();
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const filesWindow = windowElement('window-files');
 		dnd.beginSurfaceTabDrag(
 			'singleton:files',
@@ -172,7 +171,7 @@ describe('WorkspaceWindowDndController', () => {
 
 	it('maps a sidebar Chat drag to the center target', () => {
 		const layout = createWorkspaceLayoutStore();
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const target = windowElement('window-main');
 		dnd.beginChatDrag('chat-a');
 		dnd.handleWindowDragOver(
@@ -187,22 +186,21 @@ describe('WorkspaceWindowDndController', () => {
 			blockedReason: undefined,
 		});
 		expect(
-			dnd.handleWindowDrop(
-				'window-main',
-				dragEvent('drop', target, { clientX: 50, clientY: 50 }),
-			),
+			dnd.handleWindowDrop('window-main', dragEvent('drop', target, { clientX: 50, clientY: 50 })),
 		).toMatchObject({
 			payload: { kind: 'chat', chatId: 'chat-a' },
 			target: { kind: 'window', windowId: 'window-main', zone: 'center' },
 		});
 	});
 
-	it('blocks Chat edges but keeps the center available at the four-window cap', () => {
+	it('blocks Chat edges but keeps the center available at the resource ceiling', () => {
 		const layout = createWorkspaceLayoutStore();
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
-				...(['git', 'commit'] as const).map((kind, index) => ({
+				...(
+					['git', 'commit', 'git-history', 'git-compare', 'chat-map', 'pull-requests'] as const
+				).map((kind, index) => ({
 					type: 'register-surface-in-new-window' as const,
 					surface: portableSingletonDescriptor(kind),
 					targetWindowId: 'window-main' as const,
@@ -212,7 +210,7 @@ describe('WorkspaceWindowDndController', () => {
 				})),
 			]),
 		);
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const target = windowElement('window-main');
 		dnd.beginChatDrag('chat-a');
 		dnd.handleWindowDragOver(
@@ -220,7 +218,7 @@ describe('WorkspaceWindowDndController', () => {
 			dragEvent('dragover', target, { clientX: 5, clientY: 50 }),
 		);
 
-		expect(dnd.activeTarget).toMatchObject({ blockedReason: 'max-windows' });
+		expect(dnd.activeTarget).toMatchObject({ blockedReason: 'resource-ceiling' });
 		dnd.handleWindowDragOver(
 			'window-main',
 			dragEvent('dragover', target, { clientX: 50, clientY: 50 }),
@@ -233,9 +231,48 @@ describe('WorkspaceWindowDndController', () => {
 		});
 	});
 
+	it('preserves edge-specific admission while leaving center drops available', () => {
+		const layout = createWorkspaceLayoutStore();
+		const dnd = new WorkspaceWindowDndController(layout, (_snapshot, request) =>
+			request.edge === 'top' ? { allowed: true } : { allowed: false, reason: 'too-small' },
+		);
+		const target = windowElement('window-main');
+		dnd.beginChatDrag('chat-a');
+
+		dnd.handleWindowDragOver(
+			'window-main',
+			dragEvent('dragover', target, { clientX: 5, clientY: 50 }),
+		);
+		expect(dnd.activeTarget).toMatchObject({ zone: 'left', blockedReason: 'too-small' });
+
+		dnd.handleWindowDragOver(
+			'window-main',
+			dragEvent('dragover', target, { clientX: 50, clientY: 5 }),
+		);
+		expect(dnd.activeTarget).toMatchObject({ zone: 'top', blockedReason: undefined });
+
+		dnd.handleWindowDragOver(
+			'window-main',
+			dragEvent('dragover', target, { clientX: 50, clientY: 50 }),
+		);
+		expect(dnd.activeTarget).toMatchObject({ zone: 'center', blockedReason: undefined });
+	});
+
+	it('removes stale edge targets when admission is inapplicable', () => {
+		const layout = createWorkspaceLayoutStore();
+		const dnd = new WorkspaceWindowDndController(layout, () => null);
+		const target = windowElement('window-main');
+		const event = dragEvent('dragover', target, { clientX: 5, clientY: 50 });
+		dnd.beginChatDrag('chat-a');
+
+		dnd.handleWindowDragOver('window-main', event);
+
+		expect(dnd.activeTarget).toBeNull();
+	});
+
 	it('keeps the active target when a null dragleave target remains inside the window', () => {
 		const layout = createWorkspaceLayoutStore();
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const target = windowElement('window-main');
 		dnd.beginChatDrag('chat-a');
 		dnd.handleWindowDragOver(
@@ -256,7 +293,7 @@ describe('WorkspaceWindowDndController', () => {
 
 	it('clears the active target when a null dragleave target is outside the window', () => {
 		const layout = createWorkspaceLayoutStore();
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const target = windowElement('window-main');
 		dnd.beginChatDrag('chat-a');
 		dnd.handleWindowDragOver(
@@ -277,7 +314,7 @@ describe('WorkspaceWindowDndController', () => {
 
 	it('resolves tab-strip drops to an exact destination index', () => {
 		const layout = twoWindowLayout();
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const source = windowElement('window-main');
 		const chatTab = document.createElement('button');
 		chatTab.getBoundingClientRect = () => new DOMRect(100, 0, 80, 32);
@@ -303,7 +340,7 @@ describe('WorkspaceWindowDndController', () => {
 
 	it('writes only an opaque marker to native transfer data', () => {
 		const layout = twoWindowLayout();
-		const dnd = new WorkspaceWindowDndController(layout);
+		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 		const event = dragEvent('dragstart', windowElement('window-main'));
 		dnd.beginSurfaceTabDrag('singleton:git', 'window-main', 1, event);
 

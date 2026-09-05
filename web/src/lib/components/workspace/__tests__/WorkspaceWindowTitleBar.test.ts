@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
+import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
 import type {
@@ -16,6 +17,7 @@ import * as m from '$lib/paraglide/messages.js';
 const {
 	closeSurface,
 	closeWindow,
+	closeOtherWindows,
 	createTerminal,
 	activateWindow,
 	enterWindowFullscreen,
@@ -32,6 +34,7 @@ const {
 	activateWindow: vi.fn(),
 	closeSurface: vi.fn(async () => true),
 	closeWindow: vi.fn(async () => true),
+	closeOtherWindows: vi.fn(async () => true),
 	createTerminal: vi.fn(async () => 'terminal-created'),
 	enterWindowFullscreen: vi.fn(async () => true),
 	exitWindowFullscreen: vi.fn(async () => undefined),
@@ -83,12 +86,17 @@ vi.mock('$lib/context', () => ({
 			return runtime.windowCount;
 		},
 		isWindowCloseBlocked: () => runtime.closeBlocked,
+		isOtherWindowsCloseBlocked: () => runtime.windowCount < 2 || runtime.closeBlocked,
 		isSurfaceCloseBlocked: () => runtime.surfaceCloseBlocked,
 		noteWindowChromeFocus,
 		activateWindow,
 		focusSurface,
 		moveTabToWindow,
 		moveTabToNewWindow,
+		resolveSplitAdmission: () =>
+			runtime.windowCount >= 4
+				? { allowed: false, reason: 'resource-ceiling' as const }
+				: { allowed: true as const },
 		openSingletonAsTab,
 		createTerminal,
 		openTerminalSession: vi.fn(async () => undefined),
@@ -96,6 +104,7 @@ vi.mock('$lib/context', () => ({
 		enterWindowFullscreen,
 		exitWindowFullscreen,
 		closeWindow,
+		closeOtherWindows,
 	}),
 	getChatSessions: () => ({
 		get byId() {
@@ -150,6 +159,7 @@ const localTabActionOrder = [
 	'move-new-right',
 	'move-new-top',
 	'move-new-bottom',
+	'close-other-windows',
 	'close-tab',
 ] as const;
 
@@ -241,7 +251,10 @@ function renderTitleBar(
 	return render(WorkspaceWindowTitleBar, {
 		workspaceWindow: node,
 		labelFor: resolveLabel,
-		dnd: new WorkspaceWindowDndController(createWorkspaceLayoutStore()),
+		dnd: new WorkspaceWindowDndController(
+			createWorkspaceLayoutStore(),
+			resolveUnmeasuredWorkspaceSplit,
+		),
 		isCurrent,
 	});
 }
@@ -274,7 +287,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		const toolbar = screen.getByRole('toolbar');
 		expect(toolbar.classList.contains('relative')).toBe(true);
 		expect(toolbar.classList.contains('z-50')).toBe(true);
-		expect(toolbar.classList.contains('h-10')).toBe(true);
+		expect(toolbar.style.height).toBe('40px');
 		expect(toolbar.classList.contains('bg-workspace-window-titlebar')).toBe(false);
 		expect(toolbar.classList.contains('bg-workspace-window-titlebar-active')).toBe(true);
 		expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
@@ -307,7 +320,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(tablist).toBeTruthy();
 		expect(screen.getByRole('tab', { name: 'Git' }).getAttribute('aria-selected')).toBe('true');
 		expect(screen.getByRole('tab', { name: 'Chat A' }).getAttribute('aria-selected')).toBe('false');
-		expect(tablist.closest('header')?.classList.contains('h-10')).toBe(true);
+		expect(tablist.closest('header')?.getAttribute('style')).toContain('height: 40px');
 	});
 
 	it('keeps hover close regions inside the managed tab interaction model', async () => {
@@ -789,7 +802,11 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(chatId.textContent).toContain('chat-a');
 		expect(menu.querySelector('[data-workspace-chat-metadata]')).toBeNull();
 		expect(projectPathItem.parentElement).toBe(menu);
-		expect(lastMovementAction?.nextElementSibling).toBe(closeAction);
+		const closeOthersAction = menu.querySelector(
+			'[data-workspace-window-tab-action="close-other-windows"]',
+		);
+		expect(lastMovementAction?.nextElementSibling).toBe(closeOthersAction);
+		expect(closeOthersAction?.nextElementSibling).toBe(closeAction);
 		expect(closeAction?.nextElementSibling).toBe(tabActionsSeparator);
 		expect(tabActionsSeparator?.nextElementSibling).toBe(projectPathItem);
 		expect(projectPathItem.nextElementSibling).toBe(chatId);
@@ -854,6 +871,26 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_close_tab() }));
 
 		expect(closeSurface).toHaveBeenCalledWith(gitSurface.id);
+	});
+
+	it('closes other windows relative to the menu window', async () => {
+		runtime.windowCount = 3;
+		runtime.closeBlocked = false;
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		await fireEvent.click(
+			screen.getByRole('menuitem', { name: m.workspace_close_other_windows() }),
+		);
+		expect(closeOtherWindows).toHaveBeenCalledWith('window-main');
+	});
+
+	it('disables closing other windows when the close policy blocks it', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		const action = screen.getByRole('menuitem', { name: m.workspace_close_other_windows() });
+		expect(action.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(action);
+		expect(closeOtherWindows).not.toHaveBeenCalled();
 	});
 
 	it('places active-tab movement actions before current-tab actions', async () => {
@@ -976,7 +1013,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		);
 	});
 
-	it('keeps neutral Close Tab directly after directional actions in the context menu', async () => {
+	it('places neutral close actions after directional actions in the context menu', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id));
 		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Git' }));
 		const below = await screen.findByRole('menuitem', {
@@ -984,7 +1021,9 @@ describe('WorkspaceWindowTitleBar', () => {
 		});
 		const close = screen.getByRole('menuitem', { name: m.workspace_close_tab() });
 
-		expect(below.nextElementSibling).toBe(close);
+		const closeOthers = screen.getByRole('menuitem', { name: m.workspace_close_other_windows() });
+		expect(below.nextElementSibling).toBe(closeOthers);
+		expect(closeOthers.nextElementSibling).toBe(close);
 		expect(close.getAttribute('data-variant')).toBe('default');
 	});
 

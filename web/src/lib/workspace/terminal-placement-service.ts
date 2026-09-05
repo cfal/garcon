@@ -4,7 +4,6 @@ import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-nam
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {
-	MAX_WORKSPACE_WINDOWS,
 	TERMINAL_LAUNCHER_ID,
 	terminalSurfaceId,
 	type WorkspaceWindowId,
@@ -18,6 +17,8 @@ import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { isCanonicalFirstRunLayout } from './canonical-layout.js';
+import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
+import { requireWorkspaceNewWindowEdge } from './workspace-split-blocked-error.js';
 
 interface SurfaceReservations {
 	has(surfaceId: string): boolean;
@@ -60,6 +61,7 @@ interface TerminalPlacementServiceDeps {
 	): MobileReturnPlan;
 	confirmClose(request: TerminalCloseGuardRequest): Promise<boolean>;
 	clearAttachmentError(surfaceId: string): void;
+	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 }
 
 export class TerminalPlacementService {
@@ -137,6 +139,16 @@ export class TerminalPlacementService {
 	async createInNewWindow(anchorWindowId: WorkspaceWindowId, requestKey?: string): Promise<string> {
 		if (this.deps.isMobile()) return this.create(this.deps.defaultWindowId(), requestKey);
 		this.deps.cancelWorkspaceDrag();
+		if (!requestKey || !this.#hasPendingCreate(requestKey)) {
+			const snapshot = this.deps.layout.snapshot;
+			const currentAnchorWindowId = this.#resolveWindowId(snapshot, anchorWindowId);
+			const edge = requireWorkspaceNewWindowEdge(
+				this.deps.resolveSplitAdmission,
+				snapshot,
+				currentAnchorWindowId,
+			);
+			if (!edge) throw new Error('The target window is no longer available');
+		}
 		const terminalId = requestKey
 			? await this.#retryCreate(requestKey)
 			: await this.#createWithRequestId(createRandomId());
@@ -187,14 +199,17 @@ export class TerminalPlacementService {
 						);
 						return mutations;
 					}
-					if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
-						throw new Error(m.workspace_window_limit_reached({ count: MAX_WORKSPACE_WINDOWS }));
-					}
+					const edge = requireWorkspaceNewWindowEdge(
+						this.deps.resolveSplitAdmission,
+						latest,
+						currentAnchorWindowId,
+					);
+					if (!edge) return [];
 					mutations.push({
 						type: 'register-surface-in-new-window',
 						surface: { id: surfaceId, type: 'terminal', terminalId },
 						targetWindowId: currentAnchorWindowId,
-						edge: 'right',
+						edge,
 						newWindowId,
 						partitionId,
 					});
@@ -594,6 +609,11 @@ export class TerminalPlacementService {
 		);
 		if (!firstWindow) throw new Error('Workspace has no destination window');
 		return firstWindow.id;
+	}
+
+	#hasPendingCreate(requestKey: string): boolean {
+		const requestId = this.#terminalCreateRequestIds.get(requestKey);
+		return Boolean(requestId && this.deps.terminals.pendingCreates[requestId]);
 	}
 
 	async #retryCreate(requestKey: string): Promise<string> {

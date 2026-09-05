@@ -25,6 +25,7 @@
 	} from '$lib/stores/local-settings.svelte';
 	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
+	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 	interface SidebarHostProps {
 		chats?: ChatSessionRecord[];
@@ -251,5 +252,5 @@
 	onShowScheduledPrompts={() => {}}
 	onShowPreambles={() => {}}
 	onShowSettings={() => {}}
-	newWindowBlocked={false}
+	newWindowEdges={workspaceSplitAdmissions()}
 />

@@ -8,6 +8,8 @@ import {
 	canonicalWorkspaceSnapshot,
 } from '$lib/workspace/canonical-layout';
 import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
+import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy';
+import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures';
 import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 import type {
 	SidebarChatGrouping,
@@ -41,6 +43,10 @@ export class AppShellBreakpointWorkspace {
 
 	get currentChatSurfaceId() {
 		return CANONICAL_CHAT_SURFACE_ID;
+	}
+
+	resolveSplitAdmissions(): WorkspaceSplitAdmissions {
+		return workspaceSplitAdmissions();
 	}
 
 	async enterMobilePresentation(): Promise<void> {

@@ -25,6 +25,7 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindowTitleBar from './WorkspaceWindowTitleBar.svelte';
+	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -118,8 +119,11 @@
 	);
 	const dropLayerInsetClass = $derived.by(() => {
 		if (dnd.payload?.kind === 'chat') return 'inset-0';
-		return 'inset-x-0 bottom-0 top-10';
+		return 'inset-x-0 bottom-0';
 	});
+	const dropLayerTopPx = $derived(
+		dnd.payload?.kind === 'chat' ? undefined : WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX,
+	);
 
 	function dropZoneLabel(zone: WorkspaceWindowDropZonePresentation): string {
 		switch (zone.zone) {
@@ -138,11 +142,15 @@
 
 	function resultLabel(): string {
 		if (!activeDropTarget) return '';
-		if (activeDropTarget.blockedReason === 'max-windows') {
-			return m.workspace_drop_zone_max_windows();
-		}
-		if (activeDropTarget.blockedReason === 'same-window') {
-			return m.workspace_drop_zone_same_window();
+		switch (activeDropTarget.blockedReason) {
+			case 'same-window':
+				return m.workspace_drop_zone_same_window();
+			case 'too-small':
+				return m.workspace_drop_zone_too_small();
+			case 'resource-ceiling':
+				return m.workspace_drop_zone_window_limit();
+			case 'fullscreen':
+				return m.workspace_drop_zone_exit_fullscreen();
 		}
 		if (
 			activeDropTarget.zone === 'center' &&
@@ -336,6 +344,7 @@
 	{#if dnd.isDragging}
 		<div
 			class={cn('pointer-events-auto absolute z-50', dropLayerInsetClass)}
+			style:top={dropLayerTopPx === undefined ? undefined : `${dropLayerTopPx}px`}
 			data-workspace-window-drop-layer={workspaceWindow.id}
 			role="status"
 			aria-label={m.workspace_window_drop_target()}

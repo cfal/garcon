@@ -13,6 +13,10 @@
 	} from '../sidebar-display-options';
 	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
 	import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
+	import {
+		resolveUnmeasuredWorkspaceSplit,
+		workspaceSplitAdmissions,
+	} from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
@@ -108,7 +112,10 @@
 			if (chatId) onWorkspaceDragEnd?.(chatId);
 		}
 	}
-	const windowDnd = new TestWorkspaceWindowDndController(createWorkspaceLayoutStore());
+	const windowDnd = new TestWorkspaceWindowDndController(
+		createWorkspaceLayoutStore(),
+		resolveUnmeasuredWorkspaceSplit,
+	);
 	setWorkspaceWindowDnd(windowDnd);
 	onMount(() => onRegisterWindowDnd?.(windowDnd));
 </script>
@@ -131,6 +138,7 @@
 		{onPersistReorder}
 		{onSortChatOrder}
 		{onToggleProjectCollapsed}
+		newWindowEdges={workspaceSplitAdmissions()}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
 		onStartRenameChat={() => {}}

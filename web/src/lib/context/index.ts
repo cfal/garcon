@@ -42,6 +42,7 @@ import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces
 import type { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
 import type { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
+import type { WorkspaceHostGeometryState } from '$lib/workspace/workspace-host-geometry.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 // Root-level contexts (set in +layout.svelte)
@@ -72,6 +73,8 @@ export const [getWorkspaceCoordinator, setWorkspaceCoordinator] =
 	createContext<WorkspaceCoordinator>();
 export const [getWorkspaceWindowDnd, setWorkspaceWindowDnd] =
 	createContext<WorkspaceWindowDndController>();
+export const [getWorkspaceHostGeometry, setWorkspaceHostGeometry] =
+	createContext<WorkspaceHostGeometryState>();
 const [getRequiredTransientLayers, setTransientLayersContext] =
 	createContext<TransientLayerRegistry>();
 export const getTransientLayers = getRequiredTransientLayers;

@@ -23,6 +23,10 @@ export interface VisibleChatPresentation {
 	readonly windowId: WorkspaceWindowId | null;
 }
 
+export interface VisiblePresentationOptions {
+	readonly includeDialog?: boolean;
+}
+
 export function portablePresentationKey(
 	presentation: WorkspaceWindowId,
 	surfaceId: string,
@@ -43,23 +47,24 @@ export function isDesktopWindowPresented(
 export function visiblePresentationMap(
 	snapshot: WorkspaceLayoutSnapshot,
 	mode: 'desktop' | 'mobile',
-	includeDialog = true,
+	options: VisiblePresentationOptions = {},
 ): Map<PresentationHostId, string> {
 	const visible = new Map<PresentationHostId, string>();
 	if (mode === 'mobile') {
 		visible.set('mobile', snapshot.mobileActiveSurfaceId);
 		return visible;
 	}
-	const fullscreenWindow = snapshot.fullscreenWindowId
-		? windowNodeById(snapshot.desktopRoot, snapshot.fullscreenWindowId)
+	const explicitWindowId = snapshot.fullscreenWindowId;
+	const explicitWindow = explicitWindowId
+		? windowNodeById(snapshot.desktopRoot, explicitWindowId)
 		: null;
-	const desktopWindows = fullscreenWindow
-		? [fullscreenWindow]
+	const desktopWindows = explicitWindow
+		? [explicitWindow]
 		: collectWindowNodes(snapshot.desktopRoot);
 	for (const workspaceWindow of desktopWindows) {
 		visible.set(workspaceWindow.id, workspaceWindow.tabs.activeId);
 	}
-	if (includeDialog && snapshot.dialogFileSurfaceId) {
+	if ((options.includeDialog ?? true) && snapshot.dialogFileSurfaceId) {
 		visible.set('dialog', snapshot.dialogFileSurfaceId);
 	}
 	return visible;
@@ -69,36 +74,53 @@ export function visiblePortablePresentations(
 	snapshot: WorkspaceLayoutSnapshot,
 	isMobile: boolean,
 ): PortablePresentation[] {
-	return [...visiblePresentationMap(snapshot, isMobile ? 'mobile' : 'desktop', false)].flatMap(
-		([presentation, surfaceId]) => {
-			const surface = snapshot.surfaces[surfaceId];
-			if (!surface || surface.type === 'chat') return [];
-			return [
-				{
-					surfaceId,
-					presentation: presentation as WorkspaceWindowId | 'mobile',
-				},
-			];
+	const presentations: PortablePresentation[] = [];
+	for (const [presentation, surfaceId] of visiblePresentationMap(
+		snapshot,
+		isMobile ? 'mobile' : 'desktop',
+		{
+			includeDialog: false,
 		},
-	);
+	)) {
+		const surface = snapshot.surfaces[surfaceId];
+		if (!surface || surface.type === 'chat') continue;
+		presentations.push({
+			surfaceId,
+			presentation: presentation as WorkspaceWindowId | 'mobile',
+		});
+	}
+	return presentations;
 }
 
 export function visibleChatPresentations(
 	snapshot: WorkspaceLayoutSnapshot,
 	mode: 'desktop' | 'mobile',
 ): VisibleChatPresentation[] {
-	return [...visiblePresentationMap(snapshot, mode, false)].flatMap(([presentation, surfaceId]) => {
+	const presentations: VisibleChatPresentation[] = [];
+	for (const [presentation, surfaceId] of visiblePresentationMap(snapshot, mode, {
+		includeDialog: false,
+	})) {
 		const surface = snapshot.surfaces[surfaceId];
-		if (surface?.type !== 'chat' || !surface.chatId) return [];
-		return [
-			{
-				surfaceId: surface.id,
-				chatId: surface.chatId,
-				presentation: presentation as WorkspaceWindowId | 'mobile',
-				windowId: presentation === 'mobile' ? null : (presentation as WorkspaceWindowId),
-			},
-		];
-	});
+		if (surface?.type !== 'chat' || !surface.chatId) continue;
+		presentations.push({
+			surfaceId: surface.id,
+			chatId: surface.chatId,
+			presentation: presentation as WorkspaceWindowId | 'mobile',
+			windowId: presentation === 'mobile' ? null : (presentation as WorkspaceWindowId),
+		});
+	}
+	return presentations;
+}
+
+function visibleDesktopPresentationKeys(
+	visible: readonly PortablePresentation[],
+): ReadonlySet<string> {
+	const keys = new Set<string>();
+	for (const { presentation, surfaceId } of visible) {
+		if (presentation === 'mobile') continue;
+		keys.add(portablePresentationKey(presentation, surfaceId));
+	}
+	return keys;
 }
 
 export function nextRetainedSingletonPresentationKeys(
@@ -109,11 +131,7 @@ export function nextRetainedSingletonPresentationKeys(
 ): ReadonlySet<string> {
 	if (isMobile) return new Set();
 	const next = new Set<string>();
-	const visibleKeys = new Set(
-		visible.flatMap(({ presentation, surfaceId }) =>
-			presentation === 'mobile' ? [] : [portablePresentationKey(presentation, surfaceId)],
-		),
-	);
+	const visibleKeys = visibleDesktopPresentationKeys(visible);
 	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
 		for (const surfaceId of workspaceWindow.tabs.order) {
 			if (snapshot.surfaces[surfaceId]?.type !== 'singleton') continue;
@@ -131,15 +149,16 @@ export function renderedPortablePresentations(
 	retainedSingletonKeys: ReadonlySet<string>,
 ): RenderedPortablePresentation[] {
 	if (isMobile) {
-		return visible.flatMap((item) =>
-			item.presentation === 'mobile' ? [{ ...item, visible: true, windowId: null }] : [],
-		);
+		const rendered: RenderedPortablePresentation[] = [];
+		for (const item of visible) {
+			if (item.presentation === 'mobile') {
+				rendered.push({ ...item, visible: true, windowId: null });
+			}
+		}
+		return rendered;
 	}
-	const visibleKeys = new Set(
-		visible.flatMap(({ presentation, surfaceId }) =>
-			presentation === 'mobile' ? [] : [portablePresentationKey(presentation, surfaceId)],
-		),
-	);
+	const visibleKeys = visibleDesktopPresentationKeys(visible);
+	const fullscreenWindowId = snapshot.fullscreenWindowId;
 	const rendered: RenderedPortablePresentation[] = [];
 	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
 		for (const surfaceId of workspaceWindow.tabs.order) {
@@ -147,8 +166,8 @@ export function renderedPortablePresentations(
 			const key = portablePresentationKey(workspaceWindow.id, surfaceId);
 			const isVisible = visibleKeys.has(key);
 			const isHiddenFullscreenActive =
-				Boolean(snapshot.fullscreenWindowId) &&
-				workspaceWindow.id !== snapshot.fullscreenWindowId &&
+				fullscreenWindowId !== null &&
+				workspaceWindow.id !== fullscreenWindowId &&
 				workspaceWindow.tabs.activeId === surfaceId;
 			if (!isVisible && !retainedSingletonKeys.has(key) && !isHiddenFullscreenActive) continue;
 			rendered.push({

@@ -6,7 +6,7 @@ import {
 	canonicalWorkspaceSnapshot,
 } from '../canonical-layout';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	TERMINAL_LAUNCHER_ID,
 	chatViewSurfaceId,
 	fileSurfaceId,
@@ -493,9 +493,9 @@ describe('workspace layout reducer', () => {
 		]);
 	});
 
-	it('enforces the four-window cap while allowing a net-zero edge move', () => {
+	it('enforces the resource ceiling while allowing a net-zero edge move', () => {
 		let root: DesktopWorkspaceNode = workspaceWindow('window-1', [chatViewSurfaceId('window-1')]);
-		for (let index = 2; index <= MAX_WORKSPACE_WINDOWS; index += 1) {
+		for (let index = 2; index <= WORKSPACE_WINDOW_RESOURCE_CEILING; index += 1) {
 			root = partition(
 				`partition-${index}`,
 				root,
@@ -513,7 +513,7 @@ describe('workspace layout reducer', () => {
 				partitionId: 'partition-replaced',
 			},
 		]);
-		expect(collectWindowNodes(netZero.desktopRoot)).toHaveLength(MAX_WORKSPACE_WINDOWS);
+		expect(collectWindowNodes(netZero.desktopRoot)).toHaveLength(WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 		const withExtraTab = reduceWorkspaceLayout(full, [
 			{
@@ -750,10 +750,7 @@ describe('workspace layout invariants', () => {
 			...canonical,
 			desktopRoot: {
 				...canonical.desktopRoot,
-				children: [
-					{ ...chatWindow, tabs: { ...chatWindow.tabs, mru: ['missing'] } },
-					filesWindow,
-				],
+				children: [{ ...chatWindow, tabs: { ...chatWindow.tabs, mru: ['missing'] } }, filesWindow],
 			},
 		};
 		expect(() => assertWorkspaceLayoutInvariants(invalidMru)).toThrow('MRU');
@@ -788,5 +785,45 @@ describe('WorkspaceLayoutStore', () => {
 		expect(store.publish(0, next)).toBe(true);
 		expect(store.revision).toBe(1);
 		expect(store.surface(CANONICAL_CHAT_SURFACE_ID)).toMatchObject({ chatId: 'chat-a' });
+	});
+});
+
+describe('window merging', () => {
+	it('moves every file tab without imposing a per-window limit or modifying descriptors', () => {
+		const files = Array.from({ length: 300 }, (_, index) => ({
+			id: fileSurfaceId('merge-' + index),
+			type: 'file' as const,
+			fileSessionId: 'merge-' + index,
+		}));
+		const base = reduceWorkspaceLayout(
+			canonicalWorkspaceSnapshot(),
+			files.map((surface) => ({
+				type: 'register-surface' as const,
+				surface,
+				windowId: 'window-files' as const,
+			})),
+		);
+		const next = reduceWorkspaceLayout(base, [
+			{ type: 'merge-window', sourceWindowId: 'window-files', destinationWindowId: 'window-main' },
+		]);
+		expect(collectWindowNodes(next.desktopRoot)).toHaveLength(1);
+		expect(next.surfaces).toEqual(base.surfaces);
+		expect(windowNodeById(next.desktopRoot, 'window-main')?.tabs.order).toHaveLength(302);
+		expect(windowNodeById(next.desktopRoot, 'window-main')?.tabs.activeId).toBe(
+			CANONICAL_CHAT_SURFACE_ID,
+		);
+		expect(next.unplacedTerminalIds).toEqual([]);
+	});
+	it('drops only extra Chat presentations and retains the destination Chat', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'retained-chat' },
+			{ type: 'set-window-chat', windowId: 'window-files', chatId: 'sidebar-chat' },
+		]);
+		const next = reduceWorkspaceLayout(base, [
+			{ type: 'merge-window', sourceWindowId: 'window-files', destinationWindowId: 'window-main' },
+		]);
+		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: 'retained-chat' });
+		expect(next.surfaces[chatViewSurfaceId('window-files')]).toBeUndefined();
+		expect(next.surfaces['singleton:files']).toEqual(base.surfaces['singleton:files']);
 	});
 });

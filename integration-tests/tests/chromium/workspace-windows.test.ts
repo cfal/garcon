@@ -18,6 +18,16 @@ function conversationPanel(page: Page, windowId: string): Locator {
   );
 }
 
+async function waitForCurrentWorkspaceWindow(page: Page, windowId: string): Promise<void> {
+  await page.waitForFunction(
+    (expectedWindowId) =>
+      document
+        .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+        ?.getAttribute('data-workspace-window-current') === 'true',
+    windowId,
+  );
+}
+
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const child = Bun.spawn(['git', ...args], {
     cwd: projectPath,
@@ -585,9 +595,10 @@ async function dragChatToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    const expectedLabel = input.expectBlocked
-      ? '4 windows max'
-      : (input.expectedLabel ?? chatDropLabel(targetKind));
+    let expectedLabel = input.expectedLabel;
+    if (!expectedLabel) {
+      expectedLabel = input.expectBlocked ? 'Too small to split.' : chatDropLabel(targetKind);
+    }
     const label = target.getByText(expectedLabel, { exact: true });
     await nudgePointerUntilVisible(
       page,
@@ -795,8 +806,9 @@ async function resizeFirstPartition(page: Page): Promise<{ value: string; persis
 }
 
 describe('Chromium workspace windows', () => {
-  test('drags Chat onto any window, blocks the cap, and persists pointer resizing', async () => {
+  test('drags Chat onto any window, enforces split geometry, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
+      await fixture.page.setViewportSize({ width: 1440, height: 900 });
       await createGitFixture(fixture.integration.dirs.project);
       await mkdir(join(fixture.integration.dirs.project, 'src'));
       await writeFile(
@@ -811,6 +823,12 @@ describe('Chromium workspace windows', () => {
       );
       const chatB = await createChat(fixture, 'workspace-window-chat-b');
       await openChat(fixture, chatA);
+      await fixture.page.locator('.workspace-host-region').waitFor();
+      expect(
+        await fixture.page
+          .locator('.workspace-host-region')
+          .evaluate((element) => element.getBoundingClientRect().width),
+      ).toBe(1120);
       await fixture.page
         .locator(`[data-sidebar-virtual-row="${chatB}"]`)
         .waitFor({ state: 'visible' });
@@ -879,6 +897,7 @@ describe('Chromium workspace windows', () => {
         'move-new-right',
         'move-new-top',
         'move-new-bottom',
+        'close-other-windows',
         'close-tab',
       ]);
       expect(
@@ -1044,7 +1063,7 @@ describe('Chromium workspace windows', () => {
       markPhase('opening a fourth window with a sidebar Chat copy');
       await dragChatToWindow(fixture.page, {
         chatId: chatA,
-        windowId: filesWindowId,
+        windowId: edgeChatWindowId,
         target: 'bottom',
       });
       await fixture.page.waitForFunction(
@@ -1092,7 +1111,7 @@ describe('Chromium workspace windows', () => {
         filesWindowId,
       );
 
-      markPhase('blocking Chat edge drag at four windows');
+      markPhase('blocking Chat edge drag when the target is too small');
       await dragChatToWindow(fixture.page, {
         chatId: chatB,
         windowId: filesWindowId,
@@ -1103,6 +1122,278 @@ describe('Chromium workspace windows', () => {
 
       fixture.assertNoBrowserErrors();
     });
+  });
+
+  test('closes all other windows from the menu and persists the kept window', async () => {
+    await withChromiumFixture('workspace-close-other-windows', async (fixture) => {
+      const { page } = fixture;
+      await page.setViewportSize({ width: 1600, height: 900 });
+      await createGitFixture(fixture.integration.dirs.project);
+      const chatId = await createChat(fixture, 'Synthetic close-other-windows fixture');
+      await openChat(fixture, chatId);
+      const keptWindowId = await page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!keptWindowId) throw new Error('Missing kept window');
+      await page
+        .locator('textarea[placeholder="Reply..."]')
+        .fill('Retained window draft');
+      await page.keyboard.press('Control+p');
+      await page.getByRole('combobox').fill('Switch to Git');
+      await page.getByRole('option', { name: /^Switch to Git/ }).click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
+      );
+      await page
+        .locator(`[data-workspace-window-menu-trigger="${keptWindowId}"]`)
+        .click();
+      const action = page.getByRole('menuitem', {
+        name: 'Close all other windows',
+        exact: true,
+      });
+      expect(
+        await action.evaluate((element) =>
+          element.previousElementSibling?.getAttribute(
+            'data-workspace-window-tab-action',
+          ),
+        ),
+      ).toBe('move-new-bottom');
+      await action.click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+      );
+      expect(
+        await page
+          .locator('[data-workspace-window-current="true"]')
+          .getAttribute('data-workspace-window-id'),
+      ).toBe(keptWindowId);
+      expect(await page.locator('textarea[placeholder="Reply..."]').inputValue()).toBe(
+        'Retained window draft',
+      );
+      await page.waitForFunction(() => {
+        const raw = localStorage.getItem('workspace_layout_v2');
+        return raw !== null && JSON.parse(raw).root.type === 'window';
+      });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('[data-workspace-window-id]').waitFor();
+      expect(await page.locator('[data-workspace-window-id]').count()).toBe(1);
+      expect(
+        await page
+          .locator('[data-workspace-window-id]')
+          .getAttribute('data-workspace-window-id'),
+      ).toBe(keptWindowId);
+      await page
+        .locator(`[data-workspace-window-menu-trigger="${keptWindowId}"]`)
+        .click();
+      expect(
+        await page
+          .getByRole('menuitem', { name: 'Close all other windows', exact: true })
+          .getAttribute('aria-disabled'),
+      ).toBe('true');
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('merges undersized windows and persists the surviving layout without moving focus', async () => {
+    await withChromiumFixture('workspace-window-pruning', async (fixture, markPhase) => {
+      const { page } = fixture;
+      await page.setViewportSize({ width: 1600, height: 900 });
+      await createGitFixture(fixture.integration.dirs.project);
+      const chatId = await createChat(fixture, 'synthetic-pruning-chat');
+      await openChat(fixture, chatId);
+      const current = page.locator('[data-workspace-window-current="true"]');
+      const id = await current.getAttribute('data-workspace-window-id');
+      await current.evaluate((element) =>
+        element.setAttribute('data-pruning-survivor', 'true'),
+      );
+      const composer = page.locator('textarea[placeholder="Reply..."]');
+      await composer.fill('Synthetic draft retained after pruning');
+      const filesId = await canonicalFilesWindowId(page);
+      markPhase('merging after resize settles');
+      await page.setViewportSize({ width: 800, height: 900 });
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+      );
+      expect(await current.getAttribute('data-workspace-window-id')).toBe(id);
+      expect(await current.getAttribute('data-pruning-survivor')).toBe('true');
+      expect(await composer.inputValue()).toBe('Synthetic draft retained after pruning');
+      expect(
+        await composer.evaluate((element) => document.activeElement === element),
+      ).toBe(true);
+      expect(
+        await page.locator('[data-workspace-window-id="' + filesId + '"]').count(),
+      ).toBe(0);
+      expect(await page.getByRole('tab', { name: 'Files', exact: true }).count()).toBe(1);
+      expect(await page.locator('[data-workspace-compact-switcher]').count()).toBe(0);
+      expect(await page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(
+        0,
+      );
+      await page.waitForFunction(() => {
+        const raw = localStorage.getItem('workspace_layout_v2');
+        return raw !== null && JSON.parse(raw).root.type === 'window';
+      });
+      markPhase('growing and reloading do not recreate windows');
+      await page.setViewportSize({ width: 1600, height: 900 });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('[data-workspace-window-id]').waitFor();
+      expect(await page.locator('[data-workspace-window-id]').count()).toBe(1);
+      expect(
+        await page
+          .locator('[data-workspace-window-id]')
+          .getAttribute('data-workspace-window-id'),
+      ).toBe(id);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('moves the last Chat into the current Files window without losing its draft', async () => {
+    await withChromiumFixture(
+      'workspace-window-pruning-chat-transfer',
+      async (fixture) => {
+        const { page } = fixture;
+        await page.setViewportSize({ width: 1600, height: 900 });
+        await createGitFixture(fixture.integration.dirs.project);
+        const chatId = await createChat(fixture, 'synthetic-pruning-transfer-chat');
+        await openChat(fixture, chatId);
+        await page
+          .locator('textarea[placeholder="Reply..."]')
+          .fill('Draft survives Chat transfer');
+        const filesId = await canonicalFilesWindowId(page);
+        await page.locator(`[data-workspace-window-titlebar="${filesId}"]`).click({
+          position: { x: 20, y: 3 },
+        });
+        await page.setViewportSize({ width: 800, height: 900 });
+        await page.waitForFunction(
+          () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+        );
+        const survivor = page.locator('[data-workspace-window-current="true"]');
+        expect(await survivor.getAttribute('data-workspace-window-id')).toBe(filesId);
+        expect(await survivor.getAttribute('data-workspace-window-active-surface')).toBe(
+          'singleton:files',
+        );
+        await page
+          .locator(`[role="tab"][aria-controls="${filesId}-panel-chat-view:${filesId}"]`)
+          .click();
+        await page.waitForFunction(
+          () =>
+            document.querySelector<HTMLTextAreaElement>(
+              'textarea[placeholder="Reply..."]',
+            )?.value === 'Draft survives Chat transfer',
+        );
+        fixture.assertNoBrowserErrors();
+      },
+    );
+  });
+
+  test('clamps parent resizing before nested windows cross the minimum size', async () => {
+    await withChromiumFixture(
+      'workspace-window-nested-resize-bounds',
+      async (fixture, markPhase) => {
+        await fixture.page.setViewportSize({ width: 2240, height: 900 });
+        await createGitFixture(fixture.integration.dirs.project);
+        const chatId = await createChat(fixture, 'workspace-window-nested-resize-bounds');
+        await openChat(fixture, chatId);
+
+        markPhase('creating three nested horizontal windows');
+        const filesWindowId = await canonicalFilesWindowId(fixture.page);
+        await fixture.page
+          .locator(`[data-workspace-window-titlebar="${filesWindowId}"]`)
+          .click({ position: { x: 3, y: 3 } });
+        await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
+        await openNewWindow(fixture.page, 'Open Git Workbench');
+        await fixture.page.waitForFunction(
+          () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
+        );
+        const host = fixture.page.locator('.workspace-host-region');
+        expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(1920);
+        const verticalResizers = fixture.page.locator(
+          '[role="separator"][aria-label="Resize windows"][aria-orientation="vertical"]',
+        );
+        expect(await verticalResizers.count()).toBe(2);
+        const resizerPositions = await verticalResizers.evaluateAll((resizers) =>
+          resizers.map((resizer, index) => ({ index, left: resizer.getBoundingClientRect().left })),
+        );
+        const rootResizerIndex = resizerPositions.sort((left, right) => left.left - right.left)[0]
+          ?.index;
+        if (rootResizerIndex === undefined) throw new Error('Missing root workspace resizer.');
+        const rootResizer = verticalResizers.nth(rootResizerIndex);
+        await fixture.page.waitForFunction(() => {
+          const raw = localStorage.getItem('workspace_layout_v2');
+          if (!raw) return false;
+          let windowCount = 0;
+          const visit = (node: unknown): void => {
+            if (!node || typeof node !== 'object') return;
+            const candidate = node as { type?: unknown; children?: unknown[] };
+            if (candidate.type === 'window') {
+              windowCount += 1;
+              return;
+            }
+            candidate.children?.forEach(visit);
+          };
+          visit((JSON.parse(raw) as { root?: unknown }).root);
+          return windowCount === 3;
+        });
+        const initialPersisted = await fixture.page.evaluate(() =>
+          localStorage.getItem('workspace_layout_v2'),
+        );
+        if (!initialPersisted) throw new Error('Workspace layout was not persisted.');
+
+        markPhase('dragging the parent partition to its nested minimum');
+        const rootBounds = await rootResizer.boundingBox();
+        if (!rootBounds) throw new Error('Root workspace resizer has no bounds.');
+        const rootMaximum = await rootResizer.getAttribute('aria-valuemax');
+        if (!rootMaximum) throw new Error('Root workspace resizer has no maximum.');
+        await fixture.page.mouse.move(
+          rootBounds.x + rootBounds.width / 2,
+          rootBounds.y + rootBounds.height / 2,
+        );
+        await fixture.page.mouse.down();
+        await fixture.page.mouse.move(rootBounds.x + 1000, rootBounds.y + rootBounds.height / 2, {
+          steps: 20,
+        });
+        await fixture.page.mouse.up();
+        await fixture.page.waitForFunction(
+          ({ expectedIndex, expectedMaximum }) =>
+            document
+              .querySelectorAll(
+                '[role="separator"][aria-label="Resize windows"][aria-orientation="vertical"]',
+              )
+              [expectedIndex]?.getAttribute('aria-valuenow') === expectedMaximum,
+          { expectedIndex: rootResizerIndex, expectedMaximum: rootMaximum },
+        );
+        const clampedWidths = await fixture.page
+          .locator(WINDOW_SELECTOR)
+          .evaluateAll((windows) =>
+            windows.map((workspaceWindow) => workspaceWindow.getBoundingClientRect().width),
+          );
+        expect(Math.floor(Math.min(...clampedWidths))).toBeGreaterThanOrEqual(240);
+        expect(await workspaceWindowIds(fixture.page)).toHaveLength(3);
+        await fixture.page.waitForFunction(
+          (previous) => localStorage.getItem('workspace_layout_v2') !== previous,
+          initialPersisted,
+        );
+        const resizedPersisted = await fixture.page.evaluate(() =>
+          localStorage.getItem('workspace_layout_v2'),
+        );
+
+        markPhase('restoring the bounded nested ratio');
+        await fixture.page.reload({ waitUntil: 'domcontentloaded' });
+        await fixture.page.waitForFunction(
+          () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
+        );
+        const restoredWidths = await fixture.page
+          .locator(WINDOW_SELECTOR)
+          .evaluateAll((windows) =>
+            windows.map((workspaceWindow) => workspaceWindow.getBoundingClientRect().width),
+          );
+        expect(Math.floor(Math.min(...restoredWidths))).toBeGreaterThanOrEqual(240);
+        expect(await workspaceWindowIds(fixture.page)).toHaveLength(3);
+        expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
+          resizedPersisted,
+        );
+        fixture.assertNoBrowserErrors();
+      },
+    );
   });
 
   test('reveals and isolates inline close controls on multiplexed tabs', async () => {

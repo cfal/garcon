@@ -25,7 +25,12 @@
 		DropdownMenuSubTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import {
+		WORKSPACE_WINDOW_EDGES,
+		type WorkspaceWindowEdge,
+	} from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import { workspaceSplitBlockMessage } from '$lib/workspace/workspace-split-blocked-error.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatMenuProps {
@@ -39,7 +44,7 @@
 		onMoveToBottom?: () => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
-		newWindowBlocked?: boolean;
+		newWindowEdges: WorkspaceSplitAdmissions;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onRename: () => void;
@@ -61,7 +66,7 @@
 		onMoveToBottom,
 		onSortChatOrder,
 		onOpenInNewWindow,
-		newWindowBlocked = false,
+		newWindowEdges,
 		onTogglePinned,
 		onToggleArchive,
 		onRename,
@@ -75,6 +80,32 @@
 	const hasSidebarActions = $derived(
 		Boolean(onEnterMultiSelect || onMoveToTop || onMoveToBottom || onSortChatOrder),
 	);
+	const canOpenInNewWindow = $derived(
+		WORKSPACE_WINDOW_EDGES.some((edge) => newWindowEdges[edge]?.allowed === true),
+	);
+	const newWindowBlockTitle = $derived.by(() => {
+		if (canOpenInNewWindow) return undefined;
+		for (const edge of WORKSPACE_WINDOW_EDGES) {
+			const admission = newWindowEdges[edge];
+			if (admission && !admission.allowed) {
+				return workspaceSplitBlockMessage(admission.reason);
+			}
+		}
+		return undefined;
+	});
+
+	function edgeLabel(edge: WorkspaceWindowEdge): string {
+		switch (edge) {
+			case 'left':
+				return m.workspace_open_new_window_left();
+			case 'right':
+				return m.workspace_open_new_window_right();
+			case 'top':
+				return m.workspace_open_new_window_above();
+			case 'bottom':
+				return m.workspace_open_new_window_below();
+		}
+	}
 </script>
 
 {#if hasSidebarActions}
@@ -119,30 +150,34 @@
 
 {#if onOpenInNewWindow}
 	<DropdownMenuSub>
-		<DropdownMenuSubTrigger
-			disabled={newWindowBlocked}
-			title={newWindowBlocked ? m.workspace_drop_zone_max_windows() : undefined}
-		>
+		<DropdownMenuSubTrigger disabled={!canOpenInNewWindow} title={newWindowBlockTitle}>
 			<PanelRight />
 			{m.sidebar_chat_open_new_window()}
 		</DropdownMenuSubTrigger>
 		<DropdownMenuSubContent class="w-56">
-			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'left')}>
-				<PanelRight class="rotate-180" />
-				{m.workspace_open_new_window_left()}
-			</DropdownMenuItem>
-			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'right')}>
-				<PanelRight />
-				{m.workspace_open_new_window_right()}
-			</DropdownMenuItem>
-			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'top')}>
-				<PanelTop />
-				{m.workspace_open_new_window_above()}
-			</DropdownMenuItem>
-			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'bottom')}>
-				<PanelTop class="rotate-180" />
-				{m.workspace_open_new_window_below()}
-			</DropdownMenuItem>
+			{#each WORKSPACE_WINDOW_EDGES as edge (edge)}
+				{@const admission = newWindowEdges[edge]}
+				<DropdownMenuItem
+					disabled={admission?.allowed !== true}
+					title={admission && !admission.allowed
+						? workspaceSplitBlockMessage(admission.reason)
+						: undefined}
+					onclick={() => {
+						if (admission?.allowed) onOpenInNewWindow?.(session.id, edge);
+					}}
+				>
+					{#if edge === 'left'}
+						<PanelRight class="rotate-180" />
+					{:else if edge === 'right'}
+						<PanelRight />
+					{:else if edge === 'top'}
+						<PanelTop />
+					{:else}
+						<PanelTop class="rotate-180" />
+					{/if}
+					{edgeLabel(edge)}
+				</DropdownMenuItem>
+			{/each}
 		</DropdownMenuSubContent>
 	</DropdownMenuSub>
 	<DropdownMenuSeparator />

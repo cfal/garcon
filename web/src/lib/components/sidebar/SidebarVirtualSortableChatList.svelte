@@ -44,6 +44,7 @@
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { SidebarVirtualChatListController } from './SidebarVirtualChatListController.svelte.js';
 	import { SidebarWorkspaceChatDragBridge } from './sidebar-workspace-chat-drag-bridge.js';
 
@@ -73,7 +74,7 @@
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
-		newWindowBlocked?: boolean;
+		newWindowEdges: WorkspaceSplitAdmissions;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
@@ -106,7 +107,7 @@
 		onTagClick,
 		onManageTags,
 		onOpenInNewWindow,
-		newWindowBlocked = false,
+		newWindowEdges,
 		onToggleProjectCollapsed,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
@@ -937,7 +938,7 @@
 							{onTagClick}
 							{onManageTags}
 							{onOpenInNewWindow}
-							{newWindowBlocked}
+							{newWindowEdges}
 							{onEnterMultiSelect}
 							{onMultiSelectToggle}
 							onMoveToTop={getMoveToTop(row)}

@@ -54,6 +54,7 @@
 		setTerminalRegistry,
 		setWorkspaceCoordinator,
 		setWorkspaceWindowDnd,
+		setWorkspaceHostGeometry,
 		setTransientLayers,
 		setSurfaceFrames,
 		setWorkspaceShortcuts,
@@ -177,6 +178,7 @@
 	setTerminalRegistry(terminals);
 	setWorkspaceCoordinator(workspace);
 	setWorkspaceWindowDnd(workspaceServices.windowDnd);
+	setWorkspaceHostGeometry(workspaceServices.hostGeometry);
 	setTransientLayers(transientLayers);
 	setSurfaceFrames(surfaceFrames);
 	setWorkspaceShortcuts(workspaceShortcuts);
@@ -496,7 +498,7 @@
 		</div>
 	</div>
 {:else if auth.isUnavailable && (!isPublicRoute || auth.token)}
-	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
+	<div data-auth-recovery class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="max-w-md text-center">
 			<div class="flex justify-center mb-4">
 				<div class="w-16 h-16 bg-primary rounded-lg flex items-center justify-center shadow-sm">

@@ -7,10 +7,9 @@ import type {
 	WorkspaceLayoutReader,
 	WorkspaceLayoutSnapshot,
 	WorkspaceWindowId,
-	WorkspaceWindowNode,
 } from './surface-types.js';
 import { workspaceChatViewCount } from './surface-types.js';
-import { collectWindowNodes, windowNodeById } from './window-tree.js';
+import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 
 interface ReservationSet<T> {
@@ -47,65 +46,93 @@ interface WorkspaceWindowDestructionServiceDeps {
 export class WorkspaceWindowDestructionService {
 	constructor(private readonly deps: WorkspaceWindowDestructionServiceDeps) {}
 
+	isSurfaceBlocked(surfaceId: string): boolean {
+		if (this.#isSurfaceUnavailable(surfaceId)) return true;
+		const snapshot = this.deps.layout.snapshot;
+		if (snapshot.surfaces[surfaceId]?.type === 'chat' && workspaceChatViewCount(snapshot) <= 1) {
+			return true;
+		}
+		const ownerWindowId = windowIdOfSurface(snapshot.desktopRoot, surfaceId);
+		if (!ownerWindowId) return false;
+		if (this.deps.windowReservations.has(ownerWindowId)) return true;
+		const owner = windowNodeById(snapshot.desktopRoot, ownerWindowId);
+		return owner?.tabs.order.length === 1 && collectWindowNodes(snapshot.desktopRoot).length === 1;
+	}
+
 	isWindowBlocked(windowId: WorkspaceWindowId): boolean {
 		if (this.deps.windowReservations.has(windowId)) return true;
 		const workspaceWindow = windowNodeById(this.deps.layout.snapshot.desktopRoot, windowId);
 		if (!workspaceWindow) return true;
-		if (this.#removesFinalChat(this.deps.layout.snapshot, workspaceWindow)) return true;
-		return workspaceWindow.tabs.order.some((surfaceId) => this.#isSurfaceBlocked(surfaceId));
+		if (this.#removesFinalChat(this.deps.layout.snapshot, [windowId])) return true;
+		return workspaceWindow.tabs.order.some((surfaceId) => this.#isSurfaceUnavailable(surfaceId));
 	}
 
 	async close(windowId: WorkspaceWindowId): Promise<boolean> {
-		return this.#destroy(windowId);
+		return this.#destroy([windowId]);
 	}
 
-	async #destroy(targetWindowId: WorkspaceWindowId): Promise<boolean> {
+	isOtherWindowsBlocked(keptWindowId: WorkspaceWindowId): boolean {
+		const snapshot = this.deps.layout.snapshot;
+		if (!windowNodeById(snapshot.desktopRoot, keptWindowId)) return true;
+		const windows = collectWindowNodes(snapshot.desktopRoot);
+		const targets = windows.filter((window) => window.id !== keptWindowId);
+		if (targets.length === 0) return true;
+		if (windows.some((window) => this.deps.windowReservations.has(window.id))) return true;
+		const targetWindowIds = targets.map((window) => window.id);
+		if (this.#removesFinalChat(snapshot, targetWindowIds)) return true;
+		return targets.some((window) => window.tabs.order.some((id) => this.#isSurfaceUnavailable(id)));
+	}
+
+	async closeOthers(keptWindowId: WorkspaceWindowId): Promise<boolean> {
+		if (this.isOtherWindowsBlocked(keptWindowId)) return false;
+		const targetWindowIds = collectWindowNodes(this.deps.layout.snapshot.desktopRoot)
+			.filter((window) => window.id !== keptWindowId)
+			.map((window) => window.id);
+		return this.#destroy(targetWindowIds, keptWindowId);
+	}
+
+	async #destroy(
+		targetWindowIds: readonly WorkspaceWindowId[],
+		focusWindowId?: WorkspaceWindowId,
+	): Promise<boolean> {
 		const initial = this.deps.layout.snapshot;
-		const target = windowNodeById(initial.desktopRoot, targetWindowId);
-		if (!target) return false;
 		const initialWindows = collectWindowNodes(initial.desktopRoot);
-		if (initialWindows.length === 1) return false;
-		if (this.#removesFinalChat(initial, target)) return false;
+		const targets = initialWindows.filter((window) => targetWindowIds.includes(window.id));
+		if (targets.length === 0 || targets.length !== targetWindowIds.length) return false;
+		if (this.#removesFinalChat(initial, targetWindowIds)) return false;
 		const reservedWindowIds = initialWindows.map((workspaceWindow) => workspaceWindow.id);
-		const affectedSurfaceIds = target.tabs.order;
+		const affectedSurfaceIds = targets.flatMap((window) => window.tabs.order);
 		if (
 			reservedWindowIds.some((windowId) => this.deps.windowReservations.has(windowId)) ||
-			affectedSurfaceIds.some((surfaceId) => this.#isSurfaceBlocked(surfaceId))
+			affectedSurfaceIds.some((surfaceId) => this.#isSurfaceUnavailable(surfaceId))
 		) {
 			return false;
 		}
 		for (const windowId of reservedWindowIds) this.deps.windowReservations.add(windowId);
 		for (const surfaceId of affectedSurfaceIds) this.deps.surfaceReservations.add(surfaceId);
-		let removedDescriptors: SurfaceDescriptor[] = affectedSurfaceIds.flatMap((surfaceId) => {
-			const surface = initial.surfaces[surfaceId];
-			return surface ? [surface] : [];
-		});
+		let removedDescriptors = descriptorsForSurfaces(initial, affectedSurfaceIds);
 		let releasedTerminalIds: string[] = [];
 		let removalPlanned = false;
 		try {
 			if (!(await this.#confirmDestruction(removedDescriptors))) return false;
 			const plan: WorkspaceMutationPlan = (latest) => {
 				removalPlanned = false;
-				const latestTarget = windowNodeById(latest.desktopRoot, targetWindowId);
-				if (!latestTarget) return [];
 				const latestWindows = collectWindowNodes(latest.desktopRoot);
+				const latestTargets = latestWindows.filter((window) => targetWindowIds.includes(window.id));
+				if (latestTargets.length !== targetWindowIds.length) return [];
 				if (
 					latestWindows.some((workspaceWindow) => !reservedWindowIds.includes(workspaceWindow.id))
 				) {
 					return [];
 				}
-				const latestAffectedSurfaceIds = latestTarget.tabs.order;
-				if (this.#removesFinalChat(latest, latestTarget)) return [];
+				const latestAffectedSurfaceIds = latestTargets.flatMap((window) => window.tabs.order);
+				if (this.#removesFinalChat(latest, targetWindowIds)) return [];
 				if (latestAffectedSurfaceIds.some((surfaceId) => !affectedSurfaceIds.includes(surfaceId))) {
 					return [];
 				}
-				removedDescriptors = latestTarget.tabs.order.flatMap((surfaceId) => {
-					const surface = latest.surfaces[surfaceId];
-					return surface ? [surface] : [];
-				});
-				if (latestWindows.length === 1) return [];
+				removedDescriptors = descriptorsForSurfaces(latest, latestAffectedSurfaceIds);
 				removalPlanned = true;
-				return [{ type: 'close-window', windowId: targetWindowId }];
+				return targetWindowIds.map((windowId) => ({ type: 'close-window', windowId }));
 			};
 			const current = await this.deps.commitDestroyedRemovals(affectedSurfaceIds, plan);
 			if (!removalPlanned) return false;
@@ -115,7 +142,9 @@ export class WorkspaceWindowDestructionService {
 			await this.#disposeRemovedDescriptors(removedDescriptors);
 			if (current) {
 				const snapshot = this.deps.layout.snapshot;
-				const focusWindow = collectWindowNodes(snapshot.desktopRoot)[0];
+				const focusWindow = focusWindowId
+					? windowNodeById(snapshot.desktopRoot, focusWindowId)
+					: collectWindowNodes(snapshot.desktopRoot)[0];
 				if (focusWindow) this.deps.present(focusWindow.tabs.activeId);
 			}
 			return true;
@@ -130,15 +159,16 @@ export class WorkspaceWindowDestructionService {
 
 	#removesFinalChat(
 		snapshot: WorkspaceLayoutSnapshot,
-		workspaceWindow: WorkspaceWindowNode,
+		windowIds: readonly WorkspaceWindowId[],
 	): boolean {
-		return (
-			workspaceChatViewCount(snapshot) <= 1 &&
-			workspaceWindow.tabs.order.some((surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat')
+		return !collectWindowNodes(snapshot.desktopRoot).some(
+			(window) =>
+				!windowIds.includes(window.id) &&
+				window.tabs.order.some((id) => snapshot.surfaces[id]?.type === 'chat'),
 		);
 	}
 
-	#isSurfaceBlocked(surfaceId: string): boolean {
+	#isSurfaceUnavailable(surfaceId: string): boolean {
 		if (this.deps.surfaceReservations.has(surfaceId)) return true;
 		const surface = this.deps.layout.surface(surfaceId);
 		if (!surface) return true;
@@ -203,6 +233,16 @@ export class WorkspaceWindowDestructionService {
 			}
 		}
 	}
+}
+
+function descriptorsForSurfaces(
+	snapshot: WorkspaceLayoutSnapshot,
+	surfaceIds: readonly string[],
+): SurfaceDescriptor[] {
+	return surfaceIds.flatMap((surfaceId) => {
+		const surface = snapshot.surfaces[surfaceId];
+		return surface ? [surface] : [];
+	});
 }
 
 export function workspaceWindowSurfaceIds(

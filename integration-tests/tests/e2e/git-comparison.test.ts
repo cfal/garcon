@@ -342,6 +342,7 @@ describe('Lightpanda Git comparison', () => {
       await writeFile(join(project, 'z-visible-only.txt'), 'tail after\n', 'utf8');
 
       const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-comparison-seed');
@@ -526,6 +527,7 @@ describe('Lightpanda Git comparison', () => {
       await runGit(project, ['commit', '-am', 'feature']);
 
       const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-revision-freshness-seed');

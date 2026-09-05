@@ -1,6 +1,5 @@
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import {
-	MAX_WORKSPACE_WINDOWS,
 	type SurfaceDescriptor,
 	type WorkspaceLayoutSnapshot,
 	type WorkspaceWindowEdge,
@@ -9,14 +8,19 @@ import {
 	type WorkspaceWindowTabState,
 } from './surface-types.js';
 import { collectWindowNodes } from './window-tree.js';
+import {
+	mapWorkspaceSplitAdmissions,
+	type WorkspaceSplitAdmission,
+	type WorkspaceSplitAdmissions,
+} from './window-geometry-policy.js';
 
 export interface WorkspaceWindowTabActionState {
 	readonly surface: SurfaceDescriptor | null;
 	readonly index: number;
 	readonly canReorder: boolean;
 	readonly canMoveBetweenWindows: boolean;
-	readonly canMoveToNewWindow: boolean;
 	readonly otherWindows: readonly WorkspaceWindowNode[];
+	readonly newWindowEdges: WorkspaceSplitAdmissions;
 }
 
 export function resolveWorkspaceWindowTabActions(
@@ -24,6 +28,10 @@ export function resolveWorkspaceWindowTabActions(
 	windowId: WorkspaceWindowId,
 	tabs: WorkspaceWindowTabState,
 	surfaceId: string,
+	resolveAdmission: (
+		edge: WorkspaceWindowEdge,
+		movingSurfaceId: string,
+	) => WorkspaceSplitAdmission | null,
 ): WorkspaceWindowTabActionState {
 	const surface = snapshot.surfaces[surfaceId] ?? null;
 	const index = tabs.order.indexOf(surfaceId);
@@ -31,16 +39,18 @@ export function resolveWorkspaceWindowTabActions(
 	const hasRequiredChatId = surface?.type !== 'chat' || Boolean(surface.chatId);
 	const canMoveBetweenWindows = canReorder && hasRequiredChatId;
 	const windows = collectWindowNodes(snapshot.desktopRoot);
-	const canCreateWindow = windows.length < MAX_WORKSPACE_WINDOWS;
+	const canMoveToNewWindow = canMoveBetweenWindows && tabs.order.length > 1;
 	return {
 		surface,
 		index,
 		canReorder,
 		canMoveBetweenWindows,
-		canMoveToNewWindow: canCreateWindow && canMoveBetweenWindows && tabs.order.length > 1,
 		otherWindows: canMoveBetweenWindows
 			? windows.filter((workspaceWindow) => workspaceWindow.id !== windowId)
 			: [],
+		newWindowEdges: mapWorkspaceSplitAdmissions((edge) =>
+			canMoveToNewWindow ? resolveAdmission(edge, surfaceId) : null,
+		),
 	};
 }
 

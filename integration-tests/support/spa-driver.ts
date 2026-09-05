@@ -2,6 +2,7 @@ import type { Page } from 'puppeteer-core';
 import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
+import { assertLightpandaWorkspaceGeometry } from './lightpanda-workspace-geometry.js';
 
 interface ClickOptions {
   contains?: boolean;
@@ -15,6 +16,20 @@ interface ResponsiveActionClickOptions {
 type QueueRowAction = 'Edit queued message' | 'Remove from queue';
 type QueueMoveDirection = 'up' | 'down';
 type ComposerAction = 'Send message' | 'Queue message';
+
+const NEW_WORKSPACE_WINDOW_ACTIONS = [
+  'move-new-right',
+  'move-new-bottom',
+  'move-new-left',
+  'move-new-top',
+] as const;
+
+const NEW_WORKSPACE_WINDOW_MENU_ITEMS = [
+  'Open new window right',
+  'Open new window below',
+  'Open new window left',
+  'Open new window above',
+] as const;
 
 export class SpaDriver {
   readonly #page: Page;
@@ -42,6 +57,7 @@ export class SpaDriver {
     });
     if (!response?.ok()) throw new Error(`SPA navigation failed with status ${response?.status()}`);
     await this.#page.waitForFunction(() => document.querySelector('button') !== null);
+    await assertLightpandaWorkspaceGeometry(this.#page);
   }
 
   async startOpenAiDirectChat(
@@ -574,28 +590,39 @@ export class SpaDriver {
     );
     await this.openWorkspaceWindowActions(sourceWindowId);
     await this.#page.waitForFunction(
-      (expectedWindowId) => {
+      ({ expectedWindowId, actionNames }) => {
         const menu = document.querySelector<HTMLElement>(
           `[data-workspace-window-menu="${expectedWindowId}"]`,
         );
-        const item = menu?.querySelector<HTMLElement>(
-          '[data-workspace-window-tab-action="move-new-right"]',
-        );
-        return item?.getAttribute('aria-disabled') !== 'true';
+        return actionNames.some((actionName) => {
+          const item = menu?.querySelector<HTMLElement>(
+            `[data-workspace-window-tab-action="${actionName}"]`,
+          );
+          return item != null && item.getAttribute('aria-disabled') !== 'true';
+        });
       },
       { timeout: 20_000 },
-      sourceWindowId,
+      { expectedWindowId: sourceWindowId, actionNames: NEW_WORKSPACE_WINDOW_ACTIONS },
     );
-    await this.#page.evaluate((expectedWindowId) => {
-      const menu = document.querySelector<HTMLElement>(
-        `[data-workspace-window-menu="${expectedWindowId}"]`,
-      );
-      const item = menu?.querySelector<HTMLElement>(
-        '[data-workspace-window-tab-action="move-new-right"]',
-      );
-      if (!item) throw new Error(`Missing move-to-new-window action: ${expectedWindowId}`);
-      setTimeout(() => item.click(), 0);
-    }, sourceWindowId);
+    await this.#page.evaluate(
+      ({ expectedWindowId, actionNames }) => {
+        const menu = document.querySelector<HTMLElement>(
+          `[data-workspace-window-menu="${expectedWindowId}"]`,
+        );
+        const item = actionNames
+          .map((actionName) =>
+            menu?.querySelector<HTMLElement>(
+              `[data-workspace-window-tab-action="${actionName}"]`,
+            ),
+          )
+          .find(
+            (candidate) => candidate != null && candidate.getAttribute('aria-disabled') !== 'true',
+          );
+        if (!item) throw new Error(`Missing move-to-new-window action: ${expectedWindowId}`);
+        setTimeout(() => item.click(), 0);
+      },
+      { expectedWindowId: sourceWindowId, actionNames: NEW_WORKSPACE_WINDOW_ACTIONS },
+    );
     await this.waitForWorkspaceWindowCount(existingWindowIds.size + 1);
     const openedWindowId = (await this.workspaceWindowIds()).find(
       (windowId) => !existingWindowIds.has(windowId),
@@ -794,6 +821,7 @@ export class SpaDriver {
       { timeout: 20_000 },
       width <= 768,
     );
+    await assertLightpandaWorkspaceGeometry(this.#page);
   }
 
   async openWorkspaceWindowActions(windowId?: string): Promise<void> {
@@ -929,6 +957,34 @@ export class SpaDriver {
       { timeout: 20_000 },
       name,
     );
+  }
+
+  async #waitForFirstEnabledMenuItem(names: readonly string[]): Promise<string> {
+    const enabledNameHandle = await this.#page.waitForFunction(
+      (expectedNames) => {
+        const menuItems = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+        return (
+          expectedNames.find((expectedName) =>
+            menuItems.some(
+              (element) =>
+                (element.getAttribute('aria-label') || element.textContent?.trim()) ===
+                  expectedName && element.getAttribute('aria-disabled') !== 'true',
+            ),
+          ) ?? false
+        );
+      },
+      { timeout: 20_000 },
+      names,
+    );
+    try {
+      const enabledName = await enabledNameHandle.jsonValue();
+      if (typeof enabledName !== 'string') {
+        throw new Error(`No enabled menu item found: ${names.join(', ')}`);
+      }
+      return enabledName;
+    } finally {
+      await enabledNameHandle.dispose();
+    }
   }
 
   async clickDialogButton(name: string): Promise<void> {
@@ -1075,8 +1131,10 @@ export class SpaDriver {
     }, text);
     await this.waitForMenuItemEnabled('Open in new window');
     await this.clickMenuItem('Open in new window');
-    await this.waitForMenuItemEnabled('Open new window right');
-    await this.clickMenuItem('Open new window right');
+    const newWindowItem = await this.#waitForFirstEnabledMenuItem(
+      NEW_WORKSPACE_WINDOW_MENU_ITEMS,
+    );
+    await this.clickMenuItem(newWindowItem);
     await this.waitForWorkspaceWindowCount(existingWindowIds.size + 1);
     const openedWindowId = (await this.workspaceWindowIds()).find(
       (windowId) => !existingWindowIds.has(windowId),

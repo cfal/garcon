@@ -168,7 +168,10 @@ describe('visiblePortablePresentations', () => {
 		const snapshot = layoutWithGitWindow();
 		const visible = visiblePortablePresentations(snapshot, false);
 		const retained = nextRetainedSingletonPresentationKeys(snapshot, false, visible, new Set());
-		expect([...retained].sort()).toEqual(['window-2:singleton:git', 'window-files:singleton:files']);
+		expect([...retained].sort()).toEqual([
+			'window-2:singleton:git',
+			'window-files:singleton:files',
+		]);
 
 		const fullscreen = reduceWorkspaceLayout(snapshot, [
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },

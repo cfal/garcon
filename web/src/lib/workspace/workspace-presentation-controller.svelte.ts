@@ -281,11 +281,30 @@ export class WorkspacePresentationController {
 		this.#clearPointerInteraction();
 	}
 
+	cancelPendingWindowPointerInteraction(): void {
+		this.#clearPointerInteraction();
+	}
+
 	activateWindow(windowId: WorkspaceWindowId): void {
-		if (this.isMobile) return;
+		const activation = this.#beginWindowActivation(windowId);
+		if (!activation) return;
+		const { generation, surfaceId } = activation;
+
+		void tick().then(() => {
+			if (generation !== this.#focusIntentGeneration || this.currentWindowId !== windowId) return;
+			const currentWindow = windowNodeById(this.layout.snapshot.desktopRoot, windowId);
+			if (currentWindow?.tabs.activeId !== surfaceId) return;
+			this.focusPresentedSurface(surfaceId);
+		});
+	}
+
+	#beginWindowActivation(
+		windowId: WorkspaceWindowId,
+	): { generation: number; surfaceId: string } | null {
+		if (this.isMobile) return null;
 		const snapshot = this.layout.snapshot;
 		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
-		if (!workspaceWindow || !isDesktopWindowPresented(snapshot, windowId)) return;
+		if (!workspaceWindow || !isDesktopWindowPresented(snapshot, windowId)) return null;
 
 		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const generation = this.#supersedeFocusIntent();
@@ -294,13 +313,7 @@ export class WorkspacePresentationController {
 		this.lastFocusedWindowId = windowId;
 		this.lastFocusedSurfaceId = surfaceId;
 		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
-
-		void tick().then(() => {
-			if (generation !== this.#focusIntentGeneration || this.currentWindowId !== windowId) return;
-			const currentWindow = windowNodeById(this.layout.snapshot.desktopRoot, windowId);
-			if (currentWindow?.tabs.activeId !== surfaceId) return;
-			this.focusPresentedSurface(surfaceId);
-		});
+		return { generation, surfaceId };
 	}
 
 	async focusChat(): Promise<void> {
@@ -354,7 +367,10 @@ export class WorkspacePresentationController {
 		return this.#focusAdjacentTab(owner, 1, focusSurface);
 	}
 
-	cycleWindowFocus(owner: FocusOwner, focusSurface: (surfaceId: string) => void): void {
+	cycleWindowFocus(
+		owner: FocusOwner,
+		activateWindow: (windowId: WorkspaceWindowId) => boolean,
+	): void {
 		if (this.isMobile || this.layout.snapshot.fullscreenWindowId) return;
 		const windows = collectWindowNodes(this.layout.snapshot.desktopRoot);
 		if (windows.length < 2) return;
@@ -367,8 +383,13 @@ export class WorkspacePresentationController {
 		const currentIndex = windows.findIndex(
 			(workspaceWindow) => workspaceWindow.id === ownerWindowId,
 		);
-		const nextWindow = windows[(currentIndex + 1 + windows.length) % windows.length];
-		focusSurface(nextWindow.tabs.activeId);
+		const candidates =
+			currentIndex < 0
+				? windows
+				: [...windows.slice(currentIndex + 1), ...windows.slice(0, currentIndex)];
+		for (const candidate of candidates) {
+			if (activateWindow(candidate.id)) return;
+		}
 	}
 
 	async enterMobilePresentation(): Promise<void> {
@@ -488,13 +509,18 @@ export class WorkspacePresentationController {
 	}
 
 	presentSurface(surfaceId: string): void {
-		this.#focusIntentGeneration += 1;
+		const generation = ++this.#focusIntentGeneration;
 		this.lastFocusedSurfaceId = surfaceId;
 		const windowId = this.windowOf(surfaceId);
 		if (windowId) this.lastFocusedWindowId = windowId;
 		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
 		this.#adoptComposerAnchor(surfaceId);
-		this.focusPresentedSurface(surfaceId);
+		void tick().then(() => {
+			if (generation !== this.#focusIntentGeneration || this.lastFocusedSurfaceId !== surfaceId) {
+				return;
+			}
+			this.focusPresentedSurface(surfaceId);
+		});
 	}
 
 	focusPresentedSurface(surfaceId: string): void {
@@ -796,7 +822,7 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): boolean {
-		return [...visiblePresentationMap(snapshot, mode).values()].some(
+		return [...this.#visiblePresentations(snapshot, mode).values()].some(
 			(surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat',
 		);
 	}

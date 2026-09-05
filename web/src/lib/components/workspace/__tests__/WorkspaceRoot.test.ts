@@ -28,6 +28,7 @@ import type {
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import type { ChatMessagesRequest } from '$lib/api/chats.js';
 import * as m from '$lib/paraglide/messages.js';
+import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -47,6 +48,7 @@ vi.mock('$lib/context', () => ({
 	getSurfaceFrames: () => testContext.current?.surfaceFrames,
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
+	getWorkspaceHostGeometry: () => testContext.current?.hostGeometry,
 	getWorkspaceWindowDnd: () => testContext.current?.windowDnd,
 	getOptionalTransientLayers: () => null,
 	setConversationUi: (value: unknown) => {
@@ -138,10 +140,12 @@ function installContext() {
 		currentWindowId: WorkspaceWindowId;
 		focusOwner: FocusOwner;
 		composerAnchorSurfaceId: ReturnType<typeof chatViewSurfaceId> | null;
+		partitionRatioBounds: { min: number; max: number; adjustable: boolean };
 	} = {
 		currentWindowId: 'window-main' as WorkspaceWindowId,
 		focusOwner: { kind: 'surface' as const, surfaceId: chatViewSurfaceId('window-main') },
 		composerAnchorSurfaceId: chatViewSurfaceId('window-main'),
+		partitionRatioBounds: { min: 0.15, max: 0.85, adjustable: true },
 	};
 	const commit = (mutations: readonly WorkspaceLayoutMutation[]): void => {
 		const next = reduceWorkspaceLayout(layout.snapshot, mutations);
@@ -170,20 +174,6 @@ function installContext() {
 		commit([{ type: 'activate-window-tab', windowId, surfaceId }]);
 	});
 	let chatSurfaceTransferPort: ChatSurfaceTransferPort | null = null;
-	const activateWindow = vi.fn((windowId: WorkspaceWindowId) => {
-		const workspaceWindow = collectWindowNodes(layout.snapshot.desktopRoot).find(
-			(item) => item.id === windowId,
-		);
-		if (!workspaceWindow) return;
-		runtime.currentWindowId = windowId;
-		commit([
-			{
-				type: 'activate-window-tab',
-				windowId,
-				surfaceId: workspaceWindow.tabs.activeId,
-			},
-		]);
-	});
 	const workspace = {
 		layout,
 		attachmentErrors: {} as Record<string, string>,
@@ -229,7 +219,7 @@ function installContext() {
 		noteWindowChromeFocus: vi.fn((windowId: WorkspaceWindowId) => {
 			runtime.currentWindowId = windowId;
 		}),
-		activateWindow,
+		activateWindow: vi.fn(),
 		beginWindowPointerInteraction: vi.fn((windowId: WorkspaceWindowId) => {
 			const activeId = collectWindowNodes(layout.snapshot.desktopRoot).find(
 				(item) => item.id === windowId,
@@ -252,6 +242,8 @@ function installContext() {
 		releaseWindowPointerInteraction: vi.fn(),
 		cancelWindowPointerInteraction: vi.fn(),
 		focusSurface,
+		isOtherWindowsCloseBlocked: () => true,
+		closeOtherWindows: vi.fn(async () => false),
 		isWindowCloseBlocked: (windowId: WorkspaceWindowId) =>
 			collectWindowNodes(layout.snapshot.desktopRoot).length === 1 ||
 			!collectWindowNodes(layout.snapshot.desktopRoot).some((item) => item.id === windowId),
@@ -274,6 +266,17 @@ function installContext() {
 			commit([{ type: 'set-fullscreen-window', windowId: null }]);
 		}),
 		setPartitionRatio: vi.fn(async () => undefined),
+		resolvePartitionRatioBounds: () => runtime.partitionRatioBounds,
+		resolveSplitAdmission: (
+			targetWindowId: WorkspaceWindowId,
+			edge: WorkspaceWindowEdge,
+			movingSurfaceId?: string,
+		) =>
+			resolveUnmeasuredWorkspaceSplit(layout.snapshot, {
+				targetWindowId,
+				edge,
+				movingSurfaceId,
+			}),
 		moveTabToWindow: vi.fn(
 			async (surfaceId: string, destinationWindowId: WorkspaceWindowId, index?: number) => {
 				const surface = layout.snapshot.surfaces[surfaceId];
@@ -374,8 +377,13 @@ function installContext() {
 		terminalFontSize: '13',
 		set: vi.fn(),
 	};
-	const windowDnd = new WorkspaceWindowDndController(layout);
+	const hostGeometry = {
+		size: null,
+		attach: () => undefined,
+	};
+	const windowDnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 	testContext.current = {
+		hostGeometry,
 		appShell: { isMobile: false, openNewChatDialog: vi.fn() },
 		workspace,
 		windowDnd,
@@ -406,7 +414,7 @@ function installContext() {
 		ghCapability: { hasChecked: true, available: true },
 		notifications: { error: vi.fn() },
 	};
-	return { layout, runtime, workspace, windowDnd, terminals, localSettings };
+	return { layout, runtime, workspace, windowDnd, terminals, localSettings, hostGeometry };
 }
 
 const chatActions = {
@@ -786,7 +794,7 @@ describe('WorkspaceRoot', () => {
 		);
 		const { container } = renderRoot();
 		const liveChat = screen.getByTestId('chat-surface-stub');
-		const liveChatBody = container.querySelector('[data-workspace-live-chat-body]')!;
+		const liveChatBody = container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')!;
 		const panelA = screen
 			.getAllByTestId('conversation-panel')
 			.find((panel) => panel.dataset.chatId === 'chat-a')!;
@@ -797,7 +805,8 @@ describe('WorkspaceRoot', () => {
 		expect(panelA.dataset.ownsComposer).toBe('true');
 		expect(panelB.dataset.commandOwner).toBe('false');
 		expect(panelB.dataset.ownsComposer).toBe('false');
-		expect(liveChatBody.classList.contains('top-10')).toBe(true);
+		expect(liveChatBody.style.top).toBe('40px');
+		expect(liveChatBody.dataset.workspaceLiveChatBodyTopPx).toBe('40');
 		expect(liveChatBody.classList.contains('inset-0')).toBe(false);
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
 
@@ -812,7 +821,7 @@ describe('WorkspaceRoot', () => {
 		expect(panelA.dataset.ownsComposer).toBe('false');
 		expect(panelB.dataset.commandOwner).toBe('true');
 		expect(panelB.dataset.ownsComposer).toBe('true');
-		expect(liveChatBody.classList.contains('top-10')).toBe(true);
+		expect(liveChatBody.style.top).toBe('40px');
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(3);
 	});
 
@@ -1118,6 +1127,44 @@ describe('WorkspaceRoot', () => {
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('false');
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
 		expect(gitWindow.getAttribute('style')).not.toContain('width: 100%');
+	});
+
+	it('passes committed dynamic bounds to partition resizers', async () => {
+		const { layout, runtime } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('git'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		runtime.partitionRatioBounds = { min: 0.3, max: 0.7, adjustable: true };
+		renderRoot();
+		const separator = screen
+			.getAllByRole('separator', { name: m.layout_resize_windows() })
+			.find((candidate) => candidate.getAttribute('aria-valuenow') === '50');
+		if (!separator) throw new Error('Expected nested partition separator');
+
+		expect(separator.getAttribute('aria-valuemin')).toBe('30');
+		expect(separator.getAttribute('aria-valuemax')).toBe('70');
+		expect(separator.getAttribute('aria-disabled')).toBe('false');
+
+		runtime.partitionRatioBounds = { min: 0.5, max: 0.5, adjustable: false };
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-partition-ratio', partitionId: 'partition-1', ratio: 0.51 },
+			]),
+		);
+		await tick();
+		expect(separator.getAttribute('aria-disabled')).toBe('true');
+		expect(separator.getAttribute('tabindex')).toBe('-1');
 	});
 
 	it('keeps surviving keyed window identity when another window closes', async () => {

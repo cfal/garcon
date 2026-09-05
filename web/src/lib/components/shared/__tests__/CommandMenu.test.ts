@@ -7,20 +7,18 @@ type CommandMenuWorkspacePort = Pick<
 	WorkspaceCoordinator,
 	| 'isMobile'
 	| 'focusChat'
-	| 'focusMobileSingleton'
-	| 'openSingletonInNewWindow'
+	| 'openSingleton'
 	| 'focusMostRecentTerminalOrCreate'
-	| 'createTerminalInNewWindow'
+	| 'createTerminalInAvailableSpace'
 >;
 
 const mocks = vi.hoisted(() => ({
 	workspace: {
 		isMobile: false as boolean,
 		focusChat: vi.fn(),
-		focusMobileSingleton: vi.fn(),
-		openSingletonInNewWindow: vi.fn(async () => undefined),
+		openSingleton: vi.fn(async () => undefined),
 		focusMostRecentTerminalOrCreate: vi.fn(async () => undefined),
-		createTerminalInNewWindow: vi.fn(async () => 'terminal-new'),
+		createTerminalInAvailableSpace: vi.fn(async () => 'terminal-new'),
 	} satisfies CommandMenuWorkspacePort,
 	terminals: {
 		listStatus: 'ready',
@@ -100,12 +98,12 @@ describe('CommandMenu', () => {
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
 		['Open chat map', 'chat-map'],
-	] as const)('opens standalone %s in a new desktop window', async (label, kind) => {
+	] as const)('opens standalone %s through generic desktop placement', async (label, kind) => {
 		const { component } = render(CommandMenu);
 		component.toggle();
 
 		await fireEvent.click(await screen.findByText(label));
-		expect(mocks.workspace.openSingletonInNewWindow).toHaveBeenCalledWith(kind);
+		expect(mocks.workspace.openSingleton).toHaveBeenCalledWith(kind);
 	});
 
 	it.each([
@@ -118,16 +116,15 @@ describe('CommandMenu', () => {
 		component.toggle();
 
 		await fireEvent.click(await screen.findByText(label));
-		expect(mocks.workspace.focusMobileSingleton).toHaveBeenCalledWith(kind);
+		expect(mocks.workspace.openSingleton).toHaveBeenCalledWith(kind);
 	});
 
-	it('creates a new terminal in a new window', async () => {
+	it('creates a new terminal using available workspace space', async () => {
 		const { component } = render(CommandMenu);
 		component.toggle();
 
 		await fireEvent.click(await screen.findByText(m.workspace_new_terminal()));
-		expect(mocks.workspace.createTerminalInNewWindow).toHaveBeenCalledWith(
-			undefined,
+		expect(mocks.workspace.createTerminalInAvailableSpace).toHaveBeenCalledWith(
 			'command-menu:new-terminal',
 		);
 	});

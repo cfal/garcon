@@ -37,6 +37,15 @@ import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import { WorkspaceWindowDndController } from './window-dnd.svelte.js';
+import { WorkspaceHostGeometryState } from './workspace-host-geometry.svelte.js';
+import {
+	floorWorkspacePixels,
+	resolveWorkspacePartitionRatioBounds,
+	resolveWorkspaceSplitAdmission,
+	type WorkspacePartitionRatioBoundsResolver,
+	type WorkspaceSplitAdmissionResolver,
+} from './window-geometry-policy.js';
+import { computeWindowRects } from './window-tree.js';
 import {
 	singletonSurfaceId,
 	type DesktopPlacement,
@@ -104,6 +113,7 @@ export interface WorkspaceServices {
 	files: FileSessionRegistry;
 	coordinator: WorkspaceCoordinator;
 	windowDnd: WorkspaceWindowDndController;
+	hostGeometry: WorkspaceHostGeometryState;
 	shortcuts: WorkspaceShortcutDispatcher;
 	destroy(): void;
 }
@@ -115,7 +125,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			: deps.workspaceLayoutRaw;
 	const restore = parsePersistedWorkspaceLayout(workspaceLayoutRaw);
 	const layout = createWorkspaceLayoutStore(restore.snapshot);
-	const windowDnd = new WorkspaceWindowDndController(layout);
 	const persistence = new WorkspaceLayoutPersistence({
 		onError: (_error, retry) => {
 			deps.notifications.error(m.workspace_layout_persistence_failed(), {
@@ -146,6 +155,51 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		onSuccessfulList: (terminalIds) => terminalLayoutBinding?.handleSuccessfulList(terminalIds),
 	});
 	const workspaceInteractionGate = new WorkspaceInteractionGate();
+	const hostGeometry: WorkspaceHostGeometryState = new WorkspaceHostGeometryState({
+		getSnapshot: () => layout.snapshot,
+		getIsMobile: () => deps.appShell.isMobile,
+		onResizeSettled: async (): Promise<boolean> => {
+			try {
+				return (await placement?.fitWindowsToHost(() => hostGeometry.size)) ?? true;
+			} catch (error) {
+				deps.notifications.error(
+					error instanceof Error ? error.message : m.workspace_open_failed(),
+				);
+				return true;
+			}
+		},
+	});
+	const resolveSplitAdmission: WorkspaceSplitAdmissionResolver = (snapshot, request) =>
+		resolveWorkspaceSplitAdmission({
+			snapshot,
+			hostSize: hostGeometry.size,
+			...request,
+		});
+	const resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver = (
+		snapshot,
+		partitionId,
+	) => {
+		const entry = computeWindowRects(snapshot.desktopRoot).partitions.find(
+			(candidate) => candidate.partition.id === partitionId,
+		);
+		if (!entry) return null;
+		const size = hostGeometry.size;
+		let partitionAxisPixels: number | null = null;
+		if (size) {
+			const horizontal = entry.partition.direction === 'horizontal';
+			const boundsFraction = horizontal ? entry.bounds.width : entry.bounds.height;
+			const hostPixels = horizontal ? size.width : size.height;
+			partitionAxisPixels = floorWorkspacePixels(boundsFraction, hostPixels);
+		}
+		return {
+			currentRatio: entry.partition.ratio,
+			bounds: resolveWorkspacePartitionRatioBounds({
+				partition: entry.partition,
+				partitionAxisPixels,
+			}),
+		};
+	};
+	const windowDnd = new WorkspaceWindowDndController(layout, resolveSplitAdmission);
 	const unregisterWorkspaceInteraction = workspaceInteractionGate.register({
 		cancelApplicationDrag: () => windowDnd.endDrag(),
 	});
@@ -261,7 +315,12 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		singletons: singletonSurfaces,
 		gitMutations,
 		surfaceFrames,
-		onLayoutChanged: (snapshot) => persistence.schedule(snapshot),
+		resolveSplitAdmission,
+		resolvePartitionRatioBounds,
+		onLayoutChanged: (snapshot) => {
+			hostGeometry.layoutPublished();
+			persistence.schedule(snapshot);
+		},
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
 		getRouteIdentity: deps.getRouteIdentity,
 	});
@@ -304,6 +363,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		files,
 		coordinator,
 		windowDnd,
+		hostGeometry,
 		shortcuts,
 		destroy() {
 			windowDnd.endDrag();

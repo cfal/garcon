@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
-import { WorkspaceCoordinator, WorkspaceWindowLimitError } from '../workspace-coordinator.svelte';
+import { WorkspaceCoordinator } from '../workspace-coordinator.svelte';
+import { WorkspaceSplitBlockedError } from '../workspace-split-blocked-error';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import {
 	chatViewSurfaceId,
@@ -20,6 +21,11 @@ import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
+import type {
+	WorkspacePartitionRatioBoundsResolver,
+	WorkspaceSplitAdmissionResolver,
+} from '../window-geometry-policy';
+import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
 
 function deferred<T>() {
@@ -71,6 +77,8 @@ function createHarness(
 		onTerminalLauncherDismissed?: () => void;
 		failLayoutPublishAt?: number;
 		includePortableTabs?: boolean;
+		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
+		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -178,6 +186,8 @@ function createHarness(
 				options.pendingGitSurfaceIds?.includes(surfaceId) ? 1 : 0,
 		} as never,
 		surfaceFrames: options.surfaceFrames,
+		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
+		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
 		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,
@@ -277,14 +287,16 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.surfaces).toBe(before.surfaces);
 	});
 
-	it('exits fullscreen when a new window opens', async () => {
+	it('blocks new windows until fullscreen exits', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.enterWindowFullscreen('window-main');
 
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
-		await coordinator.openSingletonInNewWindow('git-history');
-		expect(layout.snapshot.fullscreenWindowId).toBeNull();
-		expect(windowCountOf(layout.snapshot)).toBe(3);
+		await expect(coordinator.openSingletonInNewWindow('git-history')).rejects.toMatchObject({
+			message: 'Exit fullscreen to open a new window.',
+		});
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
 	it('keeps hidden window surfaces and controllers alive while fullscreen', async () => {
@@ -1697,17 +1709,25 @@ describe('WorkspaceCoordinator', () => {
 	it('cycles focus across windows with the window focus shortcut', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
-		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
+		const destinationWindowId = coordinator.windowOf('singleton:git-history');
+		if (!destinationWindowId) throw new Error('Expected Git History window');
+		const filesWindowId = coordinator.windowOf(CANONICAL_FILES_SURFACE_ID);
+		if (!filesWindowId) throw new Error('Expected Files window');
+		const activateWindow = vi.spyOn(coordinator, 'activateWindow');
 		coordinator.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID };
+		const revision = layout.revision;
 
 		coordinator.cycleWindowFocus();
-		expect(focusSurface).toHaveBeenLastCalledWith('singleton:git-history');
+		expect(activateWindow).toHaveBeenLastCalledWith(destinationWindowId);
+		expect(layout.revision).toBe(revision);
 
 		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: 'singleton:git-history' });
-		expect(focusSurface).toHaveBeenLastCalledWith('singleton:files');
+		expect(activateWindow).toHaveBeenLastCalledWith(filesWindowId);
+		expect(layout.revision).toBe(revision);
 
-		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: 'singleton:files' });
-		expect(focusSurface).toHaveBeenLastCalledWith(CANONICAL_CHAT_SURFACE_ID);
+		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: CANONICAL_FILES_SURFACE_ID });
+		expect(activateWindow).toHaveBeenLastCalledWith('window-main');
+		expect(layout.revision).toBe(revision);
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
 	});
 
@@ -1715,12 +1735,41 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.enterWindowFullscreen('window-main');
-		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
+		const activateWindow = vi.spyOn(coordinator, 'activateWindow');
 
 		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID });
 
-		expect(focusSurface).not.toHaveBeenCalled();
+		expect(activateWindow).not.toHaveBeenCalled();
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+	});
+
+	it('skips windows whose active surface is reserved while cycling', async () => {
+		const confirmation = deferred<boolean>();
+		const { coordinator } = createHarness({
+			confirmDestructive: () => confirmation.promise,
+			fileEditor: { prepareRendererTransfer: vi.fn() },
+		});
+		await coordinator.placeFileSession('reserved-file', {
+			type: 'new-window',
+			anchorWindowId: 'window-main',
+		});
+		const fileId = fileSurfaceId('reserved-file');
+		const fileWindowId = coordinator.windowOf(fileId);
+		if (!fileWindowId) throw new Error('Expected File window');
+		await coordinator.openSingletonInNewWindow('git-history', fileWindowId);
+		const availableWindowId = coordinator.windowOf('singleton:git-history');
+		if (!availableWindowId) throw new Error('Expected Git History window');
+
+		const close = coordinator.closeSurface(fileId);
+		await vi.waitFor(() => expect(coordinator.isSurfaceCloseBlocked(fileId)).toBe(true));
+		const activateWindow = vi.spyOn(coordinator, 'activateWindow');
+
+		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID });
+
+		expect(activateWindow).toHaveBeenCalledOnce();
+		expect(activateWindow).toHaveBeenCalledWith(availableWindowId);
+		confirmation.resolve(false);
+		await expect(close).resolves.toBe(false);
 	});
 
 	it('does not navigate window tabs from the chat list or mobile presentation', async () => {
@@ -1734,6 +1783,49 @@ describe('WorkspaceCoordinator', () => {
 		coordinator.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID };
 		expect(coordinator.focusNextTabInFocusedWindow()).toBe(false);
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
+	it('rechecks and clamps partition ratios inside the serialized commit', async () => {
+		let min = 0.4;
+		let max = 0.6;
+		let adjustable = true;
+		const resolver = vi.fn<WorkspacePartitionRatioBoundsResolver>((snapshot, partitionId) => {
+			const root = snapshot.desktopRoot;
+			if (root.type !== 'partition' || root.id !== partitionId) return null;
+			return { currentRatio: root.ratio, bounds: { min, max, adjustable } };
+		});
+		const { coordinator, layout } = createHarness({ resolvePartitionRatioBounds: resolver });
+		await coordinator.openSingletonInNewWindow('git-history');
+		const root = layout.snapshot.desktopRoot;
+		if (root.type !== 'partition') throw new Error('Expected partition root');
+		const initialRatio = root.ratio;
+
+		await coordinator.setPartitionRatio(root.id, 0.9);
+		expect(layout.snapshot.desktopRoot).toMatchObject({ ratio: 0.6 });
+		expect(resolver).toHaveBeenLastCalledWith(
+			expect.objectContaining({ desktopRoot: expect.objectContaining({ ratio: initialRatio }) }),
+			root.id,
+		);
+
+		min = 0.6;
+		max = 0.6;
+		adjustable = false;
+		const revision = layout.revision;
+		await coordinator.setPartitionRatio(root.id, 0.2);
+
+		expect(layout.revision).toBe(revision);
+		expect(layout.snapshot.desktopRoot).toMatchObject({ ratio: 0.6 });
+	});
+
+	it('drops stale partition resize events', async () => {
+		const { coordinator, layout } = createHarness({
+			resolvePartitionRatioBounds: () => null,
+		});
+		const revision = layout.revision;
+
+		await coordinator.setPartitionRatio('partition-missing', 0.7);
+
+		expect(layout.revision).toBe(revision);
 	});
 
 	it('switches a terminal tab in place and swaps an already placed target', async () => {
@@ -1895,10 +1987,13 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.openSingletonInNewWindow('git-compare');
 		await coordinator.openSingletonInNewWindow('files');
-		expect(windowCountOf(layout.snapshot)).toBe(4);
+		for (let index = 4; index < 8; index++) {
+			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
+		}
+		expect(windowCountOf(layout.snapshot)).toBe(8);
 
 		await expect(coordinator.openSingletonInNewWindow('commit')).rejects.toBeInstanceOf(
-			WorkspaceWindowLimitError,
+			WorkspaceSplitBlockedError,
 		);
 		expect(layout.surface('singleton:commit')).toBeNull();
 	});
@@ -1909,12 +2004,100 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.openSingletonInNewWindow('git-compare');
 		await coordinator.openSingletonInNewWindow('files');
-		expect(windowCountOf(layout.snapshot)).toBe(4);
+		for (let index = 4; index < 8; index++) {
+			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
+		}
+		expect(windowCountOf(layout.snapshot)).toBe(8);
 
 		await expect(
 			coordinator.moveTabToNewWindow(chatViewSurfaceId('window-main'), 'window-main', 'right'),
-		).rejects.toBeInstanceOf(WorkspaceWindowLimitError);
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
 		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+	});
+
+	it('applies the shared geometry denial to every new-window planner', async () => {
+		const resolveSplitAdmission = vi.fn<WorkspaceSplitAdmissionResolver>(() => ({
+			allowed: false,
+			reason: 'too-small',
+		}));
+		const { coordinator, layout, terminals } = createHarness({ resolveSplitAdmission });
+		terminals.create.mockResolvedValue('terminal-blocked');
+
+		await expect(
+			coordinator.openChatInNewWindow('chat-blocked', 'window-main', 'left'),
+		).rejects.toMatchObject({ message: 'Not enough space to split this window.' });
+		await expect(
+			coordinator.openSingletonInNewWindow('git-history', 'window-main'),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
+		await expect(
+			coordinator.placeFileSession('file-blocked', {
+				type: 'new-window',
+				anchorWindowId: 'window-main',
+			}),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
+		await expect(
+			coordinator.createTerminalInNewWindow('window-main', 'command-menu:new-terminal'),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
+		expect(terminals.create).not.toHaveBeenCalled();
+		await expect(
+			coordinator.moveTabToNewWindow('singleton:git', 'window-main', 'bottom'),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
+
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(resolveSplitAdmission).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				targetWindowId: 'window-main',
+				edge: 'bottom',
+				movingSurfaceId: 'singleton:git',
+			}),
+		);
+	});
+
+	it('lets a keyed terminal retry recover an existing placement after admission closes', async () => {
+		let admissionOpen = true;
+		const resolveSplitAdmission = vi.fn<WorkspaceSplitAdmissionResolver>(() =>
+			admissionOpen ? { allowed: true } : { allowed: false, reason: 'too-small' },
+		);
+		const { coordinator, layout, terminals } = createHarness({ resolveSplitAdmission });
+		const requestIds: string[] = [];
+		terminals.create
+			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
+				requestIds.push(requestId);
+				terminals.pendingCreates[requestId] = {};
+				throw new Error('network lost');
+			})
+			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
+				requestIds.push(requestId);
+				delete terminals.pendingCreates[requestId];
+				return 'terminal-recovered';
+			});
+
+		await expect(
+			coordinator.createTerminalInNewWindow('window-main', 'command-menu:new-terminal'),
+		).rejects.toThrow('network lost');
+
+		const surfaceId = terminalSurfaceId('terminal-recovered');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: surfaceId, type: 'terminal', terminalId: 'terminal-recovered' },
+					windowId: 'window-main',
+				},
+			]),
+		);
+		admissionOpen = false;
+
+		await expect(
+			coordinator.createTerminalInNewWindow('window-main', 'command-menu:new-terminal'),
+		).resolves.toBe('terminal-recovered');
+
+		expect(requestIds[1]).toBe(requestIds[0]);
+		expect(resolveSplitAdmission).toHaveBeenCalledTimes(1);
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBe('window-main');
 	});
 
 	it('coalesces concurrent singleton opens into one placement', async () => {
@@ -1976,6 +2159,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).not.toBe(
 			sourceWindowId,
 		);
+	});
+
+	it('treats a sole non-Chat tab moved beside its own window as an identity no-op', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewWindow('files');
+		const sourceWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
+		const before = layout.snapshot;
+
+		await coordinator.moveTabToNewWindow('singleton:files', sourceWindowId, 'left');
+
+		expect(layout.snapshot).toBe(before);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).toBe(sourceWindowId);
 	});
 
 	it('derives the Terminal launcher only while first-run layout is still canonical', async () => {
@@ -2113,10 +2308,7 @@ describe('WorkspaceCoordinator', () => {
 			let coordinator: WorkspaceCoordinator | null = null;
 			let closeOnPublish = false;
 			let closing: Promise<boolean> | null = null;
-			const presentSurface = vi.spyOn(
-				WorkspacePresentationController.prototype,
-				'presentSurface',
-			);
+			const presentSurface = vi.spyOn(WorkspacePresentationController.prototype, 'presentSurface');
 			try {
 				const harness = createHarness({
 					onLayoutChanged: (snapshot) => {
@@ -2132,7 +2324,9 @@ describe('WorkspaceCoordinator', () => {
 					attachmentState: 'attached',
 				};
 				await coordinator.openTerminalSession(terminalId, 'window-main');
-				await coordinator.enterWindowFullscreen('window-main');
+				if (destination === 'current window') {
+					await coordinator.enterWindowFullscreen('window-main');
+				}
 				presentSurface.mockClear();
 				terminals.create.mockResolvedValue(terminalId);
 				closeOnPublish = true;
@@ -2473,5 +2667,238 @@ describe('WorkspaceCoordinator', () => {
 		expect(editor.prepareRendererTransfer).toHaveBeenCalledTimes(2);
 		expect(attachMobile).toHaveBeenCalledOnce();
 		expect(attachDialog).toHaveBeenCalledOnce();
+	});
+});
+describe('space-aware generic placement', () => {
+	const onlyBelow: WorkspaceSplitAdmissionResolver = (_snapshot, { edge }) =>
+		edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' };
+
+	it('opens a singleton below when the anchor is too narrow to split right', async () => {
+		const { coordinator, layout } = createHarness({
+			includePortableTabs: false,
+			resolveSplitAdmission: onlyBelow,
+		});
+		await coordinator.openSingletonInNewWindow('git', 'window-main');
+		const root = layout.snapshot.desktopRoot;
+		expect(root.type).toBe('partition');
+		if (root.type !== 'partition') throw new Error('Expected partition');
+		const column = root.children[0];
+		expect(column.type).toBe('partition');
+		if (column.type !== 'partition') throw new Error('Expected nested partition');
+		expect(column.direction).toBe('vertical');
+		expect(column.children[1].type).toBe('window');
+	});
+
+	it.each(['too-small', 'resource-ceiling', 'fullscreen'] as const)(
+		'opens a generic view as a tab on %s, without changing explicit new-window behavior',
+		async (reason) => {
+			const { coordinator, layout } = createHarness({
+				includePortableTabs: false,
+				resolveSplitAdmission: () => ({ allowed: false, reason }),
+			});
+			await expect(coordinator.openSingletonInNewWindow('git')).rejects.toThrow(
+				WorkspaceSplitBlockedError,
+			);
+			const count = windowCountOf(layout.snapshot);
+			await coordinator.openSingleton('git');
+			expect(windowCountOf(layout.snapshot)).toBe(count);
+			expect(layout.surface('singleton:git')).not.toBeNull();
+			await coordinator.openSingleton('git');
+			expect(windowCountOf(layout.snapshot)).toBe(count);
+		},
+	);
+
+	it('places configured new-window files below the anchor when right is unavailable', async () => {
+		const { coordinator, layout } = createHarness({ resolveSplitAdmission: onlyBelow });
+		await coordinator.placeFileSession('file-direction', {
+			type: 'new-window',
+			anchorWindowId: 'window-main',
+		});
+		expect(windowCountOf(layout.snapshot)).toBe(3);
+		expect(
+			windowIdOfSurface(layout.snapshot.desktopRoot, fileSurfaceId('file-direction')),
+		).not.toBe('window-main');
+	});
+
+	it('places a new terminal below the anchor when right is unavailable', async () => {
+		const { coordinator, layout } = createHarness({ resolveSplitAdmission: onlyBelow });
+		const terminalId = await coordinator.createTerminalInNewWindow('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(3);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, terminalSurfaceId(terminalId))).not.toBe(
+			'window-main',
+		);
+	});
+});
+describe('generic terminal creation', () => {
+	it('creates one terminal tab when splitting is denied', async () => {
+		const { coordinator, layout, terminals } = createHarness({
+			resolveSplitAdmission: () => ({ allowed: false, reason: 'too-small' }),
+		});
+		const terminalId = await coordinator.createTerminalInAvailableSpace('generic-terminal');
+		expect(terminals.create).toHaveBeenCalledOnce();
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, terminalSurfaceId(terminalId))).toBe(
+			'window-main',
+		);
+	});
+	it('does not turn genuine terminal failures into another creation attempt', async () => {
+		const { coordinator, terminals } = createHarness();
+		terminals.create.mockRejectedValue(new Error('Terminal unavailable'));
+		await expect(coordinator.createTerminalInAvailableSpace()).rejects.toThrow(
+			'Terminal unavailable',
+		);
+		expect(terminals.create).toHaveBeenCalledOnce();
+	});
+});
+
+describe('closing all other windows', () => {
+	it('keeps the requested window and active tab while releasing other windows together', async () => {
+		const { coordinator, layout, files, terminals } = createHarness({ includePortableTabs: false });
+		await coordinator.placeFileSession('other-file', { type: 'window', windowId: 'window-main' });
+		const terminalId = 'close-others-running';
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'window-files');
+		await coordinator.openChatInNewWindow('kept-chat', 'window-main', 'bottom');
+		const keptWindowId = coordinator.currentWindowId;
+		const activeId = windowTabs(layout.snapshot, keptWindowId).activeId;
+		expect(coordinator.isOtherWindowsCloseBlocked(keptWindowId)).toBe(false);
+		await expect(coordinator.closeOtherWindows(keptWindowId)).resolves.toBe(true);
+		expect(collectWindowNodes(layout.snapshot.desktopRoot).map((window) => window.id)).toEqual([
+			keptWindowId,
+		]);
+		expect(windowTabs(layout.snapshot, keptWindowId).activeId).toBe(activeId);
+		expect(coordinator.currentWindowId).toBe(keptWindowId);
+		expect(files.destroy).toHaveBeenCalledWith('other-file');
+		expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		expect(coordinator.isOtherWindowsCloseBlocked(keptWindowId)).toBe(true);
+	});
+
+	it('does not close any windows when a later file confirmation is canceled', async () => {
+		const confirmDestructive = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+		const { coordinator, layout, files } = createHarness({ confirmDestructive });
+		await coordinator.placeFileSession('first', { type: 'window', windowId: 'window-main' });
+		await coordinator.placeFileSession('second', { type: 'window', windowId: 'window-files' });
+		await coordinator.openChatInNewWindow('kept-chat', 'window-main', 'bottom');
+		const before = layout.snapshot;
+		await expect(coordinator.closeOtherWindows(coordinator.currentWindowId)).resolves.toBe(false);
+		expect(confirmDestructive).toHaveBeenCalledTimes(2);
+		expect(layout.snapshot).toBe(before);
+		expect(files.destroy).not.toHaveBeenCalled();
+	});
+
+	it('protects the last Chat view, missing windows, and the only window', async () => {
+		const { coordinator, layout } = createHarness({ includePortableTabs: false });
+		const before = layout.snapshot;
+		expect(coordinator.isOtherWindowsCloseBlocked('window-files')).toBe(true);
+		await expect(coordinator.closeOtherWindows('window-files')).resolves.toBe(false);
+		await expect(coordinator.closeOtherWindows('window-missing')).resolves.toBe(false);
+		expect(layout.snapshot).toBe(before);
+		await coordinator.closeOtherWindows('window-main');
+		await expect(coordinator.closeOtherWindows('window-main')).resolves.toBe(false);
+	});
+
+	it('reserves every window while confirming and honors Commit draft cancellation', async () => {
+		const { coordinator, layout, singletons } = createHarness();
+		await coordinator.openSingletonInNewWindow('commit');
+		singletons.commit.retainedDraftCount = 1;
+		const before = layout.snapshot;
+		const closing = coordinator.closeOtherWindows('window-main');
+		await vi.waitFor(() => expect(coordinator.closeGuardRequest).not.toBeNull());
+		expect(coordinator.isOtherWindowsCloseBlocked('window-main')).toBe(true);
+		await expect(coordinator.closeOtherWindows('window-main')).resolves.toBe(false);
+		coordinator.resolveCloseGuard(false);
+		await expect(closing).resolves.toBe(false);
+		expect(layout.snapshot).toBe(before);
+		expect(singletons.commit.discardDrafts).not.toHaveBeenCalled();
+		expect(coordinator.isOtherWindowsCloseBlocked('window-main')).toBe(false);
+	});
+
+	it('blocks the whole operation while a file mutation is pending', async () => {
+		const { coordinator, layout, files } = createHarness({ filePendingMutationCount: 1 });
+		await coordinator.placeFileSession('pending', { type: 'window', windowId: 'window-files' });
+		const before = layout.snapshot;
+		expect(coordinator.isOtherWindowsCloseBlocked('window-main')).toBe(true);
+		await expect(coordinator.closeOtherWindows('window-main')).resolves.toBe(false);
+		expect(layout.snapshot).toBe(before);
+		expect(files.confirmDestructive).not.toHaveBeenCalled();
+	});
+});
+
+describe('responsive window merging', () => {
+	it('keeps the current tab, transfers files and terminals, and never invokes close guards', async () => {
+		const { coordinator, layout, files, terminals } = createHarness({ includePortableTabs: false });
+		await coordinator.openChatInNewWindow('other-chat', 'window-main', 'bottom');
+		const chatWindowId = coordinator.currentWindowId;
+		await coordinator.placeFileSession('dirty', { type: 'window', windowId: chatWindowId });
+		const terminalId = await coordinator.createTerminal(chatWindowId);
+		await coordinator.focusSurface(CANONICAL_CHAT_SURFACE_ID);
+		const selected = windowTabs(layout.snapshot, 'window-main').activeId;
+		await expect(coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }))).resolves.toBe(
+			true,
+		);
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(selected);
+		expect(windowTabs(layout.snapshot, 'window-main').order).toEqual(
+			expect.arrayContaining([
+				'singleton:files',
+				fileSurfaceId('dirty'),
+				terminalSurfaceId(terminalId),
+			]),
+		);
+		expect(coordinator.closeGuardRequest).toBeNull();
+		expect(files.confirmDestructive).not.toHaveBeenCalled();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		const revision = layout.revision;
+		await coordinator.fitWindowsToHost(() => ({ width: 2400, height: 1200 }));
+		expect(layout.revision).toBe(revision);
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+	});
+	it('transfers the last Chat view into a non-Chat current window without selecting it', async () => {
+		const { coordinator, layout } = createHarness({ includePortableTabs: false });
+		await coordinator.showChatInCurrentWindow('retained-chat');
+		await coordinator.focusSurface('singleton:files');
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		const transfer = vi.fn(() => publication);
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer: transfer });
+		await coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }));
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(windowTabs(layout.snapshot, 'window-files').activeId).toBe('singleton:files');
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({
+			chatId: 'retained-chat',
+		});
+		expect(transfer).toHaveBeenCalledOnce();
+		expect(publication.publish).toHaveBeenCalledOnce();
+	});
+	it('does not prune fullscreen, mobile, or an unmeasured host', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.fitWindowsToHost(() => null);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		await coordinator.enterWindowFullscreen('window-main');
+		await coordinator.fitWindowsToHost(() => ({ width: 1, height: 1 }));
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		await coordinator.enterMobilePresentation();
+		await coordinator.fitWindowsToHost(() => ({ width: 1, height: 1 }));
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+	});
+	it('defers a merge while a close guard owns a source and succeeds after cancellation', async () => {
+		const guard = deferred<boolean>();
+		const { coordinator, layout } = createHarness({ confirmDestructive: () => guard.promise });
+		await coordinator.placeFileSession('guarded', { type: 'window', windowId: 'window-files' });
+		const closing = coordinator.closeSurface(fileSurfaceId('guarded'));
+		await Promise.resolve();
+		await expect(coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }))).resolves.toBe(
+			false,
+		);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		guard.resolve(false);
+		await closing;
+		await coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }));
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(layout.surface(fileSurfaceId('guarded'))).not.toBeNull();
 	});
 });

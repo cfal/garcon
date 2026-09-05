@@ -1,6 +1,6 @@
 import {
 	MAX_MOBILE_RETURN_TARGETS,
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	isPortableSingleton,
 	terminalSurfaceId,
@@ -29,55 +29,10 @@ import {
 	windowNodeById,
 } from './window-tree.js';
 import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
+import { activateTab, insertTab, removeTab, tabsWithOrder } from './workspace-window-tabs.js';
 
 function unique(values: readonly string[]): string[] {
 	return [...new Set(values)];
-}
-
-function tabsWithOrder(
-	tabs: WorkspaceWindowTabState,
-	order: readonly string[],
-): WorkspaceWindowTabState {
-	const nextOrder = unique(order);
-	if (nextOrder.length === 0) throw new Error('A workspace window cannot be empty');
-	const nextMru = unique(tabs.mru).filter((id) => nextOrder.includes(id));
-	for (const id of nextOrder) {
-		if (!nextMru.includes(id)) nextMru.push(id);
-	}
-	const activeId = nextOrder.includes(tabs.activeId) ? tabs.activeId : (nextMru[0] ?? nextOrder[0]);
-	return { order: nextOrder, activeId, mru: nextMru };
-}
-
-function activateTab(tabs: WorkspaceWindowTabState, surfaceId: string): WorkspaceWindowTabState {
-	if (!tabs.order.includes(surfaceId)) {
-		throw new Error(`Surface is not in the workspace window: ${surfaceId}`);
-	}
-	return {
-		order: [...tabs.order],
-		activeId: surfaceId,
-		mru: [surfaceId, ...tabs.mru.filter((id) => id !== surfaceId)],
-	};
-}
-
-function insertTab(
-	tabs: WorkspaceWindowTabState,
-	surfaceId: string,
-	index?: number,
-): WorkspaceWindowTabState {
-	const without = tabs.order.filter((id) => id !== surfaceId);
-	const insertionIndex =
-		index === undefined ? without.length : Math.max(0, Math.min(without.length, Math.trunc(index)));
-	without.splice(insertionIndex, 0, surfaceId);
-	return tabsWithOrder(tabs, without);
-}
-
-function removeTab(
-	tabs: WorkspaceWindowTabState,
-	surfaceId: string,
-): WorkspaceWindowTabState | null {
-	const order = tabs.order.filter((id) => id !== surfaceId);
-	if (order.length === 0) return null;
-	return tabsWithOrder({ ...tabs, mru: tabs.mru.filter((id) => id !== surfaceId) }, order);
 }
 
 function singleTabWindow(windowId: WorkspaceWindowId, surfaceId: string): WorkspaceWindowNode {
@@ -204,7 +159,7 @@ function registerSurfaceInNewWindow(
 	if (!windowNodeById(snapshot.desktopRoot, mutation.targetWindowId)) {
 		throw new Error(`Workspace window does not exist: ${mutation.targetWindowId}`);
 	}
-	if (windowCount(snapshot.desktopRoot) >= MAX_WORKSPACE_WINDOWS) {
+	if (windowCount(snapshot.desktopRoot) >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
 		throw new Error('Workspace window count limit reached');
 	}
 	if (windowNodeById(snapshot.desktopRoot, mutation.newWindowId)) {
@@ -267,7 +222,7 @@ function openChatInNewWindow(
 	if (!windowNodeById(snapshot.desktopRoot, mutation.targetWindowId)) {
 		throw new Error(`Workspace window does not exist: ${mutation.targetWindowId}`);
 	}
-	if (windowCount(snapshot.desktopRoot) >= MAX_WORKSPACE_WINDOWS) {
+	if (windowCount(snapshot.desktopRoot) >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
 		throw new Error('Workspace window count limit reached');
 	}
 	if (windowNodeById(snapshot.desktopRoot, mutation.newWindowId)) {
@@ -537,7 +492,7 @@ function moveTabToNewWindow(
 			snapshot.desktopRoot,
 			sourceWindowId,
 			mutation.targetWindowId,
-		) > MAX_WORKSPACE_WINDOWS
+		) > WORKSPACE_WINDOW_RESOURCE_CEILING
 	) {
 		throw new Error('Workspace window count limit reached');
 	}
@@ -610,6 +565,42 @@ function removeOwnedSurfaceDescriptors(
 			(target) => !removed.has(target.invokerSurfaceId),
 		),
 		unplacedTerminalIds: unique(unplacedTerminalIds),
+	};
+}
+
+function mergeWindow(
+	snapshot: WorkspaceLayoutSnapshot,
+	sourceWindowId: WorkspaceWindowId,
+	destinationWindowId: WorkspaceWindowId,
+): WorkspaceLayoutSnapshot {
+	if (sourceWindowId === destinationWindowId) return snapshot;
+	const source = windowNodeById(snapshot.desktopRoot, sourceWindowId);
+	const destination = windowNodeById(snapshot.desktopRoot, destinationWindowId);
+	if (!source || !destination) throw new Error('Cannot merge missing workspace windows');
+	const sourceChatId = chatViewSurfaceId(sourceWindowId);
+	const destinationChatId = chatViewSurfaceId(destinationWindowId);
+	const sourceChat = snapshot.surfaces[sourceChatId];
+	const transferChat = sourceChat?.type === 'chat' && !snapshot.surfaces[destinationChatId];
+	const movedIds = source.tabs.order.flatMap((id) => {
+		if (id !== sourceChatId) return [id];
+		return transferChat ? [destinationChatId] : [];
+	});
+	const root = removeWindowAndCollapse(snapshot.desktopRoot, sourceWindowId)!;
+	const merged = mapWindows(root, (window) =>
+		window.id === destinationWindowId
+			? { ...window, tabs: tabsWithOrder(window.tabs, [...window.tabs.order, ...movedIds]) }
+			: window,
+	);
+	const next = removeOwnedSurfaceDescriptors(
+		snapshot,
+		sourceChat ? [sourceChatId] : [],
+		merged,
+		null,
+	);
+	if (!transferChat) return next;
+	return {
+		...next,
+		surfaces: { ...next.surfaces, [destinationChatId]: { ...sourceChat, id: destinationChatId } },
 	};
 }
 
@@ -708,6 +699,8 @@ function applyMutation(
 			);
 		case 'move-tab-to-new-window':
 			return moveTabToNewWindow(snapshot, mutation);
+		case 'merge-window':
+			return mergeWindow(snapshot, mutation.sourceWindowId, mutation.destinationWindowId);
 		case 'close-window':
 			return closeWindow(snapshot, mutation.windowId);
 		case 'set-partition-ratio':
@@ -802,8 +795,8 @@ export function reduceWorkspaceLayout(
 export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapshot): void {
 	const windows = collectWindowNodes(snapshot.desktopRoot);
 	if (windows.length === 0) throw new Error('Workspace must contain a window');
-	if (windows.length > MAX_WORKSPACE_WINDOWS) {
-		throw new Error(`Workspace window count exceeds ${MAX_WORKSPACE_WINDOWS}`);
+	if (windows.length > WORKSPACE_WINDOW_RESOURCE_CEILING) {
+		throw new Error(`Workspace window count exceeds ${WORKSPACE_WINDOW_RESOURCE_CEILING}`);
 	}
 	const windowIds = new Set<WorkspaceWindowId>();
 	for (const workspaceWindow of windows) {

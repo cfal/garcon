@@ -24,6 +24,7 @@
 		SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
+	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 	interface MobileSidebarLifecycleHostProps {
 		chats?: ChatSessionRecord[];
@@ -205,6 +206,6 @@
 		onShowScheduledPrompts={() => {}}
 		onShowPreambles={() => {}}
 		onShowSettings={() => {}}
-		newWindowBlocked={false}
+		newWindowEdges={workspaceSplitAdmissions()}
 	/>
 {/if}

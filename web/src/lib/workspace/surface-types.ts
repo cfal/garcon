@@ -1,6 +1,6 @@
 export const TERMINAL_LAUNCHER_ID = 'terminal-launcher' as const;
 export const MAX_MOBILE_RETURN_TARGETS = 32;
-export const MAX_WORKSPACE_WINDOWS = 4;
+export const WORKSPACE_WINDOW_RESOURCE_CEILING = 8;
 export const MIN_PARTITION_RATIO = 0.15;
 export const MAX_PARTITION_RATIO = 0.85;
 export const PORTABLE_SINGLETON_KINDS = [
@@ -18,7 +18,8 @@ export const TRANSIENT_MOBILE_SINGLETON_KINDS = ['git-history', 'git-compare'] a
 export type WorkspaceWindowId = `window-${string}`;
 export type WorkspacePartitionId = `partition-${string}`;
 export type WorkspacePartitionDirection = 'horizontal' | 'vertical';
-export type WorkspaceWindowEdge = 'left' | 'right' | 'top' | 'bottom';
+export const WORKSPACE_WINDOW_EDGES = ['left', 'right', 'top', 'bottom'] as const;
+export type WorkspaceWindowEdge = (typeof WORKSPACE_WINDOW_EDGES)[number];
 export type ChatViewSurfaceId = `chat-view:${WorkspaceWindowId}`;
 
 export type PresentationHostId = WorkspaceWindowId | 'mobile' | 'dialog';
@@ -119,6 +120,11 @@ export interface WorkspaceLayoutCommitPort {
 }
 
 export type WorkspaceLayoutMutation =
+	| {
+			type: 'merge-window';
+			sourceWindowId: WorkspaceWindowId;
+			destinationWindowId: WorkspaceWindowId;
+	  }
 	| {
 			type: 'register-surface';
 			surface: SurfaceDescriptor;
