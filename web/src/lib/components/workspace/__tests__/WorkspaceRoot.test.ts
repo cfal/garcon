@@ -140,10 +140,12 @@ function installContext() {
 		currentWindowId: WorkspaceWindowId;
 		focusOwner: FocusOwner;
 		composerAnchorSurfaceId: ReturnType<typeof chatViewSurfaceId> | null;
+		partitionRatioBounds: { min: number; max: number; adjustable: boolean };
 	} = {
 		currentWindowId: 'window-main' as WorkspaceWindowId,
 		focusOwner: { kind: 'surface' as const, surfaceId: chatViewSurfaceId('window-main') },
 		composerAnchorSurfaceId: chatViewSurfaceId('window-main'),
+		partitionRatioBounds: { min: 0.15, max: 0.85, adjustable: true },
 	};
 	const commit = (mutations: readonly WorkspaceLayoutMutation[]): void => {
 		const next = reduceWorkspaceLayout(layout.snapshot, mutations);
@@ -276,6 +278,7 @@ function installContext() {
 			commit([{ type: 'set-fullscreen-window', windowId: null }]);
 		}),
 		setPartitionRatio: vi.fn(async () => undefined),
+		resolvePartitionRatioBounds: () => runtime.partitionRatioBounds,
 		resolveSplitAdmission: (
 			targetWindowId: WorkspaceWindowId,
 			edge: WorkspaceWindowEdge,
@@ -1240,6 +1243,41 @@ describe('WorkspaceRoot', () => {
 		).toBe(true);
 		expect(container.querySelector('[data-workspace-compact-switcher]')).toBeNull();
 		expect(container.querySelectorAll('[role="separator"]')).toHaveLength(0);
+	});
+
+	it('passes committed dynamic bounds to partition resizers', async () => {
+		const { layout, runtime } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('git'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		runtime.partitionRatioBounds = { min: 0.3, max: 0.7, adjustable: true };
+		renderRoot();
+		const separator = screen.getByRole('separator', { name: m.layout_resize_windows() });
+
+		expect(separator.getAttribute('aria-valuemin')).toBe('30');
+		expect(separator.getAttribute('aria-valuemax')).toBe('70');
+		expect(separator.getAttribute('aria-disabled')).toBe('false');
+
+		runtime.partitionRatioBounds = { min: 0.5, max: 0.5, adjustable: false };
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-partition-ratio', partitionId: 'partition-1', ratio: 0.51 },
+			]),
+		);
+		await tick();
+		expect(separator.getAttribute('aria-disabled')).toBe('true');
+		expect(separator.getAttribute('tabindex')).toBe('-1');
 	});
 
 	it('scopes compact recovery-hint dismissal to the measured compact session', async () => {

@@ -1,12 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { cn } from '$lib/utils/cn';
-	import {
-		MAX_PARTITION_RATIO,
-		MIN_PARTITION_RATIO,
-		type WorkspacePartitionDirection,
-	} from '$lib/workspace/surface-types.js';
-	import { clampPartitionRatio } from '$lib/workspace/window-tree.js';
+	import type { WorkspacePartitionDirection } from '$lib/workspace/surface-types.js';
 	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -20,9 +15,11 @@
 		// Fraction of the host region this partition spans on its axis, used to
 		// convert pointer pixels into a ratio delta for nested partitions.
 		boundsFraction: number;
+		minRatio: number;
+		maxRatio: number;
+		disabled: boolean;
 		onPreview: (ratio: number | null) => void;
 		onCommit: (ratio: number) => void;
-		onReset: () => void;
 	}
 
 	let {
@@ -30,9 +27,11 @@
 		ratio,
 		style,
 		boundsFraction,
+		minRatio,
+		maxRatio,
+		disabled,
 		onPreview,
 		onCommit,
-		onReset,
 	}: WorkspaceWindowResizerProps = $props();
 
 	let isDragging = $state(false);
@@ -42,6 +41,10 @@
 
 	const isHorizontal = $derived(direction === 'horizontal');
 
+	function clampRatio(value: number): number {
+		return Math.min(maxRatio, Math.max(minRatio, value));
+	}
+
 	function containerSize(): number {
 		const container = trackElement?.parentElement;
 		if (!container) return 0;
@@ -50,7 +53,7 @@
 	}
 
 	function handlePointerDown(e: PointerEvent): void {
-		if (e.button !== 0 || !e.isPrimary || pointerCleanup) return;
+		if (disabled || e.button !== 0 || !e.isPrimary || pointerCleanup) return;
 		e.preventDefault();
 		isDragging = true;
 		const startPos = isHorizontal ? e.clientX : e.clientY;
@@ -69,7 +72,7 @@
 			ev.preventDefault();
 			if (size <= 0) return;
 			const currentPos = isHorizontal ? ev.clientX : ev.clientY;
-			previewRatio = clampPartitionRatio(startRatio + (currentPos - startPos) / size);
+			previewRatio = clampRatio(startRatio + (currentPos - startPos) / size);
 			onPreview(previewRatio);
 		}
 
@@ -110,6 +113,7 @@
 	// Each key press is an independent preview+commit pair so held keys
 	// re-measure the container between steps.
 	function handleKeyDown(e: KeyboardEvent) {
+		if (disabled) return;
 		const decreaseKey = isHorizontal ? 'ArrowLeft' : 'ArrowUp';
 		const increaseKey = isHorizontal ? 'ArrowRight' : 'ArrowDown';
 		if (e.key !== decreaseKey && e.key !== increaseKey) return;
@@ -117,7 +121,13 @@
 		const size = containerSize();
 		if (size <= 0) return;
 		const delta = (e.key === increaseKey ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP) / size;
-		onCommit(clampPartitionRatio(ratio + delta));
+		onCommit(clampRatio(ratio + delta));
+	}
+
+	function handleReset(): void {
+		if (disabled) return;
+		const resetRatio = clampRatio(0.5);
+		if (resetRatio !== ratio) onCommit(resetRatio);
 	}
 
 	onDestroy(() => pointerCleanup?.());
@@ -130,19 +140,20 @@
 	class={cn(
 		'pointer-events-none absolute z-40 flex-shrink-0 select-none touch-none outline-none group',
 		'focus-visible:ring-2 focus-visible:ring-ring rounded-full',
-		isHorizontal ? 'cursor-col-resize' : 'cursor-row-resize',
+		disabled ? 'cursor-default' : isHorizontal ? 'cursor-col-resize' : 'cursor-row-resize',
 	)}
 	{style}
 	onpointerdown={handlePointerDown}
-	ondblclick={onReset}
+	ondblclick={handleReset}
 	onkeydown={handleKeyDown}
 	role="separator"
 	aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
 	aria-label={m.layout_resize_windows()}
-	aria-valuemin={Math.round(MIN_PARTITION_RATIO * 100)}
-	aria-valuemax={Math.round(MAX_PARTITION_RATIO * 100)}
+	aria-valuemin={Math.round(minRatio * 100)}
+	aria-valuemax={Math.round(maxRatio * 100)}
 	aria-valuenow={Math.round((previewRatio ?? ratio) * 100)}
-	tabindex="0"
+	aria-disabled={disabled}
+	tabindex={disabled ? -1 : 0}
 >
 	<div
 		data-workspace-window-separator-line
@@ -157,7 +168,8 @@
 	<div
 		data-workspace-window-resize-hit-area
 		class={cn(
-			'pointer-events-auto absolute z-10',
+			'absolute z-10',
+			disabled ? 'pointer-events-none' : 'pointer-events-auto',
 			isHorizontal ? '-left-2.5 bottom-0 w-6' : 'inset-x-0 bottom-0 h-6',
 		)}
 		style:top={isHorizontal ? `${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px` : undefined}

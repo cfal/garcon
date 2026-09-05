@@ -45,12 +45,13 @@ import type { ChatSurfaceTransferPort } from './chat-surface-transfer.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 import { WorkspaceTabMovementService } from './workspace-tab-movement-service.js';
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
-import type {
-	WorkspacePartitionRatioBounds,
-	WorkspacePartitionRatioBoundsResolver,
-	WorkspaceSplitAdmission,
-	WorkspaceSplitAdmissions,
-	WorkspaceSplitAdmissionResolver,
+import {
+	clampWorkspacePartitionRatio,
+	type WorkspacePartitionRatioBounds,
+	type WorkspacePartitionRatioBoundsResolver,
+	type WorkspaceSplitAdmission,
+	type WorkspaceSplitAdmissions,
+	type WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
 import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 
@@ -597,7 +598,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async setPartitionRatio(partitionId: WorkspacePartitionId, ratio: number): Promise<void> {
-		await this.#presentation.commit([{ type: 'set-partition-ratio', partitionId, ratio }]);
+		await this.#presentation.commit((latest) => {
+			const resolved = this.#deps.resolvePartitionRatioBounds(latest, partitionId);
+			if (!resolved) return [];
+			const next = clampWorkspacePartitionRatio(ratio, resolved.bounds);
+			if (next === resolved.currentRatio) return [];
+			return [{ type: 'set-partition-ratio', partitionId, ratio: next }];
+		});
 	}
 
 	async closeSurface(surfaceId: string): Promise<boolean> {

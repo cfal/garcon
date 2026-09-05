@@ -213,6 +213,21 @@ describe('createWorkspaceServices', () => {
 		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('unavailable');
 	});
 
+	it('resolves partition bounds from the shared host measurement', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		services.hostGeometry.size = { width: 1000, height: 500 };
+		await services.coordinator.openChatInNewWindow('chat-2');
+		const root = services.layout.snapshot.desktopRoot;
+		if (root.type !== 'partition') throw new Error('Expected partition root');
+
+		expect(services.coordinator.resolvePartitionRatioBounds(root.id)).toEqual({
+			min: 0.241,
+			max: 0.759,
+			adjustable: true,
+		});
+	});
+
 	it('cancels root-owned window drag before a main-inert transition', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));

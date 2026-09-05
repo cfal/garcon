@@ -399,5 +399,13 @@ describe('workspace partition ratio bounds', () => {
 		expect(Math.floor(bounds.min * 1200 * 0.5)).toBeGreaterThanOrEqual(
 			COMPACT_ENTER_WINDOW_WIDTH_PX,
 		);
+		const resized = { ...root, ratio: bounds.min };
+		expect(
+			resolveWorkspaceCompactActive({
+				wasActive: false,
+				root: resized,
+				hostSize: { width: 1200, height: 600 },
+			}),
+		).toBe(false);
 	});
 });
