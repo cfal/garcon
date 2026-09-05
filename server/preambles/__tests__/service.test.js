@@ -26,7 +26,7 @@ async function service(overrides = {}) {
     preambles: new PreambleService({
       store,
       projectPaths,
-      newId: () => `preamble-${++nextId}`,
+      newId: overrides.newId ?? (() => `preamble-${++nextId}`),
       now: () => new Date('2026-09-03T10:00:00.000Z'),
     }),
   };
@@ -148,6 +148,82 @@ describe('PreambleService', () => {
       reason: { code: 'PREAMBLE_COMBINED_LIMIT_EXCEEDED', status: 422 },
     });
     expect(preambles.snapshot()).toMatchObject({ revision: 1 });
+  });
+
+  it('reports duplicate generated IDs before composition violations', async () => {
+    const { preambles } = await service({ newId: () => 'same-id' });
+    await preambles.create({
+      expectedRevision: 0,
+      preamble: globalDefinition('First', 'a'.repeat(32_000)),
+    });
+
+    await expect(preambles.create({
+      expectedRevision: 1,
+      preamble: globalDefinition('Second', 'b'.repeat(32_000)),
+    })).rejects.toMatchObject({
+      code: 'PREAMBLE_VALIDATION_FAILED',
+      status: 400,
+    });
+    expect(preambles.snapshot()).toMatchObject({ revision: 1 });
+  });
+
+  it('reports revision conflicts before state-dependent create and update validation', async () => {
+    const { preambles } = await service();
+    await preambles.create({
+      expectedRevision: 0,
+      preamble: globalDefinition('First', 'a'.repeat(32_000)),
+    });
+    await preambles.create({
+      expectedRevision: 1,
+      preamble: { ...globalDefinition('Second', 'b'.repeat(32_000)), enabled: false },
+    });
+
+    await expect(preambles.create({
+      expectedRevision: 1,
+      preamble: globalDefinition('Stale create', 'c'.repeat(32_000)),
+    })).rejects.toMatchObject({ code: 'PREAMBLE_REVISION_CONFLICT', status: 409 });
+    await expect(preambles.update({
+      expectedRevision: 1,
+      id: 'preamble-2',
+      preamble: globalDefinition('Stale update', 'b'.repeat(32_000)),
+    })).rejects.toMatchObject({ code: 'PREAMBLE_REVISION_CONFLICT', status: 409 });
+    expect(preambles.snapshot()).toMatchObject({ revision: 2 });
+  });
+
+  it('accepts future-revision create and update after serialized removals make them valid', async () => {
+    const { preambles } = await service();
+    await preambles.create({
+      expectedRevision: 0,
+      preamble: globalDefinition('First', 'a'.repeat(32_000)),
+    });
+
+    const createResults = await Promise.allSettled([
+      preambles.remove({ expectedRevision: 1, id: 'preamble-1' }),
+      preambles.create({
+        expectedRevision: 2,
+        preamble: globalDefinition('Second', 'b'.repeat(32_000)),
+      }),
+    ]);
+    expect(createResults.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+
+    await preambles.create({
+      expectedRevision: 3,
+      preamble: { ...globalDefinition('Third', 'c'.repeat(32_000)), enabled: false },
+    });
+    const updateResults = await Promise.allSettled([
+      preambles.remove({ expectedRevision: 4, id: 'preamble-2' }),
+      preambles.update({
+        expectedRevision: 5,
+        id: 'preamble-3',
+        preamble: globalDefinition('Third', 'c'.repeat(32_000)),
+      }),
+    ]);
+
+    expect(updateResults.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(preambles.snapshot()).toMatchObject({
+      revision: 6,
+      preambles: [{ id: 'preamble-3', enabled: true }],
+    });
   });
 
   it('validates the combined budget after chat ID expansion', async () => {

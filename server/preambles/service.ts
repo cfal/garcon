@@ -11,10 +11,10 @@ import {
   type ReorderPreamblesRequest,
   type UpdatePreambleRequest,
 } from '../../common/preambles.js';
-import { assertPreambleCatalogComposition, PreambleDomainError } from './errors.js';
+import { PreambleDomainError } from './errors.js';
 import { applicablePreambles } from './matching.js';
 import { PreambleProjectPathService } from './project-path-service.js';
-import { PreambleStore, reorderedPreambles } from './store.js';
+import { PreambleStore } from './store.js';
 
 interface PreambleServiceEvents {
   invalidated: [reason: PreamblesInvalidationReason];
@@ -51,7 +51,6 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
       createdAt: now,
       updatedAt: now,
     };
-    assertPreambleCatalogComposition([...this.snapshot().preambles, preamble]);
     await this.deps.store.create(preamble, request.expectedRevision);
     return this.#changed('created');
   }
@@ -60,10 +59,6 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     const id = request.id.trim();
     if (!id) throw this.#validationError();
     const definition = await this.#definition(request.preamble);
-    const candidate = this.snapshot().preambles.map((preamble) => preamble.id === id
-      ? { ...preamble, ...definition }
-      : preamble);
-    assertPreambleCatalogComposition(candidate);
     await this.deps.store.update(id, definition, this.#now().toISOString(), request.expectedRevision);
     return this.#changed('updated');
   }
@@ -77,12 +72,6 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
 
   async reorder(request: ReorderPreamblesRequest): Promise<PreamblesSnapshot> {
     if (!isUniqueStringList(request.orderedPreambleIds)) throw this.#validationError();
-    const snapshot = this.snapshot();
-    if (request.expectedRevision === snapshot.revision) {
-      const candidate = reorderedPreambles(snapshot.preambles, request.orderedPreambleIds);
-      if (!candidate) throw this.#validationError();
-      assertPreambleCatalogComposition(candidate);
-    }
     await this.deps.store.reorder(request.orderedPreambleIds, request.expectedRevision);
     return this.#changed('reordered');
   }
