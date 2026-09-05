@@ -176,6 +176,7 @@ export interface IChatRegistry {
   getRegistry(): ChatRegistrySnapshot;
   reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean>;
   listAllChats(): Record<string, ChatRegistryEntry>;
+  listChatIds(): string[];
   getChat(id: string): ChatRegistryEntry | null;
   addChat(entry: NewChatRegistryEntry): boolean;
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
@@ -563,6 +564,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return Object.fromEntries(
       Object.entries(registry.sessions).map(([id, entry]) => [id, cloneRegistryEntry(entry)]),
     );
+  }
+
+  // Ids-only read for callers that never touch entry data; avoids the
+  // per-entry cloning cost of listAllChats on hot paths.
+  listChatIds(): string[] {
+    return Object.keys(this.getRegistry().sessions);
   }
 
   getChat(id: string): ChatRegistryEntry | null {

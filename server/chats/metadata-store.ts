@@ -300,8 +300,7 @@ export class MetadataIndex {
   }
 
   #pruneMissingRegistryEntries(): void {
-    const sessions = this.#registry.listAllChats();
-    const validIds = new Set(Object.keys(sessions).map(String));
+    const validIds = new Set(this.#registry.listChatIds().map(String));
     let dirty = false;
     for (const chatId of this.#metadataByChatId.keys()) {
       if (validIds.has(chatId)) continue;
