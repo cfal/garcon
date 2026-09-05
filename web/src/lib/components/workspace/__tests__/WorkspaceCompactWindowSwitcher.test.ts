@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceCompactWindowSwitcher from '../WorkspaceCompactWindowSwitcher.svelte';
@@ -98,6 +98,30 @@ describe('WorkspaceCompactWindowSwitcher', () => {
 
 		await fireEvent.click(items[2]!);
 		expect(onActivate).toHaveBeenCalledWith('window-3');
+	});
+
+	it('focuses the current window tab when compact mode exits during activation', async () => {
+		let fallbackTab: HTMLButtonElement | null = null;
+		const onActivate = vi.fn(() => {
+			const currentWindow = document.createElement('section');
+			currentWindow.dataset.workspaceWindowCurrent = 'true';
+			fallbackTab = document.createElement('button');
+			fallbackTab.setAttribute('role', 'tab');
+			fallbackTab.setAttribute('aria-selected', 'true');
+			currentWindow.append(fallbackTab);
+			screen
+				.getByRole('navigation', { name: m.workspace_compact_window_list() })
+				.replaceWith(currentWindow);
+		});
+		renderSwitcher({ onActivate });
+		const nextButton = screen.getByRole('button', {
+			name: m.workspace_compact_next_window(),
+		});
+		nextButton.focus();
+
+		await fireEvent.click(nextButton);
+
+		await waitFor(() => expect(document.activeElement).toBe(fallbackTab));
 	});
 
 	it('keeps auto-hide and dismissal actions reachable in the compact row', async () => {

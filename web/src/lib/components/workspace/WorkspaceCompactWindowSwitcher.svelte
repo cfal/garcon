@@ -55,13 +55,24 @@
 	);
 	type FocusTarget = 'previous' | 'window-list' | 'next';
 
+	function restoreActivationFocus(focusTarget: FocusTarget): void {
+		const compactControl = document.querySelector<HTMLElement>(
+			`[data-workspace-compact-focus-target="${focusTarget}"]`,
+		);
+		if (compactControl) {
+			compactControl.focus();
+			return;
+		}
+		document
+			.querySelector<HTMLElement>(
+				'[data-workspace-window-current="true"] [role="tab"][aria-selected="true"]',
+			)
+			?.focus();
+	}
+
 	function activate(windowId: WorkspaceWindowId, focusTarget: FocusTarget): void {
 		onActivate(windowId);
-		void tick().then(() => {
-			document
-				.querySelector<HTMLElement>(`[data-workspace-compact-focus-target="${focusTarget}"]`)
-				?.focus();
-		});
+		void tick().then(() => restoreActivationFocus(focusTarget));
 	}
 
 	function activateAt(index: number, focusTarget: FocusTarget): void {
