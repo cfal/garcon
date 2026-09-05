@@ -5,7 +5,9 @@ import { withChromiumFixture, type ChromiumFixture } from '../../support/chromiu
 const CHAT_LIST_SELECTOR = '[data-workspace-chat-list]';
 const CHAT_LIST_PANEL_SELECTOR = '[data-workspace-chat-list-panel]';
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
-const SIDEBAR_WIDTH = 800;
+// Wide enough that the canonical 0.62 window separator lands inside the panel
+// for both dock sides, keeping the traversal check meaningful.
+const SIDEBAR_WIDTH = 1000;
 
 type ChatListDock = 'left' | 'right';
 
@@ -54,55 +56,24 @@ async function openChat(fixture: ChromiumFixture, chatId: string): Promise<void>
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator(WINDOW_SELECTOR).waitFor({ state: 'visible' });
+  await fixture.page.locator('[data-workspace-window-current="true"]').waitFor({ state: 'visible' });
   await fixture.page.locator(CHAT_LIST_PANEL_SELECTOR).waitFor({ state: 'attached' });
 }
 
-async function openFilesInNewRightWindow(page: Page): Promise<string> {
-  const existingWindowIds = new Set(
-    await page.locator(WINDOW_SELECTOR).evaluateAll((windows) =>
-      windows.flatMap((workspaceWindow) => {
-        const windowId = workspaceWindow.getAttribute('data-workspace-window-id');
-        return windowId ? [windowId] : [];
-      }),
-    ),
+// The canonical desktop layout opens Chat on the left and Files on the right,
+// so the edge windows are read positionally instead of opened per test.
+async function edgeWindowIds(page: Page): Promise<{ left: string; right: string }> {
+  const windows = await page.locator(WINDOW_SELECTOR).evaluateAll((workspaceWindows) =>
+    workspaceWindows.flatMap((workspaceWindow) => {
+      const windowId = workspaceWindow.getAttribute('data-workspace-window-id');
+      return windowId ? [{ windowId, x: workspaceWindow.getBoundingClientRect().x }] : [];
+    }),
   );
-  const sourceWindowId = await page
-    .locator('[data-workspace-window-current="true"]')
-    .getAttribute('data-workspace-window-id');
-  if (!sourceWindowId) throw new Error('Current workspace window has no ID.');
-
-  await page.locator(`[data-workspace-window-add-trigger="${sourceWindowId}"]`).click();
-  await page.getByRole('menuitem', { name: 'Open Files', exact: true }).click();
-  await page.waitForFunction(
-    (windowId) =>
-      document
-        .querySelector(`[data-workspace-window-id="${windowId}"]`)
-        ?.getAttribute('data-workspace-window-active-surface') === 'singleton:files',
-    sourceWindowId,
-  );
-  await page.locator(`[data-workspace-window-menu-trigger="${sourceWindowId}"]`).click();
-  await page
-    .locator(
-      `[data-workspace-window-menu="${sourceWindowId}"] [data-workspace-window-tab-action="move-new-right"]`,
-    )
-    .click();
-  await page.waitForFunction(
-    (expectedCount) =>
-      document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
-    existingWindowIds.size + 1,
-  );
-
-  const newWindowId = (
-    await page.locator(WINDOW_SELECTOR).evaluateAll((windows) =>
-      windows.flatMap((workspaceWindow) => {
-        const windowId = workspaceWindow.getAttribute('data-workspace-window-id');
-        return windowId ? [windowId] : [];
-      }),
-    )
-  ).find((windowId) => !existingWindowIds.has(windowId));
-  if (!newWindowId) throw new Error('Opening Files did not create a new workspace window.');
-  return newWindowId;
+  if (windows.length !== 2) {
+    throw new Error(`Expected the canonical two windows, found ${windows.length}.`);
+  }
+  windows.sort((a, b) => a.x - b.x);
+  return { left: windows[0].windowId, right: windows[1].windowId };
 }
 
 async function activateWindow(page: Page, windowId: string): Promise<void> {
@@ -213,11 +184,7 @@ describe('Chromium chat-list autohide layering', () => {
           await enableAutohide(fixture, dock);
           const chatId = await createChat(fixture);
           await openChat(fixture, chatId);
-          const leftWindowId = await fixture.page
-            .locator('[data-workspace-window-current="true"]')
-            .getAttribute('data-workspace-window-id');
-          if (!leftWindowId) throw new Error('Initial Chat workspace window is missing.');
-          const rightWindowId = await openFilesInNewRightWindow(fixture.page);
+          const { left: leftWindowId, right: rightWindowId } = await edgeWindowIds(fixture.page);
           const edgeWindowId = dock === 'left' ? leftWindowId : rightWindowId;
           const otherWindowId = dock === 'left' ? rightWindowId : leftWindowId;
 

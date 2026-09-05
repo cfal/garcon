@@ -14,7 +14,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
       const chatWindowId = await app.currentWorkspaceWindowId();
 
       await app.openNewWorkspaceWindow('New Terminal');
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       const terminalWindow = await waitForActiveSurface(fixture.page, 'terminal:');
       const terminalId = terminalWindow.surfaceId.slice('terminal:'.length);
       expect(terminalId).not.toBe('');
@@ -44,11 +44,14 @@ describe('Lightpanda workspace-window fullscreen', () => {
       );
 
       expect(await app.currentWorkspaceWindowId()).toBe(terminalWindow.windowId);
+      const filesWindowId = await app.workspaceWindowIdForSurface('singleton:files');
+      await dispatchCycleWindowFocusShortcut(fixture.page);
+      await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
       await dispatchCycleWindowFocusShortcut(fixture.page);
       await waitForCurrentWorkspaceWindow(fixture.page, chatWindowId);
 
       await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       await waitForFullscreenState(fixture.page, chatWindowId, true);
       expect(
         await fullscreenProjectionState(
@@ -113,7 +116,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
       await fixture.waitForSpaWebSocket({
         afterConnectionCount: beforeReloadConnections,
       });
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       await waitForFullscreenState(fixture.page, chatWindowId, false);
       const restoredTerminal = await waitForActiveSurface(fixture.page, 'terminal:');
       expect(restoredTerminal).toEqual(terminalWindow);
@@ -135,7 +138,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
       });
       const chatWindowId = await app.currentWorkspaceWindowId();
       await app.openNewWorkspaceWindow('Open Commit');
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       const commitWindow = await waitForActiveSurface(fixture.page, 'singleton:commit');
       await app.fill('[data-commit-message-pane] textarea', 'Retained commit draft');
 
@@ -289,7 +292,7 @@ async function waitForPersistedTerminalWindow(page: Page, terminalId: string): P
       };
       visit(parsed.root);
       return (
-        windowCount === 2 &&
+        windowCount === 3 &&
         terminalPlaced &&
         Array.isArray(parsed.unplacedTerminalIds) &&
         !parsed.unplacedTerminalIds.includes(expectedTerminalId)

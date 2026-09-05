@@ -60,14 +60,6 @@ function twoWindowLayout() {
 				surface: portableSingletonDescriptor('git'),
 				windowId: 'window-main',
 			},
-			{
-				type: 'register-surface-in-new-window',
-				surface: portableSingletonDescriptor('files'),
-				targetWindowId: 'window-main',
-				edge: 'right',
-				newWindowId: 'window-files',
-				partitionId: 'partition-files',
-			},
 		]),
 	);
 	return layout;
@@ -210,7 +202,7 @@ describe('WorkspaceWindowDndController', () => {
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
-				...(['git', 'files', 'commit'] as const).map((kind, index) => ({
+				...(['git', 'commit'] as const).map((kind, index) => ({
 					type: 'register-surface-in-new-window' as const,
 					surface: portableSingletonDescriptor(kind),
 					targetWindowId: 'window-main' as const,

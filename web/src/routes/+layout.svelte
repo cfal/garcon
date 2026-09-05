@@ -26,6 +26,7 @@
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
+	import { resolveFirstRegistrationOnboarding } from '$lib/onboarding/first-registration-onboarding.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -437,21 +438,25 @@
 		}
 	});
 
-	// Opens the settings dialog to the Providers tab on the first authenticated
-	// load right after a successful registration. Gated on a persisted
-	// flag set during the registration flow so cold loads for existing users
-	// or auth-disabled sessions do not receive a blocking onboarding modal.
-	let settingsAutoOpened = $state(false);
+	// Opens the onboarding wizard on the first authenticated load right after
+	// a successful registration. Gated on a persisted flag set during the
+	// registration flow so cold loads for existing users or auth-disabled
+	// sessions do not receive a blocking onboarding modal.
+	let onboardingAutoOpened = $state(false);
 	$effect(() => {
-		if (auth.isLoading || !auth.isAuthenticated || settingsAutoOpened) return;
-		if (auth.authDisabled) {
-			settingsAutoOpened = true;
-			return;
-		}
-		settingsAutoOpened = true;
-		if (getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1') {
+		if (onboardingAutoOpened) return;
+		const decision = resolveFirstRegistrationOnboarding({
+			isLoading: auth.isLoading,
+			isAuthenticated: auth.isAuthenticated,
+			authDisabled: auth.authDisabled,
+			isRegistrationRoute: page.url.pathname === '/setup',
+			justRegistered: getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1',
+		});
+		if (decision === 'wait') return;
+		onboardingAutoOpened = true;
+		if (decision === 'open') {
 			removeLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered);
-			appShell.openSettings('providers');
+			appShell.openOnboardingWizard();
 		}
 	});
 </script>

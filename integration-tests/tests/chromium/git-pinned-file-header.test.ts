@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 const WORKBENCH_PANEL =
   '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
@@ -68,7 +69,10 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({ state: 'visible' });
+  await fixture.page
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
+    .waitFor({ state: 'visible' });
+  await collapseCanonicalFilesWindow(fixture.page);
 }
 
 async function switchToGitWorkbench(page: Page): Promise<void> {
@@ -319,7 +323,9 @@ describe('Chromium pinned Git file headers', () => {
 
       markPhase('checking the Compare header variant');
       await fixture.page.setViewportSize({ width: 1_440, height: 900 });
-      await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({ state: 'visible' });
+      await fixture.page
+        .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
+        .waitFor({ state: 'visible' });
       await openWorkspaceAddMenuItem(fixture.page, 'Open Git Compare');
       await fixture.page.locator(COMPARE_PANEL).waitFor();
       await waitForDiff(fixture.page, COMPARE_PANEL);

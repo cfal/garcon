@@ -517,7 +517,9 @@ describe('CodexExecution', () => {
     });
   });
 
-  it('allows GPT-6 Astra to restore its low provider-default effort', async () => {
+  it.each([
+    'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
+  ])('allows %s to restore its concrete provider-default effort', async (model) => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
@@ -527,7 +529,7 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const previous = {
-      model: 'gpt-6-astra',
+      model,
       permissionMode: 'default',
       thinkingMode: 'high',
       settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
@@ -540,13 +542,44 @@ describe('CodexExecution', () => {
     }, previous);
 
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
-      model: 'gpt-6-astra',
+      model,
       permissionMode: 'default',
       thinkingMode: 'none',
     });
   });
 
-  it('rejects carrying Astra low effort into a non-Astra provider-default transition', async () => {
+  it('switches an established GPT-6 Astra Default session to GPT-5.6 Sol Default', async () => {
+    const runtime = createRuntime();
+    runtime.hasSource.mockReturnValue(true);
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const previous = {
+      model: 'gpt-6-astra',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: null,
+    };
+
+    await execution.applySessionConfiguration('thread-1', {
+      ...previous,
+      model: 'gpt-5.6-sol',
+    }, previous);
+
+    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      model: 'gpt-5.6-sol',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+  });
+
+  it.each([
+    'gpt-5.4', 'gpt-5.6', 'gpt-5.6-sol-custom', 'gpt-5.60-sol',
+  ])('rejects carrying Astra low effort into an unknown %s default', async (model) => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
@@ -565,7 +598,7 @@ describe('CodexExecution', () => {
 
     await expect(execution.applySessionConfiguration('thread-1', {
       ...previous,
-      model: 'gpt-5.4',
+      model,
     }, previous)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });

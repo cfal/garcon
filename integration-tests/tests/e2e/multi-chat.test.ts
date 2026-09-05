@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatReadUpdatedV1Message } from '../../../common/ws-events.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 describe('Lightpanda multi-chat isolation', () => {
   test('keeps concurrent direct chats isolated while switching in the sidebar', async () => {
     await withE2eFixture('multi-chat', async (fixture) => {
+      // Sidebar previews are asserted, so pin the detailed chat-item layout.
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, {
+        sidebarChatItemLayout: 'default',
+      });
       const app = new SpaDriver(fixture.page, fixture.integration);
       const first = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-multi-a' });
       const second = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-multi-b' });

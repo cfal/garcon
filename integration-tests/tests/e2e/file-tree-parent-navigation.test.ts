@@ -20,7 +20,6 @@ describe('Lightpanda file tree parent navigation', () => {
       await app.startOpenAiDirectChat('file-tree-parent-navigation-seed', {
         projectPath: secondLevelPath,
       });
-      await app.openNewWorkspaceWindow('Open Files');
       await waitForDirectory(fixture.page, secondLevelPath);
 
       await activateParent(fixture.page, 'pointer');
@@ -94,8 +93,6 @@ describe('Lightpanda file tree parent navigation', () => {
         projectPath: rootPath,
       });
       const chatWindowId = await app.currentWorkspaceWindowId();
-      await app.openNewWorkspaceWindow('Open Files');
-      await app.waitForWorkspaceWindowCount(2);
       await expectFileListing(fixture.page, rootPath, rootEntries);
 
       await enterDirectory(fixture.page, firstLevelPath);
