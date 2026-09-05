@@ -366,6 +366,56 @@ describe('TranscriptReloadService', () => {
     });
   });
 
+  it('preserves receipt evidence across repeated reloads of control-shaped boundary inputs', async () => {
+    const visiblePrompts = [
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      '<garcon-message from="1787974832309199">\nmessage body\n</garcon-message>',
+    ];
+    for (const visiblePrompt of visiblePrompts) {
+      await withReload(async ({ ledger, reload, integration }) => {
+        const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
+        const application = ledger.appendInputAndCompose({
+          chatId: 'chat-1',
+          viewId: ledger.currentView('chat-1').viewId,
+          message: new UserMessage(TS, visiblePrompt),
+          attachments: [],
+          clientMessageId: 'control-shaped-boundary-input',
+          steer: false,
+          preambleBoundary: boundary,
+          preambles: [{
+            id: 'preamble-1',
+            enabled: true,
+            title: 'Repository rules',
+            content: 'private preamble body',
+            scope: { type: 'global' },
+            createdAt: TS,
+            updatedAt: TS,
+          }],
+        });
+        integration.nativeHistoryImport.load = async function* load() {
+          yield [{ message: new UserMessage(TS, `${application.providerPrefix}${visiblePrompt}`) }];
+        };
+
+        await reload.reload('chat-1');
+        await reload.reload('chat-1');
+
+        const rows = ledger.currentRows('chat-1');
+        expect(rows.slice(-2)).toMatchObject([
+          { kind: 'notice', detail: { type: 'preamble-application' } },
+          {
+            kind: 'user-input',
+            detail: {
+              message: { content: visiblePrompt },
+              preambleBoundary: boundary,
+              preamblePrefixReceipt: application.input.detail.preamblePrefixReceipt,
+            },
+          },
+        ]);
+        expect(JSON.stringify(rows)).not.toContain('private preamble body');
+      });
+    }
+  });
+
   it('allows a committed preamble application absent from native history after a pre-dispatch crash', async () => {
     await withReload(async ({ ledger, reload, oldViewId }) => {
       ledger.appendInputAndCompose({
