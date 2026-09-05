@@ -31,6 +31,7 @@ describe('Lightpanda Git Changes comments', () => {
       await writeFile(join(project, 'change.txt'), 'after\n', 'utf8');
 
       const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_600, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-changes-comment-seed');

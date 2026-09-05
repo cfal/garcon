@@ -48,7 +48,7 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       await createRepo(repoB, 'beta');
 
       const app = new SpaDriver(fixture.page, fixture.integration);
-      await app.setViewport(1_440, 900);
+      await app.setViewport(1_600, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('multi-repo-chat-a', {
