@@ -4,7 +4,7 @@ import {
 	type WorkspaceWindowDropZone,
 } from './window-drop-geometry.js';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	type WorkspaceLayoutSnapshot,
 	type WorkspaceLayoutReader,
 	type WorkspaceWindowId,
@@ -212,7 +212,8 @@ export class WorkspaceWindowDndController {
 		if (!payload) return undefined;
 		if (payload.kind === 'chat') {
 			if (zone === 'center') return undefined;
-			return collectWindowNodes(this.layout.snapshot.desktopRoot).length >= MAX_WORKSPACE_WINDOWS
+			return collectWindowNodes(this.layout.snapshot.desktopRoot).length >=
+				WORKSPACE_WINDOW_RESOURCE_CEILING
 				? 'max-windows'
 				: undefined;
 		}
@@ -226,7 +227,7 @@ export class WorkspaceWindowDndController {
 				this.layout.snapshot.desktopRoot,
 				payload.sourceWindowId,
 				windowId,
-			) > MAX_WORKSPACE_WINDOWS
+			) > WORKSPACE_WINDOW_RESOURCE_CEILING
 		) {
 			return 'max-windows';
 		}

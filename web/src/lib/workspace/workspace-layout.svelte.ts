@@ -1,6 +1,6 @@
 import {
 	MAX_MOBILE_RETURN_TARGETS,
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	isPortableSingleton,
 	terminalSurfaceId,
@@ -204,7 +204,7 @@ function registerSurfaceInNewWindow(
 	if (!windowNodeById(snapshot.desktopRoot, mutation.targetWindowId)) {
 		throw new Error(`Workspace window does not exist: ${mutation.targetWindowId}`);
 	}
-	if (windowCount(snapshot.desktopRoot) >= MAX_WORKSPACE_WINDOWS) {
+	if (windowCount(snapshot.desktopRoot) >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
 		throw new Error('Workspace window count limit reached');
 	}
 	if (windowNodeById(snapshot.desktopRoot, mutation.newWindowId)) {
@@ -267,7 +267,7 @@ function openChatInNewWindow(
 	if (!windowNodeById(snapshot.desktopRoot, mutation.targetWindowId)) {
 		throw new Error(`Workspace window does not exist: ${mutation.targetWindowId}`);
 	}
-	if (windowCount(snapshot.desktopRoot) >= MAX_WORKSPACE_WINDOWS) {
+	if (windowCount(snapshot.desktopRoot) >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
 		throw new Error('Workspace window count limit reached');
 	}
 	if (windowNodeById(snapshot.desktopRoot, mutation.newWindowId)) {
@@ -537,7 +537,7 @@ function moveTabToNewWindow(
 			snapshot.desktopRoot,
 			sourceWindowId,
 			mutation.targetWindowId,
-		) > MAX_WORKSPACE_WINDOWS
+		) > WORKSPACE_WINDOW_RESOURCE_CEILING
 	) {
 		throw new Error('Workspace window count limit reached');
 	}
@@ -802,8 +802,8 @@ export function reduceWorkspaceLayout(
 export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapshot): void {
 	const windows = collectWindowNodes(snapshot.desktopRoot);
 	if (windows.length === 0) throw new Error('Workspace must contain a window');
-	if (windows.length > MAX_WORKSPACE_WINDOWS) {
-		throw new Error(`Workspace window count exceeds ${MAX_WORKSPACE_WINDOWS}`);
+	if (windows.length > WORKSPACE_WINDOW_RESOURCE_CEILING) {
+		throw new Error(`Workspace window count exceeds ${WORKSPACE_WINDOW_RESOURCE_CEILING}`);
 	}
 	const windowIds = new Set<WorkspaceWindowId>();
 	for (const workspaceWindow of windows) {

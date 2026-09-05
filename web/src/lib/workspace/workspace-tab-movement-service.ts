@@ -1,6 +1,6 @@
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	type WorkspaceLayoutReader,
 	type WorkspacePartitionId,
@@ -59,11 +59,13 @@ export class WorkspaceTabMovementService {
 		index?: number,
 	): Promise<void> {
 		if (this.deps.isMobile()) return;
-		const initialSourceWindowId = windowIdOfSurface(this.deps.layout.snapshot.desktopRoot, surfaceId);
+		const initialSourceWindowId = windowIdOfSurface(
+			this.deps.layout.snapshot.desktopRoot,
+			surfaceId,
+		);
 		if (
 			this.deps.surfaceReservations.has(surfaceId) ||
-			(initialSourceWindowId !== null &&
-				this.deps.windowReservations.has(initialSourceWindowId)) ||
+			(initialSourceWindowId !== null && this.deps.windowReservations.has(initialSourceWindowId)) ||
 			this.deps.windowReservations.has(destinationWindowId)
 		) {
 			return;
@@ -123,11 +125,13 @@ export class WorkspaceTabMovementService {
 		edge: WorkspaceWindowEdge,
 	): Promise<void> {
 		if (this.deps.isMobile()) return;
-		const initialSourceWindowId = windowIdOfSurface(this.deps.layout.snapshot.desktopRoot, surfaceId);
+		const initialSourceWindowId = windowIdOfSurface(
+			this.deps.layout.snapshot.desktopRoot,
+			surfaceId,
+		);
 		if (
 			this.deps.surfaceReservations.has(surfaceId) ||
-			(initialSourceWindowId !== null &&
-				this.deps.windowReservations.has(initialSourceWindowId)) ||
+			(initialSourceWindowId !== null && this.deps.windowReservations.has(initialSourceWindowId)) ||
 			this.deps.windowReservations.has(targetWindowId)
 		) {
 			return;
@@ -164,7 +168,7 @@ export class WorkspaceTabMovementService {
 				}
 				if (
 					projectedWindowCountAfterTabMove(latest.desktopRoot, sourceWindowId, targetWindowId) >
-					MAX_WORKSPACE_WINDOWS
+					WORKSPACE_WINDOW_RESOURCE_CEILING
 				) {
 					throw this.deps.createWindowLimitError();
 				}

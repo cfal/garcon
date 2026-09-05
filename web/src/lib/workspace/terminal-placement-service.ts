@@ -4,7 +4,7 @@ import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-nam
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	TERMINAL_LAUNCHER_ID,
 	terminalSurfaceId,
 	type WorkspaceWindowId,
@@ -187,8 +187,10 @@ export class TerminalPlacementService {
 						);
 						return mutations;
 					}
-					if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
-						throw new Error(m.workspace_window_limit_reached({ count: MAX_WORKSPACE_WINDOWS }));
+					if (collectWindowNodes(latest.desktopRoot).length >= WORKSPACE_WINDOW_RESOURCE_CEILING) {
+						throw new Error(
+							m.workspace_window_limit_reached({ count: WORKSPACE_WINDOW_RESOURCE_CEILING }),
+						);
 					}
 					mutations.push({
 						type: 'register-surface-in-new-window',

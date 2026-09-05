@@ -1953,6 +1953,8 @@
 	"workspace_move_tab_to_new_window_above": "Move to new window above",
 	"workspace_move_tab_to_new_window_below": "Move to new window below",
 	"workspace_window_limit_reached": "Window limit reached (maximum {count})",
+	"workspace_split_too_small": "Not enough space to split this window.",
+	"workspace_split_exit_fullscreen": "Exit fullscreen to open a new window.",
 	"workspace_open_failed": "Failed to open view",
 	"workspace_drop_zone_add_tab": "Add as tab",
 	"workspace_drop_zone_replace_chat": "Replace existing chat",

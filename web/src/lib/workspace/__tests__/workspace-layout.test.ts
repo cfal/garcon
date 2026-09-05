@@ -6,7 +6,7 @@ import {
 	canonicalWorkspaceSnapshot,
 } from '../canonical-layout';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	TERMINAL_LAUNCHER_ID,
 	chatViewSurfaceId,
 	fileSurfaceId,
@@ -495,7 +495,7 @@ describe('workspace layout reducer', () => {
 
 	it('enforces the four-window cap while allowing a net-zero edge move', () => {
 		let root: DesktopWorkspaceNode = workspaceWindow('window-1', [chatViewSurfaceId('window-1')]);
-		for (let index = 2; index <= MAX_WORKSPACE_WINDOWS; index += 1) {
+		for (let index = 2; index <= WORKSPACE_WINDOW_RESOURCE_CEILING; index += 1) {
 			root = partition(
 				`partition-${index}`,
 				root,
@@ -513,7 +513,7 @@ describe('workspace layout reducer', () => {
 				partitionId: 'partition-replaced',
 			},
 		]);
-		expect(collectWindowNodes(netZero.desktopRoot)).toHaveLength(MAX_WORKSPACE_WINDOWS);
+		expect(collectWindowNodes(netZero.desktopRoot)).toHaveLength(WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 		const withExtraTab = reduceWorkspaceLayout(full, [
 			{
