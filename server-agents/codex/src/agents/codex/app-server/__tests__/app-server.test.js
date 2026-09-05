@@ -7868,6 +7868,69 @@ describe('CodexAppServerRuntime', () => {
     expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
   });
 
+  it('replaces a retained source after explicit goal-control effort before Default', async () => {
+    let firstClient;
+    firstClient = new FakeClient({
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => firstClient.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async () => { throw new Error('no active turn to steer'); },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'priority-turn', status: 'inProgress' }),
+      }),
+    });
+    const replacementClient = new FakeClient({
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'default-turn', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      thinkingMode: 'none',
+      codexGoalCommand: { kind: 'set', objective: 'Continue automatically' },
+    }));
+
+    await expect(provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      command: 'Prioritize this input',
+      thinkingMode: 'high',
+    }))).resolves.toBe(true);
+    expect(firstClient.startTurn).toHaveBeenCalledWith(expect.objectContaining({ effort: 'high' }));
+
+    firstClient.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'priority-turn',
+        goal: makeGoal('thread-1', 'Continue automatically', 'complete'),
+      },
+    });
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'priority-turn' }) },
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      thinkingMode: 'none',
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
   it('waits for interrupt acknowledgement before reusing the writer without awaiting its terminal event', async () => {
     const nativePath = path.join(tmpDir, 'interrupted-writer.jsonl');
     let turnNumber = 0;
@@ -8023,6 +8086,92 @@ describe('CodexAppServerRuntime', () => {
 
     expect(createClient).toHaveBeenCalledTimes(2);
     expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('does not wait on a source superseded during interrupt acknowledgement', async () => {
+    const firstPath = path.join(tmpDir, 'superseded-during-interrupt-first.jsonl');
+    const supersedingPath = path.join(tmpDir, 'superseded-during-interrupt-second.jsonl');
+    const interruptAcknowledgement = createDeferred();
+    let firstClient;
+    firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: firstPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(firstPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+      interruptTurn: async () => {
+        await interruptAcknowledgement.promise;
+        return {};
+      },
+      updateThreadSettings: async (params) => {
+        queueMicrotask(() => emitThreadSettings(firstClient, { effort: params.effort }));
+        return {};
+      },
+    });
+    const supersedingClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-2', path: supersedingPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(supersedingPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-2', status: 'inProgress' }) };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: firstPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-3', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, supersedingClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+
+    const aborting = provider.abort(started.agentSessionId);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath: firstPath,
+      thinkingMode: 'none',
+    }));
+    await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    await provider.startSession(makeRequest({
+      chatId: 'chat-1',
+      command: 'Supersede the interrupted source',
+      thinkingMode: 'none',
+    }));
+
+    interruptAcknowledgement.resolve();
+    await expect(aborting).resolves.toBe(true);
+    await resumed;
+
+    expect(createClient).toHaveBeenCalledTimes(3);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(supersedingClient.shutdown).toHaveBeenCalledTimes(1);
     expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
     expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
     expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');

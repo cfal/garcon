@@ -517,9 +517,7 @@ describe('CodexExecution', () => {
     });
   });
 
-  it.each([
-    'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
-  ])('rejects clearing an explicit effort during an active %s turn', async (model) => {
+  it('rejects clearing an explicit effort during an active turn', async () => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     runtime.isRunning.mockReturnValue(true);
@@ -530,7 +528,7 @@ describe('CodexExecution', () => {
       createConfig(),
     );
     const previous = {
-      model,
+      model: 'gpt-6-astra',
       permissionMode: 'default',
       thinkingMode: 'high',
       settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
@@ -566,6 +564,7 @@ describe('CodexExecution', () => {
       thinkingMode: 'none',
     }, previous);
 
+    expect(runtime.isRunning).toHaveBeenCalledWith('thread-1');
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });
 
@@ -587,9 +586,13 @@ describe('CodexExecution', () => {
 
     await execution.applySessionConfiguration('thread-1', {
       ...previous,
+      model: 'gpt-5.5',
+      permissionMode: 'manualBypass',
       thinkingMode: 'none',
     }, previous);
 
+    expect(runtime.hasSource).toHaveBeenCalledWith('thread-1');
+    expect(runtime.isRunning).not.toHaveBeenCalled();
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });
 

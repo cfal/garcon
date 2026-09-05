@@ -903,7 +903,7 @@ export class CodexAppServerRuntime {
   ): Promise<{ session: RunningCodexSession; buffered: boolean }> {
     const runtimeIdentity = codexSourceRuntimeIdentity(request);
     const retained = this.#latestSourceByChat.get(request.chatId);
-    // Omitted effort is reusable only when every prior turn also left the effort provider-owned.
+    // Omitted effort is reusable only when no prior turn, settings update, or goal delivery took ownership.
     const reasoningEffortIsReusable = () => !providerOwnsReasoningEffort(request)
       || retained?.providerOwnsReasoningEffort === true;
     const matchingPath = !retained?.nativePath
