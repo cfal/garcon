@@ -640,22 +640,30 @@ async function verifyCanonicalSeparatorClearance(
     .first()
     .locator('[data-workspace-window-resize-hit-area]');
   const chatContent = page.locator(`[data-workspace-window-content="${chatWindowId}"]`);
+  const composerBody = page.locator('[data-workspace-live-chat-body]');
   const disclosure = page
     .locator(`[data-workspace-window-id="${filesWindowId}"] button.file-tree-disclosure-slot`)
     .first();
   await disclosure.waitFor({ state: 'visible' });
-  const [hitAreaBox, chatContentBox, disclosureBox] = await Promise.all([
+  const [hitAreaBox, chatContentBox, composerBodyBox, disclosureBox] = await Promise.all([
     resizeHitArea.boundingBox(),
     chatContent.boundingBox(),
+    composerBody.boundingBox(),
     disclosure.boundingBox(),
   ]);
-  if (!hitAreaBox || !chatContentBox || !disclosureBox) {
+  if (!hitAreaBox || !chatContentBox || !composerBodyBox || !disclosureBox) {
     throw new Error('Missing canonical separator clearance geometry.');
   }
 
   expect(hitAreaBox.width).toBeGreaterThanOrEqual(12);
   expect(hitAreaBox.x).toBeGreaterThanOrEqual(chatContentBox.x + chatContentBox.width);
   expect(hitAreaBox.x + hitAreaBox.width).toBeLessThan(disclosureBox.x);
+  expect(Math.abs(composerBodyBox.x - chatContentBox.x)).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(
+      composerBodyBox.x + composerBodyBox.width - (chatContentBox.x + chatContentBox.width),
+    ),
+  ).toBeLessThanOrEqual(1);
 }
 
 function chatDropLabel(target: ChatDropTarget): string {

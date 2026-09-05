@@ -188,6 +188,16 @@
 	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
 	const currentWindowId = $derived(workspace.currentWindowId);
 	const presentedCurrentWindowId = $derived(fullscreenWindowId ?? currentWindowId);
+	const WINDOW_EDGE_EPSILON = 1e-6;
+
+	function hasLeftSeparator(rect: WorkspaceWindowRect): boolean {
+		return rect.left > WINDOW_EDGE_EPSILON;
+	}
+
+	function hasRightSeparator(rect: WorkspaceWindowRect): boolean {
+		return rect.left + rect.width < 1 - WINDOW_EDGE_EPSILON;
+	}
+
 	const composerPlacement = $derived.by(
 		(): {
 			surface: ChatViewSurfaceDescriptor;
@@ -225,6 +235,12 @@
 	);
 	const liveLayerRectStyle = $derived(
 		composerPlacement?.rect ? rectStyle(composerPlacement.rect) : 'inset: 0;',
+	);
+	const composerHasLeftSeparator = $derived(
+		Boolean(composerPlacement?.rect && hasLeftSeparator(composerPlacement.rect)),
+	);
+	const composerHasRightSeparator = $derived(
+		Boolean(composerPlacement?.rect && hasRightSeparator(composerPlacement.rect)),
 	);
 	const fallbackChatSurfaceId = $derived(
 		Object.values(snapshot.surfaces).find(
@@ -438,8 +454,8 @@
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
 				isVisible={!isMobile && (!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id)}
-				hasLeftSeparator={renderedRect.left > 0}
-				hasRightSeparator={renderedRect.left + renderedRect.width < 1}
+				hasLeftSeparator={hasLeftSeparator(renderedRect)}
+				hasRightSeparator={hasRightSeparator(renderedRect)}
 				presentations={renderedPresentations}
 				style={rectStyle(renderedRect)}
 				labelFor={label}
@@ -507,6 +523,8 @@
 			class={cn(
 				'pointer-events-none absolute overflow-visible',
 				composerPlacement && !isMobile ? 'inset-x-0 bottom-0 top-10' : 'inset-0',
+				composerHasLeftSeparator && 'ml-1.5',
+				composerHasRightSeparator && 'mr-1.5',
 			)}
 			data-workspace-live-chat-body
 			data-workspace-surface-id={composerPlacement?.surface.id}

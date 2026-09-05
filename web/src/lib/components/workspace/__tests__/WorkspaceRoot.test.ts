@@ -477,6 +477,42 @@ describe('WorkspaceRoot', () => {
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
 	});
 
+	it('reserves content gutters only beside vertical separators', () => {
+		const { layout } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('git'),
+					targetWindowId: 'window-files',
+					edge: 'right',
+					newWindowId: 'window-edge',
+					partitionId: 'partition-edge',
+				},
+				{ type: 'set-partition-ratio', partitionId: 'partition-main', ratio: 0.3 },
+				{ type: 'set-partition-ratio', partitionId: 'partition-edge', ratio: 0.5 },
+			]),
+		);
+		const { container } = renderRoot();
+		const contentFor = (windowId: string) =>
+			container.querySelector<HTMLElement>(`[data-workspace-window-content="${windowId}"]`)!;
+
+		const chatContent = contentFor('window-main');
+		const filesContent = contentFor('window-files');
+		const edgeContent = contentFor('window-edge');
+		const composerBody = container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')!;
+
+		expect(chatContent.classList.contains('ml-1.5')).toBe(false);
+		expect(chatContent.classList.contains('mr-1.5')).toBe(true);
+		expect(composerBody.classList.contains('ml-1.5')).toBe(false);
+		expect(composerBody.classList.contains('mr-1.5')).toBe(true);
+		expect(filesContent.classList.contains('ml-1.5')).toBe(true);
+		expect(filesContent.classList.contains('mr-1.5')).toBe(true);
+		expect(edgeContent.classList.contains('ml-1.5')).toBe(true);
+		expect(edgeContent.classList.contains('mr-1.5')).toBe(false);
+	});
+
 	it('renders a draft conversation panel without requesting a server transcript', async () => {
 		installContext();
 		const sessions = testContext.current?.sessions as {
