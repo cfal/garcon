@@ -1,5 +1,7 @@
 import type { Page } from 'puppeteer-core';
 
+const MIN_USABLE_WORKSPACE_HOST_SIZE_PX = 100;
+
 export async function installLightpandaWorkspaceGeometry(page: Page): Promise<void> {
   await page.evaluateOnNewDocument(() => {
     const nativeGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
@@ -9,7 +11,8 @@ export async function installLightpandaWorkspaceGeometry(page: Page): Promise<vo
       // Replaces Lightpanda's known square placeholders for an uncomputed flex remainder.
       const isPlaceholder =
         (nativeRect.width === 5 && nativeRect.height === 5) ||
-        (nativeRect.width === 10 && nativeRect.height === 10);
+        (nativeRect.width === 10 && nativeRect.height === 10) ||
+        (nativeRect.width === 15 && nativeRect.height === 15);
       if (!isPlaceholder) return nativeRect;
 
       const mobile = matchMedia('(max-width: 768px)').matches;
@@ -32,4 +35,23 @@ export async function installLightpandaWorkspaceGeometry(page: Page): Promise<vo
       } as DOMRect;
     };
   });
+}
+
+export async function assertLightpandaWorkspaceGeometry(page: Page): Promise<void> {
+  const hostSize = await page.evaluate(() => {
+    const host = document.querySelector<HTMLElement>('[role="region"][aria-label="Workspace"]');
+    if (!host) return null;
+    const { width, height } = host.getBoundingClientRect();
+    return { width, height };
+  });
+
+  if (!hostSize) return;
+  if (
+    hostSize.width <= MIN_USABLE_WORKSPACE_HOST_SIZE_PX ||
+    hostSize.height <= MIN_USABLE_WORKSPACE_HOST_SIZE_PX
+  ) {
+    throw new Error(
+      `Lightpanda workspace geometry shim returned unusable host bounds: ${hostSize.width}x${hostSize.height}.`,
+    );
+  }
 }
