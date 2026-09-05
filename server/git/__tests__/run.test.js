@@ -169,13 +169,14 @@ stream.write(output);
   });
 
   it('rethrows synchronous spawn failures that are not aborts', async () => {
+    const spawnError = new Error('spawn failed');
     spawnMock.mockImplementation(() => {
-      throw new Error('spawn failed');
+      throw spawnError;
     });
 
     await expect(
       runGit('/repo', ['status']),
-    ).rejects.toThrow('spawn failed');
+    ).rejects.toBe(spawnError);
   });
 
   it('spends one timeout budget across lock retries', async () => {
@@ -192,8 +193,14 @@ stream.write(output);
 
     await expect(
       runGit('/repo', ['reset', 'HEAD', '--', 'a.txt'], { timeoutMs: 150 }),
-    ).rejects.toMatchObject({ timedOut: true });
-    expect(attempts).toBe(2);
+    ).rejects.toMatchObject({
+      timedOut: true,
+      stderr: expect.stringContaining('index.lock'),
+    });
+    // A stalled first sleep can expire the budget before the second spawn,
+    // so pin the range: never a third spawn, never an unbounded retry loop.
+    expect(attempts).toBeGreaterThanOrEqual(1);
+    expect(attempts).toBeLessThanOrEqual(2);
   });
 
   it('reports an already-aborted caller signal as aborted', async () => {

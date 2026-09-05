@@ -129,10 +129,15 @@ async function runGitProcess(
   stdin: GitStdin,
 ): Promise<GitCommandResult> {
   const deadlineAt = performance.now() + (options.timeoutMs ?? GIT_DEFAULT_TIMEOUT_MS);
+  // Kept from the last lock failure so budget expiry mid-retry still reports
+  // its output; classifyGitError is message-based and would otherwise map
+  // lock contention to UNKNOWN instead of GIT_LOCKED.
+  let lastFailure: { exitCode: number | null; stdout: string; stderr: string } | null = null;
   for (let attempt = 0; ; attempt++) {
     const remainingMs = deadlineAt - performance.now();
     if (remainingMs <= 0) {
-      throw makeGitProcessError(args, null, '', '', { timedOut: true });
+      const prior = lastFailure ?? { exitCode: null, stdout: '', stderr: '' };
+      throw makeGitProcessError(args, prior.exitCode, prior.stdout, prior.stderr, { timedOut: true });
     }
     const abortState = createGitAbortState(options, remainingMs);
     let proc: Bun.Subprocess<GitStdin, 'pipe', 'pipe'>;
@@ -189,6 +194,7 @@ async function runGitProcess(
     if (exitCode === 0) return { stdout, stderr };
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
+      lastFailure = { exitCode, stdout, stderr };
       await sleep(GIT_LOCK_RETRY_DELAY_MS);
       // aborted() reads the live caller signal, so an abort during the retry
       // delay is reported here instead of spawning another attempt.
