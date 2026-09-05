@@ -38,20 +38,26 @@ describe('WorkspaceWindowResizer', () => {
 	});
 
 	it.each([
-		['horizontal', 'w-px', 'inset-y-0', 'top-10'],
-		['vertical', 'h-px', 'inset-x-0', 'bottom-0'],
-	] as const)('renders a one-pixel %s window separator', (direction, thickness, span, hitArea) => {
-		const { container } = renderResizer(direction);
-		const line = container.querySelector('[data-workspace-window-separator-line]')!;
-		const target = container.querySelector('[data-workspace-window-resize-hit-area]')!;
+		['horizontal', 'w-px', 'inset-y-0', '40px', 'w-6'],
+		['vertical', 'h-px', 'inset-x-0', '', 'h-6'],
+	] as const)(
+		'renders a one-pixel %s window separator',
+		(direction, thickness, span, top, hitAreaSize) => {
+			const { container } = renderResizer(direction);
+			const line = container.querySelector('[data-workspace-window-separator-line]')!;
+			const target = container.querySelector<HTMLElement>(
+				'[data-workspace-window-resize-hit-area]',
+			)!;
 
-		expect(line.classList.contains('bg-border')).toBe(true);
-		expect(line.classList.contains(thickness)).toBe(true);
-		expect(line.classList.contains(span)).toBe(true);
-		expect(target.classList.contains('pointer-events-auto')).toBe(true);
-		expect(target.classList.contains(hitArea)).toBe(true);
-		expect(target.classList.contains(direction === 'horizontal' ? 'w-6' : 'h-6')).toBe(true);
-	});
+			expect(line.classList.contains('bg-border')).toBe(true);
+			expect(line.classList.contains(thickness)).toBe(true);
+			expect(line.classList.contains(span)).toBe(true);
+			expect(target.classList.contains('pointer-events-auto')).toBe(true);
+			expect(target.style.top).toBe(top);
+			expect(target.classList.contains('bottom-0')).toBe(true);
+			expect(target.classList.contains(hitAreaSize)).toBe(true);
+		},
+	);
 
 	it('reverts a pointer preview on cancellation without committing it', async () => {
 		const { separator, onPreview, onCommit } = renderResizer();

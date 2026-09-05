@@ -1705,17 +1705,25 @@ describe('WorkspaceCoordinator', () => {
 	it('cycles focus across windows with the window focus shortcut', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
-		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
+		const destinationWindowId = coordinator.windowOf('singleton:git-history');
+		if (!destinationWindowId) throw new Error('Expected Git History window');
+		const filesWindowId = coordinator.windowOf(CANONICAL_FILES_SURFACE_ID);
+		if (!filesWindowId) throw new Error('Expected Files window');
+		const activateWindow = vi.spyOn(coordinator, 'activateWindow');
 		coordinator.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID };
+		const revision = layout.revision;
 
 		coordinator.cycleWindowFocus();
-		expect(focusSurface).toHaveBeenLastCalledWith('singleton:git-history');
+		expect(activateWindow).toHaveBeenLastCalledWith(destinationWindowId);
+		expect(layout.revision).toBe(revision);
 
 		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: 'singleton:git-history' });
-		expect(focusSurface).toHaveBeenLastCalledWith('singleton:files');
+		expect(activateWindow).toHaveBeenLastCalledWith(filesWindowId);
+		expect(layout.revision).toBe(revision);
 
-		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: 'singleton:files' });
-		expect(focusSurface).toHaveBeenLastCalledWith(CANONICAL_CHAT_SURFACE_ID);
+		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: CANONICAL_FILES_SURFACE_ID });
+		expect(activateWindow).toHaveBeenLastCalledWith('window-main');
+		expect(layout.revision).toBe(revision);
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
 	});
 
@@ -1723,12 +1731,41 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.enterWindowFullscreen('window-main');
-		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
+		const activateWindow = vi.spyOn(coordinator, 'activateWindow');
 
 		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID });
 
-		expect(focusSurface).not.toHaveBeenCalled();
+		expect(activateWindow).not.toHaveBeenCalled();
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+	});
+
+	it('skips windows whose active surface is reserved while cycling', async () => {
+		const confirmation = deferred<boolean>();
+		const { coordinator } = createHarness({
+			confirmDestructive: () => confirmation.promise,
+			fileEditor: { prepareRendererTransfer: vi.fn() },
+		});
+		await coordinator.placeFileSession('reserved-file', {
+			type: 'new-window',
+			anchorWindowId: 'window-main',
+		});
+		const fileId = fileSurfaceId('reserved-file');
+		const fileWindowId = coordinator.windowOf(fileId);
+		if (!fileWindowId) throw new Error('Expected File window');
+		await coordinator.openSingletonInNewWindow('git-history', fileWindowId);
+		const availableWindowId = coordinator.windowOf('singleton:git-history');
+		if (!availableWindowId) throw new Error('Expected Git History window');
+
+		const close = coordinator.closeSurface(fileId);
+		await vi.waitFor(() => expect(coordinator.isSurfaceCloseBlocked(fileId)).toBe(true));
+		const activateWindow = vi.spyOn(coordinator, 'activateWindow');
+
+		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID });
+
+		expect(activateWindow).toHaveBeenCalledOnce();
+		expect(activateWindow).toHaveBeenCalledWith(availableWindowId);
+		confirmation.resolve(false);
+		await expect(close).resolves.toBe(false);
 	});
 
 	it('does not navigate window tabs from the chat list or mobile presentation', async () => {

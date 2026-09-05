@@ -7,6 +7,7 @@
 		type WorkspacePartitionDirection,
 	} from '$lib/workspace/surface-types.js';
 	import { clampPartitionRatio } from '$lib/workspace/window-tree.js';
+	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	// Pixel step applied per arrow-key press when resizing via keyboard.
@@ -157,8 +158,9 @@
 		data-workspace-window-resize-hit-area
 		class={cn(
 			'pointer-events-auto absolute z-10',
-			isHorizontal ? '-left-2.5 bottom-0 top-10 w-6' : 'inset-x-0 bottom-0 h-6',
+			isHorizontal ? '-left-2.5 bottom-0 w-6' : 'inset-x-0 bottom-0 h-6',
 		)}
+		style:top={isHorizontal ? `${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px` : undefined}
 	></div>
 	<!-- Track background -->
 	<div
