@@ -1814,6 +1814,61 @@ describe("discard", () => {
     }
   });
 
+  it("restores a staged addition consumed by a worktree rename", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      await fs.writeFile(path.join(projectPath, "b.txt"), "staged content\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "b.txt"]);
+      await fs.rename(path.join(projectPath, "b.txt"), path.join(projectPath, "c.txt"));
+      await runGitCommand(projectPath, ["add", "-N", "c.txt"]);
+      // The staged-only entry for the source shadows the worktree rename that
+      // consumed it; the request names the rename's source side.
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  b.txt\n R b.txt -> c.txt");
+
+      await git.discard({ projectPath, file: "b.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  b.txt\n?? c.txt");
+      expect(await fs.readFile(path.join(projectPath, "b.txt"), "utf-8"))
+        .toBe("staged content\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("restores a staged modification consumed by a worktree rename", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      await fs.writeFile(path.join(projectPath, "s.txt"), "base\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "s.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add s"]);
+      await fs.writeFile(path.join(projectPath, "s.txt"), "staged edit\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "s.txt"]);
+      await fs.rename(path.join(projectPath, "s.txt"), path.join(projectPath, "t.txt"));
+      await runGitCommand(projectPath, ["add", "-N", "t.txt"]);
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("M  s.txt\n R s.txt -> t.txt");
+
+      await git.discard({ projectPath, file: "s.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("M  s.txt\n?? t.txt");
+      expect(await fs.readFile(path.join(projectPath, "s.txt"), "utf-8"))
+        .toBe("staged edit\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("leaves index-only deletions untouched instead of failing restore", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),

@@ -41,20 +41,28 @@ export async function discard({ projectPath, file }: FileOptions): Promise<unkno
   );
   // The global read keeps rename entries intact: a destination-only
   // pathspec cannot pair the rename and reports DA, hiding the source path
-  // that the worktree side of the change spans. An exact path match wins,
-  // because a copy source keeps an entry of its own; the rename-source
-  // fallback is rename-only, since a copy source is not an alias for its
-  // destination and discarding it must not touch the copy. Untracked
+  // that the worktree side of the change spans. An exact match with a
+  // worktree facet always wins, because a copy source keeps an entry of its
+  // own. But a staged-only exact entry can shadow the worktree rename that
+  // consumed the path - staging b, moving it to c, and add -N c reports
+  // 'A  b' plus ' R c -> b', and a request for b means the rename's source
+  // side, not the staged entry - so a staged-only match defers to the rename
+  // source. The fallback is rename-only, since a copy source is not an alias
+  // for its destination and discarding it must not touch the copy. Untracked
   // directories expand to their files under -uall, so a directory-shaped
   // request only matches when it names a nested repository.
   const entries = parsePorcelainV1Z(statusOutput);
-  const entry = entries.find(
+  const exactEntry = entries.find(
     (candidate) => candidate.path.replace(/\/+$/, '') === canonicalFile,
-  ) ?? entries.find(
+  );
+  const renameSourceEntry = entries.find(
     (candidate) =>
       candidate.originalPath === canonicalFile
       && candidate.workTreeStatus === 'R',
   );
+  const entry = exactEntry && exactEntry.workTreeStatus !== ' '
+    ? exactEntry
+    : renameSourceEntry ?? exactEntry;
   if (!entry) {
     throw new GitDomainError('INVALID_INPUT', 'No local working-tree changes were found for this file.');
   }
