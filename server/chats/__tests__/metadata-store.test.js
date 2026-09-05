@@ -302,7 +302,7 @@ describe('metadata-store', () => {
         getPreview: mock(() => new Promise(() => {})),
       };
       const index = new MetadataIndex(makeRegistry(sessions), stalledAgents, mockCarryOver, {
-        previewTimeoutMs: 200,
+        previewTimeoutMs: 500,
         repairDeadlineMs: 30,
       });
       const startedAt = Date.now();
@@ -311,8 +311,14 @@ describe('metadata-store', () => {
 
       // The deadline must beat the first per-preview timeout, proving init
       // returned via the deadline rather than by draining the stalled pool.
-      expect(Date.now() - startedAt).toBeLessThan(200);
+      expect(Date.now() - startedAt).toBeLessThan(500);
       expect(index.getChatMetadata('stall-0')).toBeNull();
+
+      // Past the deadline the pool must not dequeue the remaining entries:
+      // once the in-flight previews time out, the two queued chats stay
+      // unrepaired instead of starting a second wave of preview work.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(stalledAgents.getPreview).toHaveBeenCalledTimes(6);
     });
 
     it('keeps persisted metadata when agent preview repair would stall', async () => {
