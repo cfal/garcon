@@ -1,5 +1,11 @@
 import type { GitChangeKind, PorcelainStatusEntry } from './types.js';
 
+// The seven two-column codes git reports for index conflicts; shared by every
+// consumer that needs to recognize unmerged entries.
+export const UNMERGED_STATUSES: ReadonlySet<string> = new Set([
+  'UU', 'AA', 'DD', 'AU', 'UA', 'DU', 'UD',
+]);
+
 const CHANGE_KIND_BY_STATUS = Object.freeze({
   M: 'modified',
   A: 'added',

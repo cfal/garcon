@@ -198,7 +198,10 @@ async function runGitProcess(
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       lastFailure = { exitCode, stdout, stderr };
-      await sleep(GIT_LOCK_RETRY_DELAY_MS);
+      // The attempt's timer was already cleaned up, so the delay itself must
+      // respect the absolute budget; otherwise the total runtime overshoots
+      // timeoutMs by up to a full retry delay.
+      await sleep(Math.min(GIT_LOCK_RETRY_DELAY_MS, Math.max(0, deadlineAt - performance.now())));
       // aborted() reads the live caller signal, so an abort during the retry
       // delay is reported here instead of spawning another attempt.
       const timedOut = abortState.timedOut();
