@@ -376,7 +376,16 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	cycleWindowFocus(owner: FocusOwner = this.focusOwner): void {
-		this.#presentation.cycleWindowFocus(owner, (surfaceId) => void this.focusSurface(surfaceId));
+		this.#presentation.cycleWindowFocus(owner, (windowId) => {
+			if (this.#reservedWindowIds.has(windowId)) return false;
+			const activeSurfaceId = windowNodeById(
+				this.layout.snapshot.desktopRoot,
+				windowId,
+			)?.tabs.activeId;
+			if (!activeSurfaceId || this.#reservedSurfaceIds.has(activeSurfaceId)) return false;
+			this.activateWindow(windowId);
+			return true;
+		});
 	}
 
 	async showChatInCurrentWindow(chatId: string): Promise<ChatViewSurfaceId> {

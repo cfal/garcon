@@ -386,15 +386,16 @@ function installContext() {
 		terminalFontSize: '13',
 		set: vi.fn(),
 	};
+	const hostGeometry = {
+		size: null,
+		compactActive: false,
+		singleWindowProjectionActive: false,
+		compactSession: 0,
+		attach: () => undefined,
+	};
 	const windowDnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
 	testContext.current = {
-		hostGeometry: {
-			size: null,
-			compactActive: false,
-			singleWindowProjectionActive: false,
-			compactSession: 0,
-			attach: () => undefined,
-		},
+		hostGeometry,
 		appShell: { isMobile: false, openNewChatDialog: vi.fn() },
 		workspace,
 		windowDnd,
@@ -425,7 +426,7 @@ function installContext() {
 		ghCapability: { hasChecked: true, available: true },
 		notifications: { error: vi.fn() },
 	};
-	return { layout, runtime, workspace, windowDnd, terminals, localSettings };
+	return { layout, runtime, workspace, windowDnd, terminals, localSettings, hostGeometry };
 }
 
 const chatActions = {
@@ -438,8 +439,15 @@ const chatActions = {
 	reload: vi.fn(),
 };
 
-function renderRoot(isMobile = false) {
-	return render(WorkspaceRoot, { isMobile, chatActions });
+function renderRoot(
+	isMobile = false,
+	props: {
+		chatListConsumesWorkspaceWidth?: boolean;
+		canEnableChatListAutohide?: boolean;
+		onEnableChatListAutohide?: () => void;
+	} = {},
+) {
+	return render(WorkspaceRoot, { isMobile, chatActions, ...props });
 }
 
 function positionedDragEvent(type: string, clientX: number, clientY: number): DragEvent {
@@ -804,7 +812,9 @@ describe('WorkspaceRoot', () => {
 		);
 		const { container } = renderRoot();
 		const liveChat = screen.getByTestId('chat-surface-stub');
-		const liveChatBody = container.querySelector('[data-workspace-live-chat-body]')!;
+		const liveChatBody = container.querySelector<HTMLElement>(
+			'[data-workspace-live-chat-body]',
+		)!;
 		const panelA = screen
 			.getAllByTestId('conversation-panel')
 			.find((panel) => panel.dataset.chatId === 'chat-a')!;
@@ -815,7 +825,8 @@ describe('WorkspaceRoot', () => {
 		expect(panelA.dataset.ownsComposer).toBe('true');
 		expect(panelB.dataset.commandOwner).toBe('false');
 		expect(panelB.dataset.ownsComposer).toBe('false');
-		expect(liveChatBody.classList.contains('top-10')).toBe(true);
+		expect(liveChatBody.style.top).toBe('40px');
+		expect(liveChatBody.dataset.workspaceLiveChatBodyTopPx).toBe('40');
 		expect(liveChatBody.classList.contains('inset-0')).toBe(false);
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
 
@@ -830,7 +841,7 @@ describe('WorkspaceRoot', () => {
 		expect(panelA.dataset.ownsComposer).toBe('false');
 		expect(panelB.dataset.commandOwner).toBe('true');
 		expect(panelB.dataset.ownsComposer).toBe('true');
-		expect(liveChatBody.classList.contains('top-10')).toBe(true);
+		expect(liveChatBody.style.top).toBe('40px');
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(3);
 	});
 
@@ -1136,6 +1147,173 @@ describe('WorkspaceRoot', () => {
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('false');
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
 		expect(gitWindow.getAttribute('style')).not.toContain('width: 100%');
+	});
+
+	it('projects compact layouts without remounting keyed windows or portable renderers', async () => {
+		const { layout, hostGeometry, workspace } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('git'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		hostGeometry.compactActive = true;
+		hostGeometry.singleWindowProjectionActive = true;
+		hostGeometry.compactSession = 1;
+		const beforeRoot = layout.snapshot.desktopRoot;
+		const { container } = renderRoot();
+		const host = container.querySelector<HTMLElement>('.workspace-host-region')!;
+		const mainWindow = container.querySelector<HTMLElement>(
+			'[data-workspace-window-id="window-main"]',
+		)!;
+		const gitWindow = container.querySelector<HTMLElement>(
+			'[data-workspace-window-id="window-2"]',
+		)!;
+		const gitRenderer = gitWindow.querySelector<HTMLElement>(
+			'[data-testid="surface-renderer-stub"]',
+		)!;
+		const liveChatBody = container.querySelector<HTMLElement>(
+			'[data-workspace-live-chat-body]',
+		)!;
+
+		expect(host.dataset.workspaceCompact).toBe('true');
+		expect(host.dataset.workspaceSingleWindowProjection).toBe('true');
+		expect(mainWindow.classList.contains('hidden')).toBe(false);
+		expect(mainWindow.getAttribute('style')).toContain('width: 100%');
+		expect(gitWindow.classList.contains('hidden')).toBe(true);
+		expect(gitRenderer).toBeTruthy();
+		expect(container.querySelectorAll('[role="separator"]')).toHaveLength(0);
+		expect(
+			container.querySelector<HTMLElement>('[data-workspace-compact-switcher]')?.style.height,
+		).toBe('36px');
+		expect(liveChatBody.style.top).toBe('76px');
+		expect(liveChatBody.dataset.workspaceLiveChatBodyTopPx).toBe('76');
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.workspace_compact_next_window() }),
+		);
+		await waitFor(() => expect(workspace.activateWindow).toHaveBeenCalledWith('window-2'));
+		await waitFor(() => expect(gitWindow.classList.contains('hidden')).toBe(false));
+
+		expect(container.querySelector('[data-workspace-window-id="window-main"]')).toBe(mainWindow);
+		expect(container.querySelector('[data-workspace-window-id="window-2"]')).toBe(gitWindow);
+		expect(gitWindow.querySelector('[data-testid="surface-renderer-stub"]')).toBe(gitRenderer);
+		expect(gitWindow.getAttribute('style')).toContain('width: 100%');
+		expect(mainWindow.classList.contains('hidden')).toBe(true);
+		expect(layout.snapshot.desktopRoot).toStrictEqual(beforeRoot);
+	});
+
+	it('uses a silent single-window safety projection while tiled geometry is pending', () => {
+		const { layout, hostGeometry } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('git'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		hostGeometry.singleWindowProjectionActive = true;
+		const { container } = renderRoot();
+		const host = container.querySelector<HTMLElement>('.workspace-host-region')!;
+		const mainWindow = container.querySelector<HTMLElement>(
+			'[data-workspace-window-id="window-main"]',
+		)!;
+
+		expect(host.dataset.workspaceCompact).toBeUndefined();
+		expect(host.dataset.workspaceSingleWindowProjection).toBe('true');
+		expect(mainWindow.getAttribute('style')).toContain('width: 100%');
+		expect(
+			container.querySelector('[data-workspace-window-id="window-2"]')?.classList.contains('hidden'),
+		).toBe(true);
+		expect(container.querySelector('[data-workspace-compact-switcher]')).toBeNull();
+		expect(container.querySelectorAll('[role="separator"]')).toHaveLength(0);
+	});
+
+	it('scopes compact recovery-hint dismissal to the measured compact session', async () => {
+		const { layout, hostGeometry } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('git'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		hostGeometry.compactActive = true;
+		hostGeometry.singleWindowProjectionActive = true;
+		hostGeometry.compactSession = 1;
+		const onEnableChatListAutohide = vi.fn();
+		const view = renderRoot(false, {
+			chatListConsumesWorkspaceWidth: true,
+			canEnableChatListAutohide: true,
+			onEnableChatListAutohide,
+		});
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
+		);
+		expect(onEnableChatListAutohide).toHaveBeenCalledOnce();
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }),
+		);
+		expect(
+			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
+		).toBeNull();
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.workspace_compact_next_window() }),
+		);
+		expect(
+			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
+		).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_fullscreen() }));
+		await waitFor(() =>
+			expect(screen.queryByRole('navigation', { name: m.workspace_compact_window_list() })).toBeNull(),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_exit_fullscreen() }));
+		await waitFor(() =>
+			expect(screen.getByRole('navigation', { name: m.workspace_compact_window_list() })).toBeTruthy(),
+		);
+		expect(
+			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
+		).toBeNull();
+
+		hostGeometry.compactSession = 2;
+		await view.rerender({
+			isMobile: false,
+			chatActions,
+			chatListConsumesWorkspaceWidth: false,
+			canEnableChatListAutohide: true,
+			onEnableChatListAutohide,
+		});
+		await view.rerender({
+			isMobile: false,
+			chatActions,
+			chatListConsumesWorkspaceWidth: true,
+			canEnableChatListAutohide: true,
+			onEnableChatListAutohide,
+		});
+		expect(
+			screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }),
+		).toBeTruthy();
 	});
 
 	it('keeps surviving keyed window identity when another window closes', async () => {

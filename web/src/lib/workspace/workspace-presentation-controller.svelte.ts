@@ -358,7 +358,10 @@ export class WorkspacePresentationController {
 		return this.#focusAdjacentTab(owner, 1, focusSurface);
 	}
 
-	cycleWindowFocus(owner: FocusOwner, focusSurface: (surfaceId: string) => void): void {
+	cycleWindowFocus(
+		owner: FocusOwner,
+		activateWindow: (windowId: WorkspaceWindowId) => boolean,
+	): void {
 		if (this.isMobile || this.layout.snapshot.fullscreenWindowId) return;
 		const windows = collectWindowNodes(this.layout.snapshot.desktopRoot);
 		if (windows.length < 2) return;
@@ -371,8 +374,13 @@ export class WorkspacePresentationController {
 		const currentIndex = windows.findIndex(
 			(workspaceWindow) => workspaceWindow.id === ownerWindowId,
 		);
-		const nextWindow = windows[(currentIndex + 1 + windows.length) % windows.length];
-		focusSurface(nextWindow.tabs.activeId);
+		const candidates =
+			currentIndex < 0
+				? windows
+				: [...windows.slice(currentIndex + 1), ...windows.slice(0, currentIndex)];
+		for (const candidate of candidates) {
+			if (activateWindow(candidate.id)) return;
+		}
 	}
 
 	async enterMobilePresentation(): Promise<void> {

@@ -282,7 +282,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		const toolbar = screen.getByRole('toolbar');
 		expect(toolbar.classList.contains('relative')).toBe(true);
 		expect(toolbar.classList.contains('z-50')).toBe(true);
-		expect(toolbar.classList.contains('h-10')).toBe(true);
+		expect(toolbar.style.height).toBe('40px');
 		expect(toolbar.classList.contains('bg-workspace-window-titlebar')).toBe(false);
 		expect(toolbar.classList.contains('bg-workspace-window-titlebar-active')).toBe(true);
 		expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
@@ -315,7 +315,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(tablist).toBeTruthy();
 		expect(screen.getByRole('tab', { name: 'Git' }).getAttribute('aria-selected')).toBe('true');
 		expect(screen.getByRole('tab', { name: 'Chat A' }).getAttribute('aria-selected')).toBe('false');
-		expect(tablist.closest('header')?.classList.contains('h-10')).toBe(true);
+		expect(tablist.closest('header')?.getAttribute('style')).toContain('height: 40px');
 	});
 
 	it('keeps hover close regions inside the managed tab interaction model', async () => {
