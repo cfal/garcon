@@ -33,6 +33,8 @@
 		workspaceWindow,
 		isCurrent,
 		isVisible,
+		hasLeftSeparator = false,
+		hasRightSeparator = false,
 		presentations,
 		style,
 		labelFor,
@@ -48,6 +50,8 @@
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
 		isVisible: boolean;
+		hasLeftSeparator?: boolean;
+		hasRightSeparator?: boolean;
 		presentations: readonly RenderedPortablePresentation[];
 		style: string;
 		labelFor: (surfaceId: string) => string;
@@ -264,7 +268,11 @@
 		{/snippet}
 	</WorkspaceWindowTitleBar>
 	<div
-		class="relative min-h-0 flex-1 overflow-hidden"
+		class={cn(
+			'relative min-h-0 flex-1 overflow-hidden',
+			hasLeftSeparator && 'ml-3',
+			hasRightSeparator && 'mr-3',
+		)}
 		data-workspace-window-content={workspaceWindow.id}
 	>
 		{#if chatSurface}
@@ -347,7 +355,7 @@
 				<div
 					data-workspace-window-drop-result
 					class={cn(
-						'absolute flex items-center justify-center rounded-lg border-2 transition-all duration-150',
+						'pointer-events-none absolute flex items-center justify-center rounded-lg border-2 transition-all duration-150',
 						activeResultInset,
 						dropResultClass(),
 					)}

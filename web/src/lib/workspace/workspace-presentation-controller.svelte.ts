@@ -205,8 +205,9 @@ export class WorkspacePresentationController {
 	resolveMobileReturn(
 		excluding: string | ReadonlySet<string>,
 		snapshot = this.layout.snapshot,
+		sourceSnapshot = snapshot,
 	): ReturnType<MobilePresentationPlanner['resolveReturn']> {
-		return this.#mobilePresentation.resolveReturn(excluding, snapshot);
+		return this.#mobilePresentation.resolveReturn(excluding, snapshot, sourceSnapshot);
 	}
 
 	noteSurfaceFocus(surfaceId: string): void {

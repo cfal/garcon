@@ -314,7 +314,12 @@ describe('Lightpanda standalone Git views', () => {
       await app.waitForButton('Close view');
       await app.clickButton('Close view');
       await fixture.page.waitForSelector(
-        `.mobile-shell [data-workspace-surface-id="chat-view:${chatWindowId}"]`,
+        '.mobile-shell [data-workspace-surface-id="singleton:git"][aria-hidden="false"]',
+      );
+      await fixture.page.waitForSelector('nav[aria-label="Workspace navigation"]');
+      await app.clickButton('Chat');
+      await fixture.page.waitForSelector(
+        `.mobile-shell [data-workspace-surface-id="chat-view:${chatWindowId}"][aria-hidden="false"]`,
       );
       await app.waitForButton('Settings');
       await app.clickButton('Settings');

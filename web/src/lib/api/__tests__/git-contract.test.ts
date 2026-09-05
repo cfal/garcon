@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	getGitStatus,
-	getGitDiff,
 	gitCommit,
 	gitCheckout,
 	gitCheckoutRef,
@@ -83,16 +82,6 @@ describe('git API contract', () => {
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/git/status');
 		expect(url).toContain('project=%2Fproject');
-	});
-
-	it('getGitDiff calls GET with project and file params', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ diff: '+ line' }));
-
-		const result = await getGitDiff('/project', 'a.txt');
-
-		expect(result.diff).toBe('+ line');
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('file=a.txt');
 	});
 
 	it('gitCommit sends POST with project, message, files', async () => {

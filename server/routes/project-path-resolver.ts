@@ -3,6 +3,7 @@
 // against a project directory (files, slash-command discovery).
 
 import { promises as fs } from 'fs';
+import { hasNodeErrorCode } from '../lib/errors.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
@@ -22,6 +23,9 @@ export async function resolveAccessibleProjectPath(
     resolvedProjectPath = await assertRealWithinProjectBase(projectPath);
   } catch (error) {
     if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
+    if (hasNodeErrorCode(error, 'ENOENT') || hasNodeErrorCode(error, 'ENOTDIR')) {
+      return { error: projectPathNotFoundResponse(resolvedProjectPath) };
+    }
     throw error;
   }
 
@@ -29,13 +33,15 @@ export async function resolveAccessibleProjectPath(
     await fs.access(resolvedProjectPath);
     return { projectPath: resolvedProjectPath };
   } catch {
-    return {
-      error: Response.json(
-        { error: `Project path not found: ${resolvedProjectPath}` },
-        { status: 404 },
-      ),
-    };
+    return { error: projectPathNotFoundResponse(resolvedProjectPath) };
   }
+}
+
+function projectPathNotFoundResponse(projectPath: string): Response {
+  return Response.json(
+    { error: `Project path not found: ${projectPath}` },
+    { status: 404 },
+  );
 }
 
 // Resolves the project path from either a chatId or projectPath query param.

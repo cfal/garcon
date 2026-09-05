@@ -22,6 +22,7 @@
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
@@ -77,6 +78,7 @@
 		chatListAutohideAvailable?: boolean;
 		onChatListAutohideChange?: (enabled: boolean) => void;
 		onShowScheduledPrompts: () => void;
+		onShowPreambles: () => void;
 		onShowSettings: () => void;
 		newWindowBlocked: boolean;
 	}
@@ -102,6 +104,7 @@
 		chatListAutohideAvailable = false,
 		onChatListAutohideChange,
 		onShowScheduledPrompts,
+		onShowPreambles,
 		onShowSettings,
 		newWindowBlocked,
 	}: SidebarProps = $props();
@@ -231,6 +234,22 @@
 		onFailure?: () => void,
 	) {
 		quickMoveQueue.enqueue({ list, chatId, placement, onSuccess, onFailure });
+	}
+
+	async function handleSortChatOrder(sortKey: ChatOrderSortKey): Promise<void> {
+		try {
+			const response = await controller.sortChatOrder(sortKey);
+			if (response.changed) {
+				notifications.info(m.notifications_reorder_chats_applied());
+				appShell.requestSidebarRecenterToSelected();
+			}
+		} catch (error) {
+			reportActionFailure(
+				'Failed to sort manual chat order:',
+				m.notifications_reorder_chats_failed(),
+				error,
+			);
+		}
 	}
 
 	// Multi-select mode handlers.
@@ -468,6 +487,7 @@
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}
 			{onShowScheduledPrompts}
+			{onShowPreambles}
 			{onShowSettings}
 		/>
 	</div>
@@ -508,6 +528,7 @@
 			onOpenInNewWindow={onOpenChatInNewWindow}
 			{newWindowBlocked}
 			onQuickMove={handleQuickMove}
+			onSortChatOrder={handleSortChatOrder}
 		/>
 	</div>
 

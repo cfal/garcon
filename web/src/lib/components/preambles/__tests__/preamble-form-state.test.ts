@@ -1,0 +1,126 @@
+import { describe, expect, it, vi } from 'vitest';
+import { PREAMBLE_FILE_CONTEXT_SEPARATOR } from '$shared/preambles';
+import { PreambleFormState } from '../preamble-form-state.svelte';
+
+describe('PreambleFormState', () => {
+	it('builds global definitions without hidden path drafts', () => {
+		const form = new PreambleFormState();
+		form.title = '  Repository conventions  ';
+		form.content = 'Keep exact whitespace.\n';
+		form.scopeType = 'project-paths';
+		form.addPath('/workspace/project');
+		form.scopeType = 'global';
+
+		expect(form.buildDefinition()).toEqual({
+			enabled: true,
+			title: 'Repository conventions',
+			content: 'Keep exact whitespace.\n',
+			scope: { type: 'global' },
+		});
+	});
+
+	it('defaults new preambles to enabled and preserves an edited disabled value', () => {
+		const form = new PreambleFormState();
+		form.reset(null);
+		expect(form.enabled).toBe(true);
+
+		form.reset({
+			id: 'disabled',
+			enabled: false,
+			title: 'Disabled preamble',
+			content: 'Disabled content',
+			scope: { type: 'global' },
+			createdAt: '2029-01-01T00:00:00.000Z',
+			updatedAt: '2029-01-01T00:00:00.000Z',
+		});
+		expect(form.enabled).toBe(false);
+	});
+
+	it('preserves independent nested choices across multiple path rules', () => {
+		const form = new PreambleFormState();
+		form.title = 'Scoped instructions';
+		form.content = 'Use scoped instructions.';
+		form.scopeType = 'project-paths';
+		const first = form.addPath('/workspace/first');
+		const second = form.addPath('/workspace/second');
+		const firstRule = form.pathRules.find((rule) => rule.key === first);
+		const secondRule = form.pathRules.find((rule) => rule.key === second);
+		if (!firstRule || !secondRule) throw new Error('Expected path rules');
+		firstRule.includeNested = true;
+		secondRule.includeNested = false;
+
+		expect(form.buildDefinition()?.scope).toEqual({
+			type: 'project-paths',
+			rules: [
+				{ projectPath: '/workspace/first', includeNested: true },
+				{ projectPath: '/workspace/second', includeNested: false },
+			],
+		});
+	});
+
+	it('rejects duplicate trimmed paths and reserved file-context text', () => {
+		const form = new PreambleFormState();
+		form.title = 'Scoped instructions';
+		form.content = `Before${PREAMBLE_FILE_CONTEXT_SEPARATOR}after`;
+		form.scopeType = 'project-paths';
+		form.addPath('/workspace/project');
+		form.addPath(' /workspace/project ');
+
+		expect(form.contentError).toContain('reserved');
+		expect(form.scopeError).toContain('unique');
+		expect(form.pathRules.every((rule) => form.pathRuleError(rule.key)?.includes('unique')))
+			.toBe(true);
+		expect(form.canSave).toBe(false);
+	});
+
+	it('identifies only blank or duplicate path rows as invalid', () => {
+		const form = new PreambleFormState();
+		form.scopeType = 'project-paths';
+		const first = form.addPath('/workspace/project');
+		const duplicate = form.addPath(' /workspace/project ');
+		const blank = form.addPath(' ');
+		const valid = form.addPath('/workspace/other');
+		if (!first || !duplicate || !blank || !valid) throw new Error('Expected path rules');
+
+		expect(form.pathRuleError(first)).toContain('unique');
+		expect(form.pathRuleError(duplicate)).toContain('unique');
+		expect(form.pathRuleError(blank)).toContain('at least one');
+		expect(form.pathRuleError(valid)).toBeNull();
+	});
+
+	it('does not conflate backslashes with path separators', () => {
+		const form = new PreambleFormState();
+		form.title = 'Scoped instructions';
+		form.content = 'Use scoped instructions.';
+		form.scopeType = 'project-paths';
+		form.addPath('/workspace/a\\b');
+		form.addPath('/workspace/a/b');
+
+		expect(form.scopeError).toBeNull();
+	});
+
+	it('creates path-row identities without randomUUID', () => {
+		const randomUUID = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+			throw new Error('randomUUID is unavailable');
+		});
+		try {
+			const form = new PreambleFormState();
+			expect(form.addPath('/workspace/project')).toBeTruthy();
+			form.reset({
+				id: 'scoped',
+				enabled: true,
+				title: 'Scoped preamble',
+				content: 'Scoped content',
+				scope: {
+					type: 'project-paths',
+					rules: [{ projectPath: '/workspace/project', includeNested: true }],
+				},
+				createdAt: '2029-01-01T00:00:00.000Z',
+				updatedAt: '2029-01-01T00:00:00.000Z',
+			});
+			expect(form.pathRules[0]?.key).toBeTruthy();
+		} finally {
+			randomUUID.mockRestore();
+		}
+	});
+});

@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 29 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 34 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -11,13 +11,27 @@ and has no merge anchor yet. Revision 23 adds ordinary user transcript export;
 revision 24 makes its rendered artifacts transcript-first and succinct.
 Revision 29 permits a settled chat-ID request to dispatch again within the same
 long-lived provider turn.
+Revision 30 adds provider-neutral preamble boundaries, atomic title-only
+application notices, receipt-proven native sanitation, and the lazy catalog
+browser workflow.
+Revision 31 removes the per-application frame and receipt identifier; exact
+length and SHA-256 remain the sole native-sanitation proof.
+Revision 32 expands the shared `{{chat_id}}` token in preamble bodies with the
+target chat ID, validates the expanded combined budget, and documents the
+token below the preamble composer.
+Revision 33 defines receipt SHA-256 over exact JavaScript UTF-16 code units in
+little-endian order, preventing lone-surrogate replacement from aliasing a
+distinct same-length prefix during native sanitation.
+Revision 34 makes a native occurrence mandatory after a provider-origin
+terminal proves the preamble turn completed; persistence lag fails retryably
+before Reload cutover or native-fidelity target publication.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 29, SHA-256
-  `ddfcd00add9ae059d07b98bb3acdd1a0903fe1fa184d01d967a236a909f4c606`
+- `docs/transcript-ledger-v5-design.md`, revision 34, SHA-256
+  `b24125600fb05861659e06b9d24242cdc45088479453a8109ab43e7c5a99347e`
 
-Current inventory: 411 discovered stable IDs, validated by
+Current inventory: 417 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -383,6 +397,17 @@ routine local testing.
 | TLV5-CHAT-ID-DISCOVERY.05     | Every reference provider immediately receives one disclosure steer per eligible request during the requesting run; settled sequential same-run requests each receive one, and no synthetic user row becomes durable. | Claude, Codex, OpenCode, Pi scripted |
 | TLV5-CHAT-ID-DISCOVERY.06     | Disabled discovery strips the marker, emits exactly one typed error, and sends no disclosure to the provider.                           | Core unit, Claude scripted         |
 | TLV5-CHAT-ID-DISCOVERY.07     | Typed generic discovery failures render with error semantics.                                                                            | Web component                      |
+
+### Preambles
+
+| ID                    | Obligation                                                                                                                                            | Required evidence                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| TLV5-PREAMBLE.01      | The public application notice contains only a fixed type plus unique immutable `{id, title}` snapshots; bodies, paths, scopes, revisions, and receipts are rejected. | Shared contract                                        |
+| TLV5-PREAMBLE.02      | A matched boundary expands active `{{chat_id}}` tokens with the target chat ID, commits one adjacent notice/input group atomically, stores its private proof and exact expanded-prefix receipt using SHA-256 over little-endian UTF-16 code units, and keeps the body only in the transient provider prefix; a zero match stores only the proof-bearing input. | Store and service unit                                 |
+| TLV5-PREAMBLE.03      | New chat, fork, continuation, and in-place agent-switch boundaries resolve the current enabled matching catalog once in visible order and use that target chat ID for expansion; blocked provider slash input stores nothing and retains the boundary. | Core unit, server black-box, provider scripted         |
+| TLV5-PREAMBLE.04      | Reload and native-fidelity fork collect exact binding evidence, sanitize carried context before receipt-proven prefixes, hash exact UTF-16 code units without surrogate replacement, require one matching receipt signature before selecting the earliest unused exact receipt, reconstruct the notice and private input fields, tolerate absent native occurrences only without provider-completion proof, retry before publication when completed turns are not yet persisted, and fail closed on unprovable, ambiguous, or excess leading frames. | Native-import, Reload, fork, and scripted-provider unit |
+| TLV5-PREAMBLE.05      | Application notices render, freeze, share, and export with IDs/titles only while remaining absent from search, preview, resend, model context, and carryover input. | Canonical read-fold matrix and presentation tests      |
+| TLV5-PREAMBLE.06      | The lazy SPA catalog creates, edits, deletes, reorders, filters, disables, and re-enables entries; scoped rules retain independent nested flags, the composer identifies the supported `{{chat_id}}` token, and the historical application row remains title-only and adjacent. | Component and Lightpanda browser behavior              |
 
 ### Presentation-Only Chat Rows
 
@@ -858,6 +883,12 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-CHAT-ID-DISCOVERY.06-CLAUDE-SCRIPTED-01 | `integration-tests/tests/server/claude-scripted-chat-id-discovery.test.ts`: disabled discovery strips the marker, records the error, and sends no provider disclosure | CHAT-ID-DISCOVERY.06 |
 | TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01 | `server/chats/__tests__/chat-id-discovery-controller.test.js`: disabled discovery commits one typed failure and does not invoke delivery | CHAT-ID-DISCOVERY.06 |
 | TLV5-CHAT-ID-DISCOVERY.07-WEB-UNIT-01 | `web/src/lib/components/chat/__tests__/TranscriptNoticeRow.test.ts`: typed generic discovery failure renders with the error event-card variant | CHAT-ID-DISCOVERY.07 |
+| TLV5-PREAMBLE.01-CONTRACT-01 | `common/__tests__/transcript-notice-contract.test.js`: immutable preamble title snapshots round-trip while top-level and nested private fields are rejected | PREAMBLE.01 |
+| TLV5-PREAMBLE.02-STORE-UNIT-01 | `server/ledger/__tests__/store.test.js`: one transaction commits the title-only application notice immediately before its proof- and receipt-bearing input while the target-chat-expanded body remains transient | PREAMBLE.02 |
+| TLV5-PREAMBLE.03-SERVER-01 | `integration-tests/tests/server/preambles.test.ts` plus the scripted-boundary companion: ordered current enabled preambles apply exactly once and expand against the target ID at new-chat, fork, continuation, and in-place agent-switch boundaries | PREAMBLE.03 |
+| TLV5-PREAMBLE.04-NATIVE-UNIT-01 | `server/ledger/__tests__/preamble-history.test.js`: exact UTF-16 code-unit receipt sanitation strips the private prefix, rejects lone-surrogate replacement, maps distinct and byte-identical evidence deterministically without a provider-visible application identifier, counts required completed-turn occurrences by signature, retries on persistence lag, rejects prefix-related signature ambiguity, and returns immutable application evidence for reconstruction | PREAMBLE.04 |
+| TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01 | `server/ledger/__tests__/read-fold-matrix.test.js`: the application notice stays visible and body-free while every conversational fold excludes it | PREAMBLE.05, L01.02 |
+| TLV5-PREAMBLE.06-LIGHTPANDA-01 | `integration-tests/tests/e2e/preambles.test.ts` and the preamble component suite: the SPA manages enabled and scoped catalog entries, documents `{{chat_id}}`, and renders the historical application notice adjacent to its user row | PREAMBLE.06 |
 | TLV5-L01.02-EXPORT-SERVER-01   | `integration-tests/tests/server/garcon-cli-export.test.ts`: authenticated CLI export captures succinct Markdown and XML artifacts, applies filters, preserves ordinal gaps, and writes/replaces files atomically | L01.02 |
 | TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
 | TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01 | `server/chats/search/__tests__/controller-service.test.js`: a chat adopted while a resync replacement is held remains searchable after exclusive pruning refreshes the catalog | L01.02, ADOPT.01 |
@@ -988,7 +1019,7 @@ for each atomic requirement and records any required complementary tier.
 
 The remaining `Partial` and `Missing` provider-routing, native-probe, browser,
 failure-injection, and accepted-loss rows are explicit catalog or
-nightly follow-up. They do not block dogfood or the active Revision 22 release
+nightly follow-up. They do not block dogfood or the active Revision 29 release
 gate unless a current release red promotes one into that gate. Their statements
 remain here so later coverage cannot silently weaken or disappear.
 
@@ -1106,7 +1137,7 @@ registered cases and gaps promoted by a current release red enter those gates.
 
 ### Release Acceptance
 
-- Every case assigned to the active Revision 22 release gate, including any
+- Every case assigned to the active Revision 29 release gate, including any
   gap promoted by a current release red, reports pass with no undocumented skip.
 - Both exact Codex rollout replays report the expected final row and tail order.
 - The complete validation command sequence is recorded with environment data.

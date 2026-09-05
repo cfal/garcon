@@ -1,16 +1,35 @@
 import path from 'path';
-import { JsonFileStore } from '../lib/json-file-store.js';
+import { promises as fs } from 'fs';
+import crypto from 'crypto';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import {
   SCHEDULED_PROMPT_MAX_COUNT,
   normalizeScheduledPrompt,
   type ScheduledPrompt,
 } from '../../common/scheduled-prompts.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
+import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('scheduled-prompts');
+const SCHEDULED_PROMPTS_FILE_VERSION = 2;
+const HOURS_PER_DAY = 24;
 
 interface ScheduledPromptsFile {
-  version: 1;
+  version: typeof SCHEDULED_PROMPTS_FILE_VERSION;
   revision: number;
   prompts: ScheduledPrompt[];
+}
+
+interface NormalizedScheduledPromptsFile {
+  file: ScheduledPromptsFile;
+  migrated: boolean;
+  ignoredPromptCount: number;
+  invalidContainerShape: boolean;
+}
+
+interface LoadedScheduledPromptsFile extends NormalizedScheduledPromptsFile {
+  sourceBytes: Buffer | null;
 }
 
 const HOUR_MS = 3_600_000;
@@ -43,28 +62,144 @@ export class ScheduledPromptDomainError extends Error {
 }
 
 function emptyFile(): ScheduledPromptsFile {
-  return { version: 1, revision: 0, prompts: [] };
+  return { version: SCHEDULED_PROMPTS_FILE_VERSION, revision: 0, prompts: [] };
 }
 
-function normalizeFile(value: unknown): ScheduledPromptsFile {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return emptyFile();
+function normalizeRevision(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function normalizeVersionOneScheduledPrompt(value: unknown): ScheduledPrompt | null {
+  const scheduledPrompt = normalizeScheduledPrompt(value);
+  if (scheduledPrompt) return scheduledPrompt;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
-  if (raw.version !== 1) {
+  const schedule = raw.schedule;
+  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) return null;
+  const legacySchedule = schedule as Record<string, unknown>;
+  if (legacySchedule.type !== 'recurring') return null;
+  const intervalDays = legacySchedule.intervalDays;
+  if (typeof intervalDays !== 'number' || !Number.isSafeInteger(intervalDays)) return null;
+  return normalizeScheduledPrompt({
+    ...raw,
+    schedule: {
+      ...legacySchedule,
+      intervalHours: intervalDays * HOURS_PER_DAY,
+    },
+  });
+}
+
+function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { file: emptyFile(), migrated: false, ignoredPromptCount: 0, invalidContainerShape: true };
+  }
+  const raw = value as Record<string, unknown>;
+  if (raw.version !== 1 && raw.version !== SCHEDULED_PROMPTS_FILE_VERSION) {
     throw new Error(`Unsupported scheduled-prompts.json version: ${String(raw.version)}`);
   }
-  const revision =
-    typeof raw.revision === 'number' && Number.isSafeInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0;
+  const normalizedRevision = normalizeRevision(raw.revision);
+  const revision = normalizedRevision ?? 0;
   const prompts: ScheduledPrompt[] = [];
   const seen = new Set<string>();
+  let ignoredPromptCount = 0;
   if (Array.isArray(raw.prompts)) {
     for (const value of raw.prompts) {
-      const scheduledPrompt = normalizeScheduledPrompt(value);
-      if (!scheduledPrompt || seen.has(scheduledPrompt.id)) continue;
+      const scheduledPrompt =
+        raw.version === 1 ? normalizeVersionOneScheduledPrompt(value) : normalizeScheduledPrompt(value);
+      if (!scheduledPrompt || seen.has(scheduledPrompt.id)) {
+        ignoredPromptCount += 1;
+        continue;
+      }
       seen.add(scheduledPrompt.id);
       prompts.push(scheduledPrompt);
     }
   }
-  return { version: 1, revision, prompts };
+  return {
+    file: { version: SCHEDULED_PROMPTS_FILE_VERSION, revision, prompts },
+    migrated: raw.version === 1,
+    ignoredPromptCount,
+    invalidContainerShape:
+      (raw.revision !== undefined && normalizedRevision === null) ||
+      (raw.prompts !== undefined && !Array.isArray(raw.prompts)),
+  };
+}
+
+async function readFile(filePath: string): Promise<LoadedScheduledPromptsFile> {
+  try {
+    const sourceBytes = await fs.readFile(filePath);
+    return { ...normalizeFile(JSON.parse(sourceBytes.toString('utf8'))), sourceBytes };
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) {
+      return {
+        file: emptyFile(),
+        migrated: false,
+        ignoredPromptCount: 0,
+        invalidContainerShape: false,
+        sourceBytes: null,
+      };
+    }
+    throw error;
+  }
+}
+
+async function findExistingScheduledPromptsBackup(
+  filePath: string,
+  sourceBytes: Buffer,
+  sourceVersion: number,
+): Promise<string | null> {
+  const directory = path.dirname(filePath);
+  const prefix = `${path.basename(filePath)}.v${sourceVersion}-backup-`;
+  const candidateNames = (await fs.readdir(directory))
+    .filter((entry) => entry.startsWith(prefix))
+    .sort()
+    .reverse();
+
+  for (const candidateName of candidateNames) {
+    const candidatePath = path.join(directory, candidateName);
+    try {
+      const candidateStat = await fs.lstat(candidatePath);
+      if (
+        !candidateStat.isFile() ||
+        (candidateStat.mode & 0o077) !== 0 ||
+        candidateStat.size !== sourceBytes.length
+      ) {
+        continue;
+      }
+      const candidateBytes = await fs.readFile(candidatePath);
+      if (candidateBytes.equals(sourceBytes)) return candidatePath;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function backupScheduledPromptsFile(
+  filePath: string,
+  sourceBytes: Buffer,
+  sourceVersion: number,
+): Promise<string> {
+  const existingBackupPath = await findExistingScheduledPromptsBackup(filePath, sourceBytes, sourceVersion);
+  if (existingBackupPath) return existingBackupPath;
+
+  const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
+  const backupPath = `${filePath}.v${sourceVersion}-backup-${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
+  let backupFile: Awaited<ReturnType<typeof fs.open>> | null = null;
+  let backupCreated = false;
+  try {
+    backupFile = await fs.open(backupPath, 'wx', 0o600);
+    backupCreated = true;
+    await backupFile.writeFile(sourceBytes);
+    await backupFile.sync();
+    await backupFile.close();
+    backupFile = null;
+    await syncDirectory(path.dirname(filePath));
+  } catch (error) {
+    if (backupFile) await backupFile.close().catch(() => {});
+    if (backupCreated) await fs.unlink(backupPath).catch(() => {});
+    throw error;
+  }
+  return backupPath;
 }
 
 function clonePrompt(scheduledPrompt: ScheduledPrompt): ScheduledPrompt {
@@ -80,21 +215,38 @@ function nextRecurringRun(scheduledPrompt: ScheduledPrompt): string | null {
 }
 
 export class ScheduledPromptStore {
-  readonly #persistence: JsonFileStore<ScheduledPromptsFile>;
+  readonly #filePath: string;
   readonly #lock = new KeyedPromiseLock();
   #file: ScheduledPromptsFile = emptyFile();
 
   constructor(workspaceDir: string) {
-    this.#persistence = new JsonFileStore({
-      filePath: path.join(workspaceDir, 'scheduled-prompts.json'),
-      mode: 0o600,
-      empty: emptyFile,
-      normalize: normalizeFile,
-    });
+    this.#filePath = path.join(workspaceDir, 'scheduled-prompts.json');
   }
 
   async init(): Promise<void> {
-    this.#file = await this.#persistence.read();
+    const loaded = await readFile(this.#filePath);
+    let backupPath: string | null = null;
+    if (loaded.migrated || loaded.ignoredPromptCount > 0 || loaded.invalidContainerShape) {
+      if (!loaded.sourceBytes) throw new Error('scheduled-prompts.json source is unavailable for backup');
+      const sourceVersion = loaded.migrated ? 1 : SCHEDULED_PROMPTS_FILE_VERSION;
+      backupPath = await backupScheduledPromptsFile(this.#filePath, loaded.sourceBytes, sourceVersion);
+    }
+    const backupMessage = backupPath ? ` Original file backed up to ${backupPath}.` : '';
+    if (loaded.invalidContainerShape) {
+      logger.warn(`Found invalid scheduled-prompts.json container data while loading.${backupMessage}`);
+    }
+    if (loaded.ignoredPromptCount > 0) {
+      logger.warn(
+        `Ignored ${loaded.ignoredPromptCount} invalid or duplicate scheduled prompt record${loaded.ignoredPromptCount === 1 ? '' : 's'} while loading scheduled-prompts.json.${backupMessage}`,
+      );
+    }
+    if (loaded.migrated) {
+      await this.#write(loaded.file);
+      logger.info(
+        `Migrated scheduled-prompts.json from version 1 to version 2. Original file backed up to ${backupPath}.`,
+      );
+    }
+    this.#file = loaded.file;
   }
 
   get revision(): number {
@@ -267,7 +419,7 @@ export class ScheduledPromptStore {
       const draft = structuredClone(this.#file);
       const result = change(draft);
       draft.revision += 1;
-      await this.#persistence.write(draft);
+      await this.#write(draft);
       this.#file = draft;
       return structuredClone(result);
     });
@@ -279,10 +431,14 @@ export class ScheduledPromptStore {
       const result = change(draft);
       if (result === false) return structuredClone(unchanged);
       draft.revision += 1;
-      await this.#persistence.write(draft);
+      await this.#write(draft);
       this.#file = draft;
       return structuredClone(result);
     });
+  }
+
+  async #write(file: ScheduledPromptsFile): Promise<void> {
+    await writeJsonFileAtomic(this.#filePath, file, { mode: 0o600 });
   }
 
   #notFound(): ScheduledPromptDomainError {

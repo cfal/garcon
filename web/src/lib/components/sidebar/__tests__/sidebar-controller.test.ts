@@ -8,6 +8,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	toggleArchive: vi.fn(),
 	deleteChat: vi.fn(),
 	reorderChat: vi.fn(),
+	sortChatOrder: vi.fn(),
 	getChatDetails: vi.fn(),
 	forkChat: vi.fn(),
 	setChatTags: vi.fn(),
@@ -17,6 +18,7 @@ import {
 	togglePinned,
 	toggleArchive,
 	reorderChat,
+	sortChatOrder,
 	getChatDetails,
 	forkChat,
 } from '$lib/api/chats.js';
@@ -24,6 +26,7 @@ import {
 const mockTogglePinned = vi.mocked(togglePinned);
 const mockToggleArchive = vi.mocked(toggleArchive);
 const mockReorderChat = vi.mocked(reorderChat);
+const mockSortChatOrder = vi.mocked(sortChatOrder);
 const mockGetChatDetails = vi.mocked(getChatDetails);
 const mockForkChat = vi.mocked(forkChat);
 
@@ -133,6 +136,30 @@ describe('SidebarController', () => {
 					position: 'before',
 				}),
 			).rejects.toThrow('reorder failed');
+
+			expect(quietRefresh).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('sortChatOrder', () => {
+		it('returns the typed response after refreshing', async () => {
+			const response = {
+				success: true as const,
+				sortKey: 'created' as const,
+				changed: true,
+			};
+			mockSortChatOrder.mockResolvedValue(response);
+
+			await expect(controller.sortChatOrder('created')).resolves.toEqual(response);
+
+			expect(mockSortChatOrder).toHaveBeenCalledWith({ sortKey: 'created' });
+			expect(quietRefresh).toHaveBeenCalledOnce();
+		});
+
+		it('does not refresh after an API failure', async () => {
+			mockSortChatOrder.mockRejectedValue(new Error('sort failed'));
+
+			await expect(controller.sortChatOrder('activity')).rejects.toThrow('sort failed');
 
 			expect(quietRefresh).not.toHaveBeenCalled();
 		});

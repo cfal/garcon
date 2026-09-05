@@ -11,9 +11,12 @@ import type { JsonObject } from '../../common/json.js';
 import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../common/handoff-timeouts.js';
 import {
   parseReorderChatRequest,
+  parseSortChatOrderRequest,
   type ReorderChatRequest,
   type ReorderChatResponse,
+  type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
@@ -57,6 +60,7 @@ import {
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import { safeFenceDiagnostic, StaleTranscriptViewError } from '../ledger/errors.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
+import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
@@ -154,6 +158,7 @@ interface SettingsDep {
     request: ReorderChatRequest,
     isKnownChat: (chatId: string) => boolean,
   ): Promise<ChatReorderResult>;
+  sortChatOrder(compareChatIds: ChatOrderIdComparator): Promise<{ changed: boolean }>;
 }
 
 interface PathCacheDep {
@@ -453,7 +458,7 @@ export default function createChatRoutes({
     if (!chatId) {
       return jsonError('chatId is required', 400, 'VALIDATION_FAILED');
     }
-    if (!registry.getChat(chatId)) {
+    if (!registry.hasChat(chatId)) {
       return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
     }
 
@@ -697,24 +702,51 @@ export default function createChatRoutes({
       if (!request) {
         return jsonError('Invalid chat reorder request', 400, 'VALIDATION_FAILED', false);
       }
-      if (!registry.getChat(request.chatId)) {
+      if (!registry.hasChat(request.chatId)) {
         return jsonError('Chat not found', 404, 'SESSION_NOT_FOUND', false);
       }
       if (
         request.placement.kind === 'relative'
-        && !registry.getChat(request.placement.referenceChatId)
+        && !registry.hasChat(request.placement.referenceChatId)
       ) {
         return jsonError('Reference chat not found', 404, 'SESSION_NOT_FOUND', false);
       }
 
       const result = await settings.reorderChat(
         request,
-        (chatId) => registry.getChat(chatId) != null,
+        (chatId) => registry.hasChat(chatId),
       );
       if (!result.success) {
         return jsonError(result.error, result.status, result.errorCode, false);
       }
       return Response.json(result.response satisfies ReorderChatResponse);
+    } catch (error: unknown) {
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function postSortChatOrder(body: unknown): Promise<Response> {
+    try {
+      const request = parseSortChatOrderRequest(body);
+      if (!request) {
+        return jsonError(
+          'Invalid chat order sort request',
+          400,
+          'VALIDATION_FAILED',
+          false,
+        );
+      }
+
+      const compareChatIds = buildChatOrderComparator(
+        request.sortKey,
+        metadata.listAllChatMetadata(),
+      );
+      const result = await settings.sortChatOrder(compareChatIds);
+      return Response.json({
+        success: true,
+        sortKey: request.sortKey,
+        changed: result.changed,
+      } satisfies SortChatOrderResponse);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
@@ -877,7 +909,7 @@ export default function createChatRoutes({
   async function getQueue(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
-    if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+    if (!registry.hasChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
     const control = toClientChatExecutionControlState(await queue.readChatExecutionControl(chatId));
     return Response.json({ success: true, chatId, control });
   }
@@ -1101,10 +1133,11 @@ export default function createChatRoutes({
         }
         patch.agentSettingsPatch = body.agentSettingsPatch as JsonObject;
       }
-      const updated = Object.keys(patch).length > 0
+      const hasPatch = Object.keys(patch).length > 0;
+      const updated = hasPatch
         ? await agents.updateSessionSettings(chatId, patch)
         : chat;
-      if (Object.keys(patch).length > 0) searchIndex?.catalogMayHaveChanged(chatId);
+      if (hasPatch) searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
         success: true,
         chatId,
@@ -1121,7 +1154,7 @@ export default function createChatRoutes({
     try {
       const chatId = requireStringField(body, 'chatId');
       const model = requireStringField(body, 'model');
-      if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      if (!registry.hasChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const apiProviderId = optionalStringOrNull(body.apiProviderId);
       const modelEndpointId = optionalStringOrNull(body.modelEndpointId);
       const modelProtocol = optionalStringOrNull(body.modelProtocol);
@@ -1208,6 +1241,7 @@ export default function createChatRoutes({
     '/api/v1/chats/archive': { POST: withJsonBody(postToggleArchive) },
     '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
     '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChat) },
+    '/api/v1/chats/sort': { POST: withJsonBody(postSortChatOrder) },
     '/api/v1/chats/tags': { PATCH: withJsonBody(patchChatTags) },
   };
 }

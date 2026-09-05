@@ -19,6 +19,7 @@ import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import type { SnippetService } from './snippets/service.js';
+import type { PreambleService } from './preambles/service.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
@@ -40,6 +41,7 @@ import {
   TranscriptSearchStatusMessage,
   ScheduledPromptsInvalidatedMessage,
   SnippetsInvalidatedMessage,
+  PreamblesInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -75,6 +77,7 @@ export interface ServerEventWiringDeps {
   telegramSettings: TelegramSettingsStore;
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
+  preambles: PreambleService;
   searchIndex?: ChatSearchEventIndex;
 }
 
@@ -107,6 +110,7 @@ export function wireServerEvents({
   telegramSettings,
   scheduledPrompts,
   snippets,
+  preambles,
   searchIndex,
 }: ServerEventWiringDeps): ServerEventWiring {
   const broadcast = (payload: unknown) =>
@@ -210,6 +214,10 @@ export function wireServerEvents({
 
   snippets.onInvalidated((reason) => {
     broadcast(new SnippetsInvalidatedMessage(reason));
+  });
+
+  preambles.onInvalidated((reason) => {
+    broadcast(new PreamblesInvalidatedMessage(reason));
   });
 
   function turnFailureKey(
@@ -320,7 +328,7 @@ export function wireServerEvents({
     await markPublicTurnTerminal(chatId, options);
   }
 
-  const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
+  const chatExists = (chatId: string) => chatRegistry.hasChat(chatId);
 
   const transcriptFanout = createTranscriptEventFanout({
     chatExists,

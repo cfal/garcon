@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { isSidebarChatInactive } from '../chat-inactivity';
-import { chatActivityTimeMs, sortChatsByRecencyDesc } from '../chat-recency-sort';
+import { sortChatsByRecencyDesc } from '../chat-recency-sort';
 
 // 16-digit Unix-microsecond chat ids as minted by the browser clock.
 function chatIdAt(epochMs: number): string {

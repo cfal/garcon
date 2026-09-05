@@ -21,6 +21,7 @@
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
 		SidebarInactivityDuration,
+		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
 	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
@@ -41,6 +42,9 @@
 		chatListDock?: ChatListDock;
 		reduceMotion?: boolean;
 		collapsedProjectKeys?: Set<string>;
+		sidebarSortMode?: SidebarSortMode;
+		onQuietRefresh?: () => Promise<void> | void;
+		onRequestRecenter?: () => void;
 	}
 
 	let {
@@ -59,6 +63,9 @@
 		chatListDock = 'left',
 		reduceMotion = false,
 		collapsedProjectKeys = new Set<string>(),
+		sidebarSortMode = 'manual',
+		onQuietRefresh = () => Promise.resolve(),
+		onRequestRecenter = () => {},
 	}: SidebarHostProps = $props();
 
 	setAppShell({
@@ -75,7 +82,9 @@
 			return () => {};
 		},
 		projectBasePath: '/workspace',
-		requestSidebarRecenterToSelected() {},
+		requestSidebarRecenterToSelected() {
+			onRequestRecenter();
+		},
 		requestComposerFocus() {},
 	} as never);
 
@@ -116,6 +125,9 @@
 		get sidebarChatItemLayout() {
 			return sidebarChatItemLayout;
 		},
+		get sidebarSortMode() {
+			return sidebarSortMode;
+		},
 		get chatListAutohide() {
 			return chatListAutohide;
 		},
@@ -143,6 +155,10 @@
 			}
 			if (key === 'sidebarChatItemLayout') {
 				sidebarChatItemLayout = value as SidebarChatItemLayout;
+				return;
+			}
+			if (key === 'sidebarSortMode') {
+				sidebarSortMode = value as SidebarSortMode;
 				return;
 			}
 			if (key === 'chatListAutohide') chatListAutohide = value as boolean;
@@ -221,7 +237,7 @@
 	{isMobile}
 	onChatSelect={() => {}}
 	onNewChat={() => {}}
-	onQuietRefresh={() => Promise.resolve()}
+	{onQuietRefresh}
 	onRequestDeleteChat={() => {}}
 	onRequestRenameChat={() => {}}
 	onTogglePinned={() => {}}
@@ -232,6 +248,7 @@
 	onManageTags={() => {}}
 	{chatListAutohideAvailable}
 	onShowScheduledPrompts={() => {}}
+	onShowPreambles={() => {}}
 	onShowSettings={() => {}}
 	newWindowBlocked={false}
 />

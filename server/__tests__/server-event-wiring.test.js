@@ -17,6 +17,7 @@ function createFixture(overrides = {}) {
   const chats = {};
   const scheduled = {};
   const snippets = {};
+  const preambles = {};
   const telegram = {};
   const published = [];
   let chatPresent = true;
@@ -44,6 +45,7 @@ function createFixture(overrides = {}) {
   };
   const chatRegistry = {
     getChat: mock(() => chatPresent ? { chatId: 'chat-1' } : null),
+    hasChat: mock(() => chatPresent),
     onChatAdded: mock((callback) => { chats.added = callback; }),
     onChatRemoved: mock((callback) => { chats.removed = callback; }),
     onChatReadUpdated: mock((callback) => { chats.read = callback; }),
@@ -115,6 +117,10 @@ function createFixture(overrides = {}) {
       onInvalidated: mock((callback) => { snippets.invalidated = callback; }),
       ...overrides.snippets,
     },
+    preambles: {
+      onInvalidated: mock((callback) => { preambles.invalidated = callback; }),
+      ...overrides.preambles,
+    },
     searchIndex,
   });
   return {
@@ -133,6 +139,7 @@ function createFixture(overrides = {}) {
     settings,
     shareStore,
     snippets,
+    preambles,
     wiring,
     removeChat() { chatPresent = false; },
   };
@@ -177,6 +184,14 @@ const turn = {
 };
 
 describe('server event wiring', () => {
+  it('broadcasts preamble catalog invalidations without catalog content', () => {
+    const fixture = createFixture();
+
+    fixture.preambles.invalidated('updated');
+
+    expect(fixture.published).toEqual([{ type: 'preambles-invalidated', reason: 'updated' }]);
+  });
+
   it('[TLV5-SEARCH.09-WS-03] broadcasts workspace transcript search status', () => {
     const fixture = createFixture();
     const status = {

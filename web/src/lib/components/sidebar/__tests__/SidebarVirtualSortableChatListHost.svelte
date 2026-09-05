@@ -14,6 +14,7 @@
 	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
 	import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarVirtualSortableChatListHostProps {
 		rows: SidebarVirtualRow[];
@@ -29,6 +30,7 @@
 		onWorkspaceDragEnd?: (chatId: string) => void;
 		onRegisterWindowDnd?: (windowDnd: WorkspaceWindowDndController) => void;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
@@ -45,6 +47,7 @@
 		onWorkspaceDragEnd,
 		onRegisterWindowDnd,
 		onToggleProjectCollapsed,
+		onSortChatOrder = () => {},
 	}: SidebarVirtualSortableChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
@@ -126,6 +129,7 @@
 		{rowHeight}
 		{reorder}
 		{onPersistReorder}
+		{onSortChatOrder}
 		{onToggleProjectCollapsed}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}

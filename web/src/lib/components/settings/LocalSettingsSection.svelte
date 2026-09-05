@@ -22,7 +22,7 @@
 		SNIPPET_TRIGGER_MAX_LENGTH,
 		snippetTriggerValidationError,
 	} from '$lib/chat/composer/snippet-trigger.js';
-	import { getLocalSettings } from '$lib/context';
+	import { getAppShell, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import CompletionSoundSettings from './CompletionSoundSettings.svelte';
 
@@ -32,6 +32,7 @@
 	}
 
 	const ls = getLocalSettings();
+	const appShell = getAppShell();
 	const chatMaxWidthOptions: Array<{ value: ChatMaxWidth; label: () => string }> = [
 		{ value: 'none', label: m.settings_chat_max_width_none },
 		{ value: 'large', label: m.settings_chat_max_width_large },
@@ -333,6 +334,19 @@
 					'markdownViewerOpenPlacement',
 					ls.markdownViewerOpenPlacement,
 				)}
+			</div>
+			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
+				<div class="min-w-0">
+					<div class="text-sm font-medium text-foreground">
+						{m.onboarding_setup_wizard_label()}
+					</div>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.onboarding_restart_wizard_hint()}
+					</p>
+				</div>
+				<Button variant="outline" size="sm" onclick={() => appShell.openOnboardingWizard()}>
+					{m.onboarding_restart_wizard()}
+				</Button>
 			</div>
 		</div>
 	</div>

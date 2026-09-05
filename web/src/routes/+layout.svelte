@@ -10,6 +10,7 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
+	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
@@ -26,6 +27,7 @@
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
+	import { resolveFirstRegistrationOnboarding } from '$lib/onboarding/first-registration-onboarding.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -45,6 +47,7 @@
 		setMinuteClock,
 		setGhCapability,
 		setScheduledPrompts,
+		setPreambles,
 		setSnippets,
 		setWorkspaceLayout,
 		setWorkspaceContext,
@@ -64,6 +67,7 @@
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
 	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
+	import { PreamblesRouter } from '$lib/events/preambles-router.svelte.js';
 	import { SnippetsRouter } from '$lib/events/snippets-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
@@ -92,6 +96,7 @@
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
+	const preambles = createPreamblesStore();
 	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
@@ -160,6 +165,7 @@
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
 	setScheduledPrompts(scheduledPrompts);
+	setPreambles(preambles);
 	setSnippets(snippets);
 	setAppTitle(appTitle);
 	setNavigation(navigation);
@@ -281,16 +287,19 @@
 		sidebarSearch.applyTranscriptSearchStatus(status),
 	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
+	const preamblesRouter = new PreamblesRouter(ws, preambles);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	settingsRouter.start();
 	transcriptSearchStatusRouter.start();
 	scheduledPromptsRouter.start();
+	preamblesRouter.start();
 	snippetsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
 		transcriptSearchStatusRouter.tick();
 		scheduledPromptsRouter.tick();
+		preamblesRouter.tick();
 		snippetsRouter.tick();
 	});
 
@@ -303,6 +312,7 @@
 				.catch(() => undefined);
 		});
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
+		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 	});
 
@@ -392,6 +402,7 @@
 		settingsRouter.destroy();
 		transcriptSearchStatusRouter.destroy();
 		scheduledPromptsRouter.destroy();
+		preamblesRouter.destroy();
 		snippetsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
@@ -437,21 +448,25 @@
 		}
 	});
 
-	// Opens the settings dialog to the Providers tab on the first authenticated
-	// load right after a successful registration. Gated on a persisted
-	// flag set during the registration flow so cold loads for existing users
-	// or auth-disabled sessions do not receive a blocking onboarding modal.
-	let settingsAutoOpened = $state(false);
+	// Opens the onboarding wizard on the first authenticated load right after
+	// a successful registration. Gated on a persisted flag set during the
+	// registration flow so cold loads for existing users or auth-disabled
+	// sessions do not receive a blocking onboarding modal.
+	let onboardingAutoOpened = $state(false);
 	$effect(() => {
-		if (auth.isLoading || !auth.isAuthenticated || settingsAutoOpened) return;
-		if (auth.authDisabled) {
-			settingsAutoOpened = true;
-			return;
-		}
-		settingsAutoOpened = true;
-		if (getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1') {
+		if (onboardingAutoOpened) return;
+		const decision = resolveFirstRegistrationOnboarding({
+			isLoading: auth.isLoading,
+			isAuthenticated: auth.isAuthenticated,
+			authDisabled: auth.authDisabled,
+			isRegistrationRoute: page.url.pathname === '/setup',
+			justRegistered: getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1',
+		});
+		if (decision === 'wait') return;
+		onboardingAutoOpened = true;
+		if (decision === 'open') {
 			removeLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered);
-			appShell.openSettings('providers');
+			appShell.openOnboardingWizard();
 		}
 	});
 </script>

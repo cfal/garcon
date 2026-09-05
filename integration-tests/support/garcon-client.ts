@@ -55,8 +55,11 @@ import {
 import type { TransientFeedRow } from '../../common/chat-transient-feed.js';
 import {
   parseReorderChatResponse,
+  parseSortChatOrderResponse,
   type ReorderChatRequest,
   type ReorderChatResponse,
+  type SortChatOrderRequest,
+  type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
 import type {
   GenerateChatTitleRequest,
@@ -496,6 +499,15 @@ export class GarconTestClient {
     const response = await this.post<unknown>('/api/v1/chats/reorder', request);
     const parsed = parseReorderChatResponse(response);
     if (!parsed) throw new Error(`Invalid chat reorder response: ${JSON.stringify(response)}`);
+    return parsed;
+  }
+
+  async sortChatOrder(request: SortChatOrderRequest): Promise<SortChatOrderResponse> {
+    const response = await this.post<unknown>('/api/v1/chats/sort', request);
+    const parsed = parseSortChatOrderResponse(response);
+    if (!parsed) {
+      throw new Error(`Invalid chat order sort response: ${JSON.stringify(response)}`);
+    }
     return parsed;
   }
 

@@ -39,7 +39,7 @@ describe('Lightpanda workspace windows', () => {
       await app.fill('textarea[placeholder="Reply..."]', 'Draft survives window destruction');
 
       await app.openNewWorkspaceWindow('Open Git Workbench');
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       expect(gitWindowId).not.toBe(chatWindowId);
       await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
@@ -93,12 +93,12 @@ describe('Lightpanda workspace windows', () => {
       if (!chat) throw new Error('Missing persisted Chat fixture.');
 
       await app.openNewWorkspaceWindow('Open Git Workbench');
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
       await waitForPersistedWindowState(fixture.page, {
-        windowCount: 2,
+        windowCount: 3,
         chatIds: [chat.id],
         requiredSingletons: ['git', 'git-compare'],
       });
@@ -106,7 +106,7 @@ describe('Lightpanda workspace windows', () => {
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
       await fixture.page.reload({ waitUntil: [] });
       await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
       expect(
         await fixture.page.$$eval(
@@ -152,7 +152,7 @@ describe('Lightpanda workspace windows', () => {
       await fixture.integration.client.waitForTurnTerminal(chatCId, startedChatC.turnId);
       await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatCId}"]`);
       expect(await app.currentWorkspaceWindowId()).toBe(secondWindowId);
-      await app.clickSidebarChatContaining('workspace-chat-c');
+      await app.clickSidebarChatById(chatCId);
       await app.waitForSelectedChat(chatCId);
       await app.fill(
         `[data-workspace-surface-id="chat-view:${secondWindowId}"] textarea[placeholder="Reply..."]`,
@@ -166,7 +166,7 @@ describe('Lightpanda workspace windows', () => {
           `[data-conversation-panel="chat-view:${secondWindowId}"] textarea`,
         ),
       ).toBeNull();
-      await app.clickSidebarChatContaining('workspace-chat-a');
+      await app.clickSidebarChatById(chatA.id);
       await app.waitForSelectedChat(chatA.id);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,
@@ -217,14 +217,14 @@ describe('Lightpanda workspace windows', () => {
       });
       await fixture.integration.client.waitForTurnTerminal(chatBId, startedChatB.turnId);
       await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatBId}"]`);
-      await app.clickSidebarChatContaining('workspace-chat-move-b');
+      await app.clickSidebarChatById(chatBId);
       await app.waitForSelectedChat(chatBId);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,
         [secondChatWindowId]: chatBId,
       });
 
-      const filesWindowId = await app.openNewWorkspaceWindow('Open Files');
+      const filesWindowId = await app.workspaceWindowIdForSurface('singleton:files');
       await app.waitForWorkspaceWindowCount(3);
       expect(await fixture.page.$$('[data-workspace-new-window-menu]')).toHaveLength(0);
       await waitForWindowActiveSurface(fixture.page, filesWindowId, 'singleton:files');
@@ -235,7 +235,7 @@ describe('Lightpanda workspace windows', () => {
       });
 
       await app.focusWorkspaceWindow(secondChatWindowId);
-      await app.clickSidebarChatContaining('workspace-chat-move-b');
+      await app.clickSidebarChatById(chatBId);
       await app.waitForSelectedChat(chatBId);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,

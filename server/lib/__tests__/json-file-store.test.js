@@ -6,7 +6,6 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import {
   CorruptStateFileError,
-  JsonFileStore,
   QUARANTINE_INFIX,
   readJsonStateFile,
   writeJsonFileAtomic,
@@ -55,26 +54,6 @@ describe('json file store', () => {
     const source = atomicWriterSource();
     expect(source).toContain('await syncDirectory(dir)');
     expect(source.indexOf('await fs.rename(tempPath')).toBeLessThan(source.lastIndexOf('await syncDirectory(dir)'));
-  });
-
-  it('normalizes parsed values and supplies empty state for missing files', async () => {
-    const dir = await tempDir();
-    const filePath = path.join(dir, 'ledger.json');
-    const store = new JsonFileStore({
-      filePath,
-      empty: () => ({ version: 1, records: [] }),
-      normalize: (value) => {
-        const record = value && typeof value === 'object' ? value : {};
-        return {
-          version: 1,
-          records: Array.isArray(record.records) ? record.records : [],
-        };
-      },
-    });
-
-    await expect(store.read()).resolves.toEqual({ version: 1, records: [] });
-    await fs.writeFile(filePath, JSON.stringify({ records: [{ id: 'a' }] }), 'utf8');
-    await expect(store.read()).resolves.toEqual({ version: 1, records: [{ id: 'a' }] });
   });
 
   it('quarantines malformed state without losing its bytes or mode', async () => {

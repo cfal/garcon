@@ -92,6 +92,8 @@ import {
 import {
   adoptTurn,
   cancelTurnStartWaiters,
+  providerOwnsReasoningEffort,
+  recordExplicitReasoningEffort,
   sessionForClientThread,
   sourceForClientThread,
   sourceForClientTurn,
@@ -199,6 +201,7 @@ export class CodexAppServerRuntime {
       flushPendingFinish: (session) => this.#flushPendingFinish(session),
       canApplyTurnAttempt: (session, generation) => this.#canApplyTurnAttempt(session, generation),
       generationAcrossTurnBoundary: (session, generation) => this.#generationAcrossTurnBoundary(session, generation),
+      recordExplicitReasoningEffort,
     });
   }
 
@@ -319,6 +322,7 @@ export class CodexAppServerRuntime {
         codexHome: initialized.codexHome || null,
         client,
         runtimeIdentity: codexSourceRuntimeIdentity(request),
+        providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
         confirmedThreadSettings: this.#initialThreadSettings(request, started),
         operation,
       });
@@ -378,6 +382,7 @@ export class CodexAppServerRuntime {
           if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
             throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
           }
+          recordExplicitReasoningEffort(session, request);
           await this.#ensureGoalEffort(session, request);
           if (request.executionAdmission) await markCodexExecutionStarted(request);
           if (!request.codexGoalCommand) {
@@ -584,6 +589,8 @@ export class CodexAppServerRuntime {
     const session = this.#sourceForThread(agentSessionId);
     if (!session) return Promise.resolve();
     const target = codexThreadSettingsTarget(configuration);
+    // Records explicit intent before the RPC because its confirmation may precede its response.
+    if (target.effort !== null) session.providerOwnsReasoningEffort = false;
     const update = session.threadSettingsUpdateChain.then(() => (
       this.#applyThreadSettings(session, target)
     ));
@@ -819,6 +826,7 @@ export class CodexAppServerRuntime {
     codexHome: string | null;
     client: CodexAppServerClient;
     runtimeIdentity: string;
+    providerOwnsReasoningEffort: boolean;
     confirmedThreadSettings: CodexConfirmedThreadSettings;
     operation: CodexOperation;
   }): RunningCodexSession {
@@ -870,6 +878,7 @@ export class CodexAppServerRuntime {
       lastTurnOperation: null,
       terminalTurnIds: new Set(),
       superseded: false,
+      providerOwnsReasoningEffort: args.providerOwnsReasoningEffort,
       confirmedThreadSettings: args.confirmedThreadSettings,
       pendingThreadSettings: null,
       threadSettingsUpdateChain: Promise.resolve(),
@@ -894,6 +903,9 @@ export class CodexAppServerRuntime {
   ): Promise<{ session: RunningCodexSession; buffered: boolean }> {
     const runtimeIdentity = codexSourceRuntimeIdentity(request);
     const retained = this.#latestSourceByChat.get(request.chatId);
+    // Omitted effort is reusable only when no prior turn, settings update, or goal delivery took ownership.
+    const reasoningEffortIsReusable = () => !providerOwnsReasoningEffort(request)
+      || retained?.providerOwnsReasoningEffort === true;
     const matchingPath = !retained?.nativePath
       || !request.nativePath
       || retained.nativePath === request.nativePath;
@@ -902,7 +914,8 @@ export class CodexAppServerRuntime {
       && !retained.configurationFenced
       && !retained.pendingThreadSettings
       && retained.runtimeIdentity === runtimeIdentity
-      && matchingPath,
+      && matchingPath
+      && reasoningEffortIsReusable(),
     );
     let interruptedWriterReady = false;
     if (
@@ -940,6 +953,19 @@ export class CodexAppServerRuntime {
       assertCodexExecutionOpen(request);
     }
     if (
+      retained?.status === 'interrupting'
+      && interruptedWriterReady
+      && !retained.superseded
+      && (
+        retained.configurationFenced
+        || retained.pendingThreadSettings
+        || !reasoningEffortIsReusable()
+      )
+    ) {
+      await this.#waitForSourceTerminal(retained, request);
+      assertCodexExecutionOpen(request);
+    }
+    if (
       retained
       && this.#latestSourceByChat.get(request.chatId) === retained
       && retained.threadId === request.agentSessionId
@@ -951,6 +977,7 @@ export class CodexAppServerRuntime {
       ))
       && retained.runtimeIdentity === runtimeIdentity
       && matchingPath
+      && reasoningEffortIsReusable()
     ) {
       return {
         session: this.#reactivateSession(retained, request, operation),
@@ -979,6 +1006,7 @@ export class CodexAppServerRuntime {
           codexHome: initialized.codexHome || null,
           client,
           runtimeIdentity,
+          providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
           confirmedThreadSettings: this.#initialThreadSettings(request, resumed),
           operation,
         }),

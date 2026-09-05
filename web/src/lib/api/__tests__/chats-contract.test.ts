@@ -7,6 +7,7 @@ import {
 	toggleArchive,
 	markChatsReadBatch,
 	reorderChat,
+	sortChatOrder,
 	forkChat,
 	validateStart,
 	runChat,
@@ -1379,6 +1380,43 @@ describe('chats API contract', () => {
 			).rejects.toThrow('Invalid chat reorder response');
 		});
 	}
+
+	it('sortChatOrder sends and parses a creation-time preset', async () => {
+		const result = {
+			success: true as const,
+			sortKey: 'created' as const,
+			changed: true,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(result));
+
+		await expect(sortChatOrder({ sortKey: 'created' })).resolves.toEqual(result);
+
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/sort');
+		expect(options.method).toBe('POST');
+		expect(JSON.parse(options.body)).toEqual({ sortKey: 'created' });
+	});
+
+	it('sortChatOrder accepts an unchanged activity preset response', async () => {
+		const result = {
+			success: true as const,
+			sortKey: 'activity' as const,
+			changed: false,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(result));
+
+		await expect(sortChatOrder({ sortKey: 'activity' })).resolves.toEqual(result);
+	});
+
+	it('sortChatOrder rejects a malformed response', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ success: true, sortKey: 'activity', changed: 'yes' }),
+		);
+
+		await expect(sortChatOrder({ sortKey: 'activity' })).rejects.toThrow(
+			'Invalid chat order sort response',
+		);
+	});
 
 	it('forkChat sends POST with sourceChatId and chatId', async () => {
 		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');

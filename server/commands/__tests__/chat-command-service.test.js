@@ -783,6 +783,20 @@ function attachment(mimeType, content = 'hello') {
   };
 }
 
+async function createUnresolvableProjectPaths() {
+  const danglingPath = path.join(projectBaseDir, 'dangling');
+  const danglingAncestorPath = path.join(projectBaseDir, 'dangling-ancestor');
+  const filePath = path.join(projectBaseDir, 'file');
+  await fs.symlink(path.join(projectBaseDir, 'missing'), danglingPath);
+  await fs.symlink(path.join(projectBaseDir, 'missing-ancestor'), danglingAncestorPath);
+  await fs.writeFile(filePath, 'not a directory');
+  return [
+    danglingPath,
+    path.join(danglingAncestorPath, 'project'),
+    path.join(filePath, 'project'),
+  ];
+}
+
 function handoffRunInput(clientRequestId = 'req-agent-handoff') {
   return {
     chatId: SOURCE_CHAT_ID,
@@ -1264,9 +1278,24 @@ describe('ChatCommandService', () => {
     expect(scheduled.chatId).toBe(SCHEDULED_CHAT_ID);
     expect(settings.recordChatStartup).toHaveBeenCalledTimes(1);
     const [
-      { id: interactiveId, ...interactive },
-      { id: cliId, ...cliEntry },
-      { id: scheduledId, ...scheduledEntry },
+      {
+        id: interactiveId,
+        agentOwnershipEpoch: interactiveEpoch,
+        pendingPreambleBoundary: interactiveBoundary,
+        ...interactive
+      },
+      {
+        id: cliId,
+        agentOwnershipEpoch: cliEpoch,
+        pendingPreambleBoundary: cliBoundary,
+        ...cliEntry
+      },
+      {
+        id: scheduledId,
+        agentOwnershipEpoch: scheduledEpoch,
+        pendingPreambleBoundary: scheduledBoundary,
+        ...scheduledEntry
+      },
     ] =
       chats.addChat.mock.calls.map(([entry]) => entry);
     expect(interactiveId).toBe(TARGET_CHAT_ID);
@@ -1274,6 +1303,9 @@ describe('ChatCommandService', () => {
     expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
     expect(cliEntry).toEqual(interactive);
     expect(scheduledEntry).toEqual(interactive);
+    expect(interactiveBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: interactiveEpoch });
+    expect(cliBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: cliEpoch });
+    expect(scheduledBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: scheduledEpoch });
     expect(interactive.parentChat).toBeNull();
     expect(interactive.thinkingMode).toBe('ultra');
     expect(interactive.tags).toEqual(['qa', 'review-needed']);
@@ -1978,6 +2010,28 @@ describe('ChatCommandService', () => {
       code: 'VALIDATION_FAILED',
       status: 404,
     });
+
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('maps unresolvable chat start project paths to not found', async () => {
+    const { service, agents, chats } = makeService({ session: null });
+    const projectPaths = await createUnresolvableProjectPaths();
+
+    for (const [index, projectPath] of projectPaths.entries()) {
+      await expect(service.submitStart({
+        origin: 'interactive',
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        projectPath,
+        command: 'hello',
+        model: 'opus',
+        agentSettings: agentSettings(),
+        clientRequestId: `req-start-unresolvable-${index}`,
+        clientMessageId: `msg-start-unresolvable-${index}`,
+      })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 404 });
+    }
 
     expect(chats.addChat).not.toHaveBeenCalled();
     expect(agents.startSession).not.toHaveBeenCalled();
@@ -5134,6 +5188,21 @@ describe('ChatCommandService', () => {
       { flush: true },
     );
     expect(sessions.get(SOURCE_CHAT_ID).projectPath).toBe(realNextPath);
+  });
+
+  it('maps unresolvable project path updates to not found', async () => {
+    const { service, chats, agents } = makeService();
+    const projectPaths = await createUnresolvableProjectPaths();
+
+    for (const projectPath of projectPaths) {
+      await expect(service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath,
+      })).rejects.toMatchObject({ code: 'PROJECT_PATH_NOT_FOUND', status: 404 });
+    }
+
+    expect(chats.updateProjectPath).not.toHaveBeenCalled();
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
   it('persists a prepared native session before provider cleanup', async () => {

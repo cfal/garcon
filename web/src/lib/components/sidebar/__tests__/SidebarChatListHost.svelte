@@ -11,6 +11,7 @@
 		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatListHostProps {
 		chats: ChatSessionRecord[];
@@ -29,6 +30,7 @@
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
@@ -42,6 +44,7 @@
 		collapsedProjectKeys = new Set<string>(),
 		onToggleProjectCollapsed,
 		onQuickMove = () => {},
+		onSortChatOrder = () => {},
 	}: SidebarChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
@@ -114,5 +117,6 @@
 		onTogglePinned={() => {}}
 		onToggleArchive={() => {}}
 		{onQuickMove}
+		{onSortChatOrder}
 	/>
 </div>

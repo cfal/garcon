@@ -279,4 +279,23 @@ describe('Settings', () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it('opens the onboarding wizard from Local Settings', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('local');
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+
+		try {
+			await fireEvent.click(screen.getByRole('button', { name: 'Restart setup wizard' }));
+
+			expect(appShell.showOnboardingWizard).toBe(true);
+			expect(appShell.showSettings).toBe(false);
+		} finally {
+			appShell.closeOnboardingWizard();
+			rendered.unmount();
+		}
+	});
 });

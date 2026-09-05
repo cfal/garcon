@@ -92,8 +92,11 @@ import type { AgentCommandImage } from '$shared/ws-requests';
 import { AGENT_HANDOFF_HTTP_TIMEOUT_MS } from '$shared/handoff-timeouts';
 import {
 	parseReorderChatResponse,
+	parseSortChatOrderResponse,
 	type ReorderChatRequest,
 	type ReorderChatResponse,
+	type SortChatOrderRequest,
+	type SortChatOrderResponse,
 } from '$shared/chat-order-contracts';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
@@ -650,6 +653,15 @@ export async function reorderChat(request: ReorderChatRequest): Promise<ReorderC
 	const response = await apiPost<unknown>('/api/v1/chats/reorder', request);
 	const parsed = parseReorderChatResponse(response);
 	if (!parsed) throw new Error('Invalid chat reorder response');
+	return parsed;
+}
+
+export async function sortChatOrder(
+	request: SortChatOrderRequest,
+): Promise<SortChatOrderResponse> {
+	const response = await apiPost<unknown>('/api/v1/chats/sort', request);
+	const parsed = parseSortChatOrderResponse(response);
+	if (!parsed) throw new Error('Invalid chat order sort response');
 	return parsed;
 }
 

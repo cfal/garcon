@@ -1,6 +1,10 @@
 import type { ErrorCode } from './error-codes.js';
 import type { HttpErrorResponse } from './http-error.js';
 import { isRecord } from './json.js';
+import {
+  CHAT_ORDER_SORT_KEYS,
+  type ChatOrderSortKey,
+} from './chat-order-sort.js';
 
 export const PERSISTED_CHAT_ORDER_GROUPS = ['pinned', 'normal', 'archived'] as const;
 export type PersistedChatOrderGroup = (typeof PERSISTED_CHAT_ORDER_GROUPS)[number];
@@ -45,9 +49,21 @@ export interface ReorderChatErrorResponse extends HttpErrorResponse {
   errorCode: ReorderChatErrorCode;
 }
 
+export interface SortChatOrderRequest {
+  sortKey: ChatOrderSortKey;
+}
+
+export interface SortChatOrderResponse {
+  success: true;
+  sortKey: ChatOrderSortKey;
+  changed: boolean;
+}
+
 const REQUEST_KEYS = new Set(['chatId', 'placement']);
 const RELATIVE_KEYS = new Set(['kind', 'referenceChatId', 'position']);
 const BOUNDARY_KEYS = new Set(['kind', 'boundary']);
+const SORT_REQUEST_KEYS = new Set(['sortKey']);
+const SORT_RESPONSE_KEYS = new Set(['success', 'sortKey', 'changed']);
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => keys.has(key));
@@ -106,6 +122,23 @@ export function parseReorderChatResponse(value: unknown): ReorderChatResponse | 
     success: true,
     chatId,
     orderGroup: value.orderGroup as PersistedChatOrderGroup,
+    changed: value.changed,
+  };
+}
+
+export function parseSortChatOrderRequest(value: unknown): SortChatOrderRequest | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, SORT_REQUEST_KEYS)) return null;
+  if (!CHAT_ORDER_SORT_KEYS.includes(value.sortKey as ChatOrderSortKey)) return null;
+  return { sortKey: value.sortKey as ChatOrderSortKey };
+}
+
+export function parseSortChatOrderResponse(value: unknown): SortChatOrderResponse | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, SORT_RESPONSE_KEYS)) return null;
+  if (value.success !== true || typeof value.changed !== 'boolean') return null;
+  if (!CHAT_ORDER_SORT_KEYS.includes(value.sortKey as ChatOrderSortKey)) return null;
+  return {
+    success: true,
+    sortKey: value.sortKey as ChatOrderSortKey,
     changed: value.changed,
   };
 }
