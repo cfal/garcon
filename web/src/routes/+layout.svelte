@@ -449,6 +449,7 @@
 			isLoading: auth.isLoading,
 			isAuthenticated: auth.isAuthenticated,
 			authDisabled: auth.authDisabled,
+			isRegistrationRoute: page.url.pathname === '/setup',
 			justRegistered: getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1',
 		});
 		if (decision === 'wait') return;

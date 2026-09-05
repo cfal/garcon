@@ -523,8 +523,8 @@
 			class={cn(
 				'pointer-events-none absolute overflow-visible',
 				composerPlacement && !isMobile ? 'inset-x-0 bottom-0 top-10' : 'inset-0',
-				composerHasLeftSeparator && 'ml-1.5',
-				composerHasRightSeparator && 'mr-1.5',
+				composerHasLeftSeparator && 'ml-3',
+				composerHasRightSeparator && 'mr-3',
 			)}
 			data-workspace-live-chat-body
 			data-workspace-surface-id={composerPlacement?.surface.id}

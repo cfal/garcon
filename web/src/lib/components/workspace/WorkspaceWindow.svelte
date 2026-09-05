@@ -270,8 +270,8 @@
 	<div
 		class={cn(
 			'relative min-h-0 flex-1 overflow-hidden',
-			hasLeftSeparator && 'ml-1.5',
-			hasRightSeparator && 'mr-1.5',
+			hasLeftSeparator && 'ml-3',
+			hasRightSeparator && 'mr-3',
 		)}
 		data-workspace-window-content={workspaceWindow.id}
 	>

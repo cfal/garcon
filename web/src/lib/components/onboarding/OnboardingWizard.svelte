@@ -254,11 +254,9 @@
 
 		<Dialog.Footer class="flex-row items-center justify-between gap-2 sm:justify-between">
 			<div class="flex items-center gap-2">
-				{#if !wizard.isDonePage}
-					<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
-						{m.onboarding_back()}
-					</Button>
-				{/if}
+				<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
+					{m.onboarding_back()}
+				</Button>
 			</div>
 			<div class="flex flex-wrap items-center justify-end gap-3">
 				<div class="flex items-center gap-1.5" aria-hidden="true">
@@ -271,7 +269,7 @@
 						></span>
 					{/each}
 				</div>
-				<span class="sr-only">
+				<span class="sr-only" aria-live="polite" aria-atomic="true">
 					{m.onboarding_step_label({ current: wizard.pageIndex + 1, total: wizard.pageCount })}
 				</span>
 				{#if wizard.isDonePage}

@@ -157,7 +157,7 @@
 		data-workspace-window-resize-hit-area
 		class={cn(
 			'pointer-events-auto absolute z-10',
-			isHorizontal ? '-left-1 bottom-0 top-10 w-3' : 'inset-x-0 bottom-0 h-6',
+			isHorizontal ? '-left-2.5 bottom-0 top-10 w-6' : 'inset-x-0 bottom-0 h-6',
 		)}
 	></div>
 	<!-- Track background -->

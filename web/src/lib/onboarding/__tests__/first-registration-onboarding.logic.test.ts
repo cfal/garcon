@@ -11,6 +11,7 @@ describe('resolveFirstRegistrationOnboarding', () => {
 				isLoading,
 				isAuthenticated,
 				authDisabled: false,
+				isRegistrationRoute: false,
 				justRegistered: true,
 			}),
 		).toBe('wait');
@@ -22,6 +23,7 @@ describe('resolveFirstRegistrationOnboarding', () => {
 				isLoading: false,
 				isAuthenticated: true,
 				authDisabled: true,
+				isRegistrationRoute: false,
 				justRegistered: true,
 			}),
 		).toBe('ignore');
@@ -33,6 +35,7 @@ describe('resolveFirstRegistrationOnboarding', () => {
 				isLoading: false,
 				isAuthenticated: true,
 				authDisabled: false,
+				isRegistrationRoute: false,
 				justRegistered: false,
 			}),
 		).toBe('ignore');
@@ -44,6 +47,29 @@ describe('resolveFirstRegistrationOnboarding', () => {
 				isLoading: false,
 				isAuthenticated: true,
 				authDisabled: false,
+				isRegistrationRoute: false,
+				justRegistered: true,
+			}),
+		).toBe('open');
+	});
+
+	it('waits for registration navigation before reading the success flag', () => {
+		expect(
+			resolveFirstRegistrationOnboarding({
+				isLoading: false,
+				isAuthenticated: true,
+				authDisabled: false,
+				isRegistrationRoute: true,
+				justRegistered: false,
+			}),
+		).toBe('wait');
+
+		expect(
+			resolveFirstRegistrationOnboarding({
+				isLoading: false,
+				isAuthenticated: true,
+				authDisabled: false,
+				isRegistrationRoute: false,
 				justRegistered: true,
 			}),
 		).toBe('open');

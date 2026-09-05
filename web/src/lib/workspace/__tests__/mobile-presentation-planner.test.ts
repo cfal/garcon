@@ -111,7 +111,7 @@ describe('MobilePresentationPlanner', () => {
 		);
 	});
 
-	it("prefers another window's active surface over an inactive tab", () => {
+	it("prefers the source window's prior tab over another window's active surface", () => {
 		const planner = new MobilePresentationPlanner({
 			getContext: () => null,
 			getRouteIdentity: () => '/',
@@ -135,7 +135,7 @@ describe('MobilePresentationPlanner', () => {
 		]);
 
 		expect(planner.resolveReturn('singleton:commit', commitActive)).toEqual({
-			activeId: CANONICAL_FILES_SURFACE_ID,
+			activeId: CANONICAL_CHAT_SURFACE_ID,
 			returnStack: [],
 		});
 	});

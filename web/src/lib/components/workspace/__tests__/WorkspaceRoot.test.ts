@@ -503,14 +503,14 @@ describe('WorkspaceRoot', () => {
 		const edgeContent = contentFor('window-edge');
 		const composerBody = container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')!;
 
-		expect(chatContent.classList.contains('ml-1.5')).toBe(false);
-		expect(chatContent.classList.contains('mr-1.5')).toBe(true);
-		expect(composerBody.classList.contains('ml-1.5')).toBe(false);
-		expect(composerBody.classList.contains('mr-1.5')).toBe(true);
-		expect(filesContent.classList.contains('ml-1.5')).toBe(true);
-		expect(filesContent.classList.contains('mr-1.5')).toBe(true);
-		expect(edgeContent.classList.contains('ml-1.5')).toBe(true);
-		expect(edgeContent.classList.contains('mr-1.5')).toBe(false);
+		expect(chatContent.classList.contains('ml-3')).toBe(false);
+		expect(chatContent.classList.contains('mr-3')).toBe(true);
+		expect(composerBody.classList.contains('ml-3')).toBe(false);
+		expect(composerBody.classList.contains('mr-3')).toBe(true);
+		expect(filesContent.classList.contains('ml-3')).toBe(true);
+		expect(filesContent.classList.contains('mr-3')).toBe(true);
+		expect(edgeContent.classList.contains('ml-3')).toBe(true);
+		expect(edgeContent.classList.contains('mr-3')).toBe(false);
 	});
 
 	it('renders a draft conversation panel without requesting a server transcript', async () => {

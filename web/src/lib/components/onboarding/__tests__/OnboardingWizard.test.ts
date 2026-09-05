@@ -114,6 +114,26 @@ describe('OnboardingWizard', () => {
 		expect(appShell.showSettings).toBe(false);
 	});
 
+	it('returns from the done page to revise chat display settings', async () => {
+		renderWizard();
+		await advanceToDonePage();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+		await screen.findByRole('heading', { name: 'Chat display' });
+	});
+
+	it('announces the current step position', async () => {
+		renderWizard();
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+		const stepStatus = screen.getByText('Step 1 of 4');
+		expect(stepStatus.getAttribute('aria-live')).toBe('polite');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+		await waitFor(() => expect(stepStatus.textContent).toBe('Step 2 of 4'));
+	});
+
 	it('restarts on the theme page after closing', async () => {
 		const { appShell } = renderWizard();
 		await advanceToDonePage();

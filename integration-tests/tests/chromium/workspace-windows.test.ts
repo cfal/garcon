@@ -655,7 +655,7 @@ async function verifyCanonicalSeparatorClearance(
     throw new Error('Missing canonical separator clearance geometry.');
   }
 
-  expect(hitAreaBox.width).toBeGreaterThanOrEqual(12);
+  expect(hitAreaBox.width).toBeGreaterThanOrEqual(24);
   expect(hitAreaBox.x).toBeGreaterThanOrEqual(chatContentBox.x + chatContentBox.width);
   expect(hitAreaBox.x + hitAreaBox.width).toBeLessThan(disclosureBox.x);
   expect(Math.abs(composerBodyBox.x - chatContentBox.x)).toBeLessThanOrEqual(1);
