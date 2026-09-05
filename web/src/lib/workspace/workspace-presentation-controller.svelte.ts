@@ -500,13 +500,18 @@ export class WorkspacePresentationController {
 	}
 
 	presentSurface(surfaceId: string): void {
-		this.#focusIntentGeneration += 1;
+		const generation = ++this.#focusIntentGeneration;
 		this.lastFocusedSurfaceId = surfaceId;
 		const windowId = this.windowOf(surfaceId);
 		if (windowId) this.lastFocusedWindowId = windowId;
 		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
 		this.#adoptComposerAnchor(surfaceId);
-		this.focusPresentedSurface(surfaceId);
+		void tick().then(() => {
+			if (generation !== this.#focusIntentGeneration || this.lastFocusedSurfaceId !== surfaceId) {
+				return;
+			}
+			this.focusPresentedSurface(surfaceId);
+		});
 	}
 
 	focusPresentedSurface(surfaceId: string): void {
