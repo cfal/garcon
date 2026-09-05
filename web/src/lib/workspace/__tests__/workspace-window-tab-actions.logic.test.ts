@@ -8,6 +8,26 @@ import type {
 } from '../surface-types';
 import { chatViewSurfaceId } from '../surface-types';
 import { resolveWorkspaceWindowTabActions } from '../workspace-window-tab-actions';
+import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
+
+function resolveActions(
+	snapshot: WorkspaceLayoutSnapshot,
+	workspaceWindow: WorkspaceWindowNode,
+	surfaceId: string,
+) {
+	return resolveWorkspaceWindowTabActions(
+		snapshot,
+		workspaceWindow.id,
+		workspaceWindow.tabs,
+		surfaceId,
+		(edge, movingSurfaceId) =>
+			resolveUnmeasuredWorkspaceSplit(snapshot, {
+				targetWindowId: workspaceWindow.id,
+				edge,
+				movingSurfaceId,
+			}),
+	);
+}
 
 function workspaceWindow(id: WorkspaceWindowId, order: readonly string[]): WorkspaceWindowNode {
 	const activeId = order[0];
@@ -86,18 +106,13 @@ describe('workspace window tab actions', () => {
 		const destination = workspaceWindow('window-destination', ['terminal:destination']);
 		const snapshot = snapshotWithWindows([source, destination], 'chat-a');
 
-		const actions = resolveWorkspaceWindowTabActions(
-			snapshot,
-			source.id,
-			source.tabs,
-			chatViewSurfaceId(source.id),
-		);
+		const actions = resolveActions(snapshot, source, chatViewSurfaceId(source.id));
 
 		expect(actions.canMoveBetweenWindows).toBe(true);
 		expect(actions.otherWindows.map((workspaceWindow) => workspaceWindow.id)).toEqual([
 			'window-destination',
 		]);
-		expect(actions.canMoveToNewWindow).toBe(true);
+		expect(Object.values(actions.newWindowEdges).every((result) => result?.allowed)).toBe(true);
 	});
 
 	it('keeps existing-window movement but disables a sole Chat directional no-op', () => {
@@ -105,16 +120,11 @@ describe('workspace window tab actions', () => {
 		const destination = workspaceWindow('window-destination', ['terminal:destination']);
 		const snapshot = snapshotWithWindows([source, destination], 'chat-a');
 
-		const actions = resolveWorkspaceWindowTabActions(
-			snapshot,
-			source.id,
-			source.tabs,
-			chatViewSurfaceId(source.id),
-		);
+		const actions = resolveActions(snapshot, source, chatViewSurfaceId(source.id));
 
 		expect(actions.canMoveBetweenWindows).toBe(true);
 		expect(actions.otherWindows).toHaveLength(1);
-		expect(actions.canMoveToNewWindow).toBe(false);
+		expect(Object.values(actions.newWindowEdges)).toEqual([null, null, null, null]);
 	});
 
 	it('disables a sole ordinary tab directional no-op', () => {
@@ -124,15 +134,10 @@ describe('workspace window tab actions', () => {
 		]);
 		const snapshot = snapshotWithWindows([source, destination], 'chat-a');
 
-		const actions = resolveWorkspaceWindowTabActions(
-			snapshot,
-			source.id,
-			source.tabs,
-			'terminal:source',
-		);
+		const actions = resolveActions(snapshot, source, 'terminal:source');
 
 		expect(actions.canMoveBetweenWindows).toBe(true);
-		expect(actions.canMoveToNewWindow).toBe(false);
+		expect(Object.values(actions.newWindowEdges)).toEqual([null, null, null, null]);
 	});
 
 	it('offers no cross-window movement for an empty Chat view', () => {
@@ -143,16 +148,11 @@ describe('workspace window tab actions', () => {
 		const destination = workspaceWindow('window-destination', ['terminal:destination']);
 		const snapshot = snapshotWithWindows([source, destination], null);
 
-		const actions = resolveWorkspaceWindowTabActions(
-			snapshot,
-			source.id,
-			source.tabs,
-			chatViewSurfaceId(source.id),
-		);
+		const actions = resolveActions(snapshot, source, chatViewSurfaceId(source.id));
 
 		expect(actions.canMoveBetweenWindows).toBe(false);
 		expect(actions.otherWindows).toEqual([]);
-		expect(actions.canMoveToNewWindow).toBe(false);
+		expect(Object.values(actions.newWindowEdges)).toEqual([null, null, null, null]);
 	});
 
 	it('keeps existing destinations available while disabling new windows at the cap', () => {
@@ -170,14 +170,31 @@ describe('workspace window tab actions', () => {
 			'chat-a',
 		);
 
+		const actions = resolveActions(snapshot, source, chatViewSurfaceId(source.id));
+
+		expect(actions.otherWindows).toHaveLength(3);
+		expect(
+			Object.values(actions.newWindowEdges).every(
+				(result) => !result?.allowed && result?.reason === 'resource-ceiling',
+			),
+		).toBe(true);
+	});
+
+	it('preserves edge-specific admission results', () => {
+		const source = workspaceWindow('window-source', [
+			chatViewSurfaceId('window-source'),
+			'terminal:source',
+		]);
+		const snapshot = snapshotWithWindows([source], 'chat-a');
 		const actions = resolveWorkspaceWindowTabActions(
 			snapshot,
 			source.id,
 			source.tabs,
 			chatViewSurfaceId(source.id),
+			(edge) => (edge === 'top' ? { allowed: true } : { allowed: false, reason: 'too-small' }),
 		);
 
-		expect(actions.otherWindows).toHaveLength(3);
-		expect(actions.canMoveToNewWindow).toBe(false);
+		expect(actions.newWindowEdges.top).toEqual({ allowed: true });
+		expect(actions.newWindowEdges.left).toEqual({ allowed: false, reason: 'too-small' });
 	});
 });

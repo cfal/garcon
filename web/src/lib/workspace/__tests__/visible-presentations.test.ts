@@ -116,6 +116,73 @@ describe('visiblePortablePresentations', () => {
 		]);
 	});
 
+	it('projects one runtime-selected desktop window without changing mobile projection', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-1' },
+			{
+				type: 'open-chat-in-new-window',
+				chatId: 'chat-2',
+				targetWindowId: 'window-main',
+				edge: 'right',
+				newWindowId: 'window-2',
+				partitionId: 'partition-1',
+			},
+		]);
+
+		expect(
+			visibleChatPresentations(snapshot, 'desktop', { projectedWindowId: 'window-2' }),
+		).toEqual([
+			{
+				surfaceId: 'chat-view:window-2',
+				chatId: 'chat-2',
+				presentation: 'window-2',
+				windowId: 'window-2',
+			},
+		]);
+		expect(visibleChatPresentations(snapshot, 'mobile', { projectedWindowId: 'window-2' })).toEqual(
+			[
+				{
+					surfaceId: 'chat-view:window-main',
+					chatId: 'chat-1',
+					presentation: 'mobile',
+					windowId: null,
+				},
+			],
+		);
+	});
+
+	it('gives manual fullscreen precedence over a runtime projection', () => {
+		const snapshot = reduceWorkspaceLayout(layoutWithGitWindow(), [
+			{ type: 'set-fullscreen-window', windowId: 'window-2' },
+		]);
+
+		expect([
+			...visiblePresentationMap(snapshot, 'desktop', { projectedWindowId: 'window-main' }),
+		]).toEqual([['window-2', 'singleton:git']]);
+	});
+
+	it('retains active portable renderers hidden by a runtime projection', () => {
+		const snapshot = layoutWithGitWindow();
+		const options = { projectedWindowId: 'window-main' as WorkspaceWindowId };
+		const visible = visiblePortablePresentations(snapshot, false, options);
+
+		expect(visible).toEqual([]);
+		expect(renderedPortablePresentations(snapshot, false, visible, new Set(), options)).toEqual([
+			{
+				surfaceId: 'singleton:git',
+				presentation: 'window-2',
+				windowId: 'window-2',
+				visible: false,
+			},
+			{
+				surfaceId: 'singleton:files',
+				presentation: 'window-files',
+				windowId: 'window-files',
+				visible: false,
+			},
+		]);
+	});
+
 	it('retains activated singleton renderers per window without retaining session surfaces', () => {
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{

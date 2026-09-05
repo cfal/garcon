@@ -19,6 +19,7 @@
 		moveWorkspaceTabToNewWindow,
 		resolveWorkspaceWindowTabActions,
 	} from '$lib/workspace/workspace-window-tab-actions.js';
+	import { workspaceSplitBlockMessage } from '$lib/workspace/workspace-split-blocked-error.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceWindowChatMetadata from './WorkspaceWindowChatMetadata.svelte';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
@@ -48,7 +49,13 @@
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
 	const tabActions = $derived(
-		resolveWorkspaceWindowTabActions(workspace.layout.snapshot, windowId, tabs, surfaceId),
+		resolveWorkspaceWindowTabActions(
+			workspace.layout.snapshot,
+			windowId,
+			tabs,
+			surfaceId,
+			(edge, movingSurfaceId) => workspace.resolveSplitAdmission(windowId, edge, movingSurfaceId),
+		),
 	);
 	const surface = $derived(tabActions.surface);
 	const chatMetadata = $derived.by(() => {
@@ -90,6 +97,13 @@
 
 	function moveToNewWindow(edge: WorkspaceWindowEdge): void {
 		void moveWorkspaceTabToNewWindow(workspace, surfaceId, windowId, edge).catch(notifyFailure);
+	}
+
+	function newWindowTitle(edge: WorkspaceWindowEdge): string | undefined {
+		const admission = tabActions.newWindowEdges[edge];
+		return admission && !admission.allowed
+			? workspaceSplitBlockMessage(admission.reason)
+			: undefined;
 	}
 
 	function closeTab(): void {
@@ -134,7 +148,8 @@
 	{/if}
 	<menu.Item
 		data-workspace-window-tab-action="move-new-left"
-		disabled={!tabActions.canMoveToNewWindow}
+		disabled={tabActions.newWindowEdges.left?.allowed !== true}
+		title={newWindowTitle('left')}
 		onSelect={() => moveToNewWindow('left')}
 	>
 		<PanelRight class="rotate-180" />
@@ -142,7 +157,8 @@
 	</menu.Item>
 	<menu.Item
 		data-workspace-window-tab-action="move-new-right"
-		disabled={!tabActions.canMoveToNewWindow}
+		disabled={tabActions.newWindowEdges.right?.allowed !== true}
+		title={newWindowTitle('right')}
 		onSelect={() => moveToNewWindow('right')}
 	>
 		<PanelRight />
@@ -150,7 +166,8 @@
 	</menu.Item>
 	<menu.Item
 		data-workspace-window-tab-action="move-new-top"
-		disabled={!tabActions.canMoveToNewWindow}
+		disabled={tabActions.newWindowEdges.top?.allowed !== true}
+		title={newWindowTitle('top')}
 		onSelect={() => moveToNewWindow('top')}
 	>
 		<PanelTop />
@@ -158,7 +175,8 @@
 	</menu.Item>
 	<menu.Item
 		data-workspace-window-tab-action="move-new-bottom"
-		disabled={!tabActions.canMoveToNewWindow}
+		disabled={tabActions.newWindowEdges.bottom?.allowed !== true}
+		title={newWindowTitle('bottom')}
 		onSelect={() => moveToNewWindow('bottom')}
 	>
 		<PanelTop class="rotate-180" />

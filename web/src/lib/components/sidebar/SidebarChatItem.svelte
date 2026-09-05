@@ -21,6 +21,7 @@
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { WORKSPACE_DRAG_MIME } from '$lib/workspace/window-dnd.svelte.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
@@ -54,7 +55,7 @@
 		onMoveToBottom?: () => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
-		newWindowBlocked?: boolean;
+		newWindowEdges: WorkspaceSplitAdmissions;
 	}
 
 	let {
@@ -86,7 +87,7 @@
 		onMoveToBottom,
 		onSortChatOrder,
 		onOpenInNewWindow,
-		newWindowBlocked = false,
+		newWindowEdges,
 	}: SidebarChatItemProps = $props();
 
 	let isProcessing = $derived(session.isProcessing);
@@ -401,7 +402,7 @@
 						{onMoveToBottom}
 						{onSortChatOrder}
 						{onOpenInNewWindow}
-						{newWindowBlocked}
+						{newWindowEdges}
 						{onTogglePinned}
 						{onToggleArchive}
 						onRename={requestRename}

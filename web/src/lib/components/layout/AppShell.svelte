@@ -55,6 +55,7 @@
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { windowNodeById } from '$lib/workspace/window-tree.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
@@ -127,9 +128,18 @@
 	const workspaceFullscreen = $derived(
 		!isMobile && workspace.layout.snapshot.fullscreenWindowId !== null,
 	);
+	const newWindowEdges = $derived<WorkspaceSplitAdmissions>(
+		workspace.resolveSplitAdmissions(workspace.currentWindowId),
+	);
 	const hideLeftSidebar = $derived(workspaceFullscreen);
 	const chatListAutohideActive = $derived(
 		!isMobile && !hideLeftSidebar && localSettings.chatListAutohide && hoverCapability.current,
+	);
+	const chatListConsumesWorkspaceWidth = $derived(
+		!isMobile && !hideLeftSidebar && !chatListAutohideActive,
+	);
+	const canEnableChatListAutohide = $derived(
+		hoverCapability.current && !localSettings.chatListAutohide,
 	);
 	const chatListAutohide = new ChatListAutohideState({
 		get active() {
@@ -551,6 +561,10 @@
 		else chatListAutohide.collapse();
 	}
 
+	function enableChatListAutohide(): void {
+		localSettings.set('chatListAutohide', true);
+	}
+
 	function handleDesktopChatListFocus(): void {
 		workspace.noteChatListFocus();
 	}
@@ -615,7 +629,7 @@
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowPreambles={() => appShell.openPreambles()}
 		onShowSettings={() => appShell.openSettings()}
-		newWindowBlocked={!workspace.canOpenNewWindow}
+		{newWindowEdges}
 	/>
 {/snippet}
 
@@ -734,6 +748,9 @@
 					{isMobile}
 					onRegisterReload={handleRegisterReload}
 					chatActions={workspaceChatActions}
+					{chatListConsumesWorkspaceWidth}
+					{canEnableChatListAutohide}
+					onEnableChatListAutohide={enableChatListAutohide}
 				/>
 			</div>
 			{#if isMobile && !mobileKeyboardVisible && !mobileTransientSurface}

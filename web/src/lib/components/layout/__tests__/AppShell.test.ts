@@ -443,6 +443,26 @@ describe('AppShell responsive workspace binding', () => {
 		expect(chatList?.style.width).toBe('320px');
 	});
 
+	it('passes chat-list recovery ownership to the workspace without coupling sidebar visibility', async () => {
+		installContext();
+		const localSettings = testContext.current?.localSettings as AppShellLocalSettingsState;
+		const set = vi.spyOn(localSettings, 'set');
+		render(AppShell);
+		const workspaceRoot = screen.getByTestId('workspace-root-stub');
+
+		expect(workspaceRoot.dataset.chatListConsumesWidth).toBe('true');
+		expect(workspaceRoot.dataset.canEnableChatListAutohide).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Enable auto-hide from workspace' }));
+		expect(set).toHaveBeenCalledWith('chatListAutohide', true);
+
+		localSettings.chatListAutohide = true;
+		await waitFor(() => expect(workspaceRoot.dataset.chatListConsumesWidth).toBe('false'));
+		expect(workspaceRoot.dataset.canEnableChatListAutohide).toBe('false');
+		expect(document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden')).toBe(
+			'false',
+		);
+	});
+
 	it.each([
 		{ dock: 'left' as const, edgeClass: 'start-0', hiddenClass: '-translate-x-full' },
 		{ dock: 'right' as const, edgeClass: 'end-0', hiddenClass: 'translate-x-full' },

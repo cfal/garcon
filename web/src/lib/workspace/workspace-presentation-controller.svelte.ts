@@ -42,6 +42,7 @@ interface WorkspacePresentationControllerDeps {
 	files: FileSessionRegistry;
 	singletons: SingletonSurfaceRegistry;
 	surfaceFrames?: SurfaceFrameRegistry;
+	isCompactProjectionActive(): boolean;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	getRouteIdentity(): string;
 }
@@ -164,6 +165,10 @@ export class WorkspacePresentationController {
 		return [...this.#visiblePresentations(this.layout.snapshot).values()].includes(surfaceId);
 	}
 
+	syncProjectionVisibility(): void {
+		this.#syncSingletonVisibility(this.layout.snapshot);
+	}
+
 	windowOf(surfaceId: string): WorkspaceWindowId | null {
 		return this.windowOfSnapshot(this.layout.snapshot, surfaceId);
 	}
@@ -281,19 +286,14 @@ export class WorkspacePresentationController {
 		this.#clearPointerInteraction();
 	}
 
-	activateWindow(windowId: WorkspaceWindowId): void {
-		if (this.isMobile) return;
-		const snapshot = this.layout.snapshot;
-		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
-		if (!workspaceWindow || !isDesktopWindowPresented(snapshot, windowId)) return;
+	cancelPendingWindowPointerInteraction(): void {
+		this.#clearPointerInteraction();
+	}
 
-		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
-		const generation = this.#supersedeFocusIntent();
-		const surfaceId = workspaceWindow.tabs.activeId;
-		this.focusOwner = { kind: 'surface', surfaceId };
-		this.lastFocusedWindowId = windowId;
-		this.lastFocusedSurfaceId = surfaceId;
-		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
+	activateWindow(windowId: WorkspaceWindowId): void {
+		const activation = this.#beginWindowActivation(windowId, 'surface');
+		if (!activation) return;
+		const { generation, surfaceId } = activation;
 
 		void tick().then(() => {
 			if (generation !== this.#focusIntentGeneration || this.currentWindowId !== windowId) return;
@@ -301,6 +301,34 @@ export class WorkspacePresentationController {
 			if (currentWindow?.tabs.activeId !== surfaceId) return;
 			this.focusPresentedSurface(surfaceId);
 		});
+	}
+
+	activateWindowFromCompactNavigation(windowId: WorkspaceWindowId): void {
+		this.#beginWindowActivation(windowId, 'window-chrome');
+	}
+
+	#beginWindowActivation(
+		windowId: WorkspaceWindowId,
+		focusOwnerKind: 'surface' | 'window-chrome',
+	): { generation: number; surfaceId: string } | null {
+		if (this.isMobile) return null;
+		const snapshot = this.layout.snapshot;
+		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+		if (!workspaceWindow || !isDesktopWindowPresented(snapshot, windowId)) return null;
+
+		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		const generation = this.#supersedeFocusIntent();
+		const surfaceId = workspaceWindow.tabs.activeId;
+		if (focusOwnerKind === 'surface') {
+			this.focusOwner = { kind: 'surface', surfaceId };
+		} else {
+			this.focusOwner = { kind: 'window-chrome', windowId, surfaceId };
+		}
+		this.lastFocusedWindowId = windowId;
+		this.lastFocusedSurfaceId = surfaceId;
+		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
+		if (this.deps.isCompactProjectionActive()) this.syncProjectionVisibility();
+		return { generation, surfaceId };
 	}
 
 	async focusChat(): Promise<void> {
@@ -354,7 +382,10 @@ export class WorkspacePresentationController {
 		return this.#focusAdjacentTab(owner, 1, focusSurface);
 	}
 
-	cycleWindowFocus(owner: FocusOwner, focusSurface: (surfaceId: string) => void): void {
+	cycleWindowFocus(
+		owner: FocusOwner,
+		activateWindow: (windowId: WorkspaceWindowId) => boolean,
+	): void {
 		if (this.isMobile || this.layout.snapshot.fullscreenWindowId) return;
 		const windows = collectWindowNodes(this.layout.snapshot.desktopRoot);
 		if (windows.length < 2) return;
@@ -367,8 +398,13 @@ export class WorkspacePresentationController {
 		const currentIndex = windows.findIndex(
 			(workspaceWindow) => workspaceWindow.id === ownerWindowId,
 		);
-		const nextWindow = windows[(currentIndex + 1 + windows.length) % windows.length];
-		focusSurface(nextWindow.tabs.activeId);
+		const candidates =
+			currentIndex < 0
+				? windows
+				: [...windows.slice(currentIndex + 1), ...windows.slice(0, currentIndex)];
+		for (const candidate of candidates) {
+			if (activateWindow(candidate.id)) return;
+		}
 	}
 
 	async enterMobilePresentation(): Promise<void> {
@@ -488,13 +524,19 @@ export class WorkspacePresentationController {
 	}
 
 	presentSurface(surfaceId: string): void {
-		this.#focusIntentGeneration += 1;
+		const generation = ++this.#focusIntentGeneration;
 		this.lastFocusedSurfaceId = surfaceId;
 		const windowId = this.windowOf(surfaceId);
 		if (windowId) this.lastFocusedWindowId = windowId;
 		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
 		this.#adoptComposerAnchor(surfaceId);
-		this.focusPresentedSurface(surfaceId);
+		if (this.deps.isCompactProjectionActive()) this.syncProjectionVisibility();
+		void tick().then(() => {
+			if (generation !== this.#focusIntentGeneration || this.lastFocusedSurfaceId !== surfaceId) {
+				return;
+			}
+			this.focusPresentedSurface(surfaceId);
+		});
 	}
 
 	focusPresentedSurface(surfaceId: string): void {
@@ -796,7 +838,7 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): boolean {
-		return [...visiblePresentationMap(snapshot, mode).values()].some(
+		return [...this.#visiblePresentations(snapshot, mode).values()].some(
 			(surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat',
 		);
 	}
@@ -834,6 +876,11 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): Map<PresentationHostId, string> {
-		return visiblePresentationMap(snapshot, mode);
+		if (mode === 'mobile' || !this.deps.isCompactProjectionActive()) {
+			return visiblePresentationMap(snapshot, mode);
+		}
+		return visiblePresentationMap(snapshot, mode, {
+			projectedWindowId: this.resolveCurrentWindow(snapshot),
+		});
 	}
 }

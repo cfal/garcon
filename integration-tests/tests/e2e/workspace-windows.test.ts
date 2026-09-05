@@ -189,7 +189,7 @@ describe('Lightpanda workspace windows', () => {
   test('copies sidebar Chats but moves Chat tabs into empty and occupied windows', async () => {
     await withE2eFixture('workspace-window-chat-movement', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
-      await app.setViewport(1_440, 900);
+      await app.setViewport(1_760, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('workspace-chat-move-a');

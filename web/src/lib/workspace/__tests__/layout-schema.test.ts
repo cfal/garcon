@@ -4,11 +4,72 @@ import {
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 } from '../canonical-layout';
-import { parsePersistedWorkspaceLayout, serializeWorkspaceLayout } from '../layout-schema';
+import {
+	parsePersistedWorkspaceLayout,
+	serializeWorkspaceLayout,
+	WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
+	WORKSPACE_LAYOUT_MAX_PARSE_NODES,
+	WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW,
+	WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS,
+} from '../layout-schema';
 import { portableSingletonDescriptor } from '../surface-types';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { collectWindowNodes, windowNodeById } from '../window-tree';
-import type { PersistedWorkspaceLayoutNode } from '$shared/workspace-layout';
+import type {
+	PersistedWorkspaceLayoutNode,
+	PersistedWorkspaceSurfaceRef,
+} from '$shared/workspace-layout';
+
+function persistedWindow(index: number): PersistedWorkspaceLayoutNode {
+	return {
+		type: 'window',
+		id: `window-budget-${index}`,
+		order: [{ type: 'chat', chatId: `chat-budget-${index}` }],
+		active: { type: 'chat', chatId: `chat-budget-${index}` },
+		mru: [],
+	};
+}
+
+function skewedTree(depth: number): PersistedWorkspaceLayoutNode {
+	let root = persistedWindow(1);
+	for (let level = 2; level <= depth; level += 1) {
+		root = {
+			type: 'partition',
+			id: `partition-depth-${level}`,
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [persistedWindow(level), root],
+		};
+	}
+	return root;
+}
+
+function fullTreeWithNodes(nodeCount: number): PersistedWorkspaceLayoutNode {
+	const leafCount = (nodeCount + 1) / 2;
+	let level = Array.from({ length: leafCount }, (_, index) => persistedWindow(index + 1));
+	let partitionIndex = 0;
+	while (level.length > 1) {
+		const next: PersistedWorkspaceLayoutNode[] = [];
+		for (let index = 0; index < level.length; index += 2) {
+			const first = level[index]!;
+			const second = level[index + 1];
+			if (!second) {
+				next.push(first);
+				continue;
+			}
+			partitionIndex += 1;
+			next.push({
+				type: 'partition',
+				id: `partition-node-${partitionIndex}`,
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [first, second],
+			});
+		}
+		level = next;
+	}
+	return level[0]!;
+}
 
 describe('workspace layout V2 schema', () => {
 	it('round-trips mixed window topology, local tab MRU, ratios, terminals, and Chat IDs', () => {
@@ -283,6 +344,106 @@ describe('workspace layout V2 schema', () => {
 			Object.values(result.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
 		).toHaveLength(3);
 		expect(result.snapshot.surfaces['chat-view:window-5']).toBeUndefined();
+	});
+
+	it('accepts the maximum restore depth and falls back one level beyond it', () => {
+		const accepted = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: skewedTree(WORKSPACE_LAYOUT_MAX_PARSE_DEPTH),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(accepted.source).toBe('valid');
+
+		const rejected = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: skewedTree(WORKSPACE_LAYOUT_MAX_PARSE_DEPTH + 1),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
+	});
+
+	it('bounds total restored nodes before resource-ceiling repair', () => {
+		const largestFullTreeBelowBudget = WORKSPACE_LAYOUT_MAX_PARSE_NODES - 1;
+		const accepted = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: fullTreeWithNodes(largestFullTreeBelowBudget),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(accepted.source).toBe('valid');
+		expect(collectWindowNodes(accepted.snapshot.desktopRoot)).toHaveLength(4);
+
+		const firstFullTreeAboveBudget = WORKSPACE_LAYOUT_MAX_PARSE_NODES + 1;
+		const rejected = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: fullTreeWithNodes(firstFullTreeAboveBudget),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
+	});
+
+	it.each(['order', 'mru'] as const)(
+		'accepts the per-window %s budget and truncates the next reference',
+		(field) => {
+			const refs: PersistedWorkspaceSurfaceRef[] = Array.from(
+				{ length: WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW },
+				(_, index) =>
+					index === 0
+						? { type: 'chat', chatId: 'chat-budget' }
+						: { type: 'terminal', terminalId: `terminal-budget-${index}` },
+			);
+			const root = {
+				type: 'window' as const,
+				id: 'window-main',
+				order: refs,
+				active: refs[0],
+				mru: field === 'mru' ? refs : [],
+			};
+
+			const accepted = parsePersistedWorkspaceLayout(
+				JSON.stringify({ version: 2, root, unplacedTerminalIds: [] }),
+			);
+			expect(accepted.source).toBe('valid');
+
+			const oversizedRoot = {
+				...root,
+				[field]: [...refs, { type: 'terminal', terminalId: 'terminal-over-budget' }],
+			};
+			const truncated = parsePersistedWorkspaceLayout(
+				JSON.stringify({ version: 2, root: oversizedRoot, unplacedTerminalIds: [] }),
+			);
+			expect(truncated.source).toBe('valid');
+			const restoredWindow = windowNodeById(truncated.snapshot.desktopRoot, 'window-main');
+			expect(restoredWindow?.tabs.order).toHaveLength(WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
+			expect(restoredWindow?.tabs.mru).toHaveLength(WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
+			expect(truncated.snapshot.surfaces['terminal:terminal-over-budget']).toBeUndefined();
+		},
+	);
+
+	it('truncates persisted unplaced terminals at the parse budget', () => {
+		const terminalIds = Array.from(
+			{ length: WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS + 1 },
+			(_, index) => `terminal-unplaced-${index}`,
+		);
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: persistedWindow(1),
+				unplacedTerminalIds: terminalIds,
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.unplacedTerminalIds).toEqual(
+			terminalIds.slice(0, WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS),
+		);
 	});
 
 	it('falls back for malformed current roots and unsupported versions', () => {

@@ -5361,6 +5361,7 @@ describe('Chromium transcript virtualization', () => {
     await withChromiumFixture(
       'transcript-virtualization-geometry',
       async (fixture, markPhase) => {
+        await fixture.page.setViewportSize({ width: 3_200, height: 900 });
         markPhase('creating the geometry transcript');
         const chatId = await createTranscript(fixture);
         markPhase('verifying bounded prepend geometry');

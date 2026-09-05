@@ -4,17 +4,15 @@ import {
 	type WorkspaceWindowDropZone,
 } from './window-drop-geometry.js';
 import {
-	MAX_WORKSPACE_WINDOWS,
 	type WorkspaceLayoutSnapshot,
 	type WorkspaceLayoutReader,
 	type WorkspaceWindowId,
 } from './surface-types.js';
-import {
-	collectWindowNodes,
-	projectedWindowCountAfterTabMove,
-	windowIdOfSurface,
-	windowNodeById,
-} from './window-tree.js';
+import { windowIdOfSurface, windowNodeById } from './window-tree.js';
+import type {
+	WorkspaceSplitAdmissionResolver,
+	WorkspaceSplitBlockReason,
+} from './window-geometry-policy.js';
 
 export const WORKSPACE_DRAG_MIME = 'application/x-garcon-workspace-drag';
 
@@ -32,7 +30,7 @@ export type WorkspaceWindowDropTarget =
 			kind: 'window';
 			windowId: WorkspaceWindowId;
 			zone: WorkspaceWindowDropZone;
-			blockedReason?: 'max-windows' | 'same-window';
+			blockedReason?: WorkspaceSplitBlockReason | 'same-window';
 	  }
 	| {
 			kind: 'tab';
@@ -72,7 +70,10 @@ export class WorkspaceWindowDndController {
 	payload = $state<WorkspaceDragPayload | null>(null);
 	activeTarget = $state<WorkspaceWindowDropTarget | null>(null);
 
-	constructor(private readonly layout: WorkspaceLayoutReader) {}
+	constructor(
+		private readonly layout: WorkspaceLayoutReader,
+		private readonly resolveSplitAdmission: WorkspaceSplitAdmissionResolver,
+	) {}
 
 	get isDragging(): boolean {
 		return this.payload !== null;
@@ -112,7 +113,9 @@ export class WorkspaceWindowDndController {
 		const target = this.#windowTarget(windowId, zone);
 		event.preventDefault();
 		event.stopPropagation();
-		if (event.dataTransfer) event.dataTransfer.dropEffect = target.blockedReason ? 'none' : 'move';
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = target && !target.blockedReason ? 'move' : 'none';
+		}
 		this.activeTarget = target;
 	}
 
@@ -200,37 +203,32 @@ export class WorkspaceWindowDndController {
 	#windowTarget(
 		windowId: WorkspaceWindowId,
 		zone: WorkspaceWindowDropZone,
-	): Extract<WorkspaceWindowDropTarget, { kind: 'window' }> {
-		return { kind: 'window', windowId, zone, blockedReason: this.#blockedReason(windowId, zone) };
+	): Extract<WorkspaceWindowDropTarget, { kind: 'window' }> | null {
+		const blockedReason = this.#blockedReason(windowId, zone);
+		if (blockedReason === null) return null;
+		return { kind: 'window', windowId, zone, blockedReason };
 	}
 
 	#blockedReason(
 		windowId: WorkspaceWindowId,
 		zone: WorkspaceWindowDropZone,
-	): 'max-windows' | 'same-window' | undefined {
+	): WorkspaceSplitBlockReason | 'same-window' | null | undefined {
 		const payload = this.payload;
 		if (!payload) return undefined;
-		if (payload.kind === 'chat') {
-			if (zone === 'center') return undefined;
-			return collectWindowNodes(this.layout.snapshot.desktopRoot).length >= MAX_WORKSPACE_WINDOWS
-				? 'max-windows'
-				: undefined;
-		}
 		if (zone === 'center') return undefined;
-		const sourceWindow = windowNodeById(this.layout.snapshot.desktopRoot, payload.sourceWindowId);
-		if (payload.sourceWindowId === windowId && sourceWindow?.tabs.order.length === 1) {
-			return 'same-window';
+		if (payload.kind === 'surface-tab') {
+			const sourceWindow = windowNodeById(this.layout.snapshot.desktopRoot, payload.sourceWindowId);
+			if (payload.sourceWindowId === windowId && sourceWindow?.tabs.order.length === 1) {
+				return 'same-window';
+			}
 		}
-		if (
-			projectedWindowCountAfterTabMove(
-				this.layout.snapshot.desktopRoot,
-				payload.sourceWindowId,
-				windowId,
-			) > MAX_WORKSPACE_WINDOWS
-		) {
-			return 'max-windows';
-		}
-		return undefined;
+		const admission = this.resolveSplitAdmission(this.layout.snapshot, {
+			targetWindowId: windowId,
+			edge: zone,
+			movingSurfaceId: payload.kind === 'surface-tab' ? payload.surfaceId : undefined,
+		});
+		if (!admission) return null;
+		return admission.allowed ? undefined : admission.reason;
 	}
 
 	#tabTarget(

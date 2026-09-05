@@ -5,7 +5,7 @@ import type {
 } from '$shared/workspace-layout';
 import { isRecord } from '$shared/json';
 import {
-	MAX_WORKSPACE_WINDOWS,
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	portableSingletonDescriptor,
 	terminalSurfaceId,
@@ -32,6 +32,13 @@ export interface WorkspaceLayoutParseResult {
 	source: WorkspaceLayoutRestoreSource;
 	snapshot: WorkspaceLayoutSnapshot;
 }
+
+export const WORKSPACE_LAYOUT_MAX_PARSE_DEPTH = 64;
+export const WORKSPACE_LAYOUT_MAX_PARSE_NODES = 256;
+export const WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW = 256;
+export const WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS = 256;
+
+class WorkspaceLayoutBudgetExceeded extends Error {}
 
 const PORTABLE_SINGLETON_REF_KINDS = new Set<PortableSingletonKind>([
 	'git',
@@ -87,6 +94,7 @@ function asPartitionId(id: unknown): WorkspacePartitionId | null {
 interface TreeBuildState {
 	surfaces: Record<string, SurfaceDescriptor>;
 	seenGlobalSurfaceIds: Set<string>;
+	visitedNodes: number;
 }
 
 function restoredRefSurfaceId(
@@ -102,9 +110,10 @@ function restoreWindow(
 ): WorkspaceWindowNode | null {
 	const id = asWindowId(node.id);
 	if (!id || !Array.isArray(node.order)) return null;
+	const orderRefs = node.order.slice(0, WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
 	const order: string[] = [];
 	let chatPlaced = false;
-	for (const rawRef of node.order) {
+	for (const rawRef of orderRefs) {
 		const ref = parseV2Ref(rawRef);
 		if (!ref) continue;
 		if (ref.type === 'chat') {
@@ -122,35 +131,45 @@ function restoreWindow(
 		order.push(surfaceId);
 	}
 	if (order.length === 0) return null;
+	const orderSet = new Set(order);
 	const activeRef = parseV2Ref(node.active);
 	const activeKey = activeRef ? restoredRefSurfaceId(activeRef, id) : null;
-	const activeId = activeKey && order.includes(activeKey) ? activeKey : order[0];
+	const activeId = activeKey && orderSet.has(activeKey) ? activeKey : order[0];
 	const persistedMru: string[] = [];
+	const persistedMruSet = new Set<string>();
 	if (Array.isArray(node.mru)) {
-		for (const rawRef of node.mru) {
+		for (const rawRef of node.mru.slice(0, WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW)) {
 			const ref = parseV2Ref(rawRef);
 			if (!ref) continue;
 			const surfaceId = restoredRefSurfaceId(ref, id);
-			if (!order.includes(surfaceId) || persistedMru.includes(surfaceId)) continue;
+			if (!orderSet.has(surfaceId) || persistedMruSet.has(surfaceId)) continue;
 			persistedMru.push(surfaceId);
+			persistedMruSet.add(surfaceId);
 		}
 	}
 	const mru = [
 		activeId,
 		...persistedMru.filter((surfaceId) => surfaceId !== activeId),
-		...order.filter((surfaceId) => surfaceId !== activeId && !persistedMru.includes(surfaceId)),
+		...order.filter((surfaceId) => surfaceId !== activeId && !persistedMruSet.has(surfaceId)),
 	];
 	return { type: 'window', id, tabs: { order, activeId, mru } };
 }
 
-function restoreNode(node: unknown, state: TreeBuildState): DesktopWorkspaceNode | null {
+function restoreNode(node: unknown, state: TreeBuildState, depth = 1): DesktopWorkspaceNode | null {
+	state.visitedNodes += 1;
+	if (
+		depth > WORKSPACE_LAYOUT_MAX_PARSE_DEPTH ||
+		state.visitedNodes > WORKSPACE_LAYOUT_MAX_PARSE_NODES
+	) {
+		throw new WorkspaceLayoutBudgetExceeded();
+	}
 	if (!isRecord(node)) return null;
 	if (node.type === 'window') return restoreWindow(node, state);
 	if (node.type !== 'partition') return null;
 	const id = asPartitionId(node.id);
 	if (!id || !Array.isArray(node.children) || node.children.length !== 2) return null;
-	const first = restoreNode(node.children[0], state);
-	const second = restoreNode(node.children[1], state);
+	const first = restoreNode(node.children[0], state, depth + 1);
+	const second = restoreNode(node.children[1], state, depth + 1);
 	if (!first) return second;
 	if (!second) return first;
 	if (node.direction !== 'horizontal' && node.direction !== 'vertical') return null;
@@ -182,9 +201,9 @@ function appendTabsToWindow(
 	});
 }
 
-function enforceWindowCap(root: DesktopWorkspaceNode): DesktopWorkspaceNode {
+function enforceWindowResourceCeiling(root: DesktopWorkspaceNode): DesktopWorkspaceNode {
 	let next = root;
-	while (collectWindowNodes(next).length > MAX_WORKSPACE_WINDOWS) {
+	while (collectWindowNodes(next).length > WORKSPACE_WINDOW_RESOURCE_CEILING) {
 		const windows = collectWindowNodes(next);
 		const overflow = windows[windows.length - 1];
 		const collapsed = removeWindowAndCollapse(next, overflow.id);
@@ -210,23 +229,28 @@ function parseUnplacedTerminalIds(
 	surfaces: Readonly<Record<string, SurfaceDescriptor>>,
 ): string[] {
 	if (!Array.isArray(value)) return [];
-	return [
-		...new Set(
-			value.filter(
-				(terminalId): terminalId is string =>
-					typeof terminalId === 'string' &&
-					Boolean(terminalId) &&
-					!surfaces[terminalSurfaceId(terminalId)],
-			),
-		),
-	];
+	const terminalIds = new Set<string>();
+	for (const terminalId of value.slice(0, WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS)) {
+		if (
+			typeof terminalId === 'string' &&
+			terminalId.length > 0 &&
+			!surfaces[terminalSurfaceId(terminalId)]
+		) {
+			terminalIds.add(terminalId);
+		}
+	}
+	return [...terminalIds];
 }
 
 function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
-	const state: TreeBuildState = { surfaces: {}, seenGlobalSurfaceIds: new Set() };
+	const state: TreeBuildState = {
+		surfaces: {},
+		seenGlobalSurfaceIds: new Set(),
+		visitedNodes: 0,
+	};
 	const restored = restoreNode(value.root, state);
 	if (!restored) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
-	const root = enforceWindowCap(restored);
+	const root = enforceWindowResourceCeiling(restored);
 	pruneUnplacedDescriptors(root, state);
 	const firstWindow = collectWindowNodes(root)[0];
 	if (!firstWindow) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
@@ -245,16 +269,16 @@ function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
 }
 
 export function parsePersistedWorkspaceLayout(rawV2: string | null): WorkspaceLayoutParseResult {
-	if (rawV2 !== null) {
-		try {
-			const value: unknown = JSON.parse(rawV2);
-			if (!isRecord(value) || value.version !== 2) throw new Error('Unsupported layout version');
-			return parseV2(value);
-		} catch {
-			return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
-		}
+	if (rawV2 === null) {
+		return { source: 'absent', snapshot: canonicalWorkspaceSnapshot() };
 	}
-	return { source: 'absent', snapshot: canonicalWorkspaceSnapshot() };
+	try {
+		const value: unknown = JSON.parse(rawV2);
+		if (!isRecord(value) || value.version !== 2) throw new Error('Unsupported layout version');
+		return parseV2(value);
+	} catch {
+		return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
+	}
 }
 
 function persistedRef(surface: SurfaceDescriptor): PersistedWorkspaceSurfaceRef | null {
