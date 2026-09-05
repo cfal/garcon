@@ -299,7 +299,7 @@ describe('AppShell responsive workspace binding', () => {
 		await fireEvent.pointerDown(backdrop);
 		await fireEvent.click(backdrop);
 		await waitFor(() => expect(appShell.setSidebarOpen).toHaveBeenCalledWith(false));
-		expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull();
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull());
 	});
 
 	it('opens the mobile drawer through the main-inert handoff', async () => {

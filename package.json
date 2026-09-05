@@ -70,6 +70,7 @@
   "author": "Alex Lau <github@alau.ca>",
   "license": "GPL-3.0",
   "overrides": {
-    "@codemirror/view": "6.43.9"
+    "@codemirror/view": "6.43.11",
+    "cookie": "0.7.2"
   }
 }

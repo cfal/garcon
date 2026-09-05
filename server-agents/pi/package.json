@@ -14,7 +14,7 @@
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@earendil-works/pi-tui": "0.85.1"
   },
-  "devDependencies": { "@types/bun": "^1.4.0", "typescript": "^6.0.3" },
+  "devDependencies": { "@types/bun": "^1.4.1", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "pi",

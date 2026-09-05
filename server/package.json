@@ -26,13 +26,13 @@
     "jsonwebtoken": "^9.0.3",
     "mime-types": "^3.0.2",
     "proper-lockfile": "4.1.2",
-    "shell-quote": "^1.9.0",
+    "shell-quote": "^1.10.0",
     "tokenx": "2.1.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.0",
+    "@types/bun": "^1.4.1",
     "@types/mime-types": "^3.0.1",
     "@types/proper-lockfile": "4.1.4",
-    "bun-types": "^1.4.0"
+    "bun-types": "^1.4.2"
   }
 }
