@@ -54,6 +54,7 @@
 		setTerminalRegistry,
 		setWorkspaceCoordinator,
 		setWorkspaceWindowDnd,
+		setWorkspaceHostGeometry,
 		setTransientLayers,
 		setSurfaceFrames,
 		setWorkspaceShortcuts,
@@ -176,6 +177,7 @@
 	setTerminalRegistry(terminals);
 	setWorkspaceCoordinator(workspace);
 	setWorkspaceWindowDnd(workspaceServices.windowDnd);
+	setWorkspaceHostGeometry(workspaceServices.hostGeometry);
 	setTransientLayers(transientLayers);
 	setSurfaceFrames(surfaceFrames);
 	setWorkspaceShortcuts(workspaceShortcuts);

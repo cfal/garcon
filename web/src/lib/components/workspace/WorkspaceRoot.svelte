@@ -25,6 +25,7 @@
 		getSurfaceFrames,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
+		getWorkspaceHostGeometry,
 		setConversationUi,
 		setConversationLifecycles,
 		setConversationPanels,
@@ -84,6 +85,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const hostGeometry = getWorkspaceHostGeometry();
 	const terminals = getTerminalRegistry();
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
@@ -441,6 +443,7 @@
 	role="region"
 	aria-label={m.workspace_workspace_region()}
 	tabindex="-1"
+	{@attach hostGeometry.attach}
 >
 	<div
 		class="relative min-h-0 min-w-0 flex-1"

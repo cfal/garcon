@@ -45,6 +45,12 @@ import type { ChatSurfaceTransferPort } from './chat-surface-transfer.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 import { WorkspaceTabMovementService } from './workspace-tab-movement-service.js';
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
+import type {
+	WorkspacePartitionRatioBounds,
+	WorkspacePartitionRatioBoundsResolver,
+	WorkspaceSplitAdmission,
+	WorkspaceSplitAdmissionResolver,
+} from './window-geometry-policy.js';
 
 interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
@@ -57,6 +63,8 @@ interface WorkspaceCoordinatorDeps {
 	singletons: SingletonSurfaceRegistry;
 	gitMutations?: GitMutationCoordinator;
 	surfaceFrames?: SurfaceFrameRegistry;
+	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
+	resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
 	getRouteIdentity(): string;
@@ -239,6 +247,26 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.windowCount < WORKSPACE_WINDOW_RESOURCE_CEILING;
 	}
 
+	resolveSplitAdmission(
+		targetWindowId: WorkspaceWindowId,
+		edge: WorkspaceWindowEdge,
+		movingSurfaceId?: string,
+	): WorkspaceSplitAdmission | null {
+		return this.#deps.resolveSplitAdmission(this.layout.snapshot, {
+			targetWindowId,
+			edge,
+			movingSurfaceId,
+		});
+	}
+
+	resolvePartitionRatioBounds(
+		partitionId: WorkspacePartitionId,
+	): WorkspacePartitionRatioBounds | null {
+		return (
+			this.#deps.resolvePartitionRatioBounds(this.layout.snapshot, partitionId)?.bounds ?? null
+		);
+	}
+
 	get isChatPresented(): boolean {
 		return this.#presentation.isChatPresented;
 	}
@@ -314,6 +342,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	cancelWindowPointerInteraction(windowId: WorkspaceWindowId, pointerId: number): void {
 		this.#presentation.cancelWindowPointerInteraction(windowId, pointerId);
+	}
+
+	cancelPendingWindowPointerInteraction(): void {
+		this.#presentation.cancelPendingWindowPointerInteraction();
 	}
 
 	activateWindow(windowId: WorkspaceWindowId): void {
