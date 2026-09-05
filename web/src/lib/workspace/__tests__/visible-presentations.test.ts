@@ -139,16 +139,16 @@ describe('visiblePortablePresentations', () => {
 				windowId: 'window-2',
 			},
 		]);
-		expect(
-			visibleChatPresentations(snapshot, 'mobile', { projectedWindowId: 'window-2' }),
-		).toEqual([
-			{
-				surfaceId: 'chat-view:window-main',
-				chatId: 'chat-1',
-				presentation: 'mobile',
-				windowId: null,
-			},
-		]);
+		expect(visibleChatPresentations(snapshot, 'mobile', { projectedWindowId: 'window-2' })).toEqual(
+			[
+				{
+					surfaceId: 'chat-view:window-main',
+					chatId: 'chat-1',
+					presentation: 'mobile',
+					windowId: null,
+				},
+			],
+		);
 	});
 
 	it('gives manual fullscreen precedence over a runtime projection', () => {
@@ -156,9 +156,9 @@ describe('visiblePortablePresentations', () => {
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 
-		expect(
-			[...visiblePresentationMap(snapshot, 'desktop', { projectedWindowId: 'window-main' })],
-		).toEqual([['window-2', 'singleton:git']]);
+		expect([
+			...visiblePresentationMap(snapshot, 'desktop', { projectedWindowId: 'window-main' }),
+		]).toEqual([['window-2', 'singleton:git']]);
 	});
 
 	it('retains active portable renderers hidden by a runtime projection', () => {
@@ -167,9 +167,7 @@ describe('visiblePortablePresentations', () => {
 		const visible = visiblePortablePresentations(snapshot, false, options);
 
 		expect(visible).toEqual([]);
-		expect(
-			renderedPortablePresentations(snapshot, false, visible, new Set(), options),
-		).toEqual([
+		expect(renderedPortablePresentations(snapshot, false, visible, new Set(), options)).toEqual([
 			{
 				surfaceId: 'singleton:git',
 				presentation: 'window-2',
