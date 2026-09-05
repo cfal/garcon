@@ -15,15 +15,17 @@ async function clickPreambleRowAction(
   action: string,
 ): Promise<void> {
   await fixture.page.waitForFunction(({ title, action }) => {
-    const row = [...document.querySelectorAll<HTMLElement>('article')]
-      .find((element) => element.querySelector('h3')?.textContent?.trim() === title);
+    const row = [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
+      .find((element) => element
+        .querySelector('[data-slot="preamble-row-title"]')?.textContent?.trim() === title);
     const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
       .find((element) => element.getAttribute('aria-label') === action);
     return Boolean(button && !button.disabled);
   }, { timeout: 20_000 }, { title, action });
   await fixture.page.evaluate(({ title, action }) => {
-    const row = [...document.querySelectorAll<HTMLElement>('article')]
-      .find((element) => element.querySelector('h3')?.textContent?.trim() === title);
+    const row = [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
+      .find((element) => element
+        .querySelector('[data-slot="preamble-row-title"]')?.textContent?.trim() === title);
     const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
       .find((element) => element.getAttribute('aria-label') === action);
     if (!button) throw new Error(`Missing ${action} action for ${title}.`);
@@ -80,10 +82,11 @@ async function selectDirectory(
     expectedPath,
   );
   await fixture.page.evaluate(() => {
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Select Directory"]');
-    const close = dialog?.previousElementSibling;
-    if (!(close instanceof HTMLButtonElement)) throw new Error('Missing directory picker backdrop.');
-    close.click();
+    const dismiss = document.querySelector<HTMLButtonElement>(
+      '[data-slot="directory-browser-dismiss"]',
+    );
+    if (!dismiss) throw new Error('Missing directory picker dismiss control.');
+    dismiss.click();
   });
   await fixture.page.waitForFunction(
     () => document.querySelector('[role="dialog"][aria-label="Select Directory"]') === null,
@@ -108,7 +111,7 @@ describe('Lightpanda preambles', () => {
       await app.clickButton('More actions');
       await app.waitForMenuItemEnabled('Preambles');
       await app.clickMenuItem('Preambles');
-      await app.waitForButton('Add preamble');
+      await app.waitForButtonEnabled('Add preamble');
 
       await app.clickButton('Add preamble');
       await app.fill('#preamble-title', 'Global UI rules');
@@ -124,7 +127,7 @@ describe('Lightpanda preambles', () => {
       await app.waitForText('Disabled');
       await clickPreambleRowAction(fixture, 'Global UI rules', 'Enable Global UI rules');
       await fixture.page.waitForFunction(
-        () => ![...document.querySelectorAll<HTMLElement>('article')]
+        () => ![...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
           .some((element) => element.textContent?.includes('Disabled')),
         { timeout: 20_000 },
       );
@@ -174,7 +177,7 @@ describe('Lightpanda preambles', () => {
       await app.waitForText('Project UI rules');
       expect(await app.exactTextCount('Global UI rules')).toBe(0);
       expect(await fixture.page.$eval(
-        'article button[aria-label="Move Project UI rules up"]',
+        '[data-slot="preamble-row"] button[aria-label="Move Project UI rules up"]',
         (element) => (element as HTMLButtonElement).disabled,
       )).toBeTrue();
       await app.clickButton('Clear preamble filter');
@@ -182,7 +185,7 @@ describe('Lightpanda preambles', () => {
 
       await clickPreambleRowAction(fixture, 'Project UI rules', 'Move Project UI rules up');
       await fixture.page.waitForFunction(
-        () => [...document.querySelectorAll<HTMLElement>('article h3')]
+        () => [...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row-title"]')]
           .map((element) => element.textContent?.trim())
           .join('|') === 'Project UI rules|Global UI rules',
         { timeout: 20_000 },
@@ -216,7 +219,9 @@ describe('Lightpanda preambles', () => {
         return {
           adjacent: noticeIndex >= 0 && userIndex === noticeIndex + 1,
           titles: notice
-            ? [...notice.querySelectorAll('span')].map((element) => element.textContent?.trim())
+            ? [...notice.querySelectorAll(
+              '[data-slot="preamble-application-label"], [data-slot="preamble-application-title"]',
+            )].map((element) => element.textContent?.trim())
             : [],
         };
       })).toEqual({
@@ -237,8 +242,10 @@ describe('Lightpanda preambles', () => {
       await app.waitForButton('Remove preamble');
       await app.clickButton('Remove preamble', { last: true });
       await fixture.page.waitForFunction(
-        () => ![...document.querySelectorAll<HTMLElement>('article')]
-          .some((element) => element.querySelector('h3')?.textContent?.trim() === 'Project UI rules'),
+        () => ![...document.querySelectorAll<HTMLElement>('[data-slot="preamble-row"]')]
+          .some((element) => element
+            .querySelector('[data-slot="preamble-row-title"]')?.textContent?.trim()
+            === 'Project UI rules'),
         { timeout: 20_000 },
       );
 

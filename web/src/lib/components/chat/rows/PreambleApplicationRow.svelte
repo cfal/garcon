@@ -9,10 +9,13 @@
 <ChatEventCard variant="info">
 	{#snippet body()}
 		<div class="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
-			<span class="text-muted-foreground">{m.preambles_applied_label()}</span>
+			<span data-slot="preamble-application-label" class="text-muted-foreground">
+				{m.preambles_applied_label()}
+			</span>
 			{#each detail.preambles as preamble (preamble.id)}
 				<svelte:boundary>
 					<span
+						data-slot="preamble-application-title"
 						class="max-w-full break-words rounded-full bg-accent px-2 py-0.5 text-accent-foreground"
 					>
 						{preamble.title}
