@@ -83,7 +83,7 @@ export class QueueDrainer {
 
       let options: RunAgentTurnOptions | undefined;
       let inputInserted = false;
-      let admissionFailure: DomainError | null = null;
+      const admission = { failure: null as DomainError | null };
       let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
       try {
         result = await controls.dequeueNextTurn(chatId, (input) => {
@@ -100,7 +100,7 @@ export class QueueDrainer {
               !(error instanceof DomainError)
               || error.code !== 'PREAMBLE_SLASH_COMMAND_BLOCKED'
             ) throw error;
-            admissionFailure = error;
+            admission.failure = error;
             return false;
           }
           return inputInserted;
@@ -115,13 +115,13 @@ export class QueueDrainer {
         return;
       }
       if (!options) throw new Error('Queued input admission did not produce dispatch options');
-      if (admissionFailure) {
+      if (admission.failure) {
         logger.warn('queue: queued turn rejected before admission', {
           chatId,
           entryId: result.input.entry.id,
-          code: admissionFailure.code,
+          code: admission.failure.code,
         });
-        callbacks.publishTurnFailed(chatId, admissionFailure.message, options);
+        callbacks.publishTurnFailed(chatId, admission.failure.message, options);
         continue;
       }
       if (!result.inserted) continue;
@@ -188,7 +188,10 @@ export class QueueDrainer {
     try {
       return await Promise.race([
         this.deps.turnRunner.runAgentTurn(chatId, entry.content, options)
-          .then<ProviderDispatchResult>(() => ({ kind: 'completed' }), (error) => ({ kind: 'failed', error })),
+          .then<ProviderDispatchResult, ProviderDispatchResult>(
+            () => ({ kind: 'completed' }),
+            (error) => ({ kind: 'failed', error }),
+          ),
         attempt.waitUntilSettled().then((): ProviderDispatchResult => ({ kind: 'retired' })),
       ]);
     } catch (error) {
