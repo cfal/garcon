@@ -4,6 +4,7 @@
 	import { cn } from '$lib/utils/cn';
 	import Markdown from '../Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
+	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 	import ChatEventCard from './ChatEventCard.svelte';
 	import CliPresentationHeader from './CliPresentationHeader.svelte';
 	import CollapsibleBody from './CollapsibleBody.svelte';
@@ -13,6 +14,7 @@
 		message: CliRowMessage;
 		fileLinkBasePath?: string | null;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
+		resolveChatReference?: ResolveChatReference;
 		acquireTransientActivity?: (close: () => void) => () => void;
 		alwaysExpanded?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
@@ -22,6 +24,7 @@
 		message,
 		fileLinkBasePath,
 		onLinkNavigate,
+		resolveChatReference,
 		acquireTransientActivity,
 		alwaysExpanded = false,
 		disclosureState,
@@ -61,6 +64,8 @@
 							variant="presented"
 							fileLinkBasePath={fileLinkBasePath ?? undefined}
 							{onLinkNavigate}
+							{resolveChatReference}
+							chatReferencePolicy="explicit"
 							{acquireTransientActivity}
 						/>
 					</div>

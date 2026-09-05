@@ -1,6 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AskUserQuestionToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
+import {
+	AskUserQuestionToolUseMessage,
+	ExitPlanModeToolUseMessage,
+	PermissionRequestMessage,
+} from '$shared/chat-types';
 import PermissionRequestRowTestHost from './PermissionRequestRowTestHost.svelte';
 
 const TS = '2026-07-02T00:00:00.000Z';
@@ -132,5 +136,27 @@ describe('PermissionRequestRow', () => {
 			rawInputOpen: false,
 		});
 		expect(draft).toEqual({ selectedQuestionOptions: {}, rawInputOpen: false });
+	});
+
+	it('resolves explicit chat links without autolinking bare IDs in permission plans', () => {
+		const chatId = '1788592720180699';
+		const request = new PermissionRequestMessage(
+			TS,
+			'incarnation-plan',
+			new ExitPlanModeToolUseMessage(
+				TS,
+				'tool-plan',
+				`${chatId} [Open target](/chat/${chatId})`,
+			),
+		);
+		const { container } = render(PermissionRequestRowTestHost, {
+			request,
+			onDecision: vi.fn(),
+			chatTitles: { [chatId]: 'Target chat' },
+			chatContext: { chatId: 'chat-1', projectPath: '/workspace/project' },
+		});
+
+		expect(screen.getByRole('link', { name: 'Open target' })).toBeTruthy();
+		expect(container.querySelectorAll('[data-chat-reference-id]')).toHaveLength(1);
 	});
 });

@@ -116,6 +116,7 @@
 			<PermissionRequestRow
 				request={permissionRequestMessage(item.request)}
 				onDecision={onPermissionDecision}
+				{chatContext}
 				draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}
 				{acquireTransientActivity}
 				onDraftChange={(draft) =>

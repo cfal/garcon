@@ -29,6 +29,10 @@
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
 	import {
+		resolveChatReferenceTarget,
+		type ResolveChatReference,
+	} from '$lib/chat/transcript/chat-reference.js';
+	import {
 		getAppShell,
 		getChatSessions,
 		getFileSessions,
@@ -77,6 +81,8 @@
 		if (!selected?.id) return null;
 		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
 	});
+	const resolveChatReference: ResolveChatReference = (chatId) =>
+		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 	const isPending = $derived(!terminal && actionable);
 	const isResolved = $derived(terminal?.state === 'resolved');
 	const wasAllowed = $derived(isResolved && terminal?.allowed === true);
@@ -374,6 +380,8 @@
 							source={plan}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveChatReference}
+							chatReferencePolicy="explicit"
 							{acquireTransientActivity}
 						/>
 					</div>
@@ -679,6 +687,8 @@
 									source={cursorCreatePlanRequest.plan}
 									fileLinkBasePath={projectBasePath}
 									onLinkNavigate={handleLinkNavigate}
+									{resolveChatReference}
+									chatReferencePolicy="explicit"
 									{acquireTransientActivity}
 								/>
 							</div>

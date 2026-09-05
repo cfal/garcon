@@ -308,6 +308,7 @@
 												<Markdown
 													source={message.content}
 													variant={userPresentation?.style ? 'presented' : 'user'}
+													chatReferencePolicy="explicit"
 												/>
 											</div>
 										</CollapsibleBody>
@@ -326,7 +327,11 @@
 								</div>
 							{:else if message instanceof AssistantMessage}
 								<div class="text-sm text-foreground">
-									<Markdown source={String(message.content || '')} variant="assistant" />
+									<Markdown
+										source={String(message.content || '')}
+										variant="assistant"
+										chatReferencePolicy="explicit"
+									/>
 								</div>
 							{:else if message instanceof ThinkingMessage}
 								<ChatEventCard variant="thinking" compact>
@@ -349,7 +354,11 @@
 										</button>
 										{#if thinkingStates[entry.index] ?? true}
 											<div class="mt-0.5 text-sm text-foreground/90">
-												<Markdown source={message.content} variant="thinking" />
+												<Markdown
+													source={message.content}
+													variant="thinking"
+													chatReferencePolicy="explicit"
+												/>
 											</div>
 										{/if}
 									{/snippet}

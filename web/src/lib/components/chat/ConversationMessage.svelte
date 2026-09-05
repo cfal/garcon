@@ -32,6 +32,10 @@
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
+	import {
+		resolveChatReferenceTarget,
+		type ResolveChatReference,
+	} from '$lib/chat/transcript/chat-reference.js';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import CompactionRow from './CompactionRow.svelte';
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
@@ -129,9 +133,6 @@
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
-	function resolveChatTitle(chatId: string): string | undefined {
-		return sessions.byId[chatId]?.title?.trim() || undefined;
-	}
 
 	const projectBasePath = $derived(appShell.projectBasePath);
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
@@ -141,6 +142,8 @@
 		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
 	});
 	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
+	const resolveChatReference: ResolveChatReference = (chatId) =>
+		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 
 	const shouldHideThinking = $derived(message instanceof ThinkingMessage && !showThinking);
 
@@ -558,6 +561,10 @@
 										variant={userMessagePresentation?.style ? 'presented' : 'user'}
 										fileLinkBasePath={projectBasePath}
 										onLinkNavigate={handleLinkNavigate}
+										{resolveChatReference}
+										chatReferencePolicy={userMessagePresentation
+											? 'explicit'
+											: 'explicit-and-bare'}
 										{acquireTransientActivity}
 									/>
 								</div>
@@ -678,6 +685,7 @@
 							onFileOpen={handleToolFileOpen}
 							{projectBasePath}
 							{chatProjectPath}
+							{resolveChatReference}
 							{disclosureState}
 							{acquireTransientActivity}
 						/>
@@ -691,6 +699,7 @@
 							onFileOpen={handleToolFileOpen}
 							{projectBasePath}
 							{chatProjectPath}
+							{resolveChatReference}
 							{disclosureState}
 							{acquireTransientActivity}
 						/>
@@ -717,6 +726,8 @@
 											variant="thinking"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{resolveChatReference}
+											chatReferencePolicy="explicit"
 											{acquireTransientActivity}
 										/>
 									</div>
@@ -737,6 +748,8 @@
 											variant="assistant"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{resolveChatReference}
+											chatReferencePolicy="explicit-and-bare"
 											{acquireTransientActivity}
 										/>
 									</div>
@@ -767,6 +780,7 @@
 							message={asCliRow}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveChatReference}
 							{acquireTransientActivity}
 							alwaysExpanded={localSettings.alwaysExpandCliMessages}
 							{disclosureState}
@@ -778,7 +792,7 @@
 							onLinkNavigate={handleLinkNavigate}
 							{acquireTransientActivity}
 							{disclosureState}
-							{resolveChatTitle}
+							{resolveChatReference}
 						/>
 					{:else if asError}
 						<ChatEventCard variant="error">
@@ -793,6 +807,7 @@
 							message={asCompaction}
 							{projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveChatReference}
 							{acquireTransientActivity}
 							open={disclosureState?.open('compaction', 'compaction', false)}
 							onOpenChange={disclosureState
