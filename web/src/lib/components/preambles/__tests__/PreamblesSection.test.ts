@@ -23,6 +23,28 @@ function preamble(id: string, title: string, content: string): Preamble {
 }
 
 describe('PreamblesSection', () => {
+	it('renders singular and plural project path counts', () => {
+		const single = preamble('path', 'Single path', 'Single path body.');
+		const multiple: Preamble = {
+			...single,
+			id: 'paths',
+			title: 'Multiple paths',
+			scope: {
+				type: 'project-paths',
+				rules: [
+					{ projectPath: '/workspace/first', includeNested: true },
+					{ projectPath: '/workspace/second', includeNested: false },
+				],
+			},
+		};
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [single, multiple] },
+		});
+
+		expect(screen.getByText('1 project path')).toBeTruthy();
+		expect(screen.getByText('2 project paths')).toBeTruthy();
+	});
+
 	it('filters by body and path and disables reordering while filtered', async () => {
 		const snapshot: PreamblesSnapshot = {
 			revision: 1,
