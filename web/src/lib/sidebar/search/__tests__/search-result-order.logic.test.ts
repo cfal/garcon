@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	sortChatSearchResults,
+	sortChatSearchResultsByIdOrder,
 	visibleChatSearchTimePrefix,
 } from '$lib/sidebar/search/search-result-order.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -56,6 +57,14 @@ describe('chat search result ordering', () => {
 			.toEqual(['older', 'newer']);
 		expect(sortChatSearchResults([older, newer], 'created').map((entry) => entry.id))
 			.toEqual(['newer', 'older']);
+	});
+
+	it('replays a committed ID order while leaving source records live', () => {
+		const input = [older, newer, chat('unknown', null, null)];
+		const result = sortChatSearchResultsByIdOrder(input, ['newer', 'older']);
+		expect(result.map((entry) => entry.id)).toEqual(['newer', 'older', 'unknown']);
+		expect(result[0]).toBe(newer);
+		expect(result).not.toBe(input);
 	});
 
 	it('holds rows beyond an incomplete transcript frontier', () => {

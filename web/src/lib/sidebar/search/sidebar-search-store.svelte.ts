@@ -24,7 +24,9 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
+	captureChatSearchTimeOrder,
 	sortChatSearchResults,
+	sortChatSearchResultsByIdOrder,
 	visibleChatSearchTimePrefix,
 } from '$lib/sidebar/search/search-result-order.js';
 import { compareChatOrderNewestFirst } from '$shared/chat-order-sort';
@@ -135,6 +137,8 @@ export class SidebarSearchStore {
 	private transcriptSearchRevalidationPromise: Promise<void> | null = null;
 	private transcriptSearchRevalidationTimer: ReturnType<typeof setTimeout> | null = null;
 	private transcriptSearchRevalidationDirty = false;
+	private transcriptSearchCommittedTimeOrder = $state<string[] | null>(null);
+	private observedTranscriptSearchCandidateSignature: string | null = null;
 
 	constructor(private readonly deps: SidebarSearchStoreDeps) {}
 
@@ -164,10 +168,16 @@ export class SidebarSearchStore {
 
 	get dialogDisplayChats(): ChatSessionRecord[] {
 		const sort = this.deps.getSearchResultSort();
-		const sorted = sortChatSearchResults(
-			this.mergeTranscriptMatches(this.draftQuery, this.dialogFilteredChats),
-			sort,
-		);
+		const merged = this.mergeTranscriptMatches(this.draftQuery, this.dialogFilteredChats);
+		let sorted: ChatSessionRecord[];
+		if (sort === 'relevance' || this.transcriptSearchCommittedTimeOrder === null) {
+			sorted = sortChatSearchResults(merged, sort);
+		} else {
+			sorted = sortChatSearchResultsByIdOrder(
+				merged,
+				this.transcriptSearchCommittedTimeOrder,
+			);
+		}
 		if (sort === 'relevance' || this.transcriptSearchQuery !== this.draftQuery) return sorted;
 		return visibleChatSearchTimePrefix(
 			sorted,
@@ -327,14 +337,26 @@ export class SidebarSearchStore {
 	}
 
 	applyQuery(query: string): void {
+		if (query !== this.activeQuery) this.clearTranscriptSearch();
 		this.activeQuery = query;
 		this.highlightedResultIndex = 0;
 	}
 
 	updateDraftQuery(query: string): void {
-		if (query !== this.draftQuery) this.transcriptSearchResultsResetVersion += 1;
+		if (query !== this.draftQuery) {
+			this.transcriptSearchResultsResetVersion += 1;
+			this.clearTranscriptSearch();
+		}
 		this.draftQuery = query;
 		this.highlightedResultIndex = 0;
+	}
+
+	updateTranscriptSearchCandidateSignature(signature: string): void {
+		const previousSignature = this.observedTranscriptSearchCandidateSignature;
+		this.observedTranscriptSearchCandidateSignature = signature;
+		if (previousSignature !== null && previousSignature !== signature) {
+			this.clearTranscriptSearch();
+		}
 	}
 
 	resetTranscriptSearchForSortChange(): void {
@@ -460,6 +482,7 @@ export class SidebarSearchStore {
 		this.transcriptSearchPage = null;
 		this.transcriptSearchAnnouncement = '';
 		this.transcriptSearchAnnouncementVersion = 0;
+		this.transcriptSearchCommittedTimeOrder = null;
 		this.transcriptSearchIndexing = false;
 		this.transcriptSearchError = null;
 	}
@@ -467,11 +490,16 @@ export class SidebarSearchStore {
 	applyTranscriptSearchStatus(status: TranscriptSearchStatusV1): void {
 		const previousStatus = this.transcriptSearchStatus;
 		this.transcriptSearchStatus = status;
-		if (!this.transcriptSearchQuery || !this.transcriptSearchPage) return;
-		const searchIndexChanged = this.transcriptSearchIndexing
-			&& (previousStatus?.phase !== status.phase
-				|| status.chats.indexed > (previousStatus?.chats.indexed ?? -1));
-		if (searchIndexChanged) this.scheduleTranscriptSearchRevalidation();
+		if (!this.transcriptSearchQuery) return;
+		const searchIndexChanged = previousStatus?.phase !== status.phase
+			|| status.chats.indexed > (previousStatus?.chats.indexed ?? -1);
+		if (this.transcriptSearchLoading) {
+			if (searchIndexChanged) this.transcriptSearchRevalidationDirty = true;
+			return;
+		}
+		if (this.transcriptSearchIndexing && searchIndexChanged) {
+			this.scheduleTranscriptSearchRevalidation();
+		}
 	}
 
 	destroy(): void {
@@ -494,6 +522,8 @@ export class SidebarSearchStore {
 
 		const candidateChats = this.facetFilteredChats(spec);
 		const candidateIds = candidateChats.map((chat) => chat.id);
+		const sort = this.deps.getSearchResultSort();
+		const committedTimeOrder = captureChatSearchTimeOrder(candidateChats, sort);
 		this.transcriptSearchAbort?.abort();
 		const abort = new AbortController();
 		this.transcriptSearchAbort = abort;
@@ -508,6 +538,7 @@ export class SidebarSearchStore {
 		this.transcriptSearchPageError = null;
 		this.transcriptSearchAnnouncement = '';
 		this.transcriptSearchAnnouncementVersion = 0;
+		this.transcriptSearchCommittedTimeOrder = null;
 		this.transcriptSearchIndexing = false;
 		this.transcriptSearchError = null;
 		this.transcriptSearchRevalidating = false;
@@ -547,6 +578,7 @@ export class SidebarSearchStore {
 						query,
 						textTokens: spec.textTokens,
 						chatIds: candidateIds,
+						sort,
 						offset: 0,
 						limit: TRANSCRIPT_SEARCH_PAGE_SIZE,
 						signal: abort.signal,
@@ -569,6 +601,7 @@ export class SidebarSearchStore {
 					this.clearTranscriptSearch();
 					return;
 				}
+				this.transcriptSearchCommittedTimeOrder = committedTimeOrder;
 				this.transcriptSearchResults = result.results;
 				this.transcriptSearchPage = result.page;
 				this.transcriptSearchIndex = result.index;
@@ -612,8 +645,6 @@ export class SidebarSearchStore {
 		const query = this.transcriptSearchQuery;
 		const spec = parseChatSearch(query);
 		const candidateIds = this.facetFilteredChats(spec).map((chat) => chat.id);
-		const highlightedChatId = this.dialogDisplayChats[this.highlightedResultIndex]?.id ?? null;
-		const previousVisibleCount = this.dialogDisplayChats.length;
 		this.transcriptSearchPageError = null;
 		this.transcriptSearchLoadingMore = true;
 		const promise = this.searchTranscriptPage({
@@ -621,15 +652,20 @@ export class SidebarSearchStore {
 			textTokens: spec.textTokens,
 			chatIds: candidateIds,
 			offset: nextOffset,
-			limit: TRANSCRIPT_SEARCH_PAGE_SIZE,
+			limit: Math.min(
+				TRANSCRIPT_SEARCH_PAGE_SIZE,
+				TRANSCRIPT_SEARCH_LOADED_LIMIT - nextOffset,
+			),
 			signal,
 		})
 			.then((result) => {
 				if (!this.isCurrentTranscriptRequest(requestId, signal)) return;
+				const highlightedChatId = this.dialogDisplayChats[this.highlightedResultIndex]?.id ?? null;
+				const previousVisibleCount = this.dialogDisplayChats.length;
 				this.transcriptSearchResults = dedupeSearchResults([
 					...this.transcriptSearchResults,
 					...result.results,
-				]);
+				]).slice(0, TRANSCRIPT_SEARCH_LOADED_LIMIT);
 				this.transcriptSearchPage = result.page;
 				this.transcriptSearchIndex = result.index;
 				this.transcriptSearchIndexing = result.index.pendingChatCount > 0
@@ -661,12 +697,13 @@ export class SidebarSearchStore {
 	}
 
 	scheduleTranscriptSearchRevalidation(): void {
-		if (!this.transcriptSearchQuery || !this.transcriptSearchPage) return;
+		if (!this.transcriptSearchQuery) return;
 		if (this.transcriptSearchLoading || this.transcriptSearchLoadingMore
 			|| this.transcriptSearchRevalidationPromise) {
 			this.transcriptSearchRevalidationDirty = true;
 			return;
 		}
+		if (!this.transcriptSearchPage) return;
 		if (this.transcriptSearchRevalidationTimer) return;
 		this.transcriptSearchRevalidationTimer = setTimeout(() => {
 			this.transcriptSearchRevalidationTimer = null;
@@ -692,9 +729,11 @@ export class SidebarSearchStore {
 		const generationSignal = this.transcriptSearchAbort?.signal;
 		const query = this.transcriptSearchQuery;
 		const spec = parseChatSearch(query);
-		const candidateIds = this.facetFilteredChats(spec).map((chat) => chat.id);
+		const candidateChats = this.facetFilteredChats(spec);
+		const candidateIds = candidateChats.map((chat) => chat.id);
 		if (candidateIds.length === 0) return Promise.resolve();
 		const sort = this.deps.getSearchResultSort();
+		const committedTimeOrder = captureChatSearchTimeOrder(candidateChats, sort);
 		const currentFrontier = this.transcriptSearchPage.nextOffset
 			?? this.transcriptSearchPage.total;
 		const targetOffset = Math.min(
@@ -703,7 +742,6 @@ export class SidebarSearchStore {
 				? this.transcriptSearchPage.limit
 				: currentFrontier,
 		);
-		const highlightedChatId = this.dialogDisplayChats[this.highlightedResultIndex]?.id ?? null;
 		const abort = new AbortController();
 		const unlinkAbort = forwardAbort(generationSignal, abort);
 		const timeout = setTimeout(() => abort.abort(), TRANSCRIPT_SEARCH_REVALIDATION_TIMEOUT_MS);
@@ -730,6 +768,8 @@ export class SidebarSearchStore {
 				nextOffset = result.page.nextOffset;
 			}
 			if (!latest || !this.isCurrentTranscriptRequest(requestId, generationSignal)) return;
+			const highlightedChatId = this.dialogDisplayChats[this.highlightedResultIndex]?.id ?? null;
+			this.transcriptSearchCommittedTimeOrder = committedTimeOrder;
 			this.transcriptSearchResults = dedupeSearchResults(refreshed);
 			this.transcriptSearchPage = latest.page;
 			this.transcriptSearchIndex = latest.index;

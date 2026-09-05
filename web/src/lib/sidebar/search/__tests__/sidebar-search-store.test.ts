@@ -954,6 +954,33 @@ describe('SidebarSearchStore', () => {
 
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['metadata']);
 		});
+
+		it('keeps the committed time order stable until revalidation succeeds', async () => {
+			const chats = Array.from({ length: 60 }, (_, index) => makeChat({
+				id: `c${String(index).padStart(2, '0')}`,
+				createdAt: '2026-01-01T00:00:00.000Z',
+				lastActivityAt: '2026-01-01T00:00:00.000Z',
+			}));
+			const { store } = createStore(chats, null, {
+				getSearchResultSort: () => 'activity',
+				searchChatTranscripts: async () => makeSearchResponse(
+					chats.slice(0, 50).map((chat) => makeSearchResult(chat.id)),
+					makeSearchPage(60, { hasMore: true, nextOffset: 50 }),
+				),
+			});
+			store.updateDraftQuery('needle');
+			await store.refreshTranscriptSearch('needle');
+			store.highlightedResultIndex = 30;
+			const displayedBeforeActivity = store.dialogDisplayChats.map((chat) => chat.id);
+
+			chats[40].lastActivityAt = '2026-09-05T00:00:00.000Z';
+			store.scheduleTranscriptSearchRevalidation();
+
+			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(displayedBeforeActivity);
+			expect(store.dialogDisplayChats[store.highlightedResultIndex]?.id)
+				.toBe(displayedBeforeActivity[30]);
+			store.destroy();
+		});
 	});
 
 	describe('transcript search pagination', () => {
@@ -1014,6 +1041,65 @@ describe('SidebarSearchStore', () => {
 			expect(store.transcriptSearchPage?.nextOffset).toBe(100);
 			expect(store.transcriptSearchIndexing).toBe(true);
 			expect(store.transcriptSearchLoadingMore).toBe(false);
+		});
+
+		it('invalidates an in-flight page immediately when the draft query changes', async () => {
+			const nextPage = Promise.withResolvers<ChatSearchResponse>();
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockResolvedValueOnce(makeSearchResponse(
+					[makeSearchResult('c1')],
+					makeSearchPage(100, { hasMore: true, nextOffset: 50 }),
+				))
+				.mockReturnValueOnce(nextPage.promise);
+			const { store } = createStore([
+				makeChat({ id: 'c1' }),
+				makeChat({ id: 'c2' }),
+			], null, { searchChatTranscripts });
+			store.updateDraftQuery('needle');
+			await store.refreshTranscriptSearch('needle');
+			store.highlightedResultIndex = 1;
+			const pending = store.loadMoreTranscriptResults();
+			const pageSignal = searchChatTranscripts.mock.calls[1]?.[1]?.signal;
+
+			store.updateDraftQuery('replacement');
+
+			expect(pageSignal?.aborted).toBe(true);
+			expect(store.highlightedResultIndex).toBe(0);
+			expect(store.transcriptSearchResults).toEqual([]);
+			nextPage.resolve(makeSearchResponse(
+				[makeSearchResult('c2')],
+				makeSearchPage(100, { offset: 50, hasMore: true, nextOffset: 100 }),
+			));
+			await pending;
+			expect(store.transcriptSearchResults).toEqual([]);
+		});
+
+		it('preserves a user highlight changed while a page is loading', async () => {
+			const chats = Array.from({ length: 100 }, (_, index) => makeChat({ id: `c${index}` }));
+			const nextPage = Promise.withResolvers<ChatSearchResponse>();
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockResolvedValueOnce(makeSearchResponse(
+					chats.slice(0, 50).map((chat) => makeSearchResult(chat.id)),
+					makeSearchPage(100, { hasMore: true, nextOffset: 50 }),
+				))
+				.mockReturnValueOnce(nextPage.promise);
+			const { store } = createStore(chats, null, { searchChatTranscripts });
+			store.updateDraftQuery('needle');
+			await store.refreshTranscriptSearch('needle');
+			store.highlightedResultIndex = 42;
+			const pending = store.loadMoreTranscriptResults();
+			store.highlightedResultIndex = 49;
+
+			nextPage.resolve(makeSearchResponse(
+				chats.slice(50).map((chat) => makeSearchResult(chat.id)),
+				makeSearchPage(100, { offset: 50 }),
+			));
+			await pending;
+
+			expect(store.highlightedResultIndex).toBe(49);
+			expect(store.dialogDisplayChats[49]?.id).toBe('c49');
 		});
 
 		it('does not load another page after the draft query changes', async () => {
@@ -1126,6 +1212,107 @@ describe('SidebarSearchStore', () => {
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
 		});
 
+		it('limits a non-aligned final request to the remaining logical positions', async () => {
+			const chats = Array.from({ length: 600 }, (_, index) => makeChat({ id: `c${index}` }));
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockImplementation(async (request) => {
+					const offset = request.offset ?? 0;
+					const limit = request.limit ?? 50;
+					const end = Math.min(600, offset + limit);
+					return makeSearchResponse(
+						chats.slice(offset, end).map((chat) => makeSearchResult(chat.id)),
+						makeSearchPage(600, {
+							offset,
+							limit,
+							hasMore: end < 600,
+							nextOffset: end < 600 ? end : null,
+						}),
+					);
+				});
+			const { store } = createStore(chats, null, { searchChatTranscripts });
+			store.updateDraftQuery('needle');
+			store.transcriptSearchQuery = 'needle';
+			store.transcriptSearchResults = chats.slice(0, 475).map((chat) => makeSearchResult(chat.id));
+			store.transcriptSearchPage = makeSearchPage(475, {
+				offset: 450,
+				limit: 25,
+			});
+
+			await store.retryTranscriptSearchRevalidation();
+			await store.loadMoreTranscriptResults();
+
+			const finalRequest = searchChatTranscripts.mock.calls.at(-1)?.[0];
+			expect(finalRequest).toMatchObject({ offset: 475, limit: 25 });
+			expect(store.transcriptSearchResults).toHaveLength(500);
+			expect(store.transcriptSearchPage?.nextOffset).toBe(500);
+			expect(store.transcriptSearchLimitReached).toBe(true);
+		});
+
+		it('drains a content invalidation received during the initial page', async () => {
+			vi.useFakeTimers();
+			try {
+				const initialPage = Promise.withResolvers<ChatSearchResponse>();
+				const searchChatTranscripts = vi
+					.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+					.mockReturnValueOnce(initialPage.promise)
+					.mockResolvedValueOnce(makeSearchResponse(
+						[makeSearchResult('c1')],
+						makeSearchPage(1),
+					));
+				const { store } = createStore([makeChat({ id: 'c1' })], null, {
+					searchChatTranscripts,
+				});
+				store.updateDraftQuery('needle');
+				const pending = store.refreshTranscriptSearch('needle');
+
+				store.scheduleTranscriptSearchRevalidation();
+				initialPage.resolve(makeSearchResponse(
+					[makeSearchResult('c1')],
+					makeSearchPage(1),
+				));
+				await pending;
+				await vi.advanceTimersByTimeAsync(500);
+
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('drains index progress received before a pending initial page settles', async () => {
+			vi.useFakeTimers();
+			try {
+				const initialPage = Promise.withResolvers<ChatSearchResponse>();
+				const searchChatTranscripts = vi
+					.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+					.mockReturnValueOnce(initialPage.promise)
+					.mockResolvedValueOnce(makeSearchResponse([], makeSearchPage(0)));
+				const { store } = createStore([makeChat({ id: 'c1' })], null, {
+					searchChatTranscripts,
+				});
+				store.applyTranscriptSearchStatus(makeStatus());
+				store.updateDraftQuery('needle');
+				const pending = store.refreshTranscriptSearch('needle');
+
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'ready',
+					chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
+				}));
+				const response = makeSearchResponse([], makeSearchPage(0));
+				response.index.pendingChatCount = 1;
+				initialPage.resolve(response);
+				await pending;
+				await vi.advanceTimersByTimeAsync(500);
+
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it('atomically revalidates the loaded logical prefix in 100-result chunks', async () => {
 			vi.useFakeTimers();
 			try {
@@ -1171,6 +1358,40 @@ describe('SidebarSearchStore', () => {
 			} finally {
 				vi.useRealTimers();
 			}
+		});
+
+		it('preserves a user highlight changed while revalidation is loading', async () => {
+			const refreshed = Promise.withResolvers<ChatSearchResponse>();
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockReturnValue(refreshed.promise);
+			const { store } = createStore([
+				makeChat({ id: 'c1' }),
+				makeChat({ id: 'c2' }),
+				makeChat({ id: 'c3' }),
+			], null, { searchChatTranscripts });
+			store.updateDraftQuery('needle');
+			store.transcriptSearchQuery = 'needle';
+			store.transcriptSearchResults = [
+				makeSearchResult('c1'),
+				makeSearchResult('c2'),
+				makeSearchResult('c3'),
+			];
+			store.transcriptSearchPage = makeSearchPage(3, { limit: 3 });
+			store.highlightedResultIndex = 0;
+			const pending = store.retryTranscriptSearchRevalidation();
+			store.highlightedResultIndex = 2;
+
+			refreshed.resolve(makeSearchResponse([
+				makeSearchResult('c3'),
+				makeSearchResult('c2'),
+				makeSearchResult('c1'),
+			], makeSearchPage(3, { limit: 3 })));
+			await pending;
+
+			expect(store.highlightedResultIndex).toBe(0);
+			expect(store.dialogDisplayChats[store.highlightedResultIndex]?.id).toBe('c3');
+			store.destroy();
 		});
 
 		it('retains loaded results and blocks paging until a failed revalidation is retried', async () => {

@@ -194,9 +194,10 @@
 	$effect(() => {
 		const query = transcriptSearchTarget;
 		const enabled = transcriptSearchEnabled;
-		transcriptSearchCandidateSet;
+		const candidateSignature = transcriptSearchCandidateSet;
 		localSettings.sidebarSearchResultSort;
 		transcriptSearchRetryVersion;
+		untrack(() => sidebarSearch.updateTranscriptSearchCandidateSignature(candidateSignature));
 		if (!enabled || !query.trim()) {
 			untrack(() => sidebarSearch.clearTranscriptSearch());
 			return;

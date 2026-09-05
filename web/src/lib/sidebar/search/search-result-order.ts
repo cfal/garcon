@@ -13,6 +13,30 @@ export function sortChatSearchResults(
 	);
 }
 
+export function captureChatSearchTimeOrder(
+	chats: readonly ChatSessionRecord[],
+	sort: ChatSearchSort,
+): string[] | null {
+	if (sort === 'relevance') return null;
+	return sortChatSearchResults(chats, sort).map((chat) => chat.id);
+}
+
+export function sortChatSearchResultsByIdOrder(
+	chats: readonly ChatSessionRecord[],
+	orderedChatIds: readonly string[],
+): ChatSessionRecord[] {
+	const priorityByChatId = new Map(orderedChatIds.map((chatId, index) => [chatId, index]));
+	return [...chats].sort((left, right) => {
+		const leftPriority = priorityByChatId.get(left.id);
+		const rightPriority = priorityByChatId.get(right.id);
+		if (leftPriority === undefined) {
+			return rightPriority === undefined ? left.id.localeCompare(right.id) : 1;
+		}
+		if (rightPriority === undefined) return -1;
+		return leftPriority - rightPriority;
+	});
+}
+
 export function visibleChatSearchTimePrefix(
 	sortedChats: readonly ChatSessionRecord[],
 	loadedTranscriptChatIds: ReadonlySet<string>,
