@@ -179,7 +179,6 @@
 		)}
 		style:top={isHorizontal ? `${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px` : undefined}
 	></div>
-	<!-- Track background -->
 	<div
 		class={cn(
 			'absolute rounded-full transition-all duration-150',
@@ -187,7 +186,6 @@
 			isDragging ? 'bg-primary/30' : 'bg-transparent group-hover:bg-primary/10',
 		)}
 	></div>
-	<!-- Center grip dots (visible on hover/drag) -->
 	<div
 		class={cn(
 			'absolute transition-opacity duration-150 flex items-center justify-center',

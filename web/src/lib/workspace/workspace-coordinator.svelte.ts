@@ -3,7 +3,6 @@ import { SvelteSet } from 'svelte/reactivity';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
-	WORKSPACE_WINDOW_EDGES,
 	chatViewSurfaceId,
 	fileSurfaceId,
 	portableSingletonDescriptor,
@@ -47,6 +46,7 @@ import { WorkspaceTabMovementService } from './workspace-tab-movement-service.js
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
 import {
 	clampWorkspacePartitionRatio,
+	mapWorkspaceSplitAdmissions,
 	type WorkspacePartitionRatioBounds,
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmission,
@@ -258,12 +258,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		targetWindowId: WorkspaceWindowId,
 		movingSurfaceId?: string,
 	): WorkspaceSplitAdmissions {
-		return Object.fromEntries(
-			WORKSPACE_WINDOW_EDGES.map((edge) => [
-				edge,
-				this.resolveSplitAdmission(targetWindowId, edge, movingSurfaceId),
-			]),
-		) as WorkspaceSplitAdmissions;
+		return mapWorkspaceSplitAdmissions((edge) =>
+			this.resolveSplitAdmission(targetWindowId, edge, movingSurfaceId),
+		);
 	}
 
 	resolvePartitionRatioBounds(

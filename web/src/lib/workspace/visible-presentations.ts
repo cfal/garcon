@@ -78,21 +78,23 @@ export function visiblePortablePresentations(
 	isMobile: boolean,
 	options: WorkspaceProjectionOptions = {},
 ): PortablePresentation[] {
-	return [
-		...visiblePresentationMap(snapshot, isMobile ? 'mobile' : 'desktop', {
+	const presentations: PortablePresentation[] = [];
+	for (const [presentation, surfaceId] of visiblePresentationMap(
+		snapshot,
+		isMobile ? 'mobile' : 'desktop',
+		{
 			...options,
 			includeDialog: false,
-		}),
-	].flatMap(([presentation, surfaceId]) => {
+		},
+	)) {
 		const surface = snapshot.surfaces[surfaceId];
-		if (!surface || surface.type === 'chat') return [];
-		return [
-			{
-				surfaceId,
-				presentation: presentation as WorkspaceWindowId | 'mobile',
-			},
-		];
-	});
+		if (!surface || surface.type === 'chat') continue;
+		presentations.push({
+			surfaceId,
+			presentation: presentation as WorkspaceWindowId | 'mobile',
+		});
+	}
+	return presentations;
 }
 
 export function visibleChatPresentations(
@@ -100,20 +102,32 @@ export function visibleChatPresentations(
 	mode: 'desktop' | 'mobile',
 	options: WorkspaceProjectionOptions = {},
 ): VisibleChatPresentation[] {
-	return [...visiblePresentationMap(snapshot, mode, { ...options, includeDialog: false })].flatMap(
-		([presentation, surfaceId]) => {
-			const surface = snapshot.surfaces[surfaceId];
-			if (surface?.type !== 'chat' || !surface.chatId) return [];
-			return [
-				{
-					surfaceId: surface.id,
-					chatId: surface.chatId,
-					presentation: presentation as WorkspaceWindowId | 'mobile',
-					windowId: presentation === 'mobile' ? null : (presentation as WorkspaceWindowId),
-				},
-			];
-		},
-	);
+	const presentations: VisibleChatPresentation[] = [];
+	for (const [presentation, surfaceId] of visiblePresentationMap(snapshot, mode, {
+		...options,
+		includeDialog: false,
+	})) {
+		const surface = snapshot.surfaces[surfaceId];
+		if (surface?.type !== 'chat' || !surface.chatId) continue;
+		presentations.push({
+			surfaceId: surface.id,
+			chatId: surface.chatId,
+			presentation: presentation as WorkspaceWindowId | 'mobile',
+			windowId: presentation === 'mobile' ? null : (presentation as WorkspaceWindowId),
+		});
+	}
+	return presentations;
+}
+
+function visibleDesktopPresentationKeys(
+	visible: readonly PortablePresentation[],
+): ReadonlySet<string> {
+	const keys = new Set<string>();
+	for (const { presentation, surfaceId } of visible) {
+		if (presentation === 'mobile') continue;
+		keys.add(portablePresentationKey(presentation, surfaceId));
+	}
+	return keys;
 }
 
 export function nextRetainedSingletonPresentationKeys(
@@ -124,11 +138,7 @@ export function nextRetainedSingletonPresentationKeys(
 ): ReadonlySet<string> {
 	if (isMobile) return new Set();
 	const next = new Set<string>();
-	const visibleKeys = new Set(
-		visible.flatMap(({ presentation, surfaceId }) =>
-			presentation === 'mobile' ? [] : [portablePresentationKey(presentation, surfaceId)],
-		),
-	);
+	const visibleKeys = visibleDesktopPresentationKeys(visible);
 	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
 		for (const surfaceId of workspaceWindow.tabs.order) {
 			if (snapshot.surfaces[surfaceId]?.type !== 'singleton') continue;
@@ -147,15 +157,15 @@ export function renderedPortablePresentations(
 	options: WorkspaceProjectionOptions = {},
 ): RenderedPortablePresentation[] {
 	if (isMobile) {
-		return visible.flatMap((item) =>
-			item.presentation === 'mobile' ? [{ ...item, visible: true, windowId: null }] : [],
-		);
+		const rendered: RenderedPortablePresentation[] = [];
+		for (const item of visible) {
+			if (item.presentation === 'mobile') {
+				rendered.push({ ...item, visible: true, windowId: null });
+			}
+		}
+		return rendered;
 	}
-	const visibleKeys = new Set(
-		visible.flatMap(({ presentation, surfaceId }) =>
-			presentation === 'mobile' ? [] : [portablePresentationKey(presentation, surfaceId)],
-		),
-	);
+	const visibleKeys = visibleDesktopPresentationKeys(visible);
 	const projectedWindowId = snapshot.fullscreenWindowId ?? options.projectedWindowId ?? null;
 	const rendered: RenderedPortablePresentation[] = [];
 	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {

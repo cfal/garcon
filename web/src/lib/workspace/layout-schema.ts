@@ -267,16 +267,16 @@ function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
 }
 
 export function parsePersistedWorkspaceLayout(rawV2: string | null): WorkspaceLayoutParseResult {
-	if (rawV2 !== null) {
-		try {
-			const value: unknown = JSON.parse(rawV2);
-			if (!isRecord(value) || value.version !== 2) throw new Error('Unsupported layout version');
-			return parseV2(value);
-		} catch {
-			return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
-		}
+	if (rawV2 === null) {
+		return { source: 'absent', snapshot: canonicalWorkspaceSnapshot() };
 	}
-	return { source: 'absent', snapshot: canonicalWorkspaceSnapshot() };
+	try {
+		const value: unknown = JSON.parse(rawV2);
+		if (!isRecord(value) || value.version !== 2) throw new Error('Unsupported layout version');
+		return parseV2(value);
+	} catch {
+		return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
+	}
 }
 
 function persistedRef(surface: SurfaceDescriptor): PersistedWorkspaceSurfaceRef | null {

@@ -1,6 +1,5 @@
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import {
-	WORKSPACE_WINDOW_EDGES,
 	type SurfaceDescriptor,
 	type WorkspaceLayoutSnapshot,
 	type WorkspaceWindowEdge,
@@ -9,9 +8,10 @@ import {
 	type WorkspaceWindowTabState,
 } from './surface-types.js';
 import { collectWindowNodes } from './window-tree.js';
-import type {
-	WorkspaceSplitAdmission,
-	WorkspaceSplitAdmissions,
+import {
+	mapWorkspaceSplitAdmissions,
+	type WorkspaceSplitAdmission,
+	type WorkspaceSplitAdmissions,
 } from './window-geometry-policy.js';
 
 export interface WorkspaceWindowTabActionState {
@@ -48,12 +48,9 @@ export function resolveWorkspaceWindowTabActions(
 		otherWindows: canMoveBetweenWindows
 			? windows.filter((workspaceWindow) => workspaceWindow.id !== windowId)
 			: [],
-		newWindowEdges: Object.fromEntries(
-			WORKSPACE_WINDOW_EDGES.map((edge) => [
-				edge,
-				canMoveToNewWindow ? resolveAdmission(edge, surfaceId) : null,
-			]),
-		) as WorkspaceSplitAdmissions,
+		newWindowEdges: mapWorkspaceSplitAdmissions((edge) =>
+			canMoveToNewWindow ? resolveAdmission(edge, surfaceId) : null,
+		),
 	};
 }
 
