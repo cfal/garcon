@@ -1644,7 +1644,7 @@ export class OpenCodeRuntime {
     options.signal?.throwIfAborted();
     // Native fork clones only messages: the forked session carries no permission
     // ruleset, so without this the forked chat prompts for everything the source
-    // had allowed. https://github.com/anomalyco/opencode/blob/v1.18.22/packages/opencode/src/session/session.ts#L691-L701
+    // had allowed. https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/session/session.ts#L691-L701
     const permissionMode = options.permissionMode;
     if (permissionMode) {
       try {

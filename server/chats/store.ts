@@ -972,12 +972,17 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
   return {
     ...entry,
-    // Frozen fields (parentChat, carryOverSegments) are safe to share; copy the mutable ones
-    // so callers cannot mutate registry state through a handed-out entry.
+    // Deeply frozen fields (parentChat, carryOverSegments) are safe to share; every
+    // other nested field must be copied here so callers cannot mutate registry
+    // state through a handed-out entry. New entry fields declare themselves by
+    // landing in one of these two groups.
     agentSettingsById: structuredClone(entry.agentSettingsById),
     tags: [...entry.tags],
     nativeSession: entry.nativeSession ? structuredClone(entry.nativeSession) : null,
     nativeSeedReceipt: entry.nativeSeedReceipt ? { ...entry.nativeSeedReceipt } : null,
+    pendingPreambleBoundary: entry.pendingPreambleBoundary
+      ? { ...entry.pendingPreambleBoundary }
+      : null,
     carryOverMigrationQuarantine: entry.carryOverMigrationQuarantine
       ? { ...entry.carryOverMigrationQuarantine }
       : null,
