@@ -1048,6 +1048,18 @@ export class SpaDriver {
     }, text);
   }
 
+  async clickSidebarChatById(chatId: string): Promise<void> {
+    await this.#page.evaluate((expectedChatId) => {
+      const row = [
+        ...document.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'),
+      ].find((element) => element.dataset.sidebarVirtualRow === expectedChatId);
+      const summary = row?.querySelector<HTMLElement>('[data-slot="sidebar-chat-summary"]');
+      const button = summary?.closest('button') as HTMLButtonElement | null;
+      if (!button) throw new Error(`Missing sidebar chat: ${expectedChatId}`);
+      button.click();
+    }, chatId);
+  }
+
   async openSidebarChatInNewWindow(text: string): Promise<string> {
     const existingWindowIds = new Set(await this.workspaceWindowIds());
     await this.#page.evaluate((expected) => {
