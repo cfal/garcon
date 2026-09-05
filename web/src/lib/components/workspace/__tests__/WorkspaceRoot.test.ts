@@ -1195,16 +1195,40 @@ describe('WorkspaceRoot', () => {
 		expect(liveChatBody.style.top).toBe('76px');
 		expect(liveChatBody.dataset.workspaceLiveChatBodyTopPx).toBe('76');
 
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_next_window() }));
+		const nextButton = screen.getByRole('button', {
+			name: m.workspace_compact_next_window(),
+		});
+		nextButton.focus();
+		await fireEvent.click(nextButton);
 		await waitFor(() => expect(workspace.activateWindow).toHaveBeenCalledWith('window-2'));
 		await waitFor(() => expect(gitWindow.classList.contains('hidden')).toBe(false));
+		const remountedNextButton = screen.getByRole('button', {
+			name: m.workspace_compact_next_window(),
+		});
+		await waitFor(() => expect(document.activeElement).toBe(remountedNextButton));
 
 		expect(container.querySelector('[data-workspace-window-id="window-main"]')).toBe(mainWindow);
 		expect(container.querySelector('[data-workspace-window-id="window-2"]')).toBe(gitWindow);
 		expect(gitWindow.querySelector('[data-testid="surface-renderer-stub"]')).toBe(gitRenderer);
+		expect(remountedNextButton).not.toBe(nextButton);
 		expect(gitWindow.getAttribute('style')).toContain('width: 100%');
 		expect(mainWindow.classList.contains('hidden')).toBe(true);
 		expect(layout.snapshot.desktopRoot).toStrictEqual(beforeRoot);
+
+		const listTrigger = screen.getByRole('button', {
+			name: m.workspace_compact_window_position({ current: 2, count: 3 }),
+		});
+		listTrigger.focus();
+		await fireEvent.click(listTrigger);
+		await fireEvent.click(
+			document.querySelector('[data-workspace-compact-window-id="window-main"]') as HTMLElement,
+		);
+		await waitFor(() => expect(mainWindow.classList.contains('hidden')).toBe(false));
+		const remountedListTrigger = screen.getByRole('button', {
+			name: m.workspace_compact_window_position({ current: 1, count: 3 }),
+		});
+		await waitFor(() => expect(document.activeElement).toBe(remountedListTrigger));
+		expect(remountedListTrigger).not.toBe(listTrigger);
 	});
 
 	it('uses a silent single-window safety projection while tiled geometry is pending', () => {

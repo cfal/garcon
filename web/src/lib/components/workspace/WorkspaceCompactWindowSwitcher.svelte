@@ -12,6 +12,7 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
+	import { tick } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { WorkspaceWindowId, WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
 	import { WORKSPACE_COMPACT_SWITCHER_HEIGHT_PX } from './workspace-window-chrome.js';
@@ -52,11 +53,21 @@
 			? m.workspace_compact_recovery_hint()
 			: m.workspace_compact_recovery_hint_resize(),
 	);
+	type FocusTarget = 'previous' | 'window-list' | 'next';
 
-	function activateAt(index: number): void {
+	function activate(windowId: WorkspaceWindowId, focusTarget: FocusTarget): void {
+		onActivate(windowId);
+		void tick().then(() => {
+			document
+				.querySelector<HTMLElement>(`[data-workspace-compact-focus-target="${focusTarget}"]`)
+				?.focus();
+		});
+	}
+
+	function activateAt(index: number, focusTarget: FocusTarget): void {
 		if (windows.length === 0) return;
 		const destination = windows[(index + windows.length) % windows.length];
-		if (destination) onActivate(destination.id);
+		if (destination) activate(destination.id, focusTarget);
 	}
 </script>
 
@@ -71,7 +82,8 @@
 		class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		aria-label={m.workspace_compact_previous_window()}
 		title={m.workspace_compact_previous_window()}
-		onclick={() => activateAt(currentIndex - 1)}
+		data-workspace-compact-focus-target="previous"
+		onclick={() => activateAt(currentIndex - 1, 'previous')}
 	>
 		<ChevronLeft class="size-3.5" aria-hidden="true" />
 	</button>
@@ -82,6 +94,7 @@
 			aria-label={positionLabel}
 			title={positionLabel}
 			data-workspace-compact-window-list-trigger
+			data-workspace-compact-focus-target="window-list"
 		>
 			{positionLabel}
 		</DropdownMenuTrigger>
@@ -92,7 +105,7 @@
 					class="min-w-0"
 					aria-current={workspaceWindow.id === currentWindowId ? 'true' : undefined}
 					data-workspace-compact-window-id={workspaceWindow.id}
-					onSelect={() => onActivate(workspaceWindow.id)}
+					onSelect={() => activate(workspaceWindow.id, 'window-list')}
 				>
 					<span class="w-5 shrink-0 text-end text-muted-foreground">{index + 1}</span>
 					<span class="min-w-0 flex-1 truncate" {title}>{title}</span>
@@ -112,7 +125,8 @@
 		class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		aria-label={m.workspace_compact_next_window()}
 		title={m.workspace_compact_next_window()}
-		onclick={() => activateAt(currentIndex + 1)}
+		data-workspace-compact-focus-target="next"
+		onclick={() => activateAt(currentIndex + 1, 'next')}
 	>
 		<ChevronRight class="size-3.5" aria-hidden="true" />
 	</button>
