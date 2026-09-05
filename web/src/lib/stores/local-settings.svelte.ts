@@ -542,7 +542,11 @@ export class LocalSettingsStore {
 	}
 
 	addHiddenBashCommandPattern(pattern: HiddenBashCommandPattern): void {
-		this.set('hiddenBashCommandPatterns', [...this.hiddenBashCommandPatterns, pattern]);
+		this.addHiddenBashCommandPatterns([pattern]);
+	}
+
+	addHiddenBashCommandPatterns(patterns: readonly HiddenBashCommandPattern[]): void {
+		this.set('hiddenBashCommandPatterns', [...this.hiddenBashCommandPatterns, ...patterns]);
 	}
 
 	removeHiddenBashCommandPattern(pattern: HiddenBashCommandPattern): void {

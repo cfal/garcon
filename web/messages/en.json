@@ -1331,6 +1331,8 @@
 	"settings_hidden_bash_commands_mode_regex": "Regex",
 	"settings_hidden_bash_commands_mode_glob": "Glob",
 	"settings_hidden_bash_commands_add": "Add",
+	"settings_hidden_bash_commands_add_preset": "Add preset",
+	"settings_hidden_bash_commands_preset_garcon_amp": "Garcon-amp rules",
 	"settings_hidden_bash_commands_remove": "Remove pattern",
 	"settings_hidden_bash_commands_error_empty": "Enter a pattern",
 	"settings_hidden_bash_commands_error_invalid_regex": "Invalid regular expression",

@@ -54,6 +54,34 @@ describe('HiddenBashCommandsSettingsCard', () => {
 		).toBeTruthy();
 	});
 
+	it('adds a preset once while preserving manual patterns', async () => {
+		localSettings.addHiddenBashCommandPattern({ pattern: 'manual *', mode: 'glob' });
+		localSettings.addHiddenBashCommandPattern({
+			pattern: '^\\./(?:oracle|finder|librarian|reporter)(?:\\s|$)',
+			mode: 'regex',
+		});
+		render(HiddenBashCommandsSettingsCardTestHost);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add preset' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Garcon-amp rules' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Add preset' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Garcon-amp rules' }));
+
+		expect(localSettings.hiddenBashCommandPatterns).toEqual([
+			{ pattern: 'manual *', mode: 'glob' },
+			{
+				pattern: '^\\./(?:oracle|finder|librarian|reporter)(?:\\s|$)',
+				mode: 'regex',
+			},
+			{
+				pattern:
+					'^/tmp/garcon-amp-[0-9]+/(?:oracle|finder|librarian|reporter)(?:\\s|$)',
+				mode: 'regex',
+			},
+		]);
+		expect(updateRemoteSettings).not.toHaveBeenCalled();
+	});
+
 	it('rejects empty, invalid regex, and duplicate patterns with inline errors', async () => {
 		render(HiddenBashCommandsSettingsCardTestHost);
 		const input = screen.getByLabelText('Command pattern');

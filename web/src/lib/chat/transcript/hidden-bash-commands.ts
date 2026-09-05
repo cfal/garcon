@@ -11,6 +11,28 @@ export interface HiddenBashCommandPattern {
 	mode: HiddenBashCommandPatternMode;
 }
 
+export interface HiddenBashCommandPatternPreset {
+	id: 'garcon-amp';
+	patterns: readonly HiddenBashCommandPattern[];
+}
+
+export const HIDDEN_BASH_COMMAND_PATTERN_PRESETS = [
+	{
+		id: 'garcon-amp',
+		patterns: [
+			{
+				pattern:
+					'^/tmp/garcon-amp-[0-9]+/(?:oracle|finder|librarian|reporter)(?:\\s|$)',
+				mode: 'regex',
+			},
+			{
+				pattern: '^\\./(?:oracle|finder|librarian|reporter)(?:\\s|$)',
+				mode: 'regex',
+			},
+		],
+	},
+] as const satisfies readonly HiddenBashCommandPatternPreset[];
+
 export function isHiddenBashCommandPatternMode(value: unknown): value is HiddenBashCommandPatternMode {
 	return (
 		typeof value === 'string' &&

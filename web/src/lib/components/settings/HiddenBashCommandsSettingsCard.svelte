@@ -1,13 +1,25 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { buttonVariants } from '$lib/components/ui/button';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuTrigger,
+	} from '$lib/components/ui/dropdown-menu';
 	import * as m from '$lib/paraglide/messages.js';
+	import { cn } from '$lib/utils/cn.js';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import TrashIcon from '@lucide/svelte/icons/trash';
 	import { getLocalSettings } from '$lib/context';
 	import {
+		HIDDEN_BASH_COMMAND_PATTERN_PRESETS,
 		HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES,
 		validateHiddenBashCommandPattern,
 		type HiddenBashCommandPattern,
 		type HiddenBashCommandPatternMode,
+		type HiddenBashCommandPatternPreset,
 		type HiddenBashCommandPatternValidation,
 	} from '$lib/chat/transcript/hidden-bash-commands.js';
 
@@ -50,6 +62,17 @@
 		localSettings.removeHiddenBashCommandPattern(pattern);
 	}
 
+	function addPreset(preset: HiddenBashCommandPatternPreset) {
+		localSettings.addHiddenBashCommandPatterns(preset.patterns);
+	}
+
+	function presetLabel(preset: HiddenBashCommandPatternPreset): string {
+		switch (preset.id) {
+			case 'garcon-amp':
+				return m.settings_hidden_bash_commands_preset_garcon_amp();
+		}
+	}
+
 	function modeLabel(mode: HiddenBashCommandPatternMode): string {
 		return mode === 'regex'
 			? m.settings_hidden_bash_commands_mode_regex()
@@ -58,7 +81,27 @@
 </script>
 
 <div class="border border-border bg-muted/50 rounded-lg px-4 py-3 space-y-3">
-	<div class="text-sm font-medium text-foreground">{m.settings_hidden_bash_commands_title()}</div>
+	<div class="flex items-center justify-between gap-3">
+		<div class="text-sm font-medium text-foreground">{m.settings_hidden_bash_commands_title()}</div>
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				class={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
+				aria-label={m.settings_hidden_bash_commands_add_preset()}
+				title={m.settings_hidden_bash_commands_add_preset()}
+			>
+				<PlusIcon class="mr-2 size-4" />
+				{m.settings_hidden_bash_commands_add_preset()}
+				<ChevronDownIcon class="ml-1 size-3.5" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end">
+				{#each HIDDEN_BASH_COMMAND_PATTERN_PRESETS as preset (preset.id)}
+					<DropdownMenuItem onclick={() => addPreset(preset)}>
+						{presetLabel(preset)}
+					</DropdownMenuItem>
+				{/each}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	</div>
 	<div class="text-xs text-muted-foreground">
 		{m.settings_hidden_bash_commands_description()}
 	</div>

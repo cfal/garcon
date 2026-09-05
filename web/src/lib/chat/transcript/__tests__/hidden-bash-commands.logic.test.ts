@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	compileHiddenBashCommandPatterns,
+	HIDDEN_BASH_COMMAND_PATTERN_PRESETS,
 	isHiddenBashToolUse,
 	normalizeHiddenBashCommandPatterns,
 	validateHiddenBashCommandPattern,
@@ -8,6 +9,19 @@ import {
 import { BashToolUseMessage, ReadToolUseMessage } from '$shared/chat-types';
 
 describe('compileHiddenBashCommandPatterns', () => {
+	it('matches Garcon-Amp launcher commands without matching embedded paths', () => {
+		const [preset] = HIDDEN_BASH_COMMAND_PATTERN_PRESETS;
+		const matches = compileHiddenBashCommandPatterns(preset.patterns);
+
+		expect(matches?.('/tmp/garcon-amp-1788487172419500/oracle --status')).toBe(true);
+		expect(matches?.('/tmp/garcon-amp-1788487172419500/oracle --review "diff"')).toBe(true);
+		expect(matches?.('./finder --start "locate settings"')).toBe(true);
+		expect(matches?.('./reporter')).toBe(true);
+		expect(matches?.('/tmp/garcon-amp-123/reporter-extra --status')).toBe(false);
+		expect(matches?.('echo /tmp/garcon-amp-123/oracle --status')).toBe(false);
+		expect(matches?.('x/oracle --status')).toBe(false);
+	});
+
 	it('matches glob patterns against the whole command', () => {
 		const matches = compileHiddenBashCommandPatterns([{ pattern: 'git *', mode: 'glob' }]);
 		expect(matches?.('git status')).toBe(true);

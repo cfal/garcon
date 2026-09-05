@@ -446,6 +446,29 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('adds hidden bash command patterns without duplicating the full list', () => {
+		const store = createLocalSettingsStore();
+		store.addHiddenBashCommandPattern({ pattern: 'manual *', mode: 'glob' });
+		store.addHiddenBashCommandPattern({ pattern: '^amp', mode: 'regex' });
+
+		store.addHiddenBashCommandPatterns([
+			{ pattern: '^amp', mode: 'regex' },
+			{ pattern: '^oracle', mode: 'regex' },
+			{ pattern: '^oracle', mode: 'regex' },
+		]);
+		store.addHiddenBashCommandPatterns([
+			{ pattern: '^amp', mode: 'regex' },
+			{ pattern: '^oracle', mode: 'regex' },
+		]);
+
+		expect(store.hiddenBashCommandPatterns).toEqual([
+			{ pattern: 'manual *', mode: 'glob' },
+			{ pattern: '^amp', mode: 'regex' },
+			{ pattern: '^oracle', mode: 'regex' },
+		]);
+		store.destroy();
+	});
+
 	it('preserves the hidden bash command pattern reference across unrelated writes', () => {
 		const store = createLocalSettingsStore();
 		store.addHiddenBashCommandPattern({ pattern: 'git *', mode: 'glob' });
