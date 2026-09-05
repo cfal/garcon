@@ -173,7 +173,6 @@ export type ResolveNativeSession = (
 
 export interface IChatRegistry {
   init(): Promise<ChatRegistrySnapshot>;
-  getRegistry(): ChatRegistrySnapshot;
   reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean>;
   listAllChats(): Record<string, ChatRegistryEntry>;
   // Ids are unique by construction (object keys).
@@ -512,7 +511,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     }
   }
 
-  getRegistry(): ChatRegistrySnapshot {
+  // Hands out the live snapshot; private because it bypasses the clone-on-
+  // hand-out protection every public accessor upholds.
+  private getRegistry(): ChatRegistrySnapshot {
     if (!this.#registry) {
       throw new Error('Registry cache not initialized. Call init() during startup.');
     }
