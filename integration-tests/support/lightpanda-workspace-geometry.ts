@@ -38,20 +38,29 @@ export async function installLightpandaWorkspaceGeometry(page: Page): Promise<vo
 }
 
 export async function assertLightpandaWorkspaceGeometry(page: Page): Promise<void> {
-  const hostSize = await page.evaluate(() => {
+  const workspaceGeometry = await page.evaluate(() => {
     const host = document.querySelector<HTMLElement>('[role="region"][aria-label="Workspace"]');
-    if (!host) return null;
+    if (!host) {
+      if (document.querySelector('[data-auth-recovery]')) {
+        return { kind: 'auth-recovery' } as const;
+      }
+      return { kind: 'missing' } as const;
+    }
+
     const { width, height } = host.getBoundingClientRect();
-    return { width, height };
+    return { kind: 'workspace', width, height } as const;
   });
 
-  if (!hostSize) return;
+  if (workspaceGeometry.kind === 'auth-recovery') return;
+  if (workspaceGeometry.kind === 'missing') {
+    throw new Error('Lightpanda workspace geometry assertion could not find the workspace host.');
+  }
   if (
-    hostSize.width <= MIN_USABLE_WORKSPACE_HOST_SIZE_PX ||
-    hostSize.height <= MIN_USABLE_WORKSPACE_HOST_SIZE_PX
+    workspaceGeometry.width <= MIN_USABLE_WORKSPACE_HOST_SIZE_PX ||
+    workspaceGeometry.height <= MIN_USABLE_WORKSPACE_HOST_SIZE_PX
   ) {
     throw new Error(
-      `Lightpanda workspace geometry shim returned unusable host bounds: ${hostSize.width}x${hostSize.height}.`,
+      `Lightpanda workspace geometry shim returned unusable host bounds: ${workspaceGeometry.width}x${workspaceGeometry.height}.`,
     );
   }
 }

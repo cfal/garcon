@@ -821,6 +821,7 @@ export class SpaDriver {
       { timeout: 20_000 },
       width <= 768,
     );
+    await assertLightpandaWorkspaceGeometry(this.#page);
   }
 
   async openWorkspaceWindowActions(windowId?: string): Promise<void> {
