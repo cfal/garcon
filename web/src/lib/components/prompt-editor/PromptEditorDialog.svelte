@@ -46,15 +46,23 @@
 	}: Props = $props();
 	const editorRenderer = lazyRenderer(() => import('./PromptEditor.svelte'));
 	let retryKey = $state(0);
+	let dialogElement = $state<HTMLElement | null>(null);
 	let promptRefinementActionLabel = $derived(
 		isPromptRefinementPending ? m.prompt_refinement_cancel() : m.prompt_refinement_refine(),
 	);
+
+	function handleOpenAutoFocus(event: Event): void {
+		event.preventDefault();
+		dialogElement?.focus({ preventScroll: true });
+	}
 </script>
 
 <Dialog.Root open={true} requestClose={onClose}>
 	<Dialog.Content
+		bind:ref={dialogElement}
 		showCloseButton={false}
 		transientKind="application-dialog"
+		onOpenAutoFocus={handleOpenAutoFocus}
 		data-workspace-surface-id={surfaceId}
 		data-prompt-editor-dialog
 		class="flex h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[min(88dvh,900px)] sm:w-[min(94vw,1100px)] sm:max-w-none sm:rounded-lg sm:border"

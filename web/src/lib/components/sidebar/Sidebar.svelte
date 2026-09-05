@@ -266,10 +266,9 @@
 	async function handleSortChatOrder(sortKey: ChatOrderSortKey): Promise<void> {
 		try {
 			const response = await controller.sortChatOrder(sortKey);
-			if (response.changed) {
-				notifications.info(m.notifications_reorder_chats_applied());
-				appShell.requestSidebarRecenterToSelected();
-			}
+			if (!response.changed) return;
+			notifications.info(m.notifications_reorder_chats_applied());
+			appShell.requestSidebarRecenterToSelected();
 		} catch (error) {
 			reportActionFailure(
 				'Failed to sort manual chat order:',

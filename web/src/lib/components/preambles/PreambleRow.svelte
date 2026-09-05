@@ -41,6 +41,7 @@
 </script>
 
 <article
+	data-slot="preamble-row"
 	class="rounded-md border border-border p-3 transition-colors {preamble.enabled
 		? 'bg-card'
 		: 'bg-muted/30'}"
@@ -48,7 +49,11 @@
 	<div class="flex min-w-0 items-start gap-3">
 		<div class="min-w-0 flex-1 space-y-2">
 			<div class="flex min-w-0 flex-wrap items-center gap-2">
-				<h3 class="min-w-0 truncate text-sm font-medium text-foreground" title={preamble.title}>
+				<h3
+					data-slot="preamble-row-title"
+					class="min-w-0 truncate text-sm font-medium text-foreground"
+					title={preamble.title}
+				>
 					{preamble.title}
 				</h3>
 				{#if preamble.scope.type === 'global'}
@@ -86,7 +91,7 @@
 			<Switch
 				class="col-span-2 mx-auto mb-1 sm:col-span-1 sm:mb-0 sm:mr-1"
 				checked={preamble.enabled}
-				disabled={disabled}
+				{disabled}
 				onCheckedChange={onEnabledChange}
 				aria-label={preamble.enabled
 					? m.preambles_disable_toggle({ title: preamble.title })

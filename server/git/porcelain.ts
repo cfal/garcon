@@ -26,8 +26,8 @@ import type {
   StashRefOptions,
 } from './types.js';
 import { GitDomainError } from './git-types.js';
+import { UNMERGED_STATUSES } from './porcelain-status.js';
 
-const UNMERGED_STATUSES = new Set<GitConflictStatus>(['UU', 'AA', 'DD', 'AU', 'UA', 'DU', 'UD']);
 const MAX_HISTORY_LIMIT = 200;
 const MAX_BLAME_LINES = 2_000;
 const MAX_GRAPH_LIMIT = 500;
@@ -53,7 +53,12 @@ function parsePorcelainStatus(output: string): Array<{ path: string; status: str
     const status = `${token[0] || ' '}${token[1] || ' '}`;
     const filePath = token.slice(3);
     entries.push({ path: filePath, status });
-    if (status[0] === 'R' || status[0] === 'C') index += 1;
+    // Either column can carry the rename/copy marker; both forms append the
+    // original path as a second token that must be consumed.
+    if (
+      status[0] === 'R' || status[0] === 'C' ||
+      status[1] === 'R' || status[1] === 'C'
+    ) index += 1;
   }
   return entries;
 }

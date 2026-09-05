@@ -3,6 +3,7 @@ import {
   chatActivityTimeMs,
   chatCreationTimeMs,
   compareChatOrderNewestFirst,
+  isChatOrderSortKey,
 } from '../chat-order-sort.ts';
 
 const chat = (overrides = {}) => ({
@@ -13,6 +14,13 @@ const chat = (overrides = {}) => ({
 });
 
 describe('chat order sort', () => {
+  it('recognizes supported sort keys', () => {
+    expect(isChatOrderSortKey('created')).toBe(true);
+    expect(isChatOrderSortKey('activity')).toBe(true);
+    expect(isChatOrderSortKey('oldest')).toBe(false);
+    expect(isChatOrderSortKey(null)).toBe(false);
+  });
+
   it('prefers valid metadata creation over the id timestamp', () => {
     expect(chatCreationTimeMs(chat({ createdAt: '2024-01-01T00:00:00.000Z' })))
       .toBe(new Date('2024-01-01T00:00:00.000Z').getTime());

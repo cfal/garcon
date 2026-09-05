@@ -14,6 +14,7 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { probeWorktreeLayout } from './worktree-layout.js';
 import { isExpectedMissingGitResult } from './comparison-errors.js';
 import { commitSelectedFiles } from './selected-file-commit.js';
+import { discard } from './discard.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -402,11 +403,27 @@ export function createStatusOperations(agents: GitAgentRunner) {
       const status = line.substring(0, 2);
       const file = line.substring(3).trim().replace(/\/+$/g, '');
       if (!file) return;
-      if (status === 'M ' || status === ' M' || status === 'MM') {
-        modified.push(file);
-      } else if (status === 'A ' || status === 'AM') {
+      // Classifies by letter so every porcelain variant lands somewhere:
+      // T (typechange) and U (unmerged) count as modifications of a tracked
+      // path, and any A wins because the index still holds an addition. Index
+      // intent also wins over worktree deletion, so AD/MD read as added or
+      // modified rather than deleted. Renames and copies drop out as before:
+      // their porcelain line carries "old -> new", which is not a path this
+      // endpoint's consumers could act on. R/C can appear in either column;
+      // the unstaged form (DR, via an intent-to-add destination) pairs a
+      // worktree rename the same way.
+      const staged = status[0];
+      const unstaged = status[1];
+      if (staged === 'R' || staged === 'C' || unstaged === 'R' || unstaged === 'C') return;
+      if (staged === 'A' || unstaged === 'A') {
         added.push(file);
-      } else if (status === 'D ' || status === ' D') {
+      } else if (
+        staged === 'U' || unstaged === 'U' ||
+        staged === 'M' || unstaged === 'M' ||
+        staged === 'T' || unstaged === 'T'
+      ) {
+        modified.push(file);
+      } else if (staged === 'D' || unstaged === 'D') {
         deleted.push(file);
       } else if (status === '??') {
         untracked.push(file);
@@ -766,46 +783,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
       remoteName: targetRemote,
       remoteBranch: targetBranch,
     };
-  }
-
-  async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    if (!statusOutput.trim()) {
-      throw new GitDomainError('INVALID_INPUT', 'No local working-tree changes were found for this file.');
-    }
-
-    const status = statusOutput.substring(0, 2);
-    if (status === '??') {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        await fs.rm(filePath, { recursive: true, force: true });
-      } else {
-        await fs.unlink(filePath);
-      }
-    } else if (status === 'A ' || status[1] === 'A' || status === 'AU') {
-      // The workbench only offers discard on unstaged changes, so AM/AD/AT land
-      // in the restore branch below and keep their staged addition. Reset
-      // remains for index-only additions (endpoint-reachable, no worktree
-      // changes to restore) and unmerged-added states (AA/AU/UA), where it
-      // clears the conflict instead of falling through as a silent no-op.
-      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
-    } else if (status.includes('M') || status.includes('D') || status.includes('T')) {
-      // T routes worktree typechanges (regular file versus symlink) through
-      // restore, which rewrites the worktree entry back to the indexed type,
-      // so AT lands back at a staged addition. Staged-only typechanges ('T ')
-      // land here as a no-op, exactly like 'M ', because the workbench only
-      // offers discard on unstaged changes.
-      await runGit(projectPath, ['restore', '--', file]);
-    }
-
-    return { success: true, message: `Changes discarded for ${file}` };
   }
 
   async function deleteUntracked({ projectPath, file }: FileOptions): Promise<unknown> {

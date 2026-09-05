@@ -158,7 +158,9 @@ describe('Snippet template editor', () => {
 			}
 
 			await waitFor(() => expect((options?.signal as AbortSignal).aborted).toBe(true));
-			expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull();
+			await waitFor(() =>
+				expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull(),
+			);
 		},
 	);
 

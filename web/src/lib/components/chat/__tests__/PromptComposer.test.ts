@@ -1544,7 +1544,9 @@ describe('PromptComposer focus', () => {
 		);
 
 		await inputAtCaret(textarea, ';;reviewx', 9);
-		expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull();
+		await waitFor(() =>
+			expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull(),
+		);
 	});
 
 	it('retries failed inline arguments against the original trigger span', async () => {

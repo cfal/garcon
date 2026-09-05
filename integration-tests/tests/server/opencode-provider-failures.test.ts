@@ -244,7 +244,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  // OpenCode 1.18.22 continues the prompt loop after an unknown stream finish, so a
+  // OpenCode 1.18.29 continues the prompt loop after an unknown stream finish, so a
   // clean-close truncated Chat Completions stream is recovered by the next response
   // instead of ending the turn as an empty success.
   // https://github.com/anomalyco/opencode/commit/57fa34f23599f65dd1027f9caac31e6c576ce644
