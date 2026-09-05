@@ -468,8 +468,8 @@ export function insertRowsBatch(db: Database, input: {
       UPDATE search_chat_state SET indexed_through = ?, updated_at = ?
       WHERE chat_id = ?
     `).run(input.advanceTo, new Date().toISOString(), input.chatId);
-    db.exec(`INSERT INTO search_chunks_fts(search_chunks_fts, rank)
-      VALUES ('merge', ${SEARCH_FTS_MERGE_PAGES_PER_TXN})`);
+    db.query(`INSERT INTO search_chunks_fts(search_chunks_fts, rank)
+      VALUES ('merge', ?)`).run(SEARCH_FTS_MERGE_PAGES_PER_TXN);
     const updated = getChatState(db, input.chatId);
     if (!updated) throw searchError('SEARCH_STATE_INVARIANT');
     return updated;
