@@ -182,6 +182,14 @@
 		<PanelTop class="rotate-180" />
 		{m.workspace_move_tab_to_new_window_below()}
 	</menu.Item>
+	<menu.Item
+		data-workspace-window-tab-action="close-other-windows"
+		disabled={workspace.isOtherWindowsCloseBlocked(windowId)}
+		onSelect={() => void workspace.closeOtherWindows(windowId).catch(notifyFailure)}
+	>
+		<X />
+		{m.workspace_close_other_windows()}
+	</menu.Item>
 	{#if surface}
 		<menu.Item
 			data-workspace-window-tab-action="close-tab"

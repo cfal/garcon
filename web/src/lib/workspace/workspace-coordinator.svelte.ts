@@ -302,29 +302,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	isSurfaceCloseBlocked(surfaceId: string): boolean {
-		const surface = this.layout.surface(surfaceId);
-		if (!surface || this.#reservedSurfaceIds.has(surfaceId)) return true;
-		if (surface.type === 'chat' && workspaceChatViewCount(this.layout.snapshot) <= 1) {
-			return true;
-		}
-		const ownerWindowId = windowIdOfSurface(this.layout.snapshot.desktopRoot, surfaceId);
-		if (ownerWindowId && this.#reservedWindowIds.has(ownerWindowId)) return true;
-		if (ownerWindowId) {
-			const owner = windowNodeById(this.layout.snapshot.desktopRoot, ownerWindowId);
-			if (owner?.tabs.order.length === 1 && this.windowCount === 1) return true;
-		}
-		if (this.#deps.gitMutations?.pendingCount(surfaceId)) return true;
-		if (surface.type === 'file') {
-			return (this.#deps.files.get(surface.fileSessionId)?.pendingMutationCount ?? 0) > 0;
-		}
-		if (surface.type === 'singleton' && surface.kind === 'commit') {
-			return !(this.#deps.singletons.commitIfPresent()?.canClose ?? true);
-		}
-		return false;
+		return this.#windowDestruction.isSurfaceBlocked(surfaceId);
 	}
 
 	isWindowCloseBlocked(windowId: WorkspaceWindowId): boolean {
 		return this.windowCount === 1 || this.#windowDestruction.isWindowBlocked(windowId);
+	}
+
+	isOtherWindowsCloseBlocked(windowId: WorkspaceWindowId): boolean {
+		return this.#windowDestruction.isOtherWindowsBlocked(windowId);
 	}
 
 	noteSurfaceFocus(surfaceId: string): void {
@@ -717,6 +703,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async closeWindow(windowId: WorkspaceWindowId): Promise<boolean> {
 		return this.#windowDestruction.close(windowId);
+	}
+
+	async closeOtherWindows(windowId: WorkspaceWindowId): Promise<boolean> {
+		return this.#windowDestruction.closeOthers(windowId);
 	}
 
 	async enterWindowFullscreen(windowId: WorkspaceWindowId): Promise<boolean> {

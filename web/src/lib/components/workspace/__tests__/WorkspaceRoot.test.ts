@@ -242,6 +242,8 @@ function installContext() {
 		releaseWindowPointerInteraction: vi.fn(),
 		cancelWindowPointerInteraction: vi.fn(),
 		focusSurface,
+		isOtherWindowsCloseBlocked: () => true,
+		closeOtherWindows: vi.fn(async () => false),
 		isWindowCloseBlocked: (windowId: WorkspaceWindowId) =>
 			collectWindowNodes(layout.snapshot.desktopRoot).length === 1 ||
 			!collectWindowNodes(layout.snapshot.desktopRoot).some((item) => item.id === windowId),

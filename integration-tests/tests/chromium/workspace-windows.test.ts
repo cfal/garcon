@@ -897,6 +897,7 @@ describe('Chromium workspace windows', () => {
         'move-new-right',
         'move-new-top',
         'move-new-bottom',
+        'close-other-windows',
         'close-tab',
       ]);
       expect(
@@ -1119,6 +1120,76 @@ describe('Chromium workspace windows', () => {
       expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(4);
       expect(await fixture.page.locator('[data-workspace-new-window-menu]').count()).toBe(0);
 
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('closes all other windows from the menu and persists the kept window', async () => {
+    await withChromiumFixture('workspace-close-other-windows', async (fixture) => {
+      const { page } = fixture;
+      await page.setViewportSize({ width: 1600, height: 900 });
+      await createGitFixture(fixture.integration.dirs.project);
+      const chatId = await createChat(fixture, 'Synthetic close-other-windows fixture');
+      await openChat(fixture, chatId);
+      const keptWindowId = await page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!keptWindowId) throw new Error('Missing kept window');
+      await page
+        .locator('textarea[placeholder="Reply..."]')
+        .fill('Retained window draft');
+      await page.keyboard.press('Control+p');
+      await page.getByRole('combobox').fill('Switch to Git');
+      await page.getByRole('option', { name: /^Switch to Git/ }).click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
+      );
+      await page
+        .locator(`[data-workspace-window-menu-trigger="${keptWindowId}"]`)
+        .click();
+      const action = page.getByRole('menuitem', {
+        name: 'Close all other windows',
+        exact: true,
+      });
+      expect(
+        await action.evaluate((element) =>
+          element.previousElementSibling?.getAttribute(
+            'data-workspace-window-tab-action',
+          ),
+        ),
+      ).toBe('move-new-bottom');
+      await action.click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+      );
+      expect(
+        await page
+          .locator('[data-workspace-window-current="true"]')
+          .getAttribute('data-workspace-window-id'),
+      ).toBe(keptWindowId);
+      expect(await page.locator('textarea[placeholder="Reply..."]').inputValue()).toBe(
+        'Retained window draft',
+      );
+      await page.waitForFunction(() => {
+        const raw = localStorage.getItem('workspace_layout_v2');
+        return raw !== null && JSON.parse(raw).root.type === 'window';
+      });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('[data-workspace-window-id]').waitFor();
+      expect(await page.locator('[data-workspace-window-id]').count()).toBe(1);
+      expect(
+        await page
+          .locator('[data-workspace-window-id]')
+          .getAttribute('data-workspace-window-id'),
+      ).toBe(keptWindowId);
+      await page
+        .locator(`[data-workspace-window-menu-trigger="${keptWindowId}"]`)
+        .click();
+      expect(
+        await page
+          .getByRole('menuitem', { name: 'Close all other windows', exact: true })
+          .getAttribute('aria-disabled'),
+      ).toBe('true');
       fixture.assertNoBrowserErrors();
     });
   });

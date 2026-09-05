@@ -1976,6 +1976,7 @@
 	"settings_file_open_placement_new_window": "New window",
 	"workspace_window_number": "Window {number}",
 	"workspace_close_window": "Close window",
+	"workspace_close_other_windows": "Close all other windows",
 	"workspace_close_window_final_chat_disabled": "At least one Chat view must remain",
 	"workspace_close_window_unavailable": "This window cannot be closed right now",
 	"settings_completion_sound_title": "Task completion sound",

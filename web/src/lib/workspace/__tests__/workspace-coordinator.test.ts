@@ -2751,6 +2751,83 @@ describe('generic terminal creation', () => {
 	});
 });
 
+describe('closing all other windows', () => {
+	it('keeps the requested window and active tab while releasing other windows together', async () => {
+		const { coordinator, layout, files, terminals } = createHarness({ includePortableTabs: false });
+		await coordinator.placeFileSession('other-file', { type: 'window', windowId: 'window-main' });
+		const terminalId = 'close-others-running';
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'window-files');
+		await coordinator.openChatInNewWindow('kept-chat', 'window-main', 'bottom');
+		const keptWindowId = coordinator.currentWindowId;
+		const activeId = windowTabs(layout.snapshot, keptWindowId).activeId;
+		expect(coordinator.isOtherWindowsCloseBlocked(keptWindowId)).toBe(false);
+		await expect(coordinator.closeOtherWindows(keptWindowId)).resolves.toBe(true);
+		expect(collectWindowNodes(layout.snapshot.desktopRoot).map((window) => window.id)).toEqual([
+			keptWindowId,
+		]);
+		expect(windowTabs(layout.snapshot, keptWindowId).activeId).toBe(activeId);
+		expect(coordinator.currentWindowId).toBe(keptWindowId);
+		expect(files.destroy).toHaveBeenCalledWith('other-file');
+		expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		expect(coordinator.isOtherWindowsCloseBlocked(keptWindowId)).toBe(true);
+	});
+
+	it('does not close any windows when a later file confirmation is canceled', async () => {
+		const confirmDestructive = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+		const { coordinator, layout, files } = createHarness({ confirmDestructive });
+		await coordinator.placeFileSession('first', { type: 'window', windowId: 'window-main' });
+		await coordinator.placeFileSession('second', { type: 'window', windowId: 'window-files' });
+		await coordinator.openChatInNewWindow('kept-chat', 'window-main', 'bottom');
+		const before = layout.snapshot;
+		await expect(coordinator.closeOtherWindows(coordinator.currentWindowId)).resolves.toBe(false);
+		expect(confirmDestructive).toHaveBeenCalledTimes(2);
+		expect(layout.snapshot).toBe(before);
+		expect(files.destroy).not.toHaveBeenCalled();
+	});
+
+	it('protects the last Chat view, missing windows, and the only window', async () => {
+		const { coordinator, layout } = createHarness({ includePortableTabs: false });
+		const before = layout.snapshot;
+		expect(coordinator.isOtherWindowsCloseBlocked('window-files')).toBe(true);
+		await expect(coordinator.closeOtherWindows('window-files')).resolves.toBe(false);
+		await expect(coordinator.closeOtherWindows('window-missing')).resolves.toBe(false);
+		expect(layout.snapshot).toBe(before);
+		await coordinator.closeOtherWindows('window-main');
+		await expect(coordinator.closeOtherWindows('window-main')).resolves.toBe(false);
+	});
+
+	it('reserves every window while confirming and honors Commit draft cancellation', async () => {
+		const { coordinator, layout, singletons } = createHarness();
+		await coordinator.openSingletonInNewWindow('commit');
+		singletons.commit.retainedDraftCount = 1;
+		const before = layout.snapshot;
+		const closing = coordinator.closeOtherWindows('window-main');
+		await vi.waitFor(() => expect(coordinator.closeGuardRequest).not.toBeNull());
+		expect(coordinator.isOtherWindowsCloseBlocked('window-main')).toBe(true);
+		await expect(coordinator.closeOtherWindows('window-main')).resolves.toBe(false);
+		coordinator.resolveCloseGuard(false);
+		await expect(closing).resolves.toBe(false);
+		expect(layout.snapshot).toBe(before);
+		expect(singletons.commit.discardDrafts).not.toHaveBeenCalled();
+		expect(coordinator.isOtherWindowsCloseBlocked('window-main')).toBe(false);
+	});
+
+	it('blocks the whole operation while a file mutation is pending', async () => {
+		const { coordinator, layout, files } = createHarness({ filePendingMutationCount: 1 });
+		await coordinator.placeFileSession('pending', { type: 'window', windowId: 'window-files' });
+		const before = layout.snapshot;
+		expect(coordinator.isOtherWindowsCloseBlocked('window-main')).toBe(true);
+		await expect(coordinator.closeOtherWindows('window-main')).resolves.toBe(false);
+		expect(layout.snapshot).toBe(before);
+		expect(files.confirmDestructive).not.toHaveBeenCalled();
+	});
+});
+
 describe('responsive window merging', () => {
 	it('keeps the current tab, transfers files and terminals, and never invokes close guards', async () => {
 		const { coordinator, layout, files, terminals } = createHarness({ includePortableTabs: false });
