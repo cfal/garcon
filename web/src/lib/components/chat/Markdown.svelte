@@ -11,6 +11,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		type Renderers,
 	} from '@humanspeak/svelte-markdown';
 	import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
+	import { createChatReferenceMarkdownExtension } from '$lib/chat/transcript/chat-reference-markdown.js';
 	import MathRenderer from './MathRenderer.svelte';
 	import { createLiteralHtmlMarkdownExtension } from './markdown-html-policy';
 
@@ -19,9 +20,13 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		blockKatex: RendererComponent;
 	}
 
-	const markdownExtensions = [
+	const baseMarkdownExtensions = [
 		markedKatex({ singleDollarInline: true }),
 		createLiteralHtmlMarkdownExtension(),
+	];
+	const bareChatIdMarkdownExtensions = [
+		...baseMarkdownExtensions,
+		createChatReferenceMarkdownExtension(),
 	];
 	const safeRenderers: Partial<MathRenderers> = {
 		...defaultRenderers,
@@ -34,10 +39,16 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 <script lang="ts">
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
 	import CodeBlock from './CodeBlock.svelte';
+	import ChatReference from './ChatReference.svelte';
 	import MermaidBlock from './MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
+	import {
+		parseChatReferenceHref,
+		type ResolveChatReference,
+	} from '$lib/chat/transcript/chat-reference.js';
 
 	type MarkdownVariant = 'assistant' | 'user' | 'presented' | 'thinking';
+	type ChatReferencePolicy = 'disabled' | 'explicit' | 'explicit-and-bare';
 
 	export interface MarkdownLinkNavigateEvent {
 		rawHref: string;
@@ -52,6 +63,8 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		fileLinkBasePath?: string;
 		/** Called when a link is clicked. Return true to prevent default navigation. */
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
+		resolveChatReference?: ResolveChatReference;
+		chatReferencePolicy?: ChatReferencePolicy;
 		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
@@ -60,6 +73,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		{
 			container: string;
 			link: string;
+			chatReferenceId: string;
 			code: string;
 			blockquote: string;
 		}
@@ -68,6 +82,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			container:
 				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
 			link: 'text-primary hover:underline',
+			chatReferenceId: 'text-muted-foreground/80',
 			code: 'rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground',
 			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',
 		},
@@ -75,6 +90,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			container:
 				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-primary-foreground prose-headings:text-primary-foreground prose-p:text-primary-foreground prose-li:text-primary-foreground prose-strong:text-primary-foreground',
 			link: 'text-primary-foreground/90 hover:text-primary-foreground underline',
+			chatReferenceId: 'text-current opacity-70',
 			code: 'rounded-md border border-primary-foreground/30 bg-primary-foreground/10 px-1.5 py-0.5 font-mono text-[0.9em] text-primary-foreground',
 			blockquote:
 				'my-2 border-l-4 border-primary-foreground/40 pl-4 italic text-primary-foreground/90',
@@ -83,6 +99,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			container:
 				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-inherit prose-headings:text-inherit prose-p:text-inherit prose-li:text-inherit prose-strong:text-inherit',
 			link: 'text-inherit underline opacity-90 hover:opacity-100',
+			chatReferenceId: 'text-current opacity-70',
 			code: 'rounded-md border border-current/30 bg-current/10 px-1.5 py-0.5 font-mono text-[0.9em] text-inherit',
 			blockquote: 'my-2 border-l-4 border-current/40 pl-4 italic text-inherit opacity-90',
 		},
@@ -90,6 +107,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			container:
 				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
 			link: 'text-primary hover:underline',
+			chatReferenceId: 'text-muted-foreground/80',
 			code: 'rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground',
 			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',
 		},
@@ -101,6 +119,8 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		class: className = '',
 		fileLinkBasePath,
 		onLinkNavigate,
+		resolveChatReference,
+		chatReferencePolicy = 'disabled',
 		acquireTransientActivity,
 	}: Props = $props();
 
@@ -110,6 +130,11 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 
 	const styles = $derived(VARIANT_STYLES[variant]);
 	const containerClass = $derived(`${styles.container} ${className}`.trim());
+	const markdownExtensions = $derived(
+		chatReferencePolicy === 'explicit-and-bare'
+			? bareChatIdMarkdownExtensions
+			: baseMarkdownExtensions,
+	);
 	const markdownOptions = $derived(
 		variant === 'user' || variant === 'presented' ? { breaks: true } : undefined,
 	);
@@ -143,28 +168,56 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			<code class={styles.code}>{text}</code>
 		{/snippet}
 
-		{#snippet link({ href, title, children })}
-			{@const parsed = parseFileLink(href, parserOptions)}
-			{@const isFile = parsed.kind === 'file'}
-			{@const isAbsPath = !isFile && /^(\/|[A-Za-z]:[/\\])/.test(href ?? '')}
-			{@const isExternal = !isFile && !isAbsPath}
-			<a
-				{href}
-				{title}
-				class={styles.link}
-				target={isExternal ? '_blank' : undefined}
-				rel={isExternal ? 'noopener noreferrer' : undefined}
-				onpointerdowncapture={stopParentContextTriggerGesture}
-				oncontextmenu={stopParentContextTriggerGesture}
-				onclick={isFile || isAbsPath
-					? (e: MouseEvent) => {
-							e.preventDefault();
-							if (isFile) onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
-						}
-					: undefined}
-			>
-				{@render children?.()}
-			</a>
+		{#snippet chatReference({ chatId }: { chatId: string })}
+			<ChatReference
+				{chatId}
+				resolution={resolveChatReference?.(chatId) ?? null}
+				linkClass={styles.link}
+				idClass={styles.chatReferenceId}
+			/>
+		{/snippet}
+
+		{#snippet link({ href, title, text, children })}
+			{@const chatId =
+				chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
+			{#if chatId}
+				<ChatReference
+					{chatId}
+					resolution={resolveChatReference?.(chatId) ?? null}
+					authoredLabelText={text}
+					authoredTitle={title}
+					linkClass={styles.link}
+					idClass={styles.chatReferenceId}
+				>
+					{#snippet authoredLabel()}
+						{@render children?.()}
+					{/snippet}
+				</ChatReference>
+			{:else}
+				{@const parsed = parseFileLink(href, parserOptions)}
+				{@const isFile = parsed.kind === 'file'}
+				{@const isAbsPath = !isFile && /^(\/|[A-Za-z]:[/\\])/.test(href ?? '')}
+				{@const isExternal = !isFile && !isAbsPath}
+				<a
+					{href}
+					{title}
+					class={styles.link}
+					target={isExternal ? '_blank' : undefined}
+					rel={isExternal ? 'noopener noreferrer' : undefined}
+					onpointerdowncapture={stopParentContextTriggerGesture}
+					oncontextmenu={stopParentContextTriggerGesture}
+					onclick={isFile || isAbsPath
+						? (event: MouseEvent) => {
+								event.preventDefault();
+								if (isFile) {
+									onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
+								}
+							}
+						: undefined}
+				>
+					{@render children?.()}
+				</a>
+			{/if}
 		{/snippet}
 
 		{#snippet blockquote({ children })}
