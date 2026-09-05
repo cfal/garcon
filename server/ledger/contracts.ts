@@ -19,6 +19,11 @@ import {
   type CliRowFormat,
 } from '../../common/cli-presentation.js';
 import type { JsonObject } from '../../common/json.js';
+import type {
+  PendingPreambleBoundary,
+  Preamble,
+} from '../../common/preambles.js';
+import type { PreamblePrefixReceipt } from '../../common/preamble-prefix.js';
 
 declare const transcriptViewIdBrand: unique symbol;
 
@@ -50,6 +55,8 @@ export interface LedgerUserInputDetail {
   readonly message: UserMessage;
   readonly attachments: readonly AgentAttachment[];
   readonly steer: boolean;
+  readonly preambleBoundary: PendingPreambleBoundary | null;
+  readonly preamblePrefixReceipt: PreamblePrefixReceipt | null;
 }
 
 export interface LedgerUserInputRow extends LedgerRowBase {
@@ -191,8 +198,24 @@ export interface TranscriptPage {
 
 export interface InputComposition {
   readonly input: LedgerUserInputRow;
+  readonly committedRows: readonly LedgerRow[];
   readonly prompt: readonly LedgerUserInputRow[];
+  readonly providerPrefix: string;
   readonly inserted: boolean;
+}
+
+export interface PreambleInputApplication {
+  readonly boundary: PendingPreambleBoundary;
+  readonly preambles: readonly Preamble[];
+}
+
+export interface AppendInputRequest {
+  readonly viewId: TranscriptViewId;
+  readonly at: string;
+  readonly detail: LedgerUserInputDetail;
+  readonly excludedOrdinals?: ReadonlySet<number>;
+  readonly preambleBoundary: PendingPreambleBoundary | null;
+  readonly preambles: readonly Preamble[];
 }
 
 export interface AppendChatRowRequest {

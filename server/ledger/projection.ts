@@ -1,4 +1,7 @@
-import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/transcript-notice-details.js';
+import {
+  isCarryoverMigrationQuarantineNoticeDetail,
+  isPreambleApplicationNoticeDetail,
+} from '../../common/transcript-notice-details.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
 import { isPresentationOnlyProviderRow } from './contracts.js';
 
@@ -18,7 +21,10 @@ export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowD
     }
     if (
       row.kind === 'notice'
-      && isCarryoverMigrationQuarantineNoticeDetail(row.detail)
+      && (
+        isCarryoverMigrationQuarantineNoticeDetail(row.detail)
+        || isPreambleApplicationNoticeDetail(row.detail)
+      )
     ) {
       return [{
         kind: 'notice',

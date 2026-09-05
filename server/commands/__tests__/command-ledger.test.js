@@ -9,6 +9,7 @@ import {
   commandPayloadHash,
 } from '../command-ledger.ts';
 import { ChatCommandSettlement } from '../chat-command-settlement.ts';
+import { DomainError } from '../../lib/domain-error.ts';
 
 function acceptedInput(overrides = {}) {
   return {
@@ -316,6 +317,27 @@ describe('CommandLedger', () => {
       turnId: 'turn-retry',
       payload: { chatId: 'chat-1', command: 'x'.repeat(1_024) },
     }))).toMatchObject({ kind: 'accepted', record: { turnId: 'turn-retry' } });
+  });
+
+  it('retains a non-retryable domain code for deterministic replay', async () => {
+    const ledger = new CommandLedger();
+    const settlement = new ChatCommandSettlement(ledger);
+    const accepted = await ledger.accept(acceptedInput());
+
+    await settlement.markPreScheduleFailure(accepted.record, {
+      error: new DomainError(
+        'PREAMBLE_SLASH_COMMAND_BLOCKED',
+        'Start with a regular message.',
+        422,
+      ),
+      retryable: false,
+    });
+
+    expect(await ledger.getRecord(accepted.record.key)).toMatchObject({
+      status: 'failed',
+      error: 'Start with a regular message.',
+      errorCode: 'PREAMBLE_SLASH_COMMAND_BLOCKED',
+    });
   });
 
   it('bounds accepted goal-control receipts with unknown outcomes', async () => {

@@ -50,6 +50,7 @@ import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
+import type { PreambleService } from '../preambles/service.js';
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
@@ -175,6 +176,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
+  readonly #preambles: Pick<PreambleService, 'resolve'>;
   readonly #transcriptListeners = new Set<(
     event: TranscriptCommitEvent,
   ) => void | Promise<void>>();
@@ -194,6 +196,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
+    preambles: Pick<PreambleService, 'resolve'>;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
@@ -217,6 +220,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       hasPendingOwnershipTransfer: args.hasPendingOwnershipTransfer,
     });
     this.#hasPendingOwnershipTransfer = args.hasPendingOwnershipTransfer;
+    this.#preambles = args.preambles;
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
       directory: this.#directory,
@@ -538,20 +542,52 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     options: UserInputAdmissionOptions & { readonly clientRequestId: string },
     currentViewId: ReturnType<typeof transcriptViewId>,
   ): { readonly inserted: boolean } {
+    const session = this.#registry.getChat(chatId);
+    if (!session) throw new Error(`Session not initialized: ${chatId}`);
+    const pending = options.commandType === 'steer' || options.commandType === 'goal-control'
+      ? null
+      : session.pendingPreambleBoundary ?? null;
+    const alreadyConsumed = pending
+      ? this.#ledger.hasPreambleBoundaryProof(chatId, pending)
+      : false;
+    const boundary = pending && !alreadyConsumed ? pending : null;
+    const viewId = options.transcriptViewId ? transcriptViewId(options.transcriptViewId) : currentViewId;
+    const attachments = (options.images ?? []).map((image) => ({
+      kind: 'image' as const,
+      data: image.data,
+      name: image.name ?? null,
+      mimeType: image.mimeType ?? 'application/octet-stream',
+    }));
+    const slashLeading = message.content.trimStart().startsWith('/');
     let composition;
     try {
-      composition = this.#ledger.appendInputAndCompose({
+      if (boundary && slashLeading && this.#ledger.hasMatchingInputSubmission({
         chatId,
-        viewId: options.transcriptViewId ? transcriptViewId(options.transcriptViewId) : currentViewId,
+        viewId,
         message,
-        attachments: (options.images ?? []).map((image) => ({
-          kind: 'image' as const,
-          data: image.data,
-          name: image.name ?? null,
-          mimeType: image.mimeType ?? 'application/octet-stream',
-        })),
+        attachments,
         clientMessageId: options.clientMessageId ?? null,
         steer: options.commandType === 'steer',
+      })) {
+        return { inserted: false };
+      }
+      const preambles = boundary ? this.#preambles.resolve(session.projectPath) : [];
+      if (boundary && preambles.length > 0 && slashLeading) {
+        throw new DomainError(
+          'PREAMBLE_SLASH_COMMAND_BLOCKED',
+          'Matching preambles haven\u2019t been sent yet. Start with a regular message before using provider slash commands.',
+          422,
+        );
+      }
+      composition = this.#ledger.appendInputAndCompose({
+        chatId,
+        viewId,
+        message,
+        attachments,
+        clientMessageId: options.clientMessageId ?? null,
+        steer: options.commandType === 'steer',
+        preambleBoundary: boundary,
+        preambles,
         ...(options.excludedResendOrdinals?.length
           ? { excludedOrdinals: new Set(options.excludedResendOrdinals) }
           : {}),
@@ -564,6 +600,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         throw new DomainError('IDEMPOTENCY_CONFLICT', error.message, 409, false, { cause: error });
       }
       throw error;
+    }
+    if (pending && (alreadyConsumed || composition.inserted)) {
+      const current = this.#registry.getChat(chatId);
+      if (current?.pendingPreambleBoundary?.ownershipEpoch === pending.ownershipEpoch) {
+        this.#registry.updateChat(chatId, { pendingPreambleBoundary: null });
+      }
     }
     return { inserted: composition.inserted };
   }

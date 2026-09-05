@@ -10,6 +10,7 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
+	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
@@ -46,6 +47,7 @@
 		setMinuteClock,
 		setGhCapability,
 		setScheduledPrompts,
+		setPreambles,
 		setSnippets,
 		setWorkspaceLayout,
 		setWorkspaceContext,
@@ -65,6 +67,7 @@
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
 	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
+	import { PreamblesRouter } from '$lib/events/preambles-router.svelte.js';
 	import { SnippetsRouter } from '$lib/events/snippets-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
@@ -93,6 +96,7 @@
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
+	const preambles = createPreamblesStore();
 	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
@@ -161,6 +165,7 @@
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
 	setScheduledPrompts(scheduledPrompts);
+	setPreambles(preambles);
 	setSnippets(snippets);
 	setAppTitle(appTitle);
 	setNavigation(navigation);
@@ -282,16 +287,19 @@
 		sidebarSearch.applyTranscriptSearchStatus(status),
 	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
+	const preamblesRouter = new PreamblesRouter(ws, preambles);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	settingsRouter.start();
 	transcriptSearchStatusRouter.start();
 	scheduledPromptsRouter.start();
+	preamblesRouter.start();
 	snippetsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
 		transcriptSearchStatusRouter.tick();
 		scheduledPromptsRouter.tick();
+		preamblesRouter.tick();
 		snippetsRouter.tick();
 	});
 
@@ -304,6 +312,7 @@
 				.catch(() => undefined);
 		});
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
+		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 	});
 
@@ -393,6 +402,7 @@
 		settingsRouter.destroy();
 		transcriptSearchStatusRouter.destroy();
 		scheduledPromptsRouter.destroy();
+		preamblesRouter.destroy();
 		snippetsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();

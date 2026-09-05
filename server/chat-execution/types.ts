@@ -44,7 +44,7 @@ export type UserInputAdmissionOptions = Pick<
   | 'images'
   | 'excludedResendOrdinals'
 > & {
-  commandType?: AgentExecutionCommandType | 'steer';
+  commandType?: AgentExecutionCommandType | 'steer' | 'goal-control';
   createdAt?: string; userMessagePresentation?: UserMessagePresentation;
 };
 
