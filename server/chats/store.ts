@@ -544,7 +544,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       }
       if (isDeepStrictEqual(resolved, session.nativeSession)) continue;
 
-      session.nativeSession = resolved;
+      // Resolver-supplied refs are plugin-owned; clone on ingest so the
+      // plugin cannot mutate registry state through the object it returned.
+      session.nativeSession = structuredClone(resolved);
       this.#advanceChatMutationRevision(chatId);
       dirty = true;
     }
@@ -767,7 +769,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       if (update.nativeSession?.ownerId !== existing.agentId && update.nativeSession !== null) {
         throw new Error(`Native session owner mismatch for ${id}`);
       }
-      existing.nativeSession = update.nativeSession ?? null;
+      // Update-supplied refs stay reachable to the caller (the command layer
+      // retains one for its published session fact); clone on ingest to match
+      // addChat/updateChat aliasing protection.
+      existing.nativeSession = update.nativeSession
+        ? structuredClone(update.nativeSession)
+        : null;
     }
     const mutationRevision = this.#advanceChatMutationRevision(id);
     const restoreIfCurrent = (): void => {

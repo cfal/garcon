@@ -561,6 +561,7 @@ describe('ChatRegistry', () => {
     registry.addChat(newChat({ nativeSession: nativeSession('test') }));
     const listener = mock(() => undefined);
     registry.onChatProjectPathUpdated(listener);
+    const callerSession = nativeSession('test', { path: '/tmp/next.jsonl' });
 
     const result = await registry.updateProjectPath(CHAT_ID, {
       chatId: CHAT_ID,
@@ -568,13 +569,16 @@ describe('ChatRegistry', () => {
       effectiveProjectKey: '/real/next',
       previousProjectPath: '/repo',
       previousEffectiveProjectKey: '/real/repo',
-      nativeSession: nativeSession('test', { path: '/tmp/next.jsonl' }),
+      nativeSession: callerSession,
     }, { flush: true });
+
+    callerSession.value.injected = true;
 
     expect(result).toMatchObject({
       projectPath: '/next',
       nativeSession: nativeSession('test', { path: '/tmp/next.jsonl' }),
     });
+    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/next.jsonl' });
     expect(listener).toHaveBeenCalledWith({
       chatId: CHAT_ID,
       projectPath: '/next',
@@ -724,7 +728,8 @@ describe('ChatRegistry', () => {
 
   it('reconciles missing opaque native sessions through the owning integration callback', async () => {
     registry.addChat(newChat({ agentSessionId: 'native-1' }));
-    const resolver = mock(async () => nativeSession('test', { id: 'native-1' }));
+    const resolved = nativeSession('test', { id: 'native-1' });
+    const resolver = mock(async () => resolved);
 
     await expect(registry.reconcileSessions(resolver)).resolves.toBe(true);
 
@@ -732,6 +737,9 @@ describe('ChatRegistry', () => {
     expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(nativeSession('test', { id: 'native-1' }));
     await expect(registry.reconcileSessions(resolver)).resolves.toBe(false);
     expect(resolver).toHaveBeenCalledTimes(2);
+
+    resolved.value.injected = true;
+    expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(nativeSession('test', { id: 'native-1' }));
   });
 
   it('replaces an existing opaque native session only when the resolver upgrades it', async () => {
