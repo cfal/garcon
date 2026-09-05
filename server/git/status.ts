@@ -789,11 +789,12 @@ export function createStatusOperations(agents: GitAgentRunner) {
       } else {
         await fs.unlink(filePath);
       }
-    } else if (status[0] === 'A' || status[1] === 'A') {
-      // Unstage first so staged-added states (A, AM, AD) fully discard;
-      // restore would resurrect an AD file or leave an AM file staged.
-      // The second-column check keeps unmerged-added (UA) files clearing
-      // their conflict instead of falling through as a silent no-op.
+    } else if (status === 'A ' || status[1] === 'A') {
+      // The workbench only offers discard on unstaged changes, so AM/AD land
+      // in the restore branch below and keep their staged addition. Reset
+      // remains for index-only additions (endpoint-reachable, no worktree
+      // changes to restore) and unmerged-added states (UA/AA), where it
+      // clears the conflict instead of falling through as a silent no-op.
       await runGit(projectPath, ['reset', 'HEAD', '--', file]);
     } else if (status.includes('M') || status.includes('D')) {
       await runGit(projectPath, ['restore', '--', file]);

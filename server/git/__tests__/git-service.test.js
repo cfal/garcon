@@ -1076,7 +1076,7 @@ describe("discard", () => {
     agents: mockAgents,
     classifyGitError: mockClassifyGitError,
   });
-  it("fully discards staged-added files that also changed in the worktree", async () => {
+  it("discards only worktree edits for staged-added files, keeping the addition", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),
     );
@@ -1091,15 +1091,15 @@ describe("discard", () => {
       await git.discard({ projectPath, file: "added.txt" });
 
       expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? added.txt");
+        .toBe("A  added.txt");
       expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
-        .toBe("staged\nmodified\n");
+        .toBe("staged\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
 
-  it("fully discards staged-added files deleted from the worktree", async () => {
+  it("restores worktree-deleted staged-added files instead of dropping the addition", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),
     );
@@ -1114,7 +1114,31 @@ describe("discard", () => {
       await git.discard({ projectPath, file: "added.txt" });
 
       expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
+        .toBe("A  added.txt");
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("unstages index-only staged additions, which have no worktree changes to restore", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? added.txt");
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
