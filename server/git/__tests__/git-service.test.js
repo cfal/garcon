@@ -1529,12 +1529,120 @@ describe("discard", () => {
 
       await git.discard({ projectPath, file: "dst.txt" });
 
-      // The source reappears at its index content and leaves the status; the
-      // destination keeps its intent-to-add index state.
+      // The source reappears at its index content and the destination returns
+      // to its committed state, so the tree is fully clean.
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
       expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
         .toBe("one\n");
-      const status = (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout;
-      expect(status.includes("a.txt")).toBe(false);
+      expect(await fs.readFile(path.join(projectPath, "dst.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves worktree content when discarding a rename onto a new path", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "one\ntwo\nthree\nfour\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "longer source"]);
+      // The destination is an edited copy well above the rename similarity
+      // threshold, so git pairs it as an unstaged rename.
+      await fs.writeFile(
+        path.join(projectPath, "renamed.txt"),
+        "one\ntwo\nthree\nfour\nfive\n",
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["add", "-N", "renamed.txt"]);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("R a.txt -> renamed.txt");
+
+      await git.discard({ projectPath, file: "renamed.txt" });
+
+      // The source restores to its index content; resetting the destination's
+      // intent-to-add entry keeps the edited worktree copy as untracked
+      // instead of truncating it to the empty index blob.
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? renamed.txt");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\ntwo\nthree\nfour\n");
+      expect(await fs.readFile(path.join(projectPath, "renamed.txt"), "utf-8"))
+        .toBe("one\ntwo\nthree\nfour\nfive\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("discards worktree renames from their source path", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "renamed.txt"));
+      await runGitCommand(projectPath, ["add", "-N", "renamed.txt"]);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("R a.txt -> renamed.txt");
+
+      await git.discard({ projectPath, file: "a.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? renamed.txt");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves worktree content when discarding intent-to-add entries", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "new.txt"), "content\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "-N", "new.txt"]);
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A new.txt");
+
+      await git.discard({ projectPath, file: "new.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? new.txt");
+      expect(await fs.readFile(path.join(projectPath, "new.txt"), "utf-8"))
+        .toBe("content\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("discards through a project path below the repository root", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, "sub"));
+      await fs.writeFile(path.join(projectPath, "sub", "x.txt"), "sub content\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "sub/x.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add sub"]);
+      await fs.writeFile(path.join(projectPath, "sub", "x.txt"), "edited\n", "utf-8");
+
+      await git.discard({ projectPath: path.join(projectPath, "sub"), file: "x.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
+      expect(await fs.readFile(path.join(projectPath, "sub", "x.txt"), "utf-8"))
+        .toBe("sub content\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

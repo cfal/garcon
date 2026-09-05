@@ -694,7 +694,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['fetch', remoteName], networkGitOptions());
+    const { stdout } = await runGit(projectPath, ["fetch", remoteName], readOnlyGitOptions());
     return { success: true, output: stdout || 'Fetch completed successfully', remoteName };
   }
 
@@ -786,27 +786,49 @@ export function createStatusOperations(agents: GitAgentRunner) {
   }
 
   async function headHasPath(projectPath: string, file: string): Promise<boolean> {
-    try {
-      await runGit(projectPath, ['cat-file', '-e', `HEAD:${file}`], readOnlyGitOptions());
-      return true;
-    } catch {
-      return false;
-    }
+    // ls-tree reports a path HEAD lacks as a successful empty result, so any
+    // command failure stays a real error instead of masquerading as absence
+    // and skipping the worktree restore.
+    const { stdout } = await runGit(
+      projectPath,
+      ['ls-tree', '-z', 'HEAD', '--', file],
+      readOnlyGitOptions(),
+    );
+    return stdout.length > 0;
   }
 
   async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: statusOutput } = await runGit(
+    // Porcelain paths are repository-root relative; canonicalize the request
+    // and run every git command from the root so lookups and pathspecs agree
+    // even when projectPath sits below it.
+    const { stdout: repoRootOutput } = await runGit(
       projectPath,
+      ['rev-parse', '--show-toplevel'],
+      readOnlyGitOptions(),
+    );
+    const repoRoot = repoRootOutput.trim() || projectPath;
+    const projectPrefix = path.relative(repoRoot, projectPath);
+    const canonicalFile = projectPrefix && !projectPrefix.startsWith('..')
+      ? [projectPrefix.split(path.sep).join('/'), file.replace(/\/+$/, '')].join('/')
+      : file.replace(/\/+$/, '');
+
+    const { stdout: statusOutput } = await runGit(
+      repoRoot,
       ['status', '--porcelain=v1', '-z', '-uall'],
       readOnlyGitOptions(),
     );
     // The global read keeps rename entries intact: a destination-only
     // pathspec cannot pair the rename and reports DA, hiding the source path
-    // that the worktree side of the change spans.
+    // that the worktree side of the change spans. Matching the rename source
+    // lets the same entry discard from either side. Untracked directories
+    // expand to their files under -uall, so a directory-shaped request only
+    // matches when it names a nested repository.
     const entry = parsePorcelainV1Z(statusOutput).find(
-      (candidate) => candidate.path.replace(/\/+$/, '') === file.replace(/\/+$/, ''),
+      (candidate) =>
+        candidate.path.replace(/\/+$/, '') === canonicalFile
+        || candidate.originalPath === canonicalFile,
     );
     if (!entry) {
       throw new GitDomainError('INVALID_INPUT', 'No local working-tree changes were found for this file.');
@@ -822,33 +844,40 @@ export function createStatusOperations(agents: GitAgentRunner) {
         await fs.unlink(filePath);
       }
     } else if (entry.workTreeStatus === 'R' || entry.workTreeStatus === 'C') {
-      // A worktree rename or copy is one change spanning two paths: revert
-      // both sides to the index so the source reappears and the destination
-      // drops its worktree copy.
-      const renamePaths = entry.originalPath ? [entry.originalPath, entry.path] : [entry.path];
-      await runGit(projectPath, ['restore', '--', ...renamePaths]);
+      // A worktree rename or copy spans two paths: the source restores to its
+      // index content, while the destination resets its intent-to-add entry
+      // instead of restoring, because the index side of an intent-to-add is
+      // the empty blob and restore would truncate the worktree copy. Reset
+      // keeps that content: untracked when HEAD lacks the destination, or
+      // compared against HEAD's version when HEAD has it.
+      if (entry.originalPath) {
+        await runGit(repoRoot, ['restore', '--', entry.originalPath]);
+      }
+      await runGit(repoRoot, ['reset', 'HEAD', '--', entry.path]);
     } else if (UNMERGED_STATUSES.has(status)) {
       // Conflicts resolve against HEAD: reset clears the stages, and restore
       // rewrites the worktree to HEAD's version only when HEAD has the path
       // (it does for UU/UD/AA and an ours-added AU). When HEAD lacks the path
       // (DD/DU/UA) reset leaves any worktree leftover untracked.
-      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
-      if (await headHasPath(projectPath, file)) {
-        await runGit(projectPath, ['restore', '--', file]);
+      await runGit(repoRoot, ['reset', 'HEAD', '--', entry.path]);
+      if (await headHasPath(repoRoot, entry.path)) {
+        await runGit(repoRoot, ['restore', '--', entry.path]);
       }
-    } else if (status === 'A ') {
+    } else if (status === 'A ' || entry.workTreeStatus === 'A') {
       // The workbench only offers discard on unstaged changes, so AM/AD/AT land
       // in the restore branch below and keep their staged addition. Reset
       // remains for index-only additions (endpoint-reachable, no worktree
-      // changes to restore).
-      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
+      // changes to restore) and for an unstaged A column, which marks an
+      // intent-to-add entry whose worktree content HEAD does not track: reset
+      // drops the index entry and preserves the copy as untracked.
+      await runGit(repoRoot, ['reset', 'HEAD', '--', entry.path]);
     } else if (entry.workTreeStatus !== ' ' && 'MDT'.includes(entry.workTreeStatus)) {
       // Unstaged modifications, deletions, and typechanges revert the worktree
       // to the index, keeping any staged facet: AT lands back at a staged
       // addition once restore rewrites the worktree entry to the indexed
       // type. Staged-only states ('M ', 'D ', 'T ') have no worktree side to
       // discard and fall through as no-ops.
-      await runGit(projectPath, ['restore', '--', file]);
+      await runGit(repoRoot, ['restore', '--', entry.path]);
     }
 
     return { success: true, message: `Changes discarded for ${file}` };
