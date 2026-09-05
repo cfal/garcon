@@ -252,6 +252,17 @@ describe('ChatRegistry', () => {
     expect(registry.getChatByAgentSessionId('native-2')?.[0]).toBe(CHAT_ID);
   });
 
+  it('reports existence for own keys only', () => {
+    registry.addChat(newChat());
+
+    expect(registry.hasChat(CHAT_ID)).toBe(true);
+    expect(registry.hasChat(SECOND_CHAT_ID)).toBe(false);
+    // sessions is a plain object, so inherited keys like "toString" must not
+    // register as chats.
+    expect(registry.hasChat('toString')).toBe(false);
+    expect(registry.hasChat('__proto__')).toBe(false);
+  });
+
   it('ignores untyped parentage patches', () => {
     registry.addChat(newChat());
 

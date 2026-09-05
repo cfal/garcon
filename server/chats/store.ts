@@ -578,9 +578,11 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return Object.keys(this.getRegistry().sessions);
   }
 
-  // Existence check that skips the per-entry clone getChat pays.
+  // Existence check that skips the per-entry clone getChat pays. Own-keys
+  // only: sessions is a plain object, so a bare lookup would report
+  // Object.prototype names like "toString" as existing chats.
   hasChat(id: string): boolean {
-    return this.getRegistry().sessions[id] !== undefined;
+    return Object.hasOwn(this.getRegistry().sessions, id);
   }
 
   getChat(id: string): ChatRegistryEntry | null {
