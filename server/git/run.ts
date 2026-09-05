@@ -10,6 +10,7 @@ import type {
 
 const GIT_LOCK_RETRY_DELAY_MS = 100;
 const GIT_LOCK_MAX_RETRIES = 50;
+const GIT_DEFAULT_TIMEOUT_MS = 30_000;
 const GIT_DEFAULT_MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 const GIT_DEFAULT_MAX_STDERR_BYTES = 2 * 1024 * 1024;
 
@@ -59,13 +60,12 @@ function readGitOutput(
   );
 }
 
-function createGitAbortState(options: GitCommandOptions): {
+function createGitAbortState(options: GitCommandOptions, timeoutMs: number): {
   signal?: AbortSignal;
   cleanup: () => void;
   timedOut: () => boolean;
   aborted: () => boolean;
 } {
-  const timeoutMs = options.timeoutMs ?? 30_000;
   const timeoutController = new AbortController();
   let timeoutReached = false;
   const timeoutHandle = setTimeout(() => {
@@ -118,16 +118,23 @@ function makeGitProcessError(
 type GitStdin = 'ignore' | Blob;
 
 // Shared subprocess loop for every git invocation: abort wiring, output-limit
-// capture, and transparent index.lock retry. Retries stop honoring the caller
-// once its abort fired during the retry delay.
+// capture, and transparent index.lock retry. One absolute timeout budget
+// spans every attempt and retry delay, so a caller-supplied ceiling such as
+// the HTTP idle margin holds for the whole command, not per attempt. Retries
+// stop honoring the caller once its abort fired during the retry delay.
 async function runGitProcess(
   cwd: string,
   args: string[],
   options: GitCommandOptions,
   stdin: GitStdin,
 ): Promise<GitCommandResult> {
+  const deadlineAt = performance.now() + (options.timeoutMs ?? GIT_DEFAULT_TIMEOUT_MS);
   for (let attempt = 0; ; attempt++) {
-    const abortState = createGitAbortState(options);
+    const remainingMs = deadlineAt - performance.now();
+    if (remainingMs <= 0) {
+      throw makeGitProcessError(args, null, '', '', { timedOut: true });
+    }
+    const abortState = createGitAbortState(options, remainingMs);
     let proc: Bun.Subprocess<GitStdin, 'pipe', 'pipe'>;
     try {
       proc = Bun.spawn(['git', ...args], {
@@ -140,6 +147,14 @@ async function runGitProcess(
       });
     } catch (error) {
       abortState.cleanup();
+      // Bun.spawn throws synchronously for an already-aborted signal; route
+      // that through the same abort reporting as every other failure path.
+      if (abortState.aborted()) {
+        throw makeGitProcessError(args, null, '', '', {
+          timedOut: abortState.timedOut(),
+          aborted: true,
+        });
+      }
       throw error;
     }
     const abortListener = (): void => {

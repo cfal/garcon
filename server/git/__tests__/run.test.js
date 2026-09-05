@@ -154,6 +154,48 @@ stream.write(output);
     expect(kill).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a pre-aborted signal when spawn refuses to start the process', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    spawnMock.mockImplementation(() => {
+      throw abortError;
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runGit('/repo', ['status'], { signal: controller.signal }),
+    ).rejects.toMatchObject({ aborted: true, timedOut: false });
+  });
+
+  it('rethrows synchronous spawn failures that are not aborts', async () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error('spawn failed');
+    });
+
+    await expect(
+      runGit('/repo', ['status']),
+    ).rejects.toThrow('spawn failed');
+  });
+
+  it('spends one timeout budget across lock retries', async () => {
+    let attempts = 0;
+    spawnMock.mockImplementation(() => {
+      attempts += 1;
+      return {
+        stdout: textStream(''),
+        stderr: textStream("fatal: Unable to create '.git/index.lock': File exists."),
+        exited: Promise.resolve(128),
+        kill: mock(() => undefined),
+      };
+    });
+
+    await expect(
+      runGit('/repo', ['reset', 'HEAD', '--', 'a.txt'], { timeoutMs: 150 }),
+    ).rejects.toMatchObject({ timedOut: true });
+    expect(attempts).toBe(2);
+  });
+
   it('reports an already-aborted caller signal as aborted', async () => {
     const kill = mock(() => undefined);
     spawnMock.mockImplementation(() => ({
