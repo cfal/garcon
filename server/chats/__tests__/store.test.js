@@ -104,16 +104,23 @@ describe('ChatRegistry', () => {
     tags.push('injected');
     agentSettingsById.test.values.injected = true;
     session.value.injected = true;
+    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/native.jsonl' });
 
     const updateTags = ['via-update'];
     const updateSettings = { test: envelope('test') };
-    registry.updateChat(CHAT_ID, { tags: updateTags, agentSettingsById: updateSettings });
+    const updateSession = nativeSession('test', { path: '/tmp/next.jsonl' });
+    registry.updateChat(CHAT_ID, {
+      tags: updateTags,
+      agentSettingsById: updateSettings,
+      nativeSession: updateSession,
+    });
     updateTags.push('injected');
     updateSettings.test.values.injected = true;
+    updateSession.value.injected = true;
 
     expect(registry.getChat(CHAT_ID).tags).toEqual(['via-update']);
     expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
-    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/native.jsonl' });
+    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/next.jsonl' });
   });
 
   it('adds provider-neutral records with opaque ownership defaults', () => {
