@@ -68,7 +68,6 @@ function createGitAbortState(options: GitCommandOptions): {
   const timeoutMs = options.timeoutMs ?? 30_000;
   const timeoutController = new AbortController();
   let timeoutReached = false;
-  let callerAborted = false;
   const timeoutHandle = setTimeout(() => {
     timeoutReached = true;
     timeoutController.abort();
@@ -76,10 +75,6 @@ function createGitAbortState(options: GitCommandOptions): {
   timeoutHandle.unref?.();
 
   const callerSignal = options.signal;
-  const onCallerAbort = (): void => {
-    callerAborted = true;
-  };
-  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
 
   const signal = callerSignal
     ? AbortSignal.any([callerSignal, timeoutController.signal])
@@ -89,10 +84,12 @@ function createGitAbortState(options: GitCommandOptions): {
     signal,
     cleanup: () => {
       clearTimeout(timeoutHandle);
-      callerSignal?.removeEventListener('abort', onCallerAbort);
     },
     timedOut: () => timeoutReached,
-    aborted: () => callerAborted || timeoutReached,
+    // Reads the sticky signal state directly: the abort event cannot fire
+    // for a pre-aborted signal, so a latched flag alone would misreport that
+    // case (and any abort after cleanup) as a plain exit failure.
+    aborted: () => timeoutReached || callerSignal?.aborted === true,
   };
 }
 
@@ -178,12 +175,8 @@ async function runGitProcess(
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       await sleep(GIT_LOCK_RETRY_DELAY_MS);
-      // The attempt's abort state was torn down by cleanup(), so read the
-      // caller signal directly; otherwise an abort during the retry delay
-      // is misreported as a plain exit failure on the next attempt.
-      if (options.signal?.aborted) {
-        throw makeGitProcessError(args, exitCode, stdout, stderr, { aborted: true });
-      }
+      // aborted() reads the live caller signal, so an abort during the retry
+      // delay is reported here instead of spawning another attempt.
       if (abortState.timedOut() || abortState.aborted()) {
         throw makeGitProcessError(args, exitCode, stdout, stderr, {
           timedOut: abortState.timedOut(),

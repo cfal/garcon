@@ -154,6 +154,22 @@ stream.write(output);
     expect(kill).toHaveBeenCalledTimes(1);
   });
 
+  it('reports an already-aborted caller signal as aborted', async () => {
+    const kill = mock(() => undefined);
+    spawnMock.mockImplementation(() => ({
+      stdout: textStream(''),
+      stderr: textStream('error: operation was aborted'),
+      exited: Promise.resolve(1),
+      kill,
+    }));
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runGit('/repo', ['status'], { signal: controller.signal }),
+    ).rejects.toMatchObject({ aborted: true, timedOut: false });
+  });
+
   it('reports a caller abort that fires during the lock retry delay as aborted', async () => {
     const controller = new AbortController();
     const kill = mock(() => undefined);
