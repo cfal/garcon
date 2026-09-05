@@ -87,6 +87,22 @@ describe('ChatRegistry', () => {
     chat.tags.push('injected');
     chat.agentSettingsById.test.values.injected = true;
 
+    const updated = registry.updateChat(CHAT_ID, { model: 'other-model' });
+    updated.tags.push('via-update');
+    updated.agentSettingsById.test.values.injected = true;
+
+    expect(registry.getChat(CHAT_ID).tags).toEqual(['source']);
+    expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
+  });
+
+  it('clones caller-owned collections on ingest', () => {
+    const tags = ['source'];
+    const agentSettingsById = { test: envelope('test') };
+    registry.addChat(newChat({ tags, agentSettingsById }));
+
+    tags.push('injected');
+    agentSettingsById.test.values.injected = true;
+
     expect(registry.getChat(CHAT_ID).tags).toEqual(['source']);
     expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
   });

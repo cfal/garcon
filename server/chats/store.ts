@@ -621,11 +621,11 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     });
     registry.sessions[chatId] = {
       agentId,
-      nativeSession,
+      nativeSession: nativeSession ? structuredClone(nativeSession) : null,
       agentOwnershipEpoch,
-      agentSettingsById,
+      agentSettingsById: structuredClone(agentSettingsById),
       projectPath,
-      tags,
+      tags: [...tags],
       agentSessionId,
       nextForkOrdinal: normalizeNextForkOrdinal(nextForkOrdinal) ?? 1,
       model,
@@ -701,7 +701,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         this.#emitChatTagsUpdated(id);
       }
     };
-    const resolved = { id, ...existing };
+    const resolved = { id, ...cloneRegistryEntry(existing) };
     if (options.flush) {
       const restoreIfCurrent = (): void => {
         if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
