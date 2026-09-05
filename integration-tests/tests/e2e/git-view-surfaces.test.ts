@@ -369,7 +369,7 @@ describe('Lightpanda standalone Git views', () => {
       await createHistoryFixture(project);
 
       const app = new SpaDriver(fixture.page, fixture.integration);
-      await app.setViewport(1_440, 900);
+      await app.setViewport(1_760, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-view-desktop-seed');
