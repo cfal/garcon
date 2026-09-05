@@ -232,6 +232,56 @@ describe('AgentRegistry session cache', () => {
     expect(ledger.currentRows(CHAT_ID).filter((row) => row.kind === 'notice')).toHaveLength(1);
   });
 
+  it('returns a slash-leading duplicate before gating a newly armed boundary', async () => {
+    const resolve = mock(() => [definition('preamble-one', 'One', 'one body')]);
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve },
+    );
+
+    await admit(registry, 'slash-retry', 'agent-run', '/provider-command');
+    ledger.takePreparedInput(CHAT_ID, 'slash-retry');
+    armBoundary('epoch-switch', 'agent-switch');
+
+    await expect(registry.admitInput(
+      CHAT_ID,
+      new UserMessage(AT, '/provider-command'),
+      {
+        clientRequestId: 'request-slash-retry-again',
+        clientMessageId: 'slash-retry',
+        transcriptViewId: ledger.currentView(CHAT_ID).viewId,
+        turnId: 'turn-slash-retry-again',
+        commandType: 'agent-run',
+      },
+    )).resolves.toEqual({ inserted: false });
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
+      kind: 'agent-switch',
+      ownershipEpoch: 'epoch-switch',
+    });
+    expect(ledger.currentRows(CHAT_ID)).toHaveLength(1);
+
+    await expect(registry.admitInput(
+      CHAT_ID,
+      new UserMessage(AT, '/different-command'),
+      {
+        clientRequestId: 'request-slash-retry-changed',
+        clientMessageId: 'slash-retry',
+        transcriptViewId: ledger.currentView(CHAT_ID).viewId,
+        turnId: 'turn-slash-retry-changed',
+        commandType: 'agent-run',
+      },
+    )).rejects.toMatchObject({
+      code: 'IDEMPOTENCY_CONFLICT',
+      status: 409,
+    });
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
+      kind: 'agent-switch',
+      ownershipEpoch: 'epoch-switch',
+    });
+  });
+
   for (const queued of [false, true]) {
     it(`rejects a ${queued ? 'queued' : 'direct'} provider slash command until matching preambles are sent`, async () => {
       armBoundary('epoch-slash', 'fork');

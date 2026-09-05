@@ -29,6 +29,7 @@ import type {
   LedgerRowDraft,
   LedgerRunEndedRow,
   LedgerSessionRow,
+  LedgerUserInputDetail,
   TranscriptPage,
   TranscriptNativeActivityState,
   TranscriptView,
@@ -261,6 +262,21 @@ export class TranscriptLedgerService {
     return this.#appendRunEnd(chatId, runId, 'failed', 'core', error);
   }
 
+  hasMatchingInputSubmission(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly message: UserMessage;
+    readonly attachments: readonly AgentAttachment[];
+    readonly clientMessageId: string | null;
+    readonly steer: boolean;
+  }): boolean {
+    return this.#store.hasMatchingInputSubmission(
+      input.chatId,
+      input.viewId,
+      inputDetail(input),
+    );
+  }
+
   appendInputAndCompose(input: {
     readonly chatId: string;
     readonly viewId: TranscriptViewId;
@@ -275,14 +291,7 @@ export class TranscriptLedgerService {
     const composition = this.#store.appendInputAndCompose(input.chatId, {
       viewId: input.viewId,
       at: input.message.timestamp,
-      detail: {
-        clientMessageId: input.clientMessageId,
-        message: input.message,
-        attachments: input.attachments,
-        steer: input.steer,
-        preambleBoundary: null,
-        preamblePrefixReceipt: null,
-      },
+      detail: inputDetail(input),
       excludedOrdinals: input.excludedOrdinals,
       preambleBoundary: input.preambleBoundary ?? null,
       preambles: input.preambles ?? [],
@@ -893,6 +902,22 @@ function normalizeNotice(input: TranscriptNoticeInput): NormalizedTranscriptNoti
 
 function inputKey(chatId: string, clientMessageId: string): string {
   return `${chatId}\u0000${clientMessageId}`;
+}
+
+function inputDetail(input: {
+  readonly message: UserMessage;
+  readonly attachments: readonly AgentAttachment[];
+  readonly clientMessageId: string | null;
+  readonly steer: boolean;
+}): LedgerUserInputDetail {
+  return {
+    clientMessageId: input.clientMessageId,
+    message: input.message,
+    attachments: input.attachments,
+    steer: input.steer,
+    preambleBoundary: null,
+    preamblePrefixReceipt: null,
+  };
 }
 
 function timestampAtOrAfter(candidate: string, floor: string | null): string {

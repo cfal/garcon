@@ -611,6 +611,32 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one')).toHaveLength(2);
   });
 
+  it('preflights matching input submissions without mutating the ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const detail = inputDetail('message-one', '/provider-command');
+    store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail,
+    });
+
+    expect(store.hasMatchingInputSubmission('chat-one', view.viewId, detail)).toBe(true);
+    expect(store.hasMatchingInputSubmission(
+      'chat-one',
+      view.viewId,
+      inputDetail('message-two', '/provider-command'),
+    )).toBe(false);
+    expect(() => store.hasMatchingInputSubmission(
+      'chat-one',
+      view.viewId,
+      inputDetail('message-one', '/different-command'),
+    )).toThrow(SubmissionConflictError);
+    expect(store.currentRows('chat-one')).toHaveLength(1);
+  });
+
   it('[TLV5-L04.05-STORE-UNIT-01] rejects a mismatched submission retry without fencing the ledger', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),

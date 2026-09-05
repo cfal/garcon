@@ -181,17 +181,22 @@ export class TranscriptLedgerStore {
     });
   }
 
+  hasMatchingInputSubmission(
+    chatId: string,
+    viewId: TranscriptViewId,
+    detail: LedgerUserInputDetail,
+  ): boolean {
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      return this.#matchingInputSubmission(entry, viewId, detail) !== null;
+    });
+  }
+
   appendInputAndCompose(chatId: string, request: AppendInputRequest): InputComposition {
     return this.#write(chatId, (entry) => {
       this.#assertCurrent(entry, request.viewId);
-      const existing = request.detail.clientMessageId
-        ? this.#submission(entry, request.viewId, request.detail.clientMessageId)
-        : null;
+      const existing = this.#matchingInputSubmission(entry, request.viewId, request.detail);
       if (existing) {
-        if (existing.kind !== 'user-input'
-            || submissionFingerprint(existing.detail) !== submissionFingerprint(request.detail)) {
-          throw new SubmissionConflictError(request.detail.clientMessageId!);
-        }
         return {
           input: existing,
           committedRows: [],
@@ -667,6 +672,21 @@ export class TranscriptLedgerStore {
       `).get(viewId, clientMessageId);
       return stored ? decodeStoredRow(stored) : null;
     });
+  }
+
+  #matchingInputSubmission(
+    entry: ConnectionEntry,
+    viewId: TranscriptViewId,
+    detail: LedgerUserInputDetail,
+  ): LedgerUserInputRow | null {
+    if (!detail.clientMessageId) return null;
+    const existing = this.#submission(entry, viewId, detail.clientMessageId);
+    if (!existing) return null;
+    if (existing.kind !== 'user-input'
+        || submissionFingerprint(existing.detail) !== submissionFingerprint(detail)) {
+      throw new SubmissionConflictError(detail.clientMessageId);
+    }
+    return existing;
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
