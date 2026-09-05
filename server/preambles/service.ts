@@ -14,7 +14,7 @@ import {
 import { PreambleDomainError } from './errors.js';
 import { applicablePreambles } from './matching.js';
 import { PreambleProjectPathService } from './project-path-service.js';
-import { PreambleStore } from './store.js';
+import { PreambleStore, reorderedPreambles } from './store.js';
 import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 
 interface PreambleServiceEvents {
@@ -78,11 +78,9 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
 
   async reorder(request: ReorderPreamblesRequest): Promise<PreamblesSnapshot> {
     if (!Array.isArray(request.orderedPreambleIds)) throw this.#validationError();
-    const byId = new Map(this.snapshot().preambles.map((preamble) => [preamble.id, preamble]));
-    const candidate = request.orderedPreambleIds.map((id) => byId.get(id));
-    if (candidate.every((entry): entry is Preamble => Boolean(entry))) {
-      this.#assertCatalogComposition(candidate);
-    }
+    const candidate = reorderedPreambles(this.snapshot().preambles, request.orderedPreambleIds);
+    if (!candidate) throw this.#validationError();
+    this.#assertCatalogComposition(candidate);
     await this.deps.store.reorder(request.orderedPreambleIds, request.expectedRevision);
     return this.#changed('reordered');
   }

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { preambleCatalogCompositionViolation } from '../catalog-budget.ts';
 import { preambleRuleMatches } from '../matching.ts';
 import { PreambleService } from '../service.ts';
 import { PreambleStore } from '../store.ts';
@@ -145,6 +146,30 @@ describe('PreambleService', () => {
     expect(preambles.snapshot()).toMatchObject({ revision: 1 });
   });
 
+  it('combines nested ancestor rules when validating a descendant candidate', async () => {
+    const { preambles } = await service();
+    await preambles.create({
+      expectedRevision: 0,
+      preamble: {
+        ...globalDefinition('Ancestor', 'a'.repeat(32_000)),
+        scope: {
+          type: 'project-paths',
+          rules: [{ projectPath: '/workspace', includeNested: true }],
+        },
+      },
+    });
+    await expect(preambles.create({
+      expectedRevision: 1,
+      preamble: {
+        ...globalDefinition('Descendant', 'b'.repeat(32_000)),
+        scope: {
+          type: 'project-paths',
+          rules: [{ projectPath: '/workspace/child', includeNested: false }],
+        },
+      },
+    })).rejects.toMatchObject({ code: 'PREAMBLE_COMBINED_LIMIT_EXCEEDED' });
+  });
+
   it('rejects a reserved file-context separator reconstructed across bodies', async () => {
     const { preambles } = await service();
     await preambles.create({
@@ -215,5 +240,45 @@ describe('PreambleService', () => {
     await preambles.remove({ expectedRevision: 2, id: 'preamble-1' });
 
     expect(reasons).toEqual(['created', 'updated', 'removed']);
+  });
+
+  it('rejects malformed reorder IDs before validating their composition', async () => {
+    const { preambles } = await service();
+    await preambles.create({
+      expectedRevision: 0,
+      preamble: globalDefinition('Large', 'a'.repeat(32_000)),
+    });
+    await preambles.create({
+      expectedRevision: 1,
+      preamble: globalDefinition('Small'),
+    });
+
+    await expect(preambles.reorder({
+      expectedRevision: 2,
+      orderedPreambleIds: ['preamble-1', 'preamble-1'],
+    })).rejects.toMatchObject({ code: 'PREAMBLE_VALIDATION_FAILED', status: 400 });
+    expect(preambles.snapshot()).toMatchObject({ revision: 2 });
+  });
+
+  it('validates the maximum rule shape without quadratic path matching', () => {
+    const preambles = Array.from({ length: 100 }, (_, preambleIndex) => ({
+      id: `preamble-${preambleIndex}`,
+      enabled: true,
+      title: `Preamble ${preambleIndex}`,
+      content: 'x',
+      scope: {
+        type: 'project-paths',
+        rules: Array.from({ length: 32 }, (_, ruleIndex) => ({
+          projectPath: `/workspace/${preambleIndex}/${ruleIndex}`,
+          includeNested: false,
+        })),
+      },
+      createdAt: '2026-09-03T10:00:00.000Z',
+      updatedAt: '2026-09-03T10:00:00.000Z',
+    }));
+    const startedAt = performance.now();
+
+    expect(preambleCatalogCompositionViolation(preambles)).toBeNull();
+    expect(performance.now() - startedAt).toBeLessThan(500);
   });
 });

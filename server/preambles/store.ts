@@ -123,16 +123,11 @@ export class PreambleStore {
 
   async reorder(orderedIds: readonly string[], expectedRevision: number): Promise<void> {
     await this.#mutate(expectedRevision, (draft) => {
-      if (
-        orderedIds.length !== draft.preambles.length
-        || new Set(orderedIds).size !== orderedIds.length
-      ) throw new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble order is invalid', 400);
-      const byId = new Map(draft.preambles.map((preamble) => [preamble.id, preamble]));
-      const reordered = orderedIds.map((id) => byId.get(id));
-      if (reordered.some((entry) => !entry)) {
+      const reordered = reorderedPreambles(draft.preambles, orderedIds);
+      if (!reordered) {
         throw new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble order is invalid', 400);
       }
-      draft.preambles = reordered as Preamble[];
+      draft.preambles = reordered;
     });
   }
 
@@ -164,6 +159,22 @@ export class PreambleStore {
   #notFound(): PreambleDomainError {
     return new PreambleDomainError('PREAMBLE_NOT_FOUND', 'Preamble not found', 404);
   }
+}
+
+export function reorderedPreambles(
+  preambles: readonly Preamble[],
+  orderedIds: readonly string[],
+): Preamble[] | null {
+  if (
+    orderedIds.length !== preambles.length
+    || orderedIds.some((id) => typeof id !== 'string')
+    || new Set(orderedIds).size !== orderedIds.length
+  ) return null;
+  const byId = new Map(preambles.map((preamble) => [preamble.id, preamble]));
+  const reordered = orderedIds.map((id) => byId.get(id));
+  return reordered.every((entry): entry is Preamble => entry !== undefined)
+    ? reordered
+    : null;
 }
 
 function nextUpdatedAt(current: string, candidate: string): string {
