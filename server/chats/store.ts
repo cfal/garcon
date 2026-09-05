@@ -587,7 +587,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   getChat(id: string): ChatRegistryEntry | null {
     const registry = this.getRegistry();
-    const entry = registry.sessions[id];
+    // Own-keys only, matching hasChat: a bare lookup hands back
+    // Object.prototype for names like "toString" and the clone throws.
+    const entry = Object.hasOwn(registry.sessions, id) ? registry.sessions[id] : null;
     return entry ? cloneRegistryEntry(entry) : null;
   }
 

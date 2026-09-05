@@ -263,6 +263,14 @@ describe('ChatRegistry', () => {
     expect(registry.hasChat('__proto__')).toBe(false);
   });
 
+  it('returns null instead of prototype entries for unknown lookups', () => {
+    registry.addChat(newChat());
+
+    expect(registry.getChat('toString')).toBeNull();
+    expect(registry.getChat('__proto__')).toBeNull();
+    expect(registry.getChat(SECOND_CHAT_ID)).toBeNull();
+  });
+
   it('ignores untyped parentage patches', () => {
     registry.addChat(newChat());
 
