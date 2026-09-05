@@ -321,6 +321,40 @@ describe('metadata-store', () => {
       expect(stalledAgents.getPreview).toHaveBeenCalledTimes(6);
     });
 
+    it('keeps repairs completed inside the deadline when others stall', async () => {
+      const sessions = {};
+      for (let i = 0; i < 6; i += 1) {
+        sessions[`fast-${i}`] = session({ agentId: 'claude', agentSessionId: `claude-${i}` });
+      }
+      for (let i = 0; i < 2; i += 1) {
+        sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
+      }
+      const agents = {
+        getPreview: mock((entry) => (
+          entry.agentId === 'claude'
+            ? Promise.resolve(previewResult({
+              firstMessage: 'first repaired',
+              lastMessage: 'last repaired',
+              createdAt: '2026-01-01T00:00:00Z',
+              lastActivity: '2026-01-02T00:00:00Z',
+            }))
+            : new Promise(() => {})
+        )),
+      };
+      const index = new MetadataIndex(makeRegistry(sessions), agents, mockCarryOver, {
+        previewTimeoutMs: 200,
+        repairDeadlineMs: 30,
+      });
+
+      await index.init();
+
+      for (let i = 0; i < 6; i += 1) {
+        expect(index.getChatMetadata(`fast-${i}`)?.lastMessage).toBe('last repaired');
+      }
+      expect(index.getChatMetadata('stall-0')).toBeNull();
+      expect(index.getChatMetadata('stall-1')).toBeNull();
+    });
+
     it('keeps persisted metadata when agent preview repair would stall', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({

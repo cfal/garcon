@@ -216,6 +216,7 @@ export class MetadataIndex {
     // cannot be torn down by one failing preview, and per-entry timeouts start
     // when the entry actually begins processing rather than at fan-out time.
     let deadlineHit = false;
+    const repaired = new Map<string, ChatMetadata>();
     const repairs = mapWithConcurrencyResult(
       repairEntries,
       METADATA_REPAIR_CONCURRENCY,
@@ -225,7 +226,11 @@ export class MetadataIndex {
       > => {
         if (deadlineHit) return { ok: false, error: new Error('metadata repair deadline exceeded') };
         try {
-          return { ok: true, metadata: await this.#buildMetadataFromPreviewWithTimeout(chatId, session) };
+          const metadata = await this.#buildMetadataFromPreviewWithTimeout(chatId, session);
+          // Recorded at completion so repairs finished inside the budget
+          // survive a deadline win instead of being rebuilt every startup.
+          repaired.set(String(chatId), metadata);
+          return { ok: true, metadata };
         } catch (error) {
           return { ok: false, error };
         }
@@ -233,20 +238,22 @@ export class MetadataIndex {
     );
 
     // The race does not cancel the pool; the flag only stops queued workers
-    // from starting new preview work. In-flight workers may still finish after
-    // the deadline, but their adoption writes are serialized per chat and
-    // ownership-checked, and their results are dropped here.
+    // from starting new preview work. Successes are applied below on either
+    // outcome, so a deadline abandons only chats whose previews never
+    // finished; in-flight adoption writes are serialized per chat and
+    // ownership-checked.
     const deadline = new Promise<'deadline'>((resolve) => {
       setTimeout(() => resolve('deadline'), this.#repairDeadlineMs).unref?.();
     });
     const outcome = await Promise.race([repairs, deadline]);
+    for (const [chatId, metadata] of repaired) {
+      this.#metadataByChatId.set(chatId, metadata);
+    }
     if (outcome === 'deadline') {
       deadlineHit = true;
-      // Settled results are dropped with the pool, so every repair entry
-      // stays unrepaired, not only those still pending.
       logger.warn(
         `metadata: repair deadline of ${this.#repairDeadlineMs}ms exceeded; ` +
-          `${repairEntries.length} chats left for live events or the next startup`,
+          `${repairEntries.length - repaired.size} of ${repairEntries.length} chats left for live events or the next startup`,
       );
       return;
     }
@@ -255,9 +262,7 @@ export class MetadataIndex {
     for (let i = 0; i < results.length; i++) {
       const [chatId] = repairEntries[i];
       const result = results[i];
-      if (result.ok) {
-        this.#metadataByChatId.set(String(chatId), result.metadata);
-      } else {
+      if (!result.ok) {
         logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.error));
       }
     }
