@@ -344,8 +344,45 @@ describe('SharedChatPage', () => {
 			expect(card.className).not.toContain('border-status-info-border');
 			expect(card.parentElement?.className).toContain('sm:max-w-[85%]');
 		}
+		expect(container.querySelector('a[href^="/chat/"]')).toBeNull();
+		for (const chatId of [targetChatId, sourceChatId]) {
+			const idLabel = screen.getByText(chatId);
+			expect(idLabel.className).toContain('truncate');
+			expect(idLabel.className).toContain('text-sm');
+			expect(idLabel.closest('[data-chat-reference-id]')?.getAttribute('title')).toBe(chatId);
+		}
 		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull();
+	});
+
+	it('keeps bare and explicit chat references inert without exposing private titles', async () => {
+		const chatId = '1788592720180699';
+		const content = `${chatId} [custom](/chat/${chatId})`;
+		const shared = response([], 0, 2, { nextBefore: null });
+		shared.snapshot.messages = [
+			{
+				type: 'user-message',
+				timestamp: '2025-01-02T03:05:00.000Z',
+				content,
+			},
+			{
+				type: 'assistant-message',
+				timestamp: '2025-01-02T03:05:01.000Z',
+				content,
+			},
+		];
+		shared.page.end = 2;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(shared);
+
+		const { container } = render(SharedChatPageTestHost, {
+			chatTitles: { [chatId]: 'Private registry title' },
+		});
+		await screen.findAllByText('custom');
+
+		expect(container.querySelector('a[href^="/chat/"]')).toBeNull();
+		expect(container.textContent).toContain(chatId);
+		expect(container.textContent).toContain('custom');
+		expect(container.textContent).not.toContain('Private registry title');
 	});
 
 	it('styles the complete shared CLI user message surface', async () => {

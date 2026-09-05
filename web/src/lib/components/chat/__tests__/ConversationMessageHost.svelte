@@ -31,6 +31,8 @@
 		disclosureState?: ConversationDisclosureStatePort;
 		chatTitles?: Record<string, string>;
 		chatTitleUpdate?: { chatId: string; title: string };
+		selectedChatId?: string;
+		removableChatId?: string;
 	}
 
 	let {
@@ -49,6 +51,8 @@
 		disclosureState,
 		chatTitles = {},
 		chatTitleUpdate,
+		selectedChatId = 'chat-1',
+		removableChatId,
 	}: Props = $props();
 	setCanonicalWorkspaceLayout();
 	const initialHost = untrack(() => ({
@@ -57,6 +61,7 @@
 		isMobile,
 		alwaysExpandCliMessages,
 		chatTitles,
+		selectedChatId,
 	}));
 
 	const chatSessions = createChatSessionsStore();
@@ -74,12 +79,12 @@
 			},
 		});
 	}
-	createDraft('chat-1', '');
+	createDraft(initialHost.selectedChatId, '');
 	for (const [chatId, title] of Object.entries(initialHost.chatTitles)) {
-		if (chatId === 'chat-1') chatSessions.patchChat(chatId, { title });
+		if (chatId === initialHost.selectedChatId) chatSessions.patchChat(chatId, { title });
 		else createDraft(chatId, title);
 	}
-	chatSessions.setSelectedChatId('chat-1');
+	chatSessions.setSelectedChatId(initialHost.selectedChatId);
 	setChatSessions(chatSessions);
 
 	const fileSessions = new FileSessionRegistry({
@@ -135,5 +140,15 @@
 		onclick={() => chatSessions.patchChat(chatTitleUpdate.chatId, { title: chatTitleUpdate.title })}
 	>
 		Update chat title
+	</button>
+{/if}
+
+{#if removableChatId}
+	<button
+		type="button"
+		aria-label="Remove chat"
+		onclick={() => chatSessions.removeChat(removableChatId)}
+	>
+		Remove chat
 	</button>
 {/if}

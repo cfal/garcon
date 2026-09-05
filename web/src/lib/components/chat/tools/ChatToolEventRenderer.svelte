@@ -24,6 +24,7 @@
 		ConversationDisclosureKind,
 		ConversationDisclosureStatePort,
 	} from '../ConversationFeedItemState.svelte.js';
+	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 
 	interface ToolRendererProps {
 		toolMessage: ToolUseChatMessage;
@@ -33,6 +34,7 @@
 		onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
 		projectBasePath?: string | null;
 		chatProjectPath?: string | null;
+		resolveChatReference?: ResolveChatReference;
 		autoExpandTools?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
 		acquireTransientActivity?: (close: () => void) => () => void;
@@ -46,6 +48,7 @@
 		onFileOpen,
 		projectBasePath,
 		chatProjectPath,
+		resolveChatReference,
 		autoExpandTools = false,
 		disclosureState,
 		acquireTransientActivity,
@@ -248,6 +251,7 @@
 							{projectBasePath}
 							{chatProjectPath}
 							{onFileOpen}
+							{resolveChatReference}
 							{acquireTransientActivity}
 						/>
 					{:else if displayConfig.contentKind === 'fileList'}

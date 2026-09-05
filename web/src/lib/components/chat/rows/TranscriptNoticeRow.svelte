@@ -17,10 +17,11 @@
 	import Markdown from '../Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
+	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 
 	interface Props {
 		message: TranscriptNoticeMessage;
-		resolveChatTitle?: (chatId: string) => string | null | undefined;
+		resolveChatReference?: ResolveChatReference;
 		fileLinkBasePath?: string | null;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 		acquireTransientActivity?: (close: () => void) => () => void;
@@ -29,7 +30,7 @@
 
 	let {
 		message,
-		resolveChatTitle,
+		resolveChatReference,
 		fileLinkBasePath,
 		onLinkNavigate,
 		acquireTransientActivity,
@@ -54,7 +55,7 @@
 	<InterAgentMessageRow
 		{message}
 		detail={interAgentDetail}
-		{resolveChatTitle}
+		{resolveChatReference}
 		{fileLinkBasePath}
 		{onLinkNavigate}
 		{acquireTransientActivity}
@@ -80,6 +81,8 @@
 							variant="presented"
 							fileLinkBasePath={fileLinkBasePath ?? undefined}
 							{onLinkNavigate}
+							{resolveChatReference}
+							chatReferencePolicy="explicit"
 							{acquireTransientActivity}
 						/>
 					</div>

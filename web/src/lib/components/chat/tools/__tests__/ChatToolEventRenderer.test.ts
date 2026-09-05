@@ -71,6 +71,22 @@ describe('ChatToolEventRenderer', () => {
 		expect(onFileOpen).toHaveBeenCalledWith('/workspace/other/README.md');
 	});
 
+	it('resolves explicit chat links without autolinking bare IDs in rich tool text', () => {
+		const chatId = '1788592720180699';
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new ExitPlanModeToolUseMessage(
+				'',
+				'tool-chat-link',
+				`${chatId} [Open target](/chat/${chatId})`,
+			),
+			mode: 'input',
+			resolveChatReference: () => ({ title: 'Target chat', isCurrent: false }),
+		});
+
+		expect(screen.getByRole('link', { name: 'Open target' })).toBeTruthy();
+		expect(container.querySelectorAll('[data-chat-reference-id]')).toHaveLength(1);
+	});
+
 	it('forces Edit open when autoExpandTools is enabled even with defaultOpen=false', () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new EditToolUseMessage(

@@ -9,7 +9,9 @@
 	import Send from '@lucide/svelte/icons/send';
 	import X from '@lucide/svelte/icons/x';
 	import { stripLegacyInterAgentOutcomePrefix } from '$lib/chat/transcript/inter-agent-message-presentation';
+	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import ChatReference from '../ChatReference.svelte';
 	import Markdown from '../Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
@@ -19,7 +21,7 @@
 	interface Props {
 		message: TranscriptNoticeMessage;
 		detail: InterAgentMessageOutcomeNoticeDetail | InterAgentMessageReceivedNoticeDetail;
-		resolveChatTitle?: (chatId: string) => string | null | undefined;
+		resolveChatReference?: ResolveChatReference;
 		fileLinkBasePath?: string | null;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 		acquireTransientActivity?: (close: () => void) => () => void;
@@ -29,7 +31,7 @@
 	let {
 		message,
 		detail,
-		resolveChatTitle,
+		resolveChatReference,
 		fileLinkBasePath,
 		onLinkNavigate,
 		acquireTransientActivity,
@@ -52,30 +54,16 @@
 			: message.content,
 	);
 
-	function chatParticipant(chatId: string) {
-		const title = resolveChatTitle?.(chatId)?.trim();
-		return {
-			label: title || chatId,
-			chatId: title && title !== chatId ? chatId : null,
-		};
-	}
-
 	const participants = $derived.by(() => {
 		if (detail.type === 'inter-agent-message-received') {
 			if (detail.fromChatId !== null) {
-				return [{ ...chatParticipant(detail.fromChatId), status: null }];
+				return [{ chatId: detail.fromChatId, status: null }];
 			}
-			return [
-				{
-					label: m.chat_message_inter_agent_sender_hidden(),
-					chatId: null,
-					status: null,
-				},
-			];
+			return [{ chatId: null, status: null }];
 		}
 
 		return detail.results.map((result) => ({
-			...chatParticipant(result.chatId),
+			chatId: result.chatId,
 			status: result.status === 'failed' ? ('failed' as const) : ('sent' as const),
 		}));
 	});
@@ -105,12 +93,22 @@
 					<ul class="min-w-0 space-y-1.5">
 						{#each participants as participant, index (index)}
 							<li class="flex min-w-0 items-center gap-1.5 leading-5">
-								<span class="min-w-0 truncate text-sm" title={participant.label}>
-									{participant.label}
-								</span>
 								{#if participant.chatId}
-									<span class="shrink-0 text-[11px] text-muted-foreground/80">
-										({participant.chatId})
+									<ChatReference
+										chatId={participant.chatId}
+										resolution={resolveChatReference?.(participant.chatId) ?? null}
+										class="inline-flex min-w-0 items-center gap-1.5"
+										linkClass="text-primary hover:underline"
+										titleClass="min-w-0 truncate text-sm"
+										idClass="shrink-0 text-[11px] text-muted-foreground/80"
+										inertTooltipPolicy="always"
+									/>
+								{:else}
+									<span
+										class="min-w-0 truncate text-sm"
+										title={m.chat_message_inter_agent_sender_hidden()}
+									>
+										{m.chat_message_inter_agent_sender_hidden()}
 									</span>
 								{/if}
 								{#if participant.status === 'failed'}
@@ -150,6 +148,8 @@
 							variant="presented"
 							fileLinkBasePath={isOutcome ? (fileLinkBasePath ?? undefined) : undefined}
 							onLinkNavigate={isOutcome ? onLinkNavigate : undefined}
+							{resolveChatReference}
+							chatReferencePolicy="explicit"
 							{acquireTransientActivity}
 						/>
 					</div>

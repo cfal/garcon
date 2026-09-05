@@ -10,12 +10,14 @@
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		message: CompactionMessage;
 		projectBasePath?: string;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
+		resolveChatReference?: ResolveChatReference;
 		acquireTransientActivity?: (close: () => void) => () => void;
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
@@ -25,6 +27,7 @@
 		message,
 		projectBasePath,
 		onLinkNavigate,
+		resolveChatReference,
 		acquireTransientActivity,
 		open: controlledOpen,
 		onOpenChange,
@@ -89,6 +92,8 @@
 						variant="thinking"
 						fileLinkBasePath={projectBasePath}
 						{onLinkNavigate}
+						{resolveChatReference}
+						chatReferencePolicy="explicit"
 						{acquireTransientActivity}
 					/>
 				</div>
