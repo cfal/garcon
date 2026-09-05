@@ -100,11 +100,14 @@ function makeGitProcessError(
   stderr: string,
   options: { timedOut?: boolean; aborted?: boolean } = {},
 ): GitProcessError {
-  const reason = options.timedOut
-    ? 'timed out'
-    : options.aborted
-      ? 'aborted'
-      : `exit ${exitCode}`;
+  let reason: string;
+  if (options.timedOut) {
+    reason = 'timed out';
+  } else if (options.aborted) {
+    reason = 'aborted';
+  } else {
+    reason = `exit ${exitCode}`;
+  }
   const message = stderr.trim() || stdout.trim() || reason;
   const error: GitProcessError = new Error(`git ${args[0]} failed (${reason}): ${message}`);
   if (typeof exitCode === 'number') error.code = exitCode;
@@ -198,11 +201,10 @@ async function runGitProcess(
       await sleep(GIT_LOCK_RETRY_DELAY_MS);
       // aborted() reads the live caller signal, so an abort during the retry
       // delay is reported here instead of spawning another attempt.
-      if (abortState.timedOut() || abortState.aborted()) {
-        throw makeGitProcessError(args, exitCode, stdout, stderr, {
-          timedOut: abortState.timedOut(),
-          aborted: abortState.aborted(),
-        });
+      const timedOut = abortState.timedOut();
+      const aborted = abortState.aborted();
+      if (timedOut || aborted) {
+        throw makeGitProcessError(args, exitCode, stdout, stderr, { timedOut, aborted });
       }
       continue;
     }
