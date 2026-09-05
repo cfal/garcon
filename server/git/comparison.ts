@@ -3,7 +3,6 @@ import { mapWithConcurrency } from '../lib/concurrency.js';
 import {
   captureWorkingTreeObservation,
   isWorkingTreeObservationCurrent,
-  type GitWorkingTreeObservation,
 } from './diff-engine.js';
 import {
   isExpectedMissingGitResult,
@@ -40,7 +39,7 @@ import {
   GitReviewDocumentRegistry,
   registeredTreeDiffFile,
 } from './review-document-registry.js';
-import { captureWorkingPathTokens } from './working-path-token.js';
+import { captureWorkingPathTokensFromObservation } from './working-path-token.js';
 import { measureGitReviewPhaseSync } from './review-performance.js';
 
 export const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -352,35 +351,6 @@ async function loadDiffFileSummary(
   };
 }
 
-async function captureComparisonWorkingPathTokens(
-  repoRoot: string,
-  paths: string[],
-  observation: GitWorkingTreeObservation,
-  signal?: AbortSignal,
-) {
-  const observedPaths = new Set(observation.changedPaths);
-  const reusablePaths = paths.filter((path) => observedPaths.has(path));
-  const pathsNeedingIndexEntries = paths.filter((path) => !observedPaths.has(path));
-  const [reusedTokens, loadedTokens] = await Promise.all([
-    captureWorkingPathTokens(
-      repoRoot,
-      reusablePaths,
-      {
-        statusEntries: observation.statusEntries,
-        indexEntriesByPath: observation.indexEntriesByPath,
-      },
-      signal,
-    ),
-    captureWorkingPathTokens(
-      repoRoot,
-      pathsNeedingIndexEntries,
-      { statusEntries: observation.statusEntries },
-      signal,
-    ),
-  ]);
-  return new Map([...reusedTokens, ...loadedTokens]);
-}
-
 async function buildWorkingTreeSnapshot(
   repoRoot: string,
   requestedProjectPath: string,
@@ -436,12 +406,13 @@ async function buildWorkingTreeSnapshot(
       shortFingerprint: before.slice(-8),
     };
     const files = summarized.files;
-    const workingPathTokens = await captureComparisonWorkingPathTokens(
+    const workingPathTokens = await captureWorkingPathTokensFromObservation(
       repoRoot,
       files.flatMap((file) =>
         file.originalPath ? [file.path, file.originalPath] : [file.path],
       ),
       observation,
+      {},
       signal,
     );
     if (!(await isWorkingTreeObservationCurrent(observation, trace, signal))) continue;

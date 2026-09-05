@@ -197,6 +197,22 @@ async function initRepoWithCommit(projectPath) {
   await runGitCommand(projectPath, ["commit", "-m", "initial"]);
 }
 
+// Replaces the path's index entry with explicit unmerged stages, the layout
+// behind UU/UD/DU/DD porcelain statuses.
+async function plantUnmergedStages(projectPath, file, stages) {
+  await runGitCommand(projectPath, ["update-index", "--force-remove", file]);
+  let entries = "";
+  for (const [stage, content] of stages) {
+    const { stdout: hash } = await runGitWithStdin(
+      projectPath,
+      ["hash-object", "-w", "--stdin"],
+      content,
+    );
+    entries += `100644 ${hash.trim()} ${stage}\t${file}\n`;
+  }
+  await runGitWithStdin(projectPath, ["update-index", "--index-info"], entries);
+}
+
 async function waitForPath(filePath) {
   for (let attempt = 0; attempt < 500; attempt += 1) {
     try {
@@ -1071,6 +1087,107 @@ describe("network git timeout", () => {
   });
 });
 
+describe("getStatus", () => {
+  const git = createProductionGitService({
+    agents: mockAgents,
+    classifyGitError: mockClassifyGitError,
+  });
+
+  it("classifies typechanged, unmerged, and mixed-status paths instead of dropping them", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-status-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      // Unstaged typechange: tracked file swapped for a symlink.
+      await fs.rm(path.join(projectPath, "a.txt"));
+      await fs.symlink("nowhere", path.join(projectPath, "a.txt"));
+      // Staged typechange: same path shape, staged through the index.
+      await fs.writeFile(path.join(projectPath, "t.txt"), "one\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "t.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add t"]);
+      await fs.rm(path.join(projectPath, "t.txt"));
+      await fs.symlink("nowhere", path.join(projectPath, "t.txt"));
+      await runGitCommand(projectPath, ["add", "t.txt"]);
+      // Staged addition whose worktree copy was deleted.
+      await fs.writeFile(path.join(projectPath, "ad.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "ad.txt"]);
+      await fs.rm(path.join(projectPath, "ad.txt"));
+      // Both-modified conflict.
+      await plantUnmergedStages(projectPath, "uu.txt", [
+        [1, "base\n"],
+        [2, "ours\n"],
+        [3, "theirs\n"],
+      ]);
+      await fs.writeFile(path.join(projectPath, "untracked.txt"), "new\n", "utf-8");
+
+      const status = await git.getStatus({ projectPath });
+
+      expect(status.modified).toEqual(["a.txt", "t.txt", "uu.txt"]);
+      expect(status.added).toEqual(["ad.txt"]);
+      expect(status.deleted).toEqual([]);
+      expect(status.untracked).toEqual(["untracked.txt"]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("drops rename entries instead of leaking the arrow string as a path", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-status-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      // Pins rename detection on so the precondition cannot depend on the
+      // machine's global git configuration.
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      await runGitCommand(projectPath, ["mv", "a.txt", "moved.txt"]);
+      await fs.writeFile(path.join(projectPath, "moved.txt"), "two\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("RM a.txt -> moved.txt");
+
+      const status = await git.getStatus({ projectPath });
+
+      expect(status.modified).toEqual([]);
+      expect(status.added).toEqual([]);
+      expect(status.deleted).toEqual([]);
+      expect(status.untracked).toEqual([]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("drops unstaged rename entries reported through an intent-to-add destination", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-status-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      // Both files committed alike, then the destination is turned into an
+      // intent-to-add entry and the source vanishes from the worktree: git
+      // pairs that as an unstaged rename and reports R in the second column.
+      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "dst.txt"));
+      await runGitCommand(projectPath, ["add", "dst.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
+      await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("DR a.txt -> dst.txt");
+
+      const status = await git.getStatus({ projectPath });
+
+      expect(status.modified).toEqual([]);
+      expect(status.added).toEqual([]);
+      expect(status.deleted).toEqual([]);
+      expect(status.untracked).toEqual([]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("discard", () => {
   const git = createProductionGitService({
     agents: mockAgents,
@@ -1254,6 +1371,106 @@ describe("discard", () => {
         .toBe("?? ours.txt");
       expect(await fs.readFile(path.join(projectPath, "ours.txt"), "utf-8"))
         .toBe("ours\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("reverts both-modified conflicts to the HEAD version", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await plantUnmergedStages(projectPath, "a.txt", [
+        [1, "base\n"],
+        [2, "ours\n"],
+        [3, "theirs\n"],
+      ]);
+      // The merge leaves conflict markers in the worktree; without this,
+      // reset alone would already match the assertions below.
+      await fs.writeFile(path.join(projectPath, "a.txt"), "<<<<<<< ours\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("UU a.txt");
+
+      await git.discard({ projectPath, file: "a.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("reverts modified-by-us-deleted-by-them conflicts to the HEAD version", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await plantUnmergedStages(projectPath, "a.txt", [
+        [1, "base\n"],
+        [2, "ours\n"],
+      ]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "<<<<<<< ours\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("UD a.txt");
+
+      await git.discard({ projectPath, file: "a.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves deleted-by-us conflicts leaving the worktree copy untracked", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await plantUnmergedStages(projectPath, "u.txt", [
+        [1, "base\n"],
+        [3, "theirs\n"],
+      ]);
+      // The merge leaves their version in the worktree even though our side
+      // deleted the path; discard keeps it as an untracked leftover.
+      await fs.writeFile(path.join(projectPath, "u.txt"), "theirs\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("DU u.txt");
+
+      await git.discard({ projectPath, file: "u.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? u.txt");
+      expect(await fs.readFile(path.join(projectPath, "u.txt"), "utf-8"))
+        .toBe("theirs\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves both-deleted conflicts cleanly", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await plantUnmergedStages(projectPath, "u.txt", [[1, "base\n"]]);
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("DD u.txt");
+
+      await git.discard({ projectPath, file: "u.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
+      await expect(fs.stat(path.join(projectPath, "u.txt"))).rejects.toThrow();
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -5476,6 +5693,41 @@ describe("porcelain conflict and comparison robustness", () => {
         bodyState: "too-large",
         limitReason: "unsupported-file-kind",
       });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("reports no conflicts when a rename source name parses as an unmerged status", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-conflict-rename-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      // A rename source literally named "UU a.txt" turns into a second
+      // porcelain token; a parser that fails to consume it would fabricate a
+      // UU conflict from the file name itself.
+      await fs.writeFile(path.join(projectPath, "UU a.txt"), "one\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "UU a.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add named source"]);
+      await fs.copyFile(path.join(projectPath, "UU a.txt"), path.join(projectPath, "dst.txt"));
+      await runGitCommand(projectPath, ["add", "dst.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
+      await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
+      await fs.rm(path.join(projectPath, "UU a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain", "-z"])).stdout)
+        .toBe("DR dst.txt\0UU a.txt\0");
+
+      const { conflicts } = await git.getConflicts({ projectPath });
+
+      expect(conflicts).toEqual([]);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
