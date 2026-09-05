@@ -17,9 +17,11 @@ import type {
   TranscriptSearchFeatureSettings,
   AgentSwitchCompactionUiSettings,
 } from '../../common/settings.js';
+import type { HiddenBashCommandPattern } from '../../common/hidden-bash-command-patterns.js';
 
 export interface UiSettings {
   pinnedInsertPosition?: 'top' | 'bottom';
+  hiddenBashCommandPatterns?: HiddenBashCommandPattern[];
   chatTitle?: ChatTitleUiSettings;
   agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;

@@ -202,18 +202,6 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     return gitJson(git, () => git.getStatus({ projectPath: project }));
   }
 
-  async function getDiff(_request: Request, url: URL): Promise<Response> {
-    const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
-    if (input instanceof Response) return input;
-    return gitJson(git, () => git.getDiff({ projectPath: input.project, file: input.file }));
-  }
-
-  async function getFileWithDiff(_request: Request, url: URL): Promise<Response> {
-    const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
-    if (input instanceof Response) return input;
-    return gitJson(git, () => git.getFileWithDiff({ projectPath: input.project, file: input.file }));
-  }
-
   async function postInitialCommit(body: JsonBody): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
@@ -928,8 +916,6 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
 
   return {
     '/api/v1/git/status': { GET: getStatus },
-    '/api/v1/git/diff': { GET: getDiff },
-    '/api/v1/git/file-with-diff': { GET: getFileWithDiff },
     '/api/v1/git/initial-commit': { POST: withJsonBody(postInitialCommit) },
     '/api/v1/git/commit': { POST: withJsonBody(postCommit) },
     '/api/v1/git/branches': { GET: getBranches },

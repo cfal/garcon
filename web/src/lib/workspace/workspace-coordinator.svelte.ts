@@ -21,6 +21,7 @@ import {
 	type WorkspaceWindowId,
 } from './surface-types.js';
 import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
+import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	WorkspaceTransitionArbiter,
@@ -147,8 +148,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
 			focusSurface: (surfaceId) => this.focusSurface(surfaceId),
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
-			resolveMobileReturn: (excluding, snapshot) =>
-				this.#presentation.resolveMobileReturn(excluding, snapshot),
+			resolveMobileReturn: (excluding, snapshot, sourceSnapshot) =>
+				this.#presentation.resolveMobileReturn(excluding, snapshot, sourceSnapshot),
 			confirmClose: (request) => this.#confirmClose(request),
 			clearAttachmentError: (surfaceId) => this.#presentation.clearAttachmentError(surfaceId),
 		});
@@ -585,13 +586,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					removalBlocked = true;
 					return [];
 				}
-				const mutations: WorkspaceLayoutMutation[] = [
+				const removalMutation: WorkspaceLayoutMutation =
 					surface.type === 'terminal'
 						? { type: 'unplace-terminal', terminalId: surface.terminalId }
-						: { type: 'remove-surface', surfaceId },
-				];
+						: { type: 'remove-surface', surfaceId };
+				const mutations: WorkspaceLayoutMutation[] = [removalMutation];
 				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
-					const fallback = this.#presentation.resolveMobileReturn(surfaceId, latest);
+					// Uses post-removal availability while retaining the source-window topology.
+					const fallback = this.#presentation.resolveMobileReturn(
+						surfaceId,
+						reduceWorkspaceLayout(latest, [removalMutation]),
+						latest,
+					);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({
 						type: 'set-mobile-presentation',

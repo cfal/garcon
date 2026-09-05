@@ -8,6 +8,7 @@
 	} from '../sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemHostProps {
 		session: ChatSessionRecord;
@@ -26,6 +27,7 @@
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onForkChat?: (sourceChatId: string) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowBlocked?: boolean;
@@ -50,6 +52,7 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
 		onForkChat = () => {},
 		onOpenInNewWindow,
 		newWindowBlocked = false,
@@ -109,6 +112,7 @@
 	{onMultiSelectToggle}
 	{onMoveToTop}
 	{onMoveToBottom}
+	{onSortChatOrder}
 	{onOpenInNewWindow}
 	{newWindowBlocked}
 />

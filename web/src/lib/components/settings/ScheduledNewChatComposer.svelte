@@ -83,6 +83,11 @@
 		textarea?.focus();
 	}
 
+	function handlePathFocus(event: FocusEvent & { currentTarget: HTMLInputElement }): void {
+		if (isMobile) event.currentTarget.blur();
+		startup.handlePathFocus();
+	}
+
 	function handleModelChange(next: ModelSelectorChange): void {
 		startup.selectAgent(next.agentId);
 		startup.selectModel(next.modelValue, next);
@@ -102,7 +107,7 @@
 						type="text"
 						value={startup.projectPath}
 						readonly={startup.isUpdatingPinnedPath}
-						onfocus={() => startup.handlePathFocus()}
+						onfocus={handlePathFocus}
 						oninput={(event) => {
 							startup.projectPath = event.currentTarget.value;
 							startup.clearError();

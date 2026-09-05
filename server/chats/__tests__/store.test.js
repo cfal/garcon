@@ -48,6 +48,7 @@ function persistedEntry(overrides = {}) {
     carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
     parentChat: null,
     ...overrides,
   };
@@ -75,6 +76,52 @@ describe('ChatRegistry', () => {
   afterEach(async () => {
     await registry?.flush().catch(() => undefined);
     await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('hands out deep copies that cannot mutate registry state', () => {
+    registry.addChat(newChat({
+      tags: ['source'],
+      agentSettingsById: { test: envelope('test') },
+    }));
+
+    const chat = registry.getChat(CHAT_ID);
+    chat.tags.push('injected');
+    chat.agentSettingsById.test.values.injected = true;
+
+    const updated = registry.updateChat(CHAT_ID, { model: 'other-model' });
+    updated.tags.push('via-update');
+    updated.agentSettingsById.test.values.injected = true;
+
+    expect(registry.getChat(CHAT_ID).tags).toEqual(['source']);
+    expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
+  });
+
+  it('clones caller-owned collections on ingest', () => {
+    const tags = ['source'];
+    const agentSettingsById = { test: envelope('test') };
+    const session = nativeSession('test');
+    registry.addChat(newChat({ tags, agentSettingsById, nativeSession: session }));
+
+    tags.push('injected');
+    agentSettingsById.test.values.injected = true;
+    session.value.injected = true;
+    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/native.jsonl' });
+
+    const updateTags = ['via-update'];
+    const updateSettings = { test: envelope('test') };
+    const updateSession = nativeSession('test', { path: '/tmp/next.jsonl' });
+    registry.updateChat(CHAT_ID, {
+      tags: updateTags,
+      agentSettingsById: updateSettings,
+      nativeSession: updateSession,
+    });
+    updateTags.push('injected');
+    updateSettings.test.values.injected = true;
+    updateSession.value.injected = true;
+
+    expect(registry.getChat(CHAT_ID).tags).toEqual(['via-update']);
+    expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
+    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/next.jsonl' });
   });
 
   it('adds provider-neutral records with opaque ownership defaults', () => {
@@ -204,6 +251,25 @@ describe('ChatRegistry', () => {
     expect(updated).toMatchObject({ model: 'model-b', projectPath: '/repo' });
     expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
     expect(registry.getChatByAgentSessionId('native-2')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('reports existence for own keys only', () => {
+    registry.addChat(newChat());
+
+    expect(registry.hasChat(CHAT_ID)).toBe(true);
+    expect(registry.hasChat(SECOND_CHAT_ID)).toBe(false);
+    // sessions is a plain object, so inherited keys like "toString" must not
+    // register as chats.
+    expect(registry.hasChat('toString')).toBe(false);
+    expect(registry.hasChat('__proto__')).toBe(false);
+  });
+
+  it('returns null instead of prototype entries for unknown lookups', () => {
+    registry.addChat(newChat());
+
+    expect(registry.getChat('toString')).toBeNull();
+    expect(registry.getChat('__proto__')).toBeNull();
+    expect(registry.getChat(SECOND_CHAT_ID)).toBeNull();
   });
 
   it('ignores untyped parentage patches', () => {
@@ -515,6 +581,7 @@ describe('ChatRegistry', () => {
     registry.addChat(newChat({ nativeSession: nativeSession('test') }));
     const listener = mock(() => undefined);
     registry.onChatProjectPathUpdated(listener);
+    const callerSession = nativeSession('test', { path: '/tmp/next.jsonl' });
 
     const result = await registry.updateProjectPath(CHAT_ID, {
       chatId: CHAT_ID,
@@ -522,13 +589,16 @@ describe('ChatRegistry', () => {
       effectiveProjectKey: '/real/next',
       previousProjectPath: '/repo',
       previousEffectiveProjectKey: '/real/repo',
-      nativeSession: nativeSession('test', { path: '/tmp/next.jsonl' }),
+      nativeSession: callerSession,
     }, { flush: true });
+
+    callerSession.value.injected = true;
 
     expect(result).toMatchObject({
       projectPath: '/next',
       nativeSession: nativeSession('test', { path: '/tmp/next.jsonl' }),
     });
+    expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/next.jsonl' });
     expect(listener).toHaveBeenCalledWith({
       chatId: CHAT_ID,
       projectPath: '/next',
@@ -667,6 +737,12 @@ describe('ChatRegistry', () => {
   it('rejects malformed ownership, settings, and native-session records', async () => {
     for (const entry of [
       persistedEntry({ agentOwnershipEpoch: '' }),
+      persistedEntry({
+        pendingPreambleBoundary: {
+          kind: 'new-chat',
+          ownershipEpoch: 'stale-epoch',
+        },
+      }),
       persistedEntry({ agentSettingsById: null }),
       persistedEntry({ nativeSession: nativeSession('other') }),
     ]) {
@@ -678,7 +754,8 @@ describe('ChatRegistry', () => {
 
   it('reconciles missing opaque native sessions through the owning integration callback', async () => {
     registry.addChat(newChat({ agentSessionId: 'native-1' }));
-    const resolver = mock(async () => nativeSession('test', { id: 'native-1' }));
+    const resolved = nativeSession('test', { id: 'native-1' });
+    const resolver = mock(async () => resolved);
 
     await expect(registry.reconcileSessions(resolver)).resolves.toBe(true);
 
@@ -686,6 +763,9 @@ describe('ChatRegistry', () => {
     expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(nativeSession('test', { id: 'native-1' }));
     await expect(registry.reconcileSessions(resolver)).resolves.toBe(false);
     expect(resolver).toHaveBeenCalledTimes(2);
+
+    resolved.value.injected = true;
+    expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(nativeSession('test', { id: 'native-1' }));
   });
 
   it('replaces an existing opaque native session only when the resolver upgrades it', async () => {

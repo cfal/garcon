@@ -33,6 +33,7 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { canonicalFilesWindowId } from '../../support/chromium-workspace.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
@@ -248,6 +249,8 @@ function mixedOrderingRows(firstOrdinal: number): {
               message,
               attachments: [],
               steer: false,
+              preambleBoundary: null,
+              preamblePrefixReceipt: null,
             },
             providerMeta: null,
           }
@@ -4300,26 +4303,31 @@ async function verifyWindowCountGeometryStability(
   await scrollToPosition(fixture.page, 'middle');
   const chatIdentity = await currentWorkspaceIdentity(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);
-  const singleWindowAnchor = await readingAnchor(fixture.page);
-  const singleWindowLayout = await transcriptLayoutSnapshot(fixture.page, singleWindowAnchor.key);
+  const canonicalAnchor = await readingAnchor(fixture.page);
+  const canonicalLayout = await transcriptLayoutSnapshot(fixture.page, canonicalAnchor.key);
 
   const terminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);
-  const twoWindowAnchor = await anchorByKey(fixture.page, singleWindowAnchor.key);
-  const twoWindowLayout = await transcriptLayoutSnapshot(fixture.page, singleWindowAnchor.key);
+  const threeWindowAnchor = await anchorByKey(fixture.page, canonicalAnchor.key);
+  const threeWindowLayout = await transcriptLayoutSnapshot(fixture.page, canonicalAnchor.key);
   expect(
-    Math.abs(twoWindowAnchor.offset - singleWindowAnchor.offset),
+    Math.abs(threeWindowAnchor.offset - canonicalAnchor.offset),
     JSON.stringify(
-      { singleWindowAnchor, twoWindowAnchor, singleWindowLayout, twoWindowLayout },
+      { canonicalAnchor, threeWindowAnchor, canonicalLayout, threeWindowLayout },
       null,
       2,
     ),
   ).toBeLessThanOrEqual(1);
 
+  // The pre-canonical four-window case left Chat at 25% width. Splitting Chat
+  // again here would reduce it to 15.5%, adding a narrower layout than this
+  // geometry regression covers. Split Terminal instead, leaving Chat at 31%.
+  await focusWorkspaceWindow(fixture.page, terminalWindowId);
   const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
-  const filesWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
+  // The canonical desktop layout already provides the fourth window (Files).
+  const filesWindowId = await canonicalFilesWindowId(fixture.page);
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);

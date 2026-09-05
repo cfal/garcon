@@ -9,10 +9,10 @@
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
-    "@earendil-works/pi-agent-core": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2",
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-tui": "0.84.2"
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1"
   },
   "devDependencies": { "@types/bun": "^1.4.0", "typescript": "^6.0.3" },
   "garconBuild": {

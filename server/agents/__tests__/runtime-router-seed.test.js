@@ -171,6 +171,36 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(start.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
+  it('keeps the private preamble out of carryover planning and prepends it to the outbound prompt', async () => {
+    const providerPrefix = '<garcon-preambles>PRIVATE</garcon-preambles>\n\n';
+    const createCarriedContext = mock(async ({ destinationPrompt }) => {
+      expect(destinationPrompt).toContain('USER FILE BODY');
+      expect(destinationPrompt).not.toContain('PRIVATE');
+      return { kind: 'complete', context: { prefix: 'carried context' } };
+    });
+    const { router, start } = makeRouter({
+      composition: {
+        inserted: true,
+        input: inputRow(1, 'review @notes.txt'),
+        prompt: [inputRow(1, 'review @notes.txt')],
+        providerPrefix,
+      },
+      createCarriedContext,
+    });
+
+    await router.runAgentTurn('chat-1', 'fallback', {
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    });
+
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringMatching(/^<garcon-preambles>PRIVATE<\/garcon-preambles>\n\nreview @notes\.txt/),
+      carriedContext: { prefix: 'carried context' },
+    }));
+    expect(start.mock.calls[0][0].prompt).toContain('USER FILE BODY');
+    expect(start.mock.calls[0][0]).not.toHaveProperty('providerPrefix');
+  });
+
   it('excludes every composed prompt row from fresh-session carried context', async () => {
     const context = [new AssistantMessage('2026-08-12T00:00:00.000Z', 'earlier answer')];
     const conversationMessages = mock((_chatId, excluded) => {
@@ -481,6 +511,31 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(conversationMessages).not.toHaveBeenCalled();
     expect(resume.mock.calls[0][0]).not.toHaveProperty('priorContext');
     expect(transcript.notices).toEqual([]);
+  });
+
+  it('prepends a private preamble to a resumed provider prompt without changing the adapter contract', async () => {
+    const { router, resume } = makeRouter({
+      entry: {
+        agentSessionId: 'native-1',
+        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+      },
+      composition: {
+        inserted: true,
+        input: inputRow(1, 'visible'),
+        prompt: [inputRow(1, 'visible')],
+        providerPrefix: 'private-prefix\n\n',
+      },
+    });
+
+    await router.runAgentTurn('chat-1', 'fallback', {
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    });
+
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'private-prefix\n\nvisible',
+    }));
+    expect(resume.mock.calls[0][0]).not.toHaveProperty('providerPrefix');
   });
 
   it('submits goal control without materializing the ledger conversation', async () => {

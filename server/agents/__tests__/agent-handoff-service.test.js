@@ -188,6 +188,10 @@ describe('AgentHandoffService', () => {
     expect(current).toMatchObject({
       agentId: 'target-agent',
       agentOwnershipEpoch: state.decided.target.agentOwnershipEpoch,
+      pendingPreambleBoundary: {
+        kind: 'agent-switch',
+        ownershipEpoch: state.decided.target.agentOwnershipEpoch,
+      },
       agentSessionId: null,
     });
   });
@@ -1193,6 +1197,10 @@ function handoffState(current, calls) {
       Object.assign(current, {
         agentId: intent.target.execution.agentId,
         agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
+        pendingPreambleBoundary: {
+          kind: 'agent-switch',
+          ownershipEpoch: intent.target.agentOwnershipEpoch,
+        },
         agentSessionId: null,
         nativeSession: null,
         nativeSeedReceipt: null,

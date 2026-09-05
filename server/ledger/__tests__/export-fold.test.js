@@ -140,6 +140,40 @@ describe('transcript export fold', () => {
     }]);
     expect(filterTranscriptExportEntries(entries, ['diagnostics']).entries).toEqual(entries);
   });
+
+  it('exports preamble title snapshots as removable diagnostics without private data', () => {
+    const entries = foldRowsForExport([{
+      viewId: VIEW_ID,
+      ordinal: 8,
+      at: AT,
+      providerMeta: null,
+      kind: 'notice',
+      message: 'Preambles applied',
+      detail: {
+        type: 'preamble-application',
+        preambles: [{ id: 'preamble-1', title: 'Repository conventions' }],
+      },
+    }]);
+
+    expect(entries).toEqual([expect.objectContaining({
+      kind: 'message',
+      ordinal: 8,
+      category: 'diagnostics',
+      message: expect.objectContaining({
+        type: 'transcript-notice',
+        detail: {
+          type: 'preamble-application',
+          preambles: [{ id: 'preamble-1', title: 'Repository conventions' }],
+        },
+      }),
+    })]);
+    expect(filterTranscriptExportEntries(entries, ['diagnostics'])).toEqual({
+      entries: [],
+      omitted: [{ category: 'diagnostics', count: 1 }],
+    });
+    expect(JSON.stringify(entries)).not.toContain('private body sentinel');
+    expect(JSON.stringify(entries)).not.toContain('/private/project/path');
+  });
 });
 
 function row(ordinal, message) {

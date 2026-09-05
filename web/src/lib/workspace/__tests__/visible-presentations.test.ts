@@ -10,7 +10,7 @@ import {
 } from '../visible-presentations';
 import type { WorkspaceWindowId, WorkspaceLayoutSnapshot } from '../surface-types';
 
-function twoWindowLayout(): WorkspaceLayoutSnapshot {
+function layoutWithGitWindow(): WorkspaceLayoutSnapshot {
 	return reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 		{
 			type: 'register-surface-in-new-window',
@@ -76,15 +76,16 @@ describe('visiblePortablePresentations', () => {
 	});
 
 	it('returns the active surface of every presented window on desktop', () => {
-		const snapshot = twoWindowLayout();
+		const snapshot = layoutWithGitWindow();
 
 		expect(visiblePortablePresentations(snapshot, false)).toEqual([
 			{ surfaceId: 'singleton:git', presentation: 'window-2' },
+			{ surfaceId: 'singleton:files', presentation: 'window-files' },
 		]);
 	});
 
 	it('omits the chat surface and projects one mobile surface', () => {
-		const snapshot = twoWindowLayout();
+		const snapshot = layoutWithGitWindow();
 		expect(
 			visiblePortablePresentations(snapshot, false).some(
 				({ surfaceId }) => surfaceId === 'chat-view:window-main',
@@ -104,7 +105,7 @@ describe('visiblePortablePresentations', () => {
 	});
 
 	it('projects only the fullscreen window on desktop and keeps mobile projection', () => {
-		const snapshot = reduceWorkspaceLayout(twoWindowLayout(), [
+		const snapshot = reduceWorkspaceLayout(layoutWithGitWindow(), [
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 		expect([...visiblePresentationMap(snapshot, 'desktop')]).toEqual([
@@ -130,7 +131,7 @@ describe('visiblePortablePresentations', () => {
 		]);
 		const gitVisible = visiblePortablePresentations(gitActive, false);
 		const retained = nextRetainedSingletonPresentationKeys(gitActive, false, gitVisible, new Set());
-		expect([...retained]).toEqual(['window-main:singleton:git']);
+		expect([...retained]).toEqual(['window-main:singleton:git', 'window-files:singleton:files']);
 
 		const chatActive = reduceWorkspaceLayout(gitActive, [
 			{
@@ -154,14 +155,20 @@ describe('visiblePortablePresentations', () => {
 				windowId: 'window-main' as WorkspaceWindowId,
 				visible: false,
 			},
+			{
+				surfaceId: 'singleton:files',
+				presentation: 'window-files' as WorkspaceWindowId,
+				windowId: 'window-files' as WorkspaceWindowId,
+				visible: true,
+			},
 		]);
 	});
 
 	it('drops retained renderers for destroyed windows and never retains on mobile', () => {
-		const snapshot = twoWindowLayout();
+		const snapshot = layoutWithGitWindow();
 		const visible = visiblePortablePresentations(snapshot, false);
 		const retained = nextRetainedSingletonPresentationKeys(snapshot, false, visible, new Set());
-		expect([...retained].sort()).toEqual(['window-2:singleton:git']);
+		expect([...retained].sort()).toEqual(['window-2:singleton:git', 'window-files:singleton:files']);
 
 		const fullscreen = reduceWorkspaceLayout(snapshot, [
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
@@ -169,7 +176,7 @@ describe('visiblePortablePresentations', () => {
 		const fullscreenVisible = visiblePortablePresentations(fullscreen, false);
 		expect(
 			nextRetainedSingletonPresentationKeys(fullscreen, false, fullscreenVisible, retained),
-		).toEqual(new Set(['window-2:singleton:git']));
+		).toEqual(new Set(['window-2:singleton:git', 'window-files:singleton:files']));
 		expect(nextRetainedSingletonPresentationKeys(snapshot, true, visible, retained).size).toBe(0);
 	});
 });

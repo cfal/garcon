@@ -57,7 +57,6 @@ describe('Lightpanda desktop file viewer scrolling', () => {
       await app.startOpenAiDirectChat('file-viewer-scroll-seed', {
         projectPath,
       });
-      await app.openNewWorkspaceWindow('Open Files');
       const filesWindowId = await app.workspaceWindowIdForSurface('singleton:files');
       await fixture.page.waitForSelector('[data-file-tree-grid]');
 

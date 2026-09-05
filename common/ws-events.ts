@@ -35,6 +35,10 @@ import {
   type SnippetsInvalidationReason,
 } from './snippets';
 import {
+  isPreamblesInvalidationReason,
+  type PreamblesInvalidationReason,
+} from './preambles';
+import {
   isTranscriptSearchStatusV1,
   type TranscriptSearchStatusV1,
 } from './chat-search';
@@ -306,6 +310,11 @@ export class SnippetsInvalidatedMessage {
   constructor(public reason: SnippetsInvalidationReason) {}
 }
 
+export class PreamblesInvalidatedMessage {
+  readonly type = 'preambles-invalidated' as const;
+  constructor(public reason: PreamblesInvalidationReason) {}
+}
+
 export type ClientRequestErrorCode = Extract<
   ErrorCode,
   | 'MISSING_CHAT_ID'
@@ -373,6 +382,7 @@ export type ServerWsMessage =
   | TranscriptSearchStatusMessage
   | ScheduledPromptsInvalidatedMessage
   | SnippetsInvalidatedMessage
+  | PreamblesInvalidatedMessage
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
@@ -790,6 +800,11 @@ export function parseServerWsMessage(
     case 'snippets-invalidated': {
       return isSnippetsInvalidationReason(data.reason)
         ? new SnippetsInvalidatedMessage(data.reason)
+        : null;
+    }
+    case 'preambles-invalidated': {
+      return isPreamblesInvalidationReason(data.reason)
+        ? new PreamblesInvalidatedMessage(data.reason)
         : null;
     }
     case 'client-request-error': {

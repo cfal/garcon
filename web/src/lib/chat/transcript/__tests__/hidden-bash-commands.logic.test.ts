@@ -1,13 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import {
 	compileHiddenBashCommandPatterns,
+	createHiddenBashCommandMatcherCache,
+	HIDDEN_BASH_COMMAND_PATTERN_PRESETS,
 	isHiddenBashToolUse,
-	normalizeHiddenBashCommandPatterns,
 	validateHiddenBashCommandPattern,
 } from '$lib/chat/transcript/hidden-bash-commands.js';
 import { BashToolUseMessage, ReadToolUseMessage } from '$shared/chat-types';
 
 describe('compileHiddenBashCommandPatterns', () => {
+	it('matches Garcon-Amp launcher commands without matching embedded paths', () => {
+		const [preset] = HIDDEN_BASH_COMMAND_PATTERN_PRESETS;
+		const matches = compileHiddenBashCommandPatterns(preset.patterns);
+
+		expect(matches?.('/tmp/garcon-amp-1788487172419500/oracle --status')).toBe(true);
+		expect(matches?.('/tmp/garcon-amp-1788487172419500/oracle --review "diff"')).toBe(true);
+		expect(matches?.('./finder --start "locate settings"')).toBe(true);
+		expect(matches?.('./reporter')).toBe(true);
+		expect(matches?.('./reporter-extra --status')).toBe(false);
+		expect(matches?.('/tmp/garcon-amp-123/oracle-extra --status')).toBe(false);
+		expect(matches?.('echo /tmp/garcon-amp-123/oracle --status')).toBe(false);
+		expect(matches?.('x/oracle --status')).toBe(false);
+	});
+
 	it('matches glob patterns against the whole command', () => {
 		const matches = compileHiddenBashCommandPatterns([{ pattern: 'git *', mode: 'glob' }]);
 		expect(matches?.('git status')).toBe(true);
@@ -76,59 +91,65 @@ describe('validateHiddenBashCommandPattern', () => {
 		expect(validateHiddenBashCommandPattern('([unclosed', 'regex')).toBe('invalid-regex');
 	});
 
+	it('rejects patterns over the shared length limit', () => {
+		expect(validateHiddenBashCommandPattern('x'.repeat(1_001), 'glob')).toBe('too-long');
+	});
+
 	it('accepts valid patterns per mode', () => {
 		expect(validateHiddenBashCommandPattern('git *', 'glob')).toBe('ok');
 		expect(validateHiddenBashCommandPattern('^git', 'regex')).toBe('ok');
 	});
 });
 
-describe('normalizeHiddenBashCommandPatterns', () => {
-	it('drops malformed entries and duplicates', () => {
-		expect(
-			normalizeHiddenBashCommandPatterns([
-				{ pattern: 'git *', mode: 'glob' },
-				{ pattern: 'git *', mode: 'glob' },
-				{ pattern: '^git', mode: 'regex' },
-				{ pattern: '', mode: 'glob' },
-				{ pattern: '([unclosed', mode: 'regex' },
-				{ pattern: 'x', mode: 'shell' },
-				{ pattern: 42, mode: 'glob' },
-				'string',
-				null,
-			]),
-		).toEqual([
+describe('createHiddenBashCommandMatcherCache', () => {
+	it('reuses a matcher for value-identical lists', () => {
+		const matcherFor = createHiddenBashCommandMatcherCache();
+		const first = matcherFor([{ pattern: 'git *', mode: 'glob' }]);
+		const second = matcherFor([{ pattern: 'git *', mode: 'glob' }]);
+
+		expect(first).not.toBeNull();
+		expect(second).toBe(first);
+	});
+
+	it('creates a new matcher for each semantic list change', () => {
+		const matcherFor = createHiddenBashCommandMatcherCache();
+		const base = matcherFor([
 			{ pattern: 'git *', mode: 'glob' },
-			{ pattern: '^git', mode: 'regex' },
+			{ pattern: '^cargo', mode: 'regex' },
 		]);
+		const changes = [
+			[
+				{ pattern: 'git *', mode: 'regex' as const },
+				{ pattern: '^cargo', mode: 'regex' as const },
+			],
+			[
+				{ pattern: 'git ?', mode: 'glob' as const },
+				{ pattern: '^cargo', mode: 'regex' as const },
+			],
+			[
+				{ pattern: '^cargo', mode: 'regex' as const },
+				{ pattern: 'git *', mode: 'glob' as const },
+			],
+			[{ pattern: 'git *', mode: 'glob' as const }],
+			[
+				{ pattern: 'git *', mode: 'glob' as const },
+				{ pattern: '^cargo', mode: 'regex' as const },
+				{ pattern: 'bun *', mode: 'glob' as const },
+			],
+		];
+
+		for (const patterns of changes) {
+			expect(matcherFor(patterns)).not.toBe(base);
+		}
 	});
 
-	it('preserves pattern text exactly', () => {
-		expect(normalizeHiddenBashCommandPatterns([{ pattern: '  spaced  ', mode: 'glob' }])).toEqual([
-			{ pattern: '  spaced  ', mode: 'glob' },
-		]);
-	});
+	it('does not reuse a matcher after the caller mutates the prior input', () => {
+		const matcherFor = createHiddenBashCommandMatcherCache();
+		const patterns = [{ pattern: 'git *', mode: 'glob' as const }];
+		const first = matcherFor(patterns);
+		patterns[0].pattern = 'cargo *';
 
-	it('drops whitespace-only patterns', () => {
-		expect(
-			normalizeHiddenBashCommandPatterns([
-				{ pattern: '   ', mode: 'regex' },
-				{ pattern: 'git *', mode: 'glob' },
-			]),
-		).toEqual([{ pattern: 'git *', mode: 'glob' }]);
-	});
-
-	it('keeps the same pattern under different modes', () => {
-		expect(
-			normalizeHiddenBashCommandPatterns([
-				{ pattern: 'git *', mode: 'glob' },
-				{ pattern: 'git *', mode: 'regex' },
-			]),
-		).toHaveLength(2);
-	});
-
-	it('returns an empty list for non-array input', () => {
-		expect(normalizeHiddenBashCommandPatterns(undefined)).toEqual([]);
-		expect(normalizeHiddenBashCommandPatterns('nope')).toEqual([]);
+		expect(matcherFor(patterns)).not.toBe(first);
 	});
 });
 

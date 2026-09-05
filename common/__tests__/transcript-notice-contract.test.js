@@ -16,6 +16,32 @@ import {
 const AT = '2026-08-16T00:00:00.000Z';
 
 describe('transcript notice contracts', () => {
+  it('[TLV5-PREAMBLE.01-CONTRACT-01] round-trips immutable preamble title snapshots without accepting private fields', () => {
+    const detail = {
+      type: 'preamble-application',
+      preambles: [
+        { id: 'preamble-a', title: 'Repository conventions' },
+        { id: 'preamble-b', title: 'Security constraints' },
+      ],
+    };
+    const message = new TranscriptNoticeMessage(AT, 'Preambles applied', detail);
+
+    expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+    expect(parseTranscriptNoticeDetail(detail)).toEqual(detail);
+    expect(parseTranscriptNoticeDetail({
+      ...detail,
+      preambles: [{ ...detail.preambles[0], content: 'private body' }],
+    })).toBeNull();
+    expect(parseTranscriptNoticeDetail({
+      ...detail,
+      content: 'private body',
+    })).toBeNull();
+    expect(parseTranscriptNoticeDetail({
+      ...detail,
+      preambles: [detail.preambles[0], detail.preambles[0]],
+    })).toBeNull();
+  });
+
   it('[TLV5-ADOPT.04-CONTRACT-01] round-trips the typed carryover quarantine detail exactly', () => {
     const message = {
       type: 'transcript-notice',

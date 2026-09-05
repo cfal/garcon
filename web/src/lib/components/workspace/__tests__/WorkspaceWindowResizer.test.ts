@@ -50,6 +50,7 @@ describe('WorkspaceWindowResizer', () => {
 		expect(line.classList.contains(span)).toBe(true);
 		expect(target.classList.contains('pointer-events-auto')).toBe(true);
 		expect(target.classList.contains(hitArea)).toBe(true);
+		expect(target.classList.contains(direction === 'horizontal' ? 'w-6' : 'h-6')).toBe(true);
 	});
 
 	it('reverts a pointer preview on cancellation without committing it', async () => {

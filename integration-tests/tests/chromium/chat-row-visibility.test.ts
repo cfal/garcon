@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import type { BrowserContext, Page } from 'playwright';
+import type { BrowserContext, Locator, Page } from 'playwright';
 import type {
   AddChatRowResponse,
   ChatRowTargetResponse,
@@ -66,7 +66,8 @@ async function allowDirectChats(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
     globalThis.localStorage.setItem(
       'pref_local_settings',
-      JSON.stringify({ allowDirectChats: true }),
+      // The sidebar-preview assertions need the detailed chat-item layout.
+      JSON.stringify({ allowDirectChats: true, sidebarChatItemLayout: 'default' }),
     );
   });
 }
@@ -358,7 +359,95 @@ function assertOnlyExpectedReconnectErrors(errors: readonly string[]): void {
   ))).toEqual([]);
 }
 
+async function titleLayout(title: Locator): Promise<{
+  whiteSpace: string;
+  height: number;
+  lineHeight: number;
+  scrollWidth: number;
+  clientWidth: number;
+  iconTop: number | null;
+  titleTop: number;
+}> {
+  return title.evaluate((element) => {
+    const titleRect = element.getBoundingClientRect();
+    const iconRect = element.parentElement?.querySelector('svg')?.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      whiteSpace: style.whiteSpace,
+      height: titleRect.height,
+      lineHeight: Number.parseFloat(style.lineHeight),
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      iconTop: iconRect?.top ?? null,
+      titleTop: titleRect.top,
+    };
+  });
+}
+
+function expectMobileTitleLayout(layout: Awaited<ReturnType<typeof titleLayout>>): void {
+  expect(layout.whiteSpace).toBe('normal');
+  expect(layout.height).toBeGreaterThan(layout.lineHeight * 1.5);
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(layout.iconTop).not.toBeNull();
+  expect(Math.abs((layout.iconTop ?? 0) - layout.titleTop)).toBeLessThanOrEqual(2);
+}
+
 describe('Chromium transcript chat rows', () => {
+  test('shows complete CLI-authored titles on mobile and truncates them at desktop widths', async () => {
+    await withChromiumFixture('cli-title-responsive-layout', async (fixture, markPhase) => {
+      const userTitle =
+        'Mobile deployment title with all diagnostic context for operators reviewing this CLI-authored message on a narrow screen';
+      const rowTitle =
+        'Mobile release validation title with complete rollout context for operators reviewing this CLI row on a narrow screen';
+      const userContent = 'cli-title-responsive-user-message';
+
+      markPhase('creating titled CLI content');
+      await installSocketTracker(fixture.context);
+      const chatId = await completeChat(fixture, userContent, {
+        origin: 'cli',
+        style: 'notice',
+        title: userTitle,
+      });
+      const transcript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+      const row = await addRow({
+        fixture,
+        chatId,
+        transcriptViewId: transcript.transcriptViewId,
+        presentation: { style: 'error' },
+        title: rowTitle,
+        content: 'cli-title-responsive-row',
+        identity: 'cli-title-responsive-row',
+      });
+
+      markPhase('verifying mobile title wrapping');
+      await fixture.page.setViewportSize({ width: 390, height: 844 });
+      await openChat(
+        fixture.page,
+        fixture.integration.garcon.baseUrl,
+        chatId,
+        `echo:${userContent}`,
+      );
+      const presentedUserBubble = fixture.page.locator(
+        '[data-user-message-presentation="notice"]',
+      );
+      const userTitleElement = presentedUserBubble.getByText(userTitle, { exact: true });
+      const rowTitleElement = rowLocator(fixture.page, row).getByText(rowTitle, { exact: true });
+      await userTitleElement.waitFor();
+      await rowTitleElement.waitFor();
+      expectMobileTitleLayout(await titleLayout(userTitleElement));
+      expectMobileTitleLayout(await titleLayout(rowTitleElement));
+
+      markPhase('verifying desktop title truncation');
+      await fixture.page.setViewportSize({ width: 640, height: 844 });
+      for (const titleElement of [userTitleElement, rowTitleElement]) {
+        const layout = await titleLayout(titleElement);
+        expect(layout.whiteSpace).toBe('nowrap');
+        expect(layout.scrollWidth).toBeGreaterThan(layout.clientWidth);
+      }
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('[TLV5-CHAT-ROW.06-CHROMIUM-01] updates active and background clients and replays each row exactly once', async () => {
     await withChromiumFixture('chat-row-multi-client-visibility', async (fixture, markPhase) => {
       await installSocketTracker(fixture.context);

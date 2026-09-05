@@ -62,7 +62,7 @@ import {
   GitReviewDocumentRegistry,
   registeredWorkbenchFile,
 } from './review-document-registry.js';
-import { captureWorkingPathTokens } from './working-path-token.js';
+import { captureWorkingPathTokensFromObservation } from './working-path-token.js';
 import { measureGitReviewPhaseSync } from './review-performance.js';
 
 const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -1267,16 +1267,13 @@ async function getWorkbenchSnapshot({
     unmergedPaths: parseUnmergedPaths(observation.unmergedOutput),
     signal,
   });
-  const workingPathTokens = await captureWorkingPathTokens(
+  const workingPathTokens = await captureWorkingPathTokensFromObservation(
     repoRoot,
     reviewSummary.files.flatMap((file) =>
       file.originalPath ? [file.path, file.originalPath] : [file.path],
     ),
-    {
-      statusEntries: observation.statusEntries,
-      indexEntriesByPath: observation.indexEntriesByPath,
-      scope: effectiveMode === 'staged' ? 'index' : 'working-tree',
-    },
+    observation,
+    { scope: effectiveMode === 'staged' ? 'index' : 'working-tree' },
     signal,
   );
   const document = measureGitReviewPhaseSync(metrics, 'document-register', () =>

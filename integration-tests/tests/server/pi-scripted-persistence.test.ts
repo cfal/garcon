@@ -384,7 +384,7 @@ async function writeLegacyPiSession(input: {
   legacyReply: string;
 }): Promise<string> {
   // Recreates Pi 0.80.10's v3 header and message-entry contract.
-  // https://github.com/earendil-works/pi-mono/blob/8dc78834cde4e329284cf505f9e3f99763df5529/packages/coding-agent/src/core/session-manager.ts#L30-L58
+  // https://github.com/earendil-works/pi/blob/8dc78834cde4e329284cf505f9e3f99763df5529/packages/coding-agent/src/core/session-manager.ts#L30-L58
   const sessionDirectory = join(input.sessionRoot, '.pi', 'agent', 'sessions');
   const nativePath = join(
     sessionDirectory,

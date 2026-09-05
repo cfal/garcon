@@ -8,10 +8,12 @@
 		isHandoffSummaryNoticeDetail,
 		isInterAgentMessageOutcomeNoticeDetail,
 		isInterAgentMessageReceivedNoticeDetail,
+		isPreambleApplicationNoticeDetail,
 	} from '$shared/transcript-notice-details';
 	import ChatEventCard from './ChatEventCard.svelte';
 	import CollapsibleBody from './CollapsibleBody.svelte';
 	import InterAgentMessageRow from './InterAgentMessageRow.svelte';
+	import PreambleApplicationRow from './PreambleApplicationRow.svelte';
 	import Markdown from '../Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
@@ -36,6 +38,9 @@
 
 	const isHandoffSummary = $derived(isHandoffSummaryNoticeDetail(message.detail));
 	const isChatIdDiscoveryFailure = $derived(isChatIdDiscoveryFailureNoticeDetail(message.detail));
+	const preambleApplication = $derived(
+		isPreambleApplicationNoticeDetail(message.detail) ? message.detail : null,
+	);
 	const interAgentDetail = $derived.by(() => {
 		if (isInterAgentMessageOutcomeNoticeDetail(message.detail)) return message.detail;
 		if (isInterAgentMessageReceivedNoticeDetail(message.detail)) return message.detail;
@@ -43,7 +48,9 @@
 	});
 </script>
 
-{#if interAgentDetail}
+{#if preambleApplication}
+	<PreambleApplicationRow detail={preambleApplication} />
+{:else if interAgentDetail}
 	<InterAgentMessageRow
 		{message}
 		detail={interAgentDetail}

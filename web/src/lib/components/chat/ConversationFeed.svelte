@@ -3,10 +3,7 @@
 	import ConversationFeedVirtualRow from './ConversationFeedVirtualRow.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import {
-		getLocalSettings,
-		getModelCatalog,
-	} from '$lib/context';
+	import { getLocalSettings, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
@@ -28,7 +25,7 @@
 		canUseForkAtMessageAction,
 	} from '$lib/chat/actions/fork-at-message-action.js';
 	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
-	import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
+	import { createHiddenBashCommandMatcherCache } from '$lib/chat/transcript/hidden-bash-commands.js';
 	import {
 		conversationScrollbarScrollDirection,
 		conversationScrollbarTrackDirection,
@@ -108,6 +105,8 @@
 
 	const chatState = $derived(transcript);
 	const localSettings = getLocalSettings();
+	const remoteSettings = getRemoteSettings();
+	const hiddenBashCommandMatcherFor = createHiddenBashCommandMatcherCache();
 	const modelCatalog = getModelCatalog();
 
 	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
@@ -199,10 +198,8 @@
 	const announcementBatcher = new ConversationFeedAnnouncementBatcher((text) => {
 		announcement = { sequence: announcement.sequence + 1, text };
 	});
-	// Compiles apart from the projection input so its reference changes only
-	// with the pattern list, not with every row mutation.
 	const hiddenBashCommands = $derived(
-		compileHiddenBashCommandPatterns(localSettings.hiddenBashCommandPatterns),
+		hiddenBashCommandMatcherFor(remoteSettings.snapshot?.ui.hiddenBashCommandPatterns ?? []),
 	);
 	const projectionInput = $derived({
 		surfaceIdentity,

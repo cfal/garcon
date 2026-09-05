@@ -253,3 +253,119 @@ describe('ChatOrderStore.reorderChat', () => {
     expect(harness.listChanges).toEqual([]);
   });
 });
+
+describe('ChatOrderStore.sortChatOrder', () => {
+  it('sorts all persisted groups independently in one mutation', async () => {
+    const harness = createHarness({
+      pinnedChatIds: ['p-old', 'p-new'],
+      normalChatIds: ['n-old', 'n-new'],
+      archivedChatIds: ['a-old', 'a-new'],
+    });
+    const rank = new Map([
+      ['p-old', 1], ['p-new', 2],
+      ['n-old', 1], ['n-new', 2],
+      ['a-old', 1], ['a-new', 2],
+    ]);
+
+    const result = await harness.store.sortChatOrder((left, right) => (
+      (rank.get(right) ?? 0) - (rank.get(left) ?? 0)
+    ));
+
+    expect(result).toEqual({ changed: true });
+    expect(harness.settings.pinnedChatIds).toEqual(['p-new', 'p-old']);
+    expect(harness.settings.normalChatIds).toEqual(['n-new', 'n-old']);
+    expect(harness.settings.archivedChatIds).toEqual(['a-new', 'a-old']);
+    expect(harness.saveCalls).toEqual([true]);
+    expect(harness.settings.remoteSettingsVersion).toBe(1);
+    expect(harness.listChanges).toEqual([
+      { reason: 'chats-reordered', chatId: 'p-new' },
+    ]);
+  });
+
+  it('preserves membership and stable ties', async () => {
+    const harness = createHarness({
+      pinnedChatIds: ['p-a', 'p-b'],
+      normalChatIds: ['n-a', 'n-b', 'n-c'],
+      archivedChatIds: ['a-a'],
+    });
+
+    const result = await harness.store.sortChatOrder(() => 0);
+
+    expect(result).toEqual({ changed: false });
+    expect(harness.settings.pinnedChatIds).toEqual(['p-a', 'p-b']);
+    expect(harness.settings.normalChatIds).toEqual(['n-a', 'n-b', 'n-c']);
+    expect(harness.settings.archivedChatIds).toEqual(['a-a']);
+    expect(harness.saveCalls).toEqual([]);
+    expect(harness.listChanges).toEqual([]);
+  });
+
+  it('does not bump remote settings for normal and archived changes', async () => {
+    const harness = createHarness({
+      pinnedChatIds: ['p'],
+      normalChatIds: ['n-old', 'n-new'],
+      archivedChatIds: ['a-old', 'a-new'],
+    });
+    const rank = new Map([
+      ['n-old', 1], ['n-new', 2],
+      ['a-old', 1], ['a-new', 2],
+    ]);
+
+    await harness.store.sortChatOrder((left, right) => (
+      (rank.get(right) ?? 0) - (rank.get(left) ?? 0)
+    ));
+
+    expect(harness.saveCalls).toEqual([false]);
+    expect(harness.settings.remoteSettingsVersion).toBe(0);
+    expect(harness.listChanges).toHaveLength(1);
+    expect(harness.listChanges[0].chatId).toBe('n-new');
+  });
+
+  it('ignores legacy pinned duplicates when only another group changes', async () => {
+    const harness = createHarness({
+      pinnedChatIds: ['p', 'p'],
+      normalChatIds: ['n-old', 'n-new'],
+    });
+    const rank = new Map([
+      ['n-old', 1], ['n-new', 2],
+    ]);
+
+    await harness.store.sortChatOrder((left, right) => (
+      (rank.get(right) ?? 0) - (rank.get(left) ?? 0)
+    ));
+
+    expect(harness.settings.pinnedChatIds).toEqual(['p', 'p']);
+    expect(harness.settings.normalChatIds).toEqual(['n-new', 'n-old']);
+    expect(harness.saveCalls).toEqual([false]);
+    expect(harness.settings.remoteSettingsVersion).toBe(0);
+  });
+
+  it('serializes sorting with other order mutations', async () => {
+    const harness = createHarness({ normalChatIds: ['a', 'b', 'c'] });
+    const rank = new Map([['a', 1], ['b', 2], ['c', 3]]);
+
+    const sort = harness.store.sortChatOrder((left, right) => (
+      (rank.get(right) ?? 0) - (rank.get(left) ?? 0)
+    ));
+    const move = harness.store.reorderChat({
+      chatId: 'c',
+      placement: { kind: 'boundary', boundary: 'bottom' },
+    }, known('a', 'b', 'c'));
+
+    await Promise.all([sort, move]);
+    expect(harness.settings.normalChatIds).toEqual(['b', 'a', 'c']);
+    expect(harness.saveCalls).toEqual([false, false]);
+  });
+
+  it('does not emit a success invalidation when persistence fails', async () => {
+    const harness = createHarness(
+      { normalChatIds: ['old', 'new'] },
+      { failSave: true },
+    );
+
+    await expect(harness.store.sortChatOrder((left) => (
+      left === 'new' ? -1 : 1
+    ))).rejects.toThrow('save failed');
+
+    expect(harness.listChanges).toEqual([]);
+  });
+});

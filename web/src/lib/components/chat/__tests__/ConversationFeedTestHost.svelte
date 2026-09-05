@@ -8,12 +8,19 @@
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-	import { AssistantMessage, UserMessage } from '$shared/chat-types';
+	import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+	import {
+		AssistantMessage,
+		BashToolUseMessage,
+		ToolResultMessage,
+		UserMessage,
+	} from '$shared/chat-types';
 	import {
 		setAgentState,
 		setAppShell,
 		setLocalSettings,
 		setModelCatalog,
+		setRemoteSettings,
 		setChatSessions,
 		setFileSessions,
 	} from '$lib/context';
@@ -23,6 +30,7 @@
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
 		isPreparingInitialScroll?: boolean;
 		showAnnouncementTrigger?: boolean;
+		remoteSettingsStore?: RemoteSettingsStore;
 		transcriptScenario?:
 			| 'empty'
 			| 'local-truncation'
@@ -30,6 +38,7 @@
 			| 'loading-later'
 			| 'error-earlier'
 			| 'row-ids'
+			| 'bash-filter'
 			| 'count-shrink'
 			| 'count-shrink-survivors'
 			| 'twenty-thousand';
@@ -39,6 +48,7 @@
 		onUserScrollIntent,
 		isPreparingInitialScroll = false,
 		showAnnouncementTrigger = false,
+		remoteSettingsStore = new RemoteSettingsStore(),
 		transcriptScenario = 'empty',
 	}: Props = $props();
 	const initialTranscriptScenario = untrack(() => transcriptScenario);
@@ -68,6 +78,36 @@
 			createdAt: '2026-07-01T00:00:01.000Z',
 			delivery: 'pending',
 		});
+	} else if (initialTranscriptScenario === 'bash-filter') {
+		chatState.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			[
+				{
+					ordinal: 1,
+					message: new BashToolUseMessage(
+						'2026-07-01T00:00:00.000Z',
+						'bash-filter-1',
+						'git status',
+					),
+				},
+				{
+					ordinal: 2,
+					message: new ToolResultMessage(
+						'2026-07-01T00:00:01.000Z',
+						'bash-filter-1',
+						{ raw: 'working tree clean' },
+						false,
+					),
+				},
+			],
+			{
+				lastOrdinal: 2,
+				pageOldestOrdinal: 1,
+				nextBeforeOrdinal: null,
+				hasMore: false,
+			},
+		);
 	} else if (initialTranscriptScenario !== 'empty') {
 		const messageCount =
 			initialTranscriptScenario === 'twenty-thousand'
@@ -148,6 +188,7 @@
 	localSettings.showThinking = true;
 	localSettings.hiddenToolTypes = [];
 	setLocalSettings(localSettings);
+	setRemoteSettings(untrack(() => remoteSettingsStore));
 	const appShell = createAppShellStore();
 	appShell.projectBasePath = '/workspace';
 	let sidebarRecenterRequestCount = $state(0);

@@ -17,9 +17,12 @@ export const CLAUDE_MODELS = {
   DEFAULT: 'opus',
 };
 
+export const GPT_6_ASTRA_MODEL = 'gpt-6-astra';
+
 export const CODEX_MODELS = {
   OPTIONS: [
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
+    { value: GPT_6_ASTRA_MODEL, label: 'GPT-6-Astra', supportsImages: true },
     { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', supportsImages: true },
     { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', supportsImages: true },
     { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna', supportsImages: true },

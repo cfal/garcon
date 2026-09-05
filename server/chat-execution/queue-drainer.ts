@@ -6,6 +6,7 @@ import {
   type StoredQueueEntry,
 } from './control-state.ts';
 import { createLogger } from '../lib/log.ts';
+import { DomainError } from '../lib/domain-error.ts';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type { DequeuedTurnInput } from './chat-execution-control-transitions.ts';
@@ -36,35 +37,23 @@ export interface QueueDispatchDeps {
   callbacks: QueueDispatchCallbacks;
 }
 
-function optionsForQueuedTurn(
+function optionsForTurn(
   options: RunAgentTurnOptions,
-  entry: StoredQueueEntry,
+  input: DequeuedTurnInput,
 ): RunAgentTurnOptions & { createdAt: string } {
+  const submission = input.kind === 'user' ? input.entry.submission : null;
   return {
     ...options,
     clientRequestId: crypto.randomUUID(),
-    clientMessageId: entry.submission?.clientMessageId ?? crypto.randomUUID(),
+    clientMessageId: submission?.clientMessageId ?? crypto.randomUUID(),
     turnId: crypto.randomUUID(),
-    ...(entry.submission ? { transcriptViewId: entry.submission.transcriptViewId } : {}),
-    ...(entry.submission?.excludedResendOrdinals?.length
-      ? { excludedResendOrdinals: [...entry.submission.excludedResendOrdinals] }
+    ...(input.kind === 'control'
+      ? { transcriptViewId: input.entry.transcriptViewId, commandType: 'agent-run' as const }
+      : submission ? { transcriptViewId: submission.transcriptViewId } : {}),
+    ...(submission?.excludedResendOrdinals?.length
+      ? { excludedResendOrdinals: [...submission.excludedResendOrdinals] }
       : {}),
-    createdAt: entry.createdAt,
-  };
-}
-
-function optionsForControlTurn(
-  options: RunAgentTurnOptions,
-  entry: StoredControlInputEntry,
-): RunAgentTurnOptions & { createdAt: string } {
-  return {
-    ...options,
-    clientRequestId: crypto.randomUUID(),
-    clientMessageId: crypto.randomUUID(),
-    turnId: crypto.randomUUID(),
-    transcriptViewId: entry.transcriptViewId,
-    createdAt: entry.createdAt,
-    commandType: 'agent-run',
+    createdAt: input.entry.createdAt,
   };
 }
 
@@ -94,17 +83,26 @@ export class QueueDrainer {
 
       let options: RunAgentTurnOptions | undefined;
       let inputInserted = false;
+      const admission = { failure: null as DomainError | null };
       let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
       try {
         result = await controls.dequeueNextTurn(chatId, (input) => {
+          options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
           if (input.kind === 'control') {
-            options = optionsForControlTurn(this.deps.getDrainOptions(chatId), input.entry);
             callbacks.appendControlReceipt(chatId, input.entry);
             inputInserted = true;
             return true;
           }
-          options = optionsForQueuedTurn(this.deps.getDrainOptions(chatId), input.entry);
-          inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
+          try {
+            inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
+          } catch (error) {
+            if (
+              !(error instanceof DomainError)
+              || error.code !== 'PREAMBLE_SLASH_COMMAND_BLOCKED'
+            ) throw error;
+            admission.failure = error;
+            return false;
+          }
           return inputInserted;
         });
       } catch (error) {
@@ -117,6 +115,15 @@ export class QueueDrainer {
         return;
       }
       if (!options) throw new Error('Queued input admission did not produce dispatch options');
+      if (admission.failure) {
+        logger.warn('queue: queued turn rejected before admission', {
+          chatId,
+          entryId: result.input.entry.id,
+          code: admission.failure.code,
+        });
+        callbacks.publishTurnFailed(chatId, admission.failure.message, options);
+        continue;
+      }
       if (!result.inserted) continue;
       try {
         const input = result.input;
@@ -157,8 +164,7 @@ export class QueueDrainer {
     attempt: QueueExecutionAttempt,
   ): Promise<boolean> {
     const result = await this.#runProvider(chatId, input.entry, options, attempt);
-    if (result.kind !== 'failed') return true;
-    if (attempt.isSettled) return true;
+    if (result.kind !== 'failed' || attempt.isSettled) return true;
 
     const message = result.error instanceof Error ? result.error.message : String(result.error);
     logger.error('queue: queued turn failed:', {
@@ -167,34 +173,30 @@ export class QueueDrainer {
       inputKind: input.kind,
       message,
     });
-    if (input.kind === 'user') {
-      await this.deps.controls.pauseAfterDispatchFailure(chatId, input.entry.id);
-    }
+    if (input.kind === 'user') await this.deps.controls.pauseAfterDispatchFailure(chatId, input.entry.id);
     this.deps.callbacks.publishTurnFailed(chatId, message, options);
     if (!attempt.isSettled) this.deps.callbacks.retireAttempt(chatId, attempt);
     return input.kind === 'control';
   }
 
-  #runProvider(
+  async #runProvider(
     chatId: string,
     entry: StoredQueueEntry | StoredControlInputEntry,
     options: RunAgentTurnOptions,
     attempt: QueueExecutionAttempt,
   ): Promise<ProviderDispatchResult> {
-    let run: Promise<void>;
     try {
-      run = this.deps.turnRunner.runAgentTurn(chatId, entry.content, options);
+      return await Promise.race([
+        this.deps.turnRunner.runAgentTurn(chatId, entry.content, options)
+          .then<ProviderDispatchResult, ProviderDispatchResult>(
+            () => ({ kind: 'completed' }),
+            (error) => ({ kind: 'failed', error }),
+          ),
+        attempt.waitUntilSettled().then((): ProviderDispatchResult => ({ kind: 'retired' })),
+      ]);
     } catch (error) {
-      return Promise.resolve({ kind: 'failed', error });
+      return { kind: 'failed', error };
     }
-    const completion: Promise<ProviderDispatchResult> = run.then(
-      () => ({ kind: 'completed' }),
-      (error) => ({ kind: 'failed', error }),
-    );
-    return Promise.race([
-      completion,
-      attempt.waitUntilSettled().then((): ProviderDispatchResult => ({ kind: 'retired' })),
-    ]);
   }
 }
 

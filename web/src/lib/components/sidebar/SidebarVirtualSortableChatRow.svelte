@@ -24,6 +24,7 @@
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarVirtualSortableChatRowProps {
 		row: SidebarVirtualChatRow;
@@ -58,6 +59,7 @@
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowBlocked?: boolean;
 		onDragUpdate: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
@@ -94,6 +96,7 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
 		onOpenInNewWindow,
 		newWindowBlocked = false,
 		onDragUpdate,
@@ -231,6 +234,7 @@
 				{onMultiSelectToggle}
 				{onMoveToTop}
 				{onMoveToBottom}
+				{onSortChatOrder}
 				{onOpenInNewWindow}
 				{newWindowBlocked}
 				{hasPinnedChats}

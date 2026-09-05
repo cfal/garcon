@@ -33,7 +33,7 @@ export class ChatCommandSettlement implements CommandSettlementPort {
     const patch = {
       status: 'failed' as const,
       error: failure.error instanceof Error ? failure.error.message : String(failure.error),
-      errorCode: failure.retryable ? PRE_SCHEDULE_FAILURE_ERROR_CODE : undefined,
+      errorCode: failure.retryable ? PRE_SCHEDULE_FAILURE_ERROR_CODE : failure.error instanceof DomainError ? failure.error.code : undefined,
       payload: {},
       retainedPrivateTerminal: true as const,
       ...(failure.preserveForkPreparation ? {} : { forkPreparation: undefined }),

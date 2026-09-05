@@ -1,6 +1,6 @@
 import type { Page } from 'puppeteer-core';
 import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
-import type { RecordedCompletionRequest } from './fake-openai-server.js';
+import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 
 interface ClickOptions {
@@ -46,7 +46,7 @@ export class SpaDriver {
 
   async startOpenAiDirectChat(
     content: string,
-    options: { projectPath?: string } = {},
+    options: { projectPath?: string; requestMatcher?: RequestMatcher } = {},
   ): Promise<RecordedCompletionRequest> {
     return this.#startDirectChat({
       content,
@@ -56,7 +56,10 @@ export class SpaDriver {
       modelLabel: 'Integration Echo',
       waitForRequest: () =>
         this.#integration.fakeProviders.openAi.waitForRequest(
-          { lastUserText: content },
+          options.requestMatcher ?? {
+            lastUserText: content,
+            model: this.#integration.directAgents.openAi.provider.model,
+          },
           { timeoutMs: 20_000 },
         ),
     });
@@ -1043,6 +1046,18 @@ export class SpaDriver {
       if (!button) throw new Error(`Missing sidebar chat containing: ${expected}`);
       button.click();
     }, text);
+  }
+
+  async clickSidebarChatById(chatId: string): Promise<void> {
+    await this.#page.evaluate((expectedChatId) => {
+      const row = [
+        ...document.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'),
+      ].find((element) => element.dataset.sidebarVirtualRow === expectedChatId);
+      const summary = row?.querySelector<HTMLElement>('[data-slot="sidebar-chat-summary"]');
+      const button = summary?.closest('button') as HTMLButtonElement | null;
+      if (!button) throw new Error(`Missing sidebar chat: ${expectedChatId}`);
+      button.click();
+    }, chatId);
   }
 
   async openSidebarChatInNewWindow(text: string): Promise<string> {

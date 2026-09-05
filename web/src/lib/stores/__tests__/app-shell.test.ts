@@ -215,4 +215,98 @@ describe('AppShellStore', () => {
 			expect(returnFocus).not.toHaveBeenCalled();
 		});
 	});
+
+	describe('onboarding wizard dialog', () => {
+		it('opens exclusively and closes other shell dialogs', async () => {
+			const store = new AppShellStore();
+			const returnFocus = vi.fn();
+			store.openSettings('remote');
+			store.openSnippets(returnFocus);
+
+			store.openOnboardingWizard();
+			await Promise.resolve();
+
+			expect(store.showOnboardingWizard).toBe(true);
+			expect(store.showSettings).toBe(false);
+			expect(store.showScheduledPrompts).toBe(false);
+			expect(store.showSnippets).toBe(false);
+			expect(returnFocus).not.toHaveBeenCalled();
+		});
+
+		it('closes when settings open', () => {
+			const store = new AppShellStore();
+			store.openOnboardingWizard();
+
+			store.openSettings('local');
+
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showSettings).toBe(true);
+		});
+
+		it('closes when scheduled prompts or snippets open', () => {
+			const store = new AppShellStore();
+			store.openOnboardingWizard();
+
+			store.openScheduledPrompts();
+
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showScheduledPrompts).toBe(true);
+
+			store.openOnboardingWizard();
+			store.openSnippets();
+
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showSnippets).toBe(true);
+		});
+
+		it('closes without touching settings tab state', () => {
+			const store = new AppShellStore();
+			store.setSettingsTab('remote');
+			store.openOnboardingWizard();
+
+			store.closeOnboardingWizard();
+
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.settingsTab).toBe('remote');
+		});
+	});
+
+	describe('preambles dialog', () => {
+		it('opens exclusively with the other shell dialogs', () => {
+			const store = new AppShellStore();
+			store.openSettings('remote');
+
+			store.openPreambles();
+
+			expect(store.showPreambles).toBe(true);
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showSettings).toBe(false);
+			expect(store.showScheduledPrompts).toBe(false);
+			expect(store.showSnippets).toBe(false);
+
+			store.openSnippets();
+			expect(store.showPreambles).toBe(false);
+			expect(store.showSnippets).toBe(true);
+
+			store.openOnboardingWizard();
+			store.openPreambles();
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showPreambles).toBe(true);
+
+			store.openScheduledPrompts();
+			expect(store.showPreambles).toBe(false);
+			expect(store.showScheduledPrompts).toBe(true);
+		});
+
+		it('closes without changing settings tab state', () => {
+			const store = new AppShellStore();
+			store.setSettingsTab('remote');
+			store.openPreambles();
+
+			store.closePreambles();
+
+			expect(store.showPreambles).toBe(false);
+			expect(store.settingsTab).toBe('remote');
+		});
+	});
 });

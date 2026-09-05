@@ -1,4 +1,4 @@
-import { chatActivityTimeMs } from './chat-recency-sort';
+import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 

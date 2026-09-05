@@ -1,5 +1,6 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { cleanupOwnedGoalAttachments } from './goal-files.js';
 import type { GoalAttachmentOperations } from './goal-attachment-operations.js';
@@ -12,9 +13,10 @@ import type {
   JsonRpcServerRequest,
 } from './protocol.js';
 import type { CodexTurnItemLedger } from './turn-item-ledger.js';
-import type {
-  CodexConfirmedThreadSettings,
-  CodexThreadSettingsTarget,
+import {
+  codexThreadSettingsTarget,
+  type CodexConfirmedThreadSettings,
+  type CodexThreadSettingsTarget,
 } from './request-builders.js';
 
 export type RunningStatus = (
@@ -85,6 +87,8 @@ export interface RunningCodexSession {
   turnRoutes: Map<string, CodexOperation>;
   terminalTurnIds: Set<string>;
   superseded: boolean;
+  // Tracks omitted Default intent because Codex snapshots only the effective concrete effort.
+  providerOwnsReasoningEffort: boolean;
   confirmedThreadSettings: CodexConfirmedThreadSettings;
   pendingThreadSettings: ThreadSettingsWaiter | null;
   threadSettingsUpdateChain: Promise<void>;
@@ -92,6 +96,19 @@ export interface RunningCodexSession {
   // Wall-clock stamp taken when the session finishes while its source stays
   // retained; drives the idle reclamation sweep for retained writers.
   idleSince: number | null;
+}
+
+export function providerOwnsReasoningEffort(
+  request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
+): boolean {
+  return codexThreadSettingsTarget(request).effort === null;
+}
+
+export function recordExplicitReasoningEffort(
+  session: RunningCodexSession,
+  request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
+): void {
+  if (!providerOwnsReasoningEffort(request)) session.providerOwnsReasoningEffort = false;
 }
 
 export interface CodexAppServerRuntimeOptions {

@@ -14,6 +14,9 @@
 	import CheckSquare from '@lucide/svelte/icons/check-square';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import PanelTop from '@lucide/svelte/icons/panel-top';
+	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
+	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
+	import History from '@lucide/svelte/icons/history';
 	import {
 		DropdownMenuItem,
 		DropdownMenuSeparator,
@@ -23,6 +26,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatMenuProps {
 		session: ChatSessionRecord;
@@ -33,6 +37,7 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowBlocked?: boolean;
 		onTogglePinned: (chatId: string) => void;
@@ -54,6 +59,7 @@
 		onEnterMultiSelect,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
 		onOpenInNewWindow,
 		newWindowBlocked = false,
 		onTogglePinned,
@@ -66,7 +72,9 @@
 		onDelete,
 	}: SidebarChatMenuProps = $props();
 
-	const hasSidebarActions = $derived(Boolean(onEnterMultiSelect || onMoveToTop || onMoveToBottom));
+	const hasSidebarActions = $derived(
+		Boolean(onEnterMultiSelect || onMoveToTop || onMoveToBottom || onSortChatOrder),
+	);
 </script>
 
 {#if hasSidebarActions}
@@ -87,6 +95,24 @@
 			<ArrowDownToLine />
 			{m.sidebar_chats_move_to_bottom()}
 		</DropdownMenuItem>
+	{/if}
+	{#if onSortChatOrder}
+		<DropdownMenuSub>
+			<DropdownMenuSubTrigger>
+				<ArrowUpDown />
+				{m.sidebar_chats_reorder()}
+			</DropdownMenuSubTrigger>
+			<DropdownMenuSubContent class="w-56">
+				<DropdownMenuItem onclick={() => onSortChatOrder?.('created')}>
+					<CalendarClock />
+					{m.sidebar_chats_reorder_by_creation()}
+				</DropdownMenuItem>
+				<DropdownMenuItem onclick={() => onSortChatOrder?.('activity')}>
+					<History />
+					{m.sidebar_chats_reorder_by_activity()}
+				</DropdownMenuItem>
+			</DropdownMenuSubContent>
+		</DropdownMenuSub>
 	{/if}
 	<DropdownMenuSeparator />
 {/if}

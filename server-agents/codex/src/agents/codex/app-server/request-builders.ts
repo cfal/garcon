@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import { GPT_6_ASTRA_MODEL } from '@garcon/common/models';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type { ThreadInjectItemsParams } from './protocol.js';
@@ -34,6 +35,7 @@ interface CodexSandboxSettings {
 
 export interface CodexThreadSettingsTarget {
   readonly model: string;
+  // Represents provider-owned Default as null because Codex reports the effective concrete effort.
   readonly effort: string | null;
   readonly approvalPolicy: CodexApprovalPolicy;
   readonly approvalsReviewer: 'user';
@@ -111,7 +113,7 @@ export function buildThreadSettingsUpdateParams(
     approvalPolicy: target.approvalPolicy,
     approvalsReviewer: target.approvalsReviewer,
     sandboxPolicy: target.sandboxPolicy,
-    ...(target.effort ? { effort: target.effort } : {}),
+    ...(target.effort !== null ? { effort: target.effort } : {}),
   };
 }
 
@@ -119,6 +121,7 @@ export function threadSettingsMatch(
   settings: CodexConfirmedThreadSettings,
   target: CodexThreadSettingsTarget,
 ): boolean {
+  // Accepts any confirmed effort when Codex owns the Default omitted from the update.
   return settings.model === target.model
     && (target.effort === null || settings.effort === target.effort)
     && settings.approvalPolicy === target.approvalPolicy
@@ -175,18 +178,24 @@ function sandboxPolicyMatches(
     && (left.excludeSlashTmp ?? false) === (right.excludeSlashTmp ?? false);
 }
 
-// Preserves xhigh compatibility for older models while allowing GPT-5.6 to use
-// the max effort introduced for that model family.
+// Preserves xhigh compatibility for older models while allowing models that
+// advertise max reasoning to receive that effort explicitly.
 export function mapThinkingModeToCodexEffort(
   thinkingMode: ThinkingMode | undefined,
   model?: string,
 ): string | undefined {
   switch (thinkingMode) {
+    // Leaves provider defaults unset so Codex can honor config and model catalog defaults.
+    case 'none': return undefined;
     case 'low': return 'low';
     case 'medium': return 'medium';
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
-    case 'max': return model === 'gpt-5.6' || model?.startsWith('gpt-5.6-') ? 'max' : 'xhigh';
+    case 'max': return model === GPT_6_ASTRA_MODEL
+      || model === 'gpt-5.6'
+      || model?.startsWith('gpt-5.6-')
+      ? 'max'
+      : 'xhigh';
     case 'ultra': return 'ultra';
     default: return undefined;
   }

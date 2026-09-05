@@ -8,6 +8,7 @@ import {
 } from '../../common/garcon-commands.js';
 import {
   isCarryoverMigrationQuarantineNoticeDetail,
+  isPreambleApplicationNoticeDetail,
 } from '../../common/transcript-notice-details.js';
 import {
   chatIdDisclosureNoticeContent,
@@ -20,10 +21,12 @@ import {
   interAgentSendRequestNoticeDraft,
 } from './garcon-command-request.js';
 import type { LedgerRowDraft } from './contracts.js';
+import type { PreambleHistoryEvidence } from './preamble-history.js';
 
 export interface ImportedRow {
   readonly message: ChatMessage;
   readonly providerMeta: JsonObject | null;
+  readonly preambleApplication?: PreambleHistoryEvidence;
 }
 
 // Turns provider-supplied history into ledger drafts. Adoption, reload, and native fork all
@@ -32,7 +35,8 @@ export function importedDrafts(
   rows: readonly ImportedRow[],
   now: () => string,
 ): LedgerRowDraft[] {
-  return rows.flatMap(({ message, providerMeta }) => importedDraftFor(message, providerMeta, now));
+  return rows.flatMap(({ message, providerMeta, preambleApplication }) =>
+    importedDraftFor(message, providerMeta, now, preambleApplication));
 }
 
 // Turns conversation carried over from an earlier agent into frozen drafts. No provider ever
@@ -50,10 +54,14 @@ function importedDraftFor(
   original: ChatMessage,
   providerMeta: JsonObject | null,
   now: () => string,
+  preambleApplication?: PreambleHistoryEvidence,
 ): LedgerRowDraft[] {
+  const at = original.timestamp || now();
+  if (original.type === 'user-message' && preambleApplication) {
+    return importedUserInputDrafts(original, providerMeta, at, preambleApplication);
+  }
   const commandTransform = extractGarconCommands(original);
   if (commandTransform) {
-    const at = original.timestamp || now();
     return [
       ...(commandTransform.message
         ? [{ kind: 'provider-row' as const, at, message: commandTransform.message, providerMeta }]
@@ -104,26 +112,50 @@ function importedDraftFor(
       || original.type === 'permission-resolved'
       || original.type === 'permission-cancelled'
       || original.type === 'permission-expired') return [];
-  const at = original.timestamp || now();
   if (original.type === 'user-message') {
-    return [{
+    return importedUserInputDrafts(original, providerMeta, at);
+  }
+  return [{ kind: 'provider-row', at, message: original, providerMeta }];
+}
+
+function importedUserInputDrafts(
+  message: Extract<ChatMessage, { type: 'user-message' }>,
+  providerMeta: JsonObject | null,
+  at: string,
+  preambleApplication?: PreambleHistoryEvidence,
+): LedgerRowDraft[] {
+  return [
+    ...(preambleApplication
+      ? [{
+          kind: 'notice' as const,
+          at,
+          message: 'Preambles applied',
+          detail: {
+            type: 'preamble-application' as const,
+            preambles: preambleApplication.preambles.map((preamble) => ({ ...preamble })),
+          },
+          providerMeta: null,
+        }]
+      : []),
+    {
       kind: 'user-input',
       at,
       detail: {
         clientMessageId: null,
-        message: original,
-        attachments: (original.images ?? []).map((image) => ({
-          kind: 'image',
+        message,
+        attachments: (message.images ?? []).map((image) => ({
+          kind: 'image' as const,
           data: image.data,
           name: image.name || null,
           mimeType: image.mimeType ?? 'application/octet-stream',
         })),
         steer: false,
+        preambleBoundary: preambleApplication?.boundary ?? null,
+        preamblePrefixReceipt: preambleApplication?.receipt ?? null,
       },
       providerMeta,
-    }];
-  }
-  return [{ kind: 'provider-row', at, message: original, providerMeta }];
+    },
+  ];
 }
 
 function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft[] {
@@ -147,6 +179,8 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
             mimeType: image.mimeType ?? 'application/octet-stream',
           })),
           steer: false,
+          preambleBoundary: null,
+          preamblePrefixReceipt: null,
         },
         providerMeta: null,
       }];
@@ -171,7 +205,22 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
         providerMeta: null,
       }];
     case 'transcript-notice':
-      if (!isCarryoverMigrationQuarantineNoticeDetail(message.detail)) return [];
+      if (
+        !isCarryoverMigrationQuarantineNoticeDetail(message.detail)
+        && !isPreambleApplicationNoticeDetail(message.detail)
+      ) return [];
+      if (isPreambleApplicationNoticeDetail(message.detail)) {
+        return [{
+          kind: 'notice',
+          at,
+          message: message.content,
+          detail: {
+            type: message.detail.type,
+            preambles: message.detail.preambles.map((preamble) => ({ ...preamble })),
+          },
+          providerMeta: null,
+        }];
+      }
       return [{
         kind: 'notice',
         at,

@@ -22,6 +22,7 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import { WORKSPACE_DRAG_MIME } from '$lib/workspace/window-dnd.svelte.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
 		session: ChatSessionRecord;
@@ -51,6 +52,7 @@
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowBlocked?: boolean;
 	}
@@ -82,6 +84,7 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
 		onOpenInNewWindow,
 		newWindowBlocked = false,
 	}: SidebarChatItemProps = $props();
@@ -396,6 +399,7 @@
 						{onEnterMultiSelect}
 						{onMoveToTop}
 						{onMoveToBottom}
+						{onSortChatOrder}
 						{onOpenInNewWindow}
 						{newWindowBlocked}
 						{onTogglePinned}

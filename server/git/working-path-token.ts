@@ -129,6 +129,48 @@ export async function captureWorkingPathTokens(
   return new Map(tokens.map((token) => [token.path, token]));
 }
 
+// Reuses an observation's maps for paths it already covers and loads index
+// entries fresh for the rest. Rename sources stay in the index without
+// appearing as status destinations, so their tokens must come from a live
+// ls-files lookup to match the per-path capture the freshness check performs.
+export async function captureWorkingPathTokensFromObservation(
+  projectPath: string,
+  paths: string[],
+  observation: {
+    changedPaths: string[];
+    statusEntries: PorcelainStatusEntry[];
+    indexEntriesByPath: Map<string, string>;
+  },
+  options: { scope?: 'working-tree' | 'index' } = {},
+  signal?: AbortSignal,
+): Promise<Map<string, GitWorkingPathToken>> {
+  const observedPaths = new Set(observation.changedPaths);
+  const reusablePaths = paths.filter((path) => observedPaths.has(path));
+  const pathsNeedingIndexEntries = paths.filter((path) => !observedPaths.has(path));
+  const [reusedTokens, loadedTokens] = await Promise.all([
+    captureWorkingPathTokens(
+      projectPath,
+      reusablePaths,
+      {
+        statusEntries: observation.statusEntries,
+        indexEntriesByPath: observation.indexEntriesByPath,
+        scope: options.scope,
+      },
+      signal,
+    ),
+    captureWorkingPathTokens(
+      projectPath,
+      pathsNeedingIndexEntries,
+      {
+        statusEntries: observation.statusEntries,
+        scope: options.scope,
+      },
+      signal,
+    ),
+  ]);
+  return new Map([...reusedTokens, ...loadedTokens]);
+}
+
 export function changedWorkingPathTokens(
   expected: ReadonlyMap<string, GitWorkingPathToken>,
   actual: ReadonlyMap<string, GitWorkingPathToken>,

@@ -152,12 +152,12 @@
 				: 'inset-x-0 top-1/2 h-px -translate-y-1/2',
 		)}
 	></div>
-	<!-- Keeps resize hit targets clear of adjacent title-bar controls. -->
+	<!-- The vertical target stays inside the content gutters reserved by adjacent windows. -->
 	<div
 		data-workspace-window-resize-hit-area
 		class={cn(
 			'pointer-events-auto absolute z-10',
-			isHorizontal ? '-left-5 bottom-0 top-10 w-11' : 'inset-x-0 bottom-0 h-6',
+			isHorizontal ? '-left-2.5 bottom-0 top-10 w-6' : 'inset-x-0 bottom-0 h-6',
 		)}
 	></div>
 	<!-- Track background -->

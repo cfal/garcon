@@ -181,6 +181,42 @@ describe('settings store', () => {
       expect(ui.fontSize).toBe(14);
     });
 
+    it('normalizes and persists hidden bash command patterns', async () => {
+      const patterns = [
+        { pattern: 'git *', mode: 'glob' },
+        { pattern: '^cargo', mode: 'regex' },
+        { pattern: 'git *', mode: 'glob' },
+      ];
+
+      await store.setUiSettings({ theme: 'dark' });
+      await store.setUiSettings({ hiddenBashCommandPatterns: patterns });
+
+      expect(await store.getUiSettings()).toEqual({
+        theme: 'dark',
+        hiddenBashCommandPatterns: [
+          { pattern: 'git *', mode: 'glob' },
+          { pattern: '^cargo', mode: 'regex' },
+        ],
+      });
+      expect(await store.getRemoteSettingsVersion()).toBe(2);
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.ui).toEqual(await store.getUiSettings());
+    });
+
+    it('drops malformed hidden bash command patterns from loaded settings', async () => {
+      await writeRaw({
+        ui: {
+          theme: 'dark',
+          hiddenBashCommandPatterns: [{ pattern: '([unclosed', mode: 'regex' }],
+        },
+        paths: {},
+        chatNames: {},
+      });
+
+      expect(await store.getUiSettings()).toEqual({ theme: 'dark' });
+    });
+
     it('strips commit-only fields from title settings while preserving commit settings', async () => {
       await store.setUiSettings({
         chatTitle: {
@@ -692,6 +728,7 @@ describe('settings store', () => {
     it('adds missing chat IDs to normalChatIds', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {}, 'c': {} }),
+        listChatIds: () => ['a', 'b', 'c'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -712,6 +749,7 @@ describe('settings store', () => {
     it('removes unknown IDs from ordering lists', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {} }),
+        listChatIds: () => ['a'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -731,6 +769,7 @@ describe('settings store', () => {
     it('resolves cross-list duplicates by precedence', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {} }),
+        listChatIds: () => ['a', 'b'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
