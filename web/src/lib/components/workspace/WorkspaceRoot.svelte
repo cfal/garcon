@@ -478,7 +478,7 @@
 		showRecoveryHint={showCompactRecoveryHint}
 		{chatListConsumesWorkspaceWidth}
 		{canEnableChatListAutohide}
-		onActivate={(windowId) => workspace.activateWindow(windowId)}
+		onActivate={(windowId) => workspace.activateWindowFromCompactNavigation(windowId)}
 		onDismissHint={dismissCompactRecoveryHint}
 		{onEnableChatListAutohide}
 	/>

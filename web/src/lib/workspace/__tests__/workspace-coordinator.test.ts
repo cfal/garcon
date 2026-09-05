@@ -79,7 +79,7 @@ function createHarness(
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
-		isSingleWindowProjectionActive?: () => boolean;
+		isCompactProjectionActive?: () => boolean;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -189,7 +189,7 @@ function createHarness(
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
-		isSingleWindowProjectionActive: options.isSingleWindowProjectionActive ?? (() => false),
+		isCompactProjectionActive: options.isCompactProjectionActive ?? (() => false),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
 		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,
@@ -1586,6 +1586,23 @@ describe('WorkspaceCoordinator', () => {
 		expect(appShell.requestComposerFocus).not.toHaveBeenCalled();
 		await tick();
 		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
+	});
+
+	it('preserves compact navigation focus while activating a Chat window', async () => {
+		const { coordinator, appShell } = createHarness();
+		coordinator.noteWindowChromeFocus('window-files', 'singleton:files');
+
+		coordinator.activateWindowFromCompactNavigation('window-main');
+
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusOwner).toEqual({
+			kind: 'window-chrome',
+			windowId: 'window-main',
+			surfaceId: CANONICAL_CHAT_SURFACE_ID,
+		});
+		await tick();
+		expect(appShell.requestComposerFocus).not.toHaveBeenCalled();
 	});
 
 	it('promotes a presented pane when keyboard focus enters it', () => {

@@ -71,12 +71,12 @@ describe('WorkspaceHostGeometryState', () => {
 		let isMobile = options?.isMobile ?? false;
 		let measured = { width: options?.width ?? 900, height: options?.height ?? 700 };
 		const beforeCompactProjection = vi.fn();
-		const onSingleWindowProjectionChanged = vi.fn();
+		const onCompactProjectionChanged = vi.fn();
 		const geometry = new WorkspaceHostGeometryState({
 			getSnapshot: () => currentSnapshot,
 			getIsMobile: () => isMobile,
 			beforeCompactProjection,
-			onSingleWindowProjectionChanged,
+			onCompactProjectionChanged,
 		});
 		const element = document.createElement('div');
 		vi.spyOn(element, 'getBoundingClientRect').mockImplementation(() =>
@@ -88,7 +88,7 @@ describe('WorkspaceHostGeometryState', () => {
 			geometry,
 			element,
 			beforeCompactProjection,
-			onSingleWindowProjectionChanged,
+			onCompactProjectionChanged,
 			detach,
 			setSnapshot(snapshot: WorkspaceLayoutSnapshot) {
 				currentSnapshot = snapshot;
@@ -139,19 +139,19 @@ describe('WorkspaceHostGeometryState', () => {
 		expect(harness.geometry.compactActive).toBe(true);
 		expect(harness.geometry.compactSession).toBe(1);
 		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true]]);
+		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
 
 		harness.geometry.layoutPublished(twoWindowSnapshot());
 		expect(ResizeObserverHarness.instances).toHaveLength(1);
 		expect(harness.geometry.compactSession).toBe(1);
-		expect(harness.onSingleWindowProjectionChanged).toHaveBeenCalledTimes(1);
+		expect(harness.onCompactProjectionChanged).toHaveBeenCalledTimes(1);
 
 		const singleWindow = singleWindowSnapshot();
 		harness.setSnapshot(singleWindow);
 		harness.geometry.layoutPublished(singleWindow);
 		expect(harness.geometry.compactActive).toBe(false);
 		expect(harness.geometry.compactSession).toBe(1);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true], [false]]);
+		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true], [false]]);
 		harness.detach();
 	});
 
@@ -161,7 +161,7 @@ describe('WorkspaceHostGeometryState', () => {
 		harness.geometry.layoutPublished(twoWindowSnapshot());
 		expect(harness.geometry.compactActive).toBe(false);
 		expect(harness.geometry.compactSession).toBe(1);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true], [false]]);
+		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
 
 		harness.setMobile(false);
 		harness.geometry.layoutPublished(twoWindowSnapshot());
@@ -170,7 +170,7 @@ describe('WorkspaceHostGeometryState', () => {
 		expect(harness.geometry.compactActive).toBe(true);
 		expect(harness.geometry.compactSession).toBe(1);
 		expect(ResizeObserverHarness.instances).toHaveLength(1);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true], [false], [true]]);
+		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
 		harness.detach();
 	});
 
@@ -191,11 +191,11 @@ describe('WorkspaceHostGeometryState', () => {
 		harness.geometry.layoutPublished(tiled);
 		expect(harness.geometry.singleWindowProjectionActive).toBe(true);
 		expect(harness.geometry.compactActive).toBe(false);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true]]);
+		expect(harness.onCompactProjectionChanged).not.toHaveBeenCalled();
 		flushFrames();
 		expect(harness.geometry.singleWindowProjectionActive).toBe(false);
 		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true], [false]]);
+		expect(harness.onCompactProjectionChanged).not.toHaveBeenCalled();
 		harness.detach();
 	});
 
@@ -208,12 +208,12 @@ describe('WorkspaceHostGeometryState', () => {
 		harness.geometry.layoutPublished(tiled);
 		expect(harness.geometry.singleWindowProjectionActive).toBe(true);
 		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true]]);
+		expect(harness.onCompactProjectionChanged).not.toHaveBeenCalled();
 		flushFrames();
 		expect(harness.geometry.compactActive).toBe(true);
 		expect(harness.geometry.compactSession).toBe(1);
 		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onSingleWindowProjectionChanged.mock.calls).toEqual([[true]]);
+		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
 		harness.detach();
 	});
 
