@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 30 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 31 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -14,6 +14,8 @@ long-lived provider turn.
 Revision 30 adds provider-neutral preamble boundaries, atomic title-only
 application notices, receipt-proven native sanitation, and the lazy catalog
 browser workflow.
+Revision 31 removes the per-application frame and receipt identifier; exact
+length and SHA-256 remain the sole native-sanitation proof.
 
 Governing artifact:
 
