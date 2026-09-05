@@ -54,11 +54,16 @@ const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
 const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
 // Network commands run within the HTTP idle budget minus a margin, so a slow
 // remote surfaces a git error before the idle timeout drops the response.
+// The budget only tightens the runner's 30s default; it never loosens it.
 const NETWORK_GIT_TIMEOUT_MARGIN_MS = 2_000;
+const NETWORK_GIT_DEFAULT_TIMEOUT_MS = 30_000;
 
 function networkGitOptions(): GitCommandOptions {
   return {
-    timeoutMs: Math.max(1_000, getHttpIdleTimeoutSeconds() * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
+    timeoutMs: Math.min(
+      NETWORK_GIT_DEFAULT_TIMEOUT_MS,
+      Math.max(1_000, getHttpIdleTimeoutSeconds() * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
+    ),
     // Fails fast on credential prompts instead of hanging until the timeout.
     env: { GIT_TERMINAL_PROMPT: '0' },
   };
