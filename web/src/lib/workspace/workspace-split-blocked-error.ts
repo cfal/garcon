@@ -1,18 +1,23 @@
 import * as m from '$lib/paraglide/messages.js';
-import { WORKSPACE_WINDOW_RESOURCE_CEILING } from './surface-types.js';
+import {
+	WORKSPACE_WINDOW_RESOURCE_CEILING,
+	type WorkspaceLayoutSnapshot,
+} from './surface-types.js';
 import type {
 	WorkspaceSplitAdmissionResolver,
 	WorkspaceSplitBlockReason,
 	WorkspaceSplitRequest,
 } from './window-geometry-policy.js';
-import type { WorkspaceLayoutSnapshot } from './surface-types.js';
 
 export function workspaceSplitBlockMessage(reason: WorkspaceSplitBlockReason): string {
-	if (reason === 'too-small') return m.workspace_split_too_small();
-	if (reason === 'resource-ceiling') {
-		return m.workspace_window_limit_reached({ count: WORKSPACE_WINDOW_RESOURCE_CEILING });
+	switch (reason) {
+		case 'too-small':
+			return m.workspace_split_too_small();
+		case 'resource-ceiling':
+			return m.workspace_window_limit_reached({ count: WORKSPACE_WINDOW_RESOURCE_CEILING });
+		case 'fullscreen':
+			return m.workspace_split_exit_fullscreen();
 	}
-	return m.workspace_split_exit_fullscreen();
 }
 
 export class WorkspaceSplitBlockedError extends Error {
