@@ -1,10 +1,19 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 31 integrated design. Supersedes
+Status: revision 32 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 32 adds target-chat substitution to preamble bodies. At boundary
+composition, core expands the shared `{{chat_id}}` token to the target chat's
+16-digit ID, turns `\{{chat_id}}` into the literal token, and leaves unsupported
+variables unchanged. Catalog validation renders every candidate with a fixed
+16-digit sample before enforcing the combined limit. The catalog retains the
+authored template, the receipt covers the exact expanded prefix, and neither
+form enters the ledger. The preamble editor documents the supported token in
+an accessible legend below its text composer.
 
 Revision 31 removes the per-application identifier from the version-one
 preamble frame and its private receipt. Exact `codeUnitLength` and SHA-256
@@ -447,7 +456,8 @@ The decisions:
   title, and content, but never dispatches agent work.
   A pending preamble boundary is consumed only by the committed input's
   private boundary proof. A matching application's body-free prefix receipt
-  is server-derived and excluded from the submission fingerprint, so an
+  covers the exact target-chat-expanded prefix, is server-derived, and is
+  excluded from the submission fingerprint, so an
   identical retry returns the original input without another notice, prefix,
   or dispatch.
 - **L5 At-most-once, observed order.** Every accepted event is committed
@@ -549,9 +559,9 @@ The decisions:
   owning integration. Translation, native parsing, probes, and fork
   mechanics stay behind `@garcon/server-agent-interface` under
   `server-agents/<id>/`. Capabilities are nullable facets, never
-  optional methods or boolean flags. Preamble selection, framing, prompt
-  concatenation, receipt validation, and normalized-history sanitation remain
-  in provider-neutral core. Integrations receive the existing single opaque
+  optional methods or boolean flags. Preamble selection, target-chat template
+  expansion, framing, prompt concatenation, receipt validation, and
+  normalized-history sanitation remain in provider-neutral core. Integrations receive the existing single opaque
   prompt and expose the existing normalized import stream unchanged.
 
 ## 3. Data Model
@@ -636,7 +646,8 @@ Kind semantics:
   input consumed the binding's pending boundary, including when zero entries
   matched. `preamblePrefixReceipt` is
   `{format: 'preamble-v1', codeUnitLength, sha256}` and proves
-  the exact leading prefix for native sanitation without storing its body.
+  the exact leading prefix for native sanitation without storing its authored
+  body template or target-chat-expanded body.
 - `notice`: durable advisory. An accepted active-run producer advisory is an
   ordinary notice; its optional title is presentation metadata, and its
   `runId` is never stored. Native drift is not represented by this row; its
@@ -1214,7 +1225,9 @@ The guarantee is durable before provider dispatch, not durable at send:
   resolves the current enabled catalog against the canonical project path.
   A nonempty match plus an otherwise-unhandled slash-leading input is rejected
   before admission and leaves the boundary armed; otherwise the input commits
-  the boundary proof and consumes it exactly once.
+  the boundary proof and consumes it exactly once. Each matched body expands
+  the shared `{{chat_id}}` token to this target chat ID before prefix framing;
+  `\{{chat_id}}` becomes literal and unsupported variables remain unchanged.
 - A **steer** is appended and committed before delivery to the running
   provider is attempted. A steer initially sends only its own content;
   it is an ordinary prior `user-input` if a later turn performs the
@@ -1284,7 +1297,8 @@ that commits the input row and computes the backward scan before
 returning; no provider callback can interleave between insert and scan,
 and dispatch consumes the returned immutable composition. For a matched
 preamble boundary, that immutable composition also carries the rendered
-private prefix. Core resolves file mentions in visible authored input first,
+private prefix. Core expands chat-ID tokens in matched catalog bodies, then
+frames and receipts the exact result. Core resolves file mentions in visible authored input first,
 then prepends the receipt-covered prefix once to the complete turn prompt.
 The provider integration still receives one ordinary opaque prompt string;
 the body never enters the ledger or any context fold.
@@ -2127,6 +2141,7 @@ relevant-entry definition under the 10.2 obligation.
 | Crash before an input's acceptance commit | Input never existed; the client retries with the same `clientMessageId` and it appends once. |
 | Crash after an input's commit, before dispatch | Accepted loss: a retry returns the existing row and never re-dispatches; the row shows the will-send-with-next-message affordance and the next fresh input's scan is the recovery path. |
 | Pending preamble boundary with enabled matches receives an otherwise-unhandled slash command | Typed `PREAMBLE_SLASH_COMMAND_BLOCKED`; no input, notice, prefix, or dispatch; the prepared target and boundary remain available for a later ordinary input. An identical command retry returns the same typed rejection. |
+| Candidate preamble catalog exceeds the combined budget after `{{chat_id}}` expansion | Mutation fails before persistence; every valid chat ID is 16 digits, so the fixed validation sample exactly bounds runtime output. |
 | Crash after a preamble boundary input commits but before the registry clear is durable | The input's private boundary proof suppresses reapplication and repairs the stale pending boundary only for the matching ownership epoch. |
 | Reload cannot durably flush the current registry before view replacement | Reload aborts before cutover; it cannot delete the only zero-match proof while disk still records the boundary as armed. |
 | Native import contains an exact receipt-matched preamble prefix | Core strips the receipt-covered prefix, reconstructs its title-only notice, and restores the private receipt and boundary proof on the imported input. |
@@ -2483,7 +2498,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   `TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01` proves presentation/export
   inclusion and exclusion from every conversational fold; and
   `TLV5-PREAMBLE.06-LIGHTPANDA-01` exercises catalog management, enabled
-  state, scoped rules, and application-row rendering through the SPA.
+  state, scoped rules, the accessible chat-ID legend, and application-row
+  rendering through the SPA. Shared/store and scripted-provider cases prove
+  active `{{chat_id}}` expansion, escaped literal handling, target-chat
+  selection across boundary kinds, and expanded combined-budget enforcement.
   Supporting focused cases cover zero-match proof durability, blocked slash
   retention and typed replay, registry flush before Reload cutover, absent
   native evidence, fail-closed mismatches, duplicate admission, reserved
@@ -2852,7 +2870,10 @@ stabilization defects. The current case inventory and gate status live in
     an explicit follow-up.
 25. Preambles are provider-neutral core composition. The current enabled
     catalog resolves once at the first ordinary input after new chat, fork,
-    continuation, or in-place agent switch. A nonempty slash-leading provider
+    continuation, or in-place agent switch. Each active `{{chat_id}}` in a
+    matched body expands to that target chat's 16-digit ID, escaped tokens
+    become literal, and unsupported variables remain unchanged; catalog
+    validation applies the same fixed-length rendering before persistence. A nonempty slash-leading provider
     command is rejected before admission and leaves the boundary armed; core
     does not change native slash-command parsing. A matched application is one
     adjacent atomic notice/input group with a transient receipt-covered prefix;

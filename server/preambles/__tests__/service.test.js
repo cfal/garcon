@@ -128,6 +128,23 @@ describe('PreambleService', () => {
     expect(preambles.snapshot()).toMatchObject({ revision: 1 });
   });
 
+  it('validates the combined budget after chat ID expansion', async () => {
+    const { preambles } = await service();
+    const content = '{{chat_id}}'.repeat(2_700);
+    await preambles.create({
+      expectedRevision: 0,
+      preamble: globalDefinition('First', content),
+    });
+    await expect(preambles.create({
+      expectedRevision: 1,
+      preamble: globalDefinition('Second', content),
+    })).rejects.toMatchObject({
+      code: 'PREAMBLE_COMBINED_LIMIT_EXCEEDED',
+      status: 422,
+    });
+    expect(preambles.snapshot()).toMatchObject({ revision: 1 });
+  });
+
   it('rejects a reserved file-context separator reconstructed across bodies', async () => {
     const { preambles } = await service();
     await preambles.create({

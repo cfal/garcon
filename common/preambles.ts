@@ -1,9 +1,14 @@
+import { CHAT_ID_TEMPLATE_TOKEN, CHAT_ID_TEMPLATE_VARIABLE, expandTemplate } from './template-tokens.js';
+
 export const PREAMBLE_MAX_COUNT = 100;
 export const PREAMBLE_TITLE_MAX_CODE_POINTS = 120;
 export const PREAMBLE_CONTENT_MAX_LENGTH = 32_000;
 export const PREAMBLE_COMBINED_MAX_LENGTH = 64_000;
 export const PREAMBLE_PATH_RULE_MAX_COUNT = 32;
 export const PREAMBLE_FILE_CONTEXT_SEPARATOR = '\n\nReferenced file contents from @file mentions:\n\n';
+export const PREAMBLE_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
+
+const PREAMBLE_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;
 
 export const PREAMBLE_BOUNDARY_KINDS = [
   'new-chat',
@@ -111,6 +116,15 @@ export const PREAMBLE_ERROR_CODES = {
 } as const;
 
 export type PreambleErrorCode = (typeof PREAMBLE_ERROR_CODES)[keyof typeof PREAMBLE_ERROR_CODES];
+
+export function renderPreambleContent(content: string, chatId: string): string {
+  return expandTemplate(
+    content,
+    PREAMBLE_TEMPLATE_VARIABLES,
+    { chat_id: chatId },
+    PREAMBLE_COMBINED_MAX_LENGTH,
+  );
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;

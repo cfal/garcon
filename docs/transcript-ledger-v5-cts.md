@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 31 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 32 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -16,11 +16,14 @@ application notices, receipt-proven native sanitation, and the lazy catalog
 browser workflow.
 Revision 31 removes the per-application frame and receipt identifier; exact
 length and SHA-256 remain the sole native-sanitation proof.
+Revision 32 expands the shared `{{chat_id}}` token in preamble bodies with the
+target chat ID, validates the expanded combined budget, and documents the
+token below the preamble composer.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 31, SHA-256
-  `61aca7cea1a62569e6f01b018cb1f58816eb93aad011cc0248cbd685067e13e3`
+- `docs/transcript-ledger-v5-design.md`, revision 32, SHA-256
+  `dafbcfeade0f3c6eb2503ec55752df94dca1233611c11aa24659f6f8a78874df`
 
 Current inventory: 417 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
@@ -394,11 +397,11 @@ routine local testing.
 | ID                    | Obligation                                                                                                                                            | Required evidence                                      |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | TLV5-PREAMBLE.01      | The public application notice contains only a fixed type plus unique immutable `{id, title}` snapshots; bodies, paths, scopes, revisions, and receipts are rejected. | Shared contract                                        |
-| TLV5-PREAMBLE.02      | A matched boundary commits one adjacent notice/input group atomically, stores its private proof and exact receipt, and keeps the body only in the transient provider prefix; a zero match stores only the proof-bearing input. | Store and service unit                                 |
-| TLV5-PREAMBLE.03      | New chat, fork, continuation, and in-place agent-switch boundaries resolve the current enabled matching catalog once in visible order; blocked provider slash input stores nothing and retains the boundary. | Core unit, server black-box, provider scripted         |
+| TLV5-PREAMBLE.02      | A matched boundary expands active `{{chat_id}}` tokens with the target chat ID, commits one adjacent notice/input group atomically, stores its private proof and exact expanded-prefix receipt, and keeps the body only in the transient provider prefix; a zero match stores only the proof-bearing input. | Store and service unit                                 |
+| TLV5-PREAMBLE.03      | New chat, fork, continuation, and in-place agent-switch boundaries resolve the current enabled matching catalog once in visible order and use that target chat ID for expansion; blocked provider slash input stores nothing and retains the boundary. | Core unit, server black-box, provider scripted         |
 | TLV5-PREAMBLE.04      | Reload and native-fidelity fork collect exact binding evidence, sanitize carried context before receipt-proven prefixes, require one matching receipt signature before selecting the earliest unused exact receipt, reconstruct the notice and private input fields, tolerate absent native occurrences, and fail closed before publication on unprovable, ambiguous, or excess leading frames. | Native-import, Reload, fork, and scripted-provider unit |
 | TLV5-PREAMBLE.05      | Application notices render, freeze, share, and export with IDs/titles only while remaining absent from search, preview, resend, model context, and carryover input. | Canonical read-fold matrix and presentation tests      |
-| TLV5-PREAMBLE.06      | The lazy SPA catalog creates, edits, deletes, reorders, filters, disables, and re-enables entries; scoped rules retain independent nested flags and the historical application row remains title-only and adjacent. | Component and Lightpanda browser behavior              |
+| TLV5-PREAMBLE.06      | The lazy SPA catalog creates, edits, deletes, reorders, filters, disables, and re-enables entries; scoped rules retain independent nested flags, the composer identifies the supported `{{chat_id}}` token, and the historical application row remains title-only and adjacent. | Component and Lightpanda browser behavior              |
 
 ### Presentation-Only Chat Rows
 
@@ -875,11 +878,11 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01 | `server/chats/__tests__/chat-id-discovery-controller.test.js`: disabled discovery commits one typed failure and does not invoke delivery | CHAT-ID-DISCOVERY.06 |
 | TLV5-CHAT-ID-DISCOVERY.07-WEB-UNIT-01 | `web/src/lib/components/chat/__tests__/TranscriptNoticeRow.test.ts`: typed generic discovery failure renders with the error event-card variant | CHAT-ID-DISCOVERY.07 |
 | TLV5-PREAMBLE.01-CONTRACT-01 | `common/__tests__/transcript-notice-contract.test.js`: immutable preamble title snapshots round-trip while top-level and nested private fields are rejected | PREAMBLE.01 |
-| TLV5-PREAMBLE.02-STORE-UNIT-01 | `server/ledger/__tests__/store.test.js`: one transaction commits the title-only application notice immediately before its proof- and receipt-bearing input while the body remains transient | PREAMBLE.02 |
-| TLV5-PREAMBLE.03-SERVER-01 | `integration-tests/tests/server/preambles.test.ts`: ordered current enabled preambles apply exactly once at new-chat, fork, continuation, and in-place agent-switch boundaries | PREAMBLE.03 |
+| TLV5-PREAMBLE.02-STORE-UNIT-01 | `server/ledger/__tests__/store.test.js`: one transaction commits the title-only application notice immediately before its proof- and receipt-bearing input while the target-chat-expanded body remains transient | PREAMBLE.02 |
+| TLV5-PREAMBLE.03-SERVER-01 | `integration-tests/tests/server/preambles.test.ts` plus the scripted-boundary companion: ordered current enabled preambles apply exactly once and expand against the target ID at new-chat, fork, continuation, and in-place agent-switch boundaries | PREAMBLE.03 |
 | TLV5-PREAMBLE.04-NATIVE-UNIT-01 | `server/ledger/__tests__/preamble-history.test.js`: exact receipt sanitation strips the private prefix, maps distinct and byte-identical evidence deterministically without a provider-visible application identifier, rejects prefix-related signature ambiguity, and returns immutable application evidence for reconstruction | PREAMBLE.04 |
 | TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01 | `server/ledger/__tests__/read-fold-matrix.test.js`: the application notice stays visible and body-free while every conversational fold excludes it | PREAMBLE.05, L01.02 |
-| TLV5-PREAMBLE.06-LIGHTPANDA-01 | `integration-tests/tests/e2e/preambles.test.ts`: the SPA manages enabled and scoped catalog entries and renders the historical application notice adjacent to its user row | PREAMBLE.06 |
+| TLV5-PREAMBLE.06-LIGHTPANDA-01 | `integration-tests/tests/e2e/preambles.test.ts` and the preamble component suite: the SPA manages enabled and scoped catalog entries, documents `{{chat_id}}`, and renders the historical application notice adjacent to its user row | PREAMBLE.06 |
 | TLV5-L01.02-EXPORT-SERVER-01   | `integration-tests/tests/server/garcon-cli-export.test.ts`: authenticated CLI export captures succinct Markdown and XML artifacts, applies filters, preserves ordinal gaps, and writes/replaces files atomically | L01.02 |
 | TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
 | TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01 | `server/chats/search/__tests__/controller-service.test.js`: a chat adopted while a resync replacement is held remains searchable after exclusive pruning refreshes the catalog | L01.02, ADOPT.01 |

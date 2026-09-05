@@ -558,6 +558,31 @@ describe('TranscriptLedgerStore', () => {
     expect(store.hasPreambleBoundaryProof('chat-one', boundary)).toBe(true);
   });
 
+  it('expands the target chat ID only in the transient provider prefix', () => {
+    const chatId = '1783725900000000';
+    const view = store.initializeCurrentView(chatId, {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const result = store.appendInputAndCompose(chatId, {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'Visible prompt'),
+      preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'epoch-one' },
+      preambles: [preamble(
+        'a',
+        'Chat-aware',
+        'Use {{chat_id}}; keep \\{{chat_id}} literal.',
+      )],
+    });
+
+    expect(result.providerPrefix).toContain(
+      `Use ${chatId}; keep {{chat_id}} literal.`,
+    );
+    expect(JSON.stringify(store.currentRows(chatId))).not.toContain(chatId);
+    expect(JSON.stringify(store.currentRows(chatId))).not.toContain('Use {{chat_id}}');
+  });
+
   it('consumes a zero-match boundary without creating a notice or provider prefix', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),

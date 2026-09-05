@@ -98,6 +98,21 @@ describe('PreamblesSection', () => {
 		});
 	});
 
+	it('shows the chat ID placeholder legend under the preamble composer', async () => {
+		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+
+		const help = await screen.findByText(
+			'Use {{chat_id}} for the chat receiving this preamble.',
+		);
+		const composer = screen.getByRole('textbox', { name: 'Preamble text' });
+		expect(composer.getAttribute('aria-describedby')).toContain(help.id);
+	});
+
 	it('keeps an edit stale after a revision-conflict refresh', async () => {
 		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');

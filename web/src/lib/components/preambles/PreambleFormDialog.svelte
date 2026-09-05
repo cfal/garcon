@@ -13,7 +13,11 @@
 		type PromptEditorSelection,
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
 	import { getAppShell } from '$lib/context';
-	import type { Preamble, PreambleDefinitionInput } from '$shared/preambles';
+	import {
+		PREAMBLE_CHAT_ID_TOKEN,
+		type Preamble,
+		type PreambleDefinitionInput,
+	} from '$shared/preambles';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -253,7 +257,7 @@
 					placeholder={m.preambles_content_placeholder()}
 					invalid={Boolean(form.contentError)}
 					readOnly={false}
-					describedBy="preamble-content-error"
+					describedBy="preamble-content-help preamble-content-error"
 					textareaClass="min-h-48 font-mono"
 					canExpand={!form.saving}
 					expandLabel={m.preambles_expand_editor()}
@@ -262,6 +266,9 @@
 					onExpand={openExpandedEditor}
 					onRefinePrompt={() => {}}
 				/>
+				<p id="preamble-content-help" class="text-xs text-muted-foreground">
+					{m.preambles_content_chat_id_help({ token: PREAMBLE_CHAT_ID_TOKEN })}
+				</p>
 				<p id="preamble-content-error" class="min-h-4 text-xs text-destructive">
 					{form.contentError ?? ''}
 				</p>

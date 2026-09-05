@@ -1492,6 +1492,7 @@
 	"preambles_cancel": "Cancel",
 	"preambles_clear_filter": "Clear preamble filter",
 	"preambles_content_label": "Preamble text",
+	"preambles_content_chat_id_help": "Use {token} for the chat receiving this preamble.",
 	"preambles_content_placeholder": "Write instructions to prepend to matching new chats...",
 	"preambles_content_required": "Enter preamble text.",
 	"preambles_content_reserved_separator": "The preamble contains a reserved file-context separator.",

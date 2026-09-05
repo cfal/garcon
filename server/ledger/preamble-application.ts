@@ -1,6 +1,10 @@
 import type { Database } from 'bun:sqlite';
 import { createPreamblePrefix } from '../../common/preamble-prefix.js';
-import type { PendingPreambleBoundary, Preamble } from '../../common/preambles.js';
+import {
+  renderPreambleContent,
+  type PendingPreambleBoundary,
+  type Preamble,
+} from '../../common/preambles.js';
 import type {
   LedgerRowDraft,
   LedgerUserInputDetail,
@@ -29,6 +33,7 @@ export function hasPreambleBoundaryProof(
 }
 
 export function preparePreambleInput(input: {
+  readonly chatId: string;
   readonly viewId: TranscriptViewId;
   readonly at: string;
   readonly detail: LedgerUserInputDetail;
@@ -40,7 +45,9 @@ export function preparePreambleInput(input: {
   }
   const application = input.boundary
     ? createPreamblePrefix({
-        contents: input.preambles.map((preamble) => preamble.content),
+        contents: input.preambles.map((preamble) => (
+          renderPreambleContent(preamble.content, input.chatId)
+        )),
       })
     : null;
   const detail: LedgerUserInputDetail = {

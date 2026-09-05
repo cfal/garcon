@@ -208,6 +208,7 @@ export class TranscriptLedgerStore {
       }
 
       const prepared = preparePreambleInput({
+        chatId,
         viewId: request.viewId,
         at: request.at,
         detail: request.detail,

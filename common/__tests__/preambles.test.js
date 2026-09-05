@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  PREAMBLE_CHAT_ID_TOKEN,
   PREAMBLE_CONTENT_MAX_LENGTH,
   PREAMBLE_FILE_CONTEXT_SEPARATOR,
   PREAMBLE_MAX_COUNT,
@@ -9,6 +10,7 @@ import {
   normalizePreambleDefinitionInput,
   normalizePreamblesMutationResponse,
   normalizePreamblesSnapshot,
+  renderPreambleContent,
 } from '../preambles.js';
 import {
   createPreamblePrefix,
@@ -137,6 +139,14 @@ describe('preamble contracts', () => {
 });
 
 describe('preamble prefix contract', () => {
+  it('renders active chat ID tokens and unescapes escaped tokens', () => {
+    const chatId = '1783725900000000';
+    expect(renderPreambleContent(
+      `Chat ${PREAMBLE_CHAT_ID_TOKEN}; literal \\${PREAMBLE_CHAT_ID_TOKEN}; unknown {{project_path}}`,
+      chatId,
+    )).toBe(`Chat ${chatId}; literal ${PREAMBLE_CHAT_ID_TOKEN}; unknown {{project_path}}`);
+  });
+
   it('freezes the exact version-one envelope without an application identifier', () => {
     expect(renderPreamblePrefix(['first\nbody', 'second body'])).toBe(
       '<garcon-preambles version="1">\nfirst\nbody\n\nsecond body\n</garcon-preambles>\n\n<!-- garcon-preamble-input --> ',

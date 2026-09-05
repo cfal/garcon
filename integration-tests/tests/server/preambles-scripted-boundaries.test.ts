@@ -29,6 +29,7 @@ import {
 } from '../../support/scripted-codex.js';
 
 const PREAMBLE_BODY = 'SYNTHETIC_SCRIPTED_PROVIDER_PREAMBLE_BODY';
+const PREAMBLE_BODY_TEMPLATE = `${PREAMBLE_BODY} for {{chat_id}}; literal \\{{chat_id}}`;
 const PREAMBLE_TITLE = 'Scripted provider instructions';
 
 describe('scripted provider preamble boundaries', () => {
@@ -92,7 +93,11 @@ describe('scripted provider preamble boundaries', () => {
         marker: initialReply,
         afterIndex: initialCursor,
       });
-      expectPrefixedPrompt(claude.model.requests()[initialRequestIndex]?.lastUserText, initialPrompt);
+      expectPrefixedPrompt(
+        claude.model.requests()[initialRequestIndex]?.lastUserText,
+        initialPrompt,
+        sourceChatId,
+      );
 
       await reloadUntilNativeContains(fixture, sourceChatId, initialReply);
       const initialHistory = await fixture.client.getMessages(sourceChatId);
@@ -123,7 +128,11 @@ describe('scripted provider preamble boundaries', () => {
         marker: forkReply,
         afterIndex: forkCursor,
       });
-      expectPrefixedPrompt(claude.model.requests()[forkRequestIndex]?.lastUserText, forkPrompt);
+      expectPrefixedPrompt(
+        claude.model.requests()[forkRequestIndex]?.lastUserText,
+        forkPrompt,
+        forkChatId,
+      );
       const forkHistory = await fixture.client.getMessages(forkChatId);
       expect(applicationTitles(forkHistory)).toEqual([
         [PREAMBLE_TITLE],
@@ -166,6 +175,7 @@ describe('scripted provider preamble boundaries', () => {
       expectPrefixedPrompt(
         claude.model.requests()[continuationRequestIndex]?.lastUserText,
         continuationPrompt,
+        continuationChatId,
       );
       const continuationHistory = await fixture.client.getMessages(continuationChatId);
       expect(applicationTitles(continuationHistory)).toEqual([
@@ -211,7 +221,11 @@ describe('scripted provider preamble boundaries', () => {
         marker: switchReply,
         afterIndex: switchCursor,
       });
-      expectPrefixedPrompt(codex.model.requests()[switchRequestIndex]?.lastUserText, switchPrompt);
+      expectPrefixedPrompt(
+        codex.model.requests()[switchRequestIndex]?.lastUserText,
+        switchPrompt,
+        sourceChatId,
+      );
 
       const switchedHistory = await fixture.client.getMessages(sourceChatId);
       expect(applicationTitles(switchedHistory)).toEqual([
@@ -246,7 +260,7 @@ async function createGlobalPreamble(fixture: IntegrationFixture): Promise<void> 
   const preamble: PreambleDefinitionInput = {
     enabled: true,
     title: PREAMBLE_TITLE,
-    content: PREAMBLE_BODY,
+    content: PREAMBLE_BODY_TEMPLATE,
     scope: { type: 'global' },
   };
   await fixture.client.post<PreamblesMutationResponse>('/api/v1/preambles', {
@@ -280,9 +294,13 @@ function expectApplicationImmediatelyBefore(
   });
 }
 
-function expectPrefixedPrompt(content: string | undefined, visiblePrompt: string): void {
+function expectPrefixedPrompt(
+  content: string | undefined,
+  visiblePrompt: string,
+  chatId: string,
+): void {
   expect(content).toContain([
-    PREAMBLE_BODY,
+    `${PREAMBLE_BODY} for ${chatId}; literal {{chat_id}}`,
     '</garcon-preambles>',
     '',
     `<!-- garcon-preamble-input --> ${visiblePrompt}`,
