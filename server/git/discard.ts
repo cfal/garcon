@@ -26,12 +26,6 @@ async function headHasPath(projectPath: string, file: string): Promise<boolean> 
 export async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
   await assertGitRepository(projectPath);
 
-  // Porcelain paths are repository-root relative; canonicalize the request
-  // and run every git command from the root so lookups and pathspecs agree
-  // even when projectPath sits below the root or reaches it through a
-  // symlink. --show-prefix is git's own answer for the offset, so the
-  // physical root never leaks a '..' segment, and only the newline is
-  // stripped so a root path ending in whitespace survives.
   const { stdout: rootOutput } = await runGit(
     projectPath,
     ['rev-parse', '--show-toplevel', '--show-prefix'],
@@ -39,7 +33,8 @@ export async function discard({ projectPath, file }: FileOptions): Promise<unkno
   );
   const [rootLine = '', prefixLine = ''] = rootOutput.split('\n');
   const repoRoot = rootLine || projectPath;
-  const canonicalFile = `${prefixLine}${file.replace(/\/+$/, '')}`;
+  const projectPrefix = prefixLine;
+  const canonicalFile = `${projectPrefix}${file.replace(/\/+$/, '')}`;
 
   const { stdout: statusOutput } = await runGit(
     repoRoot,
@@ -50,17 +45,17 @@ export async function discard({ projectPath, file }: FileOptions): Promise<unkno
   // pathspec cannot pair the rename and reports DA, hiding the source path
   // that the worktree side of the change spans. An exact path match wins,
   // because a copy source keeps an entry of its own; the rename-source
-  // fallback (worktree-column R or C only) lets the same entry discard from
-  // either side of the rename. Untracked directories expand to their files
-  // under -uall, so a directory-shaped request only matches when it names a
-  // nested repository.
+  // fallback is rename-only, since a copy source is not an alias for its
+  // destination and discarding it must not touch the copy. Untracked
+  // directories expand to their files under -uall, so a directory-shaped
+  // request only matches when it names a nested repository.
   const entries = parsePorcelainV1Z(statusOutput);
   const entry = entries.find(
     (candidate) => candidate.path.replace(/\/+$/, '') === canonicalFile,
   ) ?? entries.find(
     (candidate) =>
       candidate.originalPath === canonicalFile
-      && (candidate.workTreeStatus === 'R' || candidate.workTreeStatus === 'C'),
+      && candidate.workTreeStatus === 'R',
   );
   if (!entry) {
     throw new GitDomainError('INVALID_INPUT', 'No local working-tree changes were found for this file.');
@@ -76,15 +71,17 @@ export async function discard({ projectPath, file }: FileOptions): Promise<unkno
       await fs.unlink(filePath);
     }
   } else if (entry.workTreeStatus === 'R' || entry.workTreeStatus === 'C') {
-    // A worktree rename or copy spans two paths: the source restores to its
-    // index content, while the destination resets its intent-to-add entry
-    // instead of restoring, because the index side of an intent-to-add is
-    // the empty blob and restore would truncate the worktree copy. Reset
-    // keeps that content: untracked when HEAD lacks the destination, or
-    // compared against HEAD's version when HEAD has it - a destination HEAD
-    // tracks with different worktree content intentionally lands as a
-    // modification rather than losing the never-hashed bytes.
-    if (entry.originalPath) {
+    // A rename or copy destination is an intent-to-add entry, so it resets
+    // instead of restoring: the index side of an intent-to-add is the empty
+    // blob and restore would truncate the worktree copy. Reset keeps that
+    // content: untracked when HEAD lacks the destination, or compared
+    // against HEAD's version when HEAD has it - a destination HEAD tracks
+    // with different worktree content intentionally lands as a modification
+    // rather than losing the never-hashed bytes. A rename additionally
+    // restores the source the rename removed from the worktree; a copy
+    // leaves its source in place, and restoring that path would erase the
+    // source's own unstaged edits, so only the destination resets.
+    if (entry.workTreeStatus === 'R' && entry.originalPath) {
       await runGit(repoRoot, ['restore', '--', literalGitPathspec(entry.originalPath)]);
     }
     await runGit(repoRoot, ['reset', 'HEAD', '--', literalGitPathspec(entry.path)]);

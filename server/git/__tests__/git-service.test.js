@@ -1757,6 +1757,38 @@ describe("discard", () => {
     }
   });
 
+  it("resets only the destination when discarding a worktree copy", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "copies"]);
+      await fs.writeFile(path.join(projectPath, "z.txt"), "one\n", "utf-8");
+      await runGitCommand(projectPath, ["rm", "a.txt"]);
+      await runGitCommand(projectPath, ["add", "z.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add z"]);
+      // The copy source carries its own unstaged edit, which the discard of
+      // the copy destination must not touch.
+      await fs.copyFile(path.join(projectPath, "z.txt"), path.join(projectPath, "a2.txt"));
+      await runGitCommand(projectPath, ["add", "-N", "a2.txt"]);
+      await fs.writeFile(path.join(projectPath, "z.txt"), "one\nedit\n", "utf-8");
+      const listed = (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout;
+      expect(listed).toContain("C z.txt -> a2.txt");
+
+      await git.discard({ projectPath, file: "a2.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("M z.txt\n?? a2.txt");
+      expect(await fs.readFile(path.join(projectPath, "z.txt"), "utf-8"))
+        .toBe("one\nedit\n");
+      expect(await fs.readFile(path.join(projectPath, "a2.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("leaves index-only deletions untouched instead of failing restore", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),
