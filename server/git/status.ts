@@ -341,42 +341,45 @@ export async function collectCommitMessageDiffContext(
   return diffContext;
 }
 
+// Resolves the display branch and whether the repository has any commits.
+// Detached HEAD falls back to a descriptive label.
+async function resolveStatusBranch(projectPath: string): Promise<{ branch: string; hasCommits: boolean }> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
+    let branch = stdout.trim();
+    if (branch === 'HEAD') {
+      const { stdout: headOutput } = await runGit(
+        projectPath,
+        ['rev-parse', '--verify', 'HEAD'],
+        readOnlyGitOptions(),
+      );
+      branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
+    }
+    return { branch, hasCommits: true };
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
+      return { branch: 'main', hasCommits: false };
+    }
+    throw error;
+  }
+}
+
 export function createStatusOperations(agents: GitAgentRunner) {
   async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    let branch = 'main';
-    let hasCommits = true;
-    try {
-      const { stdout: branchOutput } = await runGit(
-        projectPath,
-        ['rev-parse', '--abbrev-ref', 'HEAD'],
-        readOnlyGitOptions(),
-      );
-      branch = branchOutput.trim();
-      if (branch === 'HEAD') {
-        const { stdout: headOutput } = await runGit(
-          projectPath,
-          ['rev-parse', '--verify', 'HEAD'],
-          readOnlyGitOptions(),
-        );
-        branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
-      }
-    } catch (error) {
-      const message = errorMessage(error);
-      if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
-        hasCommits = false;
-        branch = 'main';
-      } else {
-        throw error;
-      }
-    }
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '-uall'],
-      readOnlyGitOptions(),
-    );
+    // Branch resolution and the working-tree scan are independent reads;
+    // run them concurrently instead of paying sequential spawn latency.
+    const [branchInfo, { stdout: statusOutput }] = await Promise.all([
+      resolveStatusBranch(projectPath),
+      runGit(projectPath, ['status', '--porcelain', '-uall'], readOnlyGitOptions()),
+    ]);
+    const { branch, hasCommits } = branchInfo;
 
     const modified: string[] = [];
     const added: string[] = [];
