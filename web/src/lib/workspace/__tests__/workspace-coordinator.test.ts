@@ -2028,9 +2028,9 @@ describe('WorkspaceCoordinator', () => {
 				anchorWindowId: 'window-main',
 			}),
 		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
-		await expect(coordinator.createTerminalInNewWindow('window-main')).rejects.toBeInstanceOf(
-			WorkspaceSplitBlockedError,
-		);
+		await expect(
+			coordinator.createTerminalInNewWindow('window-main', 'command-menu:new-terminal'),
+		).rejects.toBeInstanceOf(WorkspaceSplitBlockedError);
 		expect(terminals.create).not.toHaveBeenCalled();
 		await expect(
 			coordinator.moveTabToNewWindow('singleton:git', 'window-main', 'bottom'),
@@ -2045,6 +2045,52 @@ describe('WorkspaceCoordinator', () => {
 				movingSurfaceId: 'singleton:git',
 			}),
 		);
+	});
+
+	it('lets a keyed terminal retry recover an existing placement after admission closes', async () => {
+		let admissionOpen = true;
+		const resolveSplitAdmission = vi.fn<WorkspaceSplitAdmissionResolver>(() =>
+			admissionOpen ? { allowed: true } : { allowed: false, reason: 'too-small' },
+		);
+		const { coordinator, layout, terminals } = createHarness({ resolveSplitAdmission });
+		const requestIds: string[] = [];
+		terminals.create
+			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
+				requestIds.push(requestId);
+				terminals.pendingCreates[requestId] = {};
+				throw new Error('network lost');
+			})
+			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
+				requestIds.push(requestId);
+				delete terminals.pendingCreates[requestId];
+				return 'terminal-recovered';
+			});
+
+		await expect(
+			coordinator.createTerminalInNewWindow('window-main', 'command-menu:new-terminal'),
+		).rejects.toThrow('network lost');
+
+		const surfaceId = terminalSurfaceId('terminal-recovered');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: surfaceId, type: 'terminal', terminalId: 'terminal-recovered' },
+					windowId: 'window-main',
+				},
+			]),
+		);
+		admissionOpen = false;
+
+		await expect(
+			coordinator.createTerminalInNewWindow('window-main', 'command-menu:new-terminal'),
+		).resolves.toBe('terminal-recovered');
+
+		expect(requestIds[1]).toBe(requestIds[0]);
+		expect(resolveSplitAdmission).toHaveBeenCalledTimes(1);
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBe('window-main');
 	});
 
 	it('coalesces concurrent singleton opens into one placement', async () => {
