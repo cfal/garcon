@@ -586,7 +586,7 @@ describe('shared sidebar chat row', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 		const openItem = screen.getByRole('menuitem', { name: 'Open in new window' });
 		expect(openItem.getAttribute('aria-disabled')).toBe('true');
-		expect(openItem.getAttribute('title')).toBe('Window limit reached (maximum 4)');
+		expect(openItem.getAttribute('title')).toBe('Window limit reached (maximum 8)');
 		expect(screen.queryByRole('menuitem', { name: 'Open in new window at edge' })).toBeNull();
 	});
 

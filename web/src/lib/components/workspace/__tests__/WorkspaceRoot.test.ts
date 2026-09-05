@@ -394,7 +394,6 @@ function installContext() {
 		size: null,
 		compactActive: false,
 		singleWindowProjectionActive: false,
-		compactSession: 0,
 		attach: () => undefined,
 	};
 	const windowDnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
@@ -1168,7 +1167,6 @@ describe('WorkspaceRoot', () => {
 		);
 		hostGeometry.compactActive = true;
 		hostGeometry.singleWindowProjectionActive = true;
-		hostGeometry.compactSession = 1;
 		const beforeRoot = layout.snapshot.desktopRoot;
 		const { container } = renderRoot();
 		const host = container.querySelector<HTMLElement>('.workspace-host-region')!;
@@ -1205,15 +1203,15 @@ describe('WorkspaceRoot', () => {
 			expect(workspace.activateWindowFromCompactNavigation).toHaveBeenCalledWith('window-2'),
 		);
 		await waitFor(() => expect(gitWindow.classList.contains('hidden')).toBe(false));
-		const remountedNextButton = screen.getByRole('button', {
+		const retainedNextButton = screen.getByRole('button', {
 			name: m.workspace_compact_next_window(),
 		});
-		await waitFor(() => expect(document.activeElement).toBe(remountedNextButton));
+		await waitFor(() => expect(document.activeElement).toBe(retainedNextButton));
 
 		expect(container.querySelector('[data-workspace-window-id="window-main"]')).toBe(mainWindow);
 		expect(container.querySelector('[data-workspace-window-id="window-2"]')).toBe(gitWindow);
 		expect(gitWindow.querySelector('[data-testid="surface-renderer-stub"]')).toBe(gitRenderer);
-		expect(remountedNextButton).not.toBe(nextButton);
+		expect(retainedNextButton).toBe(nextButton);
 		expect(gitWindow.getAttribute('style')).toContain('width: 100%');
 		expect(mainWindow.classList.contains('hidden')).toBe(true);
 		expect(layout.snapshot.desktopRoot).toStrictEqual(beforeRoot);
@@ -1227,11 +1225,11 @@ describe('WorkspaceRoot', () => {
 			document.querySelector('[data-workspace-compact-window-id="window-main"]') as HTMLElement,
 		);
 		await waitFor(() => expect(mainWindow.classList.contains('hidden')).toBe(false));
-		const remountedListTrigger = screen.getByRole('button', {
+		const retainedListTrigger = screen.getByRole('button', {
 			name: m.workspace_compact_window_position({ current: 1, count: 3 }),
 		});
-		await waitFor(() => expect(document.activeElement).toBe(remountedListTrigger));
-		expect(remountedListTrigger).not.toBe(listTrigger);
+		await waitFor(() => expect(document.activeElement).toBe(retainedListTrigger));
+		expect(retainedListTrigger).toBe(listTrigger);
 	});
 
 	it('uses a silent single-window safety projection while tiled geometry is pending', () => {
@@ -1306,70 +1304,38 @@ describe('WorkspaceRoot', () => {
 		expect(separator.getAttribute('tabindex')).toBe('-1');
 	});
 
-	it('scopes compact recovery-hint dismissal to the measured compact session', async () => {
+	it('keeps compact recovery in the menu and yields to manual fullscreen', async () => {
 		const { layout, hostGeometry } = installContext();
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('git'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-2',
-					partitionId: 'partition-1',
-				},
-			]),
-		);
 		hostGeometry.compactActive = true;
 		hostGeometry.singleWindowProjectionActive = true;
-		hostGeometry.compactSession = 1;
 		const onEnableChatListAutohide = vi.fn();
-		const view = renderRoot(false, {
+		renderRoot(false, {
 			chatListConsumesWorkspaceWidth: true,
 			canEnableChatListAutohide: true,
 			onEnableChatListAutohide,
 		});
-
 		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
+			screen.getByRole('button', {
+				name: m.workspace_compact_window_position({ current: 1, count: 2 }),
+			}),
+		);
+		await fireEvent.click(
+			screen.getByRole('menuitem', { name: m.workspace_compact_enable_autohide() }),
 		);
 		expect(onEnableChatListAutohide).toHaveBeenCalledOnce();
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }));
-		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
-
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_next_window() }));
-		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_fullscreen() }));
 		await waitFor(() =>
 			expect(
 				screen.queryByRole('navigation', { name: m.workspace_compact_window_list() }),
 			).toBeNull(),
 		);
+		expect(layout.snapshot.fullscreenWindowId).not.toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_exit_fullscreen() }));
 		await waitFor(() =>
 			expect(
 				screen.getByRole('navigation', { name: m.workspace_compact_window_list() }),
 			).toBeTruthy(),
 		);
-		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
-
-		hostGeometry.compactSession = 2;
-		await view.rerender({
-			isMobile: false,
-			chatActions,
-			chatListConsumesWorkspaceWidth: false,
-			canEnableChatListAutohide: true,
-			onEnableChatListAutohide,
-		});
-		await view.rerender({
-			isMobile: false,
-			chatActions,
-			chatListConsumesWorkspaceWidth: true,
-			canEnableChatListAutohide: true,
-			onEnableChatListAutohide,
-		});
-		expect(screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeTruthy();
 	});
 
 	it('keeps surviving keyed window identity when another window closes', async () => {

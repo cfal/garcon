@@ -2006,7 +2006,10 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.openSingletonInNewWindow('git-compare');
 		await coordinator.openSingletonInNewWindow('files');
-		expect(windowCountOf(layout.snapshot)).toBe(4);
+		for (let index = 4; index < 8; index++) {
+			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
+		}
+		expect(windowCountOf(layout.snapshot)).toBe(8);
 
 		await expect(coordinator.openSingletonInNewWindow('commit')).rejects.toBeInstanceOf(
 			WorkspaceSplitBlockedError,
@@ -2020,7 +2023,10 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openSingletonInNewWindow('git-history');
 		await coordinator.openSingletonInNewWindow('git-compare');
 		await coordinator.openSingletonInNewWindow('files');
-		expect(windowCountOf(layout.snapshot)).toBe(4);
+		for (let index = 4; index < 8; index++) {
+			await coordinator.openChatInNewWindow(`capacity-chat-${index}`, 'window-main', 'bottom');
+		}
+		expect(windowCountOf(layout.snapshot)).toBe(8);
 
 		await expect(
 			coordinator.moveTabToNewWindow(chatViewSurfaceId('window-main'), 'window-main', 'right'),
@@ -2321,10 +2327,7 @@ describe('WorkspaceCoordinator', () => {
 			let coordinator: WorkspaceCoordinator | null = null;
 			let closeOnPublish = false;
 			let closing: Promise<boolean> | null = null;
-			const presentSurface = vi.spyOn(
-				WorkspacePresentationController.prototype,
-				'presentSurface',
-			);
+			const presentSurface = vi.spyOn(WorkspacePresentationController.prototype, 'presentSurface');
 			try {
 				const harness = createHarness({
 					onLayoutChanged: (snapshot) => {
@@ -2683,5 +2686,86 @@ describe('WorkspaceCoordinator', () => {
 		expect(editor.prepareRendererTransfer).toHaveBeenCalledTimes(2);
 		expect(attachMobile).toHaveBeenCalledOnce();
 		expect(attachDialog).toHaveBeenCalledOnce();
+	});
+});
+describe('space-aware generic placement', () => {
+	const onlyBelow: WorkspaceSplitAdmissionResolver = (_snapshot, { edge }) =>
+		edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' };
+
+	it('opens a singleton below when the anchor is too narrow to split right', async () => {
+		const { coordinator, layout } = createHarness({
+			includePortableTabs: false,
+			resolveSplitAdmission: onlyBelow,
+		});
+		await coordinator.openSingletonInNewWindow('git', 'window-main');
+		const root = layout.snapshot.desktopRoot;
+		expect(root.type).toBe('partition');
+		if (root.type !== 'partition') throw new Error('Expected partition');
+		const column = root.children[0];
+		expect(column.type).toBe('partition');
+		if (column.type !== 'partition') throw new Error('Expected nested partition');
+		expect(column.direction).toBe('vertical');
+		expect(column.children[1].type).toBe('window');
+	});
+
+	it.each(['too-small', 'resource-ceiling', 'fullscreen'] as const)(
+		'opens a generic view as a tab on %s, without changing explicit new-window behavior',
+		async (reason) => {
+			const { coordinator, layout } = createHarness({
+				includePortableTabs: false,
+				resolveSplitAdmission: () => ({ allowed: false, reason }),
+			});
+			await expect(coordinator.openSingletonInNewWindow('git')).rejects.toThrow(
+				WorkspaceSplitBlockedError,
+			);
+			const count = windowCountOf(layout.snapshot);
+			await coordinator.openSingleton('git');
+			expect(windowCountOf(layout.snapshot)).toBe(count);
+			expect(layout.surface('singleton:git')).not.toBeNull();
+			await coordinator.openSingleton('git');
+			expect(windowCountOf(layout.snapshot)).toBe(count);
+		},
+	);
+
+	it('places configured new-window files below the anchor when right is unavailable', async () => {
+		const { coordinator, layout } = createHarness({ resolveSplitAdmission: onlyBelow });
+		await coordinator.placeFileSession('file-direction', {
+			type: 'new-window',
+			anchorWindowId: 'window-main',
+		});
+		expect(windowCountOf(layout.snapshot)).toBe(3);
+		expect(
+			windowIdOfSurface(layout.snapshot.desktopRoot, fileSurfaceId('file-direction')),
+		).not.toBe('window-main');
+	});
+
+	it('places a new terminal below the anchor when right is unavailable', async () => {
+		const { coordinator, layout } = createHarness({ resolveSplitAdmission: onlyBelow });
+		const terminalId = await coordinator.createTerminalInNewWindow('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(3);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, terminalSurfaceId(terminalId))).not.toBe(
+			'window-main',
+		);
+	});
+});
+describe('generic terminal creation', () => {
+	it('creates one terminal tab when splitting is denied', async () => {
+		const { coordinator, layout, terminals } = createHarness({
+			resolveSplitAdmission: () => ({ allowed: false, reason: 'too-small' }),
+		});
+		const terminalId = await coordinator.createTerminalInAvailableSpace('generic-terminal');
+		expect(terminals.create).toHaveBeenCalledOnce();
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, terminalSurfaceId(terminalId))).toBe(
+			'window-main',
+		);
+	});
+	it('does not turn genuine terminal failures into another creation attempt', async () => {
+		const { coordinator, terminals } = createHarness();
+		terminals.create.mockRejectedValue(new Error('Terminal unavailable'));
+		await expect(coordinator.createTerminalInAvailableSpace()).rejects.toThrow(
+			'Terminal unavailable',
+		);
+		expect(terminals.create).toHaveBeenCalledOnce();
 	});
 });

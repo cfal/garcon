@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { WORKSPACE_WINDOW_RESOURCE_CEILING } from '../surface-types';
 import {
 	requireWorkspaceSplitAdmission,
+	requireWorkspaceNewWindowEdge,
 	WorkspaceSplitBlockedError,
 	workspaceSplitBlockMessage,
 } from '../workspace-split-blocked-error';
@@ -44,5 +45,44 @@ describe('workspace split blocked errors', () => {
 				edge: 'right',
 			}),
 		).toBe(true);
+	});
+});
+
+describe('automatic new-window direction', () => {
+	it('prefers right when both axes fit', () => {
+		expect(
+			requireWorkspaceNewWindowEdge(
+				() => ({ allowed: true }),
+				canonicalWorkspaceSnapshot(),
+				'window-main',
+			),
+		).toBe('right');
+	});
+	it('uses bottom when right is too narrow', () => {
+		expect(
+			requireWorkspaceNewWindowEdge(
+				(_snapshot, { edge }) =>
+					edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' },
+				canonicalWorkspaceSnapshot(),
+				'window-main',
+			),
+		).toBe('bottom');
+	});
+	it.each(['too-small', 'resource-ceiling', 'fullscreen'] as const)(
+		'preserves %s denial when neither axis fits',
+		(reason) => {
+			expect(() =>
+				requireWorkspaceNewWindowEdge(
+					() => ({ allowed: false, reason }),
+					canonicalWorkspaceSnapshot(),
+					'window-main',
+				),
+			).toThrow(new WorkspaceSplitBlockedError(reason));
+		},
+	);
+	it('does not invent a placement for a stale anchor', () => {
+		expect(
+			requireWorkspaceNewWindowEdge(() => null, canonicalWorkspaceSnapshot(), 'window-missing'),
+		).toBeNull();
 	});
 });

@@ -2,6 +2,8 @@ import * as m from '$lib/paraglide/messages.js';
 import {
 	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	type WorkspaceLayoutSnapshot,
+	type WorkspaceWindowEdge,
+	type WorkspaceWindowId,
 } from './surface-types.js';
 import type {
 	WorkspaceSplitAdmissionResolver,
@@ -36,4 +38,21 @@ export function requireWorkspaceSplitAdmission(
 	if (!admission) return false;
 	if (!admission.allowed) throw new WorkspaceSplitBlockedError(admission.reason);
 	return true;
+}
+
+export function requireWorkspaceNewWindowEdge(
+	resolveAdmission: WorkspaceSplitAdmissionResolver,
+	snapshot: WorkspaceLayoutSnapshot,
+	targetWindowId: WorkspaceWindowId,
+): WorkspaceWindowEdge | null {
+	let blockedReason: WorkspaceSplitBlockReason | null = null;
+	// Opposite edges have identical geometry; prefer beside, then below the anchor.
+	for (const edge of ['right', 'bottom'] as const) {
+		const admission = resolveAdmission(snapshot, { targetWindowId, edge });
+		if (!admission) return null;
+		if (admission.allowed) return edge;
+		blockedReason ??= admission.reason;
+	}
+	if (blockedReason) throw new WorkspaceSplitBlockedError(blockedReason);
+	return null;
 }

@@ -613,7 +613,7 @@ async function dragChatToWindow(
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
     let expectedLabel = input.expectedLabel;
     if (!expectedLabel) {
-      expectedLabel = input.expectBlocked ? 'Window limit reached.' : chatDropLabel(targetKind);
+      expectedLabel = input.expectBlocked ? 'Too small to split.' : chatDropLabel(targetKind);
     }
     const label = target.getByText(expectedLabel, { exact: true });
     await nudgePointerUntilVisible(
@@ -822,7 +822,7 @@ async function resizeFirstPartition(page: Page): Promise<{ value: string; persis
 }
 
 describe('Chromium workspace windows', () => {
-  test('drags Chat onto any window, blocks the cap, and persists pointer resizing', async () => {
+  test('drags Chat onto any window, enforces split geometry, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
       await fixture.page.setViewportSize({ width: 1440, height: 900 });
       await createGitFixture(fixture.integration.dirs.project);
@@ -1126,7 +1126,7 @@ describe('Chromium workspace windows', () => {
         filesWindowId,
       );
 
-      markPhase('blocking Chat edge drag at four windows');
+      markPhase('blocking Chat edge drag when the target is too small');
       await dragChatToWindow(fixture.page, {
         chatId: chatB,
         windowId: filesWindowId,
@@ -1302,7 +1302,8 @@ describe('Chromium workspace windows', () => {
       }
 
       markPhase('recovering width with chat-list auto-hide');
-      await fixture.page.getByRole('button', { name: 'Turn on auto-hide' }).click();
+      await fixture.page.locator('[data-workspace-compact-window-list-trigger]').click();
+      await fixture.page.getByRole('menuitem', { name: 'Turn on auto-hide' }).click();
       await waitForTiledWorkspace(fixture.page);
       expect(await fixture.page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(1);
       expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(800);
@@ -1323,8 +1324,6 @@ describe('Chromium workspace windows', () => {
       await chatListPanel.getByRole('button', { name: 'More actions' }).first().click();
       await fixture.page.getByRole('menuitemcheckbox', { name: 'Autohide sidebar' }).click();
       await waitForCompactWorkspace(fixture.page);
-      await fixture.page.getByRole('button', { name: 'Dismiss' }).click();
-      expect(await fixture.page.getByRole('button', { name: 'Dismiss' }).count()).toBe(0);
 
       await fixture.page.setViewportSize({ width: 1000, height: 900 });
       await waitForCompactWorkspace(fixture.page);

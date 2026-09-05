@@ -493,7 +493,7 @@ describe('workspace layout reducer', () => {
 		]);
 	});
 
-	it('enforces the four-window cap while allowing a net-zero edge move', () => {
+	it('enforces the resource ceiling while allowing a net-zero edge move', () => {
 		let root: DesktopWorkspaceNode = workspaceWindow('window-1', [chatViewSurfaceId('window-1')]);
 		for (let index = 2; index <= WORKSPACE_WINDOW_RESOURCE_CEILING; index += 1) {
 			root = partition(
@@ -750,10 +750,7 @@ describe('workspace layout invariants', () => {
 			...canonical,
 			desktopRoot: {
 				...canonical.desktopRoot,
-				children: [
-					{ ...chatWindow, tabs: { ...chatWindow.tabs, mru: ['missing'] } },
-					filesWindow,
-				],
+				children: [{ ...chatWindow, tabs: { ...chatWindow.tabs, mru: ['missing'] } }, filesWindow],
 			},
 		};
 		expect(() => assertWorkspaceLayoutInvariants(invalidMru)).toThrow('MRU');

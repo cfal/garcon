@@ -18,7 +18,7 @@ import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { isCanonicalFirstRunLayout } from './canonical-layout.js';
 import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
-import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
+import { requireWorkspaceNewWindowEdge } from './workspace-split-blocked-error.js';
 
 interface SurfaceReservations {
 	has(surfaceId: string): boolean;
@@ -142,10 +142,12 @@ export class TerminalPlacementService {
 		if (!requestKey || !this.#hasPendingCreate(requestKey)) {
 			const snapshot = this.deps.layout.snapshot;
 			const currentAnchorWindowId = this.#resolveWindowId(snapshot, anchorWindowId);
-			requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, snapshot, {
-				targetWindowId: currentAnchorWindowId,
-				edge: 'right',
-			});
+			const edge = requireWorkspaceNewWindowEdge(
+				this.deps.resolveSplitAdmission,
+				snapshot,
+				currentAnchorWindowId,
+			);
+			if (!edge) throw new Error('The target window is no longer available');
 		}
 		const terminalId = requestKey
 			? await this.#retryCreate(requestKey)
@@ -197,19 +199,17 @@ export class TerminalPlacementService {
 						);
 						return mutations;
 					}
-					if (
-						!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
-							targetWindowId: currentAnchorWindowId,
-							edge: 'right',
-						})
-					) {
-						return [];
-					}
+					const edge = requireWorkspaceNewWindowEdge(
+						this.deps.resolveSplitAdmission,
+						latest,
+						currentAnchorWindowId,
+					);
+					if (!edge) return [];
 					mutations.push({
 						type: 'register-surface-in-new-window',
 						surface: { id: surfaceId, type: 'terminal', terminalId },
 						targetWindowId: currentAnchorWindowId,
-						edge: 'right',
+						edge,
 						newWindowId,
 						partitionId,
 					});

@@ -53,7 +53,11 @@ import {
 	type WorkspaceSplitAdmissions,
 	type WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
-import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
+import {
+	requireWorkspaceSplitAdmission,
+	requireWorkspaceNewWindowEdge,
+	WorkspaceSplitBlockedError,
+} from './workspace-split-blocked-error.js';
 
 interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
@@ -564,26 +568,29 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				anchorWindowId ?? this.#presentation.lastFocusedWindowId,
 			);
 			if (this.#reservedWindowIds.has(anchor)) return [];
-			if (
-				!requireWorkspaceSplitAdmission(this.#deps.resolveSplitAdmission, latest, {
-					targetWindowId: anchor,
-					edge: 'right',
-				})
-			) {
-				return [];
-			}
+			const edge = requireWorkspaceNewWindowEdge(this.#deps.resolveSplitAdmission, latest, anchor);
+			if (!edge) return [];
 			return [
 				{
 					type: 'register-surface-in-new-window',
 					surface: portableSingletonDescriptor(kind),
 					targetWindowId: anchor,
-					edge: 'right',
+					edge,
 					newWindowId,
 					partitionId,
 				},
 			];
 		});
 		if (current && this.layout.surface(surfaceId)) this.#presentation.presentSurface(surfaceId);
+	}
+
+	async openSingleton(kind: PortableSingletonKind): Promise<void> {
+		try {
+			await this.openSingletonInNewWindow(kind);
+		} catch (error) {
+			if (!(error instanceof WorkspaceSplitBlockedError)) throw error;
+			await this.openSingletonAsTab(kind, this.currentWindowId);
+		}
 	}
 
 	moveTabToWindow(
@@ -776,20 +783,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				(latest) => {
 					const anchor = this.#resolveWindowId(latest, destination.anchorWindowId);
 					if (this.#reservedWindowIds.has(anchor)) return [];
-					if (
-						!requireWorkspaceSplitAdmission(this.#deps.resolveSplitAdmission, latest, {
-							targetWindowId: anchor,
-							edge: 'right',
-						})
-					) {
-						return [];
-					}
+					const edge = requireWorkspaceNewWindowEdge(
+						this.#deps.resolveSplitAdmission,
+						latest,
+						anchor,
+					);
+					if (!edge) return [];
 					return [
 						{
 							type: 'register-surface-in-new-window',
 							surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
 							targetWindowId: anchor,
-							edge: 'right',
+							edge,
 							newWindowId,
 							partitionId,
 						},
@@ -867,6 +872,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			anchorWindowId ?? this.lastFocusedWindowId,
 			requestKey,
 		);
+	}
+
+	async createTerminalInAvailableSpace(requestKey?: string): Promise<string> {
+		try {
+			return await this.createTerminalInNewWindow(this.currentWindowId, requestKey);
+		} catch (error) {
+			if (!(error instanceof WorkspaceSplitBlockedError)) throw error;
+			return this.createTerminal(this.currentWindowId, requestKey);
+		}
 	}
 
 	async createTerminalReplacing(currentTerminalId: string, requestKey?: string): Promise<string> {

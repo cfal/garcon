@@ -1,9 +1,6 @@
 <script lang="ts">
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import CircleHelp from '@lucide/svelte/icons/circle-help';
-	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
-	import X from '@lucide/svelte/icons/x';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -12,7 +9,7 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import { tick } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { WorkspaceWindowId, WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
 	import { WORKSPACE_COMPACT_SWITCHER_HEIGHT_PX } from './workspace-window-chrome.js';
@@ -21,71 +18,61 @@
 		windows,
 		currentWindowId,
 		labelFor,
-		showRecoveryHint,
 		chatListConsumesWorkspaceWidth,
 		canEnableChatListAutohide,
 		onActivate,
-		onDismissHint,
+		onExitNavigation,
 		onEnableChatListAutohide,
 	}: {
 		windows: readonly WorkspaceWindowNode[];
 		currentWindowId: WorkspaceWindowId;
 		labelFor(surfaceId: string): string;
-		showRecoveryHint: boolean;
 		chatListConsumesWorkspaceWidth: boolean;
 		canEnableChatListAutohide: boolean;
 		onActivate(windowId: WorkspaceWindowId): void;
-		onDismissHint(): void;
+		onExitNavigation(): void;
 		onEnableChatListAutohide(): void;
 	} = $props();
 
-	const currentIndex = $derived.by(() => {
-		const index = windows.findIndex((workspaceWindow) => workspaceWindow.id === currentWindowId);
-		return index < 0 ? 0 : index;
-	});
-	const currentWindow = $derived(windows[currentIndex] ?? null);
+	let navigation: HTMLElement | undefined = $state();
+	let menuOpen = $state(false);
+	let navigationOwnsFocus = false;
+	const currentIndex = $derived(
+		Math.max(
+			0,
+			windows.findIndex((item) => item.id === currentWindowId),
+		),
+	);
+	const currentWindow = $derived(windows[currentIndex]);
 	const positionLabel = $derived(
 		m.workspace_compact_window_position({ current: currentIndex + 1, count: windows.length }),
 	);
-	const showChatListRecoveryHint = $derived(showRecoveryHint && chatListConsumesWorkspaceWidth);
-	const recoveryHint = $derived(
-		canEnableChatListAutohide
-			? m.workspace_compact_recovery_hint()
-			: m.workspace_compact_recovery_hint_resize(),
-	);
-	type FocusTarget = 'previous' | 'window-list' | 'next';
 
-	function restoreActivationFocus(focusTarget: FocusTarget): void {
-		const compactControl = document.querySelector<HTMLElement>(
-			`[data-workspace-compact-focus-target="${focusTarget}"]`,
-		);
-		if (compactControl) {
-			compactControl.focus();
-			return;
-		}
-		document
-			.querySelector<HTMLElement>(
-				'[data-workspace-window-current="true"] [role="tab"][aria-selected="true"]',
-			)
-			?.focus();
-	}
-
-	function activate(windowId: WorkspaceWindowId, focusTarget: FocusTarget): void {
-		onActivate(windowId);
-		void tick().then(() => restoreActivationFocus(focusTarget));
-	}
-
-	function activateAt(index: number, focusTarget: FocusTarget): void {
+	function activateAt(index: number): void {
 		if (windows.length === 0) return;
 		const destination = windows[(index + windows.length) % windows.length];
-		if (destination) activate(destination.id, focusTarget);
+		if (destination) onActivate(destination.id);
 	}
+
+	// Transfers focus only when navigation disappears, not on window switches.
+	onDestroy(() => {
+		if (menuOpen || navigationOwnsFocus) onExitNavigation();
+	});
 </script>
 
 <nav
+	bind:this={navigation}
+	onfocusin={() => {
+		navigationOwnsFocus = true;
+	}}
+	onfocusout={(event) => {
+		if (event.relatedTarget instanceof Node) {
+			navigationOwnsFocus = navigation?.contains(event.relatedTarget) ?? false;
+		}
+	}}
 	data-workspace-compact-switcher
 	aria-label={m.workspace_compact_window_list()}
-	class="workspace-compact-switcher relative z-40 flex shrink-0 items-center gap-0.5 border-b border-border/60 bg-muted/40 px-1.5 text-xs"
+	class="workspace-compact-switcher flex min-w-0 items-center gap-1 border-b border-border/60 bg-muted px-1.5 text-xs"
 	style:height={`${WORKSPACE_COMPACT_SWITCHER_HEIGHT_PX}px`}
 >
 	<button
@@ -93,124 +80,52 @@
 		class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		aria-label={m.workspace_compact_previous_window()}
 		title={m.workspace_compact_previous_window()}
-		data-workspace-compact-focus-target="previous"
-		onclick={() => activateAt(currentIndex - 1, 'previous')}
+		onclick={() => activateAt(currentIndex - 1)}
 	>
 		<ChevronLeft class="size-3.5" aria-hidden="true" />
 	</button>
-
-	<DropdownMenu>
+	<DropdownMenu bind:open={menuOpen}>
 		<DropdownMenuTrigger
-			class="h-7 shrink-0 rounded-md px-1.5 font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			class="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			aria-label={positionLabel}
 			title={positionLabel}
 			data-workspace-compact-window-list-trigger
-			data-workspace-compact-focus-target="window-list"
 		>
-			{positionLabel}
+			<span class="min-w-0 truncate font-medium">
+				{currentWindow ? labelFor(currentWindow.tabs.activeId) : m.workspace_compact_window_list()}
+			</span>
+			<span class="shrink-0 text-muted-foreground">{positionLabel}</span>
 		</DropdownMenuTrigger>
 		<DropdownMenuContent align="start" class="w-72" data-workspace-compact-window-list>
-			{#each windows as workspaceWindow, index (workspaceWindow.id)}
+			{#each windows as workspaceWindow (workspaceWindow.id)}
 				{@const title = labelFor(workspaceWindow.tabs.activeId)}
 				<DropdownMenuItem
 					class="min-w-0"
 					aria-current={workspaceWindow.id === currentWindowId ? 'true' : undefined}
 					data-workspace-compact-window-id={workspaceWindow.id}
-					onSelect={() => activate(workspaceWindow.id, 'window-list')}
+					onSelect={() => onActivate(workspaceWindow.id)}
 				>
-					<span class="w-5 shrink-0 text-end text-muted-foreground">{index + 1}</span>
 					<span class="min-w-0 flex-1 truncate" {title}>{title}</span>
 				</DropdownMenuItem>
 			{/each}
-			{#if showChatListRecoveryHint}
-				<DropdownMenuSeparator />
-				<DropdownMenuLabel class="whitespace-normal text-xs font-normal text-muted-foreground">
-					{recoveryHint}
-				</DropdownMenuLabel>
+			<DropdownMenuSeparator />
+			<DropdownMenuLabel class="whitespace-normal text-xs font-normal text-muted-foreground">
+				{m.workspace_compact_recovery_hint_resize()}
+			</DropdownMenuLabel>
+			{#if chatListConsumesWorkspaceWidth && canEnableChatListAutohide}
+				<DropdownMenuItem onSelect={onEnableChatListAutohide}>
+					{m.workspace_compact_enable_autohide()}
+				</DropdownMenuItem>
 			{/if}
 		</DropdownMenuContent>
 	</DropdownMenu>
-
 	<button
 		type="button"
 		class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		aria-label={m.workspace_compact_next_window()}
 		title={m.workspace_compact_next_window()}
-		data-workspace-compact-focus-target="next"
-		onclick={() => activateAt(currentIndex + 1, 'next')}
+		onclick={() => activateAt(currentIndex + 1)}
 	>
 		<ChevronRight class="size-3.5" aria-hidden="true" />
 	</button>
-
-	{#if currentWindow}
-		<span class="compact-window-title min-w-0 flex-1 truncate px-1 text-muted-foreground">
-			{labelFor(currentWindow.tabs.activeId)}
-		</span>
-	{/if}
-
-	{#if showChatListRecoveryHint}
-		<span
-			class="compact-recovery-icon flex size-5 shrink-0 items-center justify-center text-muted-foreground"
-			role="img"
-			aria-label={recoveryHint}
-			title={recoveryHint}
-		>
-			<CircleHelp class="size-3.5" aria-hidden="true" />
-		</span>
-		<span class="compact-recovery-text min-w-0 truncate text-muted-foreground" title={recoveryHint}>
-			{recoveryHint}
-		</span>
-	{/if}
-
-	{#if chatListConsumesWorkspaceWidth && canEnableChatListAutohide}
-		<button
-			type="button"
-			class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-			aria-label={m.workspace_compact_enable_autohide()}
-			title={m.workspace_compact_enable_autohide()}
-			onclick={onEnableChatListAutohide}
-		>
-			<PanelLeftClose class="size-3.5" aria-hidden="true" />
-		</button>
-	{/if}
-
-	{#if showChatListRecoveryHint}
-		<button
-			type="button"
-			class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-			aria-label={m.workspace_compact_dismiss_hint()}
-			title={m.workspace_compact_dismiss_hint()}
-			onclick={onDismissHint}
-		>
-			<X class="size-3.5" aria-hidden="true" />
-		</button>
-	{/if}
 </nav>
-
-<style>
-	.workspace-compact-switcher {
-		container-name: workspace-compact-switcher;
-		container-type: inline-size;
-	}
-
-	.compact-window-title,
-	.compact-recovery-text {
-		display: none;
-	}
-
-	@container workspace-compact-switcher (min-width: 32rem) {
-		.compact-window-title {
-			display: block;
-		}
-	}
-
-	@container workspace-compact-switcher (min-width: 48rem) {
-		.compact-recovery-icon {
-			display: none;
-		}
-
-		.compact-recovery-text {
-			display: block;
-		}
-	}
-</style>

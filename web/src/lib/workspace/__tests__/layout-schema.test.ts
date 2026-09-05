@@ -1,3 +1,4 @@
+import { WORKSPACE_WINDOW_RESOURCE_CEILING } from '../surface-types';
 import { describe, expect, it } from 'vitest';
 import {
 	CANONICAL_CHAT_SURFACE_ID,
@@ -303,7 +304,7 @@ describe('workspace layout V2 schema', () => {
 				active: { type: 'singleton', kind: 'git' },
 				mru: [],
 			},
-			...Array.from({ length: 3 }, (_, index) => ({
+			...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 1 }, (_, index) => ({
 				type: 'window' as const,
 				id: `window-${index + 2}`,
 				order: [{ type: 'chat' as const, chatId: `chat-${index + 2}` }],
@@ -312,13 +313,13 @@ describe('workspace layout V2 schema', () => {
 			})),
 			{
 				type: 'window',
-				id: 'window-5',
+				id: 'window-overflow',
 				order: [
-					{ type: 'chat', chatId: 'chat-5' },
-					{ type: 'terminal', terminalId: 'terminal-5' },
+					{ type: 'chat', chatId: 'chat-overflow' },
+					{ type: 'terminal', terminalId: 'terminal-overflow' },
 				],
-				active: { type: 'chat', chatId: 'chat-5' },
-				mru: [{ type: 'terminal', terminalId: 'terminal-5' }],
+				active: { type: 'chat', chatId: 'chat-overflow' },
+				mru: [{ type: 'terminal', terminalId: 'terminal-overflow' }],
 			},
 		];
 		const root = windows.slice(1).reduce<PersistedWorkspaceLayoutNode>(
@@ -335,15 +336,17 @@ describe('workspace layout V2 schema', () => {
 			JSON.stringify({ version: 2, root, unplacedTerminalIds: [] }),
 		);
 		expect(result.source).toBe('valid');
-		expect(collectWindowNodes(result.snapshot.desktopRoot)).toHaveLength(4);
+		expect(collectWindowNodes(result.snapshot.desktopRoot)).toHaveLength(
+			WORKSPACE_WINDOW_RESOURCE_CEILING,
+		);
 		expect(windowNodeById(result.snapshot.desktopRoot, 'window-1')?.tabs.order).toEqual([
 			'singleton:git',
-			'terminal:terminal-5',
+			'terminal:terminal-overflow',
 		]);
 		expect(
 			Object.values(result.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
-		).toHaveLength(3);
-		expect(result.snapshot.surfaces['chat-view:window-5']).toBeUndefined();
+		).toHaveLength(WORKSPACE_WINDOW_RESOURCE_CEILING - 1);
+		expect(result.snapshot.surfaces['chat-view:window-overflow']).toBeUndefined();
 	});
 
 	it('accepts the maximum restore depth and falls back one level beyond it', () => {
@@ -376,7 +379,9 @@ describe('workspace layout V2 schema', () => {
 			}),
 		);
 		expect(accepted.source).toBe('valid');
-		expect(collectWindowNodes(accepted.snapshot.desktopRoot)).toHaveLength(4);
+		expect(collectWindowNodes(accepted.snapshot.desktopRoot)).toHaveLength(
+			WORKSPACE_WINDOW_RESOURCE_CEILING,
+		);
 
 		const firstFullTreeAboveBudget = WORKSPACE_LAYOUT_MAX_PARSE_NODES + 1;
 		const rejected = parsePersistedWorkspaceLayout(

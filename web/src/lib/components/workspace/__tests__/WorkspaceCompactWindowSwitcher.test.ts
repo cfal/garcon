@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceCompactWindowSwitcher from '../WorkspaceCompactWindowSwitcher.svelte';
@@ -28,17 +28,16 @@ function renderSwitcher(
 	overrides: Partial<ComponentProps<typeof WorkspaceCompactWindowSwitcher>> = {},
 ) {
 	const onActivate = vi.fn();
-	const onDismissHint = vi.fn();
+	const onExitNavigation = vi.fn();
 	const onEnableChatListAutohide = vi.fn();
 	const props = {
 		windows,
 		currentWindowId: 'window-2' as WorkspaceWindowId,
 		labelFor: (surfaceId: string) => titles[surfaceId] ?? surfaceId,
-		showRecoveryHint: true,
 		chatListConsumesWorkspaceWidth: true,
 		canEnableChatListAutohide: true,
 		onActivate,
-		onDismissHint,
+		onExitNavigation,
 		onEnableChatListAutohide,
 		...overrides,
 	};
@@ -46,7 +45,7 @@ function renderSwitcher(
 		...render(WorkspaceCompactWindowSwitcher, props),
 		props,
 		onActivate,
-		onDismissHint,
+		onExitNavigation,
 		onEnableChatListAutohide,
 	};
 }
@@ -94,72 +93,64 @@ describe('WorkspaceCompactWindowSwitcher', () => {
 			'window-3',
 		]);
 		expect(items[1]?.getAttribute('aria-current')).toBe('true');
-		expect(within(menu).getByText(m.workspace_compact_recovery_hint())).toBeTruthy();
+		expect(within(menu).getByText(m.workspace_compact_recovery_hint_resize())).toBeTruthy();
 
 		await fireEvent.click(items[2]!);
 		expect(onActivate).toHaveBeenCalledWith('window-3');
 	});
 
-	it('focuses the current window tab when compact mode exits during activation', async () => {
-		let fallbackTab: HTMLButtonElement | null = null;
-		const onActivate = vi.fn(() => {
-			const currentWindow = document.createElement('section');
-			currentWindow.dataset.workspaceWindowCurrent = 'true';
-			fallbackTab = document.createElement('button');
-			fallbackTab.setAttribute('role', 'tab');
-			fallbackTab.setAttribute('aria-selected', 'true');
-			currentWindow.append(fallbackTab);
-			screen
-				.getByRole('navigation', { name: m.workspace_compact_window_list() })
-				.replaceWith(currentWindow);
-		});
-		renderSwitcher({ onActivate });
-		const nextButton = screen.getByRole('button', {
-			name: m.workspace_compact_next_window(),
-		});
+	it('keeps the same focused control when the current window changes', async () => {
+		const { props, rerender, onExitNavigation } = renderSwitcher();
+		const nextButton = screen.getByRole('button', { name: m.workspace_compact_next_window() });
 		nextButton.focus();
-
 		await fireEvent.click(nextButton);
-
-		await waitFor(() => expect(document.activeElement).toBe(fallbackTab));
-	});
-
-	it('keeps auto-hide and dismissal actions reachable in the compact row', async () => {
-		const { onDismissHint, onEnableChatListAutohide, props, rerender } = renderSwitcher();
-		const hint = m.workspace_compact_recovery_hint();
-
-		expect(screen.getByRole('img', { name: hint })).toBeTruthy();
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
+		await rerender({ ...props, currentWindowId: 'window-3' });
+		expect(screen.getByRole('button', { name: m.workspace_compact_next_window() })).toBe(
+			nextButton,
 		);
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }));
+		expect(document.activeElement).toBe(nextButton);
+		expect(onExitNavigation).not.toHaveBeenCalled();
+	});
 
+	it('hands focus back on removal only when navigation owns focus', async () => {
+		const { unmount, onExitNavigation } = renderSwitcher();
+		screen.getByRole('button', { name: m.workspace_compact_next_window() }).focus();
+		await unmount();
+		expect(onExitNavigation).toHaveBeenCalledOnce();
+	});
+
+	it('does not move unrelated focus when removed', () => {
+		const { unmount, onExitNavigation } = renderSwitcher();
+		unmount();
+		expect(onExitNavigation).not.toHaveBeenCalled();
+	});
+
+	it('offers auto-hide in the menu without extra recovery controls in the row', async () => {
+		const { onEnableChatListAutohide } = renderSwitcher();
+		expect(screen.getAllByRole('button')).toHaveLength(3);
+		await fireEvent.click(
+			screen.getByRole('button', {
+				name: m.workspace_compact_window_position({ current: 2, count: 3 }),
+			}),
+		);
+		await fireEvent.click(
+			screen.getByRole('menuitem', { name: m.workspace_compact_enable_autohide() }),
+		);
 		expect(onEnableChatListAutohide).toHaveBeenCalledOnce();
-		expect(onDismissHint).toHaveBeenCalledOnce();
-
-		await rerender({ ...props, showRecoveryHint: false });
-		expect(screen.queryByRole('img', { name: hint })).toBeNull();
-		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
-		expect(
-			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
-		).toBeTruthy();
 	});
 
-	it('uses resize-only recovery copy when hover auto-hide is unavailable', () => {
-		renderSwitcher({ canEnableChatListAutohide: false });
-
-		expect(
-			screen.getByRole('img', { name: m.workspace_compact_recovery_hint_resize() }),
-		).toBeTruthy();
-		expect(
-			screen.queryByRole('button', { name: m.workspace_compact_enable_autohide() }),
-		).toBeNull();
-	});
-
-	it('omits recovery affordances when the chat list does not consume host width', () => {
-		renderSwitcher({ chatListConsumesWorkspaceWidth: false });
-
-		expect(screen.queryByRole('img')).toBeNull();
-		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
-	});
+	it.each([{ canEnableChatListAutohide: false }, { chatListConsumesWorkspaceWidth: false }])(
+		'omits unavailable auto-hide actions: %s',
+		async (props) => {
+			renderSwitcher(props);
+			await fireEvent.click(
+				screen.getByRole('button', {
+					name: m.workspace_compact_window_position({ current: 2, count: 3 }),
+				}),
+			);
+			expect(
+				screen.queryByRole('menuitem', { name: m.workspace_compact_enable_autohide() }),
+			).toBeNull();
+		},
+	);
 });

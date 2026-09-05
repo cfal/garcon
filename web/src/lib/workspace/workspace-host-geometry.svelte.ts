@@ -14,7 +14,6 @@ export class WorkspaceHostGeometryState {
 	size = $state.raw<WorkspaceHostSize | null>(null);
 	#compact = $state(false);
 	#awaitingTiledMeasurement = $state(false);
-	#compactSession = $state(0);
 	#element: HTMLElement | null = null;
 	#measureFrame: number | null = null;
 	#lastFullscreenWindowId: WorkspaceWindowId | null;
@@ -31,10 +30,6 @@ export class WorkspaceHostGeometryState {
 
 	get singleWindowProjectionActive(): boolean {
 		return !this.deps.getIsMobile() && (this.#compact || this.#awaitingTiledMeasurement);
-	}
-
-	get compactSession(): number {
-		return this.#compactSession;
 	}
 
 	readonly attach: Attachment<HTMLElement> = (element) =>
@@ -114,7 +109,6 @@ export class WorkspaceHostGeometryState {
 		if (next === this.#compact) return;
 		if (next) {
 			if (!this.#awaitingTiledMeasurement) this.deps.beforeCompactProjection();
-			this.#compactSession += 1;
 		}
 		this.#compact = next;
 		this.deps.onCompactProjectionChanged(next);

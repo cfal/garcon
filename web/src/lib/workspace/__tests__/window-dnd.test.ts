@@ -24,9 +24,7 @@ function dragEvent(
 	Object.defineProperties(event, {
 		clientX: { value: options.clientX ?? 0 },
 		clientY: { value: options.clientY ?? 0 },
-		...('relatedTarget' in options
-			? { relatedTarget: { value: options.relatedTarget } }
-			: {}),
+		...('relatedTarget' in options ? { relatedTarget: { value: options.relatedTarget } } : {}),
 	});
 	Object.defineProperty(event, 'currentTarget', { value: currentTarget });
 	return event;
@@ -188,22 +186,21 @@ describe('WorkspaceWindowDndController', () => {
 			blockedReason: undefined,
 		});
 		expect(
-			dnd.handleWindowDrop(
-				'window-main',
-				dragEvent('drop', target, { clientX: 50, clientY: 50 }),
-			),
+			dnd.handleWindowDrop('window-main', dragEvent('drop', target, { clientX: 50, clientY: 50 })),
 		).toMatchObject({
 			payload: { kind: 'chat', chatId: 'chat-a' },
 			target: { kind: 'window', windowId: 'window-main', zone: 'center' },
 		});
 	});
 
-	it('blocks Chat edges but keeps the center available at the four-window cap', () => {
+	it('blocks Chat edges but keeps the center available at the resource ceiling', () => {
 		const layout = createWorkspaceLayoutStore();
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
-				...(['git', 'commit'] as const).map((kind, index) => ({
+				...(
+					['git', 'commit', 'git-history', 'git-compare', 'chat-map', 'pull-requests'] as const
+				).map((kind, index) => ({
 					type: 'register-surface-in-new-window' as const,
 					surface: portableSingletonDescriptor(kind),
 					targetWindowId: 'window-main' as const,

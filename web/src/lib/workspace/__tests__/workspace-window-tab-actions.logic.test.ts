@@ -166,13 +166,16 @@ describe('workspace window tab actions', () => {
 				workspaceWindow('window-two', ['terminal:two']),
 				workspaceWindow('window-three', ['terminal:three']),
 				workspaceWindow('window-four', ['terminal:four']),
+				...Array.from({ length: 4 }, (_, index) =>
+					workspaceWindow(`window-extra-${index}`, [`terminal:extra-${index}`]),
+				),
 			],
 			'chat-a',
 		);
 
 		const actions = resolveActions(snapshot, source, chatViewSurfaceId(source.id));
 
-		expect(actions.otherWindows).toHaveLength(3);
+		expect(actions.otherWindows).toHaveLength(7);
 		expect(
 			Object.values(actions.newWindowEdges).every(
 				(result) => !result?.allowed && result?.reason === 'resource-ceiling',

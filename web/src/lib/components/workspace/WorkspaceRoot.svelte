@@ -15,7 +15,10 @@
 	import WorkspaceCompactWindowSwitcher from './WorkspaceCompactWindowSwitcher.svelte';
 	import WorkspaceWindow from './WorkspaceWindow.svelte';
 	import WorkspaceWindowResizer from './WorkspaceWindowResizer.svelte';
-	import { workspaceWindowBodyTopPx } from './workspace-window-chrome.js';
+	import {
+		workspaceWindowBodyTopPx,
+		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX,
+	} from './workspace-window-chrome.js';
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
 	import {
 		getChatSessions,
@@ -132,7 +135,6 @@
 	let renamingTerminalId = $state<string | null>(null);
 	let conversationPanelActions = $state<ConversationPanelActions | null>(null);
 	let composerInsetPx = $state(0);
-	let dismissedCompactHintSession = $state<number | null>(null);
 	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
@@ -148,11 +150,6 @@
 		return null;
 	});
 	const presentedCurrentWindowId = $derived(projectedWindowId ?? currentWindowId);
-	const showCompactRecoveryHint = $derived(
-		compactActive &&
-			chatListConsumesWorkspaceWidth &&
-			dismissedCompactHintSession !== hostGeometry.compactSession,
-	);
 	const portablePresentations = $derived(
 		visiblePortablePresentations(snapshot, isMobile, { projectedWindowId }),
 	);
@@ -390,10 +387,6 @@
 		return projectedWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
 	}
 
-	function dismissCompactRecoveryHint(): void {
-		dismissedCompactHintSession = hostGeometry.compactSession;
-	}
-
 	function resizerStyle(partition: WorkspacePartitionNode, bounds: WorkspaceWindowRect): string {
 		const ratio = rootState.partitionRatio(partition.id, partition.ratio);
 		if (partition.direction === 'horizontal') {
@@ -470,20 +463,6 @@
 	{/if}
 {/snippet}
 
-{#snippet compactNavigation()}
-	<WorkspaceCompactWindowSwitcher
-		windows={compactWindows}
-		currentWindowId={presentedCurrentWindowId}
-		labelFor={label}
-		showRecoveryHint={showCompactRecoveryHint}
-		{chatListConsumesWorkspaceWidth}
-		{canEnableChatListAutohide}
-		onActivate={(windowId) => workspace.activateWindowFromCompactNavigation(windowId)}
-		onDismissHint={dismissCompactRecoveryHint}
-		{onEnableChatListAutohide}
-	/>
-{/snippet}
-
 <div
 	class="workspace-host-region relative flex h-full min-h-0 min-w-0 flex-1 bg-background"
 	role="region"
@@ -493,6 +472,20 @@
 	data-workspace-single-window-projection={safetyProjectionActive ? 'true' : undefined}
 	{@attach hostGeometry.attach}
 >
+	{#if compactActive}
+		<div class="absolute inset-x-0 z-40" style:top={`${WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX}px`}>
+			<WorkspaceCompactWindowSwitcher
+				windows={compactWindows}
+				currentWindowId={presentedCurrentWindowId}
+				labelFor={label}
+				{chatListConsumesWorkspaceWidth}
+				{canEnableChatListAutohide}
+				onActivate={(windowId) => workspace.activateWindowFromCompactNavigation(windowId)}
+				onExitNavigation={() => workspace.activateWindow(workspace.currentWindowId)}
+				{onEnableChatListAutohide}
+			/>
+		</div>
+	{/if}
 	<div
 		class="relative min-h-0 min-w-0 flex-1"
 		class:hidden={isMobile}
@@ -518,9 +511,7 @@
 				surfaceStyle={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
-				compactNavigation={compactActive && projectedWindowId === workspaceWindow.id
-					? compactNavigation
-					: null}
+				hasCompactNavigation={compactActive && projectedWindowId === workspaceWindow.id}
 			/>
 		{/each}
 		{#if !projectedWindowId}
