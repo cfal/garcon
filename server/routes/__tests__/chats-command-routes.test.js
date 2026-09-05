@@ -134,6 +134,7 @@ function createRouteAgent(sessionOverrides = {}) {
   const sessions = new Map([[CHAT_ID, createSession(sessionOverrides)]]);
   const registry = {
     getChat: mock((chatId) => sessions.get(chatId) ?? null),
+    hasChat: mock((chatId) => sessions.has(chatId)),
     addChat: mock((entry) => {
       if (sessions.has(entry.id)) return false;
       sessions.set(entry.id, entry);
