@@ -15,6 +15,7 @@ export interface PreambleHistoryEvidence {
   readonly receipt: PreamblePrefixReceipt;
   readonly boundary: PendingPreambleBoundary;
   readonly preambles: readonly AppliedPreambleReference[];
+  readonly requiresNativeOccurrence: boolean;
 }
 
 export interface SanitizedPreambleMessage {
@@ -24,6 +25,7 @@ export interface SanitizedPreambleMessage {
 
 export type SanitizePreamblePrefixesResult =
   | { readonly kind: 'sanitized'; readonly messages: readonly SanitizedPreambleMessage[] }
+  | { readonly kind: 'not-yet-persisted'; readonly reason: string }
   | { readonly kind: 'mismatch'; readonly reason: string };
 
 export function collectPreambleHistoryEvidence(
@@ -44,6 +46,7 @@ export function collectPreambleHistoryEvidence(
         receipt,
         boundary: input.detail.preambleBoundary,
         preambles: row.detail.preambles.map((preamble) => ({ ...preamble })),
+        requiresNativeOccurrence: hasProviderTurnCompletion(rows, index + 2),
       });
       index += 1;
       continue;
@@ -107,7 +110,46 @@ export function sanitizeRecordedPreamblePrefixes(input: {
       application: evidence,
     });
   }
+  if (hasMissingRequiredNativeOccurrence(input.evidence, used)) {
+    return {
+      kind: 'not-yet-persisted',
+      reason: 'completed preamble turn is absent from native history',
+    };
+  }
   return { kind: 'sanitized', messages };
+}
+
+function hasProviderTurnCompletion(rows: readonly LedgerRow[], startIndex: number): boolean {
+  for (let index = startIndex; index < rows.length; index += 1) {
+    const row = rows[index]!;
+    if (row.kind === 'user-input' && !row.detail.steer) return false;
+    if (row.kind === 'run-ended' && row.origin === 'provider') return true;
+  }
+  return false;
+}
+
+function hasMissingRequiredNativeOccurrence(
+  evidence: readonly PreambleHistoryEvidence[],
+  used: ReadonlySet<number>,
+): boolean {
+  const requiredBySignature = new Map<string, number>();
+  const observedBySignature = new Map<string, number>();
+  for (const [index, entry] of evidence.entries()) {
+    const signature = receiptSignature(entry.receipt);
+    if (entry.requiresNativeOccurrence) {
+      requiredBySignature.set(signature, (requiredBySignature.get(signature) ?? 0) + 1);
+    }
+    if (used.has(index)) {
+      observedBySignature.set(signature, (observedBySignature.get(signature) ?? 0) + 1);
+    }
+  }
+  return [...requiredBySignature].some(
+    ([signature, required]) => (observedBySignature.get(signature) ?? 0) < required,
+  );
+}
+
+function receiptSignature(receipt: PreamblePrefixReceipt): string {
+  return `${receipt.codeUnitLength}:${receipt.sha256}`;
 }
 
 function hasVersionOneOpeningFrame(content: string): boolean {

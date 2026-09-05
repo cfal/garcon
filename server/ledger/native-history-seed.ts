@@ -74,6 +74,14 @@ export async function importNativeHistoryDrafts({
     messages: sanitized.messages,
     evidence: preambleEvidence,
   });
+  if (preambles.kind === 'not-yet-persisted') {
+    throw new DomainError(
+      'HISTORY_LOAD_FAILED',
+      'The native transcript has not persisted the completed turn yet. Try again shortly.',
+      409,
+      true,
+    );
+  }
   if (preambles.kind === 'mismatch') {
     throw new DomainError(
       'PREAMBLE_ENVELOPE_MISMATCH',

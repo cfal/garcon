@@ -96,6 +96,7 @@ describe('native history ledger seed', () => {
         receipt: application.receipt,
         boundary,
         preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        requiresNativeOccurrence: false,
       }],
       async *load() {
         yield [{
@@ -138,6 +139,7 @@ describe('native history ledger seed', () => {
       receipt: application.receipt,
       boundary: { kind: 'fork', ownershipEpoch: 'ownership-1' },
       preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+      requiresNativeOccurrence: false,
     }];
 
     await expect(importNativeHistoryDrafts(seedInput({
@@ -156,6 +158,28 @@ describe('native history ledger seed', () => {
     }]);
   });
 
+  it('retries when native history omits a completed preamble application turn', async () => {
+    const application = createPreamblePrefix({
+      contents: ['private preamble body'],
+    });
+
+    await expect(importNativeHistoryDrafts(seedInput({
+      receipt: null,
+      preambleEvidence: [{
+        receipt: application.receipt,
+        boundary: { kind: 'new-chat', ownershipEpoch: 'ownership-1' },
+        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        requiresNativeOccurrence: true,
+      }],
+      async *load() {
+        yield [{ message: new UserMessage(AT, 'earlier visible prompt') }];
+      },
+    }))).rejects.toMatchObject({
+      code: 'HISTORY_LOAD_FAILED',
+      retryable: true,
+    });
+  });
+
   it('fails closed when a receipt-bearing native prefix was changed', async () => {
     const application = createPreamblePrefix({
       contents: ['private preamble body'],
@@ -164,6 +188,7 @@ describe('native history ledger seed', () => {
       receipt: application.receipt,
       boundary: { kind: 'fork', ownershipEpoch: 'ownership-1' },
       preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+      requiresNativeOccurrence: false,
     }];
 
     await expect(importNativeHistoryDrafts(seedInput({

@@ -366,6 +366,100 @@ describe('TranscriptReloadService', () => {
     });
   });
 
+  it('preserves completed preamble evidence until native history persists the turn', async () => {
+    await withReload(async ({ ledger, reload, integration, lease, oldViewId }) => {
+      const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
+      const application = ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: oldViewId,
+        message: new UserMessage(TS, 'visible boundary prompt'),
+        attachments: [],
+        clientMessageId: 'completed-preamble-input',
+        steer: false,
+        preambleBoundary: boundary,
+        preambles: [{
+          id: 'preamble-1',
+          enabled: true,
+          title: 'Repository rules',
+          content: 'private preamble body',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
+      });
+      ledger.beginRun('chat-1', 'completed-preamble-run');
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'completed live answer') }],
+      });
+      lease.sink.publish({
+        type: 'run-ended',
+        runId: 'completed-preamble-run',
+        outcome: 'finished',
+      });
+      let importAttempt = 0;
+      integration.nativeHistoryImport.load = async function* load() {
+        importAttempt += 1;
+        yield [
+          { message: new UserMessage(TS, 'native prompt') },
+          { message: new AssistantMessage(TS, 'native answer') },
+          ...(importAttempt === 1
+            ? []
+            : [
+                {
+                  message: new UserMessage(
+                    TS,
+                    `${application.providerPrefix}visible boundary prompt`,
+                  ),
+                },
+                { message: new AssistantMessage(TS, 'completed native answer') },
+              ]),
+        ];
+      };
+
+      await expect(reload.reload('chat-1')).rejects.toMatchObject({
+        code: 'HISTORY_LOAD_FAILED',
+        retryable: true,
+      });
+      expect(ledger.currentView('chat-1').viewId).toBe(oldViewId);
+      expect(ledger.currentRows('chat-1')).toContainEqual(expect.objectContaining({
+        kind: 'user-input',
+        detail: expect.objectContaining({
+          clientMessageId: 'completed-preamble-input',
+          preamblePrefixReceipt: application.input.detail.preamblePrefixReceipt,
+        }),
+      }));
+
+      await reload.reload('chat-1');
+      await reload.reload('chat-1');
+
+      const rows = ledger.currentRows('chat-1');
+      const noticeIndex = rows.findIndex(
+        (row) => row.kind === 'notice' && row.detail.type === 'preamble-application',
+      );
+      expect(noticeIndex).toBeGreaterThanOrEqual(0);
+      expect(rows.slice(noticeIndex, noticeIndex + 2)).toMatchObject([
+        {
+          kind: 'notice',
+          detail: {
+            type: 'preamble-application',
+            preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+          },
+        },
+        {
+          kind: 'user-input',
+          detail: {
+            message: { content: 'visible boundary prompt' },
+            preambleBoundary: boundary,
+            preamblePrefixReceipt: application.input.detail.preamblePrefixReceipt,
+          },
+        },
+      ]);
+      expect(importAttempt).toBe(3);
+      expect(JSON.stringify(rows)).not.toContain('private preamble body');
+    });
+  });
+
   it('preserves receipt evidence across repeated reloads of control-shaped boundary inputs', async () => {
     const visiblePrompts = [
       '<garcon-chat-id>1787836573296800</garcon-chat-id>',

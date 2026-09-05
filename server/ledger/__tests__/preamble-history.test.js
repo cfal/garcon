@@ -57,6 +57,36 @@ function rowGroup({
   ];
 }
 
+function userInputRow(ordinal, steer) {
+  return {
+    viewId: VIEW_ID,
+    ordinal,
+    kind: 'user-input',
+    at: AT,
+    detail: {
+      clientMessageId: `message-${ordinal}`,
+      message: new UserMessage(AT, steer ? 'Visible steer' : 'Visible follow-up'),
+      attachments: [],
+      steer,
+      preambleBoundary: null,
+      preamblePrefixReceipt: null,
+    },
+    providerMeta: null,
+  };
+}
+
+function providerRunEndedRow(ordinal) {
+  return {
+    viewId: VIEW_ID,
+    ordinal,
+    kind: 'run-ended',
+    at: AT,
+    outcome: 'finished',
+    origin: 'provider',
+    providerMeta: null,
+  };
+}
+
 describe('preamble history evidence', () => {
   it('collects only an adjacent typed notice and receipt-bearing boundary input', () => {
     expect(collectPreambleHistoryEvidence(rowGroup())).toEqual([{
@@ -66,7 +96,24 @@ describe('preamble history evidence', () => {
         { id: 'preamble-a', title: 'First' },
         { id: 'preamble-b', title: 'Second' },
       ],
+      requiresNativeOccurrence: false,
     }]);
+  });
+
+  it('keeps steers in the application turn and stops at the next ordinary input', () => {
+    const completedEvidence = collectPreambleHistoryEvidence([
+      ...rowGroup(),
+      userInputRow(3, true),
+      providerRunEndedRow(4),
+    ]);
+    const supersededEvidence = collectPreambleHistoryEvidence([
+      ...rowGroup(),
+      userInputRow(3, false),
+      providerRunEndedRow(4),
+    ]);
+
+    expect(completedEvidence).toMatchObject([{ requiresNativeOccurrence: true }]);
+    expect(supersededEvidence).toMatchObject([{ requiresNativeOccurrence: false }]);
   });
 
   it('rejects orphan notices and orphan receipts', () => {
@@ -261,6 +308,47 @@ describe('preamble native-history sanitation', () => {
       messages: [message],
       evidence: collectPreambleHistoryEvidence(rowGroup()),
     })).toEqual({ kind: 'sanitized', messages: [{ message }] });
+  });
+
+  it('reports a completed application turn that is absent from native history', () => {
+    const evidence = collectPreambleHistoryEvidence([
+      ...rowGroup(),
+      providerRunEndedRow(3),
+    ]);
+
+    expect(sanitizeRecordedPreamblePrefixes({
+      messages: [new UserMessage(AT, 'Earlier visible prompt')],
+      evidence,
+    })).toEqual({
+      kind: 'not-yet-persisted',
+      reason: 'completed preamble turn is absent from native history',
+    });
+  });
+
+  it('counts indistinguishable native occurrences by receipt signature', () => {
+    const applied = application();
+    const evidence = collectPreambleHistoryEvidence([
+      ...rowGroup({
+        applied,
+        preambles: [{ id: 'preamble-a', title: 'Optional' }],
+      }),
+      ...rowGroup({
+        applied,
+        ordinal: 3,
+        clientMessageId: 'message-two',
+        preambles: [{ id: 'preamble-b', title: 'Required' }],
+      }),
+      providerRunEndedRow(5),
+    ]);
+
+    expect(evidence.map((entry) => entry.requiresNativeOccurrence)).toEqual([false, true]);
+    expect(sanitizeRecordedPreamblePrefixes({
+      messages: [new UserMessage(AT, `${applied.prefix}Visible prompt`)],
+      evidence,
+    })).toMatchObject({
+      kind: 'sanitized',
+      messages: [{ application: { preambles: [{ title: 'Optional' }] } }],
+    });
   });
 
   it('leaves all user-authored messages unchanged when there is no evidence', () => {

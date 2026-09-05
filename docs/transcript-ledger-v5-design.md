@@ -1,10 +1,21 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 33 integrated design. Supersedes
+Status: revision 34 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 34 prevents native-history persistence lag from deleting the only
+receipt evidence for a completed preamble turn. A provider-origin `run-ended`
+after the application input and before the next ordinary non-steer input makes
+one native occurrence of that receipt signature mandatory; intervening steers
+remain part of the same turn. If the normalized native history has fewer
+matching occurrences than completed applications, Reload fails retryably with
+`HISTORY_LOAD_FAILED` before cutover and native-fidelity target creation
+aborts. Evidence without provider-completion proof remains valid for the
+commit-before-dispatch crash window. Identical prefixes remain intentionally
+indistinguishable and are counted by receipt signature.
 
 Revision 33 defines preamble receipt SHA-256 over the exact JavaScript UTF-16
 code units of the complete prefix, serialized as unsigned 16-bit little-endian
@@ -28,8 +39,9 @@ remain sufficient proof of the complete prefix. Native sanitation matches
 each framed message to the sole matching receipt signature and then the
 earliest unused exact receipt in ledger order;
 identical prefixes are intentionally indistinguishable and consume identical
-evidence in that order. Missing native occurrences remain valid crash-window
-evidence, while a malformed frame, an unmatched exact prefix, more native
+evidence in that order. At that revision, missing native occurrences remained
+valid crash-window evidence, while a malformed frame, an unmatched exact
+prefix, more native
 occurrences than matching receipts, or more than one distinct matching
 receipt signature fails closed.
 
@@ -552,8 +564,12 @@ The decisions:
   preamble prefixes proven by receipts collected from the selected ledger
   binding. A recognizable malformed, unmatched, or multi-signature prefix, or
   an excess native occurrence without matching evidence, fails before cutover or target
-  publication; receipt evidence absent from native
-  history is allowed for the commit-before-dispatch crash window.
+  publication. Receipt evidence absent from native history is allowed only
+  without provider-completion proof. A provider-origin `run-ended` after the
+  application input and before the next ordinary non-steer input requires one
+  native occurrence of that receipt signature; a missing required occurrence
+  fails retryably with `HISTORY_LOAD_FAILED` before Reload cutover or
+  native-fidelity target publication.
 - **L11 Fail closed, per chat.** A commit failure or unknown commit
   outcome fences the chat's ledger for writes; `SQLITE_CORRUPT` or any
   other ledger failure on open or query fences that chat with a typed
@@ -1818,11 +1834,18 @@ in ledger order, restores that private receipt
 and boundary proof on the imported input, and reconstructs the immutable
 title-only notice immediately before it. Identical prefixes consume identical
 evidence in ledger order because the removed application identifier served
-only as sanitation correlation and is no longer required. Evidence with no
-native occurrence is allowed
-for the commit-before-dispatch crash window. A malformed, unmatched, or
-multi-signature leading Garcon preamble frame, or an excess native occurrence without matching
-evidence, fails with `PREAMBLE_ENVELOPE_MISMATCH` before
+only as sanitation correlation and is no longer required. Core marks an
+application as requiring a native occurrence when a provider-origin
+`run-ended` follows it before the next ordinary non-steer input; intervening
+steers remain part of that application turn. After sanitation, observed and
+required counts are compared by receipt signature because identical prefixes
+are intentionally indistinguishable. A missing required occurrence fails
+retryably with `HISTORY_LOAD_FAILED`, preserving the current view on Reload and
+aborting native-fidelity target creation. Evidence without provider-completion
+proof may remain absent for the commit-before-dispatch crash window. A
+malformed, unmatched, or multi-signature leading Garcon preamble frame, or an
+excess native occurrence without matching evidence, fails with
+`PREAMBLE_ENVELOPE_MISMATCH` before
 cutover; raw injected text is never presented. The frozen prefix preserves the
 prior conversational rows, agent-switch boundaries, carryover-quarantine
 notices, and preamble-application notices while dropping other lifecycle rows.
@@ -2156,7 +2179,8 @@ relevant-entry definition under the 10.2 obligation.
 | Reload cannot durably flush the current registry before view replacement | Reload aborts before cutover; it cannot delete the only zero-match proof while disk still records the boundary as armed. |
 | Native import contains an exact receipt-matched preamble prefix | Core strips the receipt-covered prefix, reconstructs its title-only notice, and restores the private receipt and boundary proof on the imported input. |
 | Native import contains a malformed, unmatched, or multi-signature leading preamble frame, or more framed occurrences than matching receipts | Typed `PREAMBLE_ENVELOPE_MISMATCH`; Reload preserves the current view and native-fidelity target creation aborts. Raw framed content is never presented. |
-| Ledger preamble evidence has no native occurrence | Allowed as the commit-before-dispatch or provider-persistence crash window; unrelated native messages import normally. |
+| Ledger preamble evidence has no native occurrence and no later provider-origin terminal before the next ordinary input | Allowed as the commit-before-dispatch crash window; unrelated native messages import normally. |
+| A completed preamble turn has fewer native occurrences than its required receipt-signature count | Retryable `HISTORY_LOAD_FAILED`; Reload preserves the current view and native-fidelity target creation aborts until native persistence catches up. |
 | Crash with entries in the future-turn queue | Queue lost by design; no rows; resubmission is the user's explicit choice, idempotent by `clientMessageId`. |
 | Commit failure during dequeue | The entry stays queued while the chat fences; dequeue is one synchronous block, so a retry observes exactly one identity. |
 | Duplicate submission retry, same `clientMessageId`, identical content | Existing queue disposition or ledger row returned via the submission unique index; no second row; no re-dispatch. |
@@ -2504,8 +2528,9 @@ The catalog cites this revision, but its inventory is not repeated here.
   exactly-once application across new chat, fork, continuation, and in-place
   agent-switch boundaries through the server boundary;
   `TLV5-PREAMBLE.04-NATIVE-UNIT-01` proves exact receipt sanitation, including
-  exact UTF-16 code-unit hashing without lone-surrogate replacement, and
-  reconstructed immutable evidence;
+  exact UTF-16 code-unit hashing without lone-surrogate replacement,
+  completed-turn persistence-lag refusal, signature-counted identical
+  receipts, and reconstructed immutable evidence;
   `TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01` proves presentation/export
   inclusion and exclusion from every conversational fold; and
   `TLV5-PREAMBLE.06-LIGHTPANDA-01` exercises catalog management, enabled

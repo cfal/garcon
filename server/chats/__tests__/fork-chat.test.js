@@ -589,6 +589,7 @@ describe('forkChatFileCopy', () => {
         receipt: application.receipt,
         boundary,
         preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        requiresNativeOccurrence: false,
       }],
     }));
     expect(deps.sessions.get('target-chat').pendingPreambleBoundary).toEqual({
