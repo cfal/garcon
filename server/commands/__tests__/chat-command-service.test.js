@@ -783,6 +783,20 @@ function attachment(mimeType, content = 'hello') {
   };
 }
 
+async function createUnresolvableProjectPaths() {
+  const danglingPath = path.join(projectBaseDir, 'dangling');
+  const danglingAncestorPath = path.join(projectBaseDir, 'dangling-ancestor');
+  const filePath = path.join(projectBaseDir, 'file');
+  await fs.symlink(path.join(projectBaseDir, 'missing'), danglingPath);
+  await fs.symlink(path.join(projectBaseDir, 'missing-ancestor'), danglingAncestorPath);
+  await fs.writeFile(filePath, 'not a directory');
+  return [
+    danglingPath,
+    path.join(danglingAncestorPath, 'project'),
+    path.join(filePath, 'project'),
+  ];
+}
+
 function handoffRunInput(clientRequestId = 'req-agent-handoff') {
   return {
     chatId: SOURCE_CHAT_ID,
@@ -1996,6 +2010,28 @@ describe('ChatCommandService', () => {
       code: 'VALIDATION_FAILED',
       status: 404,
     });
+
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('maps unresolvable chat start project paths to not found', async () => {
+    const { service, agents, chats } = makeService({ session: null });
+    const projectPaths = await createUnresolvableProjectPaths();
+
+    for (const [index, projectPath] of projectPaths.entries()) {
+      await expect(service.submitStart({
+        origin: 'interactive',
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        projectPath,
+        command: 'hello',
+        model: 'opus',
+        agentSettings: agentSettings(),
+        clientRequestId: `req-start-unresolvable-${index}`,
+        clientMessageId: `msg-start-unresolvable-${index}`,
+      })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 404 });
+    }
 
     expect(chats.addChat).not.toHaveBeenCalled();
     expect(agents.startSession).not.toHaveBeenCalled();
@@ -5152,6 +5188,21 @@ describe('ChatCommandService', () => {
       { flush: true },
     );
     expect(sessions.get(SOURCE_CHAT_ID).projectPath).toBe(realNextPath);
+  });
+
+  it('maps unresolvable project path updates to not found', async () => {
+    const { service, chats, agents } = makeService();
+    const projectPaths = await createUnresolvableProjectPaths();
+
+    for (const projectPath of projectPaths) {
+      await expect(service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath,
+      })).rejects.toMatchObject({ code: 'PROJECT_PATH_NOT_FOUND', status: 404 });
+    }
+
+    expect(chats.updateProjectPath).not.toHaveBeenCalled();
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
   it('persists a prepared native session before provider cleanup', async () => {

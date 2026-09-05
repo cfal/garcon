@@ -491,6 +491,31 @@ describe('files route', () => {
     expect(body.error).toBe(`Project path not found: ${missingPath}`);
   });
 
+  it('returns 404 for unresolvable project roots during path canonicalization', async () => {
+    const danglingPath = path.join(projectPath, 'dangling');
+    const danglingAncestorPath = path.join(projectPath, 'dangling-ancestor');
+    const filePath = path.join(projectPath, 'file');
+    await fs.symlink(path.join(projectPath, 'missing'), danglingPath);
+    await fs.symlink(path.join(projectPath, 'missing-ancestor'), danglingAncestorPath);
+    await fs.writeFile(filePath, 'not a directory');
+    const projectPaths = [
+      danglingPath,
+      path.join(danglingAncestorPath, 'project'),
+      path.join(filePath, 'project'),
+    ];
+    const routes = createFilesRoutes({ getChat: () => null });
+
+    for (const unresolvablePath of projectPaths) {
+      const url = new URL(
+        `http://localhost/api/v1/files/list?projectPath=${encodeURIComponent(unresolvablePath)}`,
+      );
+      const response = await routes['/api/v1/files/list'].GET(new Request(url), url);
+      const body = await response.json();
+      expect(response.status).toBe(404);
+      expect(body.error).toBe(`Project path not found: ${unresolvablePath}`);
+    }
+  });
+
   it('rejects chat project paths outside the configured base', async () => {
     const routes = createFilesRoutes({
       getChat: () => ({ projectPath: outsidePath }),

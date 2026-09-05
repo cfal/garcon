@@ -18,6 +18,7 @@ import {
 } from '../chat-execution/control-state.ts';
 import { createLogger } from '../lib/log.js';
 import { withCurrentExecutionControl } from '../lib/command-execution-control-error.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import {
   CommandSupport,
@@ -555,6 +556,13 @@ export class SessionCommands {
           'PROJECT_PATH_OUTSIDE_BASE',
           'Project path is outside the allowed base directory',
           403,
+        );
+      }
+      if (hasNodeErrorCode(error, 'ENOENT') || hasNodeErrorCode(error, 'ENOTDIR')) {
+        throw new CommandValidationError(
+          'PROJECT_PATH_NOT_FOUND',
+          `Project path not found: ${requestedPath}`,
+          404,
         );
       }
       throw error;

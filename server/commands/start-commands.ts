@@ -6,6 +6,7 @@ import {
 } from '../../common/chat-command-contracts.js';
 
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
@@ -281,6 +282,9 @@ export class StartCommands {
           'Project path is outside the allowed base directory',
           403,
         );
+      }
+      if (hasNodeErrorCode(error, 'ENOENT') || hasNodeErrorCode(error, 'ENOTDIR')) {
+        throw new CommandValidationError('VALIDATION_FAILED', `Project path not found: ${requestedPath}`, 404);
       }
       throw error;
     }
