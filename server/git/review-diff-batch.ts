@@ -94,6 +94,24 @@ function expectedStatus(
     : file.change.workTreeStatus;
 }
 
+// The registered originalPath is the porcelain entry's rename source, so it
+// exists even when the reviewed facet is not the renaming one (RM reviews the
+// worktree edit). A split only carries a source when its own side detected
+// the rename, so the expectation must be scoped to the reviewed facet's
+// column instead of comparing the entry-level source directly.
+function expectedRenameSource(
+  document: RegisteredGitReviewDocument,
+  file: RegisteredGitReviewFile,
+): string | null {
+  if (document.source.kind !== 'workbench' || file.change.kind !== 'workbench') {
+    return file.originalPath ?? null;
+  }
+  const status = document.source.mode === 'staged'
+    ? file.change.indexStatus
+    : file.change.workTreeStatus;
+  return status === 'R' || status === 'C' ? file.originalPath ?? null : null;
+}
+
 function splitMatches(
   document: RegisteredGitReviewDocument,
   file: RegisteredGitReviewFile,
@@ -102,7 +120,7 @@ function splitMatches(
   const expected = expectedStatus(document, file);
   const actual = split.rawStatus.slice(0, 1);
   if (expected && expected !== ' ' && expected !== actual) return false;
-  return (file.originalPath ?? null) === (split.originalPath ?? null);
+  return expectedRenameSource(document, file) === (split.originalPath ?? null);
 }
 
 function diffArgs(

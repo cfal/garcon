@@ -409,6 +409,35 @@ describe('Git review documents', () => {
     if (response.status === 'ready') expect(response.files['other.txt'].patch).toBeTruthy();
   });
 
+  it('loads unstaged edits to a staged rename without a mirrored rename source', async () => {
+    const projectPath = await createRepository();
+    const service = createService();
+    await git(projectPath, ['mv', 'a.txt', 'renamed.txt']);
+    await fs.writeFile(path.join(projectPath, 'renamed.txt'), 'renamed and edited\n');
+
+    const snapshot = await service.getWorkbenchSnapshot({
+      projectPath,
+      mode: 'working',
+      context: 3,
+    });
+    expect(snapshot.status).toBe('ready');
+    if (snapshot.status !== 'ready') return;
+    const renamed = snapshot.reviewSummary.files.find((file) => file.path === 'renamed.txt');
+    expect(renamed?.originalPath).toBe('a.txt');
+
+    const response = await service.getReviewDocumentFileBodies({
+      projectPath,
+      documentId: snapshot.reviewSummary.documentId,
+      files: ['renamed.txt'],
+      purpose: 'visible',
+    });
+
+    expect(response.status).toBe('ready');
+    if (response.status === 'ready') {
+      expect(response.files['renamed.txt'].patch).toContain('+renamed and edited');
+    }
+  });
+
   it('returns a typed response for an expired document', async () => {
     const projectPath = await createRepository();
     const response = await createService().getReviewDocumentFileBodies({
