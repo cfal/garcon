@@ -17,6 +17,7 @@ import type {
 } from './store.js';
 import { carryOverRevision } from './carryover-segments.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
+import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 
 const logger = createLogger('chats:ownership-journal');
 export const AGENT_OWNERSHIP_JOURNAL_VERSION = 5 as const;
@@ -214,7 +215,7 @@ export class AgentOwnershipJournal {
       nativeSeedReceipt: null,
       carryOverSegments: [],
       carryOverMigrationQuarantine: null,
-      agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
+      ...createPreambleBoundaryBinding('agent-switch', intent.target.agentOwnershipEpoch),
     }, { flush: true });
     if (!updated) throw new Error(`Session not found: ${intent.chatId}`);
 

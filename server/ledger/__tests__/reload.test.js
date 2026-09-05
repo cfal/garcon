@@ -315,6 +315,299 @@ describe('TranscriptReloadService', () => {
     });
   });
 
+  it('reconstructs preamble notices while keeping bodies out of the replacement view', async () => {
+    await withReload(async ({ ledger, reload, integration }) => {
+      const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
+      const application = ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: ledger.currentView('chat-1').viewId,
+        message: new UserMessage(TS, 'visible boundary prompt'),
+        attachments: [],
+        clientMessageId: 'preamble-boundary-input',
+        steer: false,
+        preambleBoundary: boundary,
+        preambles: [{
+          id: 'preamble-1',
+          enabled: true,
+          title: 'Repository rules',
+          content: 'private preamble body',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
+      });
+      integration.nativeHistoryImport.load = async function* load() {
+        yield [{
+          message: new UserMessage(TS, `${application.providerPrefix}visible boundary prompt`),
+        }];
+      };
+
+      await reload.reload('chat-1');
+
+      const rows = ledger.currentRows('chat-1');
+      expect(rows.slice(-2)).toMatchObject([
+        {
+          kind: 'notice',
+          message: 'Preambles applied',
+          detail: {
+            type: 'preamble-application',
+            preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+          },
+        },
+        {
+          kind: 'user-input',
+          detail: {
+            message: { content: 'visible boundary prompt' },
+            preambleBoundary: boundary,
+          },
+        },
+      ]);
+      expect(JSON.stringify(rows)).not.toContain('private preamble body');
+    });
+  });
+
+  it('preserves completed preamble evidence until native history persists the turn', async () => {
+    await withReload(async ({ ledger, reload, integration, lease, oldViewId }) => {
+      const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
+      const application = ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: oldViewId,
+        message: new UserMessage(TS, 'visible boundary prompt'),
+        attachments: [],
+        clientMessageId: 'completed-preamble-input',
+        steer: false,
+        preambleBoundary: boundary,
+        preambles: [{
+          id: 'preamble-1',
+          enabled: true,
+          title: 'Repository rules',
+          content: 'private preamble body',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
+      });
+      ledger.beginRun('chat-1', 'completed-preamble-run');
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'completed live answer') }],
+      });
+      lease.sink.publish({
+        type: 'run-ended',
+        runId: 'completed-preamble-run',
+        outcome: 'finished',
+      });
+      let importAttempt = 0;
+      integration.nativeHistoryImport.load = async function* load() {
+        importAttempt += 1;
+        yield [
+          { message: new UserMessage(TS, 'native prompt') },
+          { message: new AssistantMessage(TS, 'native answer') },
+          ...(importAttempt === 1
+            ? []
+            : [
+                {
+                  message: new UserMessage(
+                    TS,
+                    `${application.providerPrefix}visible boundary prompt`,
+                  ),
+                },
+                { message: new AssistantMessage(TS, 'completed native answer') },
+              ]),
+        ];
+      };
+
+      await expect(reload.reload('chat-1')).rejects.toMatchObject({
+        code: 'HISTORY_LOAD_FAILED',
+        retryable: true,
+      });
+      expect(ledger.currentView('chat-1').viewId).toBe(oldViewId);
+      expect(ledger.currentRows('chat-1')).toContainEqual(expect.objectContaining({
+        kind: 'user-input',
+        detail: expect.objectContaining({
+          clientMessageId: 'completed-preamble-input',
+          preamblePrefixReceipt: application.input.detail.preamblePrefixReceipt,
+        }),
+      }));
+
+      await reload.reload('chat-1');
+      await reload.reload('chat-1');
+
+      const rows = ledger.currentRows('chat-1');
+      const noticeIndex = rows.findIndex(
+        (row) => row.kind === 'notice' && row.detail.type === 'preamble-application',
+      );
+      expect(noticeIndex).toBeGreaterThanOrEqual(0);
+      expect(rows.slice(noticeIndex, noticeIndex + 2)).toMatchObject([
+        {
+          kind: 'notice',
+          detail: {
+            type: 'preamble-application',
+            preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+          },
+        },
+        {
+          kind: 'user-input',
+          detail: {
+            message: { content: 'visible boundary prompt' },
+            preambleBoundary: boundary,
+            preamblePrefixReceipt: application.input.detail.preamblePrefixReceipt,
+          },
+        },
+      ]);
+      expect(importAttempt).toBe(3);
+      expect(JSON.stringify(rows)).not.toContain('private preamble body');
+    });
+  });
+
+  it('preserves receipt evidence across repeated reloads of control-shaped boundary inputs', async () => {
+    const visiblePrompts = [
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      '<garcon-message from="1787974832309199">\nmessage body\n</garcon-message>',
+    ];
+    for (const visiblePrompt of visiblePrompts) {
+      await withReload(async ({ ledger, reload, integration }) => {
+        const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
+        const application = ledger.appendInputAndCompose({
+          chatId: 'chat-1',
+          viewId: ledger.currentView('chat-1').viewId,
+          message: new UserMessage(TS, visiblePrompt),
+          attachments: [],
+          clientMessageId: 'control-shaped-boundary-input',
+          steer: false,
+          preambleBoundary: boundary,
+          preambles: [{
+            id: 'preamble-1',
+            enabled: true,
+            title: 'Repository rules',
+            content: 'private preamble body',
+            scope: { type: 'global' },
+            createdAt: TS,
+            updatedAt: TS,
+          }],
+        });
+        integration.nativeHistoryImport.load = async function* load() {
+          yield [{ message: new UserMessage(TS, `${application.providerPrefix}${visiblePrompt}`) }];
+        };
+
+        await reload.reload('chat-1');
+        await reload.reload('chat-1');
+
+        const rows = ledger.currentRows('chat-1');
+        expect(rows.slice(-2)).toMatchObject([
+          { kind: 'notice', detail: { type: 'preamble-application' } },
+          {
+            kind: 'user-input',
+            detail: {
+              message: { content: visiblePrompt },
+              preambleBoundary: boundary,
+              preamblePrefixReceipt: application.input.detail.preamblePrefixReceipt,
+            },
+          },
+        ]);
+        expect(JSON.stringify(rows)).not.toContain('private preamble body');
+      });
+    }
+  });
+
+  it('allows a committed preamble application absent from native history after a pre-dispatch crash', async () => {
+    await withReload(async ({ ledger, reload, oldViewId }) => {
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: oldViewId,
+        message: new UserMessage(TS, 'visible boundary prompt'),
+        attachments: [],
+        clientMessageId: 'preamble-missing-input',
+        steer: false,
+        preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'ownership-1' },
+        preambles: [{
+          id: 'preamble-1',
+          enabled: true,
+          title: 'Repository rules',
+          content: 'private preamble body',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
+      });
+
+      await reload.reload('chat-1');
+
+      expect(ledger.currentView('chat-1').viewId).not.toBe(oldViewId);
+      const rows = ledger.currentRows('chat-1');
+      expect(rows.map((row) => row.kind)).toEqual([
+        'user-input',
+        'provider-row',
+        'session',
+        'user-input',
+        'provider-row',
+      ]);
+      expect(rows).not.toContainEqual(expect.objectContaining({
+        kind: 'notice',
+        detail: expect.objectContaining({ type: 'preamble-application' }),
+      }));
+      expect(JSON.stringify(rows)).not.toContain('private preamble body');
+      expect(JSON.stringify(rows)).not.toContain('visible boundary prompt');
+    });
+  });
+
+  it('durably clears a stale zero-match boundary proof before native cutover', async () => {
+    await withReload(async ({ ledger, reload, entry, integration, registryUpdates }) => {
+      const boundary = { kind: 'fork', ownershipEpoch: 'ownership-1' };
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: ledger.currentView('chat-1').viewId,
+        message: new UserMessage(TS, 'zero-match boundary prompt'),
+        attachments: [],
+        clientMessageId: 'preamble-zero-match-input',
+        steer: false,
+        preambleBoundary: boundary,
+        preambles: [],
+      });
+      entry.pendingPreambleBoundary = boundary;
+      integration.nativeHistoryImport.load = async function* load() {
+        expect(entry.pendingPreambleBoundary).toBeNull();
+        yield [{ message: new UserMessage(TS, 'native prompt') }];
+      };
+
+      await reload.reload('chat-1');
+
+      expect(registryUpdates).toContainEqual({
+        patch: { pendingPreambleBoundary: null },
+        options: undefined,
+      });
+      expect(entry.pendingPreambleBoundary).toBeNull();
+    });
+  });
+
+  it('flushes an already-cleared boundary state before native cutover', async () => {
+    const flushStarted = deferred();
+    const allowFlush = deferred();
+    const importStarted = deferred();
+    await withReload(async ({ reload, integration }) => {
+      integration.nativeHistoryImport.load = async function* load() {
+        importStarted.resolve();
+        yield [{ message: new UserMessage(TS, 'native prompt') }];
+      };
+
+      const reloading = reload.reload('chat-1');
+      await flushStarted.promise;
+      let imported = false;
+      void importStarted.promise.then(() => { imported = true; });
+      await Promise.resolve();
+      expect(imported).toBe(false);
+
+      allowFlush.resolve();
+      await reloading;
+      expect(imported).toBe(true);
+    }, {
+      flushRegistry: async () => {
+        flushStarted.resolve();
+        await allowFlush.promise;
+      },
+    });
+  });
+
   it('[TLV5-ADOPT.06-CORE-UNIT-01] carries the quarantine notice through reload while dropping ordinary notices', async () => {
     const quarantineDetail = {
       type: 'carryover-migration-quarantine',
@@ -530,9 +823,14 @@ async function withReload(run, options = {}) {
       return { entries: this.queueEntries, controlEntries: [] };
     },
   };
+  const registryUpdates = [];
   const registry = {
     getChat: () => entry,
-    updateChat: (_chatId, patch) => Object.assign(entry, patch),
+    updateChat: (_chatId, patch, updateOptions) => {
+      registryUpdates.push({ patch, options: updateOptions });
+      return Object.assign(entry, patch);
+    },
+    flush: async () => options.flushRegistry?.(),
   };
   const integrations = {
     get: () => integration,
@@ -570,6 +868,8 @@ async function withReload(run, options = {}) {
       replacementLease,
       execution,
       integration,
+      entry,
+      registryUpdates,
       oldViewId: old.viewId,
       chatMutationLock,
     });

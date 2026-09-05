@@ -14,6 +14,7 @@ import { LedgerFencedError } from './errors.js';
 import { TranscriptLedgerService } from './service.js';
 import { frozenConversationDrafts } from './projection.js';
 import { importNativeHistoryDrafts } from './native-history-seed.js';
+import { collectPreambleHistoryEvidence } from './preamble-history.js';
 
 interface ReloadExecutionPort {
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
@@ -77,7 +78,7 @@ export class TranscriptReloadService {
   }
 
   async #reloadReserved(chatId: string, signal: AbortSignal): Promise<TranscriptView> {
-    const entry = this.options.registry.getChat(chatId);
+    let entry = this.options.registry.getChat(chatId);
     const current = this.options.ledger.currentView(chatId);
     const session = this.options.ledger.currentSession(chatId);
     if (!entry || !current) {
@@ -93,12 +94,23 @@ export class TranscriptReloadService {
       );
     }
 
+    const currentRows = this.options.ledger.currentRows(chatId);
+    const bindingRows = currentRows.filter((row) => row.ordinal >= current.contentStartOrdinal);
+    const preambleEvidence = collectPreambleHistoryEvidence(bindingRows);
+    const pending = entry.pendingPreambleBoundary;
+    if (pending && this.options.ledger.hasPreambleBoundaryProof(chatId, pending)) {
+      const updated = this.options.registry.updateChat(chatId, { pendingPreambleBoundary: null });
+      if (!updated) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
+      entry = updated;
+    }
+    await this.options.registry.flush();
+
     this.options.ledger.closeProducer(chatId);
     let staging: TranscriptView | null = null;
     let replacement: TranscriptView;
     try {
       const prefix = frozenConversationDrafts(
-        this.options.ledger.currentRows(chatId)
+        currentRows
           .filter((row) => row.ordinal < current.contentStartOrdinal),
       );
       const sessionDraft: LedgerRowDraft = {
@@ -116,6 +128,7 @@ export class TranscriptReloadService {
         carryOverRevision: this.options.getCarryOverRevision(entry),
         signal,
         now: this.#now,
+        preambleEvidence,
       });
       const contentStartOrdinal = prefix.length + 1;
       staging = this.options.ledger.stageView(

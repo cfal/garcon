@@ -12,6 +12,7 @@ import createSnippetRoutes from './snippets.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
+import createPreambleRoutes from './preambles.js';
 import createTerminalRoutes from './terminals.js';
 import createPromptRefinementRoutes from './prompt-refinement.js';
 import { createRuntimeRoutes } from './runtime.js';
@@ -50,6 +51,7 @@ import type { ChatProcessingActivity } from '../chats/chat-processing-activity.j
 import type { ChatRowService } from '../chats/chat-row-service.js';
 import type { TranscriptExportService } from '../chats/transcript-export/service.js';
 import type { HandoffArtifactService } from '../chats/handoff-artifact/service.js';
+import type { PreambleService } from '../preambles/service.js';
 
 export default function createAllRoutes({
   registry,
@@ -72,6 +74,7 @@ export default function createAllRoutes({
   lastSelectedChat,
   scheduledPrompts,
   snippets,
+  preambles,
   terminals,
   searchIndex,
   transcriptSearchSettings,
@@ -102,6 +105,7 @@ export default function createAllRoutes({
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
+  preambles: PreambleService;
   terminals: TerminalManager;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
@@ -162,6 +166,7 @@ export default function createAllRoutes({
     ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),
+    ...createPreambleRoutes(preambles),
     ...createPromptRefinementRoutes({ settings, agents }),
     ...createTerminalRoutes(terminals),
   };

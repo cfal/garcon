@@ -9,15 +9,16 @@ import {
 import { createLogger } from '../lib/log.js';
 import {
   decodeLedgerRow,
+  decodeStoredLedgerRow,
   cliRowFingerprint,
   encodeLedgerDraft,
   parseLedgerCliRowNoticeDetail,
-  submissionFingerprint,
   type StoredLedgerRow,
 } from './codec.js';
 import type {
   AppendChatRowRequest,
   AppendChatRowResult,
+  AppendInputRequest,
   InputComposition,
   LedgerCliRowNoticeRow,
   LedgerCheckpoint,
@@ -55,6 +56,12 @@ import {
   runQuery,
   runTransaction,
 } from './sqlite-operations.js';
+import type { PendingPreambleBoundary } from '../../common/preambles.js';
+import {
+  hasPreambleBoundaryProof as queryPreambleBoundaryProof,
+  preparePreambleInput,
+} from './preamble-application.js';
+import { matchingInputSubmission, readSubmission } from './input-submission.js';
 
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
@@ -96,14 +103,6 @@ export interface InitializeViewInput {
 export interface StageViewInput extends InitializeViewInput {
   readonly viewId: TranscriptViewId;
 }
-
-export interface AppendInputRequest {
-  readonly viewId: TranscriptViewId;
-  readonly at: string;
-  readonly detail: LedgerUserInputDetail;
-  readonly excludedOrdinals?: ReadonlySet<number>;
-}
-
 export class TranscriptLedgerStore {
   readonly #rootDirectory: string;
   readonly #cacheSize: number;
@@ -183,43 +182,64 @@ export class TranscriptLedgerStore {
     });
   }
 
+  hasMatchingInputSubmission(
+    chatId: string,
+    viewId: TranscriptViewId,
+    detail: LedgerUserInputDetail,
+  ): boolean {
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      return matchingInputSubmission(entry.db, viewId, detail) !== null;
+    });
+  }
+
   appendInputAndCompose(chatId: string, request: AppendInputRequest): InputComposition {
-    validateInputDetail(request.detail);
-    const draft: LedgerRowDraft = {
-      kind: 'user-input',
-      at: request.at,
-      detail: request.detail,
-      providerMeta: null,
-    };
-    const encoded = { draft, ...encodeLedgerDraft(draft) };
     return this.#write(chatId, (entry) => {
       this.#assertCurrent(entry, request.viewId);
-      const existing = request.detail.clientMessageId
-        ? this.#submission(entry, request.viewId, request.detail.clientMessageId)
-        : null;
+      const existing = matchingInputSubmission(entry.db, request.viewId, request.detail);
       if (existing) {
-        if (existing.kind !== 'user-input'
-            || submissionFingerprint(existing.detail) !== submissionFingerprint(request.detail)) {
-          throw new SubmissionConflictError(request.detail.clientMessageId!);
-        }
-        return { input: existing, prompt: [], inserted: false };
+        return {
+          input: existing,
+          committedRows: [],
+          prompt: [],
+          providerPrefix: '',
+          inserted: false,
+        };
       }
 
-      const ordinal = entry.nextOrdinal;
-      const [materialized] = materializeRows(
-        request.viewId,
-        [encoded],
-        ordinal,
-      );
-      const input = materialized as LedgerUserInputRow;
+      const prepared = preparePreambleInput({
+        chatId,
+        viewId: request.viewId,
+        at: request.at,
+        detail: request.detail,
+        boundary: request.preambleBoundary,
+        preambles: request.preambles,
+      });
+      const encoded = encodeDrafts(prepared.drafts);
+      const firstOrdinal = entry.nextOrdinal;
+      const committedRows = materializeRows(request.viewId, encoded, firstOrdinal);
+      const input = committedRows[committedRows.length - 1] as LedgerUserInputRow;
       const prompt = runTransaction(entry.db, () => {
-        insertEncodedRows(entry.db, request.viewId, [encoded], ordinal);
-        return request.detail.steer
+        insertEncodedRows(entry.db, request.viewId, encoded, firstOrdinal);
+        return prepared.detail.steer
           ? [input]
           : this.#composePrompt(entry, request.viewId, input, request.excludedOrdinals);
       });
-      entry.nextOrdinal += 1;
-      return { input, prompt, inserted: true };
+      entry.nextOrdinal += committedRows.length;
+      return {
+        input,
+        committedRows,
+        prompt,
+        providerPrefix: prepared.providerPrefix,
+        inserted: true,
+      };
+    });
+  }
+
+  hasPreambleBoundaryProof(chatId: string, boundary: PendingPreambleBoundary): boolean {
+    return this.#read(chatId, (entry) => {
+      const current = this.#requireCurrent(entry);
+      return queryPreambleBoundaryProof(entry.db, current.viewId, boundary);
     });
   }
 
@@ -241,8 +261,8 @@ export class TranscriptLedgerStore {
     const encoded = { draft, ...encodeLedgerDraft(draft) };
     return this.#write(chatId, (entry) => {
       this.#assertCurrent(entry, request.viewId);
-      const existing = this.#submission(
-        entry,
+      const existing = readSubmission(
+        entry.db,
         request.viewId,
         detail.clientMessageId,
       );
@@ -309,7 +329,7 @@ export class TranscriptLedgerStore {
             ORDER BY ordinal DESC
             LIMIT ?
           `).all(viewId, before, boundedLimit);
-      const rows = stored.map(decodeStoredRow).reverse();
+      const rows = stored.map(decodeStoredLedgerRow).reverse();
       const oldest = rows[0]?.ordinal ?? null;
       return {
         viewId,
@@ -340,7 +360,7 @@ export class TranscriptLedgerStore {
         FROM transcript_rows
         WHERE view_id = ? AND ordinal > ?${kind === undefined ? '' : ' AND kind = ?'}
         ORDER BY ordinal
-      `).all(...params).map(decodeStoredRow);
+      `).all(...params).map(decodeStoredLedgerRow);
     });
   }
 
@@ -370,7 +390,7 @@ export class TranscriptLedgerStore {
         WHERE view_id = ? AND ordinal > ? AND ordinal <= ?
         ORDER BY ordinal
         LIMIT ?
-      `).all(viewId, afterOrdinal, throughOrdinal, boundedLimit).map(decodeStoredRow);
+      `).all(viewId, afterOrdinal, throughOrdinal, boundedLimit).map(decodeStoredLedgerRow);
     });
   }
 
@@ -388,7 +408,7 @@ export class TranscriptLedgerStore {
         FROM transcript_rows
         WHERE view_id = ? AND ordinal <= ?
         ORDER BY ordinal
-      `).all(watermark.viewId, watermark.ordinal).map(decodeStoredRow);
+      `).all(watermark.viewId, watermark.ordinal).map(decodeStoredLedgerRow);
     });
   }
 
@@ -400,7 +420,7 @@ export class TranscriptLedgerStore {
   ): readonly string[] {
     return this.#read(chatId, (entry) => {
       this.#assertCurrent(entry, viewId);
-      const input = this.#submission(entry, viewId, clientMessageId);
+      const input = readSubmission(entry.db, viewId, clientMessageId);
       if (input?.kind !== 'user-input' || input.ordinal >= throughOrdinal) return [];
       return entry.db.query<StoredLedgerRow, [string, number, number]>(`
         SELECT view_id, ordinal, kind, at, client_message_id, payload_json
@@ -408,7 +428,7 @@ export class TranscriptLedgerStore {
         WHERE view_id = ? AND ordinal > ? AND ordinal < ? AND kind = 'provider-row'
         ORDER BY ordinal
       `).all(viewId, input.ordinal, throughOrdinal)
-        .map(decodeStoredRow)
+        .map(decodeStoredLedgerRow)
         .flatMap((row) => (
           row.kind === 'provider-row' && row.message.type === 'assistant-message'
             ? [row.message.content]
@@ -423,7 +443,7 @@ export class TranscriptLedgerStore {
       return entry.db.query<StoredLedgerRow, [string]>(`
         SELECT view_id, ordinal, kind, at, client_message_id, payload_json
         FROM transcript_rows WHERE view_id = ? ORDER BY ordinal
-      `).all(current.viewId).map(decodeStoredRow);
+      `).all(current.viewId).map(decodeStoredLedgerRow);
     });
   }
 
@@ -641,22 +661,7 @@ export class TranscriptLedgerStore {
       WHERE view_id = ? AND ordinal >= ? AND kind = 'session'
       ORDER BY ordinal DESC LIMIT 1
     `).get(current.viewId, current.contentStartOrdinal);
-    return stored ? decodeStoredRow(stored) as LedgerSessionRow : null;
-  }
-
-  #submission(
-    entry: ConnectionEntry,
-    viewId: TranscriptViewId,
-    clientMessageId: string,
-  ): LedgerRow | null {
-    return runQuery(() => {
-      const stored = entry.db.query<StoredLedgerRow, [string, string]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ? AND client_message_id = ?
-      `).get(viewId, clientMessageId);
-      return stored ? decodeStoredRow(stored) : null;
-    });
+    return stored ? decodeStoredLedgerRow(stored) as LedgerSessionRow : null;
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
@@ -768,21 +773,13 @@ function materializeRows(
   }));
 }
 
-function decodeStoredRow(row: StoredLedgerRow): LedgerRow {
-  try {
-    return decodeLedgerRow(row);
-  } catch (error) {
-    throw new Error('Stored transcript row is invalid', { cause: error });
-  }
-}
-
 function collectResendCandidates(
   storedRows: Iterable<StoredLedgerRow>,
   excludedOrdinals?: ReadonlySet<number>,
 ): readonly LedgerUserInputRow[] {
   const candidates: LedgerUserInputRow[] = [];
   for (const stored of storedRows) {
-    const row = decodeStoredRow(stored);
+    const row = decodeStoredLedgerRow(stored);
     if (row.kind === 'user-input') {
       if (!excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
       continue;
@@ -980,15 +977,6 @@ function validateChatDirectoryName(chatId: string): void {
 function validateContentStartOrdinal(value: number, rowCount: number): void {
   if (!Number.isSafeInteger(value) || value < 1 || value > rowCount + 1) {
     throw new TypeError('Content-start ordinal must address the view or its append boundary');
-  }
-}
-
-function validateInputDetail(detail: LedgerUserInputDetail): void {
-  if (detail.clientMessageId !== null && detail.clientMessageId.length === 0) {
-    throw new TypeError('Client message ID must be non-empty');
-  }
-  if (!detail.message || detail.message.type !== 'user-message') {
-    throw new TypeError('Input detail requires a user message');
   }
 }
 

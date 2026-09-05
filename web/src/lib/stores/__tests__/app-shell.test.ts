@@ -270,4 +270,43 @@ describe('AppShellStore', () => {
 			expect(store.settingsTab).toBe('remote');
 		});
 	});
+
+	describe('preambles dialog', () => {
+		it('opens exclusively with the other shell dialogs', () => {
+			const store = new AppShellStore();
+			store.openSettings('remote');
+
+			store.openPreambles();
+
+			expect(store.showPreambles).toBe(true);
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showSettings).toBe(false);
+			expect(store.showScheduledPrompts).toBe(false);
+			expect(store.showSnippets).toBe(false);
+
+			store.openSnippets();
+			expect(store.showPreambles).toBe(false);
+			expect(store.showSnippets).toBe(true);
+
+			store.openOnboardingWizard();
+			store.openPreambles();
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showPreambles).toBe(true);
+
+			store.openScheduledPrompts();
+			expect(store.showPreambles).toBe(false);
+			expect(store.showScheduledPrompts).toBe(true);
+		});
+
+		it('closes without changing settings tab state', () => {
+			const store = new AppShellStore();
+			store.setSettingsTab('remote');
+			store.openPreambles();
+
+			store.closePreambles();
+
+			expect(store.showPreambles).toBe(false);
+			expect(store.settingsTab).toBe('remote');
+		});
+	});
 });

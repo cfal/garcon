@@ -518,6 +518,150 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one')).toHaveLength(1);
   });
 
+  it('[TLV5-PREAMBLE.02-STORE-UNIT-01] atomically commits an applied-preamble notice immediately before its boundary input', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const boundary = { kind: 'new-chat', ownershipEpoch: 'epoch-one' };
+    const result = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'Visible prompt'),
+      preambleBoundary: boundary,
+      preambles: [
+        preamble('a', 'First', 'PRIVATE-FIRST-BODY'),
+        preamble('b', 'Second', 'PRIVATE-SECOND-BODY'),
+      ],
+    });
+
+    expect(result.inserted).toBe(true);
+    expect(result.committedRows.map((row) => [row.ordinal, row.kind])).toEqual([
+      [1, 'notice'],
+      [2, 'user-input'],
+    ]);
+    expect(result.committedRows[0]).toMatchObject({
+      message: 'Preambles applied',
+      detail: {
+        type: 'preamble-application',
+        preambles: [
+          { id: 'a', title: 'First' },
+          { id: 'b', title: 'Second' },
+        ],
+      },
+    });
+    expect(result.input.detail.preambleBoundary).toEqual(boundary);
+    expect(result.input.detail.preamblePrefixReceipt).toMatchObject({ format: 'preamble-v1' });
+    expect(result.providerPrefix).toContain('PRIVATE-FIRST-BODY\n\nPRIVATE-SECOND-BODY');
+    expect(result.prompt.map((row) => row.detail.message.content)).toEqual(['Visible prompt']);
+    expect(JSON.stringify(store.currentRows('chat-one'))).not.toContain('PRIVATE-FIRST-BODY');
+    expect(store.hasPreambleBoundaryProof('chat-one', boundary)).toBe(true);
+  });
+
+  it('expands the target chat ID only in the transient provider prefix', () => {
+    const chatId = '1783725900000000';
+    const view = store.initializeCurrentView(chatId, {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const result = store.appendInputAndCompose(chatId, {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'Visible prompt'),
+      preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'epoch-one' },
+      preambles: [preamble(
+        'a',
+        'Chat-aware',
+        'Use {{chat_id}}; keep \\{{chat_id}} literal.',
+      )],
+    });
+
+    expect(result.providerPrefix).toContain(
+      `Use ${chatId}; keep {{chat_id}} literal.`,
+    );
+    expect(JSON.stringify(store.currentRows(chatId))).not.toContain(chatId);
+    expect(JSON.stringify(store.currentRows(chatId))).not.toContain('Use {{chat_id}}');
+  });
+
+  it('consumes a zero-match boundary without creating a notice or provider prefix', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const boundary = { kind: 'fork', ownershipEpoch: 'epoch-one' };
+    const result = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail: inputDetail('message-one', 'Visible prompt'),
+      preambleBoundary: boundary,
+      preambles: [],
+    });
+
+    expect(result.committedRows).toHaveLength(1);
+    expect(result.input.detail.preambleBoundary).toEqual(boundary);
+    expect(result.input.detail.preamblePrefixReceipt).toBeNull();
+    expect(result.providerPrefix).toBe('');
+    expect(store.hasPreambleBoundaryProof('chat-one', boundary)).toBe(true);
+  });
+
+  it('deduplicates a boundary input after its catalog application changes', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const boundary = { kind: 'continuation', ownershipEpoch: 'epoch-one' };
+    const detail = inputDetail('message-one', 'Visible prompt');
+    const first = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail,
+      preambleBoundary: boundary,
+      preambles: [preamble('a', 'First', 'PRIVATE-FIRST-BODY')],
+    });
+    const retry = store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail,
+      preambleBoundary: null,
+      preambles: [preamble('b', 'Changed', 'PRIVATE-CHANGED-BODY')],
+    });
+
+    expect(first.committedRows).toHaveLength(2);
+    expect(retry).toMatchObject({
+      inserted: false,
+      committedRows: [],
+      prompt: [],
+      providerPrefix: '',
+    });
+    expect(store.currentRows('chat-one')).toHaveLength(2);
+  });
+
+  it('preflights matching input submissions without mutating the ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const detail = inputDetail('message-one', '/provider-command');
+    store.appendInputAndCompose('chat-one', {
+      viewId: view.viewId,
+      at,
+      detail,
+    });
+
+    expect(store.hasMatchingInputSubmission('chat-one', view.viewId, detail)).toBe(true);
+    expect(store.hasMatchingInputSubmission(
+      'chat-one',
+      view.viewId,
+      inputDetail('message-two', '/provider-command'),
+    )).toBe(false);
+    expect(() => store.hasMatchingInputSubmission(
+      'chat-one',
+      view.viewId,
+      inputDetail('message-one', '/different-command'),
+    )).toThrow(SubmissionConflictError);
+    expect(store.currentRows('chat-one')).toHaveLength(1);
+  });
+
   it('[TLV5-L04.05-STORE-UNIT-01] rejects a mismatched submission retry without fencing the ledger', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
@@ -1639,6 +1783,18 @@ function inputDetail(clientMessageId, content, attachments = []) {
     message: new UserMessage(at, content),
     attachments,
     steer: false,
+  };
+}
+
+function preamble(id, title, content) {
+  return {
+    id,
+    enabled: true,
+    title,
+    content,
+    scope: { type: 'global' },
+    createdAt: at,
+    updatedAt: at,
   };
 }
 

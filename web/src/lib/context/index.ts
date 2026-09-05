@@ -26,6 +26,7 @@ import type { AppTitleStore } from '$lib/stores/app-title.svelte';
 import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte';
+import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte';
 import type { WorkspaceLayoutReader } from '$lib/workspace/surface-types';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte';
@@ -62,6 +63,7 @@ export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();
 export const [getMinuteClock, setMinuteClock] = createContext<MinuteClockStore>();
 export const [getScheduledPrompts, setScheduledPrompts] = createContext<ScheduledPromptsStore>();
+export const [getPreambles, setPreambles] = createContext<PreamblesStore>();
 export const [getSnippets, setSnippets] = createContext<SnippetsStore>();
 export const [getWorkspaceLayout, setWorkspaceLayout] = createContext<WorkspaceLayoutReader>();
 export const [getWorkspaceContext, setWorkspaceContext] = createContext<WorkspaceContextStore>();

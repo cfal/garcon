@@ -6,6 +6,7 @@ import {
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
 } from '../../common/settings.js';
+import { parseHiddenBashCommandPatterns } from '../../common/hidden-bash-command-patterns.js';
 
 function normalizeAppIdentitySettings(value: unknown): { title: string } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -27,6 +28,11 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
   }
   if ('pinnedInsertPosition' in normalized) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
+  }
+  if ('hiddenBashCommandPatterns' in normalized) {
+    const patterns = parseHiddenBashCommandPatterns(normalized.hiddenBashCommandPatterns);
+    if (patterns !== null) normalized.hiddenBashCommandPatterns = patterns;
+    else delete normalized.hiddenBashCommandPatterns;
   }
   if ('chatTitle' in normalized) {
     const chatTitle = normalizeChatTitleUiSettings(normalized.chatTitle);

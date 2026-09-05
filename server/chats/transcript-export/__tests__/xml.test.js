@@ -202,6 +202,24 @@ describe('XML transcript export', () => {
     expect(document).not.toContain('removed-secret');
     expect(document).not.toContain('added-secret');
   });
+
+  it('renders preamble applications structurally with only ids and title snapshots', () => {
+    const document = renderTranscriptExportXml(model([
+      entry(5, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles applied', {
+        type: 'preamble-application',
+        preambles: [
+          { id: 'preamble-1', title: 'Repository & conventions' },
+          { id: 'preamble-2', title: 'Security constraints' },
+        ],
+      })),
+    ]));
+
+    expect(document).toContain('<preambles-applied ordinal="5">');
+    expect(document).toContain('<preamble id="preamble-1" title="Repository &amp; conventions"/>');
+    expect(document).toContain('<preamble id="preamble-2" title="Security constraints"/>');
+    expect(document).not.toContain('private body sentinel');
+    expect(document).not.toContain('/private/project/path');
+  });
 });
 
 function entry(ordinal, category, message) {

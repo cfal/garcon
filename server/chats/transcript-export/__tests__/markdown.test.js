@@ -3,6 +3,7 @@ import {
   AssistantMessage,
   BashToolUseMessage,
   CliRowMessage,
+  TranscriptNoticeMessage,
   ToolResultMessage,
   UserMessage,
 } from '../../../../common/chat-types.ts';
@@ -171,6 +172,24 @@ describe('Markdown transcript export', () => {
 
     expect(document).toContain('[image body omitted from export]');
     expect(document).not.toContain('structured-base64-secret');
+  });
+
+  it('renders preamble applications by title without exposing ids or private data', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(5, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles applied', {
+        type: 'preamble-application',
+        preambles: [
+          { id: 'preamble-1', title: 'Repository conventions' },
+          { id: 'preamble-2', title: 'Security constraints' },
+        ],
+      })),
+    ]));
+
+    expect(document).toContain('## [5] Preambles applied');
+    expect(document).toContain('Preambles applied: Repository conventions; Security constraints');
+    expect(document).not.toContain('preamble-1');
+    expect(document).not.toContain('private body sentinel');
+    expect(document).not.toContain('/private/project/path');
   });
 });
 

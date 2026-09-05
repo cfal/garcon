@@ -20,6 +20,7 @@
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
+	const lazyPreambles = () => import('../preambles/PreamblesDialog.svelte');
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
 	import {
@@ -612,6 +613,7 @@
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
+		onShowPreambles={() => appShell.openPreambles()}
 		onShowSettings={() => appShell.openSettings()}
 		newWindowBlocked={!workspace.canOpenNewWindow}
 	/>
@@ -796,6 +798,12 @@
 {#if appShell.showScheduledPrompts}
 	{#await lazyScheduledPrompts() then { default: ScheduledPromptsDialog }}
 		<ScheduledPromptsDialog />
+	{/await}
+{/if}
+
+{#if appShell.showPreambles}
+	{#await lazyPreambles() then { default: PreamblesDialog }}
+		<PreamblesDialog />
 	{/await}
 {/if}
 

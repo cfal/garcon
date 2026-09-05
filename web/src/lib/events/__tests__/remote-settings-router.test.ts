@@ -68,7 +68,13 @@ describe('RemoteSettingsRouter', () => {
 
 	it('applies settings-changed snapshots to the remote settings store', () => {
 		const store = { applySnapshot: vi.fn() };
-		const snapshot = makeSnapshot({ version: 2, ui: { pinnedInsertPosition: 'bottom' } });
+		const snapshot = makeSnapshot({
+			version: 2,
+			ui: {
+				pinnedInsertPosition: 'bottom',
+				hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }],
+			},
+		});
 		drain.mockReturnValue([{ data: { type: 'settings-changed', settings: snapshot } }]);
 		const router = new RemoteSettingsRouter({} as never, store as never);
 
