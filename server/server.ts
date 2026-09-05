@@ -459,7 +459,7 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       listChatIds: () => chatRegistry.listChatIds(),
-      hasChat: (chatId) => chatRegistry.getChat(chatId) !== null,
+      hasChat: (chatId) => chatRegistry.hasChat(chatId),
       logger,
     });
     try {
@@ -515,7 +515,7 @@ export async function startServer(): Promise<void> {
       agentRegistry,
       agentRegistry,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
-      (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      (chatId) => chatRegistry.hasChat(chatId),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
       agentCommands.appendControlReceipt,

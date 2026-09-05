@@ -458,7 +458,7 @@ export default function createChatRoutes({
     if (!chatId) {
       return jsonError('chatId is required', 400, 'VALIDATION_FAILED');
     }
-    if (!registry.getChat(chatId)) {
+    if (!registry.hasChat(chatId)) {
       return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
     }
 
@@ -702,19 +702,19 @@ export default function createChatRoutes({
       if (!request) {
         return jsonError('Invalid chat reorder request', 400, 'VALIDATION_FAILED', false);
       }
-      if (!registry.getChat(request.chatId)) {
+      if (!registry.hasChat(request.chatId)) {
         return jsonError('Chat not found', 404, 'SESSION_NOT_FOUND', false);
       }
       if (
         request.placement.kind === 'relative'
-        && !registry.getChat(request.placement.referenceChatId)
+        && !registry.hasChat(request.placement.referenceChatId)
       ) {
         return jsonError('Reference chat not found', 404, 'SESSION_NOT_FOUND', false);
       }
 
       const result = await settings.reorderChat(
         request,
-        (chatId) => registry.getChat(chatId) != null,
+        (chatId) => registry.hasChat(chatId),
       );
       if (!result.success) {
         return jsonError(result.error, result.status, result.errorCode, false);
@@ -909,7 +909,7 @@ export default function createChatRoutes({
   async function getQueue(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
-    if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+    if (!registry.hasChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
     const control = toClientChatExecutionControlState(await queue.readChatExecutionControl(chatId));
     return Response.json({ success: true, chatId, control });
   }
@@ -1154,7 +1154,7 @@ export default function createChatRoutes({
     try {
       const chatId = requireStringField(body, 'chatId');
       const model = requireStringField(body, 'model');
-      if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      if (!registry.hasChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const apiProviderId = optionalStringOrNull(body.apiProviderId);
       const modelEndpointId = optionalStringOrNull(body.modelEndpointId);
       const modelProtocol = optionalStringOrNull(body.modelProtocol);

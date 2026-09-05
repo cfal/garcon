@@ -7,6 +7,7 @@ import { MetadataIndex } from '../metadata-store.js';
 const mockRegistry = {
   listAllChats: () => ({}),
   listChatIds: () => [],
+  hasChat: () => false,
   onChatRemoved: mock(() => {}),
 };
 const mockAgents = {
@@ -39,6 +40,7 @@ function makeRegistry(sessions = {}) {
   return {
     listAllChats: mock(() => sessions),
     listChatIds: mock(() => Object.keys(sessions)),
+    hasChat: (chatId) => chatId in sessions,
     onChatRemoved: mock(() => {}),
   };
 }

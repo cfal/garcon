@@ -176,7 +176,9 @@ export interface IChatRegistry {
   getRegistry(): ChatRegistrySnapshot;
   reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean>;
   listAllChats(): Record<string, ChatRegistryEntry>;
+  // Ids are unique by construction (object keys).
   listChatIds(): string[];
+  hasChat(id: string): boolean;
   getChat(id: string): ChatRegistryEntry | null;
   addChat(entry: NewChatRegistryEntry): boolean;
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
@@ -569,9 +571,15 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   }
 
   // Ids-only read for callers that never touch entry data; avoids the
-  // per-entry cloning cost of listAllChats on hot paths.
+  // per-entry cloning cost of listAllChats on hot paths. Ids are unique
+  // by construction (object keys).
   listChatIds(): string[] {
     return Object.keys(this.getRegistry().sessions);
+  }
+
+  // Existence check that skips the per-entry clone getChat pays.
+  hasChat(id: string): boolean {
+    return this.getRegistry().sessions[id] !== undefined;
   }
 
   getChat(id: string): ChatRegistryEntry | null {
