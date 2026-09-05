@@ -131,7 +131,7 @@ export class TranscriptSearchController {
   catalogMayHaveChanged(chatId: string): void {
     this.#adoptionFailedChatIds.delete(chatId);
     if (!this.#enabled || this.#closed) return;
-    this.#deps.service.setCatalogChatTotal(new Set(this.#deps.listChatIds()).size);
+    this.#deps.service.setCatalogChatTotal(this.#deps.listChatIds().length);
     if (this.#adoptingChatIds.has(chatId)) return;
     this.#schedule(chatId, 'catalog-refresh', () => this.#syncCatalogChat(chatId));
   }
@@ -139,7 +139,7 @@ export class TranscriptSearchController {
   deleteChat(chatId: string): void {
     this.#forgetChat(chatId);
     if (!this.#enabled || this.#closed) return;
-    this.#deps.service.setCatalogChatTotal(new Set(this.#deps.listChatIds()).size);
+    this.#deps.service.setCatalogChatTotal(this.#deps.listChatIds().length);
     this.#schedule(chatId, 'delete', () => this.#deps.service.deleteChat(chatId));
   }
 

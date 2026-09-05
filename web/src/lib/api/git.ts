@@ -448,28 +448,6 @@ export async function getGitStatus(project: string): Promise<GitStatus> {
 	return apiGet<GitStatus>(`/api/v1/git/status?${projectParam(project)}`);
 }
 
-export async function getGitDiff(
-	project: string,
-	file: string,
-): Promise<{ diff?: string; error?: string }> {
-	return apiGet(`/api/v1/git/diff?${projectParam(project)}&file=${encodeURIComponent(file)}`);
-}
-
-export async function getFileWithDiff(
-	project: string,
-	file: string,
-): Promise<{
-	currentContent?: string;
-	oldContent?: string;
-	isDeleted?: boolean;
-	isUntracked?: boolean;
-	error?: string;
-}> {
-	return apiGet(
-		`/api/v1/git/file-with-diff?${projectParam(project)}&file=${encodeURIComponent(file)}`,
-	);
-}
-
 export async function gitCommit(
 	project: string,
 	message: string,

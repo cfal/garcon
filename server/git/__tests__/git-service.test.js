@@ -6,6 +6,8 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
 import { createGitService as createProductionGitService } from "../git-service.js";
+import { runGitWithStdin } from "../run.js";
+import { resolveNetworkGitTimeoutMs } from "../status.js";
 import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
@@ -292,8 +294,6 @@ describe("createGitService", () => {
   it("returns an object with all expected service methods", () => {
     const expectedMethods = [
       "getStatus",
-      "getDiff",
-      "getFileWithDiff",
       "initialCommit",
       "commit",
       "getBranches",
@@ -1053,6 +1053,207 @@ describe("selected-file commits", () => {
       expect(committed.stdout.trim()).toBe("a.txt");
       const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
       expect(status.stdout.trim()).toBe("A  unrelated.txt");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("network git timeout", () => {
+  it("caps at the runner default, tightens with the idle budget, and keeps a floor", () => {
+    expect(resolveNetworkGitTimeoutMs(120)).toBe(30_000);
+    expect(resolveNetworkGitTimeoutMs(20)).toBe(18_000);
+    expect(resolveNetworkGitTimeoutMs(2)).toBe(1_000);
+  });
+
+  it("does not tighten when the idle budget is disabled", () => {
+    expect(resolveNetworkGitTimeoutMs(0)).toBe(30_000);
+  });
+});
+
+describe("discard", () => {
+  const git = createProductionGitService({
+    agents: mockAgents,
+    classifyGitError: mockClassifyGitError,
+  });
+  it("discards only worktree edits for staged-added files, keeping the addition", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\nmodified\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AM added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  added.txt");
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("restores worktree-deleted staged-added files instead of dropping the addition", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      await fs.rm(path.join(projectPath, "added.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AD added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  added.txt");
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("restores typechanged staged-added files instead of silently no-opping", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      await fs.rm(path.join(projectPath, "added.txt"));
+      await fs.symlink("elsewhere.txt", path.join(projectPath, "added.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AT added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  added.txt");
+      const stats = await fs.lstat(path.join(projectPath, "added.txt"));
+      expect(stats.isSymbolicLink()).toBe(false);
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("restores unstaged typechanges on tracked files", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      await fs.symlink("elsewhere.txt", path.join(projectPath, "a.txt"));
+      // Strips only the trailing newline: trim() would eat the leading space
+      // that carries the unstaged half of the status.
+      const porcelain = async () =>
+        (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout
+          .replace(/\n$/, "");
+      expect(await porcelain()).toBe(" T a.txt");
+
+      await git.discard({ projectPath, file: "a.txt" });
+
+      expect(await porcelain()).toBe("");
+      const stats = await fs.lstat(path.join(projectPath, "a.txt"));
+      expect(stats.isSymbolicLink()).toBe(false);
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("unstages index-only staged additions, which have no worktree changes to restore", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("A  added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? added.txt");
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves unmerged added-by-them files instead of silently no-opping", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "u.txt"), "theirs\n", "utf-8");
+      const { stdout: hash } = await runGitCommand(
+        projectPath,
+        ["hash-object", "-w", "u.txt"],
+      );
+      // Plants a stage-3-only index entry, the layout behind UA status.
+      await runGitWithStdin(
+        projectPath,
+        ["update-index", "--index-info"],
+        `100644 ${hash.trim()} 3\tu.txt\n`,
+      );
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("UA u.txt");
+
+      await git.discard({ projectPath, file: "u.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? u.txt");
+      expect(await fs.readFile(path.join(projectPath, "u.txt"), "utf-8"))
+        .toBe("theirs\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves unmerged added-by-us files instead of silently no-opping", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "ours.txt"), "ours\n", "utf-8");
+      const { stdout: hash } = await runGitCommand(
+        projectPath,
+        ["hash-object", "-w", "ours.txt"],
+      );
+      // Plants a stage-2-only index entry, the layout behind AU status.
+      await runGitWithStdin(
+        projectPath,
+        ["update-index", "--index-info"],
+        `100644 ${hash.trim()} 2\tours.txt\n`,
+      );
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AU ours.txt");
+
+      await git.discard({ projectPath, file: "ours.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? ours.txt");
+      expect(await fs.readFile(path.join(projectPath, "ours.txt"), "utf-8"))
+        .toBe("ours\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

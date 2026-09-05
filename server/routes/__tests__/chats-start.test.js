@@ -34,6 +34,7 @@ const testChats = new Map();
 const normalChatIds = [];
 const registry = {
   getChat: mock((chatId) => testChats.get(chatId)),
+  hasChat: mock((chatId) => testChats.has(chatId)),
   addChat: mock((chat) => {
     testChats.set(chat.id, {
       carryOverSegments: [],

@@ -666,12 +666,21 @@ export class TerminalManager {
           `terminal operation failed id=${session.metadata.terminalId}:`,
           errorMessage(error),
         );
-        peer.sendTerminalMessage({
-          type: "terminal-error",
-          terminalId: session.metadata.terminalId,
-          code: "terminal-internal",
-          message: "Terminal operation failed.",
-        });
+        try {
+          peer.sendTerminalMessage({
+            type: "terminal-error",
+            terminalId: session.metadata.terminalId,
+            code: "terminal-internal",
+            message: "Terminal operation failed.",
+          });
+        } catch (sendError) {
+          // A failed peer send must not reject the chain; no later operation
+          // would exist to absorb the rejection.
+          logger.warn(
+            `terminal error notification failed id=${session.metadata.terminalId} connection=${peer.connectionId}:`,
+            errorMessage(sendError),
+          );
+        }
       })
       .finally(() => {
         session.pendingOperations -= 1;

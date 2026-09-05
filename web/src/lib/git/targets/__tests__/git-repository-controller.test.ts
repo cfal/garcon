@@ -11,7 +11,6 @@ vi.stubGlobal('localStorage', {
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitStatus: vi.fn(),
-	getGitDiff: vi.fn().mockResolvedValue({}),
 	getGitRefs: vi.fn().mockResolvedValue({ refs: [] }),
 	getRemoteStatus: vi.fn().mockResolvedValue({}),
 	getGitRemotes: vi
