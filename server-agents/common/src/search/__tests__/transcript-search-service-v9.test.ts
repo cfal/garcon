@@ -80,8 +80,10 @@ function searchRequest(chatId: string, viewId: string, throughOrdinal: number, m
       }],
     },
     allowedChats: [{ chatId, transcriptViewId: viewId, throughOrdinal }],
+    order: 'relevance' as const,
+    offset: 0,
     limit: 20,
-    signal: new AbortController().signal,
+    executionSignal: new AbortController().signal,
   };
 }
 
@@ -498,26 +500,19 @@ describe('transcript search service v9', () => {
     await service.close();
   });
 
-  test('[TLV5-SEARCH.08-SVC-01] caller abandonment retires only its reader', async () => {
+  test('[TLV5-SEARCH.08-SVC-01] admitted caller cancellation preserves its reader', async () => {
     const records: Array<{ message: string; fields: unknown }> = [];
     const searchReaders: number[] = [];
-    let suppressFirstResult = true;
+    let markStarted = () => {};
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
     const service = new TranscriptSearchService({
       workspaceDirectory: workspace(),
       logger: logger(records),
       workerFactory: instrumentingWorkerFactory({
-        onEvent: (role, reader, event, deliver) => {
-          const type = (event.data as { type?: unknown }).type;
-          if (role === 'reader' && reader === 0 && type === 'search-result'
-              && suppressFirstResult) {
-            suppressFirstResult = false;
-            return;
-          }
-          deliver(event);
-        },
         onPost: (role, reader, message) => {
           if (role === 'reader' && (message as { type?: unknown }).type === 'search-start') {
             searchReaders.push(reader);
+            markStarted();
           }
         },
       }),
@@ -527,17 +522,21 @@ describe('transcript search service v9', () => {
     const abort = new AbortController();
     const abandoned = service.search({
       ...searchRequest('chat-abandon', 'view-abandon', 100, 'abandonmarker'),
-      signal: abort.signal,
+      admissionSignal: abort.signal,
     });
-    setTimeout(() => abort.abort(), 5);
-    await expect(abandoned).rejects.toThrow('SEARCH_TIMEOUT');
+    await started;
+    abort.abort();
+    await expect(abandoned).resolves.toMatchObject({
+      results: [expect.objectContaining({ chatId: 'chat-abandon' })],
+    });
     await expect(service.search(searchRequest(
       'chat-abandon', 'view-abandon', 100, 'abandonmarker',
     ))).resolves.toMatchObject({ results: [expect.objectContaining({ chatId: 'chat-abandon' })] });
-    expect(searchReaders.slice(0, 2)).toEqual([0, 1]);
-    await waitFor(() => records.some((record) => (
+    expect(searchReaders.slice(0, 2)).toEqual([0, 0]);
+    expect(service.queryStats().timedOut).toBe(0);
+    expect(records.some((record) => (
       (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
-    )), 5_000);
+    ))).toBe(false);
     await service.close();
   });
 
@@ -571,6 +570,45 @@ describe('transcript search service v9', () => {
     hold = false;
     for (const item of held.splice(0)) item.deliver(item.event);
     await expect(Promise.all(pending)).resolves.toHaveLength(6);
+    await service.close();
+  });
+
+  test('queued caller cancellation removes its waiter without retiring a reader', async () => {
+    const held: Array<{
+      event: MessageEvent<unknown>;
+      deliver: (event: MessageEvent<unknown>) => void;
+    }> = [];
+    const records: Array<{ message: string; fields: unknown }> = [];
+    const service = new TranscriptSearchService({
+      workspaceDirectory: workspace(),
+      logger: logger(records),
+      workerFactory: interceptingWorkerFactory((_reader, event, deliver) => {
+        if ((event.data as { type?: unknown }).type === 'search-result') {
+          held.push({ event, deliver });
+          return;
+        }
+        deliver(event);
+      }),
+    });
+    await service.enable(new AbortController().signal);
+    await build(service, 'chat-cancel-queue', 'view-cancel-queue', 20, 'cancelqueuemarker');
+    const admitted = Array.from({ length: 2 }, () => service.search(searchRequest(
+      'chat-cancel-queue', 'view-cancel-queue', 20, 'cancelqueuemarker',
+    )));
+    await waitFor(() => held.length === 2);
+    const abort = new AbortController();
+    const queued = service.search({
+      ...searchRequest('chat-cancel-queue', 'view-cancel-queue', 20, 'cancelqueuemarker'),
+      admissionSignal: abort.signal,
+    });
+    abort.abort();
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(service.queryStats().timedOut).toBe(0);
+    for (const item of held.splice(0)) item.deliver(item.event);
+    await expect(Promise.all(admitted)).resolves.toHaveLength(2);
+    expect(records.some((record) => (
+      (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
+    ))).toBe(false);
     await service.close();
   });
 

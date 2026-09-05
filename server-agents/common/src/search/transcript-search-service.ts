@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type {
   ChatSearchIndexStatus,
+  ChatSearchPage,
   ChatSearchQueryV1,
   ChatSearchResult,
   TranscriptSearchAllowedChat,
@@ -12,6 +13,11 @@ import type { JsonObject } from '@garcon/common/json';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { resolveSearchWorkerEntrypoints } from '../build/standalone-entrypoint.js';
 import { searchFrames } from './query-frames.js';
+import {
+  enqueueReaderWaiter,
+  raceAgainstSignal,
+  type ReaderWaiter,
+} from './reader-admission.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
 import { SEARCH_INGEST_ROW_MAX_BYTES, type SearchChatState } from './schema.js';
 import type {
@@ -20,6 +26,7 @@ import type {
   ReaderEvent,
   ReaderRequest,
 } from './worker-protocol.js';
+import type { TranscriptSearchOrder } from './worker-protocol.js';
 import {
   MAX_FRAME_BYTES,
   MAX_ROWS_PER_FRAME,
@@ -120,11 +127,6 @@ interface ReaderSlot {
   state: 'idle' | 'busy' | 'quarantined';
 }
 
-interface SearchWaiter {
-  resolve(slot: ReaderSlot): void;
-  reject(error: Error): void;
-}
-
 export class TranscriptSearchService {
   readonly #searchDirectory: string;
   readonly #dbPath: string;
@@ -135,7 +137,7 @@ export class TranscriptSearchService {
   readonly #deleteQueue: IngestJob[] = [];
   readonly #buildQueue: IngestJob[] = [];
   readonly #jobChatIds = new Set<string>();
-  readonly #searchWaiters: SearchWaiter[] = [];
+  readonly #searchWaiters: ReaderWaiter<ReaderSlot>[] = [];
   readonly #statusListeners = new Set<(status: TranscriptSearchStatusV1) => void>();
   readonly #queryDurations: number[] = [];
   readonly #lastLogAt = new Map<string, number>();
@@ -398,18 +400,34 @@ export class TranscriptSearchService {
   async search(request: {
     readonly query: ChatSearchQueryV1;
     readonly allowedChats: readonly TranscriptSearchAllowedChat[];
+    readonly order: TranscriptSearchOrder;
+    readonly offset: number;
     readonly limit: number;
-    readonly signal: AbortSignal;
+    readonly admissionSignal?: AbortSignal;
+    readonly executionSignal: AbortSignal;
   }): Promise<{
     readonly results: readonly ChatSearchResult[];
+    readonly page: ChatSearchPage;
     readonly index: ChatSearchIndexStatus;
   }> {
     if (!this.#enabled || this.#closed) throw new Error('SEARCH_INDEX_UNAVAILABLE');
-    request.signal.throwIfAborted();
-    const slot = await this.#acquireReaderSlot(request.signal);
+    if (request.admissionSignal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    if (request.executionSignal.aborted) throw new Error('SEARCH_TIMEOUT');
+    const slot = await this.#acquireReaderSlot(
+      request.admissionSignal,
+      request.executionSignal,
+    );
     const started = performance.now();
     const session = slot.supervisor.beginRequestSession();
-    const frames = searchFrames(request.query, request.allowedChats, request.limit);
+    const frames = searchFrames(
+      request.query,
+      request.allowedChats,
+      request.order,
+      request.offset,
+      request.limit,
+    );
     const pending = session.request(frames, undefined, this.#readerRequestTimeoutMs, {
       isComplete: (candidate) => candidate.type === 'search-result',
     });
@@ -419,7 +437,7 @@ export class TranscriptSearchService {
     );
     let event: ReaderEvent;
     try {
-      event = await raceAgainstSignal(pending, request.signal);
+      event = await raceAgainstSignal(pending, request.executionSignal);
     } catch (error) {
       if ((error instanceof Error && error.name === 'AbortError')
           || (error instanceof Error && error.message === 'SEARCH_TIMEOUT')) {
@@ -428,6 +446,9 @@ export class TranscriptSearchService {
         this.#rateLimitedWarn('Transcript search query timeout', {
           code: 'SEARCH_TIMEOUT',
           executeMs: Math.round(performance.now() - started),
+          order: request.order,
+          offset: request.offset,
+          limit: request.limit,
         });
         throw new Error('SEARCH_TIMEOUT');
       }
@@ -442,7 +463,7 @@ export class TranscriptSearchService {
     }
     this.#queryCounters.served += 1;
     this.#recordQueryDuration(performance.now() - started);
-    return { results: event.results, index: event.index };
+    return { results: event.results, page: event.page, index: event.index };
   }
 
   #retireReadersForRecreatedIndex(): void {
@@ -489,7 +510,14 @@ export class TranscriptSearchService {
     }
   }
 
-  #acquireReaderSlot(signal: AbortSignal): Promise<ReaderSlot> {
+  #acquireReaderSlot(
+    admissionSignal: AbortSignal | undefined,
+    executionSignal: AbortSignal,
+  ): Promise<ReaderSlot> {
+    if (admissionSignal?.aborted) {
+      return Promise.reject(new DOMException('Aborted', 'AbortError'));
+    }
+    if (executionSignal.aborted) return Promise.reject(new Error('SEARCH_TIMEOUT'));
     const idle = this.#readers.find(
       (slot) => slot.state === 'idle' && slot.supervisor.available,
     );
@@ -508,17 +536,13 @@ export class TranscriptSearchService {
       });
       return Promise.reject(new Error('SEARCH_INDEX_BUSY'));
     }
-    return new Promise<ReaderSlot>((resolve, reject) => {
-      const waiter: SearchWaiter = { resolve, reject };
-      this.#searchWaiters.push(waiter);
-      signal.addEventListener('abort', () => {
-        const index = this.#searchWaiters.indexOf(waiter);
-        if (index >= 0) {
-          this.#searchWaiters.splice(index, 1);
-          this.#queryCounters.timedOut += 1;
-          reject(new Error('SEARCH_TIMEOUT'));
-        }
-      }, { once: true });
+    return enqueueReaderWaiter({
+      waiters: this.#searchWaiters,
+      admissionSignal,
+      executionSignal,
+      onExecutionTimeout: () => {
+        this.#queryCounters.timedOut += 1;
+      },
     });
   }
 
@@ -565,7 +589,7 @@ export class TranscriptSearchService {
     }
   }
 
-  #requeueOrFail(waiter: SearchWaiter): void {
+  #requeueOrFail(waiter: ReaderWaiter<ReaderSlot>): void {
     const idle = this.#readers.find(
       (slot) => slot.state === 'idle' && slot.supervisor.available,
     );
@@ -920,24 +944,6 @@ export class TranscriptSearchService {
       this.#indexer.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS),
     ]);
   }
-}
-
-function raceAgainstSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(error);
-      },
-    );
-  });
 }
 
 function chunkFrame(frame: TranscriptSearchSyncFrame): Array<{

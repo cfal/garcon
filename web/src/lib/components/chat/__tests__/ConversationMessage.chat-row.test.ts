@@ -154,6 +154,14 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('From')).toBeTruthy();
 		expect(screen.getByText('Protocol review')).toBeTruthy();
 		expect(screen.getByText(`(${SOURCE_CHAT_ID})`)).toBeTruthy();
+		const participant = screen.getByRole('link', {
+			name: `Protocol review (${SOURCE_CHAT_ID})`,
+		});
+		expect(participant.getAttribute('href')).toBe(`/chat/${SOURCE_CHAT_ID}`);
+		expect(participant.getAttribute('title')).toBe(`Protocol review (${SOURCE_CHAT_ID})`);
+		expect(participant.className).toContain('text-primary');
+		expect(participant.className).toContain('hover:underline');
+		expect(participant.className).toContain('items-center');
 		expect(screen.getByText('typed contract').tagName).toBe('STRONG');
 		expect(card?.className).toContain('border-status-neutral-border');
 		expect(card?.className).not.toContain('border-status-info-border');
@@ -181,6 +189,9 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('To')).toBeTruthy();
 		expect(screen.getByText('Parser cleanup')).toBeTruthy();
 		expect(screen.getByText(`(${TARGET_CHAT_ID})`)).toBeTruthy();
+		expect(
+			screen.getByRole('link', { name: `Parser cleanup (${TARGET_CHAT_ID})` }).getAttribute('href'),
+		).toBe(`/chat/${TARGET_CHAT_ID}`);
 		expect(screen.getByRole('img', { name: 'Sent' })).toBeTruthy();
 		expect(screen.getByText('focused fix').tagName).toBe('CODE');
 		expect(container.querySelector('.markdown-body')).toBeTruthy();
@@ -209,9 +220,7 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('Sent Message')).toBeTruthy();
 		const participantLabel = screen.getByText('To');
 		const participantList = participantLabel.nextElementSibling;
-		expect(participantLabel.parentElement?.className).toContain(
-			'grid-cols-[auto_minmax(0,1fr)]',
-		);
+		expect(participantLabel.parentElement?.className).toContain('grid-cols-[auto_minmax(0,1fr)]');
 		expect(participantList?.tagName).toBe('UL');
 		expect(participantList?.querySelectorAll('li')).toHaveLength(2);
 		const deliveredRecipient = screen.getByText('Build verification').closest('li');
@@ -245,6 +254,7 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('Received Message')).toBeTruthy();
 		expect(screen.getByText('From')).toBeTruthy();
 		expect(screen.getByText('Hidden sender')).toBeTruthy();
+		expect(screen.getByText('Hidden sender').getAttribute('title')).toBe('Hidden sender');
 		expect(screen.getByText('message').tagName).toBe('STRONG');
 	});
 
@@ -275,10 +285,28 @@ describe('ConversationMessage chat rows', () => {
 		});
 
 		expect(screen.getByText('Original title')).toBeTruthy();
+		expect(screen.getByRole('link', { name: `Original title (${SOURCE_CHAT_ID})` })).toBeTruthy();
 		expect(screen.getByText(`(${SOURCE_CHAT_ID})`)).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Update chat title' }));
 		await waitFor(() => expect(screen.getByText('Renamed title')).toBeTruthy());
+		expect(screen.getByRole('link', { name: `Renamed title (${SOURCE_CHAT_ID})` })).toBeTruthy();
 		expect(screen.getByText(`(${SOURCE_CHAT_ID})`)).toBeTruthy();
+	});
+
+	it('keeps a current-chat participant inert with its full truncation tooltip', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(AT, 'Self reference.', {
+				type: 'inter-agent-message-received',
+				fromChatId: SOURCE_CHAT_ID,
+			}),
+			chatTitles: { [SOURCE_CHAT_ID]: 'Current chat' },
+			selectedChatId: SOURCE_CHAT_ID,
+		});
+
+		const participant = container.querySelector(`[data-chat-reference-id="${SOURCE_CHAT_ID}"]`);
+		expect(participant?.tagName).toBe('SPAN');
+		expect(participant?.getAttribute('title')).toBe(`Current chat (${SOURCE_CHAT_ID})`);
+		expect(participant?.className).not.toContain('text-primary');
 	});
 
 	it('runs the message divider to the padded card edges', () => {

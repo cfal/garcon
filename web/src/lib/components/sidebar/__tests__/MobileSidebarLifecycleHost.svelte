@@ -63,6 +63,7 @@
 	function createDefaultSidebarSearchContext(): SidebarSearchStore {
 		return createSidebarSearchStore({
 			getTranscriptSearchEnabled: () => true,
+			getSearchResultSort: () => 'relevance',
 			getChats: () => chats,
 			getSelectedChatId: () => selectedChatId,
 			notifyError: (message) => notifications.error(message),

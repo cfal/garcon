@@ -10,12 +10,23 @@
 	import Save from '@lucide/svelte/icons/save';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
+	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuGroup,
+		DropdownMenuGroupHeading,
+		DropdownMenuRadioGroup,
+		DropdownMenuRadioItem,
+		DropdownMenuTrigger,
+	} from '$lib/components/ui/dropdown-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import type {
 		ChatSearchIndexStatus,
 		ChatSearchResult,
+		ChatSearchSort,
 		TranscriptSearchStatusV1,
 	} from '$shared/chat-search';
 
@@ -31,6 +42,18 @@
 		transcriptSearchIndex?: ChatSearchIndexStatus | null;
 		transcriptSearchStatus?: TranscriptSearchStatusV1 | null;
 		transcriptSearchError?: string | null;
+		sort?: ChatSearchSort;
+		showTranscriptPagination?: boolean;
+		hasMoreTranscriptResults?: boolean;
+		loadingMoreTranscriptResults?: boolean;
+		transcriptSearchPageError?: string | null;
+		transcriptSearchRevalidating?: boolean;
+		transcriptSearchRevalidationError?: string | null;
+		transcriptSearchLimitReached?: boolean;
+		transcriptSearchAnnouncement?: string;
+		transcriptSearchAnnouncementVersion?: number;
+		resultsResetVersion?: number;
+		revalidationVersion?: number;
 		currentTime: Date;
 		highlightedIndex: number;
 		onQueryChange: (query: string) => void;
@@ -40,6 +63,9 @@
 		onOpenManager: () => void;
 		onHighlightChange: (index: number) => void;
 		onRetryTranscriptSearch?: () => void;
+		onSortChange?: (sort: ChatSearchSort) => void;
+		onLoadMoreTranscriptResults?: () => Promise<void> | void;
+		onRetryTranscriptSearchRevalidation?: () => Promise<void> | void;
 		onClose: () => void;
 		showSavedSearchActions?: boolean;
 		reduceMotion?: boolean;
@@ -60,6 +86,18 @@
 		transcriptSearchIndex = null,
 		transcriptSearchStatus = null,
 		transcriptSearchError = null,
+		sort = 'relevance',
+		showTranscriptPagination = false,
+		hasMoreTranscriptResults = false,
+		loadingMoreTranscriptResults = false,
+		transcriptSearchPageError = null,
+		transcriptSearchRevalidating = false,
+		transcriptSearchRevalidationError = null,
+		transcriptSearchLimitReached = false,
+		transcriptSearchAnnouncement = '',
+		transcriptSearchAnnouncementVersion = 0,
+		resultsResetVersion = 0,
+		revalidationVersion = 0,
 		currentTime,
 		highlightedIndex,
 		onQueryChange,
@@ -69,6 +107,9 @@
 		onOpenManager,
 		onHighlightChange,
 		onRetryTranscriptSearch = () => {},
+		onSortChange,
+		onLoadMoreTranscriptResults,
+		onRetryTranscriptSearchRevalidation,
 		onClose,
 		showSavedSearchActions = true,
 		reduceMotion = false,
@@ -89,11 +130,29 @@
 		onQueryChange(target.value);
 	}
 
+	function sortLabel(value: ChatSearchSort): string {
+		switch (value) {
+			case 'relevance':
+				return m.sidebar_search_sort_relevance();
+			case 'activity':
+				return m.sidebar_search_sort_activity();
+			case 'created':
+				return m.sidebar_search_sort_created();
+		}
+	}
+
 	function moveHighlight(offset: -1 | 1) {
 		if (filteredChats.length === 0) return;
 		const currentIndex = Math.min(Math.max(highlightedIndex, 0), filteredChats.length - 1);
-		onHighlightChange(Math.min(Math.max(currentIndex + offset, 0), filteredChats.length - 1));
+		const nextIndex = Math.min(Math.max(currentIndex + offset, 0), filteredChats.length - 1);
+		onHighlightChange(nextIndex);
 		highlightRevealVersion += 1;
+		const canPrefetchTranscriptResults = hasMoreTranscriptResults
+			&& !transcriptSearchPageError
+			&& !transcriptSearchRevalidationError;
+		if (offset > 0 && canPrefetchTranscriptResults && nextIndex >= filteredChats.length - 8) {
+			void onLoadMoreTranscriptResults?.();
+		}
 	}
 
 	function isVisibleFocusableElement(element: HTMLElement): boolean {
@@ -245,6 +304,37 @@
 								</button>
 							{/if}
 						</div>
+						{#if onSortChange}
+							<DropdownMenu>
+								<DropdownMenuTrigger
+									class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+								>
+									<ArrowUpDown class="h-3.5 w-3.5" />
+									<span class="sr-only sm:not-sr-only">{sortLabel(sort)}</span>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end">
+									<DropdownMenuGroup>
+										<DropdownMenuGroupHeading>
+											{m.sidebar_search_sort_heading()}
+										</DropdownMenuGroupHeading>
+										<DropdownMenuRadioGroup
+											value={sort}
+											onValueChange={(value) => onSortChange(value as ChatSearchSort)}
+										>
+											<DropdownMenuRadioItem value="relevance">
+												{m.sidebar_search_sort_relevance()}
+											</DropdownMenuRadioItem>
+											<DropdownMenuRadioItem value="activity">
+												{m.sidebar_search_sort_activity()}
+											</DropdownMenuRadioItem>
+											<DropdownMenuRadioItem value="created">
+												{m.sidebar_search_sort_created()}
+											</DropdownMenuRadioItem>
+										</DropdownMenuRadioGroup>
+									</DropdownMenuGroup>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						{/if}
 						<Button
 							variant="ghost"
 							size="icon-sm"
@@ -314,8 +404,21 @@
 					{currentTime}
 					{highlightedIndex}
 					{highlightRevealVersion}
+					{resultsResetVersion}
+					{revalidationVersion}
+					{showTranscriptPagination}
+					{hasMoreTranscriptResults}
+					{loadingMoreTranscriptResults}
+					{transcriptSearchPageError}
+					{transcriptSearchRevalidating}
+					{transcriptSearchRevalidationError}
+					{transcriptSearchLimitReached}
+					{transcriptSearchAnnouncement}
+					{transcriptSearchAnnouncementVersion}
 					{onSelectChat}
 					{onHighlightChange}
+					{onLoadMoreTranscriptResults}
+					{onRetryTranscriptSearchRevalidation}
 				/>
 			</div>
 		</div>
@@ -338,6 +441,12 @@
 					<span class="text-muted-foreground"
 						>{m.sidebar_search_legend_free_text_description()}</span
 					>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>title:X</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_title()}</span>
 				</div>
 				<div class="flex gap-3">
 					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">tag:X</code

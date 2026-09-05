@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import ComposerAddMenuTestHost from './ComposerAddMenuTestHost.svelte';
 
@@ -35,7 +35,9 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: /Snippets/ }));
 
 		expect(screen.getByTestId('palette-open-count').textContent).toBe('1');
-		expect(screen.queryByRole('menuitem', { name: /Snippets/ })).toBeNull();
+		await waitFor(() =>
+			expect(screen.queryByRole('menuitem', { name: /Snippets/ })).toBeNull(),
+		);
 	});
 
 	it('opens a constrained menu above the composer', async () => {

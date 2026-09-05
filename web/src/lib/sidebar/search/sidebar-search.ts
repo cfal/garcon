@@ -1,7 +1,7 @@
 // Parses sidebar search queries into structured filter specs and matches
 // chats against them. Supports free-text search across title, projectPath,
 // firstMessage, lastMessage, and tags, plus structured prefix filters:
-// tag:X, agent:Y, model:Z, project:P, and is:pinned|normal|archived.
+// title:X, tag:X, agent:Y, model:Z, project:P, and is:pinned|normal|archived.
 // The | character creates OR groups within supported operators, e.g.
 // tag:a|b matches chats with tag "a" or "b".
 
@@ -12,7 +12,7 @@ import {
 import { chatOrderGroupFor } from '$lib/sidebar/search/chat-order-group.js';
 
 /** An OR group — values within one group match if ANY element matches. */
-type OrGroup = string[];
+export type OrGroup = string[];
 
 export interface ChatOrderGroupFilter {
 	group: PersistedChatOrderGroup;
@@ -21,6 +21,7 @@ export interface ChatOrderGroupFilter {
 
 export interface ChatFilterSpec {
 	textTokens: string[];
+	titles: OrGroup[];
 	tags: OrGroup[]; // Each group is OR'd; groups are AND'd together
 	agents: string[]; // OR across all values
 	models: string[]; // OR across all values
@@ -30,12 +31,13 @@ export interface ChatFilterSpec {
 }
 
 export function emptyFilterSpec(): ChatFilterSpec {
-	return { textTokens: [], tags: [], agents: [], models: [], project: [] };
+	return { textTokens: [], titles: [], tags: [], agents: [], models: [], project: [] };
 }
 
 export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 	return (
 		spec.textTokens.length === 0 &&
+		spec.titles.length === 0 &&
 		spec.tags.length === 0 &&
 		spec.agents.length === 0 &&
 		spec.models.length === 0 &&
@@ -56,7 +58,7 @@ function parsePipeValue(raw: string): string[] | null {
 }
 
 /** Parses a raw search query into a structured filter spec.
- *  Prefix filters: tag:X, agent:Y, model:Z, project:P
+ *  Prefix filters: title:X, tag:X, agent:Y, model:Z, project:P
  *  The | character creates OR groups within a single operator value.
  *  Everything else is a free-text token. */
 export function parseChatSearch(query: string): ChatFilterSpec {
@@ -80,6 +82,11 @@ export function parseChatSearch(query: string): ChatFilterSpec {
 			const rawGroup = negated ? value.slice(1) : value;
 			const group = PERSISTED_CHAT_ORDER_GROUPS.find((candidate) => candidate === rawGroup);
 			if (group) spec.orderGroup = { group, negated };
+		} else if (lower.startsWith('title:')) {
+			const value = token.slice(6).trim();
+			if (!value) continue;
+			const parts = parsePipeValue(value);
+			if (parts) spec.titles.push(parts);
 		} else if (lower.startsWith('tag:')) {
 			const value = token.slice(4).trim();
 			if (!value) continue;
@@ -125,7 +132,10 @@ function tokenize(input: string): string[] {
 			} else {
 				current += ch;
 			}
-		} else if (ch === '"' || ch === "'") {
+		} else if ((ch === '"' || ch === "'") && (current === '' || current.endsWith(':'))) {
+			inQuote = true;
+			quoteChar = ch;
+		} else if (ch === '"') {
 			if (current) tokens.push(current);
 			current = '';
 			inQuote = true;
@@ -169,6 +179,12 @@ export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec):
 	if (spec.orderGroup) {
 		const group = chatOrderGroupFor(chat);
 		if ((group === spec.orderGroup.group) === spec.orderGroup.negated) return false;
+	}
+	if (spec.titles.length > 0) {
+		const title = chat.title.toLowerCase();
+		for (const group of spec.titles) {
+			if (!group.some((candidate) => title.includes(candidate))) return false;
+		}
 	}
 
 	// Project filter: projectPath must contain at least one value (OR)
@@ -226,18 +242,25 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
 	if (spec.orderGroup) {
 		parts.push(`is:${spec.orderGroup.negated ? '!' : ''}${spec.orderGroup.group}`);
 	}
-	for (const group of spec.tags) {
-		parts.push(`tag:${group.join('|')}`);
+	for (const group of spec.titles) {
+		parts.push(`title:${serializeOperatorValue(group.join('|'))}`);
 	}
-	for (const agent of spec.agents) parts.push(`agent:${agent}`);
-	for (const model of spec.models) parts.push(`model:${model}`);
+	for (const group of spec.tags) {
+		parts.push(`tag:${serializeOperatorValue(group.join('|'))}`);
+	}
+	for (const agent of spec.agents) parts.push(`agent:${serializeOperatorValue(agent)}`);
+	for (const model of spec.models) parts.push(`model:${serializeOperatorValue(model)}`);
 	if (spec.project.length > 0) {
-		parts.push(`project:${spec.project.join('|')}`);
+		parts.push(`project:${serializeOperatorValue(spec.project.join('|'))}`);
 	}
 	for (const text of spec.textTokens) {
 		parts.push(text.includes(' ') ? `"${text}"` : text);
 	}
 	return parts.join(' ');
+}
+
+function serializeOperatorValue(value: string): string {
+	return /\s/u.test(value) ? `"${value}"` : value;
 }
 
 /** Adds a tag filter to the current search query without duplicating. */

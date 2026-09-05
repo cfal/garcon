@@ -47,6 +47,25 @@ describe('reader worker v9', () => {
       advanceTo: 1,
     });
     finishChatSync(opened.db, { chatId: 'chat-0001', transcriptViewId: 'view-0001' });
+    planChatSync(opened.db, {
+      mode: 'replace',
+      chatId: 'chat-2001',
+      transcriptViewId: 'view-2001',
+      targetThrough: 1,
+      expectedAfterOrdinal: 0,
+    });
+    insertRowsBatch(opened.db, {
+      chatId: 'chat-2001',
+      transcriptViewId: 'view-2001',
+      rows: [{
+        ordinal: 1,
+        role: 'user',
+        timestamp: null,
+        body: 'synthetic reader marker',
+      }],
+      advanceTo: 1,
+    });
+    finishChatSync(opened.db, { chatId: 'chat-2001', transcriptViewId: 'view-2001' });
     opened.db.close();
 
     const worker = new Worker(new URL('../reader-main.ts', import.meta.url).href);
@@ -80,13 +99,30 @@ describe('reader worker v9', () => {
           tokens: [{ text: 'marker', normalized: 'marker', match: 'exact' }],
         }],
       },
-      limit: 20,
+      order: 'allowlist',
+      offset: 0,
+      limit: 2,
     });
     post(worker, {
       type: 'search-allowlist-chunk',
       requestId: 2,
       lifecycleEpoch,
       chunkIndex: 0,
+      allowedChats: [
+        { chatId: 'chat-2001', transcriptViewId: 'view-2001', throughOrdinal: 1 },
+        ...Array.from({ length: 1_999 }, (_, index) => ({
+          chatId: `dummy-${String(index).padStart(4, '0')}`,
+          transcriptViewId: `dummy-view-${index}`,
+          throughOrdinal: 0,
+        })),
+      ],
+      done: false,
+    });
+    post(worker, {
+      type: 'search-allowlist-chunk',
+      requestId: 2,
+      lifecycleEpoch,
+      chunkIndex: 1,
       allowedChats: [{
         chatId: 'chat-0001',
         transcriptViewId: 'view-0001',
@@ -96,7 +132,8 @@ describe('reader worker v9', () => {
     });
     const result = await waitForEvent('search-result');
     expect(result).toMatchObject({ type: 'search-result' });
-    expect(result.type === 'search-result' && result.results).toHaveLength(1);
+    expect(result.type === 'search-result' && result.results.map((entry) => entry.chatId))
+      .toEqual(['chat-2001', 'chat-0001']);
 
     post(worker, { type: 'close', requestId: 3, lifecycleEpoch });
     await expect(waitForEvent('closed')).resolves.toMatchObject({ type: 'closed' });

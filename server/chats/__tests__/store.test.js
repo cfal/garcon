@@ -82,18 +82,26 @@ describe('ChatRegistry', () => {
     registry.addChat(newChat({
       tags: ['source'],
       agentSettingsById: { test: envelope('test') },
+      agentOwnershipEpoch: 'epoch-1',
+      pendingPreambleBoundary: { kind: 'new-chat', ownershipEpoch: 'epoch-1' },
     }));
 
     const chat = registry.getChat(CHAT_ID);
     chat.tags.push('injected');
     chat.agentSettingsById.test.values.injected = true;
+    chat.pendingPreambleBoundary.ownershipEpoch = 'injected';
 
     const updated = registry.updateChat(CHAT_ID, { model: 'other-model' });
     updated.tags.push('via-update');
     updated.agentSettingsById.test.values.injected = true;
+    updated.pendingPreambleBoundary.ownershipEpoch = 'injected';
 
     expect(registry.getChat(CHAT_ID).tags).toEqual(['source']);
     expect(registry.getChat(CHAT_ID).agentSettingsById.test.values).toEqual({});
+    expect(registry.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
+      kind: 'new-chat',
+      ownershipEpoch: 'epoch-1',
+    });
   });
 
   it('clones caller-owned collections on ingest', () => {

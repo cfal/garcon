@@ -378,4 +378,114 @@ describe('Markdown', () => {
 			expect(handler).not.toHaveBeenCalled();
 		});
 	});
+
+	describe('chat references', () => {
+		const chatId = '1788592720180699';
+		const resolution = { title: 'Chat links design', isCurrent: false } as const;
+		const resolveChatReference = vi.fn(() => resolution);
+
+		it('keeps exact chat destinations on the previous absolute-path path by default', () => {
+			render(Markdown, { source: `[${chatId}](/chat/${chatId})` });
+
+			const link = screen.getByRole('link', { name: chatId });
+			const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+			link.dispatchEvent(event);
+			expect(event.defaultPrevented).toBe(true);
+		});
+
+		it('resolves an explicit ID label before absolute file paths', () => {
+			render(Markdown, {
+				source: `[${chatId}](/chat/${chatId})`,
+				chatReferencePolicy: 'explicit',
+				resolveChatReference,
+				fileLinkBasePath: '/',
+			});
+
+			const link = screen.getByRole('link', { name: `Chat links design (${chatId})` });
+			expect(link.getAttribute('href')).toBe(`/chat/${chatId}`);
+			expect(link.getAttribute('target')).toBeNull();
+			expect(link.getAttribute('rel')).toBeNull();
+		});
+
+		it('preserves structured custom labels for explicit references', () => {
+			render(Markdown, {
+				source: `[**Design chat**](/chat/${chatId} "Authored title")`,
+				chatReferencePolicy: 'explicit',
+				resolveChatReference,
+			});
+
+			const link = screen.getByRole('link', { name: 'Design chat' });
+			expect(link.querySelector('strong')?.textContent).toBe('Design chat');
+			expect(link.getAttribute('title')).toBe('Authored title');
+		});
+
+		it('renders unresolved explicit references as inert text with a durable ID', () => {
+			const { container } = render(Markdown, {
+				source: `[custom](/chat/${chatId})`,
+				chatReferencePolicy: 'explicit',
+			});
+
+			expect(container.querySelector(`a[href="/chat/${chatId}"]`)).toBeNull();
+			expect(container.textContent?.replace(/\s+/g, ' ').trim()).toBe(`custom (${chatId})`);
+		});
+
+		it('autolinks a known bare ID only under the bare policy', () => {
+			const explicit = render(Markdown, {
+				source: `Continue in ${chatId}.`,
+				chatReferencePolicy: 'explicit',
+				resolveChatReference,
+			});
+			expect(explicit.container.querySelector('a[data-chat-reference-id]')).toBeNull();
+			explicit.unmount();
+
+			render(Markdown, {
+				source: `Continue in ${chatId}.`,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+			expect(screen.getByRole('link', { name: `Chat links design (${chatId})` })).toBeTruthy();
+		});
+
+		it.each([
+			['user', 'text-current opacity-70'],
+			['presented', 'text-current opacity-70'],
+			['assistant', 'text-muted-foreground/80'],
+			['thinking', 'text-muted-foreground/80'],
+		] as const)('uses contrast-aware ID styling for the %s variant', (variant, classes) => {
+			render(Markdown, {
+				source: chatId,
+				variant,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+
+			const id = screen.getByText(`(${chatId})`);
+			for (const className of classes.split(' ')) expect(id.className).toContain(className);
+		});
+
+		it('corrects a transient end-of-stream match when the next digit arrives', async () => {
+			const view = render(Markdown, {
+				source: chatId,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+			expect(view.container.querySelector('a[data-chat-reference-id]')).toBeTruthy();
+
+			await view.rerender({
+				source: `${chatId}7`,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+			expect(view.container.querySelector('a[data-chat-reference-id]')).toBeNull();
+			expect(view.container.textContent).toContain(`${chatId}7`);
+		});
+
+		it.each(['javascript:alert(1)', 'data:text/html,unsafe', 'JaVaScRiPt:alert(1)'])(
+			'keeps the unsafe %s destination without an href',
+			(destination) => {
+				render(Markdown, { source: `[unsafe](${destination})` });
+				expect(screen.getByText('unsafe').closest('a')?.getAttribute('href')).toBeNull();
+			},
+		);
+	});
 });

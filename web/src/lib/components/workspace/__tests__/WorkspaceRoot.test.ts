@@ -622,6 +622,7 @@ describe('WorkspaceRoot', () => {
 			'context-menu-sub-trigger',
 		);
 		await fireEvent.click(rename);
+		await waitFor(() => expect(rename.isConnected).toBe(false));
 		const renameInput = await screen.findByRole('textbox', { name: m.terminal_name() });
 		expect((renameInput as HTMLInputElement).value).toBe('Dev server');
 		await fireEvent.input(renameInput, { target: { value: 'Build logs' } });

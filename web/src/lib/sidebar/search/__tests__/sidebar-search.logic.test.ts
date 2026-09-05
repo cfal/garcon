@@ -50,6 +50,7 @@ describe('parseChatSearch', () => {
 		const spec = parseChatSearch('status:active');
 		expect(spec).toEqual({
 			textTokens: [],
+			titles: [],
 			tags: [],
 			agents: [],
 			models: [],
@@ -62,6 +63,7 @@ describe('parseChatSearch', () => {
 		const spec = parseChatSearch('status:unread');
 		expect(spec).toEqual({
 			textTokens: [],
+			titles: [],
 			tags: [],
 			agents: [],
 			models: [],
@@ -149,6 +151,21 @@ describe('parseChatSearch', () => {
 		const spec2 = parseChatSearch('tag:|a|');
 		expect(spec2.tags).toEqual([['a']]);
 	});
+
+	it('parses title groups, quoted values, and remaining transcript terms', () => {
+		const spec = parseChatSearch('title:"error handling" title:auth|login kubernetes');
+		expect(spec.titles).toEqual([['error handling'], ['auth', 'login']]);
+		expect(spec.textTokens).toEqual(['kubernetes']);
+	});
+
+	it.each([
+		["can't stop", ["can't", 'stop']],
+		["don't retry", ["don't", 'retry']],
+		["it's fine tag:ops", ["it's", 'fine']],
+		['foo"bar baz"', ['foo', 'bar baz']],
+	] as const)('preserves word quoting in %s', (query, expected) => {
+		expect(parseChatSearch(query).textTokens).toEqual(expected);
+	});
 });
 
 describe('serializeChatFilter', () => {
@@ -199,6 +216,17 @@ describe('serializeChatFilter', () => {
 		const serialized = serializeChatFilter(spec);
 		const reparsed = parseChatSearch(serialized);
 		expect(reparsed).toEqual(spec);
+	});
+
+	it.each([
+		'title:"error handling"',
+		'tag:"release blocker"',
+		'project:"my app"',
+		'agent:"claude code"',
+		'model:"gpt 5"',
+	])('round-trips quoted operator values in %s', (query) => {
+		const spec = parseChatSearch(query);
+		expect(parseChatSearch(serializeChatFilter(spec))).toEqual(spec);
 	});
 
 	it('round-trips pipe-separated agents', () => {
@@ -453,6 +481,14 @@ describe('matchesChatFilter OR groups', () => {
 		isPinned: false,
 		isArchived: false,
 	};
+
+	it('matches title groups only against the title', () => {
+		expect(matchesChatFilter(
+			{ ...chat, title: 'Authentication Error Handling' },
+			parseChatSearch('title:AUTH|login title:"Error Handling"'),
+		)).toBe(true);
+		expect(matchesChatFilter(chat, parseChatSearch('title:workspace'))).toBe(false);
+	});
 
 	it('matches when OR group has any matching tag', () => {
 		const spec = { ...emptyFilterSpec(), tags: [['ops', 'bugs']] };

@@ -50,4 +50,16 @@ describe('CompactionRow', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Hide summary' }));
 		expect(onOpenChange).toHaveBeenCalledWith(false);
 	});
+
+	it('resolves explicit chat links without autolinking bare IDs in summaries', () => {
+		const chatId = '1788592720180699';
+		const { container } = render(CompactionRow, {
+			message: new CompactionMessage(TS, 'manual', `${chatId} [Open target](/chat/${chatId})`),
+			open: true,
+			resolveChatReference: () => ({ title: 'Target chat', isCurrent: false }),
+		});
+
+		expect(screen.getByRole('link', { name: 'Open target' })).toBeTruthy();
+		expect(container.querySelectorAll('[data-chat-reference-id]')).toHaveLength(1);
+	});
 });

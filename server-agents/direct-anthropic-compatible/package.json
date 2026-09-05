@@ -4,7 +4,7 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "bunx tsc -p tsconfig.json" },
   "dependencies": { "@garcon/common": "workspace:*", "@garcon/server-agent-common": "workspace:*", "@garcon/server-agent-interface": "workspace:*" },
-  "devDependencies": { "@types/bun": "^1.4.0", "typescript": "^6.0.3" },
+  "devDependencies": { "@types/bun": "^1.4.1", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "direct-anthropic-compatible",

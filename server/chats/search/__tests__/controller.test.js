@@ -149,6 +149,7 @@ function harness(options = {}) {
     markChatUnavailable: mock(async () => {}),
     search: mock(async () => ({
       results: [],
+      page: { offset: 0, limit: 20, total: 0, hasMore: false, nextOffset: null },
       index: {
         indexedChatCount: 0,
         pendingChatCount: 0,
@@ -269,6 +270,58 @@ describe('TranscriptSearchController v9', () => {
       [{ chatId: 'chat-0001', transcriptViewId: 'view-0001', throughOrdinal: 2 }],
       [{ chatId: 'chat-0001', transcriptViewId: 'view-0001', throughOrdinal: 2 }],
     ]);
+    await fixture.controller.close();
+  });
+
+  test('maps public sort and paging while preserving a worker cursor after stale-view filtering', async () => {
+    const fixture = harness({ states: [{
+      chatId: 'chat-0001', transcriptViewId: 'view-0001', status: 'indexed',
+      indexedThrough: 2, targetThrough: 2, lastErrorCode: null,
+    }] });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.service.search.mockResolvedValueOnce({
+      results: [{
+        chatId: 'chat-0001', transcriptViewId: 'stale-view', score: 1,
+        matchedMessageCount: 1, snippets: [],
+      }],
+      page: { offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75 },
+      index: {
+        indexedChatCount: 1, pendingChatCount: 0, failedChatCount: 0,
+        unindexedChatCount: 0, unsupportedChatCount: 0, resultsTruncated: false,
+      },
+    });
+    const callerAbort = new AbortController();
+
+    const result = await fixture.controller.search({
+      query: 'alpha',
+      allowedChatIds: ['chat-0001'],
+      sort: 'activity',
+      offset: 50,
+      limit: 50,
+      signal: callerAbort.signal,
+    });
+
+    expect(fixture.service.search.mock.calls.at(-1)[0]).toMatchObject({
+      order: 'allowlist',
+      offset: 50,
+      limit: 50,
+      admissionSignal: callerAbort.signal,
+      executionSignal: expect.any(AbortSignal),
+    });
+    expect(result.results).toEqual([]);
+    expect(result.page).toEqual({
+      offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75,
+    });
+
+    await fixture.controller.search({
+      query: 'alpha', allowedChatIds: ['chat-0001'], sort: 'relevance', offset: 0,
+    });
+    expect(fixture.service.search.mock.calls.at(-1)[0].order).toBe('relevance');
+    await fixture.controller.search({
+      query: 'alpha', allowedChatIds: ['chat-0001'], sort: 'created', offset: 0,
+    });
+    expect(fixture.service.search.mock.calls.at(-1)[0].order).toBe('allowlist');
     await fixture.controller.close();
   });
 
@@ -986,6 +1039,26 @@ describe('TranscriptSearchController v9', () => {
         query: 'alpha', allowedChatIds: ['chat-0001'],
       })).rejects.toMatchObject({ code: expected, retryable: true });
     }
+    await fixture.controller.close();
+  });
+
+  test('preserves caller cancellation without warning', async () => {
+    const fixture = harness({ states: [{
+      chatId: 'chat-0001', transcriptViewId: 'view-0001', status: 'indexed',
+      indexedThrough: 2, targetThrough: 2, lastErrorCode: null,
+    }] });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.logger.warn.mockClear();
+    const callerAbort = new AbortController();
+    callerAbort.abort();
+
+    await expect(fixture.controller.search({
+      query: 'alpha', allowedChatIds: ['chat-0001'], signal: callerAbort.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(fixture.service.search).not.toHaveBeenCalled();
+    expect(fixture.logger.warn).not.toHaveBeenCalled();
     await fixture.controller.close();
   });
 

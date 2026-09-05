@@ -121,6 +121,33 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
     durations.sort((left, right) => left - right);
     expect(durations[Math.floor(durations.length * 0.5)]).toBeLessThan(CONVERGED_P50_BUDGET_MS);
     expect(durations[Math.floor(durations.length * 0.95)]).toBeLessThan(CONVERGED_P95_BUDGET_MS);
+    const servedBeforePages = (await fixture.client.waitForSearchPhase(
+      ['ready'],
+      { timeoutMs: 5_000 },
+    )).queryStats.served;
+    const pageDurations: number[] = [];
+    for (const offset of [0, 50, 100, 150, 200]) {
+      const page = await fixture.client.timedSearchChats({
+        query: corpus.markerTerm,
+        sort: 'relevance',
+        offset,
+        limit: 50,
+      });
+      expect(page.status).toBe(200);
+      expect(page.elapsedMs).toBeLessThan(FIRST_SEARCH_BUDGET_MS);
+      expect(page.body.page.offset).toBe(offset);
+      expect(page.body.page.hasMore).toBe(page.body.page.nextOffset !== null);
+      expect(page.body.index.resultsTruncated).toBe(true);
+      pageDurations.push(page.elapsedMs);
+    }
+    pageDurations.sort((left, right) => left - right);
+    expect(pageDurations[Math.floor(pageDurations.length * 0.95)])
+      .toBeLessThan(CONVERGED_P95_BUDGET_MS);
+    const servedAfterPages = (await fixture.client.waitForSearchPhase(
+      ['ready'],
+      { timeoutMs: 5_000 },
+    )).queryStats.served;
+    expect(servedAfterPages - servedBeforePages).toBe(5);
     const phraseDecoyChatId = corpus.phraseDecoyChatId;
     if (!phraseDecoyChatId) throw new Error('Tier M requires a phrase decoy chat');
     const multiClause = await fixture.client.timedSearchChats({
