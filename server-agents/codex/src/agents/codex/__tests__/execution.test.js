@@ -519,9 +519,10 @@ describe('CodexExecution', () => {
 
   it.each([
     'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
-  ])('allows %s to restore its concrete provider-default effort', async (model) => {
+  ])('rejects clearing an explicit effort during an active %s turn', async (model) => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
+    runtime.isRunning.mockReturnValue(true);
     const execution = new CodexExecution(
       createHost(),
       runtime,
@@ -536,16 +537,60 @@ describe('CodexExecution', () => {
       endpoint: null,
     };
 
+    await expect(execution.applySessionConfiguration('thread-1', {
+      ...previous,
+      thinkingMode: 'none',
+    }, previous)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
+  });
+
+  it('defers returning to provider-default effort until the retained source is replaced', async () => {
+    const runtime = createRuntime();
+    runtime.hasSource.mockReturnValue(true);
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const previous = {
+      model: 'gpt-6-astra',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: null,
+    };
+
     await execution.applySessionConfiguration('thread-1', {
       ...previous,
       thinkingMode: 'none',
     }, previous);
 
-    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
-      model,
+    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
+  });
+
+  it('allows returning to provider-default effort after the source is gone', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const previous = {
+      model: 'gpt-6-astra',
       permissionMode: 'default',
+      thinkingMode: 'high',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: null,
+    };
+
+    await execution.applySessionConfiguration('thread-1', {
+      ...previous,
       thinkingMode: 'none',
-    });
+    }, previous);
+
+    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
   });
 
   it('switches an established GPT-6 Astra Default session to GPT-5.6 Sol Default', async () => {
@@ -578,8 +623,8 @@ describe('CodexExecution', () => {
   });
 
   it.each([
-    'gpt-5.4', 'gpt-5.6', 'gpt-5.6-sol-custom', 'gpt-5.60-sol',
-  ])('rejects carrying Astra low effort into an unknown %s default', async (model) => {
+    'gpt-5.5', 'gpt-5.4', 'gpt-5.6', 'gpt-5.6-sol-custom', 'gpt-5.60-sol',
+  ])('allows switching from Astra Default to %s Default', async (model) => {
     const runtime = createRuntime();
     runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
@@ -596,11 +641,15 @@ describe('CodexExecution', () => {
       endpoint: null,
     };
 
-    await expect(execution.applySessionConfiguration('thread-1', {
+    await execution.applySessionConfiguration('thread-1', {
       ...previous,
       model,
-    }, previous)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
-    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
+    }, previous);
+    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      model,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
   });
 
   it('rejects live endpoint replacement and concrete reasoning-effort clearing', async () => {
