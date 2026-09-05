@@ -35,6 +35,7 @@ export interface WorkspaceLayoutParseResult {
 
 export const WORKSPACE_LAYOUT_MAX_PARSE_DEPTH = 64;
 export const WORKSPACE_LAYOUT_MAX_PARSE_NODES = 256;
+export const WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW = 256;
 
 class WorkspaceLayoutBudgetExceeded extends Error {}
 
@@ -108,6 +109,12 @@ function restoreWindow(
 ): WorkspaceWindowNode | null {
 	const id = asWindowId(node.id);
 	if (!id || !Array.isArray(node.order)) return null;
+	if (
+		node.order.length > WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW ||
+		(Array.isArray(node.mru) && node.mru.length > WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW)
+	) {
+		throw new WorkspaceLayoutBudgetExceeded();
+	}
 	const order: string[] = [];
 	let chatPlaced = false;
 	for (const rawRef of node.order) {
@@ -128,23 +135,26 @@ function restoreWindow(
 		order.push(surfaceId);
 	}
 	if (order.length === 0) return null;
+	const orderSet = new Set(order);
 	const activeRef = parseV2Ref(node.active);
 	const activeKey = activeRef ? restoredRefSurfaceId(activeRef, id) : null;
-	const activeId = activeKey && order.includes(activeKey) ? activeKey : order[0];
+	const activeId = activeKey && orderSet.has(activeKey) ? activeKey : order[0];
 	const persistedMru: string[] = [];
+	const persistedMruSet = new Set<string>();
 	if (Array.isArray(node.mru)) {
 		for (const rawRef of node.mru) {
 			const ref = parseV2Ref(rawRef);
 			if (!ref) continue;
 			const surfaceId = restoredRefSurfaceId(ref, id);
-			if (!order.includes(surfaceId) || persistedMru.includes(surfaceId)) continue;
+			if (!orderSet.has(surfaceId) || persistedMruSet.has(surfaceId)) continue;
 			persistedMru.push(surfaceId);
+			persistedMruSet.add(surfaceId);
 		}
 	}
 	const mru = [
 		activeId,
 		...persistedMru.filter((surfaceId) => surfaceId !== activeId),
-		...order.filter((surfaceId) => surfaceId !== activeId && !persistedMru.includes(surfaceId)),
+		...order.filter((surfaceId) => surfaceId !== activeId && !persistedMruSet.has(surfaceId)),
 	];
 	return { type: 'window', id, tabs: { order, activeId, mru } };
 }
