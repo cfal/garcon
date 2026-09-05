@@ -1059,6 +1059,57 @@ describe("selected-file commits", () => {
   });
 });
 
+describe("discard", () => {
+  const git = createProductionGitService({
+    agents: mockAgents,
+    classifyGitError: mockClassifyGitError,
+  });
+
+  it("fully discards staged-added files that also changed in the worktree", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\nmodified\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AM added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("?? added.txt");
+      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
+        .toBe("staged\nmodified\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("fully discards staged-added files deleted from the worktree", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "added.txt"]);
+      await fs.rm(path.join(projectPath, "added.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AD added.txt");
+
+      await git.discard({ projectPath, file: "added.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("commit message generation", () => {
   it("builds the staged diff with one batched pathspec command for normal selections", async () => {
     const calls = [];
