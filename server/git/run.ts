@@ -178,6 +178,12 @@ async function runGitProcess(
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       await sleep(GIT_LOCK_RETRY_DELAY_MS);
+      // The attempt's abort state was torn down by cleanup(), so read the
+      // caller signal directly; otherwise an abort during the retry delay
+      // is misreported as a plain exit failure on the next attempt.
+      if (options.signal?.aborted) {
+        throw makeGitProcessError(args, exitCode, stdout, stderr, { aborted: true });
+      }
       if (abortState.timedOut() || abortState.aborted()) {
         throw makeGitProcessError(args, exitCode, stdout, stderr, {
           timedOut: abortState.timedOut(),
