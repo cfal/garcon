@@ -7,6 +7,7 @@ import {
 	toggleArchive,
 	deleteChat,
 	reorderChat,
+	sortChatOrder,
 	getChatDetails,
 	forkChat,
 	setChatTags,
@@ -16,7 +17,11 @@ import { createClientChatId } from '$shared/client-chat-id';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatListEntry } from '$shared/chat-list';
-import type { RelativeChatOrderPlacement } from '$shared/chat-order-contracts';
+import type {
+	RelativeChatOrderPlacement,
+	SortChatOrderResponse,
+} from '$shared/chat-order-contracts';
+import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;
@@ -56,6 +61,12 @@ export class SidebarController {
 	async reorderChat(chatId: string, placement: RelativeChatOrderPlacement): Promise<void> {
 		await reorderChat({ chatId, placement });
 		await this.deps.onQuietRefresh();
+	}
+
+	async sortChatOrder(sortKey: ChatOrderSortKey): Promise<SortChatOrderResponse> {
+		const response = await sortChatOrder({ sortKey });
+		await this.deps.onQuietRefresh();
+		return response;
 	}
 
 	async loadDetails(chatId: string) {

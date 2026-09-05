@@ -459,12 +459,14 @@ describe('shared sidebar chat row', () => {
 		const onEnterMultiSelect = vi.fn();
 		const onMoveToTop = vi.fn();
 		const onMoveToBottom = vi.fn();
+		const onSortChatOrder = vi.fn();
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			selectedChatId: 'chat-1',
 			onEnterMultiSelect,
 			onMoveToTop,
 			onMoveToBottom,
+			onSortChatOrder,
 			onManageTags: vi.fn(),
 		});
 
@@ -478,11 +480,17 @@ describe('shared sidebar chat row', () => {
 				? 'separator'
 				: item.textContent?.trim(),
 		);
-		expect(labels.slice(0, 3)).toEqual(['Select', 'Move to top', 'Move to bottom']);
+		expect(labels.slice(0, 4)).toEqual([
+			'Select',
+			'Move to top',
+			'Move to bottom',
+			'Reorder chats',
+		]);
 		expect(menuParts).toEqual([
 			'Select',
 			'Move to top',
 			'Move to bottom',
+			'Reorder chats',
 			'separator',
 			'Pin',
 			'Archive',
@@ -509,6 +517,38 @@ describe('shared sidebar chat row', () => {
 		expect(forkItem.hasAttribute('data-disabled')).toBe(false);
 		expect(screen.queryByRole('menuitem', { name: /reload from native history/i })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
+	});
+
+	it.each([
+		['By creation time', 'created'],
+		['By recent activity', 'activity'],
+	] as const)('reorders chats with %s from the keyboard submenu', async (label, sortKey) => {
+		const onSortChatOrder = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onSortChatOrder,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		const reorderSubmenu = screen.getByRole('menuitem', { name: 'Reorder chats' });
+		reorderSubmenu.focus();
+		await fireEvent.keyDown(reorderSubmenu, { key: 'ArrowRight' });
+		await fireEvent.click(await screen.findByRole('menuitem', { name: label }));
+
+		expect(onSortChatOrder).toHaveBeenCalledWith(sortKey);
+	});
+
+	it('shows the reorder submenu without quick-move actions', async () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onSortChatOrder: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+
+		expect(screen.getByRole('menuitem', { name: 'Reorder chats' })).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: 'Move to top' })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Move to bottom' })).toBeNull();
 	});
 
 	it('opens a sidebar chat at an edge from the single new-window submenu', async () => {

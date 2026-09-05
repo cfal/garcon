@@ -977,10 +977,28 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('high')).toBe('high');
     expect(mapThinkingModeToCodexEffort('xhigh')).toBe('xhigh');
     expect(mapThinkingModeToCodexEffort('max', 'gpt-5.5')).toBe('xhigh');
-    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra']) {
       expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
     }
     expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
+  });
+
+  it('maps provider-default thinking to GPT-6 Astra low effort', () => {
+    const params = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'hello',
+      model: 'gpt-6-astra',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    expect(params.effort).toBe('low');
+    expect(codexThreadSettingsTarget({
+      model: 'gpt-6-astra',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    }).effort).toBe('low');
   });
 
   it('builds one complete subsequent-turn settings update', () => {

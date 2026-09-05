@@ -260,6 +260,26 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.getByText('Chat 0').closest('button')?.hasAttribute('draggable')).toBe(false);
 	});
 
+	it.each([
+		['manual', true],
+		['recent', false],
+	] as const)('shows preset reordering in %s mode: %s', async (sortMode, isVisible) => {
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(1),
+			displayOptions: {
+				grouping: 'none',
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'default',
+				sortMode,
+			},
+			onSortChatOrder: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+
+		expect(Boolean(screen.queryByRole('menuitem', { name: 'Reorder chats' }))).toBe(isVisible);
+	});
+
 	it('renders mixed project header rows inside the virtual list', () => {
 		render(SidebarChatListHost, {
 			chats: Array.from({ length: 120 }, (_, index) =>

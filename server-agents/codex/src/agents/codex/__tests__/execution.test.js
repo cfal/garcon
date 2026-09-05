@@ -517,6 +517,59 @@ describe('CodexExecution', () => {
     });
   });
 
+  it('allows GPT-6 Astra to restore its low provider-default effort', async () => {
+    const runtime = createRuntime();
+    runtime.hasSource.mockReturnValue(true);
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const previous = {
+      model: 'gpt-6-astra',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: null,
+    };
+
+    await execution.applySessionConfiguration('thread-1', {
+      ...previous,
+      thinkingMode: 'none',
+    }, previous);
+
+    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      model: 'gpt-6-astra',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+  });
+
+  it('rejects carrying Astra low effort into a non-Astra provider-default transition', async () => {
+    const runtime = createRuntime();
+    runtime.hasSource.mockReturnValue(true);
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const previous = {
+      model: 'gpt-6-astra',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: null,
+    };
+
+    await expect(execution.applySessionConfiguration('thread-1', {
+      ...previous,
+      model: 'gpt-5.4',
+    }, previous)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
+  });
+
   it('rejects live endpoint replacement and concrete reasoning-effort clearing', async () => {
     const runtime = createRuntime();
     runtime.isRunning.mockReturnValue(true);

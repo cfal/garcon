@@ -22,6 +22,7 @@
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
@@ -231,6 +232,22 @@
 		onFailure?: () => void,
 	) {
 		quickMoveQueue.enqueue({ list, chatId, placement, onSuccess, onFailure });
+	}
+
+	async function handleSortChatOrder(sortKey: ChatOrderSortKey): Promise<void> {
+		try {
+			const response = await controller.sortChatOrder(sortKey);
+			if (response.changed) {
+				notifications.info(m.notifications_reorder_chats_applied());
+				appShell.requestSidebarRecenterToSelected();
+			}
+		} catch (error) {
+			reportActionFailure(
+				'Failed to sort manual chat order:',
+				m.notifications_reorder_chats_failed(),
+				error,
+			);
+		}
 	}
 
 	// Multi-select mode handlers.
@@ -508,6 +525,7 @@
 			onOpenInNewWindow={onOpenChatInNewWindow}
 			{newWindowBlocked}
 			onQuickMove={handleQuickMove}
+			onSortChatOrder={handleSortChatOrder}
 		/>
 	</div>
 

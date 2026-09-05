@@ -47,6 +47,7 @@ const settings = {
     success: true,
     response: { success: true, chatId: 'chat-a', orderGroup: 'normal', changed: true },
   })),
+  sortChatOrder: mock(() => Promise.resolve({ changed: true })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
 const pathCache = createRoutePathCache();
@@ -101,11 +102,18 @@ const chatsRoutes = createChatRoutes({
 });
 
 const handler = chatsRoutes['/api/v1/chats/reorder'].POST;
+const sortHandler = chatsRoutes['/api/v1/chats/sort'].POST;
 
 async function callReorder(body) {
   parseJsonBody.mockResolvedValue(body);
   const request = new Request('http://localhost/api/v1/chats/reorder', { method: 'POST' });
   return handler(request);
+}
+
+async function callSort(body) {
+  parseJsonBody.mockResolvedValue(body);
+  const request = new Request('http://localhost/api/v1/chats/sort', { method: 'POST' });
+  return sortHandler(request);
 }
 
 describe('POST /api/v1/chats/reorder', () => {
@@ -280,5 +288,106 @@ describe('POST /api/v1/chats/reorder', () => {
 
   it('does not expose the retired quick route', () => {
     expect(chatsRoutes['/api/v1/chats/reorder-quick']).toBeUndefined();
+  });
+});
+
+describe('POST /api/v1/chats/sort', () => {
+  beforeEach(() => {
+    parseJsonBody.mockClear();
+    registry.getChat.mockClear();
+    settings.sortChatOrder.mockClear();
+    settings.sortChatOrder.mockResolvedValue({ changed: true });
+    metadata.listAllChatMetadata.mockClear();
+    metadata.listAllChatMetadata.mockReturnValue(new Map([
+      ['older-active', {
+        chatId: 'older-active',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        lastActivity: '2025-01-04T00:00:00.000Z',
+        lastMessage: '',
+        firstMessage: '',
+        source: 'live',
+      }],
+      ['newer-idle', {
+        chatId: 'newer-idle',
+        createdAt: '2025-01-03T00:00:00.000Z',
+        lastActivity: '2025-01-03T00:00:00.000Z',
+        lastMessage: '',
+        firstMessage: '',
+        source: 'live',
+      }],
+    ]));
+  });
+
+  it.each(['created', 'activity'])('sorts by %s and returns the typed response', async (sortKey) => {
+    settings.sortChatOrder.mockResolvedValue({ changed: sortKey === 'created' });
+
+    const response = await callSort({ sortKey });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      sortKey,
+      changed: sortKey === 'created',
+    });
+    expect(settings.sortChatOrder).toHaveBeenCalledTimes(1);
+    expect(metadata.listAllChatMetadata).toHaveBeenCalledTimes(1);
+    expect(registry.getChat).not.toHaveBeenCalled();
+  });
+
+  it('builds the creation comparator from metadata', async () => {
+    await callSort({ sortKey: 'created' });
+    const compare = settings.sortChatOrder.mock.calls[0][0];
+
+    expect(['older-active', 'newer-idle'].sort(compare))
+      .toEqual(['newer-idle', 'older-active']);
+  });
+
+  it('builds the activity comparator from metadata', async () => {
+    await callSort({ sortKey: 'activity' });
+    const compare = settings.sortChatOrder.mock.calls[0][0];
+
+    expect(['older-active', 'newer-idle'].sort(compare))
+      .toEqual(['older-active', 'newer-idle']);
+  });
+
+  const invalidBodies = [
+    null,
+    {},
+    [],
+    { sortKey: 'oldest' },
+    { sortKey: 'created', direction: 'desc' },
+  ];
+
+  for (const [index, body] of invalidBodies.entries()) {
+    it(`rejects invalid sort request shape ${index + 1}`, async () => {
+      const response = await callSort(body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: 'Invalid chat order sort request',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      });
+      expect(settings.sortChatOrder).not.toHaveBeenCalled();
+    });
+  }
+
+  it('maps settings failures to an opaque internal error', async () => {
+    settings.sortChatOrder.mockRejectedValue(new Error('save failed'));
+
+    const response = await callSort({ sortKey: 'activity' });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+  });
+
+  it('does not expose alternate quick or bulk sort routes', () => {
+    expect(chatsRoutes['/api/v1/chats/sort-quick']).toBeUndefined();
+    expect(chatsRoutes['/api/v1/chats/sort-bulk']).toBeUndefined();
   });
 });

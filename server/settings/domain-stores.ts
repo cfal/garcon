@@ -12,6 +12,7 @@ import type {
   ReorderChatRequest,
   ReorderChatResponse,
 } from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
@@ -693,6 +694,34 @@ export class ChatOrderStore {
       await this.#context.saveAndMaybeEmitRemote(settings, remoteSettingsChanged);
       this.#context.emitListChanged('chats-reordered', request.chatId);
       return { success: true, response };
+    });
+  }
+
+  async sortChatOrder(
+    compareChatIds: ChatOrderIdComparator,
+  ): Promise<{ changed: boolean }> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const before = orderSnapshot(settings);
+      let anchorChatId: string | null = null;
+
+      for (const key of ORDER_LIST_KEYS) {
+        const sorted = [...before[key]].sort(compareChatIds);
+        settings[key] = sorted;
+        if (!anchorChatId && !sameOrderedStringArray(before[key], sorted)) {
+          anchorChatId = sorted[0] ?? null;
+        }
+      }
+
+      if (!anchorChatId) return { changed: false };
+
+      const remoteSettingsChanged = bumpRemoteSettingsVersionForPinnedChange(
+        settings,
+        dedup(before.pinnedChatIds),
+      );
+      await this.#context.saveAndMaybeEmitRemote(settings, remoteSettingsChanged);
+      this.#context.emitListChanged('chats-reordered', anchorChatId);
+      return { changed: true };
     });
   }
 }
