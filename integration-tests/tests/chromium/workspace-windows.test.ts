@@ -798,6 +798,7 @@ async function resizeFirstPartition(page: Page): Promise<{ value: string; persis
 describe('Chromium workspace windows', () => {
   test('drags Chat onto any window, blocks the cap, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
+      await fixture.page.setViewportSize({ width: 1440, height: 900 });
       await createGitFixture(fixture.integration.dirs.project);
       await mkdir(join(fixture.integration.dirs.project, 'src'));
       await writeFile(
@@ -812,6 +813,12 @@ describe('Chromium workspace windows', () => {
       );
       const chatB = await createChat(fixture, 'workspace-window-chat-b');
       await openChat(fixture, chatA);
+      await fixture.page.locator('.workspace-host-region').waitFor();
+      expect(
+        await fixture.page
+          .locator('.workspace-host-region')
+          .evaluate((element) => element.getBoundingClientRect().width),
+      ).toBe(1120);
       await fixture.page
         .locator(`[data-sidebar-virtual-row="${chatB}"]`)
         .waitFor({ state: 'visible' });

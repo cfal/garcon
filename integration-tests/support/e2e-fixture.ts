@@ -14,6 +14,7 @@ import {
   type IntegrationFixtureOptions,
 } from './integration-fixture.js';
 import { LightpandaProcess } from './lightpanda-process.js';
+import { installLightpandaWorkspaceGeometry } from './lightpanda-workspace-geometry.js';
 import { withTimeout } from './deferred.js';
 import { requireCurrentWebBuild } from './web-build-gate.js';
 
@@ -60,6 +61,7 @@ export class E2eFixture {
       browser = await connect({ browserWSEndpoint: lightpanda.browserWsEndpoint });
       context = await browser.createBrowserContext();
       const page = await context.newPage();
+      await installLightpandaWorkspaceGeometry(page);
       await page.evaluateOnNewDocument(() => {
         const localSettingsKey = 'pref_local_settings';
         try {
