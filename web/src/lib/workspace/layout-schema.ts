@@ -36,6 +36,7 @@ export interface WorkspaceLayoutParseResult {
 export const WORKSPACE_LAYOUT_MAX_PARSE_DEPTH = 64;
 export const WORKSPACE_LAYOUT_MAX_PARSE_NODES = 256;
 export const WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW = 256;
+export const WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS = 256;
 
 class WorkspaceLayoutBudgetExceeded extends Error {}
 
@@ -228,16 +229,17 @@ function parseUnplacedTerminalIds(
 	surfaces: Readonly<Record<string, SurfaceDescriptor>>,
 ): string[] {
 	if (!Array.isArray(value)) return [];
-	return [
-		...new Set(
-			value.filter(
-				(terminalId): terminalId is string =>
-					typeof terminalId === 'string' &&
-					Boolean(terminalId) &&
-					!surfaces[terminalSurfaceId(terminalId)],
-			),
-		),
-	];
+	const terminalIds = new Set<string>();
+	for (const terminalId of value.slice(0, WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS)) {
+		if (
+			typeof terminalId === 'string' &&
+			terminalId.length > 0 &&
+			!surfaces[terminalSurfaceId(terminalId)]
+		) {
+			terminalIds.add(terminalId);
+		}
+	}
+	return [...terminalIds];
 }
 
 function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {

@@ -10,6 +10,7 @@ import {
 	WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
 	WORKSPACE_LAYOUT_MAX_PARSE_NODES,
 	WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW,
+	WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS,
 } from '../layout-schema';
 import { portableSingletonDescriptor } from '../surface-types';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
@@ -425,6 +426,25 @@ describe('workspace layout V2 schema', () => {
 			expect(truncated.snapshot.surfaces['terminal:terminal-over-budget']).toBeUndefined();
 		},
 	);
+
+	it('truncates persisted unplaced terminals at the parse budget', () => {
+		const terminalIds = Array.from(
+			{ length: WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS + 1 },
+			(_, index) => `terminal-unplaced-${index}`,
+		);
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: persistedWindow(1),
+				unplacedTerminalIds: terminalIds,
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.unplacedTerminalIds).toEqual(
+			terminalIds.slice(0, WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS),
+		);
+	});
 
 	it('falls back for malformed current roots and unsupported versions', () => {
 		for (const raw of [
