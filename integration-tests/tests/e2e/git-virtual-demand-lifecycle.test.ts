@@ -168,6 +168,7 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
       });
 
       const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_600, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-virtual-demand-seed');
