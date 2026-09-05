@@ -4,10 +4,11 @@ import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import { getHttpIdleTimeoutSeconds } from '../config.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
-import { GIT_REF_RESULT_LIMITS } from './types.js';
+import { GIT_REF_RESULT_LIMITS, type GitCommandOptions } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { probeWorktreeLayout } from './worktree-layout.js';
@@ -52,6 +53,17 @@ const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
 const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
+// Network commands run within the HTTP idle budget minus a margin, so a slow
+// remote surfaces a git error before the idle timeout drops the response.
+const NETWORK_GIT_TIMEOUT_MARGIN_MS = 2_000;
+
+function networkGitOptions(): GitCommandOptions {
+  return {
+    timeoutMs: Math.max(1_000, getHttpIdleTimeoutSeconds() * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
+    // Fails fast on credential prompts instead of hanging until the timeout.
+    env: { GIT_TERMINAL_PROMPT: '0' },
+  };
+}
 const repositoryCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
@@ -748,7 +760,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['fetch', remoteName]);
+    const { stdout } = await runGit(projectPath, ['fetch', remoteName], networkGitOptions());
     return { success: true, output: stdout || 'Fetch completed successfully', remoteName };
   }
 
@@ -777,7 +789,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin/branch as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['pull', remoteName, remoteBranch]);
+    const { stdout } = await runGit(
+      projectPath,
+      ['pull', remoteName, remoteBranch],
+      networkGitOptions(),
+    );
     return {
       success: true,
       output: stdout || 'Pull completed successfully',
@@ -822,7 +838,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       }
     }
 
-    const { stdout } = await runGit(projectPath, ['push', targetRemote, `${branch}:${targetBranch}`]);
+    const { stdout } = await runGit(
+      projectPath,
+      ['push', targetRemote, `${branch}:${targetBranch}`],
+      networkGitOptions(),
+    );
     return {
       success: true,
       output: stdout || 'Push completed successfully',
