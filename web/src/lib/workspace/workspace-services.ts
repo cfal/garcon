@@ -179,12 +179,13 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		);
 		if (!entry) return null;
 		const size = hostGeometry.size;
-		const partitionAxisPixels = size
-			? floorWorkspacePixels(
-					entry.partition.direction === 'horizontal' ? entry.bounds.width : entry.bounds.height,
-					entry.partition.direction === 'horizontal' ? size.width : size.height,
-				)
-			: null;
+		let partitionAxisPixels: number | null = null;
+		if (size) {
+			const horizontal = entry.partition.direction === 'horizontal';
+			const boundsFraction = horizontal ? entry.bounds.width : entry.bounds.height;
+			const hostPixels = horizontal ? size.width : size.height;
+			partitionAxisPixels = floorWorkspacePixels(boundsFraction, hostPixels);
+		}
 		return {
 			currentRatio: entry.partition.ratio,
 			bounds: resolveWorkspacePartitionRatioBounds({

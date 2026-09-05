@@ -118,9 +118,10 @@ export function resolveWorkspaceSplitAdmission(
 	const childWidth = horizontal ? Math.floor(width / 2) : width;
 	const childHeight = horizontal ? height : Math.floor(height / 2);
 
-	return childWidth >= SPLIT_MIN_WINDOW_WIDTH_PX && childHeight >= SPLIT_MIN_WINDOW_HEIGHT_PX
-		? { allowed: true }
-		: { allowed: false, reason: 'too-small' };
+	if (childWidth < SPLIT_MIN_WINDOW_WIDTH_PX || childHeight < SPLIT_MIN_WINDOW_HEIGHT_PX) {
+		return { allowed: false, reason: 'too-small' };
+	}
+	return { allowed: true };
 }
 
 export function floorWorkspacePixels(fraction: number, hostPixels: number): number {
@@ -132,22 +133,17 @@ export function resolveWorkspaceCompactActive(input: {
 	readonly root: DesktopWorkspaceNode;
 	readonly hostSize: WorkspaceHostSize | null;
 }): boolean {
-	if (!input.hostSize || collectWindowNodes(input.root).length < 2) return false;
-	const rectangles = computeWindowRects(input.root).windows.map(({ rect }) => ({
-		width: floorWorkspacePixels(rect.width, input.hostSize!.width),
-		height: floorWorkspacePixels(rect.height, input.hostSize!.height),
-	}));
+	const { wasActive, root, hostSize } = input;
+	if (!hostSize) return false;
+	const windows = computeWindowRects(root).windows;
+	if (windows.length < 2) return false;
 
-	if (!input.wasActive) {
-		return rectangles.some(
-			(rect) =>
-				rect.width < COMPACT_ENTER_WINDOW_WIDTH_PX || rect.height < COMPACT_ENTER_WINDOW_HEIGHT_PX,
-		);
-	}
-
-	return !rectangles.every(
-		(rect) =>
-			rect.width >= COMPACT_EXIT_WINDOW_WIDTH_PX && rect.height >= COMPACT_EXIT_WINDOW_HEIGHT_PX,
+	const minimumWidth = wasActive ? COMPACT_EXIT_WINDOW_WIDTH_PX : COMPACT_ENTER_WINDOW_WIDTH_PX;
+	const minimumHeight = wasActive ? COMPACT_EXIT_WINDOW_HEIGHT_PX : COMPACT_ENTER_WINDOW_HEIGHT_PX;
+	return windows.some(
+		({ rect }) =>
+			floorWorkspacePixels(rect.width, hostSize.width) < minimumWidth ||
+			floorWorkspacePixels(rect.height, hostSize.height) < minimumHeight,
 	);
 }
 
@@ -166,35 +162,24 @@ export function resolveWorkspacePartitionRatioBounds(input: {
 	readonly partition: WorkspacePartitionNode;
 	readonly partitionAxisPixels: number | null;
 }): WorkspacePartitionRatioBounds {
-	if (!input.partitionAxisPixels || input.partitionAxisPixels <= 0) {
+	const { partition, partitionAxisPixels } = input;
+	if (!partitionAxisPixels || partitionAxisPixels <= 0) {
 		return { min: MIN_PARTITION_RATIO, max: MAX_PARTITION_RATIO, adjustable: true };
 	}
 	const criticalPixels =
-		input.partition.direction === 'horizontal'
+		partition.direction === 'horizontal'
 			? COMPACT_ENTER_WINDOW_WIDTH_PX
 			: COMPACT_ENTER_WINDOW_HEIGHT_PX;
 	const requiredPixels = criticalPixels + WORKSPACE_RESIZE_BOUND_SAFETY_PX;
-	const firstFraction = minimumLeafAxisFraction(
-		input.partition.children[0],
-		input.partition.direction,
-	);
-	const secondFraction = minimumLeafAxisFraction(
-		input.partition.children[1],
-		input.partition.direction,
-	);
-	const min = Math.max(
-		MIN_PARTITION_RATIO,
-		requiredPixels / (input.partitionAxisPixels * firstFraction),
-	);
+	const firstFraction = minimumLeafAxisFraction(partition.children[0], partition.direction);
+	const secondFraction = minimumLeafAxisFraction(partition.children[1], partition.direction);
+	const min = Math.max(MIN_PARTITION_RATIO, requiredPixels / (partitionAxisPixels * firstFraction));
 	const max = Math.min(
 		MAX_PARTITION_RATIO,
-		1 - requiredPixels / (input.partitionAxisPixels * secondFraction),
+		1 - requiredPixels / (partitionAxisPixels * secondFraction),
 	);
 	if (min > max) {
-		const retained = Math.min(
-			MAX_PARTITION_RATIO,
-			Math.max(MIN_PARTITION_RATIO, input.partition.ratio),
-		);
+		const retained = Math.min(MAX_PARTITION_RATIO, Math.max(MIN_PARTITION_RATIO, partition.ratio));
 		return { min: retained, max: retained, adjustable: false };
 	}
 	return { min, max, adjustable: true };
@@ -204,6 +189,6 @@ export function clampWorkspacePartitionRatio(
 	ratio: number,
 	bounds: WorkspacePartitionRatioBounds,
 ): number {
-	if (!Number.isFinite(ratio)) return Math.min(bounds.max, Math.max(bounds.min, 0.5));
-	return Math.min(bounds.max, Math.max(bounds.min, ratio));
+	const candidate = Number.isFinite(ratio) ? ratio : 0.5;
+	return Math.min(bounds.max, Math.max(bounds.min, candidate));
 }
