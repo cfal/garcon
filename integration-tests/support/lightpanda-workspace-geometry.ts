@@ -6,8 +6,11 @@ export async function installLightpandaWorkspaceGeometry(page: Page): Promise<vo
     HTMLElement.prototype.getBoundingClientRect = function (): DOMRect {
       const nativeRect = nativeGetBoundingClientRect.call(this);
       if (!this.classList.contains('workspace-host-region')) return nativeRect;
-      // Replaces Lightpanda's 10x10 placeholder for an otherwise uncomputed flex remainder.
-      if (nativeRect.width !== 10 || nativeRect.height !== 10) return nativeRect;
+      // Replaces Lightpanda's known square placeholders for an uncomputed flex remainder.
+      const isPlaceholder =
+        (nativeRect.width === 5 && nativeRect.height === 5) ||
+        (nativeRect.width === 10 && nativeRect.height === 10);
+      if (!isPlaceholder) return nativeRect;
 
       const mobile = matchMedia('(max-width: 768px)').matches;
       const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');
