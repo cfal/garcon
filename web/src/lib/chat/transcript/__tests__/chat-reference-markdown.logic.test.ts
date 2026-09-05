@@ -83,9 +83,27 @@ describe('createChatReferenceMarkdownExtension', () => {
 		`https://example.com/${CHAT_ID}`,
 		`www.example.com/${CHAT_ID}`,
 		`user${CHAT_ID}@example.com`,
-		`${CHAT_ID}@example.com`,
 	])('does not claim IDs owned by code or links in %s', (source) => {
 		expect(chatReferenceIds(source)).toEqual([]);
+	});
+
+	it.each([
+		`${CHAT_ID}@example.com`,
+		`${CHAT_ID}+updates@example.com`,
+		`${CHAT_ID}.updates@example.com`,
+		`${CHAT_ID}-updates@example.com`,
+	])('preserves a complete GFM email link for %s', (address) => {
+		const { marked, tokens } = lex(`Email ${address} now`);
+		const collected = collectTokens(marked, tokens);
+		const links = collected.filter((token) => token.type === 'link');
+
+		expect(links).toHaveLength(1);
+		expect(links[0]).toMatchObject({
+			raw: address,
+			text: address,
+			href: `mailto:${address}`,
+		});
+		expect(collected.some((token) => token.type === 'chatReference')).toBe(false);
 	});
 
 	it('coexists with KaTeX, literal XML, tables, lists, and blockquotes', () => {

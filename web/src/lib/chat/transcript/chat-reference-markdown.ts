@@ -1,15 +1,21 @@
 import { CHAT_ID_LENGTH, parseChatId } from '$shared/chat-id.js';
-import type { MarkedExtension, TokenizerExtension } from 'marked';
+import { Lexer, type MarkedExtension, type TokenizerExtension } from 'marked';
 
 const WORD_CHARACTER = /[\p{L}\p{M}\p{N}_]/u;
-const CHAT_ID_AT_START = new RegExp(
-	`^(\\d{${CHAT_ID_LENGTH}})(?![\\p{L}\\p{M}\\p{N}_]|@[\\p{L}\\p{N}])`,
-	'u',
-);
-const CHAT_ID_AHEAD = new RegExp(
-	`\\d{${CHAT_ID_LENGTH}}(?![\\p{L}\\p{M}\\p{N}_]|@[\\p{L}\\p{N}])`,
-	'u',
-);
+const CHAT_ID_AT_START = new RegExp(`^(\\d{${CHAT_ID_LENGTH}})(?![\\p{L}\\p{M}\\p{N}_])`, 'u');
+const CHAT_ID_AHEAD = new RegExp(`\\d{${CHAT_ID_LENGTH}}(?![\\p{L}\\p{M}\\p{N}_])`, 'u');
+
+function startsWithGfmEmail(source: string): boolean {
+	const atIndex = source.indexOf('@', CHAT_ID_LENGTH);
+	if (atIndex === -1) return false;
+
+	const whitespaceIndex = source.search(/\s/u);
+	if (whitespaceIndex !== -1 && whitespaceIndex < atIndex) return false;
+
+	const candidate = whitespaceIndex === -1 ? source : source.slice(0, whitespaceIndex);
+	const firstToken = Lexer.lexInline(candidate, { gfm: true }).at(0);
+	return firstToken?.type === 'link' && firstToken.href.startsWith('mailto:');
+}
 
 const chatReferenceTokenizer: TokenizerExtension = {
 	name: 'chatReference',
@@ -22,6 +28,7 @@ const chatReferenceTokenizer: TokenizerExtension = {
 		if (this.lexer.state.inLink) return;
 		const match = CHAT_ID_AT_START.exec(source);
 		if (!match) return;
+		if (startsWithGfmEmail(source)) return;
 
 		const previousRaw = tokens.at(-1)?.raw ?? '';
 		const previousCharacter = [...previousRaw.slice(-2)].at(-1);
