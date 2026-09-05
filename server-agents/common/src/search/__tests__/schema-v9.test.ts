@@ -496,6 +496,100 @@ describe('schema v9', () => {
     db.close();
   });
 
+  test('pages 500 distinct chats and honors ordered allowlist priority', async () => {
+    const db = await openFresh();
+    const marker = 'paginationmarker';
+    const allowedChats = Array.from({ length: 525 }, (_, index) => {
+      const suffix = String(index).padStart(4, '0');
+      const chatId = `chat-page-${suffix}`;
+      const transcriptViewId = `view-page-${suffix}`;
+      buildChat(db, chatId, transcriptViewId, 1, marker);
+      return { chatId, transcriptViewId, throughOrdinal: 1 };
+    });
+    const query = {
+      version: 1 as const,
+      clauses: [{
+        kind: 'all-words' as const,
+        tokens: [{ text: marker, normalized: marker, match: 'exact' as const }],
+      }],
+    };
+    const pages = Array.from({ length: 10 }, (_, index) => searchTranscriptIndexV1(db, {
+      query,
+      allowedChats,
+      order: 'relevance',
+      offset: index * 50,
+      limit: 50,
+    }));
+    const resultIds = pages.flatMap((page) => page.results.map((result) => result.chatId));
+    expect(resultIds).toHaveLength(500);
+    expect(new Set(resultIds).size).toBe(500);
+    expect(pages[0]!.page).toEqual({
+      offset: 0, limit: 50, total: 525, hasMore: true, nextOffset: 50,
+    });
+    expect(pages[9]!.page).toEqual({
+      offset: 450, limit: 50, total: 525, hasMore: true, nextOffset: 500,
+    });
+    expect(pages[9]!.results[0]).toMatchObject({
+      matchedMessageCount: 1,
+      snippets: [expect.objectContaining({ ordinal: 1 })],
+    });
+
+    const reversed = [...allowedChats].reverse();
+    const allowlistPage = searchTranscriptIndexV1(db, {
+      query,
+      allowedChats: reversed,
+      order: 'allowlist',
+      offset: 50,
+      limit: 50,
+    });
+    expect(allowlistPage.results.map((result) => result.chatId))
+      .toEqual(reversed.slice(50, 100).map((entry) => entry.chatId));
+    const finalPage = searchTranscriptIndexV1(db, {
+      query, allowedChats, order: 'relevance', offset: 500, limit: 50,
+    });
+    expect(finalPage.results).toHaveLength(25);
+    expect(finalPage.page).toEqual({
+      offset: 500, limit: 50, total: 525, hasMore: false, nextOffset: null,
+    });
+    const beyond = searchTranscriptIndexV1(db, {
+      query, allowedChats, order: 'relevance', offset: 600, limit: 50,
+    });
+    expect(beyond.results).toEqual([]);
+    expect(beyond.page).toEqual({
+      offset: 600, limit: 50, total: 525, hasMore: false, nextOffset: null,
+    });
+    db.close();
+  });
+
+  test('returns normalized terminal pages for empty searches', async () => {
+    const db = await openFresh();
+    const emptyAllowlist = searchTranscriptIndexV1(db, {
+      query: {
+        version: 1,
+        clauses: [{
+          kind: 'all-words',
+          tokens: [{ text: 'empty', normalized: 'empty', match: 'exact' }],
+        }],
+      },
+      allowedChats: [],
+      offset: 25,
+      limit: 500,
+    });
+    expect(emptyAllowlist.page).toEqual({
+      offset: 25, limit: 100, total: 0, hasMore: false, nextOffset: null,
+    });
+    const emptyTerms = searchTranscriptIndexV1(db, {
+      query: { version: 1, clauses: [] },
+      allowedChats: [],
+      offset: 12,
+      limit: 25,
+    });
+    expect(emptyTerms.page).toEqual({
+      offset: 12, limit: 25, total: 0, hasMore: false, nextOffset: null,
+    });
+    db.close();
+  });
+
   test('[TLV5-SEARCH.07-SCHEMA-05] timestamp bytes are bounded in code and storage', async () => {
     const db = await openFresh();
     planChatSync(db, {

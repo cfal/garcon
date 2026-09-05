@@ -155,6 +155,7 @@
 		getSelectedChatId: () => chatSessions.selectedChatId,
 		getTranscriptSearchEnabled: () =>
 			remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
+		getSearchResultSort: () => localSettings.sidebarSearchResultSort,
 		notifyError: (message) => notifications.error(message),
 		searchChatTranscripts,
 		logError: (message, error) => {

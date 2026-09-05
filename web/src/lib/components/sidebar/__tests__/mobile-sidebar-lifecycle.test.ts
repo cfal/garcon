@@ -105,6 +105,7 @@ describe('mobile sidebar lifecycle', () => {
 		const chats = [createChat({ id: 'unread-chat', title: 'Unread chat', isUnread: true })];
 		const sidebarSearch = createSidebarSearchStore({
 			getTranscriptSearchEnabled: () => true,
+			getSearchResultSort: () => 'relevance',
 			getChats: () => chats,
 			getSelectedChatId: () => null,
 			notifyError: vi.fn(),

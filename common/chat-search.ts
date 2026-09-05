@@ -3,6 +3,11 @@ export type ChatSearchSnippetRole = 'user' | 'assistant' | 'tool' | 'system';
 export const CHAT_SEARCH_MAX_TERMS = 16;
 export const CHAT_SEARCH_MAX_WORDS = 32;
 export const CHAT_SEARCH_MIN_PREFIX_CHARS = 3;
+export const CHAT_SEARCH_MAX_PAGE_SIZE = 100;
+export const CHAT_SEARCH_MAX_OFFSET = 9_999;
+export const CHAT_SEARCH_SORT_VALUES = ['relevance', 'activity', 'created'] as const;
+
+export type ChatSearchSort = (typeof CHAT_SEARCH_SORT_VALUES)[number];
 
 export interface ChatSearchQueryV1 {
   readonly version: 1;
@@ -23,6 +28,8 @@ export interface ChatSearchRequest {
   query: string;
   textTokens?: string[];
   chatIds?: string[];
+  sort?: ChatSearchSort;
+  offset?: number;
   limit?: number;
 }
 
@@ -67,10 +74,18 @@ export interface ChatSearchIndexStatus {
   resultsTruncated: boolean;
 }
 
+export interface ChatSearchPage {
+  readonly offset: number;
+  readonly limit: number;
+  readonly total: number;
+  readonly hasMore: boolean;
+  readonly nextOffset: number | null;
+}
+
 export interface ChatSearchResponse {
   query: string;
   results: ChatSearchResult[];
-  total: number;
+  page: ChatSearchPage;
   index: ChatSearchIndexStatus;
 }
 

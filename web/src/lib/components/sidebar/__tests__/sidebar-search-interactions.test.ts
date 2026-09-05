@@ -95,6 +95,84 @@ describe('sidebar search interactions', () => {
 		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
 	});
 
+	it('prefetches once keyboard navigation reaches the final eight loaded rows', async () => {
+		const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
+		render(SidebarSearchDialogHost, {
+			filteredChats: Array.from({ length: 10 }, (_, index) => (
+				createChat(`chat-${index}`, `Chat ${index}`)
+			)),
+			hasMoreTranscriptResults: true,
+			onLoadMoreTranscriptResults,
+		});
+
+		const input = await screen.findByRole('textbox');
+		input.focus();
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		expect(onLoadMoreTranscriptResults).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		['page', { transcriptSearchPageError: 'Loading more results failed.' }],
+		['revalidation', { transcriptSearchRevalidationError: 'Updating results failed.' }],
+	])('does not prefetch from the keyboard while a %s error requires explicit retry', async (
+		_errorKind,
+		errorProps,
+	) => {
+		const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
+		render(SidebarSearchDialogHost, {
+			filteredChats: Array.from({ length: 10 }, (_, index) => (
+				createChat(`chat-${index}`, `Chat ${index}`)
+			)),
+			hasMoreTranscriptResults: true,
+			onLoadMoreTranscriptResults,
+			...errorProps,
+		});
+
+		const input = await screen.findByRole('textbox');
+		input.focus();
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+		expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
+	});
+
+	it('changes the search-result sort from the keyboard-reachable menu', async () => {
+		const onSortChange = vi.fn();
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onSortChange,
+		});
+
+		const trigger = await screen.findByRole('button', { name: 'Best match' });
+		trigger.focus();
+		await fireEvent.click(trigger);
+		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Creation time' }));
+
+		expect(onSortChange).toHaveBeenCalledWith('created');
+		expect(screen.getByRole('button', { name: 'Creation time' })).toBeTruthy();
+	});
+
+	it('closes the sort menu before Escape closes the search dialog', async () => {
+		const onClose = vi.fn();
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onSortChange: vi.fn(),
+			onClose,
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Best match' }));
+		const item = await screen.findByRole('menuitemradio', { name: 'Recent activity' });
+		await fireEvent.keyDown(item, { key: 'Escape', bubbles: true });
+		expect(onClose).not.toHaveBeenCalled();
+		await waitFor(() => expect(screen.queryByRole('menuitemradio')).toBeNull());
+
+		const input = screen.getByRole('textbox');
+		await fireEvent.keyDown(input, { key: 'Escape', bubbles: true });
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
 	it('does not publish an invalid highlight for empty results', async () => {
 		const onHighlightChange = vi.fn();
 		render(SidebarSearchDialog, {
@@ -200,7 +278,8 @@ describe('sidebar search interactions', () => {
 			onClose: vi.fn(),
 		});
 
-		const statusRow = screen.getByRole('status');
+		const statusRow = document.querySelector('[data-slot="transcript-search-status"]');
+		if (!(statusRow instanceof HTMLElement)) throw new Error('Expected transcript search status');
 		const results = document.querySelector('[data-slot="search-dialog-results"]');
 		expect(results).toBeInstanceOf(HTMLElement);
 		expect(statusRow.parentElement).toBe(results?.parentElement);

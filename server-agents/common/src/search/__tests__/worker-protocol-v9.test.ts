@@ -149,7 +149,14 @@ describe('worker protocol v9', () => {
     };
     const requests = [
       { ...envelope, type: 'open', dbPath: '/tmp/index.sqlite' },
-      { ...envelope, type: 'search-start', query, limit: 20 },
+      {
+        ...envelope,
+        type: 'search-start',
+        query,
+        order: 'relevance',
+        offset: 0,
+        limit: 20,
+      },
       {
         ...envelope,
         type: 'search-allowlist-chunk',
@@ -167,6 +174,15 @@ describe('worker protocol v9', () => {
       expect(isReaderRequest(request)).toBe(true);
       expect(isReaderRequest(extra(request))).toBe(false);
     }
+    const searchStart = requests[1];
+    expect(isReaderRequest({ ...searchStart, order: 'activity' })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, offset: -1 })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, offset: 10_000 })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, limit: 0 })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, limit: 101 })).toBe(false);
+    const missingOffset: Record<string, unknown> = { ...searchStart };
+    Reflect.deleteProperty(missingOffset, 'offset');
+    expect(isReaderRequest(missingOffset)).toBe(false);
     expect(isReaderRequest({ ...envelope, type: 'search-cancel' })).toBe(false);
     expect(isReaderRequest({
       ...requests[2],
@@ -198,6 +214,7 @@ describe('worker protocol v9', () => {
         ...envelope,
         type: 'search-result',
         results: [result],
+        page: { offset: 0, limit: 20, total: 1, hasMore: false, nextOffset: null },
         index: {
           indexedChatCount: 1,
           pendingChatCount: 0,
@@ -214,6 +231,32 @@ describe('worker protocol v9', () => {
       expect(isReaderEvent(extra(event))).toBe(false);
     }
     const searchResult = events[2];
+    expect(isReaderEvent({
+      ...searchResult,
+      page: { offset: 0, limit: 20, total: 2, hasMore: true, nextOffset: 1 },
+    })).toBe(true);
+    expect(isReaderEvent({
+      ...searchResult,
+      page: { offset: 0, limit: 20, total: 2, hasMore: true, nextOffset: 2 },
+    })).toBe(false);
+    expect(isReaderEvent({
+      ...searchResult,
+      page: { offset: 0, limit: 0, total: 1, hasMore: false, nextOffset: null },
+    })).toBe(false);
+    expect(isReaderEvent({
+      ...searchResult,
+      page: { offset: 9_999, limit: 1, total: 10_001, hasMore: true, nextOffset: 10_000 },
+    })).toBe(false);
+    expect(isReaderEvent({
+      ...searchResult,
+      results: [],
+      page: { offset: 2, limit: 20, total: 1, hasMore: false, nextOffset: null },
+    })).toBe(true);
+    expect(isReaderEvent({
+      ...searchResult,
+      results: [result, result],
+      page: { offset: 0, limit: 1, total: 2, hasMore: true, nextOffset: 1 },
+    })).toBe(false);
     expect(isReaderEvent({
       ...searchResult,
       index: { ...searchResult.index, resultsTruncated: 1 },
