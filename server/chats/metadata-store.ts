@@ -9,6 +9,7 @@ import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { isRecord } from '../../common/json.js';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -16,6 +17,9 @@ const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
 const METADATA_VERSION = 1;
 const CARRY_OVER_HEAD_WINDOW = 25;
+// Agent previews each spawn work; an unbounded repair fan-out stalls startup
+// on large registries, so repairs run through a bounded pool.
+const METADATA_REPAIR_CONCURRENCY = 6;
 
 type MetadataSource = 'live' | 'agent-preview' | 'startup';
 
@@ -200,17 +204,31 @@ export class MetadataIndex {
       return !existing || this.#isCheaplyStale(existing, session);
     });
 
-    const results = await Promise.allSettled(
-      repairEntries.map(([chatId, session]) => this.#buildMetadataFromPreviewWithTimeout(chatId, session)),
+    // Workers never reject: each returns an ok/error union so the bounded pool
+    // cannot be torn down by one failing preview, and per-entry timeouts start
+    // when the entry actually begins processing rather than at fan-out time.
+    const results = await mapWithConcurrencyResult(
+      repairEntries,
+      METADATA_REPAIR_CONCURRENCY,
+      async ([chatId, session]): Promise<
+        | { ok: true; metadata: ChatMetadata }
+        | { ok: false; error: unknown }
+      > => {
+        try {
+          return { ok: true, metadata: await this.#buildMetadataFromPreviewWithTimeout(chatId, session) };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
     );
 
     for (let i = 0; i < results.length; i++) {
       const [chatId] = repairEntries[i];
       const result = results[i];
-      if (result.status === 'fulfilled') {
-        this.#metadataByChatId.set(String(chatId), result.value);
+      if (result.ok) {
+        this.#metadataByChatId.set(String(chatId), result.metadata);
       } else {
-        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.reason));
+        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.error));
       }
     }
   }
