@@ -116,6 +116,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     controls: ChatExecutionControlRepository,
     unsettledQueueReceiptKeys: (chatId: string) => ReadonlySet<string> = () => new Set(),
     appendControlReceipt: (chatId: string, entry: StoredControlInputEntry) => void = () => undefined,
+    selectionAdmissionLock: KeyedPromiseLock = new KeyedPromiseLock(),
   ) {
     super();
     if (!turnRunner) throw new Error('ChatExecutionCoordinator requires an agent turn runner');
@@ -203,6 +204,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       controls: this.#controlOperations,
       turnRunner: this.#turnRunner,
       getDrainOptions: this.#getDrainOptions,
+      runSelectionAdmissionExclusive: (chatId, operation) =>
+        selectionAdmissionLock.runExclusive(`chat:${chatId}`, operation),
       callbacks: {
         isShuttingDown: () => this.#shuttingDown,
         registerQueued: (chatId, content, options) => (

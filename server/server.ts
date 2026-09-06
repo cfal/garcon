@@ -49,7 +49,7 @@ import { TranscriptExportService } from './chats/transcript-export/service.js';
 import { HandoffArtifactService } from './chats/handoff-artifact/service.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
-import { AgentRegistry } from './agents/index.js';
+import { AgentRegistry, createForkNativeHistoryReader } from './agents/index.js';
 import {
   CARRYOVER_COMPACTION_TIMEOUT_MS,
   CarryOverCompactionService,
@@ -105,9 +105,8 @@ import {
   SnippetProjectPathService,
   SnippetService,
 } from './snippets/service.js';
-import { initializePreambleService } from './preambles/setup.js';
+import { initializeChatPreambleSelectionService, initializePreambleService } from './preambles/setup.js';
 import {
-  importNativeHistoryDrafts,
   ledgerRowsToMessages,
   TranscriptAdoptionService,
   TranscriptLedgerService,
@@ -347,7 +346,9 @@ export async function startServer(): Promise<void> {
 
     // Every chat mutation shares one lock, including live settings changes.
     const chatMutationLock = new KeyedPromiseLock();
-
+    // Narrow per-chat lock shared by selection Save, direct admission, and queue
+    // draining so an input can never overtake a Save's update-notice attempt.
+    const selectionAdmissionLock = new KeyedPromiseLock();
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     let eventWiring: ServerEventWiring | null = null;
     let unsubscribeSearchStatus = () => {};
@@ -390,6 +391,16 @@ export async function startServer(): Promise<void> {
       transcriptAdoption,
     );
     const preambles = await initializePreambleService(workspaceDir);
+    const chatPreambleSelection = initializeChatPreambleSelectionService({
+      preambles,
+      registry: chatRegistry,
+      adoption: transcriptAdoption,
+      ledger: transcriptLedger,
+      ownershipJournal: agentOwnership,
+      chatMutationLock,
+      selectionAdmissionLock,
+      onSelectionCommitted: (chatId, revision) => eventWiring?.notifyChatPreamblesInvalidated(chatId, revision),
+    });
 
     agentRegistry = new AgentRegistry({
       registry: chatRegistry,
@@ -429,6 +440,7 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       preambles,
+      selectionAdmissionLock,
     });
 
     await chatRegistry.reconcileSessions((session, chatId) =>
@@ -523,6 +535,7 @@ export async function startServer(): Promise<void> {
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
       agentCommands.appendControlReceipt,
+      selectionAdmissionLock,
     );
     executionQueries = queue;
     const transcriptReload = new TranscriptReloadService({
@@ -581,35 +594,17 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
-      readForkedNativeHistory: async ({
-        targetChatId,
-        sourceSession,
-        fork,
-        signal,
-        preambleEvidence,
-      }) => {
-        const integration = integrationRegistry.get(sourceSession.agentId);
-        if (!integration?.nativeHistoryImport) return null;
-        return importNativeHistoryDrafts({
-          chatId: targetChatId,
-          entry: sourceSession,
-          integration,
-          nativeHistoryImport: integration.nativeHistoryImport,
-          session: fork,
-          // The fork target starts with no carryover of its own; its history is the
-          // session it resumes from.
-          carryOverRevision: carryOver.revision([]),
-          signal,
-          now: () => new Date().toISOString(),
-          preambleEvidence,
-        });
-      },
+      readForkedNativeHistory: createForkNativeHistoryReader({
+        integrations: integrationRegistry,
+        carryOver,
+      }),
       transcripts: transcriptLedger,
       chatListProjector,
       pathCache,
       ownership: agentOwnership,
       handoffs,
       transientFeeds,
+      preambles,
       chatMutationLock,
     });
     agentCommands.initialize({
@@ -730,6 +725,7 @@ export async function startServer(): Promise<void> {
       scheduledPrompts,
       snippets,
       preambles,
+      chatPreambleSelection,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,

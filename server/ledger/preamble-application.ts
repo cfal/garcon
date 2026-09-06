@@ -22,6 +22,19 @@ export function hasPreambleBoundaryProof(
   viewId: TranscriptViewId,
   boundary: PendingPreambleBoundary,
 ): boolean {
+  // The proof identity must match completely: a selection-change boundary in
+  // one ownership epoch is repeatable per selection revision.
+  if (boundary.kind === 'selection-change') {
+    return Boolean(db.query<{ found: 1 }, [string, string, string, number]>(`
+      SELECT 1 AS found
+      FROM transcript_rows
+      WHERE view_id = ? AND kind = 'user-input'
+        AND json_extract(payload_json, '$.value.preambleBoundary.kind') = ?
+        AND json_extract(payload_json, '$.value.preambleBoundary.ownershipEpoch') = ?
+        AND json_extract(payload_json, '$.value.preambleBoundary.selectionRevision') = ?
+      LIMIT 1
+    `).get(viewId, boundary.kind, boundary.ownershipEpoch, boundary.selectionRevision));
+  }
   return Boolean(db.query<{ found: 1 }, [string, string, string]>(`
     SELECT 1 AS found
     FROM transcript_rows

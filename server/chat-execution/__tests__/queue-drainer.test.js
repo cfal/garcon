@@ -37,6 +37,7 @@ describe('QueueDrainer', () => {
         isChatRunning: () => false,
       },
       getDrainOptions: () => ({}),
+      runSelectionAdmissionExclusive: (chatId, operation) => operation(),
       callbacks: {
         isShuttingDown: () => false,
         registerQueued: mock(() => true),
@@ -87,6 +88,7 @@ describe('QueueDrainer', () => {
         runAgentTurn,
       },
       getDrainOptions: () => ({}),
+      runSelectionAdmissionExclusive: (chatId, operation) => operation(),
       callbacks: {
         isShuttingDown: () => {
           shutdownChecks += 1;
@@ -175,6 +177,7 @@ describe('QueueDrainer', () => {
         runAgentTurn,
       },
       getDrainOptions: () => ({}),
+      runSelectionAdmissionExclusive: (chatId, operation) => operation(),
       callbacks: {
         isShuttingDown: () => false,
         registerQueued,
@@ -235,6 +238,7 @@ describe('QueueDrainer', () => {
         runAgentTurn: mock(() => providerRun),
       },
       getDrainOptions: () => ({}),
+      runSelectionAdmissionExclusive: (chatId, operation) => operation(),
       callbacks: {
         isShuttingDown: () => false,
         registerQueued: mock(() => true),
@@ -251,5 +255,61 @@ describe('QueueDrainer', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(publishTurnFailed).not.toHaveBeenCalled();
+  });
+
+  it('runs the dequeue transition and synchronous admission inside the selection admission lock', async () => {
+    const { KeyedPromiseLock } = await import('../../lib/keyed-lock.js');
+    const lock = new KeyedPromiseLock();
+    const events = [];
+    const drainer = new QueueDrainer({
+      ownership: {
+        hasSuppression: () => false,
+        hasDirect: () => false,
+        attempt: () => null,
+      },
+      controls: {
+        dequeueNextTurn: mock(async (chatId, admit) => {
+          events.push('dequeue:begin');
+          admit({
+            kind: 'user',
+            entry: {
+              id: 'entry-1',
+              createdAt: TS,
+              updatedAt: TS,
+              status: 'queued',
+              submission: { clientMessageId: 'message-1', transcriptViewId: 'view-1' },
+            },
+          });
+          events.push('dequeue:end');
+          return null;
+        }),
+        read: mock(async () => ({ entries: [], controlEntries: [], pause: null })),
+      },
+      turnRunner: { isChatRunning: () => false },
+      getDrainOptions: () => ({}),
+      runSelectionAdmissionExclusive: (chatId, operation) => {
+        events.push('lock:enter');
+        return lock.runExclusive(`chat:${chatId}`, async () => {
+          const result = await operation();
+          events.push('lock:exit');
+          return result;
+        });
+      },
+      callbacks: {
+        isShuttingDown: () => false,
+        registerQueued: mock(() => {
+          events.push('admit');
+          return true;
+        }),
+        appendControlReceipt: mock(() => {}),
+        discardPreparedInput: mock(() => {}),
+        publishIdle: mock(() => {}),
+        publishTurnFailed: mock(() => {}),
+        retireAttempt: mock(() => {}),
+      },
+    });
+
+    await drainer.run('chat-1');
+    expect(events).toEqual(['lock:enter', 'dequeue:begin', 'admit', 'dequeue:end', 'lock:exit']);
   });
 });

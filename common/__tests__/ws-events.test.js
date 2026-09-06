@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ChatOperationalNoticeMessage,
+  ChatPreamblesInvalidatedMessage,
   PreamblesInvalidatedMessage,
   parseServerWsMessage,
   TranscriptSearchStatusMessage,
@@ -15,6 +16,29 @@ describe('parseServerWsMessage preambles-invalidated', () => {
     expect(parseServerWsMessage({
       type: 'preambles-invalidated',
       reason: 'applied',
+    })).toBeNull();
+  });
+
+  it('parses the body-free per-chat selection invalidation strictly', () => {
+    expect(parseServerWsMessage({
+      type: 'chat-preambles-invalidated',
+      chatId: '1783725900000200',
+      revision: 3,
+    })).toEqual(new ChatPreamblesInvalidatedMessage('1783725900000200', 3));
+    expect(parseServerWsMessage({
+      type: 'chat-preambles-invalidated',
+      chatId: '1783725900000200',
+      revision: -1,
+    })).toBeNull();
+    expect(parseServerWsMessage({
+      type: 'chat-preambles-invalidated',
+      chatId: '',
+      revision: 0,
+    })).toBeNull();
+    expect(parseServerWsMessage({
+      type: 'chat-preambles-invalidated',
+      chatId: 'chat-1',
+      revision: 0,
     })).toBeNull();
   });
 });

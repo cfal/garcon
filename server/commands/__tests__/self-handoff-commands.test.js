@@ -22,6 +22,8 @@ function sourceChat(overrides = {}) {
     carryOverSegments: [{ id: 'seg-old', agentId: 'claude', model: 'opus' }],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
+    preambleSelection: { revision: 2, orderedPreambleIds: ['80becfa6-c9c7-4b31-9190-fd23c0bedf9c'] },
     parentChat: null,
     ...overrides,
   };

@@ -10,7 +10,7 @@ export interface PreambleBoundaryBinding {
 }
 
 export function createPreambleBoundaryBinding(
-  kind: PreambleBoundaryKind,
+  kind: Exclude<PreambleBoundaryKind, 'selection-change'>,
   ownershipEpoch: string = crypto.randomUUID(),
 ): PreambleBoundaryBinding {
   return {

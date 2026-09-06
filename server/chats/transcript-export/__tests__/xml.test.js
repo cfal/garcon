@@ -203,20 +203,40 @@ describe('XML transcript export', () => {
     expect(document).not.toContain('added-secret');
   });
 
+  it('renders preamble selection changes structurally including the empty list', () => {
+    const document = renderTranscriptExportXml(model([
+      entry(6, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles updated', {
+        type: 'preamble-selection-changed',
+        preambles: [
+          { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' },
+        ],
+      })),
+      entry(7, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles updated', {
+        type: 'preamble-selection-changed',
+        preambles: [],
+      })),
+    ]));
+
+    expect(document).toContain('<preambles-updated ordinal="6">');
+    expect(document).toContain('<preamble id="3502b645-222b-49d2-ac39-1c91f9fb1174" title="Repository conventions"/>');
+    expect(document).toContain('<preambles-updated ordinal="7">');
+    expect(document).not.toContain('private body sentinel');
+  });
+
   it('renders preamble applications structurally with only ids and title snapshots', () => {
     const document = renderTranscriptExportXml(model([
       entry(5, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles applied', {
         type: 'preamble-application',
         preambles: [
-          { id: 'preamble-1', title: 'Repository & conventions' },
-          { id: 'preamble-2', title: 'Security constraints' },
+          { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository & conventions' },
+          { id: '80becfa6-c9c7-4b31-9190-fd23c0bedf9c', title: 'Security constraints' },
         ],
       })),
     ]));
 
     expect(document).toContain('<preambles-applied ordinal="5">');
-    expect(document).toContain('<preamble id="preamble-1" title="Repository &amp; conventions"/>');
-    expect(document).toContain('<preamble id="preamble-2" title="Security constraints"/>');
+    expect(document).toContain('<preamble id="3502b645-222b-49d2-ac39-1c91f9fb1174" title="Repository &amp; conventions"/>');
+    expect(document).toContain('<preamble id="80becfa6-c9c7-4b31-9190-fd23c0bedf9c" title="Security constraints"/>');
     expect(document).not.toContain('private body sentinel');
     expect(document).not.toContain('/private/project/path');
   });
