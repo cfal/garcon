@@ -59,7 +59,7 @@ export class FileSession {
 	textScrollTop = 0;
 	markdownScrollLeft = 0;
 	markdownScrollTop = 0;
-	editor: CodeEditorController | null = null;
+	editor = $state.raw<CodeEditorController | null>(null);
 	loadController: AbortController | null = null;
 	saveController: AbortController | null = null;
 	freshnessController: AbortController | null = null;

@@ -6,9 +6,9 @@ import {
 	resolveFileIdentity,
 	saveText,
 } from '$lib/api/files.js';
-import {
+import type {
 	CodeEditorController,
-	type EditorPresentationSettings,
+	EditorPresentationSettings,
 } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
 import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
@@ -78,7 +78,15 @@ export interface FileSessionsDeps {
 	readText?: typeof readText;
 	readContent?: typeof readContent;
 	saveText?: typeof saveText;
+	loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
 	openMainInert?<T>(commitOpen: () => T): T;
+}
+
+export interface FileEditorRuntimeModule {
+	CodeEditorController: new (
+		session: FileSession,
+		settings: EditorPresentationSettings,
+	) => CodeEditorController;
 }
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown']);
@@ -100,6 +108,10 @@ function rendererMode(path: string, requested: FileOpenMode): FileRendererMode {
 	return 'code';
 }
 
+function loadEditorRuntime(): Promise<FileEditorRuntimeModule> {
+	return import('$lib/files/editor/code-editor-controller.svelte.js');
+}
+
 export class FileSessionRegistry {
 	sessions = $state.raw<Readonly<Record<string, FileSession>>>({});
 	guardRequest = $state<FileGuardRequest | null>(null);
@@ -112,6 +124,7 @@ export class FileSessionRegistry {
 	#overwriteResolve: ((choice: 'overwrite' | 'cancel') => void) | null = null;
 	#creationQueue = new SerialQueue();
 	#decisionQueue = new SerialQueue();
+	#editorRuntimePromise: Promise<FileEditorRuntimeModule> | null = null;
 	#isDark = false;
 
 	constructor(private readonly deps: FileSessionsDeps) {}
@@ -425,9 +438,6 @@ export class FileSessionRegistry {
 					? 'markdown'
 					: 'text';
 		session.requestLocation(request.line, request.col);
-		if (session.rendererMode !== 'image') {
-			session.editor = new CodeEditorController(session, this.#editorSettings());
-		}
 		// Publishes the session in its initial loading state so a renderer cannot attach
 		// to empty content while placement waits for its first frame.
 		session.loading = true;
@@ -477,11 +487,15 @@ export class FileSessionRegistry {
 		session.loading = true;
 		session.loadError = null;
 		try {
-			const loaded = await this.#readLatest(session, controller.signal);
-			if (controller.signal.aborted) return;
+			const [loaded] = await Promise.all([
+				this.#readLatest(session, controller.signal),
+				this.#ensureEditor(session, controller),
+			]);
+			if (!this.#isCurrentInitialLoad(session, controller)) return;
 			this.#commitLoadedContent(session, loaded);
 		} catch (error) {
-			if (isAbortError(error)) return;
+			if (isAbortError(error) || !this.#isCurrentInitialLoad(session, controller)) return;
+			controller.abort();
 			session.loadError = error instanceof Error ? error.message : String(error);
 		} finally {
 			if (session.loadController === controller) {
@@ -489,6 +503,31 @@ export class FileSessionRegistry {
 				session.loading = false;
 			}
 		}
+	}
+
+	async #ensureEditor(session: FileSession, controller: AbortController): Promise<void> {
+		if (session.rendererMode === 'image' || session.editor) return;
+		const runtime = await this.#loadEditorRuntime();
+		if (!this.#isCurrentInitialLoad(session, controller)) return;
+		session.editor = new runtime.CodeEditorController(session, this.#editorSettings());
+	}
+
+	#loadEditorRuntime(): Promise<FileEditorRuntimeModule> {
+		this.#editorRuntimePromise ??= (this.deps.loadEditorRuntime ?? loadEditorRuntime)().catch(
+			(error) => {
+				this.#editorRuntimePromise = null;
+				throw error;
+			},
+		);
+		return this.#editorRuntimePromise;
+	}
+
+	#isCurrentInitialLoad(session: FileSession, controller: AbortController): boolean {
+		return (
+			this.get(session.id) === session &&
+			!controller.signal.aborted &&
+			session.loadController === controller
+		);
 	}
 
 	async #readLatest(session: FileSession, signal: AbortSignal): Promise<LoadedFileContent> {
