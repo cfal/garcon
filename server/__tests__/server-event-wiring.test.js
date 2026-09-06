@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { AssistantMessage } from '../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
+import { ProjectUnavailableError } from '../lib/domain-error.ts';
 import { wireServerEvents } from '../server-event-wiring.js';
 import {
   attachNativeMessageSource,
@@ -37,6 +38,7 @@ function createFixture(overrides = {}) {
     onProcessingInvalidated: mock((callback) => { queue.processing = callback; }),
     onSessionStopped: mock((callback) => { queue.stopped = callback; }),
     onTurnFailed: mock((callback) => { queue.failed = callback; }),
+    onProjectUnavailable: mock((callback) => { queue.projectUnavailable = callback; }),
     onTurnSettled: mock((callback) => { queue.settled = callback; }),
     getQueuedTurnFinalization: mock(() => null),
     onAgentTurnTerminal: mock(async () => undefined),
@@ -515,6 +517,22 @@ describe('server event wiring', () => {
       chatId: 'chat-1',
       noticeType: 'info',
       content: 'Carryover is being compacted.',
+    })]);
+    expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
+  });
+
+  it('publishes unavailable-project queue warnings as operational notices', async () => {
+    const fixture = createFixture();
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+
+    fixture.queue.projectUnavailable('chat-1', unavailable);
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toEqual([expect.objectContaining({
+      type: 'chat-operational-notice',
+      chatId: 'chat-1',
+      noticeType: 'warning',
+      content: unavailable.message,
     })]);
     expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
   });
