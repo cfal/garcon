@@ -49,6 +49,7 @@
     "./models": "./models.ts",
     "./native-session-lookup": "./native-session-lookup.ts",
     "./prompt-refinement": "./prompt-refinement.ts",
+    "./project-resolution": "./project-resolution.ts",
     "./preamble-prefix": "./preamble-prefix.ts",
     "./preambles": "./preambles.ts",
     "./queue-state": "./queue-state.ts",
