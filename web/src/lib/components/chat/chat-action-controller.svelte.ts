@@ -56,14 +56,14 @@ export class ChatActionController {
 				? (this.deps.chats[chatIndex + 1]?.id ?? this.deps.chats[chatIndex - 1]?.id ?? null)
 				: null;
 
+		if (isArchivingSelectedChat) {
+			if (neighborId) this.deps.onSelectChat(neighborId);
+			else this.deps.onNewChat();
+		}
+
 		await this.run('Failed to toggle archive:', m.notifications_archive_chat_failed(), async () => {
 			await this.#sidebarController.toggleArchive(chatId);
-			if (isArchivingSelectedChat) {
-				if (neighborId) this.deps.onSelectChat(neighborId);
-				else this.deps.onNewChat();
-				return;
-			}
-			if (wasArchived && isSelectedChat) {
+			if (wasArchived && this.deps.selectedChatId === chatId) {
 				this.deps.requestSidebarRecenter();
 			}
 		});

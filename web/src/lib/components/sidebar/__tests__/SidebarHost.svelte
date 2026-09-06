@@ -48,6 +48,8 @@
 		sidebarSearchResultSort?: ChatSearchSort;
 		onQuietRefresh?: () => Promise<void> | void;
 		onRequestRecenter?: () => void;
+		onChatSelect?: (chatId: string) => void;
+		onNewChat?: () => void;
 	}
 
 	let {
@@ -70,6 +72,8 @@
 		sidebarSearchResultSort = 'relevance',
 		onQuietRefresh = () => Promise.resolve(),
 		onRequestRecenter = () => {},
+		onChatSelect = () => {},
+		onNewChat = () => {},
 	}: SidebarHostProps = $props();
 
 	setAppShell({
@@ -248,8 +252,8 @@
 	{selectedChatId}
 	isLoading={false}
 	{isMobile}
-	onChatSelect={() => {}}
-	onNewChat={() => {}}
+	{onChatSelect}
+	{onNewChat}
 	{onQuietRefresh}
 	onRequestDeleteChat={() => {}}
 	onRequestRenameChat={() => {}}

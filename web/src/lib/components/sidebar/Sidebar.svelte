@@ -334,18 +334,19 @@
 		logMessage: string,
 		userMessage: string,
 	) {
+		const plan = controller.planBulkOperation(action, {
+			selectedChats,
+			allChats: chats,
+			selectedChatId,
+		});
 		isBulkOperating = true;
+		if (plan.nextSelectedChatId) {
+			onChatSelect(plan.nextSelectedChatId);
+		} else if (plan.shouldCreateNewChat) {
+			onNewChat();
+		}
 		try {
-			const result = await controller.runBulkOperation(action, {
-				selectedChats,
-				allChats: chats,
-				selectedChatId,
-			});
-			if (result.nextSelectedChatId) {
-				onChatSelect(result.nextSelectedChatId);
-			} else if (result.shouldCreateNewChat) {
-				onNewChat();
-			}
+			await controller.executeBulkOperation(action, plan.affectedIds);
 		} catch (error) {
 			reportActionFailure(logMessage, userMessage, error);
 		} finally {
