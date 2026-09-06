@@ -64,9 +64,16 @@ describe('OpenCodeRuntime model discovery', () => {
       OPENCODE_DISABLE_AUTOCOMPACT: '0',
       OPENCODE_DISABLE_AUTOUPDATE: '0',
       OPENCODE_PURE: '1',
+      OPENCODE_SESSION_ID: 'ambient-session',
     }, 'file:///tmp/garcon-opencode-plugin.js')).toEqual({
       KEEP_ME: 'yes',
-      OPENCODE_CONFIG_CONTENT: '{}',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        mode: 'user',
+        plugin: [
+          'file:///tmp/user-opencode-plugin.js',
+          'file:///tmp/garcon-opencode-plugin.js',
+        ],
+      }),
       OPENCODE_DISABLE_AUTOCOMPACT: '0',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     });
