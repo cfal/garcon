@@ -7,6 +7,7 @@ import { ChatRegistry } from '../store.ts';
 
 const CHAT_ID = '1783725900000200';
 const SECOND_CHAT_ID = '1783725900000201';
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 const nativeSession = (ownerId, value = { path: '/tmp/native.jsonl' }) => ({
   ownerId,
@@ -49,6 +50,7 @@ function persistedEntry(overrides = {}) {
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
     pendingPreambleBoundary: null,
+    preambleSelection: { revision: 0, orderedPreambleIds: [] },
     parentChat: null,
     ...overrides,
   };
@@ -65,6 +67,73 @@ function deferred() {
 async function writeRegistry(sessions, version = 5) {
   await fs.writeFile(path.join(tempDir, 'chats.json'), JSON.stringify({ version, sessions }));
 }
+
+describe('ChatRegistry phased updates', () => {
+  const SELECTION_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+
+  it('rolls a rejected selection patch back even after an unrelated concurrent mutation', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chats-phased-'));
+    const registry = new ChatRegistry(tempDir);
+    await registry.init();
+    registry.addChat({
+      id: CHAT_ID,
+      agentId: 'test',
+      model: 'model-a',
+      projectPath: '/repo',
+      agentSettingsById: { test: envelope('test') },
+      preambleSelection: { revision: 0, orderedPreambleIds: [] },
+      pendingPreambleBoundary: null,
+      parentChat: null,
+    });
+    const epoch = registry.getChat(CHAT_ID).agentOwnershipEpoch;
+
+    // Fail the atomic write before rename only for the phased flush.
+    const originalRename = fs.rename;
+    let failNextWrite = false;
+    fs.rename = async (source, target) => {
+      if (failNextWrite) {
+        failNextWrite = false;
+        throw new Error('disk full');
+      }
+      return originalRename(source, target);
+    };
+    try {
+      failNextWrite = true;
+      const phased = registry.updateChatPhased(CHAT_ID, {
+        preambleSelection: { revision: 1, orderedPreambleIds: [SELECTION_ID] },
+        pendingPreambleBoundary: {
+          kind: 'selection-change',
+          ownershipEpoch: epoch,
+          selectionRevision: 1,
+        },
+      }).catch((error) => error);
+      // An unrelated same-chat mutation lands while persistence is failing;
+      // it must survive the rejected selection's rollback.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      registry.updateChat(CHAT_ID, { agentSessionId: 'native-concurrent' });
+      await expect(phased).resolves.toMatchObject({ message: expect.stringContaining('disk full') });
+    } finally {
+      fs.rename = originalRename;
+    }
+
+    const entry = registry.getChat(CHAT_ID);
+    expect(entry.preambleSelection).toEqual({ revision: 0, orderedPreambleIds: [] });
+    expect(entry.pendingPreambleBoundary).toBeNull();
+    expect(entry.agentSessionId).toBe('native-concurrent');
+
+    // The rejected selection must not survive into the next persisted flush.
+    await registry.flush();
+    const reloaded = new ChatRegistry(tempDir);
+    await reloaded.init();
+    expect(reloaded.getChat(CHAT_ID).preambleSelection).toEqual({
+      revision: 0,
+      orderedPreambleIds: [],
+    });
+    expect(reloaded.getChat(CHAT_ID).agentSessionId).toBe('native-concurrent');
+    await reloaded.flush();
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+});
 
 describe('ChatRegistry', () => {
   beforeEach(async () => {
@@ -296,16 +365,24 @@ describe('ChatRegistry', () => {
   });
 
   it('adds normalized tags without removing existing tags', () => {
-    registry.addChat(newChat({ tags: ['existing'] }));
+    registry.addChat(newChat({
+      tags: ['existing'],
+      preambleSelection: { revision: 1, orderedPreambleIds: [PREAMBLE_ID] },
+    }));
     const updated = [];
     registry.onChatTagsUpdated((chatId) => updated.push(chatId));
 
-    expect(registry.addTags(CHAT_ID, ['CLI', 'existing', 'Review Needed'])).toMatchObject({
+    const changed = registry.addTags(CHAT_ID, ['CLI', 'existing', 'Review Needed']);
+    expect(changed).toMatchObject({
       tags: ['cli', 'existing', 'review-needed'],
     });
-    expect(registry.addTags(CHAT_ID, ['cli'])).toMatchObject({
+    changed.preambleSelection.orderedPreambleIds.length = 0;
+    const unchanged = registry.addTags(CHAT_ID, ['cli']);
+    expect(unchanged).toMatchObject({
       tags: ['cli', 'existing', 'review-needed'],
     });
+    unchanged.preambleSelection.orderedPreambleIds.length = 0;
+    expect(registry.getChat(CHAT_ID).preambleSelection.orderedPreambleIds).toEqual([PREAMBLE_ID]);
     expect(updated).toEqual([CHAT_ID]);
   });
 
@@ -586,7 +663,10 @@ describe('ChatRegistry', () => {
   });
 
   it('persists dedicated project-path updates and emits only canonical metadata', async () => {
-    registry.addChat(newChat({ nativeSession: nativeSession('test') }));
+    registry.addChat(newChat({
+      nativeSession: nativeSession('test'),
+      preambleSelection: { revision: 1, orderedPreambleIds: [PREAMBLE_ID] },
+    }));
     const listener = mock(() => undefined);
     registry.onChatProjectPathUpdated(listener);
     const callerSession = nativeSession('test', { path: '/tmp/next.jsonl' });
@@ -601,18 +681,35 @@ describe('ChatRegistry', () => {
     }, { flush: true });
 
     callerSession.value.injected = true;
+    result.preambleSelection.orderedPreambleIds.length = 0;
 
     expect(result).toMatchObject({
       projectPath: '/next',
       nativeSession: nativeSession('test', { path: '/tmp/next.jsonl' }),
     });
     expect(registry.getChat(CHAT_ID).nativeSession.value).toEqual({ path: '/tmp/next.jsonl' });
+    expect(registry.getChat(CHAT_ID).preambleSelection.orderedPreambleIds).toEqual([PREAMBLE_ID]);
     expect(listener).toHaveBeenCalledWith({
       chatId: CHAT_ID,
       projectPath: '/next',
       effectiveProjectKey: '/real/next',
       previousProjectPath: '/repo',
       previousEffectiveProjectKey: '/real/repo',
+    });
+  });
+
+  it('returns an isolated selection from native-session lookup', () => {
+    registry.addChat(newChat({
+      agentSessionId: 'native-1',
+      preambleSelection: { revision: 1, orderedPreambleIds: [PREAMBLE_ID] },
+    }));
+
+    const result = registry.getChatByAgentSessionId('native-1');
+    result[1].preambleSelection.orderedPreambleIds.length = 0;
+
+    expect(registry.getChat(CHAT_ID).preambleSelection).toEqual({
+      revision: 1,
+      orderedPreambleIds: [PREAMBLE_ID],
     });
   });
 
@@ -648,6 +745,132 @@ describe('ChatRegistry', () => {
     expect(registry.removeChat(CHAT_ID)).toBe(false);
     expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
     expect(removed).toHaveBeenCalledWith(CHAT_ID, 'user-deletion');
+  });
+
+  it('treats only an absent preamble selection as legacy and rejects explicit null', async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-registry-null-'));
+    await writeRegistry({
+      [CHAT_ID]: {
+        ...persistedEntry(),
+        preambleSelection: null,
+      },
+    });
+    registry = new ChatRegistry(tempDir);
+    await expect(registry.init()).rejects.toThrow('Invalid preamble selection');
+
+    // A present malformed value rejects as well; absence alone defaults.
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-registry-malformed-'));
+    await writeRegistry({
+      [CHAT_ID]: {
+        ...persistedEntry(),
+        preambleSelection: { revision: -1, orderedPreambleIds: [] },
+      },
+    });
+    registry = new ChatRegistry(tempDir);
+    await expect(registry.init()).rejects.toThrow('Invalid preamble selection');
+  });
+
+  it('binds a selection-change boundary to both the ownership epoch and selection revision', async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-registry-binding-'));
+    const badRevision = {
+      ...persistedEntry({
+        preambleSelection: { revision: 2, orderedPreambleIds: [] },
+        pendingPreambleBoundary: {
+          kind: 'selection-change',
+          ownershipEpoch: 'epoch-1',
+          selectionRevision: 1,
+        },
+      }),
+    };
+    await writeRegistry({ [CHAT_ID]: badRevision });
+    registry = new ChatRegistry(tempDir);
+    await expect(registry.init()).rejects.toThrow('selection revision mismatch');
+
+    const badEpoch = persistedEntry({
+      preambleSelection: { revision: 1, orderedPreambleIds: [] },
+      pendingPreambleBoundary: {
+        kind: 'selection-change',
+        ownershipEpoch: 'other-epoch',
+        selectionRevision: 1,
+      },
+    });
+    await writeRegistry({ [CHAT_ID]: badEpoch });
+    registry = new ChatRegistry(tempDir);
+    await expect(registry.init()).rejects.toThrow('ownership epoch mismatch');
+
+    // Ordinary updateChat enforces the same complete binding.
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-registry-binding-2-'));
+    await writeRegistry({ [CHAT_ID]: persistedEntry() });
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(() => registry.updateChat(CHAT_ID, {
+      pendingPreambleBoundary: {
+        kind: 'selection-change',
+        ownershipEpoch: 'epoch-1',
+        selectionRevision: 7,
+      },
+    })).toThrow('selection revision mismatch');
+  });
+
+  it('keeps a prior queued writer from persisting a pre-rename-rejected selection', async () => {
+    const phasedDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chats-phased-gated-'));
+    const phasedRegistry = new ChatRegistry(phasedDir);
+    await phasedRegistry.init();
+    phasedRegistry.addChat({
+      id: CHAT_ID,
+      agentId: 'test',
+      model: 'model-a',
+      projectPath: '/repo',
+      agentSettingsById: { test: envelope('test') },
+      preambleSelection: { revision: 0, orderedPreambleIds: [] },
+      pendingPreambleBoundary: null,
+      parentChat: null,
+    });
+    await phasedRegistry.flush();
+
+    const originalRename = fs.rename;
+    const blocker = deferred();
+    const blockerEntered = deferred();
+    let chatsRenameCount = 0;
+    fs.rename = async (source, destination) => {
+      if (destination.endsWith('chats.json') && source.includes('.tmp')) {
+        chatsRenameCount += 1;
+        if (chatsRenameCount === 1) {
+          blockerEntered.resolve();
+          await blocker.promise;
+        }
+        if (chatsRenameCount === 3) throw new Error('disk full');
+      }
+      return originalRename(source, destination);
+    };
+    try {
+      const blockingWriter = phasedRegistry.flush();
+      await blockerEntered.promise;
+      const priorQueuedWriter = phasedRegistry.flush();
+      const gatedSelectionId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+      const phased = phasedRegistry.updateChatPhased(CHAT_ID, {
+        preambleSelection: { revision: 1, orderedPreambleIds: [gatedSelectionId] },
+      }).catch((error) => error);
+
+      blocker.resolve();
+      await blockingWriter;
+      await priorQueuedWriter;
+      await expect(phased).resolves.toMatchObject({ message: expect.stringContaining('disk full') });
+    } finally {
+      blocker.resolve();
+      fs.rename = originalRename;
+    }
+
+    const onDisk = JSON.parse(await fs.readFile(path.join(phasedDir, 'chats.json'), 'utf8'));
+    expect(onDisk.sessions[CHAT_ID].preambleSelection).toEqual({
+      revision: 0,
+      orderedPreambleIds: [],
+    });
+    expect(phasedRegistry.getChat(CHAT_ID).preambleSelection).toEqual({
+      revision: 0,
+      orderedPreambleIds: [],
+    });
+    await fs.rm(phasedDir, { recursive: true, force: true });
   });
 
   it('loads a strict version-five registry and rebuilds its native ID index', async () => {

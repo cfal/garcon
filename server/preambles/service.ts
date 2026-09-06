@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
+  isPreambleId,
   normalizePreambleDefinitionInput,
+  PREAMBLE_ID_LIFETIME_MAX_COUNT,
+  PREAMBLE_MAX_COUNT,
   type CreatePreambleRequest,
   type Preamble,
   type PreambleDefinitionInput,
@@ -11,10 +14,10 @@ import {
   type ReorderPreamblesRequest,
   type UpdatePreambleRequest,
 } from '../../common/preambles.js';
+import { PreambleCatalogCommittedUnknownError, PreambleStore } from './store.js';
 import { PreambleDomainError } from './errors.js';
 import { applicablePreambles } from './matching.js';
 import { PreambleProjectPathService } from './project-path-service.js';
-import { PreambleStore } from './store.js';
 
 interface PreambleServiceEvents {
   invalidated: [reason: PreamblesInvalidationReason];
@@ -45,35 +48,65 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
   async create(request: CreatePreambleRequest): Promise<PreamblesSnapshot> {
     const definition = await this.#definition(request.preamble);
     const now = this.#now().toISOString();
-    const preamble: Preamble = {
-      id: this.#newId(),
-      ...definition,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.deps.store.create(preamble, request.expectedRevision);
-    return this.#changed('created');
+    return this.#mutate(
+      'created',
+      () => this.deps.store.createWithGeneratedId(
+        request.expectedRevision,
+        this.deps.newId ?? (() => crypto.randomUUID()),
+        (id) => ({ id, ...definition, createdAt: now, updatedAt: now }),
+      ),
+    );
   }
 
   async update(request: UpdatePreambleRequest): Promise<PreamblesSnapshot> {
-    const id = request.id.trim();
-    if (!id) throw this.#validationError();
+    // No trim or case folding: the canonical lowercase UUID-v4 spelling only.
+    const id = request.id;
+    if (!isPreambleId(id)) throw this.#validationError();
     const definition = await this.#definition(request.preamble);
-    await this.deps.store.update(id, definition, this.#now().toISOString(), request.expectedRevision);
-    return this.#changed('updated');
+    return this.#mutate(
+      'updated',
+      () => this.deps.store.update(id, definition, this.#now().toISOString(), request.expectedRevision),
+    );
   }
 
   async remove(request: RemovePreambleRequest): Promise<PreamblesSnapshot> {
-    const id = request.id.trim();
-    if (!id) throw this.#validationError();
-    await this.deps.store.remove(id, request.expectedRevision);
-    return this.#changed('removed');
+    const id = request.id;
+    if (!isPreambleId(id)) throw this.#validationError();
+    return this.#mutate('removed', () => this.deps.store.remove(id, request.expectedRevision));
   }
 
   async reorder(request: ReorderPreamblesRequest): Promise<PreamblesSnapshot> {
-    if (!isUniqueStringList(request.orderedPreambleIds)) throw this.#validationError();
-    await this.deps.store.reorder(request.orderedPreambleIds, request.expectedRevision);
-    return this.#changed('reordered');
+    if (
+      !Array.isArray(request.orderedPreambleIds)
+      || request.orderedPreambleIds.length > PREAMBLE_MAX_COUNT
+      || !request.orderedPreambleIds.every((id): id is string => isPreambleId(id))
+      || new Set(request.orderedPreambleIds).size !== request.orderedPreambleIds.length
+    ) throw this.#validationError();
+    return this.#mutate('reordered', () =>
+      this.deps.store.reorder(request.orderedPreambleIds, request.expectedRevision));
+  }
+
+  // A post-rename failure leaves the installed candidate authoritative, so its
+  // invalidation is emitted before the unknown-durability outcome surfaces.
+  async #mutate(
+    reason: PreamblesInvalidationReason,
+    run: () => Promise<void>,
+  ): Promise<PreamblesSnapshot> {
+    try {
+      await run();
+    } catch (error) {
+      if (error instanceof PreambleCatalogCommittedUnknownError) {
+        this.emit('invalidated', reason);
+        throw new PreambleDomainError(
+          'PREAMBLE_CATALOG_SAVE_UNKNOWN',
+          'The preambles catalog was saved, but its durability could not be confirmed. Restart the server before further catalog changes.',
+          503,
+          false,
+        );
+      }
+      throw error;
+    }
+    return this.#changed(reason);
   }
 
   async #definition(value: unknown): Promise<PreambleDefinitionInput> {
@@ -104,17 +137,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     return new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble is invalid', 400);
   }
 
-  #newId(): string {
-    return (this.deps.newId ?? crypto.randomUUID)();
-  }
-
   #now(): Date {
     return (this.deps.now ?? (() => new Date()))();
   }
-}
-
-function isUniqueStringList(value: unknown): value is string[] {
-  return Array.isArray(value)
-    && value.every((entry) => typeof entry === 'string')
-    && new Set(value).size === value.length;
 }

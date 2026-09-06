@@ -21,6 +21,7 @@
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
 	const lazyPreambles = () => import('../preambles/PreamblesDialog.svelte');
+	const lazyChatPreambleSelection = () => import('../preambles/ChatPreambleSelectionDialog.svelte');
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
 	import {
@@ -525,6 +526,9 @@
 		requestDetails: requestDetailsChat,
 		requestShare: requestShareChat,
 		requestProjectPath: requestProjectPathChat,
+		configurePreambles(chat: ChatSessionRecord, transcriptViewId: string): void {
+			appShell.openChatPreambleSelection(chat.id, transcriptViewId);
+		},
 		fork(chat: ChatSessionRecord): void {
 			void chatActionController.forkChat(chat.id);
 		},
@@ -815,6 +819,12 @@
 {#if appShell.showPreambles}
 	{#await lazyPreambles() then { default: PreamblesDialog }}
 		<PreamblesDialog />
+	{/await}
+{/if}
+
+{#if appShell.chatPreambleSelectionTarget}
+	{#await lazyChatPreambleSelection() then { default: ChatPreambleSelectionDialog }}
+		<ChatPreambleSelectionDialog />
 	{/await}
 {/if}
 

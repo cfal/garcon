@@ -4,6 +4,7 @@ import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { isErrorCode } from '../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
+import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts.js';
 import type { TranscriptViewId } from './ledger/contracts.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
@@ -42,6 +43,7 @@ import {
   ScheduledPromptsInvalidatedMessage,
   SnippetsInvalidatedMessage,
   PreamblesInvalidatedMessage,
+  ChatPreamblesInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -89,6 +91,9 @@ export interface ServerEventWiring {
     noticeType: ChatOperationalNoticeMessage['noticeType'],
     content: string,
   ): void;
+  // Scheduled through the per-chat task queue so the invalidation follows the
+  // committed update notice's own chat-messages fanout.
+  notifyChatPreamblesInvalidated(chatId: string, revision: number): void;
   broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
   waitForIdle(): Promise<void>;
 }
@@ -188,6 +193,16 @@ export function wireServerEvents({
       content,
       new Date().toISOString(),
     ));
+  }
+
+  // Body-free per-chat invalidation; a lost event is recoverable through a
+  // reconnect refresh of the already-loaded selection.
+  function notifyChatPreamblesInvalidated(chatId: string, revision: number): void {
+    if (!chatExists(chatId)) return;
+    scheduleChatTask(chatId, 'server-events: chat preambles invalidation failed', () => {
+      if (!chatExists(chatId)) return;
+      broadcast(new ChatPreamblesInvalidatedMessage(chatId, revision));
+    });
   }
 
   scheduledPrompts.onInvalidated((reason) => {
@@ -348,6 +363,25 @@ export function wireServerEvents({
   });
   agentRegistry.onTranscriptCommitted(async (event) => {
     transcriptFanout(event);
+    // A committed Preambles-updated notice invalidates the per-chat selection
+    // cache. Scheduling here, immediately after the fanout has enqueued the
+    // notice's chat-messages task on the per-chat queue, fixes the broadcast
+    // order deterministically: messages first, invalidation second.
+    if (event.type === 'rows') {
+      for (const row of event.rows) {
+        if (
+          row.kind === 'notice'
+          && isLedgerPreambleSelectionChangedNoticeDetail(row.detail)
+          && row.detail.selectionRevision >= 0
+        ) {
+          const revision = row.detail.selectionRevision;
+          scheduleChatTask(event.chatId, 'server-events: chat preambles invalidation failed', () => {
+            if (!chatExists(event.chatId)) return;
+            broadcast(new ChatPreamblesInvalidatedMessage(event.chatId, revision));
+          });
+        }
+      }
+    }
     const applied = transientFeeds.apply(event);
     if (applied.kind !== 'unchanged') {
       const mutation = applied.value;
@@ -592,6 +626,7 @@ export function wireServerEvents({
     notifyAgentHandoff,
     notifyTranscriptCompositionChanged,
     notifyOperationalNotice,
+    notifyChatPreamblesInvalidated,
     broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void {
       broadcast(new TranscriptSearchStatusMessage(status));
     },

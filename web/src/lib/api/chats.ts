@@ -138,6 +138,7 @@ export interface StartChatParams {
 	command: string;
 	images?: AgentCommandImage[];
 	tags?: string[];
+	orderedPreambleIds?: readonly string[];
 }
 
 export type { ChatDetailsResponse } from '$shared/chat-details';

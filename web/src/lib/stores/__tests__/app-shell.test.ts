@@ -308,5 +308,28 @@ describe('AppShellStore', () => {
 			expect(store.showPreambles).toBe(false);
 			expect(store.settingsTab).toBe('remote');
 		});
+
+		it('restores the captured opener after catalog management closes', async () => {
+			const store = new AppShellStore();
+			const restore = vi.fn();
+			store.openPreambles(restore);
+
+			store.closePreambles();
+			await Promise.resolve();
+
+			expect(restore).toHaveBeenCalledOnce();
+		});
+
+		it('captures both chat and transcript view for selection editing', () => {
+			const store = new AppShellStore();
+			store.openChatPreambleSelection(
+				'1783725900000200',
+				'12345678-1234-4123-8123-123456789abc',
+			);
+			expect(store.chatPreambleSelectionTarget).toEqual({
+				chatId: '1783725900000200',
+				transcriptViewId: '12345678-1234-4123-8123-123456789abc',
+			});
+		});
 	});
 });

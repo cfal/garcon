@@ -24,6 +24,7 @@
     "./chat-parentage": "./chat-parentage.ts",
     "./chat-modes": "./chat-modes.ts",
     "./chat-order-contracts": "./chat-order-contracts.ts",
+    "./chat-preamble-selection-contracts": "./chat-preamble-selection-contracts.ts",
     "./chat-row-contracts": "./chat-row-contracts.ts",
     "./chat-snapshot": "./chat-snapshot.ts",
     "./chat-transient-feed": "./chat-transient-feed.ts",

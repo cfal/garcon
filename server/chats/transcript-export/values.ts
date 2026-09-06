@@ -6,6 +6,7 @@ import type {
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   isPreambleApplicationNoticeDetail,
+  isPreambleSelectionChangedNoticeDetail,
   type AppliedPreambleReference,
 } from '../../../common/transcript-notice-details.js';
 
@@ -80,9 +81,15 @@ export function transcriptExportEntryCliPresentation(
 
 export function transcriptExportEntryText(entry: TranscriptExportEntry): string | null {
   if (entry.kind === 'run-ended') return null;
-  const preambles = transcriptExportEntryPreambles(entry);
-  if (preambles) {
-    return textSafe(`Preambles applied: ${preambles.map((preamble) => preamble.title).join('; ')}`);
+  const snapshot = transcriptExportEntryPreambleSnapshot(entry);
+  if (snapshot) {
+    const label = snapshot.kind === 'applied'
+      ? 'Preambles applied'
+      : 'Preambles updated';
+    const titles = snapshot.preambles.length === 0
+      ? 'None enabled'
+      : snapshot.preambles.map((preamble) => preamble.title).join('; ');
+    return textSafe(`${label}: ${titles}`);
   }
   switch (entry.message.type) {
     case 'user-message':
@@ -127,15 +134,30 @@ export function transcriptExportEntryFields(
   return fieldsFromMessage(entry.message);
 }
 
+export interface TranscriptExportPreambleSnapshot {
+  readonly kind: 'applied' | 'updated';
+  readonly preambles: readonly AppliedPreambleReference[];
+}
+
+// Structural snapshot accessor for both title-only preamble notice facts; the
+// update variant may list zero entries (`None enabled`).
 export function transcriptExportEntryPreambles(
   entry: TranscriptExportEntry,
 ): readonly AppliedPreambleReference[] | null {
-  if (
-    entry.kind !== 'message'
-    || entry.message.type !== 'transcript-notice'
-    || !isPreambleApplicationNoticeDetail(entry.message.detail)
-  ) return null;
-  return entry.message.detail.preambles;
+  return transcriptExportEntryPreambleSnapshot(entry)?.preambles ?? null;
+}
+
+export function transcriptExportEntryPreambleSnapshot(
+  entry: TranscriptExportEntry,
+): TranscriptExportPreambleSnapshot | null {
+  if (entry.kind !== 'message' || entry.message.type !== 'transcript-notice') return null;
+  if (isPreambleApplicationNoticeDetail(entry.message.detail)) {
+    return { kind: 'applied', preambles: entry.message.detail.preambles };
+  }
+  if (isPreambleSelectionChangedNoticeDetail(entry.message.detail)) {
+    return { kind: 'updated', preambles: entry.message.detail.preambles };
+  }
+  return null;
 }
 
 function fieldsFromMessage(message: ChatMessage): TranscriptExportField[] {

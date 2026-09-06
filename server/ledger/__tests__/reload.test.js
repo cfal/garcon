@@ -12,6 +12,7 @@ import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 import { LedgerFencedError } from '../errors.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptReloadService', () => {
   it('[TLV5-L10.02-CORE-UNIT-01] atomically repeats replacement while preserving one frozen conversation prefix', async () => {
@@ -327,7 +328,7 @@ describe('TranscriptReloadService', () => {
         steer: false,
         preambleBoundary: boundary,
         preambles: [{
-          id: 'preamble-1',
+          id: PREAMBLE_ID,
           enabled: true,
           title: 'Repository rules',
           content: 'private preamble body',
@@ -351,7 +352,7 @@ describe('TranscriptReloadService', () => {
           message: 'Preambles applied',
           detail: {
             type: 'preamble-application',
-            preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+            preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
           },
         },
         {
@@ -378,7 +379,7 @@ describe('TranscriptReloadService', () => {
         steer: false,
         preambleBoundary: boundary,
         preambles: [{
-          id: 'preamble-1',
+          id: PREAMBLE_ID,
           enabled: true,
           title: 'Repository rules',
           content: 'private preamble body',
@@ -443,7 +444,7 @@ describe('TranscriptReloadService', () => {
           kind: 'notice',
           detail: {
             type: 'preamble-application',
-            preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+            preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
           },
         },
         {
@@ -477,7 +478,7 @@ describe('TranscriptReloadService', () => {
           steer: false,
           preambleBoundary: boundary,
           preambles: [{
-            id: 'preamble-1',
+            id: PREAMBLE_ID,
             enabled: true,
             title: 'Repository rules',
             content: 'private preamble body',
@@ -521,7 +522,7 @@ describe('TranscriptReloadService', () => {
         steer: false,
         preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'ownership-1' },
         preambles: [{
-          id: 'preamble-1',
+          id: PREAMBLE_ID,
           enabled: true,
           title: 'Repository rules',
           content: 'private preamble body',

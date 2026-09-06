@@ -149,6 +149,7 @@ export interface DirectStartInput {
   agent: ConfiguredDirectTestAgent;
   clientRequestId?: string;
   clientMessageId?: string;
+  orderedPreambleIds?: string[];
 }
 
 export interface DirectRunInput {
@@ -584,6 +585,9 @@ export class GarconTestClient {
       thinkingMode: 'none',
       agentSettings: input.agent.agentSettings,
       command: input.content,
+      ...(input.orderedPreambleIds === undefined
+        ? {}
+        : { orderedPreambleIds: input.orderedPreambleIds }),
     };
   }
 

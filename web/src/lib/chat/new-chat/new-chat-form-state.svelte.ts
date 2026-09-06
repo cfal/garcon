@@ -34,6 +34,7 @@ import {
 	normalizeSupportedThinkingMode,
 } from '$shared/execution-defaults';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/chat/new-chat/new-chat-submit.js';
+import { NewChatPreambleSelectionState } from './new-chat-preamble-selection-state.svelte.js';
 import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
@@ -84,6 +85,8 @@ export class NewChatFormState {
 	chatTags = $state<string[]>([]);
 	showTagInput = $state(false);
 
+	readonly preambles: NewChatPreambleSelectionState;
+
 	// Form
 	#firstMessage = $state('');
 	#contentRevision = 0;
@@ -110,6 +113,7 @@ export class NewChatFormState {
 
 	constructor(options: NewChatFormStateOptions) {
 		this.#options = options;
+		this.preambles = new NewChatPreambleSelectionState(this);
 	}
 
 	// Derived accessors
@@ -518,6 +522,8 @@ export class NewChatFormState {
 			return;
 		}
 
+		this.preambles.pathValidationStarted();
+
 		this.validationStatus = 'checking';
 		this.validationError = null;
 
@@ -532,16 +538,19 @@ export class NewChatFormState {
 					this.validationStatus = 'valid';
 					this.validationError = null;
 					this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
+					void this.preambles.refreshPreview();
 				} else {
 					this.validationStatus = 'invalid';
 					this.validationError = this.#validationErrorMessage(data.errorCode);
 					this.gitRepoStatus = 'non-git';
+					this.preambles.invalidatePreview();
 				}
 			} catch (err) {
 				if (requestVersion !== this.#validationRequestVersion) return;
 				this.validationStatus = 'invalid';
 				this.validationError = m.chat_new_chat_errors_invalid_directory();
 				this.gitRepoStatus = 'non-git';
+				this.preambles.invalidatePreview();
 				console.warn('[NewChatFormState] Path validation request failed', err);
 			}
 		}, 300);
@@ -564,6 +573,7 @@ export class NewChatFormState {
 		this.validationStatus = 'idle';
 		this.validationError = null;
 		this.gitRepoStatus = 'unknown';
+		this.preambles.invalidatePreview();
 	}
 
 	// Pinned paths
@@ -657,6 +667,7 @@ export class NewChatFormState {
 			firstMessage: this.firstMessage.trim(),
 			initialImages: this.attachedImages,
 			tags: this.chatTags.length > 0 ? this.chatTags : undefined,
+			...this.preambles.creationFields,
 		};
 	}
 
@@ -676,6 +687,7 @@ export class NewChatFormState {
 		this.chatTags = [];
 		this.showTagInput = false;
 		this.#modesTouched = false;
+		this.preambles.reset();
 	}
 
 	// Initialization

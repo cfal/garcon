@@ -1,8 +1,9 @@
-import type {
-  CreatePreambleRequest,
-  RemovePreambleRequest,
-  ReorderPreamblesRequest,
-  UpdatePreambleRequest,
+import {
+  isPreambleId,
+  type CreatePreambleRequest,
+  type RemovePreambleRequest,
+  type ReorderPreamblesRequest,
+  type UpdatePreambleRequest,
 } from '../../common/preambles.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -50,8 +51,8 @@ export default function createPreambleRoutes(preambles: PreambleService): RouteM
           return jsonError('expectedRevision, id, and preamble are required', 400, 'PREAMBLE_VALIDATION_FAILED');
         }
         const expectedRevision = revision(body?.expectedRevision);
-        const id = typeof body?.id === 'string' ? body.id.trim() : '';
-        if (expectedRevision === null || !id || !body?.preamble) {
+        const id = typeof body?.id === 'string' ? body.id : '';
+        if (expectedRevision === null || !isPreambleId(id) || !body?.preamble) {
           return jsonError('expectedRevision, id, and preamble are required', 400, 'PREAMBLE_VALIDATION_FAILED');
         }
         try {
@@ -66,8 +67,8 @@ export default function createPreambleRoutes(preambles: PreambleService): RouteM
           return jsonError('expectedRevision and id are required', 400, 'PREAMBLE_VALIDATION_FAILED');
         }
         const expectedRevision = revision(body?.expectedRevision);
-        const id = typeof body?.id === 'string' ? body.id.trim() : '';
-        if (expectedRevision === null || !id) {
+        const id = typeof body?.id === 'string' ? body.id : '';
+        if (expectedRevision === null || !isPreambleId(id)) {
           return jsonError('expectedRevision and id are required', 400, 'PREAMBLE_VALIDATION_FAILED');
         }
         try {
@@ -85,7 +86,7 @@ export default function createPreambleRoutes(preambles: PreambleService): RouteM
         }
         const expectedRevision = revision(body?.expectedRevision);
         const orderedPreambleIds = Array.isArray(body?.orderedPreambleIds)
-          ? body.orderedPreambleIds.filter((id): id is string => typeof id === 'string')
+          ? body.orderedPreambleIds.filter((id): id is string => isPreambleId(id))
           : null;
         if (
           expectedRevision === null

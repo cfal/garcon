@@ -19,9 +19,13 @@ import {
   type CliRowFormat,
 } from '../../common/cli-presentation.js';
 import type { JsonObject } from '../../common/json.js';
-import type {
-  PendingPreambleBoundary,
-  Preamble,
+import { isCommandCorrelationIdWithinLimit } from '../../common/command-request-validation.js';
+import {
+  isPreambleId,
+  normalizePreambleTitle,
+  PREAMBLE_MAX_COUNT,
+  type PendingPreambleBoundary,
+  type Preamble,
 } from '../../common/preambles.js';
 import type { PreamblePrefixReceipt } from '../../common/preamble-prefix.js';
 
@@ -93,6 +97,61 @@ export interface LedgerCliRowNoticeRow extends LedgerNoticeRow {
   readonly providerMeta: null;
 }
 
+// Private durable identity for the Preambles updated notice. Carries only the
+// submission identity needed for retry; titles are public snapshots and the
+// fingerprint excludes catalog titles, bodies, paths, and catalog revision so a
+// retry survives catalog edits.
+export interface LedgerPreambleSelectionChangedNoticeDetail extends JsonObject {
+  readonly type: 'preamble-selection-change';
+  readonly clientMessageId: string;
+  readonly requestFingerprint: string;
+  readonly selectionRevision: number;
+  readonly preambles: readonly { readonly id: string; readonly title: string }[];
+}
+
+export interface LedgerPreambleSelectionChangedNoticeRow extends LedgerNoticeRow {
+  readonly detail: LedgerPreambleSelectionChangedNoticeDetail;
+  readonly providerMeta: null;
+}
+
+export function isLedgerPreambleSelectionChangedNoticeDetail(
+  value: JsonObject,
+): value is LedgerPreambleSelectionChangedNoticeDetail {
+  if (
+    value.type !== 'preamble-selection-change'
+    || typeof value.clientMessageId !== 'string'
+    || value.clientMessageId.length === 0
+    || value.clientMessageId.trim() !== value.clientMessageId
+    || !isCommandCorrelationIdWithinLimit(value.clientMessageId)
+    || typeof value.requestFingerprint !== 'string'
+    || value.requestFingerprint.length === 0
+    || typeof value.selectionRevision !== 'number'
+    || !Number.isSafeInteger(value.selectionRevision)
+    || value.selectionRevision < 0
+    || !Array.isArray(value.preambles)
+    // Reuse the shared reference count bound.
+    || value.preambles.length > PREAMBLE_MAX_COUNT
+  ) return false;
+  const allowed = new Set(['type', 'clientMessageId', 'requestFingerprint', 'selectionRevision', 'preambles']);
+  if (!Object.keys(value).every((key) => allowed.has(key))) return false;
+  const ids = new Set<string>();
+  for (const entry of value.preambles) {
+    // Canonical UUID identity and shared title bounds, no trimming.
+    if (
+      entry === null
+      || typeof entry !== 'object'
+      || Array.isArray(entry)
+      || !Object.keys(entry).every((key) => key === 'id' || key === 'title')
+      || !isPreambleId((entry as { id: unknown }).id)
+      || ids.has((entry as { id: string }).id)
+      || normalizePreambleTitle((entry as { title: unknown }).title)
+        !== (entry as { title: unknown }).title
+    ) return false;
+    ids.add((entry as { id: string }).id);
+  }
+  return true;
+}
+
 export function isLedgerCliRowNoticeDetail(
   value: JsonObject,
 ): value is LedgerCliRowNoticeDetail {
@@ -112,6 +171,21 @@ export function isLedgerCliRowNoticeRow(row: LedgerRow): row is LedgerCliRowNoti
   return row.kind === 'notice'
     && row.providerMeta === null
     && isLedgerCliRowNoticeDetail(row.detail);
+}
+
+export function isLedgerPreambleSelectionChangedNoticeRow(
+  row: LedgerRow,
+): row is LedgerPreambleSelectionChangedNoticeRow {
+  return row.kind === 'notice'
+    && row.providerMeta === null
+    && isLedgerPreambleSelectionChangedNoticeDetail(row.detail);
+}
+
+export const PREAMBLES_UPDATED_MESSAGE = 'Preambles updated';
+
+export interface AppendSelectionChangeNoticeResult {
+  readonly row: LedgerPreambleSelectionChangedNoticeRow;
+  readonly inserted: boolean;
 }
 
 export interface LedgerAgentSwitchDetail {

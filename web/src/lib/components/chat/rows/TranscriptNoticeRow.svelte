@@ -9,11 +9,13 @@
 		isInterAgentMessageOutcomeNoticeDetail,
 		isInterAgentMessageReceivedNoticeDetail,
 		isPreambleApplicationNoticeDetail,
+		isPreambleSelectionChangedNoticeDetail,
 	} from '$shared/transcript-notice-details';
 	import ChatEventCard from './ChatEventCard.svelte';
 	import CollapsibleBody from './CollapsibleBody.svelte';
 	import InterAgentMessageRow from './InterAgentMessageRow.svelte';
 	import PreambleApplicationRow from './PreambleApplicationRow.svelte';
+	import PreambleSelectionChangedRow from './PreambleSelectionChangedRow.svelte';
 	import Markdown from '../Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
@@ -42,6 +44,9 @@
 	const preambleApplication = $derived(
 		isPreambleApplicationNoticeDetail(message.detail) ? message.detail : null,
 	);
+	const preambleSelectionChanged = $derived(
+		isPreambleSelectionChangedNoticeDetail(message.detail) ? message.detail : null,
+	);
 	const interAgentDetail = $derived.by(() => {
 		if (isInterAgentMessageOutcomeNoticeDetail(message.detail)) return message.detail;
 		if (isInterAgentMessageReceivedNoticeDetail(message.detail)) return message.detail;
@@ -51,6 +56,8 @@
 
 {#if preambleApplication}
 	<PreambleApplicationRow detail={preambleApplication} />
+{:else if preambleSelectionChanged}
+	<PreambleSelectionChangedRow detail={preambleSelectionChanged} />
 {:else if interAgentDetail}
 	<InterAgentMessageRow
 		{message}

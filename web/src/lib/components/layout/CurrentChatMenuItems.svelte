@@ -6,6 +6,7 @@
 	import History from '@lucide/svelte/icons/history';
 	import Info from '@lucide/svelte/icons/info';
 	import ListIcon from '@lucide/svelte/icons/list';
+	import ListPlus from '@lucide/svelte/icons/list-plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -26,6 +27,7 @@
 		onOpenUserMessageNavigator,
 		onOpenGitHistory,
 		onOpenGitCompare,
+		onConfigurePreambles,
 		onRename,
 		onDetails,
 		onReload,
@@ -43,6 +45,7 @@
 		onOpenUserMessageNavigator?: () => void;
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
+		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
 		onReload: () => void;
@@ -83,6 +86,12 @@
 	<Info />
 	{m.sidebar_chats_details()}
 </menu.Item>
+{#if onConfigurePreambles}
+	<menu.Item onSelect={onConfigurePreambles}>
+		<ListPlus />
+		{m.sidebar_chats_configure_preambles()}
+	</menu.Item>
+{/if}
 {#if canFork}
 	<menu.Item disabled={!canForkNow} onSelect={() => canForkNow && onFork()}>
 		<GitFork />

@@ -11,6 +11,7 @@
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
@@ -48,6 +49,7 @@
 		setGhCapability,
 		setScheduledPrompts,
 		setPreambles,
+		setChatPreambleSelectionInvalidationHub,
 		setSnippets,
 		setWorkspaceLayout,
 		setWorkspaceContext,
@@ -98,6 +100,7 @@
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
 	const preambles = createPreamblesStore();
+	const chatPreambleSelectionInvalidationHub = createChatPreambleSelectionInvalidationHub();
 	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
@@ -168,6 +171,7 @@
 	setRemoteSettings(remoteSettings);
 	setScheduledPrompts(scheduledPrompts);
 	setPreambles(preambles);
+	setChatPreambleSelectionInvalidationHub(chatPreambleSelectionInvalidationHub);
 	setSnippets(snippets);
 	setAppTitle(appTitle);
 	setNavigation(navigation);
@@ -290,7 +294,7 @@
 		sidebarSearch.applyTranscriptSearchStatus(status),
 	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
-	const preamblesRouter = new PreamblesRouter(ws, preambles);
+	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	settingsRouter.start();
 	transcriptSearchStatusRouter.start();
@@ -317,6 +321,9 @@
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
+		// A reconnect also refreshes an already-open chat selection editor;
+		// its dirty draft is preserved by the controller's refresh path.
+		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
 	});
 
 	onMount(() => {

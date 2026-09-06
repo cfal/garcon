@@ -423,6 +423,7 @@ const chatActions = {
 	requestDetails: vi.fn(),
 	requestShare: vi.fn(),
 	requestProjectPath: vi.fn(),
+	configurePreambles: vi.fn(),
 	fork: vi.fn(),
 	reload: vi.fn(),
 };
@@ -557,6 +558,40 @@ describe('WorkspaceRoot', () => {
 			screen.getByRole('menuitem', { name: m.sidebar_tooltips_edit_chat_name() }),
 		).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.sidebar_tooltips_delete_chat() })).toBeTruthy();
+	});
+
+	it('configures the exact chat and transcript view from a nonselected window menu', async () => {
+		const { layout } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		renderRoot();
+		await waitFor(() => {
+			const panel = screen
+				.getAllByTestId('conversation-panel')
+				.find((entry) => entry.dataset.chatId === 'chat-b');
+			expect(panel?.dataset.transcriptViewId).toBe('view-chat-b');
+		});
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
+		await fireEvent.click(
+			await screen.findByRole('menuitem', { name: m.sidebar_chats_configure_preambles() }),
+		);
+
+		expect(chatActions.configurePreambles).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 'chat-b' }),
+			'view-chat-b',
+		);
 	});
 
 	it('adds terminal actions to both tab menus', async () => {

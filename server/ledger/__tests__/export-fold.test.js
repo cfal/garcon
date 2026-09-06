@@ -21,6 +21,7 @@ import { transcriptViewId } from '../contracts.ts';
 
 const AT = '2026-08-23T00:00:00.000Z';
 const VIEW_ID = transcriptViewId('view-1');
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('transcript export fold', () => {
   it('classifies the complete rendered vocabulary into semantic export categories', () => {
@@ -151,7 +152,7 @@ describe('transcript export fold', () => {
       message: 'Preambles applied',
       detail: {
         type: 'preamble-application',
-        preambles: [{ id: 'preamble-1', title: 'Repository conventions' }],
+        preambles: [{ id: PREAMBLE_ID, title: 'Repository conventions' }],
       },
     }]);
 
@@ -163,7 +164,7 @@ describe('transcript export fold', () => {
         type: 'transcript-notice',
         detail: {
           type: 'preamble-application',
-          preambles: [{ id: 'preamble-1', title: 'Repository conventions' }],
+          preambles: [{ id: PREAMBLE_ID, title: 'Repository conventions' }],
         },
       }),
     })]);

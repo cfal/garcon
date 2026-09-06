@@ -13,8 +13,10 @@ vi.stubGlobal('localStorage', {
 	removeItem: () => {},
 });
 
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+
 const preamble = {
-	id: 'preamble-a',
+	id: PREAMBLE_ID,
 	enabled: true,
 	title: 'Repository conventions',
 	content: 'Use the repository conventions.',
@@ -57,9 +59,9 @@ describe('preambles API contract', () => {
 			scope: { type: 'global' as const },
 		};
 		await createPreamble({ expectedRevision: 1, preamble: definition });
-		await updatePreamble({ expectedRevision: 1, id: 'preamble-a', preamble: definition });
-		await removePreamble({ expectedRevision: 1, id: 'preamble-a' });
-		await reorderPreambles({ expectedRevision: 1, orderedPreambleIds: ['preamble-a'] });
+		await updatePreamble({ expectedRevision: 1, id: PREAMBLE_ID, preamble: definition });
+		await removePreamble({ expectedRevision: 1, id: PREAMBLE_ID });
+		await reorderPreambles({ expectedRevision: 1, orderedPreambleIds: [PREAMBLE_ID] });
 
 		expect(fetchMock.mock.calls.map(([url, options]) => [url, options?.method])).toEqual([
 			['/api/v1/preambles', undefined],
@@ -79,7 +81,7 @@ describe('preambles API contract', () => {
 		await expect(getPreambles()).rejects.toThrow('Invalid preambles response');
 
 		fetchMock.mockResolvedValueOnce(Response.json({ success: true, snapshot: { revision: -1 } }));
-		await expect(removePreamble({ expectedRevision: 1, id: 'preamble-a' })).rejects.toThrow(
+		await expect(removePreamble({ expectedRevision: 1, id: PREAMBLE_ID })).rejects.toThrow(
 			'Invalid preamble mutation response',
 		);
 	});

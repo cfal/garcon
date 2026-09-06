@@ -37,6 +37,7 @@
 				firstMessage: config.firstMessage,
 				initialImages: config.initialImages,
 				tags: config.tags,
+				orderedPreambleIds: config.orderedPreambleIds,
 			},
 		});
 

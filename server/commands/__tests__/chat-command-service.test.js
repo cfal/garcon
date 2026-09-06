@@ -724,6 +724,9 @@ function makeService(overrides = {}) {
     transientFeeds: overrides.transientFeeds ?? {
       validateAction: mock(() => undefined),
     },
+    preambles: overrides.preambles ?? {
+      snapshot: () => ({ revision: 0, preambles: [] }),
+    },
     chatMutationLock: overrides.chatMutationLock,
   });
   activeServices.push(service);
