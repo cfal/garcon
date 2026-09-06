@@ -18,7 +18,6 @@ export interface ChatListEntry {
   agentSettings: AgentSettingsEnvelope;
   title: string;
   projectPath: string;
-  effectiveProjectKey: string;
   orderGroup: ChatOrderGroup;
   tags: string[];
   activity: {

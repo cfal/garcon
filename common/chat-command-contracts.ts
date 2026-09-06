@@ -98,6 +98,7 @@ export type CommandErrorCode = Extract<
   | 'PROJECT_PATH_NOT_FOUND'
   | 'PROJECT_PATH_NOT_DIRECTORY'
   | 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED'
+  | 'PROJECT_UNAVAILABLE'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
   | 'SERVER_SHUTTING_DOWN'
@@ -463,7 +464,6 @@ export interface ProjectPathPatchResponse {
   projectPath: string;
   effectiveProjectKey: string;
   previousProjectPath: string;
-  previousEffectiveProjectKey: string | null;
 }
 
 export interface RunningChatsResponse {

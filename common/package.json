@@ -47,6 +47,7 @@
     "./model-routing": "./model-routing.ts",
     "./models": "./models.ts",
     "./prompt-refinement": "./prompt-refinement.ts",
+    "./project-resolution": "./project-resolution.ts",
     "./preamble-prefix": "./preamble-prefix.ts",
     "./preambles": "./preambles.ts",
     "./queue-state": "./queue-state.ts",
