@@ -63,7 +63,6 @@
 				<select
 					id="remote-pinned-insert-position"
 					class="shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
-					aria-label={m.sidebar_chats_pinned_insert_position()}
 					aria-describedby="remote-pinned-insert-position-hint"
 					value={remoteSettings.snapshot?.ui.pinnedInsertPosition ?? 'top'}
 					onchange={(e) =>
