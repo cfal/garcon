@@ -1326,10 +1326,13 @@ describe('SidebarSearchStore', () => {
 				const pending = store.refreshTranscriptSearch('needle');
 
 				store.scheduleTranscriptSearchRevalidation();
-				initialPage.resolve(makeSearchResponse(
+				const partial = makeSearchResponse(
 					[makeSearchResult('c1')],
 					makeSearchPage(1),
-				));
+				);
+				partial.index.indexedChatCount = 0;
+				partial.index.pendingChatCount = 1;
+				initialPage.resolve(partial);
 				await pending;
 				await vi.advanceTimersByTimeAsync(500);
 
@@ -1418,7 +1421,7 @@ describe('SidebarSearchStore', () => {
 					}));
 					inFlightResponse.resolve(responseFor(operation === 'page append' ? 50 : 0, 50, 1));
 					await pending;
-					await vi.advanceTimersByTimeAsync(500);
+					await vi.advanceTimersByTimeAsync(operation === 'revalidation' ? 1_000 : 500);
 
 					expect(searchChatTranscripts).toHaveBeenCalledTimes(3);
 					store.destroy();
@@ -1427,6 +1430,176 @@ describe('SidebarSearchStore', () => {
 				}
 			},
 		);
+
+		it('keeps a partial prefix dirty when a fully indexed append settles', async () => {
+			vi.useFakeTimers();
+			try {
+				const chats = Array.from({ length: 60 }, (_, index) => makeChat({ id: `c${index}` }));
+				const initial = makeSearchResponse(
+					chats.slice(0, 50).map((chat) => makeSearchResult(chat.id)),
+					makeSearchPage(60, { hasMore: true, nextOffset: 50 }),
+				);
+				initial.index.indexedChatCount = 59;
+				initial.index.pendingChatCount = 1;
+				const append = Promise.withResolvers<ChatSearchResponse>();
+				const searchChatTranscripts = vi
+					.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+					.mockResolvedValueOnce(initial)
+					.mockReturnValueOnce(append.promise)
+					.mockResolvedValueOnce(makeSearchResponse(
+						chats.map((chat) => makeSearchResult(chat.id)),
+						makeSearchPage(60, { limit: 60 }),
+					));
+				const { store } = createStore(chats, null, { searchChatTranscripts });
+				store.applyTranscriptSearchStatus(makeStatus({
+					chats: { total: 60, indexed: 59, pending: 1, failed: 0, unindexed: 0 },
+				}));
+				store.updateDraftQuery('needle');
+				await store.refreshTranscriptSearch('needle');
+
+				const pendingAppend = store.loadMoreTranscriptResults();
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'ready',
+					chats: { total: 60, indexed: 60, pending: 0, failed: 0, unindexed: 0 },
+				}));
+				append.resolve(makeSearchResponse(
+					chats.slice(50).map((chat) => makeSearchResult(chat.id)),
+					makeSearchPage(60, { offset: 50 }),
+				));
+				await pendingAppend;
+				expect(store.transcriptSearchIndexing).toBe(true);
+
+				await vi.advanceTimersByTimeAsync(500);
+
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(3);
+				expect(store.transcriptSearchIndexing).toBe(false);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('does not rerun a fully indexed replacement for unrelated status progress', async () => {
+			vi.useFakeTimers();
+			try {
+				const response = Promise.withResolvers<ChatSearchResponse>();
+				const searchChatTranscripts = vi
+					.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+					.mockReturnValue(response.promise);
+				const { store } = createStore([makeChat({ id: 'c1' })], null, {
+					searchChatTranscripts,
+				});
+				store.updateDraftQuery('needle');
+				store.transcriptSearchQuery = 'needle';
+				store.transcriptSearchResults = [makeSearchResult('c1')];
+				store.transcriptSearchPage = makeSearchPage(1);
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'ready',
+					chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
+				}));
+				const pending = store.retryTranscriptSearchRevalidation();
+
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'rebuilding',
+					chats: { total: 2, indexed: 2, pending: 0, failed: 0, unindexed: 0 },
+				}));
+				response.resolve(makeSearchResponse([makeSearchResult('c1')], makeSearchPage(1)));
+				await pending;
+				await vi.advanceTimersByTimeAsync(5_000);
+
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('retains an index timer that fires while an append owns the generation', async () => {
+			vi.useFakeTimers();
+			try {
+				const chats = Array.from({ length: 60 }, (_, index) => makeChat({ id: `c${index}` }));
+				const initial = makeSearchResponse(
+					chats.slice(0, 50).map((chat) => makeSearchResult(chat.id)),
+					makeSearchPage(60, { hasMore: true, nextOffset: 50 }),
+				);
+				initial.index.pendingChatCount = 1;
+				const append = Promise.withResolvers<ChatSearchResponse>();
+				const searchChatTranscripts = vi
+					.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+					.mockResolvedValueOnce(initial)
+					.mockReturnValueOnce(append.promise)
+					.mockResolvedValueOnce(makeSearchResponse(
+						chats.map((chat) => makeSearchResult(chat.id)),
+						makeSearchPage(60, { limit: 60 }),
+					));
+				const { store } = createStore(chats, null, { searchChatTranscripts });
+				store.applyTranscriptSearchStatus(makeStatus());
+				store.updateDraftQuery('needle');
+				await store.refreshTranscriptSearch('needle');
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'ready',
+					chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
+				}));
+				const pendingAppend = store.loadMoreTranscriptResults();
+
+				await vi.advanceTimersByTimeAsync(500);
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+
+				append.resolve(makeSearchResponse(
+					chats.slice(50).map((chat) => makeSearchResult(chat.id)),
+					makeSearchPage(60, { offset: 50 }),
+				));
+				await pendingAppend;
+				await vi.advanceTimersByTimeAsync(500);
+
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(3);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('retains content invalidation during initial retry backoff', async () => {
+			vi.useFakeTimers();
+			try {
+				const retry = Promise.withResolvers<void>();
+				const partial = makeSearchResponse([makeSearchResult('c1')], makeSearchPage(1));
+				partial.index.indexedChatCount = 0;
+				partial.index.pendingChatCount = 1;
+				const searchChatTranscripts = vi
+					.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+					.mockRejectedValueOnce(new ApiError(
+						503,
+						'Transcript search timed out',
+						'SEARCH_TIMEOUT',
+						undefined,
+						true,
+					))
+					.mockResolvedValueOnce(partial)
+					.mockResolvedValueOnce(makeSearchResponse(
+						[makeSearchResult('c1')],
+						makeSearchPage(1),
+					));
+				const waitForTranscriptIndexRetry = vi.fn(() => retry.promise);
+				const { store } = createStore([makeChat({ id: 'c1' })], null, {
+					searchChatTranscripts,
+					waitForTranscriptIndexRetry,
+				});
+				const pending = store.refreshTranscriptSearch('needle');
+				await vi.waitFor(() => expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1));
+				expect(store.transcriptSearchLoading).toBe(false);
+
+				store.scheduleTranscriptSearchRevalidation();
+				retry.resolve();
+				await pending;
+				await vi.advanceTimersByTimeAsync(500);
+
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(3);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
 
 		it('atomically revalidates the loaded logical prefix in 100-result chunks', async () => {
 			vi.useFakeTimers();
@@ -1542,6 +1715,13 @@ describe('SidebarSearchStore', () => {
 					'Failed to update transcript search results:',
 					expect.any(Error),
 				);
+				store.scheduleTranscriptSearchRevalidation();
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'ready',
+					chats: { total: 2, indexed: 2, pending: 0, failed: 0, unindexed: 0 },
+				}));
+				await vi.advanceTimersByTimeAsync(5_000);
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
 
 				await store.retryTranscriptSearchRevalidation();
 
