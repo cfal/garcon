@@ -46,6 +46,7 @@
 			currentTime: new Date('2026-09-06T12:00:00.000Z'),
 			inactivityDuration: '3-days',
 			sortMode: 'manual',
+			pinnedInsertPosition: 'top',
 		}),
 	);
 
