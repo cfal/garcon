@@ -42,9 +42,12 @@ function fixture(size: number, nestedProjects: boolean): ChatSessionRecord[] {
 	const random = randomGenerator(FIXTURE_SEED + size + Number(nestedProjects));
 	const projectCount = Math.max(4, Math.floor(size / 10));
 	return Array.from({ length: size }, (_, index) => {
-		const project = Math.floor(random() * projectCount);
+		const project = index % projectCount;
+		const projectVisit = Math.floor(index / projectCount);
 		const projectPath = nestedProjects
-			? `/workspace/project-${project % 40}/package-${project}`
+			? project % 2 === 0
+				? `/workspace/project-${Math.floor(project / 2)}`
+				: `/workspace/project-${Math.floor(project / 2)}/package-${project}`
 			: `/workspace/project-${project}`;
 		const activityOffsetMinutes = Math.floor(random() * 60 * 24 * 30);
 		const lastActivityAt = new Date(
@@ -60,8 +63,8 @@ function fixture(size: number, nestedProjects: boolean): ChatSessionRecord[] {
 			projectIdentityState: 'available',
 			orderGroup: isPinned ? 'pinned' : isArchived ? 'archived' : 'normal',
 			title: `Chat ${index} performance fixture`,
-			agentId: index % 5 === 0 ? 'codex' : 'claude',
-			model: index % 5 === 0 ? 'gpt-5' : 'sonnet',
+			agentId: projectVisit % 5 === 0 ? 'codex' : 'claude',
+			model: projectVisit % 5 === 0 ? 'gpt-5' : 'sonnet',
 			permissionMode: 'default',
 			thinkingMode: 'low',
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
@@ -77,7 +80,7 @@ function fixture(size: number, nestedProjects: boolean): ChatSessionRecord[] {
 			status: 'running',
 			agentOwnershipEpoch: null,
 			lastMessage: `Deterministic message ${index}`,
-			tags: index % 3 === 0 ? ['perf'] : ['general'],
+			tags: projectVisit % 3 === 0 ? ['perf'] : ['general'],
 		};
 	});
 }
@@ -107,6 +110,19 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 	const sortedChats = sortChatsByRecencyDesc(displayedChats);
 	const orders = buildSidebarChatOrderMap(sortedChats);
 	const iterations = Math.max(5, Math.floor(20_000 / size));
+	const ungroupedProjectCount = buildSidebarProjectKeys({
+		displayedChats,
+		groupNestedProjectPaths: false,
+	}).length;
+	const groupedProjectCount = buildSidebarProjectKeys({
+		displayedChats,
+		groupNestedProjectPaths: true,
+	}).length;
+	if (nestedProjects && groupedProjectCount >= ungroupedProjectCount) {
+		throw new Error(
+			`Nested fixture did not reduce project keys: ${ungroupedProjectCount} -> ${groupedProjectCount}`,
+		);
+	}
 	const rowInput = {
 		displayedChats: sortedChats,
 		orders,
@@ -122,6 +138,8 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 		nestedProjects,
 		activeSearch,
 		matchedChats: displayedChats.length,
+		ungroupedProjectCount,
+		groupedProjectCount,
 		iterations,
 		filter: profile(
 			() =>
