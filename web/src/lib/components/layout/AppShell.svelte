@@ -123,6 +123,10 @@
 	});
 
 	let isMobile = $derived(workspace.isMobile);
+	let viewportWidth = $state<number>();
+	const mobileBreakpointMatches = $derived(
+		viewportWidth === undefined ? undefined : viewportWidth <= 768,
+	);
 	let mobileAppHeight = $state<number | null>(null);
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
@@ -271,9 +275,9 @@
 	});
 
 	$effect(() => {
-		if (typeof window === 'undefined') return;
-		const mql = window.matchMedia('(max-width: 768px)');
-		let requestGeneration = 0;
+		const matches = mobileBreakpointMatches;
+		if (matches === undefined) return;
+		let cancelled = false;
 		let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 		function transitionBreakpoint(matches: boolean): Promise<void> {
@@ -283,32 +287,18 @@
 			return transition;
 		}
 
-		function applyBreakpoint(matches: boolean): void {
-			const generation = ++requestGeneration;
-			if (retryTimer) clearTimeout(retryTimer);
-			retryTimer = null;
-			void transitionBreakpoint(matches).catch(() => {
-				if (requestGeneration !== generation) return;
-				retryTimer = setTimeout(() => {
-					retryTimer = null;
-					if (requestGeneration !== generation) return;
-					requestGeneration += 1;
-					void transitionBreakpoint(mql.matches).catch(() => undefined);
-				}, 0);
-			});
-		}
+		void untrack(() => transitionBreakpoint(matches)).catch(() => {
+			if (cancelled) return;
+			retryTimer = setTimeout(() => {
+				retryTimer = null;
+				if (cancelled) return;
+				void untrack(() => transitionBreakpoint(matches)).catch(() => undefined);
+			}, 0);
+		});
 
-		applyBreakpoint(mql.matches);
-
-		function onChange(e: MediaQueryListEvent) {
-			applyBreakpoint(e.matches);
-		}
-
-		mql.addEventListener('change', onChange);
 		return () => {
-			requestGeneration += 1;
+			cancelled = true;
 			if (retryTimer) clearTimeout(retryTimer);
-			mql.removeEventListener('change', onChange);
 		};
 	});
 
@@ -706,6 +696,8 @@
 		</div>
 	</div>
 {/snippet}
+
+<svelte:window bind:innerWidth={viewportWidth} />
 
 <div
 	class="flex w-screen overflow-hidden bg-background text-foreground"

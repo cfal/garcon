@@ -144,6 +144,11 @@ class TestMediaQueryList {
 	}
 }
 
+function setViewportWidth(width: number, dispatch = true): void {
+	Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+	if (dispatch) window.dispatchEvent(new Event('resize'));
+}
+
 function installContext(): AppShellBreakpointWorkspace {
 	const workspace = new AppShellBreakpointWorkspace();
 	const noOpSubscription = () => () => undefined;
@@ -212,16 +217,14 @@ function installContext(): AppShellBreakpointWorkspace {
 }
 
 describe('AppShell responsive workspace binding', () => {
-	let breakpointMediaQuery: TestMediaQueryList;
 	let hoverMediaQuery: TestMediaQueryList;
 
 	beforeEach(() => {
-		breakpointMediaQuery = new TestMediaQueryList('(max-width: 768px)');
+		setViewportWidth(1_024, false);
 		hoverMediaQuery = new TestMediaQueryList(HOVER_CAPABLE_MEDIA_QUERY, true);
 		vi.stubGlobal(
 			'matchMedia',
 			vi.fn((query: string) => {
-				if (query === breakpointMediaQuery.media) return breakpointMediaQuery;
 				if (query === hoverMediaQuery.media) return hoverMediaQuery;
 				throw new Error(`Unexpected media query: ${query}`);
 			}),
@@ -258,35 +261,38 @@ describe('AppShell responsive workspace binding', () => {
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
 
-		breakpointMediaQuery.setMatches(true);
+		setViewportWidth(390);
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('true');
 
-		breakpointMediaQuery.setMatches(false);
+		setViewportWidth(1_024);
 		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
 	});
 
-	it('responds only to media-query changes and removes the subscription on teardown', async () => {
+	it('deduplicates same-breakpoint resizes and stops responding after teardown', async () => {
 		const workspace = installContext();
 		const view = render(AppShell);
 
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
-		expect(breakpointMediaQuery.listeners.size).toBe(1);
-		breakpointMediaQuery.matches = true;
-		window.dispatchEvent(new Event('resize'));
+		setViewportWidth(1_200);
 		await Promise.resolve();
-		expect(workspace.enterCalls).toBe(0);
+		expect(workspace.exitCalls).toBe(1);
 
-		breakpointMediaQuery.setMatches(true);
+		setViewportWidth(390);
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+		setViewportWidth(600);
+		await Promise.resolve();
+		expect(workspace.enterCalls).toBe(1);
 
 		view.unmount();
-		expect(breakpointMediaQuery.listeners.size).toBe(0);
+		setViewportWidth(1_024);
+		await Promise.resolve();
+		expect(workspace.exitCalls).toBe(1);
 	});
 
 	it('retries one failed transition against the current breakpoint', async () => {
-		breakpointMediaQuery.matches = true;
+		setViewportWidth(390, false);
 		const workspace = installContext();
 		const enter = vi.spyOn(workspace, 'enterMobilePresentation').mockRejectedValueOnce(
 			new Error('presentation failed'),
@@ -298,6 +304,20 @@ describe('AppShell responsive workspace binding', () => {
 		expect(workspace.isMobile).toBe(true);
 	});
 
+	it('stops after one failed breakpoint retry', async () => {
+		setViewportWidth(390, false);
+		const workspace = installContext();
+		const enter = vi
+			.spyOn(workspace, 'enterMobilePresentation')
+			.mockRejectedValue(new Error('presentation failed'));
+
+		render(AppShell);
+
+		await waitFor(() => expect(enter).toHaveBeenCalledTimes(2));
+		await new Promise((resolve) => window.setTimeout(resolve, 10));
+		expect(enter).toHaveBeenCalledTimes(2);
+	});
+
 	it('cancels a failed transition retry after a rapid breakpoint reversal', async () => {
 		const pending = deferred<void>();
 		const workspace = installContext();
@@ -307,9 +327,12 @@ describe('AppShell responsive workspace binding', () => {
 		render(AppShell);
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
 
-		breakpointMediaQuery.setMatches(true);
+		setViewportWidth(390);
+		await waitFor(() => expect(enter).toHaveBeenCalledOnce());
+		setViewportWidth(600);
+		await Promise.resolve();
 		expect(enter).toHaveBeenCalledOnce();
-		breakpointMediaQuery.setMatches(false);
+		setViewportWidth(1_024);
 		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 		pending.reject(new Error('superseded transition failed'));
 		await new Promise((resolve) => window.setTimeout(resolve, 10));
@@ -319,7 +342,7 @@ describe('AppShell responsive workspace binding', () => {
 	});
 
 	it('cancels a failed transition retry on teardown', async () => {
-		breakpointMediaQuery.matches = true;
+		setViewportWidth(390, false);
 		const pending = deferred<void>();
 		const workspace = installContext();
 		const enter = vi
@@ -333,7 +356,6 @@ describe('AppShell responsive workspace binding', () => {
 		await new Promise((resolve) => window.setTimeout(resolve, 10));
 
 		expect(enter).toHaveBeenCalledOnce();
-		expect(breakpointMediaQuery.listeners.size).toBe(0);
 	});
 
 	it('loads the initial chat list independently of WebSocket connection state', async () => {
@@ -354,7 +376,7 @@ describe('AppShell responsive workspace binding', () => {
 			setSidebarOpen: ReturnType<typeof vi.fn>;
 		};
 		appShell.sidebarOpen = true;
-		breakpointMediaQuery.matches = true;
+		setViewportWidth(390, false);
 		const { container } = render(AppShell);
 
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
@@ -373,7 +395,7 @@ describe('AppShell responsive workspace binding', () => {
 		const workspace = installContext();
 		const transientLayers = testContext.current?.transientLayers as TransientLayerRegistry;
 		const open = vi.spyOn(transientLayers, 'open');
-		breakpointMediaQuery.matches = true;
+		setViewportWidth(390, false);
 		render(AppShell);
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
 
@@ -390,7 +412,7 @@ describe('AppShell responsive workspace binding', () => {
 		const workspace = installContext();
 		const appShell = testContext.current?.appShell as AppShellStore;
 		const transientLayers = testContext.current?.transientLayers as TransientLayerRegistry;
-		breakpointMediaQuery.matches = true;
+		setViewportWidth(390, false);
 		render(AppShell);
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
 		const trigger = document.createElement('button');
@@ -566,7 +588,7 @@ describe('AppShell responsive workspace binding', () => {
 			]);
 			workspace.layout.publish(workspace.layout.revision, mobile);
 			workspace.isMobile = true;
-			breakpointMediaQuery.matches = true;
+			setViewportWidth(390, false);
 
 			render(AppShell);
 			expect(screen.queryByTestId('bottom-tab-bar-stub')).toBeNull();
@@ -588,7 +610,7 @@ describe('AppShell responsive workspace binding', () => {
 		]);
 		workspace.layout.publish(workspace.layout.revision, mobile);
 		workspace.isMobile = true;
-		breakpointMediaQuery.matches = true;
+		setViewportWidth(390, false);
 
 		render(AppShell);
 		const bottomBar = screen.getByTestId('bottom-tab-bar-stub');
