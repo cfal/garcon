@@ -270,13 +270,29 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const mql = window.matchMedia('(max-width: 768px)');
+		let requestGeneration = 0;
+		let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+		function transitionBreakpoint(matches: boolean): Promise<void> {
+			if (matches) return workspace.enterMobilePresentation();
+			const transition = workspace.exitMobilePresentation();
+			appShell.setSidebarOpen(false);
+			return transition;
+		}
 
 		function applyBreakpoint(matches: boolean): void {
-			if (matches) void workspace.enterMobilePresentation();
-			else {
-				void workspace.exitMobilePresentation();
-				appShell.setSidebarOpen(false);
-			}
+			const generation = ++requestGeneration;
+			if (retryTimer) clearTimeout(retryTimer);
+			retryTimer = null;
+			void transitionBreakpoint(matches).catch(() => {
+				if (requestGeneration !== generation) return;
+				retryTimer = setTimeout(() => {
+					retryTimer = null;
+					if (requestGeneration !== generation) return;
+					requestGeneration += 1;
+					void transitionBreakpoint(mql.matches).catch(() => undefined);
+				}, 0);
+			});
 		}
 
 		applyBreakpoint(mql.matches);
@@ -287,6 +303,8 @@
 
 		mql.addEventListener('change', onChange);
 		return () => {
+			requestGeneration += 1;
+			if (retryTimer) clearTimeout(retryTimer);
 			mql.removeEventListener('change', onChange);
 		};
 	});

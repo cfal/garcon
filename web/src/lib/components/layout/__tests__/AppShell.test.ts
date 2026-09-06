@@ -82,6 +82,16 @@ vi.mock('$lib/components/sidebar/SidebarTagDialog.svelte', async () => ({
 
 const AppShell = (await import('../AppShell.svelte')).default;
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return { promise, resolve, reject };
+}
+
 class TestMediaQueryList {
 	readonly media: string;
 	onchange: ((this: MediaQueryList, ev: MediaQueryListEvent) => unknown) | null = null;
@@ -270,6 +280,57 @@ describe('AppShell responsive workspace binding', () => {
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
 
 		view.unmount();
+		expect(breakpointMediaQuery.listeners.size).toBe(0);
+	});
+
+	it('retries one failed transition against the current breakpoint', async () => {
+		breakpointMediaQuery.matches = true;
+		const workspace = installContext();
+		const enter = vi.spyOn(workspace, 'enterMobilePresentation').mockRejectedValueOnce(
+			new Error('presentation failed'),
+		);
+
+		render(AppShell);
+
+		await waitFor(() => expect(enter).toHaveBeenCalledTimes(2));
+		expect(workspace.isMobile).toBe(true);
+	});
+
+	it('cancels a failed transition retry after a rapid breakpoint reversal', async () => {
+		const pending = deferred<void>();
+		const workspace = installContext();
+		const enter = vi
+			.spyOn(workspace, 'enterMobilePresentation')
+			.mockReturnValueOnce(pending.promise);
+		render(AppShell);
+		await waitFor(() => expect(workspace.exitCalls).toBe(1));
+
+		breakpointMediaQuery.setMatches(true);
+		expect(enter).toHaveBeenCalledOnce();
+		breakpointMediaQuery.setMatches(false);
+		await waitFor(() => expect(workspace.exitCalls).toBe(2));
+		pending.reject(new Error('superseded transition failed'));
+		await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+		expect(enter).toHaveBeenCalledOnce();
+		expect(workspace.isMobile).toBe(false);
+	});
+
+	it('cancels a failed transition retry on teardown', async () => {
+		breakpointMediaQuery.matches = true;
+		const pending = deferred<void>();
+		const workspace = installContext();
+		const enter = vi
+			.spyOn(workspace, 'enterMobilePresentation')
+			.mockReturnValueOnce(pending.promise);
+		const view = render(AppShell);
+		expect(enter).toHaveBeenCalledOnce();
+
+		view.unmount();
+		pending.reject(new Error('unmounted transition failed'));
+		await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+		expect(enter).toHaveBeenCalledOnce();
 		expect(breakpointMediaQuery.listeners.size).toBe(0);
 	});
 
