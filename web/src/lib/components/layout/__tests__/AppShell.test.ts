@@ -255,18 +255,22 @@ describe('AppShell responsive workspace binding', () => {
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
 	});
 
-	it('reconciles breakpoint changes from resize when the media query omits change events', async () => {
+	it('responds only to media-query changes and removes the subscription on teardown', async () => {
 		const workspace = installContext();
-		render(AppShell);
+		const view = render(AppShell);
 
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
+		expect(breakpointMediaQuery.listeners.size).toBe(1);
 		breakpointMediaQuery.matches = true;
 		window.dispatchEvent(new Event('resize'));
+		await Promise.resolve();
+		expect(workspace.enterCalls).toBe(0);
+
+		breakpointMediaQuery.setMatches(true);
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
 
-		breakpointMediaQuery.matches = false;
-		window.dispatchEvent(new Event('resize'));
-		await waitFor(() => expect(workspace.exitCalls).toBe(2));
+		view.unmount();
+		expect(breakpointMediaQuery.listeners.size).toBe(0);
 	});
 
 	it('loads the initial chat list independently of WebSocket connection state', async () => {

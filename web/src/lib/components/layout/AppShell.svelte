@@ -285,15 +285,9 @@
 			applyBreakpoint(e.matches);
 		}
 
-		function onResize(): void {
-			applyBreakpoint(mql.matches);
-		}
-
 		mql.addEventListener('change', onChange);
-		window.addEventListener('resize', onResize);
 		return () => {
 			mql.removeEventListener('change', onChange);
-			window.removeEventListener('resize', onResize);
 		};
 	});
 
