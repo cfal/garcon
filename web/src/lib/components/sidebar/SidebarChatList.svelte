@@ -17,7 +17,7 @@
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
-	import { sortChatsByRecencyDesc } from './chat-recency-sort';
+	import { sortSidebarChatsByRecency } from './chat-recency-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -106,7 +106,9 @@
 	// results are already recency-ordered upstream, so re-sorting is idempotent.
 	let displayedChats = $derived.by(() => {
 		const source = isFiltered ? filteredChats : chats;
-		return sortByRecent ? sortChatsByRecencyDesc(source) : source;
+		return sortByRecent
+			? sortSidebarChatsByRecency(source, displayOptions.pinnedInsertPosition)
+			: source;
 	});
 	let showChats = $derived(!isLoading && chats.length > 0 && displayedChats.length > 0);
 	let hasPinnedChats = $derived(partitionSidebarChats(chats).hasPinned);

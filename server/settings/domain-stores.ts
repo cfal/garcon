@@ -19,6 +19,7 @@ import {
 } from './settings-shared.js';
 import type {
   ChatFolder,
+  ChatOrderComparatorOverrides,
   ChatReorderResult,
   ChatStartupPreferences,
   ExecutionDefaults,
@@ -52,6 +53,12 @@ const ORDER_GROUP_KEYS: Record<PersistedChatOrderGroup, OrderListKey> = {
   pinned: 'pinnedChatIds',
   normal: 'normalChatIds',
   archived: 'archivedChatIds',
+};
+
+const ORDER_GROUP_BY_LIST_KEY: Record<OrderListKey, PersistedChatOrderGroup> = {
+  pinnedChatIds: 'pinned',
+  normalChatIds: 'normal',
+  archivedChatIds: 'archived',
 };
 
 function bumpRemoteSettingsVersion(settings: ProjectSettings): void {
@@ -698,6 +705,7 @@ export class ChatOrderStore {
 
   async sortChatOrder(
     compareChatIds: ChatOrderIdComparator,
+    comparatorOverrides: ChatOrderComparatorOverrides = {},
   ): Promise<{ changed: boolean }> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
@@ -705,7 +713,8 @@ export class ChatOrderStore {
       let anchorChatId: string | null = null;
 
       for (const key of ORDER_LIST_KEYS) {
-        const sorted = [...before[key]].sort(compareChatIds);
+        const compare = comparatorOverrides[ORDER_GROUP_BY_LIST_KEY[key]] ?? compareChatIds;
+        const sorted = [...before[key]].sort(compare);
         settings[key] = sorted;
         if (!anchorChatId && !sameOrderedStringArray(before[key], sorted)) {
           anchorChatId = sorted[0] ?? null;

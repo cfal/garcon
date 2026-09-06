@@ -46,6 +46,7 @@ describe('resolveAdjacentChatId', () => {
 			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 			inactivityDuration: '3-days',
 			sortMode: 'manual',
+			pinnedInsertPosition: 'top',
 		});
 
 		expect(displayedChatIds).toEqual(['pinned-c', 'normal-a', 'normal-b']);
@@ -71,6 +72,7 @@ describe('resolveAdjacentChatId', () => {
 			grouping: 'activity',
 			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 			sortMode: 'manual',
+			pinnedInsertPosition: 'top',
 		} as const;
 
 		expect(
@@ -94,6 +96,7 @@ describe('resolveAdjacentChatId', () => {
 			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 			inactivityDuration: '3-days',
 			sortMode: 'recent',
+			pinnedInsertPosition: 'top',
 		});
 
 		expect(displayedChatIds).toEqual(['newer', 'older']);
@@ -105,6 +108,43 @@ describe('resolveAdjacentChatId', () => {
 				offset: 1,
 			}),
 		).toBe('older');
+	});
+
+	it('follows oldest-first pinned activity when pins are added at the bottom', () => {
+		const displayedChatIds = buildSidebarDisplayChatIds({
+			displayedChats: [
+				chat('pinned-newer', {
+					isPinned: true,
+					lastActivityAt: '2025-05-31T12:00:00.000Z',
+				}),
+				chat('normal-newer', { lastActivityAt: '2025-05-31T12:00:00.000Z' }),
+				chat('pinned-older', {
+					isPinned: true,
+					lastActivityAt: '2025-05-30T12:00:00.000Z',
+				}),
+				chat('normal-older', { lastActivityAt: '2025-05-30T12:00:00.000Z' }),
+			],
+			grouping: 'none',
+			currentTime: new Date('2025-06-01T12:00:00.000Z'),
+			inactivityDuration: '3-days',
+			sortMode: 'recent',
+			pinnedInsertPosition: 'bottom',
+		});
+
+		expect(displayedChatIds).toEqual([
+			'pinned-older',
+			'pinned-newer',
+			'normal-newer',
+			'normal-older',
+		]);
+		expect(
+			resolveAdjacentChatId({
+				selectedChatId: 'pinned-older',
+				displayedChatIds,
+				fallbackOrder: [],
+				offset: 1,
+			}),
+		).toBe('pinned-newer');
 	});
 
 	it('falls back to raw session order when the sidebar is unmounted', () => {
