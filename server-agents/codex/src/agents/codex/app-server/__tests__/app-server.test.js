@@ -2033,6 +2033,14 @@ describe('CodexAppServerRuntime', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  function availableQueueOptions() {
+    return {
+      projectAdmission: { assertAvailable: async () => undefined },
+      unsettledQueueReceiptKeys: () => new Set(),
+      appendControlReceipt: () => {},
+    };
+  }
+
   function createActiveGoalQueue(provider, codexGoalCommand, operation) {
     return new ChatExecutionCoordinator(
       tmpDir,
@@ -2050,6 +2058,7 @@ describe('CodexAppServerRuntime', () => {
         isChatRunning: () => provider.isRunning('thread-1'),
       },
       {
+        hasMatchingInput: async () => false,
         admitInput: async () => ({ inserted: true }),
         admitQueuedInput: () => ({ inserted: true }),
         discardPreparedInput: () => {},
@@ -2063,6 +2072,7 @@ describe('CodexAppServerRuntime', () => {
       }),
       () => true,
       new InMemoryChatExecutionControlRepository('server-instance-test'),
+      availableQueueOptions(),
     );
   }
 
@@ -5249,6 +5259,7 @@ describe('CodexAppServerRuntime', () => {
         isChatRunning: () => provider.isRunning('thread-1'),
       },
       {
+        hasMatchingInput: async () => false,
         admitInput: async () => {
           registered = true;
           return { inserted: true };
@@ -5265,6 +5276,7 @@ describe('CodexAppServerRuntime', () => {
       }),
       () => true,
       new InMemoryChatExecutionControlRepository('server-instance-test'),
+      availableQueueOptions(),
     );
 
     const result = await queue.deliverGoalControlInput('chat-1', 'Steer from the queue', {
