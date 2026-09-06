@@ -66,6 +66,10 @@ export class SidebarChatReorderState {
 		this.#deps = deps;
 	}
 
+	get hasOverrides(): boolean {
+		return chatOrderLists.some((list) => this.#overrideByList[list] !== undefined);
+	}
+
 	orderFor(list: PersistedChatOrderGroup): string[] {
 		return this.#overrideByList[list] ?? this.#deps.visibleOrders[list];
 	}

@@ -20,8 +20,10 @@ describe('SidebarChatReorderState', () => {
 				return visibleOrders;
 			},
 		});
+		expect(reorder.hasOverrides).toBe(false);
 
 		reorder.begin('normal', 'a');
+		expect(reorder.hasOverrides).toBe(true);
 		reorder.preview({
 			list: 'normal',
 			sourceChatId: 'a',
@@ -42,6 +44,9 @@ describe('SidebarChatReorderState', () => {
 		visibleOrders = buildOrders(['b', 'c', 'a']);
 		reorder.reconcile();
 		expect(reorder.orderFor('normal')).toEqual(['b', 'c', 'a']);
+		expect(reorder.hasOverrides).toBe(true);
+		reorder.completeIfCurrent('normal', 1);
+		expect(reorder.hasOverrides).toBe(false);
 	});
 
 	it('returns a relative target for filtered top drops', () => {
