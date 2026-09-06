@@ -7,7 +7,7 @@ import type {
 } from './operation-routes.js';
 import { isOpenCodeCompactionAssistant, openCodeAssistantTerminal } from './sse-events.js';
 import type { SSEEvent } from './sse-events.js';
-import type { OpenCodeSession } from './turn-events.js';
+import type { OpenCodeSession, OpenCodeTurnContext } from './turn-events.js';
 
 type OpenCodeCompactionPartDropCode =
   | 'COMPACTION_PART_NO_SESSION'
@@ -128,6 +128,19 @@ export interface OpenCodeCompactionBoundary {
   // The successful summary assistant's id anchors the boundary so point-fork
   // boundaries match across live and reloaded transcripts.
   readonly summaryMessageId: string;
+}
+
+export function compactionBoundaryTrigger(
+  event: SSEEvent,
+  turn: OpenCodeTurnContext,
+): CompactionTrigger | null {
+  if (turn.compaction) return 'manual';
+  const messageId = event.properties?.info?.id
+    ?? event.properties?.part?.messageID
+    ?? event.properties?.messageID;
+  return typeof messageId === 'string' && turn.automaticCompactionMessageIds.has(messageId)
+    ? 'auto'
+    : null;
 }
 
 // Only a summary assistant that finished successfully replaced prior context.

@@ -27,7 +27,7 @@ import {
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
-import { CompactionMessage, type CompactionTrigger } from '@garcon/common/chat-types';
+import type { CompactionTrigger } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   runtimeRows,
@@ -88,7 +88,7 @@ import {
   modelsFromProviders,
   type OpenCodeModelOption,
 } from './model-catalog.js';
-import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow } from './compaction-routing.js';
+import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow, compactionBoundaryTrigger } from './compaction-routing.js';
 import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
 import {
   OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
@@ -917,29 +917,17 @@ export class OpenCodeRuntime {
   }
 
   #dispatchOpenCodeEvent(event: SSEEvent, route: OpenCodeOperationRoute): void {
-    if (route.turn.compaction) {
-      this.#dispatchCompactionBoundary(event, route, 'manual');
-      return;
-    }
-    const messageId = event.properties?.info?.id
-      ?? event.properties?.part?.messageID
-      ?? event.properties?.messageID;
-    if (
-      typeof messageId === 'string'
-      && route.turn.automaticCompactionMessageIds.has(messageId)
-    ) {
-      this.#dispatchCompactionBoundary(event, route, 'auto');
+    const compactionTrigger = compactionBoundaryTrigger(event, route.turn);
+    if (compactionTrigger) {
+      this.#dispatchCompactionBoundary(event, route, compactionTrigger);
       return;
     }
     const chatMessages = convertOpenCodeEventToChatMessages(event, route.turn, this.#logger);
-    if (!chatMessages || !chatMessages.length) {
-      return;
-    }
+    if (!chatMessages?.length) return;
 
     this.#publishRows(route.sessionId, route.turn.operation, chatMessages);
   }
 
-  // Compaction summary text and control parts stay internal to the native session.
   #dispatchCompactionBoundary(
     event: SSEEvent,
     route: OpenCodeOperationRoute,
