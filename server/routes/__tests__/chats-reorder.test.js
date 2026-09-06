@@ -363,6 +363,7 @@ describe('POST /api/v1/chats/sort', () => {
     await callSort({ sortKey: 'activity' });
     const [compare, comparatorOverrides] = settings.sortChatOrder.mock.calls[0];
 
+    expect(typeof comparatorOverrides.pinned).toBe('function');
     expect(['older-active', 'newer-idle'].sort(comparatorOverrides.pinned))
       .toEqual(['newer-idle', 'older-active']);
     expect(['older-active', 'newer-idle'].sort(compare))

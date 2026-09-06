@@ -17,6 +17,7 @@ import {
   type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
+import type { PinnedInsertPosition } from '../../common/settings.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
@@ -148,10 +149,7 @@ interface SettingsDep {
   getPinnedChatIds(): string[];
   getNormalChatIds(): string[];
   getArchivedChatIds(): string[];
-  getUiSettings(): {
-    chatTitle?: unknown;
-    pinnedInsertPosition?: 'top' | 'bottom';
-  } | null | undefined;
+  getUiSettings(): { pinnedInsertPosition?: PinnedInsertPosition } | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
