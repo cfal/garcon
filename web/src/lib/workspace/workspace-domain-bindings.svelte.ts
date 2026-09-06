@@ -6,9 +6,11 @@ import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.sv
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
+import type { ProjectResolutionLease, ProjectResolutionStore } from './project-resolution-store.svelte.js';
 
 interface WorkspaceDomainBindingsDeps {
 	workspaceContext: WorkspaceContextStore;
+	projectResolution: ProjectResolutionStore;
 	ghCapability: GhCapabilityStore;
 	localSettings: LocalSettingsStore;
 	singletons: SingletonSurfaceRegistry;
@@ -23,6 +25,26 @@ export class WorkspaceDomainBindings {
 		let lastCommitInvalidationKey = '';
 		// Bindings run for the application lifetime, so every sink tolerates absent pre-auth context.
 		this.#destroyEffects = $effect.root(() => {
+			$effect(() => {
+				const target = deps.workspaceContext.currentTarget;
+				if (!target) return;
+				const lease = untrack(() => deps.projectResolution.retain(target));
+				return () => lease.release();
+			});
+
+			$effect(() => {
+				const target = deps.workspaceContext.currentTarget;
+				const hasDemand = deps.singletons.hasVisibleProjectSurface
+					|| deps.localSettings.showQuickCommitTray;
+				if (!target || !hasDemand) return;
+				const lease: ProjectResolutionLease = untrack(() => {
+					const retained = deps.projectResolution.retain(target);
+					void retained.resolve();
+					return retained;
+				});
+				return () => lease.release();
+			});
+
 			$effect(() => {
 				deps.singletons.setProjectState(deps.workspaceContext.projectState);
 			});

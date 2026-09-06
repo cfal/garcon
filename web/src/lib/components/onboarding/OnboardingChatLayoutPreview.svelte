@@ -20,8 +20,6 @@
 		id: 'onboarding-layout-preview',
 		parentChat: null,
 		projectPath: '/workspace/aurora',
-		effectiveProjectKey: '/workspace/aurora',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Release checklist review',
 		agentId: 'claude',

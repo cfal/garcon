@@ -185,7 +185,7 @@ describe('PullRequestsStore', () => {
 
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/project', effectiveProjectKey: null },
+			context: { chatId: 'draft', projectPath: '/project' },
 		});
 		await store.refresh();
 		await store.select(4);

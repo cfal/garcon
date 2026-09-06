@@ -202,8 +202,6 @@
 		id: selectedChatId,
 		parentChat: null,
 		projectPath,
-		effectiveProjectKey: projectPath,
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: selectedChatId,
 		agentId: selectedAgentId,

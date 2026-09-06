@@ -127,8 +127,6 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		id: session.id,
 		parentChat: session.parentChat,
 		projectPath: session.projectPath,
-		effectiveProjectKey: session.effectiveProjectKey,
-		projectIdentityState: 'available',
 		orderGroup: session.orderGroup,
 		title: session.title,
 		agentId: session.agentId,
@@ -181,8 +179,6 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.id === b.id &&
 		sameParentChat(a.parentChat, b.parentChat) &&
 		a.projectPath === b.projectPath &&
-		a.effectiveProjectKey === b.effectiveProjectKey &&
-		a.projectIdentityState === b.projectIdentityState &&
 		a.orderGroup === b.orderGroup &&
 		a.title === b.title &&
 		a.agentId === b.agentId &&
@@ -736,8 +732,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			id,
 			parentChat: null,
 			projectPath,
-			effectiveProjectKey: null,
-			projectIdentityState: 'pending',
 			orderGroup: null,
 			title: normalizedStartup.firstMessage.trim() || m.chat_sessions_new_session(),
 			agentId: normalizedStartup.agentId,

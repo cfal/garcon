@@ -53,6 +53,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		setSnippets,
 		setWorkspaceLayout,
 		setWorkspaceContext,
+		setProjectResolution,
 		setTerminalRegistry,
 		setWorkspaceCoordinator,
 		setWorkspaceWindowDnd,
@@ -140,6 +141,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	});
 	const workspaceLayout = workspaceServices.layout;
 	const workspaceContext = workspaceServices.context;
+	const projectResolution = workspaceServices.projectResolution;
 	const terminals = workspaceServices.terminals;
 	const transientLayers = workspaceServices.transientLayers;
 	const surfaceFrames = workspaceServices.surfaceFrames;
@@ -179,6 +181,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	setAppShell(appShell);
 	setWorkspaceLayout(workspaceLayout);
 	setWorkspaceContext(workspaceContext);
+	setProjectResolution(projectResolution);
 	setTerminalRegistry(terminals);
 	setWorkspaceCoordinator(workspace);
 	setWorkspaceWindowDnd(workspaceServices.windowDnd);

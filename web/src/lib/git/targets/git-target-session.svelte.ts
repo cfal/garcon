@@ -117,7 +117,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind === 'resolving') {
+		if (projectState.kind !== 'available' && projectState.kind !== 'absent') {
 			this.projectIdentityPending = true;
 			this.closeDialogs();
 			this.#cancelTargetRequest();

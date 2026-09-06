@@ -8,7 +8,7 @@ import { collectWindowNodes } from './window-tree.js';
 
 interface MobileWorkspaceContext {
 	chatId: string;
-	effectiveProjectKey: string | null;
+	projectPath: string;
 }
 
 interface MobilePresentationPlannerDeps {
@@ -41,7 +41,7 @@ export class MobilePresentationPlanner {
 				invokerSurfaceId: snapshot.mobileActiveSurfaceId,
 				invokerHost: 'mobile',
 				chatId: context?.chatId ?? null,
-				effectiveProjectKey: context?.effectiveProjectKey ?? null,
+				projectPath: context?.projectPath ?? null,
 				routeIdentity: this.deps.getRouteIdentity(),
 			},
 		];
@@ -65,7 +65,7 @@ export class MobilePresentationPlanner {
 				snapshot.surfaces[target.invokerSurfaceId] &&
 				target.routeIdentity === routeIdentity &&
 				target.chatId === (context?.chatId ?? null) &&
-				target.effectiveProjectKey === (context?.effectiveProjectKey ?? null)
+				target.projectPath === (context?.projectPath ?? null)
 			) {
 				return {
 					activeId: target.invokerSurfaceId,

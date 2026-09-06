@@ -322,13 +322,16 @@ export class FileTreeStore {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind === 'resolving') return;
 		if (projectState.kind === 'absent') {
 			this.#projectPath = null;
 			this.#effectiveProjectKey = '';
 			this.#canonicalChatProjectPath = null;
 			this.#chatProjectBreadcrumbs = [];
 			this.#resetBrowsingState();
+			return;
+		}
+		if (projectState.kind !== 'available') {
+			this.#abortRequests();
 			return;
 		}
 

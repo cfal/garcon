@@ -22,6 +22,8 @@
 		projectPath: string;
 		chatId?: string | null;
 		isVisible: boolean;
+		projectPending?: boolean;
+		projectUnavailable?: boolean;
 		query: string;
 		supportsFork: boolean;
 		supportsSteering: boolean;
@@ -37,6 +39,8 @@
 		projectPath,
 		chatId = null,
 		isVisible,
+		projectPending = false,
+		projectUnavailable = false,
 		query,
 		supportsFork,
 		supportsSteering,
@@ -279,11 +283,11 @@
 					</li>
 				{/each}
 			</ul>
-			{#if isLoading}
+			{#if isLoading || projectPending}
 				<div class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_loading()}
 				</div>
-			{:else if loadFailed}
+			{:else if loadFailed || projectUnavailable}
 				<div class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_load_failed()}
 				</div>

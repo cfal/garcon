@@ -72,13 +72,7 @@
 	let prepareConversationHide: (() => void) | null = $state(null);
 
 	const selectedChat = $derived(sessions.selectedChat);
-	const hasUsableChatContext = $derived(
-		Boolean(
-			selectedChat &&
-			selectedChat.projectIdentityState === 'available' &&
-			selectedChat.effectiveProjectKey,
-		),
-	);
+	const hasUsableChatContext = $derived(Boolean(selectedChat));
 	const chatSurfacePresentation = $derived(
 		resolveChatSurfacePresentation(selectedChat, sessions.isLoadingChats),
 	);
@@ -193,6 +187,10 @@
 			{transcriptCache}
 			{reserveMobileToolbar}
 			isVisible={conversationWorkspaceVisible}
+			onChooseProjectFolder={(chatId) => {
+				const chat = sessions.byId[chatId];
+				if (chat) chatActions.requestProjectPath(chat);
+			}}
 		/>
 	</div>
 </div>

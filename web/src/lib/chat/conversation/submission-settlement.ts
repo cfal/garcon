@@ -26,7 +26,7 @@ export interface SubmissionFailureOptions {
 	composerRevisionAfterClear?: number | null;
 	refreshControl?: () => Promise<void>;
 	restoreRejected?: () => void;
-	onRejected?: () => void | Promise<void>;
+	onRejected?: (error: unknown) => void | Promise<void>;
 }
 
 export async function settleSubmissionFailure(
@@ -44,7 +44,7 @@ export async function settleSubmissionFailure(
 		if (admissionConflict && options.refreshControl) await options.refreshControl();
 	}
 
-	if (!outcomeUnknown) await options.onRejected?.();
+	if (!outcomeUnknown) await options.onRejected?.(error);
 	if (context.ownsComposer && !outcomeUnknown) {
 		if (options.restoreRejected) {
 			options.restoreRejected();

@@ -105,8 +105,10 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind === 'resolving') {
+		if (projectState.kind !== 'available' && projectState.kind !== 'absent') {
 			this.#projectIdentityPending = true;
+			this.#listController?.abort();
+			this.#detailController?.abort();
 			return;
 		}
 		this.#projectIdentityPending = false;

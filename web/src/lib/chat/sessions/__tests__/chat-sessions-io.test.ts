@@ -59,7 +59,6 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		model: 'sonnet',
 		title: 'Chat 1',
 		projectPath: '/repo',
-		effectiveProjectKey: '/repo',
 		orderGroup: 'normal',
 		tags: [],
 		permissionMode: 'default',

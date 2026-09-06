@@ -200,9 +200,9 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 
 function projectStateChatId(projectState: WorkspaceProjectState): string | null {
 	if (projectState.kind === 'absent') return null;
-	return projectState.kind === 'resolving'
-		? projectState.context.chatId
-		: projectState.project.chatId;
+	return projectState.kind === 'available'
+		? projectState.project.chatId
+		: projectState.context.chatId;
 }
 
 function sameSession(

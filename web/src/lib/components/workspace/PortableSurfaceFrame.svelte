@@ -24,6 +24,7 @@
 		style,
 		onSendToChat,
 		onAppendToChatDraft,
+		onChooseProjectFolder,
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
@@ -32,6 +33,7 @@
 		style: string;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
+		onChooseProjectFolder?: () => void;
 		frameBridge: SurfaceFrameBridge;
 	} = $props();
 
@@ -109,6 +111,7 @@
 					{visible}
 					{onSendToChat}
 					{onAppendToChatDraft}
+					{onChooseProjectFolder}
 					{frameBridge}
 				/>
 			</div>
@@ -120,6 +123,7 @@
 			{visible}
 			{onSendToChat}
 			{onAppendToChatDraft}
+			{onChooseProjectFolder}
 			{frameBridge}
 		/>
 	{/if}

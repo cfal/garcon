@@ -90,8 +90,6 @@ function chat(
 		id,
 		parentChat: null,
 		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title,
 		agentId: 'codex',
@@ -531,8 +529,6 @@ describe('WorkspaceRoot', () => {
 		const draft = chat('chat-a', 'Chat A', {
 			status: 'draft',
 			orderGroup: null,
-			effectiveProjectKey: null,
-			projectIdentityState: 'pending',
 		});
 		sessions.selectedChat = draft;
 		sessions.byId['chat-a'] = draft;

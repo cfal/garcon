@@ -55,6 +55,7 @@
 		getWorkspaceCoordinator,
 		getWorkspaceShortcuts,
 		getGitQuickSummary,
+		getProjectResolution,
 		getGitBranchActions,
 		getChatDrafts,
 		getConversationUi,
@@ -77,6 +78,7 @@
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
 		onComposerHeightChange?: (height: number) => void;
+		onChooseProjectFolder?: (chatId: string) => void;
 		subagentToolbar: SubagentToolbarState;
 		transcriptCache?: ChatTranscriptCache;
 		reserveMobileToolbar?: boolean;
@@ -101,6 +103,7 @@
 		onRegisterPrepareHide,
 		onRegisterPanelActions,
 		onComposerHeightChange,
+		onChooseProjectFolder,
 		subagentToolbar,
 		transcriptCache: providedTranscriptCache,
 		reserveMobileToolbar = false,
@@ -166,6 +169,7 @@
 	});
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
+	const projectResolution = getProjectResolution();
 	const startupCoordinator = new StartupCoordinator();
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
@@ -239,6 +243,7 @@
 				);
 			});
 		},
+		projectResolution,
 	});
 	reconnectCoordinator.mount();
 
@@ -293,6 +298,14 @@
 			},
 		},
 		requestProcessingSnapshot: (source) => ws.requestProcessingSnapshot(source),
+		onProjectUnavailable: async (target) => {
+			const lease = projectResolution.retain(target);
+			try {
+				await lease.retry();
+			} finally {
+				lease.release();
+			}
+		},
 		setIsViewportPinnedToBottom: (v) => {
 			currentPanel()?.scroll.setPinnedToBottom(v);
 		},
@@ -389,10 +402,7 @@
 		},
 		createBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
-			const chat = sessions.byId[chatId];
-			if (chat?.projectPath && chat.effectiveProjectKey) {
-				quickGitBranches.openNewBranchDialog(chat.projectPath, surfaceId, chat.effectiveProjectKey);
-			}
+			void openNewBranchDialog(surfaceId, chatId);
 		},
 		switchBranch(surfaceId, chatId, branch) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -634,7 +644,7 @@
 		});
 	}
 
-	function toggleCommitBranchDropdown(chatId: string): void {
+	async function toggleCommitBranchDropdown(chatId: string): Promise<void> {
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath) return;
 		if (
@@ -644,7 +654,22 @@
 			quickGitBranches.closeBranchDropdown();
 			return;
 		}
-		void quickGitBranches.openBranchDropdown(projectPath);
+		const project = await resolveChatProject(chatId);
+		if (!project) return;
+		await quickGitBranches.openBranchDropdown(project.projectPath);
+	}
+
+	async function openNewBranchDialog(
+		surfaceId: ChatViewSurfaceId,
+		chatId: string,
+	): Promise<void> {
+		const project = await resolveChatProject(chatId);
+		if (!project) return;
+		quickGitBranches.openNewBranchDialog(
+			project.projectPath,
+			surfaceId,
+			project.effectiveProjectKey,
+		);
 	}
 
 	async function switchCommitBranch(
@@ -652,15 +677,39 @@
 		chatId: string,
 		branch: string,
 	): Promise<void> {
-		const chat = sessions.byId[chatId];
-		if (!chat?.projectPath || !chat.effectiveProjectKey) return;
+		const project = await resolveChatProject(chatId);
+		if (!project) return;
 		await quickGitBranches.switchBranch(
-			chat.projectPath,
+			project.projectPath,
 			branch,
 			undefined,
 			surfaceId,
-			chat.effectiveProjectKey,
+			project.effectiveProjectKey,
 		);
+	}
+
+	async function resolveChatProject(chatId: string): Promise<{
+		projectPath: string;
+		effectiveProjectKey: string;
+	} | null> {
+		const chat = sessions.byId[chatId];
+		if (!chat?.projectPath) return null;
+		const target = chat.status === 'draft'
+			? { kind: 'path' as const, projectPath: chat.projectPath }
+			: { kind: 'chat' as const, chatId, projectPath: chat.projectPath };
+		const lease = projectResolution.retain(target);
+		try {
+			await lease.resolve();
+			if (sessions.byId[chatId]?.projectPath !== target.projectPath) return null;
+			return lease.snapshot.kind === 'available'
+				? {
+						projectPath: target.projectPath,
+						effectiveProjectKey: lease.snapshot.effectiveProjectKey,
+					}
+				: null;
+		} finally {
+			lease.release();
+		}
 	}
 
 	let composerHost = $state<HTMLDivElement | null>(null);
@@ -699,6 +748,7 @@
 			{composerEditorOpenRequestId}
 			onsubmit={onSubmit}
 			{onSteerPreferredSubmit}
+			{onChooseProjectFolder}
 			onModelChange={(next) => controller.handleModelSelectionChange(next)}
 			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}

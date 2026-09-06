@@ -29,6 +29,7 @@ export interface ChatActionControllerDeps {
 
 export class ChatActionController {
 	#sidebarController: SidebarController;
+	#projectPathRequestGeneration = new Map<string, number>();
 
 	constructor(private readonly deps: ChatActionControllerDeps) {
 		this.#sidebarController = new SidebarController({
@@ -144,7 +145,17 @@ export class ChatActionController {
 	}
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<void> {
+		const expectedProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
+		if (!expectedProjectPath) return;
+		const generation = (this.#projectPathRequestGeneration.get(chatId) ?? 0) + 1;
+		this.#projectPathRequestGeneration.set(chatId, generation);
 		const result = await this.#sidebarController.updateProjectPath(chatId, projectPath);
+		if (this.#projectPathRequestGeneration.get(chatId) !== generation) return;
+		const currentProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
+		if (
+			currentProjectPath !== expectedProjectPath &&
+			currentProjectPath !== result.projectPath
+		) return;
 		this.deps.onProjectPathUpdated(chatId, {
 			projectPath: result.projectPath,
 			effectiveProjectKey: result.effectiveProjectKey,

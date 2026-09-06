@@ -174,6 +174,9 @@
 							<span class="block truncate">{projectPathDialog?.currentProjectPath ?? ''}</span>
 						</div>
 					</div>
+					<p class="text-sm text-muted-foreground">
+						{m.sidebar_project_path_queue_warning()}
+					</p>
 
 					<div class="space-y-1.5">
 						<label
