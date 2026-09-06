@@ -35,7 +35,7 @@ export interface SidebarBulkOperationInput {
 	selectedChatId: string | null;
 }
 
-export interface SidebarBulkOperationResult {
+export interface SidebarBulkOperationPlan {
 	affectedIds: string[];
 	nextSelectedChatId: string | null;
 	shouldCreateNewChat: boolean;
@@ -107,21 +107,22 @@ export class SidebarController {
 		await this.deps.onQuietRefresh();
 	}
 
-	async runBulkOperation(
+	planBulkOperation(
 		action: SidebarBulkAction,
 		input: SidebarBulkOperationInput,
-	): Promise<SidebarBulkOperationResult> {
+	): SidebarBulkOperationPlan {
 		const affectedIds = this.resolveBulkAffectedIds(action, input.selectedChats);
-		const archiveSelection = this.resolveArchiveSelection(action, affectedIds, input);
-		if (affectedIds.length === 0) return archiveSelection;
+		return this.resolveArchiveSelection(action, affectedIds, input);
+	}
+
+	async executeBulkOperation(action: SidebarBulkAction, affectedIds: string[]): Promise<void> {
+		if (affectedIds.length === 0) return;
 
 		if (action === 'pin' || action === 'unpin') {
 			await this.bulkTogglePin(affectedIds);
 		} else {
 			await this.bulkToggleArchive(affectedIds);
 		}
-
-		return archiveSelection;
 	}
 
 	private resolveBulkAffectedIds(
@@ -145,7 +146,7 @@ export class SidebarController {
 		action: SidebarBulkAction,
 		affectedIds: string[],
 		input: SidebarBulkOperationInput,
-	): SidebarBulkOperationResult {
+	): SidebarBulkOperationPlan {
 		if (
 			action !== 'archive' ||
 			!input.selectedChatId ||
