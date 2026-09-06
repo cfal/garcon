@@ -10,6 +10,7 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
+import { isAgentId, type AgentId } from '@garcon/common/agents';
 import {
   parseChatRowTitle,
 } from '@garcon/common/chat-row-contracts';
@@ -45,6 +46,10 @@ import {
   HANDOFF_CONTEXT_WINDOW_MIN_TOKENS,
   isHandoffContextWindowTokens,
 } from '@garcon/common/handoff-sizing';
+import {
+  NativeSessionLookupValidationError,
+  parseNativeSessionId,
+} from '@garcon/common/native-session-lookup';
 import { argumentError } from './errors.js';
 
 const ADD_ROW_PRESENTATION_REQUIREMENT = [
@@ -63,6 +68,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
   garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
   garcon-cli [connection options] handoff <chat-id> [--context-window-size <tokens>] [--output <path>] [--force]
+  garcon-cli [connection options] lookup-native-session <native-session-id> [--agent <agent-id>]
 
 Starts or resumes a visible chat through an already-running Garcon server.
 The selected permission mode may allow the agent to edit files and run tools.
@@ -77,6 +83,7 @@ export writes the complete untruncated transcript as Markdown or XML. Exclusions
 apply to top-level entries; tool calls embedded in permission entries remain.
 handoff creates a read-only XML projection for another model to summarize. It
 creates no chat, changes no agent or owner, starts no run, and appends nothing.
+Lookup the Garcon chat associated with a native agent session ID.
 Message presentation is not sent as prompt text. A message title without a style
 uses notice; a style without a title displays its CLI label. --color selects custom styling.
 --collapsible starts the CLI-authored body collapsed without requiring a style.
@@ -97,7 +104,7 @@ Options:
   --server <url>               Assert the workspace descriptor's exact URL
   --cwd <path>                 Project directory for a new chat (default: current directory)
   --parent <chat-id>           Record an existing parent for a new delegated chat
-  --agent <id>                 Agent ID; required for a new chat and agent-scoped lists
+  --agent <id>                 Agent ID; required for a new chat and scoped lists, optional for native-session lookup
   --provider <id>              Configured API provider ID
   --endpoint <id>              Endpoint ID within --provider
   --model <id>                 Model value or raw model; required for a new chat
@@ -130,7 +137,7 @@ Options:
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, wait, export, or handoff.
+Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, wait, export, handoff, or lookup-native-session.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
@@ -254,6 +261,12 @@ export interface HandoffCliCommand extends CliConnectionOptions {
   readonly force: boolean;
 }
 
+export interface LookupNativeSessionCliCommand extends CliConnectionOptions {
+  readonly kind: 'lookup-native-session';
+  readonly nativeSessionId: string;
+  readonly agentId?: AgentId;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
@@ -265,6 +278,7 @@ export type ParsedCliCommand =
   | WaitCliCommand
   | ExportCliCommand
   | HandoffCliCommand
+  | LookupNativeSessionCliCommand
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
@@ -791,6 +805,73 @@ function parseContextWindowSize(value: ParsedOptionValue): number {
   return parsed;
 }
 
+const LOOKUP_NATIVE_SESSION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
+  ['cwd', '--cwd'],
+  ['parent', '--parent'],
+  ['provider', '--provider'],
+  ['endpoint', '--endpoint'],
+  ['model', '--model'],
+  ['permissions', '--permissions'],
+  ['reasoning-effort', '--reasoning-effort'],
+  ['title', '--title'],
+  ['message-title', '--message-title'],
+  ['message-style', '--message-style'],
+  ['color', '--color'],
+  ['tag', '--tag'],
+  ['resume', '--resume'],
+  ['allow-steer', '--allow-steer'],
+  ['turn', '--turn'],
+  ['messages', '--messages'],
+  ['type', '--type'],
+  ['markdown', '--markdown'],
+  ['collapsible', '--collapsible'],
+  ['format', '--format'],
+  ['exclude', '--exclude'],
+  ['output', '--output'],
+  ['force', '--force'],
+  ['context-window-size', '--context-window-size'],
+  ['json', '--json'],
+] as const;
+
+function parseLookupNativeSession(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+  agentId: string | undefined,
+): LookupNativeSessionCliCommand {
+  for (const [key, flag] of LOOKUP_NATIVE_SESSION_FORBIDDEN_OPTIONS) {
+    if (values[key] !== undefined) {
+      throw argumentError(`${flag} cannot be used with lookup-native-session`);
+    }
+  }
+  if (parsed.positionals.length < 2) {
+    throw argumentError('lookup-native-session requires one native session ID');
+  }
+  if (parsed.positionals.length > 2) {
+    throw argumentError('lookup-native-session accepts exactly one native session ID');
+  }
+  let nativeSessionId: string;
+  try {
+    nativeSessionId = parseNativeSessionId(parsed.positionals[1]);
+  } catch (error) {
+    if (error instanceof NativeSessionLookupValidationError) {
+      throw argumentError(error.message.replace('nativeSessionId', 'native session ID'), {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  if (agentId !== undefined && !isAgentId(agentId)) {
+    throw argumentError('--agent must be a valid agent ID');
+  }
+  return {
+    kind: 'lookup-native-session',
+    ...connection,
+    nativeSessionId,
+    ...(agentId === undefined ? {} : { agentId }),
+  };
+}
+
 function parseDocumentOutputOptions(
   values: Record<string, ParsedOptionValue>,
   noun: string,
@@ -948,6 +1029,9 @@ export function parseCliArgs(
   }
   if (startsReservedCommand(tokens, 'handoff')) {
     return parseHandoff(parsed, values, connection);
+  }
+  if (startsReservedCommand(tokens, 'lookup-native-session')) {
+    return parseLookupNativeSession(parsed, values, connection, agentId);
   }
 
   if (startsReservedCommand(tokens, 'list')) {

@@ -14,6 +14,7 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { GarconProcess } from '../../support/garcon-process.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WORKSPACE = 'cli-integration';
@@ -125,6 +126,16 @@ function controlArguments(fixture: IntegrationFixture, command: string[]): strin
 }
 
 describe('garcon-cli', () => {
+  test('documents native session lookup help without runtime discovery', async () => {
+    const help = await runCli(['lookup-native-session', '--help']);
+
+    expect(help.exitCode).toBe(0);
+    expect(help.stderr).toBe('');
+    expect(help.stdout).toContain(
+      'Lookup the Garcon chat associated with a native agent session ID.',
+    );
+  });
+
   test('discovers a running named workspace through a sibling symlink', async () => {
     await withIntegrationFixture('garcon-cli-workspace-symlink', async (fixture) => {
       const listedAgents = await runCli([
@@ -663,6 +674,66 @@ describe('garcon-cli', () => {
       expect(status.exitCode).toBe(0);
       expect(status.stderr).toBe('');
       expect(JSON.parse(status.stdout).chat.id).toBe(chatId);
+    }, { namedWorkspace: WORKSPACE });
+  }, 20_000);
+
+  test('looks up the exact current native session through the authenticated server', async () => {
+    await withIntegrationFixture('garcon-cli-native-session-lookup', async (fixture) => {
+      await fixture.client.close();
+      await fixture.garcon.stop();
+      fixture.garcon = await GarconProcess.start({
+        repoRoot: REPO_ROOT,
+        configDir: fixture.dirs.config,
+        workspaceDir: fixture.dirs.workspace,
+        workspaceName: WORKSPACE,
+        projectDir: fixture.dirs.project,
+        homeDir: fixture.dirs.home,
+        disableAuth: false,
+      });
+
+      const unauthenticated = await fetch(
+        `${fixture.garcon.baseUrl}/api/v1/chats/lookup-native-session`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ nativeSessionId: 'session-123' }),
+        },
+      );
+      expect(unauthenticated.status).toBe(401);
+      expect(await unauthenticated.json()).toEqual({
+        success: false,
+        error: 'Access denied. No token provided.',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      });
+
+      const started = await runCli(startArguments(fixture, 'cli-native-session-lookup'));
+      expect(started.exitCode).toBe(0);
+      const chatId = started.stdout.match(/^chat id: (\d{16})$/m)?.[1];
+      expect(chatId).toBeString();
+      const binding = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: chatId!,
+        agentId: fixture.directAgents.openAi.agentId,
+      });
+
+      const unfiltered = await runCli(controlArguments(fixture, [
+        'lookup-native-session', binding.agentSessionId!,
+      ]));
+      const filtered = await runCli(controlArguments(fixture, [
+        'lookup-native-session', binding.agentSessionId!,
+        '--agent', binding.agentId,
+      ]));
+      const wrongAgent = await runCli(controlArguments(fixture, [
+        'lookup-native-session', binding.agentSessionId!,
+        '--agent', fixture.directAgents.anthropic.agentId,
+      ]));
+
+      expect(unfiltered).toEqual({ exitCode: 0, stdout: `${chatId}\n`, stderr: '' });
+      expect(filtered).toEqual({ exitCode: 0, stdout: `${chatId}\n`, stderr: '' });
+      expect(wrongAgent.exitCode).toBe(2);
+      expect(wrongAgent.stdout).toBe('');
+      expect(wrongAgent.stderr).toContain('No chat matches the native session ID');
     }, { namedWorkspace: WORKSPACE });
   }, 20_000);
 

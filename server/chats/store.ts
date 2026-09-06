@@ -18,7 +18,7 @@ import {
 } from '../../common/agent-integration.js';
 import type { JsonObject, JsonValue } from '../../common/json.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
-import { parseChatId } from '../../common/chat-id.js';
+import { parseChatId, type ChatId } from '../../common/chat-id.js';
 import {
   parseParentChatRef,
   type ParentChatRef,
@@ -146,6 +146,11 @@ export interface PhasedChatUpdateResult {
   readonly durability: 'durable' | 'unknown';
 }
 
+export type NativeSessionLookupResult =
+  | { readonly status: 'found'; readonly chatId: ChatId }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'ambiguous' };
+
 // Raised when a phased update is attempted for a chat whose previous registry
 // write committed but never confirmed its directory durability.
 export class ChatRegistryDurabilityUnknownError extends Error {
@@ -238,6 +243,7 @@ export interface IChatRegistry {
   addTags(id: string, tags: readonly string[]): ChatRegistryResolvedEntry | null;
   removeChat(id: string, reason?: ChatRemovalReason): boolean;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
+  lookupNativeSession(agentSessionId: string, agentId?: AgentName): NativeSessionLookupResult;
   saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
   flush(): Promise<void>;
   onChatAdded(cb: ChatAddedCallback): void;
@@ -770,6 +776,19 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       return null;
     }
     return [chatId, cloneRegistryEntry(entry)];
+  }
+
+  lookupNativeSession(agentSessionId: string, agentId?: AgentName): NativeSessionLookupResult {
+    let matchedChatId: ChatId | null = null;
+    for (const [chatId, entry] of Object.entries(this.getRegistry().sessions)) {
+      if (entry.agentSessionId !== agentSessionId) continue;
+      if (agentId !== undefined && entry.agentId !== agentId) continue;
+      if (matchedChatId !== null) return { status: 'ambiguous' };
+      matchedChatId = parseChatId(chatId);
+    }
+    return matchedChatId === null
+      ? { status: 'not-found' }
+      : { status: 'found', chatId: matchedChatId };
   }
 
   async saveRegistry(

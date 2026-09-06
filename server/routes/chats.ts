@@ -149,7 +149,10 @@ interface SettingsDep {
   getPinnedChatIds(): string[];
   getNormalChatIds(): string[];
   getArchivedChatIds(): string[];
-  getUiSettings(): { pinnedInsertPosition?: PinnedInsertPosition } | null | undefined;
+  getUiSettings(): {
+    pinnedInsertPosition?: PinnedInsertPosition;
+    chatTitle?: unknown;
+  } | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;

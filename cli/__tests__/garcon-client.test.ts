@@ -205,6 +205,105 @@ describe('GarconClient', () => {
     })).rejects.toMatchObject({ phase: 'handoff artifact', exitCode: 2 });
   });
 
+  test('posts an authenticated native session lookup and validates the response', async () => {
+    let request: {
+      url: string;
+      method: string | undefined;
+      authorization: string | null;
+      contentType: string | null;
+      body: unknown;
+    } | undefined;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        request = {
+          url: String(input),
+          method: init?.method,
+          authorization: headers.get('authorization'),
+          contentType: headers.get('content-type'),
+          body: JSON.parse(String(init?.body)),
+        };
+        return Response.json({ chatId: runRequest.chatId });
+      },
+    });
+
+    await expect(client.lookupNativeSession({
+      nativeSessionId: 'session-123',
+      agent: 'codex',
+    })).resolves.toBe(runRequest.chatId);
+    expect(request).toEqual({
+      url: `${connection.baseUrl}/api/v1/chats/lookup-native-session`,
+      method: 'POST',
+      authorization: `Bearer ${connection.localCapability}`,
+      contentType: 'application/json',
+      body: { nativeSessionId: 'session-123', agent: 'codex' },
+    });
+  });
+
+  test.each([
+    {},
+    { chatId: '123' },
+    { chatId: 1785337200123456 },
+  ])('rejects malformed native session lookup response %p', async (body) => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json(body),
+    });
+
+    await expect(client.lookupNativeSession({ nativeSessionId: 'session-123' }))
+      .rejects.toMatchObject({
+        phase: 'native session lookup',
+        exitCode: 3,
+        message: 'server returned an invalid native session lookup response',
+      });
+  });
+
+  test.each([
+    [404, 'NATIVE_SESSION_NOT_FOUND'],
+    [409, 'NATIVE_SESSION_AMBIGUOUS'],
+    [422, 'UNSUPPORTED_AGENT'],
+  ])('maps native session lookup HTTP %i %s to exit 2', async (status, errorCode) => {
+    let calls = 0;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => {
+        calls += 1;
+        return Response.json({
+          success: false,
+          error: 'Lookup failed',
+          errorCode,
+          retryable: false,
+        }, { status });
+      },
+    });
+
+    await expect(client.lookupNativeSession({ nativeSessionId: 'session-123' }))
+      .rejects.toMatchObject({ phase: 'native session lookup', exitCode: 2, errorCode });
+    expect(calls).toBe(1);
+  });
+
+  test('distinguishes native session lookup authentication and transport failures', async () => {
+    const authenticationClient = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: false,
+        error: 'Invalid token',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      }, { status: 401 }),
+    });
+    await expect(authenticationClient.lookupNativeSession({ nativeSessionId: 'session-123' }))
+      .rejects.toMatchObject({ phase: 'authentication', exitCode: 3 });
+
+    const transportClient = new GarconClient({
+      ...connection,
+      fetch: async () => { throw new TypeError('connection refused'); },
+    });
+    await expect(transportClient.lookupNativeSession({ nativeSessionId: 'session-123' }))
+      .rejects.toMatchObject({ phase: 'native session lookup', exitCode: 3 });
+  });
+
   test('fetches and validates a correlated chat snapshot', async () => {
     let request: { url: string; method: string | undefined; authorization: string | null } | undefined;
     const client = new GarconClient({

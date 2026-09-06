@@ -22,6 +22,7 @@ import { createChatSnapshotRoutes } from './chat-snapshot.js';
 import { createChatRowRoutes } from './chat-rows.js';
 import { createChatExportRoutes } from './chat-export.js';
 import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
+import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -132,6 +133,7 @@ export default function createAllRoutes({
     ...createChatRowRoutes(chatRows),
     ...createChatExportRoutes(transcriptExport),
     ...createChatHandoffArtifactRoutes(handoffArtifact),
+    ...createNativeSessionLookupRoutes(registry, agents),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
