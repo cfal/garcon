@@ -495,6 +495,57 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(readVirtualRowOrder()).toEqual(['chat-1', 'chat-3', 'chat-0', 'chat-2']);
 	});
 
+	it('sorts only pinned chats oldest-first when pins are added at the bottom', () => {
+		const chats = [
+			makeChat(0, {
+				status: 'running',
+				isPinned: true,
+				lastActivityAt: '2025-04-01T00:00:00.000Z',
+			}),
+			makeChat(1, {
+				status: 'running',
+				lastActivityAt: '2025-01-01T00:00:00.000Z',
+			}),
+			makeChat(2, {
+				status: 'running',
+				isPinned: true,
+				lastActivityAt: '2025-02-01T00:00:00.000Z',
+			}),
+			makeChat(3, {
+				status: 'running',
+				lastActivityAt: '2025-05-01T00:00:00.000Z',
+			}),
+			makeChat(4, {
+				status: 'running',
+				isArchived: true,
+				lastActivityAt: '2025-06-01T00:00:00.000Z',
+			}),
+			makeChat(5, {
+				status: 'running',
+				isArchived: true,
+				lastActivityAt: '2025-03-01T00:00:00.000Z',
+			}),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				grouping: 'none',
+				sortMode: 'recent',
+				pinnedInsertPosition: 'bottom',
+			},
+		});
+
+		expect(readVirtualRowOrder()).toEqual([
+			'chat-2',
+			'chat-0',
+			'chat-3',
+			'chat-1',
+			'chat-4',
+			'chat-5',
+		]);
+	});
+
 	it('keeps collapsed activity sections expandable across the reconciled reorder pass', async () => {
 		const chats = [
 			makeChat(0, {

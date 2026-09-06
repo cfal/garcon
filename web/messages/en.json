@@ -1707,6 +1707,7 @@
 	"sidebar_chats_no_matching_chats": "No matching chats",
 	"sidebar_chats_pin": "Pin",
 	"sidebar_chats_pinned_insert_position": "Pinned chats are added to",
+	"sidebar_chats_pinned_insert_position_activity_hint": "When set to Bottom, recent-activity sorting also places the newest pinned chats at the bottom.",
 	"sidebar_chats_pinned_insert_top": "Top",
 	"sidebar_chats_pinned_insert_bottom": "Bottom",
 	"sidebar_chats_rename_chat": "Rename chat",

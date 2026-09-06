@@ -282,6 +282,33 @@ describe('ChatOrderStore.sortChatOrder', () => {
     ]);
   });
 
+  it('applies a pinned comparator override without changing other groups', async () => {
+    const harness = createHarness({
+      pinnedChatIds: ['p-new', 'p-old'],
+      normalChatIds: ['n-old', 'n-new'],
+      archivedChatIds: ['a-old', 'a-new'],
+    });
+    const rank = new Map([
+      ['p-old', 1], ['p-new', 2],
+      ['n-old', 1], ['n-new', 2],
+      ['a-old', 1], ['a-new', 2],
+    ]);
+    const newestFirst = (left, right) => (
+      (rank.get(right) ?? 0) - (rank.get(left) ?? 0)
+    );
+
+    const result = await harness.store.sortChatOrder(newestFirst, {
+      pinned: (left, right) => newestFirst(right, left),
+    });
+
+    expect(result).toEqual({ changed: true });
+    expect(harness.settings.pinnedChatIds).toEqual(['p-old', 'p-new']);
+    expect(harness.settings.normalChatIds).toEqual(['n-new', 'n-old']);
+    expect(harness.settings.archivedChatIds).toEqual(['a-new', 'a-old']);
+    expect(harness.saveCalls).toEqual([true]);
+    expect(harness.settings.remoteSettingsVersion).toBe(1);
+  });
+
   it('preserves membership and stable ties', async () => {
     const harness = createHarness({
       pinnedChatIds: ['p-a', 'p-b'],

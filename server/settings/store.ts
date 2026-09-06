@@ -44,6 +44,7 @@ import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 
 import type {
   ChatFolder,
+  ChatOrderComparatorOverrides,
   ChatReorderResult,
   ChatStartupPreferences,
   ProjectSettings,
@@ -485,8 +486,9 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   async sortChatOrder(
     compareChatIds: ChatOrderIdComparator,
+    comparatorOverrides?: ChatOrderComparatorOverrides,
   ): Promise<{ changed: boolean }> {
-    return this.#chatOrder.sortChatOrder(compareChatIds);
+    return this.#chatOrder.sortChatOrder(compareChatIds, comparatorOverrides);
   }
 
   getSavedSearches(): SavedChatSearch[] {

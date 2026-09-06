@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { isSidebarChatInactive } from '../chat-inactivity';
-import { sortChatsByRecencyDesc } from '../chat-recency-sort';
+import { sortChatsByRecencyDesc, sortSidebarChatsByRecency } from '../chat-recency-sort';
 
 // 16-digit Unix-microsecond chat ids as minted by the browser clock.
 function chatIdAt(epochMs: number): string {
@@ -140,6 +140,61 @@ describe('sortChatsByRecencyDesc', () => {
 		];
 
 		expect(sortChatsByRecencyDesc(chats).map((chat) => chat.id)).toEqual(['a', 'b']);
+	});
+});
+
+describe('sortSidebarChatsByRecency', () => {
+	it('puts only the pinned subset oldest-first when pins are added at the bottom', () => {
+		const chats = [
+			makeChat('pinned-new', {
+				isPinned: true,
+				lastActivityAt: '2026-04-01T00:00:00.000Z',
+			}),
+			makeChat('normal-old', { lastActivityAt: '2026-01-01T00:00:00.000Z' }),
+			makeChat('archived-new', {
+				isArchived: true,
+				lastActivityAt: '2026-06-01T00:00:00.000Z',
+			}),
+			makeChat('pinned-old', {
+				isPinned: true,
+				lastActivityAt: '2026-02-01T00:00:00.000Z',
+			}),
+			makeChat('normal-new', { lastActivityAt: '2026-05-01T00:00:00.000Z' }),
+			makeChat('archived-old', {
+				isArchived: true,
+				lastActivityAt: '2026-03-01T00:00:00.000Z',
+			}),
+		];
+		const originalOrder = chats.map((chat) => chat.id);
+
+		const sorted = sortSidebarChatsByRecency(chats, 'bottom');
+
+		expect(sorted.filter((chat) => chat.isPinned).map((chat) => chat.id)).toEqual([
+			'pinned-old',
+			'pinned-new',
+		]);
+		expect(
+			sorted.filter((chat) => !chat.isPinned && !chat.isArchived).map((chat) => chat.id),
+		).toEqual(['normal-new', 'normal-old']);
+		expect(sorted.filter((chat) => chat.isArchived).map((chat) => chat.id)).toEqual([
+			'archived-new',
+			'archived-old',
+		]);
+		expect(chats.map((chat) => chat.id)).toEqual(originalOrder);
+	});
+
+	it('keeps stable pinned ties while placing pinned drafts last', () => {
+		const chats = [
+			makeChat('pinned-a', { isPinned: true }),
+			makeChat('pinned-b', { isPinned: true }),
+			makeChat('pinned-draft', { isPinned: true, status: 'draft' }),
+		];
+
+		expect(sortSidebarChatsByRecency(chats, 'bottom').map((chat) => chat.id)).toEqual([
+			'pinned-a',
+			'pinned-b',
+			'pinned-draft',
+		]);
 	});
 });
 
