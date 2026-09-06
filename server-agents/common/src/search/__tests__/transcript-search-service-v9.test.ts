@@ -81,8 +81,10 @@ function searchRequest(chatId: string, viewId: string, throughOrdinal: number, m
     },
     allowedChats: [{ chatId, transcriptViewId: viewId, throughOrdinal }],
     order: 'relevance' as const,
+    mode: 'page' as const,
     offset: 0,
     limit: 20,
+    snippetLimit: 3,
     executionSignal: new AbortController().signal,
   };
 }
@@ -182,8 +184,28 @@ describe('transcript search service v9', () => {
     const result = await service.search(searchRequest(
       'chat-0001', 'view-0001', 700, 'servicemarkera',
     ));
+    expect(result).toMatchObject({ mode: 'page', snippetLimit: 3 });
     expect(result.results).toHaveLength(1);
     expect(result.index).toMatchObject({ indexedChatCount: 1, pendingChatCount: 0 });
+    const compactPrefix = await service.search({
+      ...searchRequest('chat-0001', 'view-0001', 700, 'servicemarkera'),
+      mode: 'prefix',
+      limit: 500,
+      snippetLimit: 1,
+    });
+    expect(compactPrefix).toMatchObject({
+      mode: 'prefix',
+      snippetLimit: 1,
+      page: {
+        offset: 0,
+        limit: 500,
+        total: 1,
+        hasMore: false,
+        nextOffset: null,
+      },
+    });
+    expect(compactPrefix.results).toHaveLength(1);
+    expect(compactPrefix.results[0]?.snippets).toHaveLength(1);
     await service.close();
   });
 

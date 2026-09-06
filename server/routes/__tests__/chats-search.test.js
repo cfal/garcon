@@ -141,6 +141,8 @@ function createRoutesFixture({
       maxMs: 40,
     })),
     search: mock((request) => ({
+      mode: request.mode,
+      snippetLimit: request.snippetLimit,
       results: request.allowedChatIds.length > 0 ? [
         {
           chatId: request.allowedChatIds[0],
@@ -263,6 +265,8 @@ describe('POST /api/v1/chats/search', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       query: 'needle',
+      mode: 'page',
+      snippetLimit: 3,
       page: { offset: 0, limit: 5, total: 1, hasMore: false, nextOffset: null },
       index: { indexedChatCount: 1, pendingChatCount: 0 },
     });
@@ -271,8 +275,10 @@ describe('POST /api/v1/chats/search', () => {
       textTokens: ['needle'],
       allowedChatIds: ['c2'],
       sort: 'relevance',
+      mode: 'page',
       offset: 0,
       limit: 5,
+      snippetLimit: 3,
       signal: expect.any(AbortSignal),
     });
   });
@@ -342,6 +348,8 @@ describe('POST /api/v1/chats/search', () => {
       },
     });
     searchIndex.search.mockResolvedValueOnce({
+      mode: 'page',
+      snippetLimit: 3,
       results: [],
       page: { offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75 },
       index: {
@@ -361,7 +369,33 @@ describe('POST /api/v1/chats/search', () => {
       allowedChatIds: ['c2', 'c1'], sort: 'created', offset: 50, limit: 50,
     }));
     await expect(response.json()).resolves.toMatchObject({
+      mode: 'page',
+      snippetLimit: 3,
       page: { offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75 },
+    });
+  });
+
+  it('forwards a compact bounded-prefix projection', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+
+    const response = await postSearch(routes, {
+      query: 'needle',
+      mode: 'prefix',
+      offset: 0,
+      limit: 500,
+      snippetLimit: 1,
+    });
+
+    expect(response.status).toBe(200);
+    expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'prefix',
+      offset: 0,
+      limit: 500,
+      snippetLimit: 1,
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      mode: 'prefix',
+      snippetLimit: 1,
     });
   });
 
@@ -392,6 +426,15 @@ describe('POST /api/v1/chats/search', () => {
       { query: 'needle', limit: 1.5 },
       { query: 'needle', limit: '50' },
       { query: 'needle', limit: 101 },
+      { query: 'needle', mode: 'batch' },
+      { query: 'needle', mode: [] },
+      { query: 'needle', snippetLimit: 0 },
+      { query: 'needle', snippetLimit: 4 },
+      { query: 'needle', snippetLimit: 1.5 },
+      { query: 'needle', snippetLimit: '1' },
+      { query: 'needle', mode: 'prefix', snippetLimit: 1, offset: 1 },
+      { query: 'needle', mode: 'prefix', limit: 500 },
+      { query: 'needle', mode: 'prefix', snippetLimit: 1, limit: 501 },
     ];
 
     for (const request of requests) {
@@ -433,6 +476,8 @@ describe('POST /api/v1/chats/search', () => {
   it('[TLV5-SEARCH.09-ROUTE-03] preserves committed-prefix results during indexing', async () => {
     const { routes, searchIndex } = createRoutesFixture();
     const result = {
+      mode: 'page',
+      snippetLimit: 3,
       results: [{
         chatId: 'c1', transcriptViewId: 'view-1', score: 3,
         matchedMessageCount: 1, snippets: [],

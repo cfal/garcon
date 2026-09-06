@@ -1,10 +1,15 @@
 import {
+  CHAT_SEARCH_DEFAULT_PAGE_SIZE,
   CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_PREFIX_SIZE,
+  CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
   CHAT_SEARCH_MIN_PREFIX_CHARS,
   type ChatSearchIndexStatus,
   type ChatSearchPage,
   type ChatSearchQueryV1,
   type ChatSearchResult,
+  type ChatSearchResultMode,
   type ChatSearchSort,
   type TranscriptSearchAllowedChat,
   type TranscriptSearchStatusV1,
@@ -37,8 +42,6 @@ import type {
 import type { TranscriptAdoptionService } from '../../ledger/adoption.js';
 import { TranscriptSearchUnavailableError } from './errors.js';
 
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
 const DEFAULT_SEARCH_TIMEOUT_MS = 5_000;
 const LEDGER_PAGE_ROWS = 512;
 const LEDGER_FENCED_VIEW_SENTINEL: TranscriptViewId = transcriptViewId('ledger-fenced');
@@ -151,10 +154,14 @@ export class TranscriptSearchController {
     readonly textTokens?: string[];
     readonly allowedChatIds: string[];
     readonly sort: ChatSearchSort;
+    readonly mode?: ChatSearchResultMode;
     readonly offset: number;
     readonly limit?: number;
+    readonly snippetLimit?: number;
     readonly signal?: AbortSignal;
   }): Promise<{
+    mode: ChatSearchResultMode;
+    snippetLimit: number;
     results: ChatSearchResult[];
     page: ChatSearchPage;
     index: ChatSearchIndexStatus;
@@ -200,16 +207,26 @@ export class TranscriptSearchController {
           throughOrdinal: snapshot.through,
         });
       }
+      const mode = options.mode ?? 'page';
+      const snippetLimit = clampSnippetLimit(options.snippetLimit);
+      const offset = clampOffset(options.offset);
+      if (mode === 'prefix' && (offset !== 0 || snippetLimit !== 1)) {
+        throw new RangeError('Invalid transcript search prefix projection');
+      }
       const response = await this.#deps.service.search({
         query: compileQuery(options.query, options.textTokens),
         allowedChats,
         order: (options.sort ?? 'relevance') === 'relevance' ? 'relevance' : 'allowlist',
-        offset: clampOffset(options.offset),
-        limit: clampLimit(options.limit),
+        mode,
+        offset,
+        limit: clampLimit(options.limit, mode),
+        snippetLimit,
         admissionSignal: options.signal,
         executionSignal: executionAbort.signal,
       });
       return {
+        mode: response.mode,
+        snippetLimit: response.snippetLimit,
         results: response.results.filter((result) => (
           allowedViews.get(result.chatId) === result.transcriptViewId
           && this.validateResultView(result.chatId, result.transcriptViewId)
@@ -768,10 +785,17 @@ function compileQuery(query: string, textTokens?: readonly string[]): ChatSearch
   };
 }
 
-function clampLimit(limit: number | undefined): number {
+function clampLimit(limit: number | undefined, mode: ChatSearchResultMode): number {
+  const maximum = mode === 'prefix' ? CHAT_SEARCH_MAX_PREFIX_SIZE : CHAT_SEARCH_MAX_PAGE_SIZE;
   return Number.isInteger(limit)
-    ? Math.min(MAX_LIMIT, Math.max(1, Number(limit)))
-    : DEFAULT_LIMIT;
+    ? Math.min(maximum, Math.max(1, Number(limit)))
+    : CHAT_SEARCH_DEFAULT_PAGE_SIZE;
+}
+
+function clampSnippetLimit(snippetLimit: number | undefined): number {
+  return Number.isInteger(snippetLimit)
+    ? Math.min(CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT, Math.max(1, Number(snippetLimit)))
+    : CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
 }
 
 function clampOffset(offset: number | undefined): number {

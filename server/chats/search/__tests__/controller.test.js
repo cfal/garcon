@@ -147,7 +147,9 @@ function harness(options = {}) {
     }),
     deleteChat: mock(async () => {}),
     markChatUnavailable: mock(async () => {}),
-    search: mock(async () => ({
+    search: mock(async (request) => ({
+      mode: request.mode,
+      snippetLimit: request.snippetLimit,
       results: [],
       page: { offset: 0, limit: 20, total: 0, hasMore: false, nextOffset: null },
       index: {
@@ -281,6 +283,8 @@ describe('TranscriptSearchController v9', () => {
     await fixture.controller.start();
     await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
     fixture.service.search.mockResolvedValueOnce({
+      mode: 'page',
+      snippetLimit: 3,
       results: [{
         chatId: 'chat-0001', transcriptViewId: 'stale-view', score: 1,
         matchedMessageCount: 1, snippets: [],
@@ -304,8 +308,10 @@ describe('TranscriptSearchController v9', () => {
 
     expect(fixture.service.search.mock.calls.at(-1)[0]).toMatchObject({
       order: 'allowlist',
+      mode: 'page',
       offset: 50,
       limit: 50,
+      snippetLimit: 3,
       admissionSignal: callerAbort.signal,
       executionSignal: expect.any(AbortSignal),
     });
@@ -322,6 +328,22 @@ describe('TranscriptSearchController v9', () => {
       query: 'alpha', allowedChatIds: ['chat-0001'], sort: 'created', offset: 0,
     });
     expect(fixture.service.search.mock.calls.at(-1)[0].order).toBe('allowlist');
+    await fixture.controller.search({
+      query: 'alpha',
+      allowedChatIds: ['chat-0001'],
+      sort: 'relevance',
+      mode: 'prefix',
+      offset: 0,
+      limit: 500,
+      snippetLimit: 1,
+    });
+    expect(fixture.service.search.mock.calls.at(-1)[0]).toMatchObject({
+      order: 'relevance',
+      mode: 'prefix',
+      offset: 0,
+      limit: 500,
+      snippetLimit: 1,
+    });
     await fixture.controller.close();
   });
 

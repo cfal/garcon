@@ -5,6 +5,7 @@ import type {
   ChatSearchPage,
   ChatSearchQueryV1,
   ChatSearchResult,
+  ChatSearchResultMode,
   TranscriptSearchAllowedChat,
   TranscriptSearchQueryStatsV1,
   TranscriptSearchStatusV1,
@@ -401,11 +402,15 @@ export class TranscriptSearchService {
     readonly query: ChatSearchQueryV1;
     readonly allowedChats: readonly TranscriptSearchAllowedChat[];
     readonly order: TranscriptSearchOrder;
+    readonly mode: ChatSearchResultMode;
     readonly offset: number;
     readonly limit: number;
+    readonly snippetLimit: number;
     readonly admissionSignal?: AbortSignal;
     readonly executionSignal: AbortSignal;
   }): Promise<{
+    readonly mode: ChatSearchResultMode;
+    readonly snippetLimit: number;
     readonly results: readonly ChatSearchResult[];
     readonly page: ChatSearchPage;
     readonly index: ChatSearchIndexStatus;
@@ -425,8 +430,10 @@ export class TranscriptSearchService {
       request.query,
       request.allowedChats,
       request.order,
+      request.mode,
       request.offset,
       request.limit,
+      request.snippetLimit,
     );
     const pending = session.request(frames, undefined, this.#readerRequestTimeoutMs, {
       isComplete: (candidate) => candidate.type === 'search-result',
@@ -455,6 +462,13 @@ export class TranscriptSearchService {
       throw error;
     }
     if (event.type !== 'search-result') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    if (event.mode !== request.mode
+        || event.snippetLimit !== request.snippetLimit
+        || event.page.offset !== request.offset
+        || event.page.limit !== request.limit
+        || event.results.some((result) => result.snippets.length > request.snippetLimit)) {
+      throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    }
     const allowed = new Map(
       request.allowedChats.map((entry) => [entry.chatId, entry.transcriptViewId]),
     );
@@ -463,7 +477,13 @@ export class TranscriptSearchService {
     }
     this.#queryCounters.served += 1;
     this.#recordQueryDuration(performance.now() - started);
-    return { results: event.results, page: event.page, index: event.index };
+    return {
+      mode: event.mode,
+      snippetLimit: event.snippetLimit,
+      results: event.results,
+      page: event.page,
+      index: event.index,
+    };
   }
 
   #retireReadersForRecreatedIndex(): void {

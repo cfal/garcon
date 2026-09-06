@@ -3,11 +3,15 @@ import type {
   ChatSearchPage,
   ChatSearchQueryV1,
   ChatSearchResult,
+  ChatSearchResultMode,
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_PREFIX_SIZE,
+  CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS,
+  CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
   CHAT_SEARCH_MIN_PREFIX_CHARS,
@@ -97,8 +101,10 @@ export type ReaderRequest =
       readonly type: 'search-start';
       readonly query: ChatSearchQueryV1;
       readonly order: TranscriptSearchOrder;
+      readonly mode: ChatSearchResultMode;
       readonly offset: number;
       readonly limit: number;
+      readonly snippetLimit: number;
     })
   | (RequestBase & {
       readonly type: 'search-allowlist-chunk';
@@ -112,6 +118,8 @@ export type ReaderEvent =
   | (RequestBase & { readonly type: 'opened' | 'closed' })
   | (RequestBase & {
       readonly type: 'search-result';
+      readonly mode: ChatSearchResultMode;
+      readonly snippetLimit: number;
       readonly results: readonly ChatSearchResult[];
       readonly page: ChatSearchPage;
       readonly index: ChatSearchIndexStatus;
@@ -291,7 +299,7 @@ function indexStatus(value: unknown): value is ChatSearchIndexStatus {
     && typeof candidate!.resultsTruncated === 'boolean';
 }
 
-function searchResult(value: unknown): value is ChatSearchResult {
+function searchResult(value: unknown, snippetLimit: number): value is ChatSearchResult {
   const candidate = record(value);
   if (!candidate
       || Object.keys(candidate).length !== 5
@@ -303,7 +311,7 @@ function searchResult(value: unknown): value is ChatSearchResult {
       || !Number.isFinite(candidate.score)
       || !nonNegativeInteger(candidate.matchedMessageCount)
       || !Array.isArray(candidate.snippets)
-      || candidate.snippets.length > 3) return false;
+      || candidate.snippets.length > snippetLimit) return false;
   return candidate.snippets.every((valueSnippet) => {
     const snippet = record(valueSnippet);
     return Boolean(snippet)
@@ -311,13 +319,16 @@ function searchResult(value: unknown): value is ChatSearchResult {
       && ['ordinal', 'role', 'timestamp', 'text'].every((key) => Object.hasOwn(snippet!, key))
       && positiveInteger(snippet!.ordinal)
       && ['user', 'assistant', 'tool', 'system'].includes(String(snippet!.role))
-      && (snippet!.timestamp === null || typeof snippet!.timestamp === 'string')
-      && typeof snippet!.text === 'string';
+      && (snippet!.timestamp === null || (typeof snippet!.timestamp === 'string'
+        && Buffer.byteLength(snippet!.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES))
+      && typeof snippet!.text === 'string'
+      && [...snippet!.text].length <= CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS;
   });
 }
 
-function searchPage(value: unknown): value is ChatSearchPage {
+function searchPage(value: unknown, mode: ChatSearchResultMode): value is ChatSearchPage {
   const candidate = record(value);
+  const maximumLimit = mode === 'prefix' ? CHAT_SEARCH_MAX_PREFIX_SIZE : CHAT_SEARCH_MAX_PAGE_SIZE;
   if (!candidate
       || Object.keys(candidate).length !== 5
       || !['offset', 'limit', 'total', 'hasMore', 'nextOffset']
@@ -325,12 +336,13 @@ function searchPage(value: unknown): value is ChatSearchPage {
       || !nonNegativeInteger(candidate.offset)
       || Number(candidate.offset) > CHAT_SEARCH_MAX_OFFSET
       || !positiveInteger(candidate.limit)
-      || Number(candidate.limit) > CHAT_SEARCH_MAX_PAGE_SIZE
+      || Number(candidate.limit) > maximumLimit
       || !nonNegativeInteger(candidate.total)
       || typeof candidate.hasMore !== 'boolean'
       || (candidate.nextOffset !== null && !positiveInteger(candidate.nextOffset))) {
     return false;
   }
+  if (mode === 'prefix' && Number(candidate.offset) !== 0) return false;
   if (candidate.hasMore !== (candidate.nextOffset !== null)) return false;
   if (candidate.nextOffset !== null) {
     return Number(candidate.nextOffset) > Number(candidate.offset)
@@ -451,13 +463,20 @@ export function isReaderRequest(value: unknown): value is ReaderRequest {
         && typeof candidate.dbPath === 'string'
         && candidate.dbPath.length > 0;
     case 'search-start':
-      return exactKeys(candidate, 'query', 'order', 'offset', 'limit')
+      return exactKeys(candidate, 'query', 'order', 'mode', 'offset', 'limit', 'snippetLimit')
         && searchQuery(candidate.query)
         && (candidate.order === 'relevance' || candidate.order === 'allowlist')
+        && (candidate.mode === 'page' || candidate.mode === 'prefix')
         && nonNegativeInteger(candidate.offset)
         && Number(candidate.offset) <= CHAT_SEARCH_MAX_OFFSET
         && positiveInteger(candidate.limit)
-        && Number(candidate.limit) <= CHAT_SEARCH_MAX_PAGE_SIZE;
+        && Number(candidate.limit) <= (candidate.mode === 'prefix'
+          ? CHAT_SEARCH_MAX_PREFIX_SIZE
+          : CHAT_SEARCH_MAX_PAGE_SIZE)
+        && positiveInteger(candidate.snippetLimit)
+        && Number(candidate.snippetLimit) <= CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT
+        && (candidate.mode !== 'prefix'
+          || (Number(candidate.offset) === 0 && Number(candidate.snippetLimit) === 1));
     case 'search-allowlist-chunk':
       return exactKeys(candidate, 'chunkIndex', 'allowedChats', 'done')
         && nonNegativeInteger(candidate.chunkIndex)
@@ -484,13 +503,23 @@ export function isReaderEvent(value: unknown): value is ReaderEvent {
         && failureCode(candidate.code)
         && typeof candidate.retryable === 'boolean';
     case 'search-result':
-      if (!(exactKeys(candidate, 'results', 'page', 'index')
+      if (!(exactKeys(candidate, 'mode', 'snippetLimit', 'results', 'page', 'index')
+        && (candidate.mode === 'page' || candidate.mode === 'prefix')
+        && positiveInteger(candidate.snippetLimit)
+        && Number(candidate.snippetLimit) <= CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT
+        && (candidate.mode !== 'prefix' || Number(candidate.snippetLimit) === 1)
         && Array.isArray(candidate.results)
-        && candidate.results.length <= CHAT_SEARCH_MAX_PAGE_SIZE
-        && candidate.results.every(searchResult)
-        && searchPage(candidate.page)
+        && candidate.results.length <= (candidate.mode === 'prefix'
+          ? CHAT_SEARCH_MAX_PREFIX_SIZE
+          : CHAT_SEARCH_MAX_PAGE_SIZE)
+        && candidate.results.every((result) => searchResult(
+          result,
+          Number(candidate.snippetLimit),
+        ))
+        && searchPage(candidate.page, candidate.mode)
         && candidate.results.length <= candidate.page.limit
-        && indexStatus(candidate.index))) return false;
+        && indexStatus(candidate.index)
+        && jsonBytesWithin(candidate, MAX_FRAME_BYTES))) return false;
       if (candidate.page.hasMore) {
         return candidate.page.nextOffset === candidate.page.offset + candidate.results.length
           && candidate.page.nextOffset < candidate.page.total;

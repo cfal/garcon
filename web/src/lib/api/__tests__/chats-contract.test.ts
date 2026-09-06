@@ -31,6 +31,7 @@ import {
 	updateChatModel,
 	updateChatProjectPath,
 	getChatMessages,
+	searchChatTranscripts,
 	getChatDetails,
 	setLastSelectedChat,
 } from '../chats';
@@ -100,6 +101,40 @@ describe('chats API contract', () => {
 			processingPhase: 'running',
 			isUnread: false,
 			canReloadFromNativeHistory: false,
+		};
+	}
+
+	function chatSearchResponse(overrides: Record<string, unknown> = {}) {
+		return {
+			query: 'needle',
+			mode: 'prefix',
+			snippetLimit: 1,
+			results: [
+				{
+					chatId: 'chat-1',
+					transcriptViewId: 'view-1',
+					score: 1,
+					matchedMessageCount: 1,
+					snippets: [
+						{
+							ordinal: 1,
+							role: 'user',
+							timestamp: null,
+							text: 'needle',
+						},
+					],
+				},
+			],
+			page: { offset: 0, limit: 500, total: 501, hasMore: true, nextOffset: 1 },
+			index: {
+				indexedChatCount: 1,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unindexedChatCount: 0,
+				unsupportedChatCount: 0,
+				resultsTruncated: false,
+			},
+			...overrides,
 		};
 	}
 
@@ -1263,6 +1298,107 @@ describe('chats API contract', () => {
 			}),
 		);
 		await expect(getChatMessages({ chatId: 'c-1' })).rejects.toThrow('lastOrdinal');
+	});
+
+	it('validates a compact transcript-search prefix against its request', async () => {
+		const payload = chatSearchResponse();
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(
+			searchChatTranscripts({
+				query: 'needle',
+				mode: 'prefix',
+				offset: 0,
+				limit: 500,
+				snippetLimit: 1,
+			}),
+		).resolves.toEqual(payload);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			query: 'needle',
+			mode: 'prefix',
+			offset: 0,
+			limit: 500,
+			snippetLimit: 1,
+		});
+	});
+
+	it('permits a transcript-search cursor whose rows were filtered by the controller', async () => {
+		const payload = chatSearchResponse({
+			mode: 'page',
+			snippetLimit: 1,
+			results: [],
+			page: { offset: 0, limit: 50, total: 100, hasMore: true, nextOffset: 50 },
+		});
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(
+			searchChatTranscripts({
+				query: 'needle',
+				mode: 'page',
+				offset: 0,
+				limit: 50,
+				snippetLimit: 1,
+			}),
+		).resolves.toEqual(payload);
+	});
+
+	it.each([
+		[
+			'mode',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.mode = 'page';
+			},
+		],
+		[
+			'snippet limit',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.snippetLimit = 2;
+			},
+		],
+		[
+			'offset',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.offset = 1;
+			},
+		],
+		[
+			'limit',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.limit = 499;
+			},
+		],
+		[
+			'snippet count',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.results[0]!.snippets.push({ ...payload.results[0]!.snippets[0]!, ordinal: 2 });
+			},
+		],
+		[
+			'cursor presence',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.hasMore = false;
+			},
+		],
+		[
+			'cursor bounds',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.nextOffset = 501;
+			},
+		],
+	] as const)('rejects a transcript-search %s mismatch', async (_caseName, mutate) => {
+		const payload = chatSearchResponse();
+		mutate(payload);
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(
+			searchChatTranscripts({
+				query: 'needle',
+				mode: 'prefix',
+				offset: 0,
+				limit: 500,
+				snippetLimit: 1,
+			}),
+		).rejects.toThrow('Invalid chat search response');
 	});
 
 	it('deleteChat sends chatId in the JSON body', async () => {

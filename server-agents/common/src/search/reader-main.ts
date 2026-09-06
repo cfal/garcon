@@ -1,5 +1,9 @@
 import type { Database } from 'bun:sqlite';
-import type { TranscriptSearchAllowedChat } from '@garcon/common/chat-search';
+import {
+  CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_PREFIX_SIZE,
+  type TranscriptSearchAllowedChat,
+} from '@garcon/common/chat-search';
 import { searchTranscriptIndexV1 } from './query.js';
 import { openSearchReadDatabase } from './schema.js';
 import type { ReaderEvent, ReaderRequest } from './worker-protocol.js';
@@ -11,8 +15,10 @@ let closing = false;
 const searches = new Map<number, {
   readonly query: Extract<ReaderRequest, { type: 'search-start' }>['query'];
   readonly order: Extract<ReaderRequest, { type: 'search-start' }>['order'];
+  readonly mode: Extract<ReaderRequest, { type: 'search-start' }>['mode'];
   readonly offset: number;
   readonly limit: number;
+  readonly snippetLimit: number;
   readonly allowedChats: TranscriptSearchAllowedChat[];
   nextChunkIndex: number;
 }>();
@@ -36,15 +42,22 @@ function handle(request: ReaderRequest): void {
         return;
       case 'search-start': {
         if (!db || closing) throw new Error('READER_UNAVAILABLE');
+        const maximumLimit = request.mode === 'prefix'
+          ? CHAT_SEARCH_MAX_PREFIX_SIZE
+          : CHAT_SEARCH_MAX_PAGE_SIZE;
         if (searches.has(request.requestId)
-            || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 100) {
+            || !Number.isSafeInteger(request.limit)
+            || request.limit < 1
+            || request.limit > maximumLimit) {
           throw new Error('INVALID_SEARCH_REQUEST');
         }
         searches.set(request.requestId, {
           query: request.query,
           order: request.order,
+          mode: request.mode,
           offset: request.offset,
           limit: request.limit,
+          snippetLimit: request.snippetLimit,
           allowedChats: [],
           nextChunkIndex: 0,
         });
@@ -67,8 +80,10 @@ function handle(request: ReaderRequest): void {
           query: search.query,
           allowedChats: search.allowedChats,
           order: search.order,
+          mode: search.mode,
           offset: search.offset,
           limit: search.limit,
+          snippetLimit: search.snippetLimit,
         });
         post({ type: 'search-result', ...response(request), ...result });
         return;

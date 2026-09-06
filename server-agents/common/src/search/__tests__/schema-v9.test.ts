@@ -526,6 +526,7 @@ describe('schema v9', () => {
     expect(pages[0]!.page).toEqual({
       offset: 0, limit: 50, total: 525, hasMore: true, nextOffset: 50,
     });
+    expect(pages[0]).toMatchObject({ mode: 'page', snippetLimit: 3 });
     expect(pages[9]!.page).toEqual({
       offset: 450, limit: 50, total: 525, hasMore: true, nextOffset: 500,
     });
@@ -544,6 +545,34 @@ describe('schema v9', () => {
     });
     expect(allowlistPage.results.map((result) => result.chatId))
       .toEqual(reversed.slice(50, 100).map((entry) => entry.chatId));
+    const compactPrefix = searchTranscriptIndexV1(db, {
+      query,
+      allowedChats,
+      order: 'relevance',
+      mode: 'prefix',
+      offset: 0,
+      limit: 500,
+      snippetLimit: 1,
+    });
+    expect(compactPrefix).toMatchObject({
+      mode: 'prefix',
+      snippetLimit: 1,
+      page: {
+        offset: 0,
+        limit: 500,
+        total: 525,
+        hasMore: true,
+        nextOffset: 500,
+      },
+    });
+    expect(compactPrefix.results.map((result) => result.chatId)).toEqual(resultIds);
+    expect(compactPrefix.results).toHaveLength(500);
+    expect(compactPrefix.results.every((result) => result.snippets.length === 1)).toBe(true);
+    expect(compactPrefix.results[0]).toMatchObject({
+      score: pages[0]!.results[0]!.score,
+      matchedMessageCount: 1,
+      snippets: [pages[0]!.results[0]!.snippets[0]],
+    });
     const finalPage = searchTranscriptIndexV1(db, {
       query, allowedChats, order: 'relevance', offset: 500, limit: 50,
     });

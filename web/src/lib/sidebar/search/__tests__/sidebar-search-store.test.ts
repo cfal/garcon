@@ -116,6 +116,8 @@ function makeSearchResponse(
 ): ChatSearchResponse {
 	return {
 		query: 'needle',
+		mode: 'page',
+		snippetLimit: 3,
 		results,
 		page,
 		index: {
@@ -341,6 +343,8 @@ describe('SidebarSearchStore', () => {
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValue({
 					query: 'needle tag:ops',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [
 						{
 							chatId: 'c1',
@@ -396,6 +400,8 @@ describe('SidebarSearchStore', () => {
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValue({
 					query: 'needle is:!archived',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [],
 					page: makeSearchPage(0),
 					index: {
@@ -493,6 +499,8 @@ describe('SidebarSearchStore', () => {
 				))
 				.mockResolvedValueOnce({
 					query: 'needle',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [],
 					page: makeSearchPage(0),
 					index: {
@@ -530,6 +538,8 @@ describe('SidebarSearchStore', () => {
 				))
 				.mockResolvedValueOnce({
 					query: 'needle',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [],
 					page: makeSearchPage(0),
 					index: {
@@ -583,6 +593,8 @@ describe('SidebarSearchStore', () => {
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValueOnce({
 					query: 'needle',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [],
 					page: makeSearchPage(0),
 					index: {
@@ -596,6 +608,8 @@ describe('SidebarSearchStore', () => {
 				})
 				.mockResolvedValueOnce({
 					query: 'needle',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [
 						{
 							chatId: 'c1',
@@ -652,6 +666,8 @@ describe('SidebarSearchStore', () => {
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValue({
 					query: 'needle',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [],
 					page: makeSearchPage(0),
 					index: {
@@ -685,6 +701,8 @@ describe('SidebarSearchStore', () => {
 			try {
 				const pending = {
 					query: 'needle',
+					mode: 'page' as const,
+					snippetLimit: 3,
 					results: [],
 					page: makeSearchPage(0),
 					index: {
@@ -789,6 +807,8 @@ describe('SidebarSearchStore', () => {
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValue({
 					query: 'needle',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [
 						{
 							chatId: 'c2',
@@ -832,6 +852,8 @@ describe('SidebarSearchStore', () => {
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValue({
 					query: 'needle tag:ops',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [
 						{
 							chatId: 'c1',
@@ -870,6 +892,8 @@ describe('SidebarSearchStore', () => {
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValueOnce({
 					query: 'needle',
+					mode: 'page',
+					snippetLimit: 3,
 					results: [
 						{
 							chatId: 'c2',
@@ -913,6 +937,8 @@ describe('SidebarSearchStore', () => {
 
 			deferred.resolve({
 				query: 'other',
+				mode: 'page',
+				snippetLimit: 3,
 				results: [],
 				page: makeSearchPage(0),
 				index: {
@@ -2103,6 +2129,8 @@ describe('openTranscriptResult', () => {
 		});
 		const search = vi.fn(async () => ({
 			query: 'needle',
+			mode: 'page' as const,
+			snippetLimit: 3,
 			results: [],
 			page: makeSearchPage(0),
 			index: {
