@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 34 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 35 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -25,13 +25,15 @@ distinct same-length prefix during native sanitation.
 Revision 34 makes a native occurrence mandatory after a provider-origin
 terminal proves the preamble turn completed; persistence lag fails retryably
 before Reload cutover or native-fidelity target publication.
+Revision 35 makes automatic compaction boundaries visible as best-effort live
+provider rows without adding native Reload reconstruction.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 34, SHA-256
-  `b24125600fb05861659e06b9d24242cdc45088479453a8109ab43e7c5a99347e`
+- `docs/transcript-ledger-v5-design.md`, revision 35, SHA-256
+  `0ccb3b7d0f99ae8cfd9abf3b6c31e5863e793eb648ae08d7bdcecf089a0f2fd3`
 
-Current inventory: 417 discovered stable IDs, validated by
+Current inventory: 419 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -536,7 +538,7 @@ cache restoration.
 
 | ID                | Obligation                                                                                                      | Required evidence   |
 | ----------------- | --------------------------------------------------------------------------------------------------------------- | ------------------- |
-| TLV5-OPENCODE.01  | Pinned V1 automatic compaction is marker-routed into the owning turn and continues with only user-facing output. | Provider scripted   |
+| TLV5-OPENCODE.01  | Pinned V1 automatic compaction is marker-routed into the owning turn; a successful summary publishes one informational boundary before user-facing output continues. | Provider scripted   |
 | TLV5-OPENCODE.02  | The owned process does not force autocompaction off and ships no plugin or session-latest continuation route.   | Static plus unit    |
 
 ### Observability and Release Hygiene
@@ -765,7 +767,7 @@ not merely that the final transcript matched.
 
 | ID                | Current evidence                                                                                                      | State          |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------- | -------------- |
-| TLV5-OPENCODE.01  | Pinned real-binary fixtures assert threshold and first-turn overflow compaction continue through the owning turn's route, replay inherits operation metadata, and interruption leaves the next turn clean. | Covered |
+| TLV5-OPENCODE.01  | Pinned real-binary fixtures assert threshold and first-turn overflow compaction publish a live informational boundary through the owning turn's route, replay inherits operation metadata, and interruption leaves the next turn clean. | Covered |
 | TLV5-OPENCODE.02  | Static and unit guards keep autocompaction unforced and require absence of the plugin and session-latest route.       | Covered |
 
 Parsing already stored compaction summaries remains supported.
@@ -1011,7 +1013,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-UX.17-WEB-UNIT-04         | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switching discards expansion and restores the exact bounded tail with earlier paging available | R4 switch restoration |
 | TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact live-edge expansion survives the retired delay and later growth in canonical order with the final row visible | R4 compact geometry |
 | TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide live-edge expansion survives the retired delay and later growth in canonical order with the final row visible    | R4 wide geometry    |
-| TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: threshold compaction continues with only user-facing output and pinned markers    | OPENCODE.01                 |
+| TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: threshold compaction shows a boundary and pins native markers              | OPENCODE.01                 |
 | TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: compaction stays enabled with no plugin or session-latest route | OPENCODE.02              |
 | TLV5-PAGE.07-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
 
