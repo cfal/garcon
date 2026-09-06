@@ -218,17 +218,26 @@ describe('PreambleStore version two', () => {
     // form with the incremented revision and trailing newline included.
     // Stay within the 64,000-code-unit combined composition budget: scope
     // each entry to a distinct exact path so no matching set combines them.
+    const directory = await temporaryDirectory();
+    const canonicalProjectBase = await fs.realpath(
+      process.env.GARCON_PROJECT_BASE_DIR ?? os.homedir(),
+    );
     const definitions = [];
     for (let index = 0; index < 3; index += 1) {
       definitions.push(preamble(`00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, {
         content: 'C'.repeat(30_000),
         scope: {
           type: 'project-paths',
-          rules: [{ projectPath: `/workspace/exact-${index}`, includeNested: false }],
+          rules: [{
+            projectPath: path.join(
+              canonicalProjectBase,
+              `.garcon-preamble-size-${path.basename(directory)}-${index}`,
+            ),
+            includeNested: false,
+          }],
         },
       }));
     }
-    const directory = await temporaryDirectory();
     const store = new PreambleStore(directory);
     await store.init();
     let revision = 0;

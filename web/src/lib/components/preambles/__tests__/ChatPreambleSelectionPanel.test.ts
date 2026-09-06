@@ -148,7 +148,9 @@ describe('NewChatPreamblePicker', () => {
 		);
 		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
 		expect(appShell.showPreambles).toBe(true);
-		expect(document.querySelector('[data-slot="new-chat-preamble-selection-dialog"]')).toBeNull();
+		await waitFor(() => {
+			expect(document.querySelector('[data-slot="new-chat-preamble-selection-dialog"]')).toBeNull();
+		});
 		expect(close).not.toHaveBeenCalled();
 
 		appShell.closePreambles();
