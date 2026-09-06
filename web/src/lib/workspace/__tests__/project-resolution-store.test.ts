@@ -52,7 +52,8 @@ describe('ProjectResolutionStore', () => {
 		});
 		await Promise.all([firstResolve, secondResolve]);
 		expect(second.snapshot).toEqual({
-			kind: 'available', effectiveProjectKey: '/real/project',
+			kind: 'available',
+			effectiveProjectKey: '/real/project',
 		});
 
 		first.release();
@@ -83,6 +84,95 @@ describe('ProjectResolutionStore', () => {
 		await pending;
 		expect(lease.snapshot).toEqual({ kind: 'unchecked' });
 		lease.release();
+	});
+
+	it('preserves a matching destination while a relocation echo is pending', async () => {
+		const destination = { ...target, projectPath: '/workspace/replacement' } as const;
+		const result = deferred<{
+			target: typeof destination;
+			resolution: { kind: 'available'; effectiveProjectKey: string };
+		}>();
+		let capturedSignal: AbortSignal | undefined;
+		const store = new ProjectResolutionStore((_target, signal) => {
+			capturedSignal = signal;
+			return result.promise;
+		});
+		const lease = store.retain(destination);
+		const pending = lease.resolve();
+
+		store.invalidateChat(CHAT_ID, { preserveProjectPath: destination.projectPath });
+
+		expect(capturedSignal?.aborted).toBe(false);
+		expect(lease.snapshot).toEqual({ kind: 'resolving' });
+		result.resolve({
+			target: destination,
+			resolution: { kind: 'available', effectiveProjectKey: '/real/replacement' },
+		});
+		await pending;
+		expect(lease.snapshot).toEqual({
+			kind: 'available',
+			effectiveProjectKey: '/real/replacement',
+		});
+		lease.release();
+	});
+
+	it('preserves a resolved destination across duplicate relocation notifications', async () => {
+		const destination = { ...target, projectPath: '/workspace/replacement' } as const;
+		const fetchResolution = vi.fn(async (requested: ProjectTarget) => ({
+			target: requested,
+			resolution: { kind: 'available' as const, effectiveProjectKey: `/real${requested.projectPath}` },
+		}));
+		const store = new ProjectResolutionStore(fetchResolution);
+		const oldLease = store.retain(target);
+		const lease = store.retain(destination);
+		await Promise.all([oldLease.resolve(), lease.resolve()]);
+
+		store.invalidateChat(CHAT_ID, { preserveProjectPath: destination.projectPath });
+		store.invalidateChat(CHAT_ID, { preserveProjectPath: destination.projectPath });
+
+		expect(fetchResolution).toHaveBeenCalledTimes(2);
+		expect(oldLease.snapshot).toEqual({ kind: 'unchecked' });
+		expect(lease.snapshot).toEqual({
+			kind: 'available',
+			effectiveProjectKey: '/real/workspace/replacement',
+		});
+		oldLease.release();
+		lease.release();
+	});
+
+	it('keeps the current destination resolved when an old binding reports a change', async () => {
+		const destination = { ...target, projectPath: '/workspace/replacement' } as const;
+		const oldResult = deferred<never>();
+		const onBindingChanged = vi.fn();
+		const store = new ProjectResolutionStore(
+			async (requested) => {
+				if (requested.projectPath === target.projectPath) return oldResult.promise;
+				return {
+					target: requested,
+					resolution: {
+						kind: 'available',
+						effectiveProjectKey: '/real/replacement',
+					} as const,
+				};
+			},
+			onBindingChanged,
+		);
+		const oldLease = store.retain(target);
+		const destinationLease = store.retain(destination);
+		const oldPending = oldLease.resolve();
+		await destinationLease.resolve();
+
+		oldResult.reject(new ApiError(409, 'changed', 'PROJECT_PATH_CHANGED'));
+		await oldPending;
+
+		expect(oldLease.snapshot).toEqual({ kind: 'request-failed', message: 'changed' });
+		expect(destinationLease.snapshot).toEqual({
+			kind: 'available',
+			effectiveProjectKey: '/real/replacement',
+		});
+		expect(onBindingChanged).toHaveBeenCalledWith(target);
+		oldLease.release();
+		destinationLease.release();
 	});
 
 	it('supersedes a pending request when Retry starts a fresh inspection', async () => {
@@ -164,25 +254,11 @@ describe('ProjectResolutionStore', () => {
 		expect(store.snapshotFor(target)).toEqual({ kind: 'unchecked' });
 	});
 
-	it('seeds only retained targets', () => {
-		const store = new ProjectResolutionStore();
-		store.seed(target, { kind: 'available', effectiveProjectKey: '/ignored' });
-		expect(store.snapshotFor(target)).toEqual({ kind: 'unchecked' });
-
-		const lease = store.retain(target);
-		store.seed(target, { kind: 'available', effectiveProjectKey: '/real/project' });
-		expect(lease.snapshot).toEqual({
-			kind: 'available', effectiveProjectKey: '/real/project',
-		});
-		lease.release();
-	});
-
 	it('invalidates chat metadata when the server reports a changed binding', async () => {
 		const onBindingChanged = vi.fn();
-		const store = new ProjectResolutionStore(
-			async () => { throw new ApiError(409, 'changed', 'PROJECT_PATH_CHANGED'); },
-			onBindingChanged,
-		);
+		const store = new ProjectResolutionStore(async () => {
+			throw new ApiError(409, 'changed', 'PROJECT_PATH_CHANGED');
+		}, onBindingChanged);
 		const lease = store.retain(target);
 
 		await lease.resolve();

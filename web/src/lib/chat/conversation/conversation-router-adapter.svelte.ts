@@ -59,7 +59,7 @@ export interface ConversationRouterStoreDeps {
 	chatDrafts?: Pick<ChatDraftStore, 'discardChat'>;
 	panels: ConversationPanelRegistry;
 	clearDeletedChat: (chatId: string) => void;
-	projectResolution: Pick<ProjectResolutionStore, 'invalidateChat' | 'seed'>;
+	projectResolution: Pick<ProjectResolutionStore, 'invalidateChat'>;
 }
 
 export interface ConversationRouterDeps extends ConversationRouterStoreDeps {

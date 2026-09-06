@@ -151,7 +151,7 @@ export interface EventRouterStores {
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
 	chatPresentations: EventRouterChatPresentations;
-	projectResolution: Pick<ProjectResolutionStore, 'invalidateChat' | 'seed'>;
+	projectResolution: Pick<ProjectResolutionStore, 'invalidateChat'>;
 	notifyCompletion: () => void;
 }
 
@@ -287,9 +287,8 @@ function buildDispatch(
 		navigateAwayFromChat: stores.navigation.navigateAwayFromChat,
 		patchChatTitle: (chatId, title) => stores.sessions.patchChat(chatId, { title }),
 		patchChatProjectPath: (chatId, patch) => stores.sessions.patchChat(chatId, patch),
-		invalidateProjectResolution: (chatId) => stores.projectResolution.invalidateChat(chatId),
-		seedProjectResolution: (target, resolution) =>
-			stores.projectResolution.seed(target, resolution),
+		invalidateProjectResolution: (chatId, preserveProjectPath) =>
+			stores.projectResolution.invalidateChat(chatId, { preserveProjectPath }),
 		patchLastReadAt: (chatId, lastReadAt) => stores.sessions.patchLastReadAt(chatId, lastReadAt),
 		refreshChats: () => {
 			void stores.sessions.quietRefreshChats();

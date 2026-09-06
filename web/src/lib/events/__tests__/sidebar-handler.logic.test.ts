@@ -20,11 +20,8 @@ interface SidebarContextMocks extends SidebarContext {
 	removeChat: Mock<(chatId: string) => void>;
 	navigateAwayFromChat: Mock<(chatId: string) => void>;
 	patchChatTitle: Mock<(chatId: string, title: string) => void>;
-	patchChatProjectPath: Mock<
-		(chatId: string, patch: { projectPath: string }) => void
-	>;
+	patchChatProjectPath: Mock<(chatId: string, patch: { projectPath: string }) => void>;
 	invalidateProjectResolution: Mock<SidebarContext['invalidateProjectResolution']>;
-	seedProjectResolution: Mock<SidebarContext['seedProjectResolution']>;
 	patchLastReadAt: Mock<(chatId: string, lastReadAt: string) => void>;
 	refreshChats: Mock<() => void>;
 	removeChatTranscript: Mock<(chatId: string) => void>;
@@ -36,12 +33,8 @@ function createSidebarContext(overrides: Partial<SidebarContextMocks> = {}): Sid
 		removeChat: vi.fn<(chatId: string) => void>(),
 		navigateAwayFromChat: vi.fn<(chatId: string) => void>(),
 		patchChatTitle: vi.fn<(chatId: string, title: string) => void>(),
-		patchChatProjectPath:
-			vi.fn<
-				(chatId: string, patch: { projectPath: string }) => void
-			>(),
+		patchChatProjectPath: vi.fn<(chatId: string, patch: { projectPath: string }) => void>(),
 		invalidateProjectResolution: vi.fn<SidebarContext['invalidateProjectResolution']>(),
-		seedProjectResolution: vi.fn<SidebarContext['seedProjectResolution']>(),
 		patchLastReadAt: vi.fn<(chatId: string, lastReadAt: string) => void>(),
 		refreshChats: vi.fn<() => void>(),
 		removeChatTranscript: vi.fn<(chatId: string) => void>(),
@@ -140,10 +133,9 @@ describe('handleChatProjectPathUpdated', () => {
 		expect(ctx.patchChatProjectPath).toHaveBeenCalledWith('chat-1', {
 			projectPath: '/workspace/worktree',
 		});
-		expect(ctx.invalidateProjectResolution).toHaveBeenCalledWith('chat-1');
-		expect(ctx.seedProjectResolution).toHaveBeenCalledWith(
-			{ kind: 'chat', chatId: 'chat-1', projectPath: '/workspace/worktree' },
-			{ kind: 'available', effectiveProjectKey: '/workspace/worktree' },
+		expect(ctx.invalidateProjectResolution).toHaveBeenCalledWith(
+			'chat-1',
+			'/workspace/worktree',
 		);
 	});
 
@@ -168,7 +160,10 @@ describe('handleChatListInvalidated', () => {
 	it('calls refreshChats when chatId is present', () => {
 		const ctx = createSidebarContext();
 
-		handleChatListInvalidated(new ChatListRefreshRequestedMessage('chats-reordered', 'chat-1'), ctx);
+		handleChatListInvalidated(
+			new ChatListRefreshRequestedMessage('chats-reordered', 'chat-1'),
+			ctx,
+		);
 
 		expect(ctx.refreshChats).toHaveBeenCalledTimes(1);
 	});

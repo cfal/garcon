@@ -10,18 +10,13 @@ import type {
 	ChatListRefreshRequestedMessage,
 	ChatProjectPathUpdatedMessage,
 } from '$shared/ws-events';
-import type { ProjectResolution, ProjectTarget } from '$shared/project-resolution';
 
 export interface SidebarContext {
 	removeChat: (chatId: string) => void;
 	navigateAwayFromChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
-	patchChatProjectPath: (
-		chatId: string,
-		patch: { projectPath: string },
-	) => void;
-	invalidateProjectResolution: (chatId: string) => void;
-	seedProjectResolution: (target: ProjectTarget, resolution: ProjectResolution) => void;
+	patchChatProjectPath: (chatId: string, patch: { projectPath: string }) => void;
+	invalidateProjectResolution: (chatId: string, preserveProjectPath?: string) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	refreshChats: () => void;
 	removeChatTranscript: (chatId: string) => void;
@@ -50,15 +45,11 @@ export function handleChatProjectPathUpdated(
 	msg: ChatProjectPathUpdatedMessage,
 	ctx: SidebarContext,
 ) {
-	if (!msg.chatId || !msg.projectPath || !msg.effectiveProjectKey) return;
-	ctx.invalidateProjectResolution(msg.chatId);
+	if (!msg.chatId || !msg.projectPath) return;
+	ctx.invalidateProjectResolution(msg.chatId, msg.projectPath);
 	ctx.patchChatProjectPath(msg.chatId, {
 		projectPath: msg.projectPath,
 	});
-	ctx.seedProjectResolution(
-		{ kind: 'chat', chatId: msg.chatId, projectPath: msg.projectPath },
-		{ kind: 'available', effectiveProjectKey: msg.effectiveProjectKey },
-	);
 }
 
 export function handleChatListInvalidated(

@@ -252,7 +252,6 @@ export interface SessionControllerDeps {
 	scrollToBottom: () => void;
 	onProjectUnavailable?: (target: ProjectTarget) => Promise<void> | void;
 }
-
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
 	#pendingDirectAdmissions = $state.raw<ReadonlyMap<string, DirectAdmissionBarrier>>(new Map());

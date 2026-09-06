@@ -136,8 +136,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			});
 		},
 	});
-	const projectResolution = new ProjectResolutionStore(undefined, (target) => {
-		projectResolution.invalidateChat(target.chatId);
+	const projectResolution = new ProjectResolutionStore(undefined, () => {
 		void deps.chatSessions.quietRefreshChats();
 	});
 	const context = createWorkspaceContextStore(
