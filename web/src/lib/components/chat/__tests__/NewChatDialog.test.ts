@@ -14,6 +14,15 @@ vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn().mockResolvedValue({ valid: true, isGitRepo: false }),
 }));
 
+vi.mock('$lib/api/chat-preambles', () => ({
+	preambleSelectionPreview: vi.fn(async (request: { projectPath: string }) => ({
+		success: true,
+		canonicalProjectPath: request.projectPath,
+		orderedPreambleIds: [],
+		projection: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
+	})),
+}));
+
 vi.mock('$lib/api/git', () => ({
 	getGitWorktrees: vi.fn(),
 	gitCreateWorktree: vi.fn(),
@@ -29,21 +38,20 @@ vi.mock('$lib/api/prompt-refinement', async (importOriginal) => {
 	return { ...actual, refinePrompt: vi.fn() };
 });
 
-	vi.mock('$lib/api/snippets', async (importOriginal) => {
-		const actual = await importOriginal<typeof import('$lib/api/snippets')>();
-		return { ...actual, expandSnippet: vi.fn() };
+vi.mock('$lib/api/snippets', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
+	return { ...actual, expandSnippet: vi.fn() };
 });
 
 vi.mock('$lib/chat/actions/chat-navigation.js', () => ({ gotoChat: vi.fn() }));
 
-	vi.mock('$shared/client-chat-id', () => ({
-		createClientChatId: vi.fn(() => '1787471053739199'),
-	}));
+vi.mock('$shared/client-chat-id', () => ({
+	createClientChatId: vi.fn(() => '1787471053739199'),
+}));
 
-	vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
-		default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'))
-			.default,
-	}));
+vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
+	default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte')).default,
+}));
 
 interface DeferredRefinement {
 	promise: Promise<RefinePromptResponse>;

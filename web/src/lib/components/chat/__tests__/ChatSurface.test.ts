@@ -17,6 +17,7 @@ const { sessions } = vi.hoisted(() => ({
 vi.mock('$lib/context', () => ({
 	getChatSessions: () => sessions,
 	getAppShell: () => ({ requestComposerFocus: vi.fn() }),
+	getConversationPanels: () => ({ composerPanel: null }),
 	getModelCatalog: () => ({
 		supportsFork: () => true,
 		supportsUpdateProjectPath: () => true,

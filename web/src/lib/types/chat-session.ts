@@ -22,6 +22,7 @@ export interface ChatStartupConfig {
 	firstMessage: string;
 	initialImages?: File[];
 	tags?: string[];
+	orderedPreambleIds?: readonly string[];
 }
 
 export interface ChatSessionRecord {

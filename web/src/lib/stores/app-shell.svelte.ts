@@ -18,12 +18,19 @@ export interface NewChatDialogSeed {
 	prefill?: string;
 }
 
+/** Captured target for the per-chat preamble selection editor. */
+export interface ChatPreambleSelectionTarget {
+	readonly chatId: string;
+	readonly transcriptViewId: string;
+}
+
 export class AppShellStore {
 	showSettings = $state(false);
 	showScheduledPrompts = $state(false);
 	showPreambles = $state(false);
 	showSnippets = $state(false);
 	showOnboardingWizard = $state(false);
+	chatPreambleSelectionTarget = $state<ChatPreambleSelectionTarget | null>(null);
 	settingsTab = $state<SettingsTab>('providers');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
@@ -45,12 +52,13 @@ export class AppShellStore {
 	#newChatDialogSeed = createActionSignal();
 	#sidebarSearch = createActionSignal();
 	#snippetsReturnFocus: (() => void) | null = null;
+	#preamblesReturnFocus: (() => void) | null = null;
 
 	openSettings(section: string = 'providers'): void {
 		this.dismissSnippets();
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
-		this.showPreambles = false;
+		this.dismissPreambles();
 		this.showSettings = true;
 		this.settingsTab = normalizeSettingsTab(section);
 	}
@@ -63,7 +71,7 @@ export class AppShellStore {
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
-		this.showPreambles = false;
+		this.dismissPreambles();
 		this.showOnboardingWizard = true;
 	}
 
@@ -75,7 +83,7 @@ export class AppShellStore {
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showOnboardingWizard = false;
-		this.showPreambles = false;
+		this.dismissPreambles();
 		this.showScheduledPrompts = true;
 	}
 
@@ -83,23 +91,40 @@ export class AppShellStore {
 		this.showScheduledPrompts = false;
 	}
 
-	openPreambles(): void {
+	openPreambles(returnFocus?: () => void): void {
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
+		this.#preamblesReturnFocus = returnFocus ?? null;
 		this.showPreambles = true;
 	}
 
 	closePreambles(): void {
 		this.showPreambles = false;
+		const returnFocus = this.#preamblesReturnFocus;
+		this.#preamblesReturnFocus = null;
+		if (returnFocus) queueMicrotask(returnFocus);
+	}
+
+	dismissPreambles(): void {
+		this.showPreambles = false;
+		this.#preamblesReturnFocus = null;
+	}
+
+	openChatPreambleSelection(chatId: string, transcriptViewId: string): void {
+		this.chatPreambleSelectionTarget = { chatId, transcriptViewId };
+	}
+
+	closeChatPreambleSelection(): void {
+		this.chatPreambleSelectionTarget = null;
 	}
 
 	openSnippets(returnFocus?: () => void): void {
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
-		this.showPreambles = false;
+		this.dismissPreambles();
 		this.#snippetsReturnFocus = returnFocus ?? null;
 		this.showSnippets = true;
 	}
