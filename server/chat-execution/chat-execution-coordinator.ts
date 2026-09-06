@@ -578,14 +578,12 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
     this.#ownership.notifyOwnersChanged();
     if (!drainRequested || !this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
-    try {
-      await this.triggerDrain(reservation.chatId);
-    } catch (error) {
+    void this.triggerDrain(reservation.chatId).catch((error) => {
       logger.warn('Deferred queue drain failed after exclusive operation release', {
         chatId: reservation.chatId,
         error: error instanceof Error ? error.message : String(error),
       });
-    }
+    });
   }
 
   completeDirectTurn(reservation: DirectTurnReservation): Promise<void> { return this.#finishDirect(reservation, 'completed'); }
