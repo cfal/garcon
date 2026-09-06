@@ -101,7 +101,8 @@
 
 	let isFiltered = $derived(searchFilter.trim().length > 0);
 	let sortByRecent = $derived(displayOptions.sortMode === 'recent');
-	// Re-sorting filtered results also applies the pinned placement policy.
+	// Filtered results arrive recency-ordered upstream; re-sorting only applies
+	// the pinned placement policy.
 	let displayedChats = $derived.by(() => {
 		const source = isFiltered ? filteredChats : chats;
 		return sortByRecent
