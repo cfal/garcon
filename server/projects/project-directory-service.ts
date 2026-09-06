@@ -21,6 +21,8 @@ export async function inspectProjectDirectory(
     access?: typeof fs.access;
   } = {},
 ): Promise<ProjectResolution> {
+  if (!projectPath.trim()) return { kind: 'unavailable', reason: 'not-found' };
+
   try {
     const canonical = await resolvePath(projectPath);
     const status = await stat(canonical);
