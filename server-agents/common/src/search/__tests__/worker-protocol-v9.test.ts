@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { SEARCH_INGEST_ROW_MAX_BYTES, SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
 import {
+  MAX_FRAME_BYTES,
   MAX_ALLOWLIST_PER_FRAME,
   MAX_ROWS_PER_FRAME,
   isIndexerEvent,
@@ -154,8 +155,10 @@ describe('worker protocol v9', () => {
         type: 'search-start',
         query,
         order: 'relevance',
+        mode: 'page',
         offset: 0,
         limit: 20,
+        snippetLimit: 3,
       },
       {
         ...envelope,
@@ -180,6 +183,28 @@ describe('worker protocol v9', () => {
     expect(isReaderRequest({ ...searchStart, offset: 10_000 })).toBe(false);
     expect(isReaderRequest({ ...searchStart, limit: 0 })).toBe(false);
     expect(isReaderRequest({ ...searchStart, limit: 101 })).toBe(false);
+    expect(isReaderRequest({
+      ...searchStart,
+      mode: 'prefix',
+      limit: 500,
+      snippetLimit: 1,
+    })).toBe(true);
+    expect(isReaderRequest({
+      ...searchStart,
+      mode: 'prefix',
+      offset: 1,
+      snippetLimit: 1,
+    })).toBe(false);
+    expect(isReaderRequest({
+      ...searchStart,
+      mode: 'prefix',
+      limit: 501,
+      snippetLimit: 1,
+    })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, mode: 'prefix', snippetLimit: 2 })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, snippetLimit: 0 })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, snippetLimit: 4 })).toBe(false);
+    expect(isReaderRequest({ ...searchStart, mode: 'batch' })).toBe(false);
     const missingOffset: Record<string, unknown> = { ...searchStart };
     Reflect.deleteProperty(missingOffset, 'offset');
     expect(isReaderRequest(missingOffset)).toBe(false);
@@ -213,6 +238,8 @@ describe('worker protocol v9', () => {
       {
         ...envelope,
         type: 'search-result',
+        mode: 'page',
+        snippetLimit: 3,
         results: [result],
         page: { offset: 0, limit: 20, total: 1, hasMore: false, nextOffset: null },
         index: {
@@ -264,6 +291,67 @@ describe('worker protocol v9', () => {
     const missingCoverage: Record<string, unknown> = { ...searchResult.index };
     Reflect.deleteProperty(missingCoverage, 'unindexedChatCount');
     expect(isReaderEvent({ ...searchResult, index: missingCoverage })).toBe(false);
+    const maximumSnippet = {
+      ordinal: Number.MAX_SAFE_INTEGER,
+      role: 'assistant' as const,
+      timestamp: 't'.repeat(SEARCH_TIMESTAMP_MAX_BYTES),
+      text: '\u0000'.repeat(520),
+    };
+    const maximumResult = {
+      chatId: 'c'.repeat(256),
+      transcriptViewId: 'v'.repeat(256),
+      score: -Number.MAX_VALUE,
+      matchedMessageCount: Number.MAX_SAFE_INTEGER,
+      snippets: [maximumSnippet],
+    };
+    const prefixEvent = {
+      ...envelope,
+      type: 'search-result',
+      mode: 'prefix',
+      snippetLimit: 1,
+      results: Array.from({ length: 500 }, () => maximumResult),
+      page: {
+        offset: 0,
+        limit: 500,
+        total: 501,
+        hasMore: true,
+        nextOffset: 500,
+      },
+      index: searchResult.index,
+    } as const;
+    expect(Buffer.byteLength(JSON.stringify(prefixEvent))).toBeLessThan(MAX_FRAME_BYTES);
+    expect(isReaderEvent(prefixEvent)).toBe(true);
+    expect(isReaderEvent({
+      ...prefixEvent,
+      results: [{
+        ...maximumResult,
+        snippets: [{
+          ...maximumSnippet,
+          timestamp: 't'.repeat(SEARCH_TIMESTAMP_MAX_BYTES + 1),
+        }],
+      }],
+      page: {
+        offset: 0,
+        limit: 500,
+        total: 1,
+        hasMore: false,
+        nextOffset: null,
+      },
+    })).toBe(false);
+    expect(isReaderEvent({
+      ...prefixEvent,
+      results: [{
+        ...maximumResult,
+        snippets: [{ ...maximumSnippet, text: 'x'.repeat(521) }],
+      }],
+      page: {
+        offset: 0,
+        limit: 500,
+        total: 1,
+        hasMore: false,
+        nextOffset: null,
+      },
+    })).toBe(false);
     expect(workerRequestIdentity({ ...envelope, type: 'invalid' })).toEqual(envelope);
     expect(workerRequestIdentity({ requestId: 0, lifecycleEpoch: 'epoch-0001' })).toBeNull();
   });

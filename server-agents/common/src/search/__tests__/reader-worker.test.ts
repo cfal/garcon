@@ -100,8 +100,10 @@ describe('reader worker v9', () => {
         }],
       },
       order: 'allowlist',
+      mode: 'page',
       offset: 0,
       limit: 2,
+      snippetLimit: 3,
     });
     post(worker, {
       type: 'search-allowlist-chunk',

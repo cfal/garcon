@@ -20,10 +20,13 @@
     "@anthropic-ai/claude-code": "2.1.238",
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@openai/codex": "0.153.4",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@types/bun": "1.4.0",
     "opencode-ai": "1.18.29",
     "playwright": "1.62.1",
     "puppeteer-core": "25.8.0",
-    "typescript": "7.0.2"
+    "svelte": "5.57.0",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2"
   }
 }

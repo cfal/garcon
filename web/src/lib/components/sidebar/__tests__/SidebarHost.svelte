@@ -24,6 +24,7 @@
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
 	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
+	import type { ChatSearchSort } from '$shared/chat-search';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
@@ -44,6 +45,7 @@
 		reduceMotion?: boolean;
 		collapsedProjectKeys?: Set<string>;
 		sidebarSortMode?: SidebarSortMode;
+		sidebarSearchResultSort?: ChatSearchSort;
 		onQuietRefresh?: () => Promise<void> | void;
 		onRequestRecenter?: () => void;
 	}
@@ -65,6 +67,7 @@
 		reduceMotion = false,
 		collapsedProjectKeys = new Set<string>(),
 		sidebarSortMode = 'manual',
+		sidebarSearchResultSort = 'relevance',
 		onQuietRefresh = () => Promise.resolve(),
 		onRequestRecenter = () => {},
 	}: SidebarHostProps = $props();
@@ -129,6 +132,9 @@
 		get sidebarSortMode() {
 			return sidebarSortMode;
 		},
+		get sidebarSearchResultSort() {
+			return sidebarSearchResultSort;
+		},
 		get chatListAutohide() {
 			return chatListAutohide;
 		},
@@ -146,6 +152,7 @@
 				| 'sidebarGrouping'
 				| 'sidebarChatItemLayout'
 				| 'sidebarSortMode'
+				| 'sidebarSearchResultSort'
 				| 'chatListAutohide'
 				| 'chatListDock',
 			value: string | boolean,
@@ -160,6 +167,10 @@
 			}
 			if (key === 'sidebarSortMode') {
 				sidebarSortMode = value as SidebarSortMode;
+				return;
+			}
+			if (key === 'sidebarSearchResultSort') {
+				sidebarSearchResultSort = value as ChatSearchSort;
 				return;
 			}
 			if (key === 'chatListAutohide') chatListAutohide = value as boolean;

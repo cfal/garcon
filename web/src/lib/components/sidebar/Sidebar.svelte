@@ -29,10 +29,9 @@
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
 	import {
-		transcriptSearchCandidateSignature,
-		transcriptSearchContentRevisionSignature,
-		transcriptSearchTimeOrderSignature,
-	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
+		EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
+		transcriptSearchInvalidationProjection,
+	} from '$lib/sidebar/search/transcript-search-invalidation.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
 	import {
@@ -146,22 +145,21 @@
 	let transcriptSearchTarget = $derived(
 		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
 	);
-	let transcriptSearchCandidateSet = $derived(
-		transcriptSearchCandidateSignature(chats, transcriptSearchTarget),
-	);
-	let transcriptSearchContentRevision = $derived(
-		transcriptSearchContentRevisionSignature(chats, transcriptSearchTarget),
-	);
-	let transcriptSearchTimeOrder = $derived(
-		transcriptSearchTimeOrderSignature(
-			chats,
-			transcriptSearchTarget,
-			localSettings.sidebarSearchResultSort,
-		),
-	);
 	let transcriptSearchEnabled = $derived(
 		remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
 	);
+	let transcriptSearchInvalidation = $derived.by(() => {
+		if (!transcriptSearchEnabled) return EMPTY_TRANSCRIPT_SEARCH_INVALIDATION;
+		return transcriptSearchInvalidationProjection(
+			chats,
+			transcriptSearchTarget,
+			localSettings.sidebarSearchResultSort,
+		);
+	});
+	let transcriptSearchHasTerms = $derived(transcriptSearchInvalidation.hasTranscriptTerms);
+	let transcriptSearchCandidateSet = $derived(transcriptSearchInvalidation.candidateSignature);
+	let transcriptSearchContentRevision = $derived(transcriptSearchInvalidation.contentSignature);
+	let transcriptSearchTimeOrder = $derived(transcriptSearchInvalidation.timeOrderSignature);
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
@@ -199,7 +197,7 @@
 		localSettings.sidebarSearchResultSort;
 		transcriptSearchRetryVersion;
 		untrack(() => sidebarSearch.updateTranscriptSearchCandidateSignature(candidateSignature));
-		if (!enabled || !query.trim()) {
+		if (!enabled || !transcriptSearchHasTerms) {
 			untrack(() => sidebarSearch.clearTranscriptSearch());
 			return;
 		}

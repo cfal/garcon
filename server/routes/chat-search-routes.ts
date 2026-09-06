@@ -3,6 +3,7 @@ import type {
   ChatSearchNavigateResponse,
   ChatSearchRequest,
   ChatSearchResponse,
+  ChatSearchResultMode,
   ChatSearchSort,
   TranscriptSearchQueryStatsV1,
   TranscriptSearchStatusResponse,
@@ -11,13 +12,19 @@ import type {
 import {
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_PREFIX_SIZE,
+  CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
+  CHAT_SEARCH_RESULT_MODES,
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
   CHAT_SEARCH_SORT_VALUES,
 } from '../../common/chat-search.js';
 import type { ChatListEntry } from '../../common/chat-list.js';
 import type { ChatOrderTimestamps } from '../../common/chat-order-sort.js';
-import { compareChatOrderNewestFirst } from '../../common/chat-order-sort.js';
+import {
+  chatActivityTimeMs,
+  chatCreationTimeMs,
+} from '../../common/chat-order-sort.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -40,10 +47,14 @@ export interface ChatSearchDep {
     textTokens?: string[];
     allowedChatIds: string[];
     sort: ChatSearchSort;
+    mode: ChatSearchResultMode;
     offset: number;
     limit?: number;
+    snippetLimit: number;
     signal?: AbortSignal;
   }): Promise<{
+    mode: ChatSearchResultMode;
+    snippetLimit: number;
     results: ChatSearchResponse['results'];
     page: ChatSearchResponse['page'];
     index: ChatSearchResponse['index'];
@@ -63,7 +74,9 @@ interface ChatSearchRouteDeps {
 
 interface NormalizedChatSearchRequest extends ChatSearchRequest {
   sort: ChatSearchSort;
+  mode: ChatSearchResultMode;
   offset: number;
+  snippetLimit: number;
 }
 
 const CLIENT_CLOSED_REQUEST_STATUS = 499;
@@ -85,23 +98,31 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         );
       }
       const search = parseSearchRequest(body);
+      request?.signal.throwIfAborted();
+      const allowedChatIds = await searchableChatIds(
+        registry,
+        pathCache,
+        chatListProjector,
+        search.chatIds,
+        search.sort,
+        request?.signal,
+      );
+      request?.signal.throwIfAborted();
       const result = await searchIndex.search({
         query: search.query,
         textTokens: search.textTokens,
-        allowedChatIds: await searchableChatIds(
-          registry,
-          pathCache,
-          chatListProjector,
-          search.chatIds,
-          search.sort,
-        ),
+        allowedChatIds,
         sort: search.sort,
+        mode: search.mode,
         offset: search.offset,
         limit: search.limit,
+        snippetLimit: search.snippetLimit,
         signal: request?.signal,
       });
       return Response.json({
         query: search.query,
+        mode: result.mode,
+        snippetLimit: result.snippetLimit,
         results: result.results,
         page: result.page,
         index: result.index,
@@ -150,6 +171,12 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
           p50Ms: 0,
           p95Ms: 0,
           maxMs: 0,
+          admissionP50Ms: 0,
+          admissionP95Ms: 0,
+          admissionMaxMs: 0,
+          totalP50Ms: 0,
+          totalP95Ms: 0,
+          totalMaxMs: 0,
         },
       } satisfies TranscriptSearchStatusResponse);
     }
@@ -213,6 +240,13 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   }
   const effectiveQuery = query || textTokens?.join(' ') || '';
   if (!effectiveQuery) throw new ValidationDomainError('query is required');
+  const mode = optionalSearchResultMode(input.mode) ?? 'page';
+  const offset = optionalBoundedOffset(input.offset) ?? 0;
+  const snippetLimit = optionalSnippetLimit(input.snippetLimit)
+    ?? CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
+  if (mode === 'prefix' && (offset !== 0 || snippetLimit !== 1)) {
+    throw new ValidationDomainError('prefix mode requires offset 0 and snippetLimit 1');
+  }
 
   return {
     query: effectiveQuery,
@@ -223,8 +257,10 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
       maxTotalChars: MAX_SEARCH_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
     }),
     sort: optionalSearchSort(input.sort) ?? 'relevance',
-    offset: optionalBoundedOffset(input.offset) ?? 0,
-    limit: optionalPageLimit(input.limit),
+    mode,
+    offset,
+    limit: optionalResultLimit(input.limit, mode),
+    snippetLimit,
   };
 }
 
@@ -234,29 +270,33 @@ async function searchableChatIds(
   chatListProjector: ChatListProjector,
   requestedChatIds: string[] | undefined,
   sort: ChatSearchSort,
+  signal?: AbortSignal,
 ): Promise<string[]> {
-  const sessions = registry.listAllChats();
-  const sessionEntries = Object.entries(sessions);
+  const sessionEntries = requestedChatIds === undefined
+    ? Object.entries(registry.listAllChats())
+    : [...new Set(requestedChatIds)].flatMap((chatId) => {
+      const session = registry.getChat(chatId);
+      return session ? [[chatId, session] as const] : [];
+    });
+  signal?.throwIfAborted();
   const statuses = await pathCache.resolveProjectPaths(
     sessionEntries.map(([, session]) => session.projectPath),
   );
+  signal?.throwIfAborted();
   const visibleEntries = await chatListProjector.buildMany(sessionEntries, statuses);
-  const entries = requestedChatIds === undefined
-    ? [...visibleEntries.values()]
-    : [...new Set(requestedChatIds)]
-      .map((chatId) => visibleEntries.get(chatId))
-      .filter((entry): entry is ChatListEntry => entry !== undefined);
+  const entries = [...visibleEntries.values()];
   if (sort === 'relevance') return entries.map((entry) => entry.id);
-  const compareTime = compareChatOrderNewestFirst(sort);
   const timestamps = (entry: ChatListEntry): ChatOrderTimestamps => ({
     id: entry.id,
     createdAt: entry.activity.createdAt,
     lastActivityAt: entry.activity.lastActivityAt,
   });
+  const timeFor = sort === 'created' ? chatCreationTimeMs : chatActivityTimeMs;
   return entries
-    .sort((left, right) => compareTime(timestamps(left), timestamps(right))
-      || left.id.localeCompare(right.id))
-    .map((entry) => entry.id);
+    .map((entry) => ({ entry, time: timeFor(timestamps(entry)) }))
+    .sort((left, right) => right.time - left.time
+      || left.entry.id.localeCompare(right.entry.id))
+    .map(({ entry }) => entry.id);
 }
 
 function optionalSearchSort(value: unknown): ChatSearchSort | undefined {
@@ -267,6 +307,15 @@ function optionalSearchSort(value: unknown): ChatSearchSort | undefined {
   return value as ChatSearchSort;
 }
 
+function optionalSearchResultMode(value: unknown): ChatSearchResultMode | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string'
+      || !CHAT_SEARCH_RESULT_MODES.includes(value as ChatSearchResultMode)) {
+    throw new ValidationDomainError('mode must be page or prefix');
+  }
+  return value as ChatSearchResultMode;
+}
+
 function optionalBoundedOffset(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > CHAT_SEARCH_MAX_OFFSET) {
@@ -275,10 +324,26 @@ function optionalBoundedOffset(value: unknown): number | undefined {
   return Number(value);
 }
 
-function optionalPageLimit(value: unknown): number | undefined {
+function optionalResultLimit(
+  value: unknown,
+  mode: ChatSearchResultMode,
+): number | undefined {
   if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > CHAT_SEARCH_MAX_PAGE_SIZE) {
-    throw new ValidationDomainError(`limit must be an integer from 1 to ${CHAT_SEARCH_MAX_PAGE_SIZE}`);
+  const maximum = mode === 'prefix' ? CHAT_SEARCH_MAX_PREFIX_SIZE : CHAT_SEARCH_MAX_PAGE_SIZE;
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum) {
+    throw new ValidationDomainError(`limit must be an integer from 1 to ${maximum}`);
+  }
+  return Number(value);
+}
+
+function optionalSnippetLimit(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value)
+      || Number(value) < 1
+      || Number(value) > CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT) {
+    throw new ValidationDomainError(
+      `snippetLimit must be an integer from 1 to ${CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT}`,
+    );
   }
   return Number(value);
 }

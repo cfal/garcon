@@ -1,5 +1,6 @@
 import type {
   ChatSearchQueryV1,
+  ChatSearchResultMode,
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
@@ -14,15 +15,19 @@ export function searchFrames(
   query: ChatSearchQueryV1,
   allowedChats: readonly TranscriptSearchAllowedChat[],
   order: TranscriptSearchOrder,
+  mode: ChatSearchResultMode,
   offset: number,
   limit: number,
+  snippetLimit: number,
 ): readonly WorkerRequestInput<ReaderRequest>[] {
   const frames: WorkerRequestInput<ReaderRequest>[] = [{
     type: 'search-start',
     query,
     order,
+    mode,
     offset,
     limit,
+    snippetLimit,
   }];
   if (allowedChats.length === 0) {
     frames.push({

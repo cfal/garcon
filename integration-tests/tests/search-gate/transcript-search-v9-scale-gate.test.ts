@@ -1,6 +1,15 @@
 import { expect, test } from 'bun:test';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { rm, stat, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createServer, type ViteDevServer } from 'vite';
+import type {
+  ChatSearchIndexStatus,
+  ChatSearchPage,
+  ChatSearchRequest,
+  ChatSearchResponse,
+  ChatSearchResult,
+} from '../../../common/chat-search.js';
 import {
   SEARCH_CORPUS_TIER_ISOLATION,
   SEARCH_CORPUS_TIER_M,
@@ -10,8 +19,13 @@ import {
   derivedIndexDiskBytes,
   readDerivedIndexSnapshot,
 } from '../../support/search-corpus-fixture.js';
+import {
+  createSearchPrefixPerformanceFixture,
+  type SearchPrefixPerformanceFixture,
+} from '../../support/search-prefix-performance-fixture.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { cpuSecondsOf, rssBytesOf, sampleDuty, trackPeakRss } from '../../support/process-probes.js';
+import { TranscriptSearchService } from '../../../server-agents/common/src/search/transcript-search-service.js';
 
 const LISTEN_BUDGET_MS = 60_000;
 const BUILD_BUDGET_MS = 180_000;
@@ -25,6 +39,178 @@ const BUILD_DUTY_WINDOW_CEILING = 0.75;
 const SERVER_RSS_DELTA_CEILING_BYTES = 600 * 1_024 * 1_024;
 const DERIVED_BYTES_PER_BODY_BYTE = 2.5;
 const RESTART_LOG_PATTERN = /SEARCH_(?:READER|INDEXER)_RESTARTED/;
+const PREFIX_HARD_BUDGET_MS = 2_000;
+const SHORT_PREFIX_P95_BUDGET_MS = 1_000;
+const NEAR_CAP_PREFIX_HARD_BUDGET_MS = 4_250;
+const NEAR_CAP_PREFIX_P50_BUDGET_MS = 3_500;
+const CLIENT_PREFIX_BUDGET_MS = 4_500;
+
+type ServiceSearchRequest = Parameters<TranscriptSearchService['search']>[0];
+
+interface SidebarSearchStoreHarness {
+  transcriptSearchQuery: string;
+  transcriptSearchResults: ChatSearchResult[];
+  transcriptSearchIndex: ChatSearchIndexStatus | null;
+  transcriptSearchPage: ChatSearchPage | null;
+  readonly transcriptSearchRevalidating: boolean;
+  readonly transcriptSearchRevalidationError: string | null;
+  updateDraftQuery(query: string): void;
+  retryTranscriptSearchRevalidation(): Promise<void>;
+  destroy(): void;
+}
+
+type SidebarSearchStoreFactory = (deps: {
+  readonly getChats: () => Record<string, unknown>[];
+  readonly getSelectedChatId: () => string | null;
+  readonly getTranscriptSearchEnabled: () => boolean;
+  readonly getSearchResultSort: () => 'relevance';
+  readonly notifyError: (message: string) => void;
+  readonly searchChatTranscripts: (
+    request: ChatSearchRequest,
+    options?: { signal?: AbortSignal },
+  ) => Promise<ChatSearchResponse>;
+}) => SidebarSearchStoreHarness;
+
+async function loadSidebarSearchStore(): Promise<{
+  readonly create: SidebarSearchStoreFactory;
+  readonly server: ViteDevServer;
+}> {
+  const webRoot = join(import.meta.dir, '../../../web');
+  const server = await createServer({
+    root: webRoot,
+    configFile: false,
+    appType: 'custom',
+    logLevel: 'silent',
+    plugins: [svelte()],
+    resolve: {
+      alias: {
+        $lib: join(webRoot, 'src/lib'),
+        $shared: join(webRoot, '../common'),
+      },
+    },
+    optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true },
+  });
+  try {
+    // SSR compilation exercises the production deadline and commit control flow.
+    // Browser rune scheduling remains covered by the web Vitest suite.
+    const loaded = await server.ssrLoadModule(
+      '/src/lib/sidebar/search/sidebar-search-store.svelte.ts',
+    ) as Record<string, unknown>;
+    if (typeof loaded.createSidebarSearchStore !== 'function') {
+      throw new Error('Sidebar search store factory is unavailable');
+    }
+    return {
+      create: loaded.createSidebarSearchStore as SidebarSearchStoreFactory,
+      server,
+    };
+  } catch (error) {
+    await server.close();
+    throw error;
+  }
+}
+
+function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Search aborted', 'AbortError'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException('Search aborted', 'AbortError'));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function sidebarChat(chatId: string): Record<string, unknown> {
+  return {
+    id: chatId,
+    parentChat: null,
+    projectPath: '/workspace/search-gate',
+    effectiveProjectKey: '/workspace/search-gate',
+    projectIdentityState: 'available',
+    orderGroup: 'normal',
+    title: chatId,
+    agentId: 'claude',
+    model: 'sonnet',
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+    createdAt: null,
+    lastActivityAt: '2026-01-01T00:00:00.000Z',
+    lastReadAt: null,
+    isPinned: false,
+    isArchived: false,
+    isProcessing: false,
+    processingPhase: null,
+    canReloadFromNativeHistory: false,
+    isUnread: false,
+    status: 'running',
+    agentOwnershipEpoch: null,
+    tags: [],
+  };
+}
+
+function searchQuery(...markers: string[]): ServiceSearchRequest['query'] {
+  return {
+    version: 1,
+    clauses: markers.map((marker) => ({
+      kind: 'all-words',
+      tokens: [{ text: marker, normalized: marker, match: 'exact' }],
+    })),
+  };
+}
+
+function prefixRequest(
+  fixture: SearchPrefixPerformanceFixture,
+  options: {
+    readonly allowedChats?: ServiceSearchRequest['allowedChats'];
+    readonly order?: ServiceSearchRequest['order'];
+    readonly markers?: readonly string[];
+  } = {},
+): ServiceSearchRequest {
+  return {
+    query: searchQuery(...(options.markers ?? [fixture.markerTerm])),
+    allowedChats: options.allowedChats ?? fixture.allowedChats,
+    order: options.order ?? 'relevance',
+    mode: 'prefix',
+    offset: 0,
+    limit: 500,
+    snippetLimit: 1,
+    executionSignal: new AbortController().signal,
+  };
+}
+
+async function timedServiceSearch(
+  service: TranscriptSearchService,
+  request: ServiceSearchRequest,
+): Promise<{
+  readonly elapsedMs: number;
+  readonly result: Awaited<ReturnType<TranscriptSearchService['search']>>;
+}> {
+  const started = performance.now();
+  const result = await service.search(request);
+  return { elapsedMs: performance.now() - started, result };
+}
+
+function percentile(samples: readonly number[], quantile: number): number {
+  const sorted = [...samples].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * quantile))] ?? 0;
+}
+
+function searchService(workspaceDirectory: string): TranscriptSearchService {
+  const discard = () => undefined;
+  return new TranscriptSearchService({
+    workspaceDirectory,
+    logger: { debug: discard, info: discard, warn: discard, error: discard },
+  });
+}
 
 test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and idempotent', async () => {
   await withIntegrationFixture('transcript-search-v9-scale-gate', async (fixture) => {
@@ -116,6 +302,7 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
       expect(timed.status).toBe(200);
       expect(timed.body.index.pendingChatCount).toBe(0);
       expect(timed.body.results.length).toBeGreaterThanOrEqual(10);
+      expect(timed.body.index.resultsTruncated).toBe(true);
       durations.push(timed.elapsedMs);
     }
     durations.sort((left, right) => left - right);
@@ -128,16 +315,23 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
     const pageDurations: number[] = [];
     for (const offset of [0, 50, 100, 150, 200]) {
       const page = await fixture.client.timedSearchChats({
-        query: corpus.markerTerm,
+        query: corpus.deepMarkerTerm,
         sort: 'relevance',
+        mode: 'page',
         offset,
         limit: 50,
+        snippetLimit: 1,
       });
       expect(page.status).toBe(200);
       expect(page.elapsedMs).toBeLessThan(FIRST_SEARCH_BUDGET_MS);
       expect(page.body.page.offset).toBe(offset);
       expect(page.body.page.hasMore).toBe(page.body.page.nextOffset !== null);
-      expect(page.body.index.resultsTruncated).toBe(true);
+      expect(page.body.results).toHaveLength(50);
+      expect(page.body.results.every((result) => (
+        result.snippets.length === 1
+        && result.snippets[0]!.text.includes(corpus.deepMarkerTerm)
+      ))).toBe(true);
+      expect(page.body.index.resultsTruncated).toBe(false);
       pageDurations.push(page.elapsedMs);
     }
     pageDurations.sort((left, right) => left - right);
@@ -148,6 +342,21 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
       { timeoutMs: 5_000 },
     )).queryStats.served;
     expect(servedAfterPages - servedBeforePages).toBe(5);
+    for (const sort of ['activity', 'created'] as const) {
+      const orderedPrefix = await fixture.client.timedSearchChats({
+        query: corpus.deepMarkerTerm,
+        sort,
+        mode: 'prefix',
+        offset: 0,
+        limit: 250,
+        snippetLimit: 1,
+      });
+      expect(orderedPrefix.status).toBe(200);
+      expect(orderedPrefix.elapsedMs).toBeLessThan(PREFIX_HARD_BUDGET_MS);
+      expect(orderedPrefix.body.results).toHaveLength(250);
+      expect(orderedPrefix.body.mode).toBe('prefix');
+      expect(orderedPrefix.body.snippetLimit).toBe(1);
+    }
     const phraseDecoyChatId = corpus.phraseDecoyChatId;
     if (!phraseDecoyChatId) throw new Error('Tier M requires a phrase decoy chat');
     const multiClause = await fixture.client.timedSearchChats({
@@ -165,6 +374,18 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
         && snippet.text.includes(corpus.secondaryMarkerTerm)
       ))
     ))).toBe(true);
+    const multiClausePrefix = await fixture.client.timedSearchChats({
+      query: `${corpus.markerTerm} ${corpus.secondaryMarkerTerm}`,
+      mode: 'prefix',
+      offset: 0,
+      limit: 500,
+      snippetLimit: 1,
+    });
+    expect(multiClausePrefix.status).toBe(200);
+    expect(multiClausePrefix.elapsedMs).toBeLessThan(PREFIX_HARD_BUDGET_MS);
+    expect(multiClausePrefix.body.results.length).toBeGreaterThanOrEqual(10);
+    expect(multiClausePrefix.body.results.every((result) => result.snippets.length === 1))
+      .toBe(true);
     const phrase = `${corpus.markerTerm} ${corpus.secondaryMarkerTerm}`;
     const quotedPhrase = await fixture.client.timedSearchChats({
       query: `"${phrase}"`,
@@ -219,6 +440,184 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
     expect(fixture.garcon.capturedOutput()).not.toMatch(RESTART_LOG_PATTERN);
   });
 }, 900_000);
+
+test('[TLV5-SEARCH.10-GATE-04] compact prefix stays bounded across 525 short chats', async () => {
+  const fixture = await createSearchPrefixPerformanceFixture({
+    chatCount: 525,
+    rowsPerChat: 1,
+    bodyCharacters: 780,
+    name: 'shortprefix',
+  });
+  const service = searchService(fixture.workspaceDirectory);
+  try {
+    await service.enable(new AbortController().signal);
+    const page = await timedServiceSearch(service, {
+      ...prefixRequest(fixture),
+      mode: 'page',
+      limit: 50,
+    });
+    expect(page.elapsedMs).toBeLessThan(PREFIX_HARD_BUDGET_MS);
+    expect(page.result.results).toHaveLength(50);
+
+    for (let warmup = 0; warmup < 2; warmup += 1) {
+      await service.search(prefixRequest(fixture));
+    }
+    const prefixDurations: number[] = [];
+    for (let sample = 0; sample < 5; sample += 1) {
+      const measured = await timedServiceSearch(service, prefixRequest(fixture));
+      expect(measured.elapsedMs).toBeLessThan(PREFIX_HARD_BUDGET_MS);
+      expect(measured.result).toMatchObject({
+        mode: 'prefix',
+        snippetLimit: 1,
+        page: { offset: 0, limit: 500, total: 525, hasMore: true, nextOffset: 500 },
+        index: { resultsTruncated: false },
+      });
+      expect(measured.result.results).toHaveLength(500);
+      expect(new Set(measured.result.results.map((result) => result.chatId)).size).toBe(500);
+      expect(measured.result.results.every((result) => result.snippets.length === 1)).toBe(true);
+      prefixDurations.push(measured.elapsedMs);
+    }
+    expect(percentile(prefixDurations, 0.95)).toBeLessThan(SHORT_PREFIX_P95_BUDGET_MS);
+
+    const authoritativeOrders = [
+      [...fixture.allowedChats].reverse(),
+      [...fixture.allowedChats.slice(175), ...fixture.allowedChats.slice(0, 175)],
+    ];
+    for (const allowedChats of authoritativeOrders) {
+      const measured = await timedServiceSearch(service, prefixRequest(fixture, {
+        allowedChats,
+        order: 'allowlist',
+      }));
+      expect(measured.elapsedMs).toBeLessThan(PREFIX_HARD_BUDGET_MS);
+      expect(measured.result.results.map((result) => result.chatId))
+        .toEqual(allowedChats.slice(0, 500).map((entry) => entry.chatId));
+    }
+
+    const multiClause = await timedServiceSearch(service, prefixRequest(fixture, {
+      markers: [fixture.markerTerm, fixture.secondaryMarkerTerm],
+    }));
+    expect(multiClause.elapsedMs).toBeLessThan(PREFIX_HARD_BUDGET_MS);
+    expect(multiClause.result.results).toHaveLength(500);
+    expect(multiClause.result.results.every((result) => (
+      result.snippets.length === 1
+      && result.snippets[0]!.text.includes(fixture.markerTerm)
+      && result.snippets[0]!.text.includes(fixture.secondaryMarkerTerm)
+    ))).toBe(true);
+
+    const stats = service.queryStats();
+    expect(stats.served).toBe(11);
+    expect(stats.totalP95Ms).toBeGreaterThanOrEqual(stats.p95Ms);
+    expect(stats.totalP95Ms).toBeGreaterThanOrEqual(stats.admissionP95Ms);
+  } finally {
+    await service.close();
+    await fixture.dispose();
+  }
+}, 120_000);
+
+test('[TLV5-SEARCH.10-GATE-05] compact prefix retains near-cap client headroom', async () => {
+  const fixture = await createSearchPrefixPerformanceFixture({
+    chatCount: 600,
+    rowsPerChat: 3,
+    bodyCharacters: 63_983,
+    name: 'nearcap',
+  });
+  const service = searchService(fixture.workspaceDirectory);
+  let storeLoader: Awaited<ReturnType<typeof loadSidebarSearchStore>> | null = null;
+  let store: SidebarSearchStoreHarness | null = null;
+  try {
+    await service.enable(new AbortController().signal);
+    const initial = await service.search(prefixRequest(fixture));
+
+    const durations: number[] = [];
+    for (let sample = 0; sample < 3; sample += 1) {
+      const measured = await timedServiceSearch(service, prefixRequest(fixture));
+      expect(measured.elapsedMs).toBeLessThan(NEAR_CAP_PREFIX_HARD_BUDGET_MS);
+      expect(measured.result.results).toHaveLength(500);
+      expect(measured.result.results.every((result) => result.snippets.length === 1)).toBe(true);
+      durations.push(measured.elapsedMs);
+    }
+    expect(percentile(durations, 0.5)).toBeLessThan(NEAR_CAP_PREFIX_P50_BUDGET_MS);
+
+    storeLoader = await loadSidebarSearchStore();
+    const allowedByChatId = new Map(
+      fixture.allowedChats.map((entry) => [entry.chatId, entry]),
+    );
+    const chats = fixture.allowedChats.map((entry) => sidebarChat(entry.chatId));
+    let requestCount = 0;
+    const searchChatTranscripts = async (
+      request: ChatSearchRequest,
+      options?: { signal?: AbortSignal },
+    ): Promise<ChatSearchResponse> => {
+      requestCount += 1;
+      const execution = new AbortController();
+      const executionTimeout = setTimeout(() => execution.abort(), 5_000);
+      try {
+        const result = await service.search({
+          query: searchQuery(...(request.textTokens ?? [request.query])),
+          allowedChats: (request.chatIds ?? fixture.allowedChats.map((entry) => entry.chatId))
+            .flatMap((chatId) => {
+              const allowed = allowedByChatId.get(chatId);
+              return allowed ? [allowed] : [];
+            }),
+          order: request.sort === 'activity' || request.sort === 'created'
+            ? 'allowlist'
+            : 'relevance',
+          mode: request.mode ?? 'page',
+          offset: request.offset ?? 0,
+          limit: request.limit ?? 20,
+          snippetLimit: request.snippetLimit ?? 3,
+          admissionSignal: options?.signal,
+          executionSignal: execution.signal,
+        });
+        await abortableDelay(200, options?.signal);
+        return {
+          query: request.query,
+          ...result,
+          results: [...result.results],
+        };
+      } finally {
+        clearTimeout(executionTimeout);
+      }
+    };
+    store = storeLoader.create({
+      getChats: () => chats,
+      getSelectedChatId: () => null,
+      getTranscriptSearchEnabled: () => true,
+      getSearchResultSort: () => 'relevance',
+      notifyError: () => undefined,
+      searchChatTranscripts,
+    });
+    store.updateDraftQuery(fixture.markerTerm);
+    store.transcriptSearchQuery = fixture.markerTerm;
+    store.transcriptSearchResults = initial.results.map((result) => ({
+      ...result,
+      snippets: [],
+    }));
+    store.transcriptSearchPage = initial.page;
+    store.transcriptSearchIndex = initial.index;
+
+    const browserStarted = performance.now();
+    await store.retryTranscriptSearchRevalidation();
+    const browserElapsedMs = performance.now() - browserStarted;
+
+    expect(requestCount).toBe(1);
+    expect(store.transcriptSearchRevalidating).toBe(false);
+    expect(store.transcriptSearchRevalidationError).toBeNull();
+    expect(store.transcriptSearchResults).toHaveLength(500);
+    expect(store.transcriptSearchResults.every((result) => result.snippets.length === 1)).toBe(true);
+    expect(store.transcriptSearchResults[0]?.snippets[0]?.text).toContain(fixture.markerTerm);
+    expect(browserElapsedMs).toBeLessThan(CLIENT_PREFIX_BUDGET_MS);
+    const stats = service.queryStats();
+    expect(stats.served).toBe(5);
+    expect(stats.p50Ms).toBeLessThan(NEAR_CAP_PREFIX_P50_BUDGET_MS);
+    expect(stats.totalP50Ms).toBeLessThan(NEAR_CAP_PREFIX_P50_BUDGET_MS);
+  } finally {
+    store?.destroy();
+    await storeLoader?.server.close();
+    await service.close();
+    await fixture.dispose();
+  }
+}, 180_000);
 
 test('[TLV5-SEARCH.10-GATE-02] one corrupt ledger degrades only its chat', async () => {
   await withIntegrationFixture('transcript-search-v9-poisoned-ledger', async (fixture) => {

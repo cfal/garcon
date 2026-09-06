@@ -1,4 +1,4 @@
-import { compareChatOrderNewestFirst } from '$shared/chat-order-sort';
+import { chatActivityTimeMs, chatCreationTimeMs } from '$shared/chat-order-sort';
 import type { ChatSearchSort } from '$shared/chat-search';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -7,10 +7,11 @@ export function sortChatSearchResults(
 	sort: ChatSearchSort,
 ): ChatSessionRecord[] {
 	if (sort === 'relevance') return [...chats];
-	const compareTime = compareChatOrderNewestFirst(sort);
-	return [...chats].sort((left, right) =>
-		compareTime(left, right) || left.id.localeCompare(right.id),
-	);
+	const timeFor = sort === 'created' ? chatCreationTimeMs : chatActivityTimeMs;
+	return chats
+		.map((chat) => ({ chat, time: timeFor(chat) }))
+		.sort((left, right) => right.time - left.time || left.chat.id.localeCompare(right.chat.id))
+		.map(({ chat }) => chat);
 }
 
 export function captureChatSearchTimeOrder(

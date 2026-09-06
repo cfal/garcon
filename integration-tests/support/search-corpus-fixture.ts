@@ -67,6 +67,7 @@ export interface SeededSearchCorpus {
   readonly oversizedChatId: string | null;
   readonly markerTerm: string;
   readonly secondaryMarkerTerm: string;
+  readonly deepMarkerTerm: string;
   readonly phraseDecoyChatId: string | null;
 }
 
@@ -81,6 +82,7 @@ export async function createSearchCorpusChats(
 ): Promise<SeededSearchCorpus> {
   const markerTerm = 'quartzmarker';
   const secondaryMarkerTerm = 'cobaltmarker';
+  const deepMarkerTerm = 'topazdeepmarker';
   const denseChatIds: string[] = [];
   const sparseChatIds: string[] = [];
   const seedChat = async (content: string): Promise<string> => {
@@ -113,6 +115,7 @@ export async function createSearchCorpusChats(
     oversizedChatId,
     markerTerm,
     secondaryMarkerTerm,
+    deepMarkerTerm,
     phraseDecoyChatId,
   };
 }
@@ -125,7 +128,13 @@ export async function bulkAppendCorpusRows(
   const store = new TranscriptLedgerStore(join(workspaceDir, 'transcript-ledgers'));
   let rows = 0;
   let bodyBytes = 0;
-  const appendRows = (chatId: string, rowCount: number, rowBytes: number, seed: number) => {
+  const appendRows = (
+    chatId: string,
+    rowCount: number,
+    rowBytes: number,
+    seed: number,
+    markerTerms: readonly string[],
+  ) => {
     const view = store.currentView(chatId);
     if (!view) throw new Error(`Corpus chat ${chatId} has no current view`);
     const random = mulberry32(seed);
@@ -137,7 +146,7 @@ export async function bulkAppendCorpusRows(
     for (let index = 0; index < rowCount; index += 1) {
       const generated = syntheticBody(random, rowBytes);
       const body = index % 11 === 0
-        ? `${generated} ${corpus.markerTerm} ${corpus.secondaryMarkerTerm}`
+        ? `${generated} ${markerTerms.join(' ')}`
         : generated;
       bodyBytes += Buffer.byteLength(body, 'utf8');
       const at = '2026-01-01T00:00:00.000Z';
@@ -172,11 +181,21 @@ export async function bulkAppendCorpusRows(
       index === 0 ? tier.maxChatRows : tier.denseRowsPerChat,
       tier.bodyBytes,
       1_000 + index,
+      [corpus.markerTerm, corpus.secondaryMarkerTerm],
     );
   });
   if (corpus.oversizedChatId) {
-    appendRows(corpus.oversizedChatId, 1_500, 48_000, 9_999);
+    appendRows(
+      corpus.oversizedChatId,
+      1_500,
+      48_000,
+      9_999,
+      [corpus.markerTerm, corpus.secondaryMarkerTerm],
+    );
   }
+  corpus.sparseChatIds.forEach((chatId, index) => {
+    appendRows(chatId, 1, tier.bodyBytes, 20_000 + index, [corpus.deepMarkerTerm]);
+  });
   store.close();
   return { rows, bodyBytes };
 }

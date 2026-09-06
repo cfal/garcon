@@ -11,8 +11,10 @@ let closing = false;
 const searches = new Map<number, {
   readonly query: Extract<ReaderRequest, { type: 'search-start' }>['query'];
   readonly order: Extract<ReaderRequest, { type: 'search-start' }>['order'];
+  readonly mode: Extract<ReaderRequest, { type: 'search-start' }>['mode'];
   readonly offset: number;
   readonly limit: number;
+  readonly snippetLimit: number;
   readonly allowedChats: TranscriptSearchAllowedChat[];
   nextChunkIndex: number;
 }>();
@@ -36,15 +38,16 @@ function handle(request: ReaderRequest): void {
         return;
       case 'search-start': {
         if (!db || closing) throw new Error('READER_UNAVAILABLE');
-        if (searches.has(request.requestId)
-            || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 100) {
+        if (searches.has(request.requestId)) {
           throw new Error('INVALID_SEARCH_REQUEST');
         }
         searches.set(request.requestId, {
           query: request.query,
           order: request.order,
+          mode: request.mode,
           offset: request.offset,
           limit: request.limit,
+          snippetLimit: request.snippetLimit,
           allowedChats: [],
           nextChunkIndex: 0,
         });
@@ -67,8 +70,10 @@ function handle(request: ReaderRequest): void {
           query: search.query,
           allowedChats: search.allowedChats,
           order: search.order,
+          mode: search.mode,
           offset: search.offset,
           limit: search.limit,
+          snippetLimit: search.snippetLimit,
         });
         post({ type: 'search-result', ...response(request), ...result });
         return;

@@ -5,6 +5,7 @@ import type {
   ChatSearchPage,
   ChatSearchQueryV1,
   ChatSearchResult,
+  ChatSearchResultMode,
   TranscriptSearchAllowedChat,
   TranscriptSearchQueryStatsV1,
   TranscriptSearchStatusV1,
@@ -13,6 +14,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { resolveSearchWorkerEntrypoints } from '../build/standalone-entrypoint.js';
 import { searchFrames } from './query-frames.js';
+import { QueryLatencyStats } from './query-latency-stats.js';
 import {
   enqueueReaderWaiter,
   raceAgainstSignal,
@@ -37,6 +39,9 @@ import {
   SearchWorkerSupervisor,
   type WorkerRequestInput,
 } from './worker-supervisor.js';
+import { workerEventError } from './worker-error.js';
+
+export { TranscriptSearchWorkerError } from './worker-error.js';
 
 const SEARCH_DIRECTORY = 'transcript-search';
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -47,7 +52,6 @@ const SEARCH_READER_POOL_SIZE = 2;
 const SEARCH_MAX_QUEUED = 4;
 const SEARCH_MAINTENANCE_PASSES = 4;
 const STATUS_COALESCE_MS = 250;
-const QUERY_STATS_SAMPLE = 512;
 
 export interface TranscriptSearchServiceOptions {
   readonly workspaceDirectory: string;
@@ -92,13 +96,6 @@ const DISABLED_STATUS: TranscriptSearchStatusV1 = {
   updatedAt: new Date(0).toISOString(),
 };
 
-export class TranscriptSearchWorkerError extends Error {
-  constructor(readonly code: string, readonly retryable: boolean) {
-    super(code);
-    this.name = 'TranscriptSearchWorkerError';
-  }
-}
-
 type IngestJob =
   | {
       readonly kind: 'sync';
@@ -139,9 +136,8 @@ export class TranscriptSearchService {
   readonly #jobChatIds = new Set<string>();
   readonly #searchWaiters: ReaderWaiter<ReaderSlot>[] = [];
   readonly #statusListeners = new Set<(status: TranscriptSearchStatusV1) => void>();
-  readonly #queryDurations: number[] = [];
+  readonly #queryStats = new QueryLatencyStats();
   readonly #lastLogAt = new Map<string, number>();
-  #queryCounters = { served: 0, timedOut: 0, rejectedBusy: 0 };
   #durableCounts = { indexed: 0, pending: 0, failed: 0 };
   #durableBacklogRows = 0;
   #activeJob: IngestJob | null = null;
@@ -380,16 +376,7 @@ export class TranscriptSearchService {
   }
 
   queryStats(): TranscriptSearchQueryStats {
-    const sorted = [...this.#queryDurations].sort((left, right) => left - right);
-    const at = (quantile: number) => sorted.length === 0
-      ? 0
-      : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * quantile))]!;
-    return {
-      ...this.#queryCounters,
-      p50Ms: at(0.5),
-      p95Ms: at(0.95),
-      maxMs: sorted.at(-1) ?? 0,
-    };
+    return this.#queryStats.snapshot();
   }
 
   onStatusChanged(listener: (status: TranscriptSearchStatusV1) => void): () => void {
@@ -401,11 +388,15 @@ export class TranscriptSearchService {
     readonly query: ChatSearchQueryV1;
     readonly allowedChats: readonly TranscriptSearchAllowedChat[];
     readonly order: TranscriptSearchOrder;
+    readonly mode: ChatSearchResultMode;
     readonly offset: number;
     readonly limit: number;
+    readonly snippetLimit: number;
     readonly admissionSignal?: AbortSignal;
     readonly executionSignal: AbortSignal;
   }): Promise<{
+    readonly mode: ChatSearchResultMode;
+    readonly snippetLimit: number;
     readonly results: readonly ChatSearchResult[];
     readonly page: ChatSearchPage;
     readonly index: ChatSearchIndexStatus;
@@ -415,18 +406,22 @@ export class TranscriptSearchService {
       throw new DOMException('Aborted', 'AbortError');
     }
     if (request.executionSignal.aborted) throw new Error('SEARCH_TIMEOUT');
+    const totalStarted = performance.now();
     const slot = await this.#acquireReaderSlot(
       request.admissionSignal,
       request.executionSignal,
     );
-    const started = performance.now();
+    const executionStarted = performance.now();
+    const admissionMs = executionStarted - totalStarted;
     const session = slot.supervisor.beginRequestSession();
     const frames = searchFrames(
       request.query,
       request.allowedChats,
       request.order,
+      request.mode,
       request.offset,
       request.limit,
+      request.snippetLimit,
     );
     const pending = session.request(frames, undefined, this.#readerRequestTimeoutMs, {
       isComplete: (candidate) => candidate.type === 'search-result',
@@ -442,10 +437,11 @@ export class TranscriptSearchService {
       if ((error instanceof Error && error.name === 'AbortError')
           || (error instanceof Error && error.message === 'SEARCH_TIMEOUT')) {
         this.#retireAbandonedReader(slot);
-        this.#queryCounters.timedOut += 1;
+        this.#queryStats.recordTimedOut();
         this.#rateLimitedWarn('Transcript search query timeout', {
           code: 'SEARCH_TIMEOUT',
-          executeMs: Math.round(performance.now() - started),
+          admissionMs: Math.round(admissionMs),
+          executeMs: Math.round(performance.now() - executionStarted),
           order: request.order,
           offset: request.offset,
           limit: request.limit,
@@ -455,15 +451,32 @@ export class TranscriptSearchService {
       throw error;
     }
     if (event.type !== 'search-result') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    if (event.mode !== request.mode
+        || event.snippetLimit !== request.snippetLimit
+        || event.page.offset !== request.offset
+        || event.page.limit !== request.limit
+        || event.results.some((result) => result.snippets.length > request.snippetLimit)) {
+      throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    }
     const allowed = new Map(
       request.allowedChats.map((entry) => [entry.chatId, entry.transcriptViewId]),
     );
     if (event.results.some((result) => allowed.get(result.chatId) !== result.transcriptViewId)) {
       throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
     }
-    this.#queryCounters.served += 1;
-    this.#recordQueryDuration(performance.now() - started);
-    return { results: event.results, page: event.page, index: event.index };
+    const completed = performance.now();
+    this.#queryStats.recordServed({
+      admissionMs,
+      executionMs: completed - executionStarted,
+      totalMs: completed - totalStarted,
+    });
+    return {
+      mode: event.mode,
+      snippetLimit: event.snippetLimit,
+      results: event.results,
+      page: event.page,
+      index: event.index,
+    };
   }
 
   #retireReadersForRecreatedIndex(): void {
@@ -529,7 +542,7 @@ export class TranscriptSearchService {
       return Promise.reject(new Error('SEARCH_INDEX_UNAVAILABLE'));
     }
     if (this.#searchWaiters.length >= SEARCH_MAX_QUEUED) {
-      this.#queryCounters.rejectedBusy += 1;
+      this.#queryStats.recordRejectedBusy();
       this.#rateLimitedWarn('Transcript search queue overflow', {
         code: 'SEARCH_INDEX_BUSY',
         depth: this.#searchWaiters.length,
@@ -541,7 +554,7 @@ export class TranscriptSearchService {
       admissionSignal,
       executionSignal,
       onExecutionTimeout: () => {
-        this.#queryCounters.timedOut += 1;
+        this.#queryStats.recordTimedOut();
       },
     });
   }
@@ -896,11 +909,6 @@ export class TranscriptSearchService {
     return 'ready';
   }
 
-  #recordQueryDuration(durationMs: number): void {
-    this.#queryDurations.push(Math.round(durationMs));
-    if (this.#queryDurations.length > QUERY_STATS_SAMPLE) this.#queryDurations.shift();
-  }
-
   #rejectQueues(error: Error): void {
     for (const job of [...this.#deleteQueue.splice(0), ...this.#buildQueue.splice(0)]) {
       this.#jobChatIds.delete(job.chatId);
@@ -973,12 +981,6 @@ function chunkFrame(frame: TranscriptSearchSyncFrame): Array<{
       ? frame.advanceTo
       : rows[rows.length - 1]!.ordinal,
   }));
-}
-
-function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {
-  return event.type === 'error'
-    ? new TranscriptSearchWorkerError(event.code, event.retryable)
-    : null;
 }
 
 function isRepairableIndexPositionError(error: unknown): boolean {

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
 
 import { getSavedSearches } from '$lib/api/settings';
+import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 vi.mock('$lib/api/settings', async () => {
@@ -74,6 +75,52 @@ describe('sidebar search dialog flow', () => {
 					.workspaceScrollRegion,
 			).toBe('primary');
 		});
+	});
+
+	it('revalidates an activity-only mutation without restarting page zero', async () => {
+		let chats = [createChat('chat-1', 'Transcript result')];
+		const refreshTranscriptSearch = vi.fn(async () => {});
+		const scheduleTranscriptSearchRevalidation = vi.fn();
+		const sidebarSearch = createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => true,
+			getSearchResultSort: () => 'activity',
+			getChats: () => chats,
+			getSelectedChatId: () => null,
+			notifyError: vi.fn(),
+		});
+		sidebarSearch.searchDialogOpen = true;
+		sidebarSearch.draftQuery = 'needle';
+		sidebarSearch.transcriptSearchQuery = 'needle';
+		sidebarSearch.transcriptSearchPage = {
+			offset: 400,
+			limit: 100,
+			total: 600,
+			hasMore: true,
+			nextOffset: 500,
+		};
+		sidebarSearch.refreshTranscriptSearch = refreshTranscriptSearch;
+		sidebarSearch.scheduleTranscriptSearchRevalidation = scheduleTranscriptSearchRevalidation;
+		const view = render(SidebarHost, {
+			chats,
+			sidebarSearch,
+			sidebarSearchResultSort: 'activity',
+			autoLoadSavedSearches: false,
+		});
+		await waitFor(() => expect(refreshTranscriptSearch).toHaveBeenCalledTimes(1));
+		refreshTranscriptSearch.mockClear();
+		scheduleTranscriptSearchRevalidation.mockClear();
+
+		chats = [{ ...chats[0], lastActivityAt: '2025-02-01T00:00:00.000Z' }];
+		await view.rerender({
+			chats,
+			sidebarSearch,
+			sidebarSearchResultSort: 'activity',
+			autoLoadSavedSearches: false,
+		});
+
+		await waitFor(() => expect(scheduleTranscriptSearchRevalidation).toHaveBeenCalledTimes(1));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		expect(refreshTranscriptSearch).not.toHaveBeenCalled();
 	});
 
 	it('restores the search dialog draft after cancelling add saved search', async () => {
