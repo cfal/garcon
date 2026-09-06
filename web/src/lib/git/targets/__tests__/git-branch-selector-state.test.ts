@@ -166,6 +166,15 @@ describe('GitBranchSelectorState', () => {
 		expectRefRequest('/project', '', UPDATED_DESC);
 	});
 
+	it('refuses branch results for a project the shared selector no longer owns', async () => {
+		branchSelector.setProject('/workspace/current', 'main', '/real/current');
+
+		await branchSelector.openBranchDropdown('/workspace/obsolete', '/real/obsolete');
+
+		expect(branchSelector.showBranchDropdown).toBe(false);
+		expect(getGitRefs).not.toHaveBeenCalled();
+	});
+
 	it('keeps generic ref loads on Name ascending without changing branch sort', async () => {
 		branchSelector.branchSort = { ...UPDATED_DESC };
 

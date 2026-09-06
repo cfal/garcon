@@ -11,6 +11,7 @@ import { ImageAttachmentState } from '$lib/chat/composer/image-attachment.svelte
 import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 import { PromptComposerHeightState } from '../prompt-composer-height-state.svelte.js';
+import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -1303,6 +1304,41 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review cancellable');
 	});
 
+	it('lets Escape cancel project resolution before snippet expansion starts', async () => {
+		const pending = deferredProjectResolution();
+		let signal!: AbortSignal;
+		let requestedTarget!: ProjectTarget;
+		const fetchProjectResolution = vi.fn((target: ProjectTarget, requestSignal: AbortSignal) => {
+			signal = requestSignal;
+			requestedTarget = target;
+			return pending.promise;
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-resolution-cancel',
+			selectedStatus: 'running',
+			fetchProjectResolution,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review cancellable' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+
+		await fireEvent.keyDown(textarea, { key: 'Escape' });
+		expect(signal.aborted).toBe(true);
+		pending.resolve({
+			target: requestedTarget,
+			resolution: { kind: 'available', effectiveProjectKey: requestedTarget.projectPath },
+		});
+		await pending.promise;
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Send message' })).toBeTruthy(),
+		);
+
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(textarea.value).toBe('/snippet review cancellable');
+	});
+
 	it('lets another composer control cancel a pending expansion with Escape', async () => {
 		const pending = deferredSnippetExpansion();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
@@ -1430,6 +1466,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		await screen.findByRole('button', { name: 'Expanding snippet' });
+		await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce());
 
 		const attachment = new File(['image'], 'dropped.png', { type: 'image/png' });
 		const dropTarget = textarea.closest('[role="region"]');
@@ -1779,6 +1816,52 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('Keep this draft');
 	});
 
+	it('rejects a slash expansion resolved for another project path', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/two',
+			expandedText: 'must not apply',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-response-path',
+			selectedStatus: 'running',
+			projectPath: '/workspace/one',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review keep this' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Send message' })).toBeTruthy(),
+		);
+		expect(textarea.value).toBe('/snippet review keep this');
+	});
+
+	it('presents unavailable project recovery actions for completion demand', async () => {
+		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
+		}));
+		const onChooseProjectFolder = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-project-unavailable',
+			selectedStatus: 'running',
+			fetchProjectResolution,
+			onChooseProjectFolder,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/' } });
+
+		await screen.findByText('Project folder unavailable');
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		expect(onChooseProjectFolder).toHaveBeenCalledWith('chat-project-unavailable');
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledTimes(2));
+	});
+
 	it('reports a missing project path instead of swallowing a snippet command', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-missing-path',
@@ -1865,4 +1948,15 @@ function deferredSnippetExpansion() {
 		resolve = done;
 	});
 	return { promise, resolve };
+}
+
+function deferredProjectResolution() {
+	let resolve!: (value: ProjectResolutionResponse) => void;
+	const promise = new Promise<ProjectResolutionResponse>((done) => {
+		resolve = done;
+	});
+	return {
+		promise,
+		resolve,
+	};
 }

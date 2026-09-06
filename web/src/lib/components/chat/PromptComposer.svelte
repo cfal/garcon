@@ -427,13 +427,19 @@
 		const start = range?.start ?? textarea.selectionStart;
 		const end = range?.end ?? textarea.selectionEnd;
 		try {
-			const operation = await projectState.resolveSnippetContext();
-			const result = await snippetExpansion.run({
-				shortName: snippet.shortName,
-				arguments: { type: 'value', value: argumentsText },
-				context: operation.context,
+			const result = await snippetExpansion.runPrepared(snippet.shortName, async (signal) => {
+				const operation = await projectState.resolveSnippetContext(signal);
+				return {
+					request: {
+						shortName: snippet.shortName,
+						arguments: { type: 'value', value: argumentsText },
+						context: operation.context,
+					},
+					prepared: operation,
+				};
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
+			const operation = result.prepared;
 			if (
 				result.response.snippetId !== snippet.id ||
 				result.response.snippetUpdatedAt !== snippet.updatedAt
@@ -476,16 +482,23 @@
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		try {
-			const operation = await projectState.resolveSnippetContext();
-			const result = await snippetExpansion.run({
-				shortName: command.shortName,
-				arguments: command.arguments,
-				context: operation.context,
+			const result = await snippetExpansion.runPrepared(command.shortName, async (signal) => {
+				const operation = await projectState.resolveSnippetContext(signal);
+				return {
+					request: {
+						shortName: command.shortName,
+						arguments: command.arguments,
+						context: operation.context,
+					},
+					prepared: operation,
+				};
 			});
 			if (result.kind !== 'expanded') return;
+			const operation = result.prepared;
 			if (
 				sessions.selectedChatId !== operation.chatId ||
 				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
+				result.response.contextProjectPath !== operation.projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return;

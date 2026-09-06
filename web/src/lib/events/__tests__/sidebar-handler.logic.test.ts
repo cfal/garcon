@@ -21,7 +21,6 @@ interface SidebarContextMocks extends SidebarContext {
 	navigateAwayFromChat: Mock<(chatId: string) => void>;
 	patchChatTitle: Mock<(chatId: string, title: string) => void>;
 	patchChatProjectPath: Mock<(chatId: string, patch: { projectPath: string }) => void>;
-	invalidateProjectResolution: Mock<SidebarContext['invalidateProjectResolution']>;
 	patchLastReadAt: Mock<(chatId: string, lastReadAt: string) => void>;
 	refreshChats: Mock<() => void>;
 	removeChatTranscript: Mock<(chatId: string) => void>;
@@ -34,7 +33,6 @@ function createSidebarContext(overrides: Partial<SidebarContextMocks> = {}): Sid
 		navigateAwayFromChat: vi.fn<(chatId: string) => void>(),
 		patchChatTitle: vi.fn<(chatId: string, title: string) => void>(),
 		patchChatProjectPath: vi.fn<(chatId: string, patch: { projectPath: string }) => void>(),
-		invalidateProjectResolution: vi.fn<SidebarContext['invalidateProjectResolution']>(),
 		patchLastReadAt: vi.fn<(chatId: string, lastReadAt: string) => void>(),
 		refreshChats: vi.fn<() => void>(),
 		removeChatTranscript: vi.fn<(chatId: string) => void>(),
@@ -133,10 +131,6 @@ describe('handleChatProjectPathUpdated', () => {
 		expect(ctx.patchChatProjectPath).toHaveBeenCalledWith('chat-1', {
 			projectPath: '/workspace/worktree',
 		});
-		expect(ctx.invalidateProjectResolution).toHaveBeenCalledWith(
-			'chat-1',
-			'/workspace/worktree',
-		);
 	});
 
 	it('does nothing when chatId is missing', () => {

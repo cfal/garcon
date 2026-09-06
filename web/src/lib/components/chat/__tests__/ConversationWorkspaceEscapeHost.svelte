@@ -27,6 +27,7 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ConversationPanelActions } from '../conversation-panel-actions.js';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
 	import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -49,9 +50,10 @@
 
 	interface ConversationWorkspaceEscapeHostProps {
 		onPatchActivity?: (chatId: string, timestamp: string) => void;
+		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 	}
 
-	let { onPatchActivity }: ConversationWorkspaceEscapeHostProps = $props();
+	let { onPatchActivity, fetchProjectResolution }: ConversationWorkspaceEscapeHostProps = $props();
 
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
@@ -78,10 +80,16 @@
 		tags: [],
 	});
 	setChatDrafts(new ChatDraftStore());
-	const projectResolution = new ProjectResolutionStore(async (target) => ({
-		target,
-		resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
-	}));
+	function getInitialProjectResolver() {
+		return (
+			fetchProjectResolution ??
+			(async (target) => ({
+				target,
+				resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+			}))
+		);
+	}
+	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver());
 	setProjectResolution(projectResolution);
 	onDestroy(() => projectResolution.destroy());
 	const conversationUi = new ConversationUiState();
@@ -222,7 +230,8 @@
 	setWorkspaceShortcuts(workspaceShortcuts);
 	setTransientLayers(transientLayers);
 	setGitQuickSummary(new GitQuickSummaryStore());
-	setGitBranchActions(new GitBranchSelectorState());
+	const quickGitBranches = new GitBranchSelectorState();
+	setGitBranchActions(quickGitBranches);
 	const conversationLifecycles = new ConversationLifecycleRegistry({
 		sessions,
 		processing: processingReconciler,
@@ -249,6 +258,7 @@
 	const conversationPanel = conversationPanels.panel(CANONICAL_CHAT_SURFACE_ID)!;
 
 	const subagentToolbar = new SubagentToolbarState();
+	let panelActions = $state.raw<ConversationPanelActions | null>(null);
 	let showTestLayer = $state(false);
 	let testLayerIsComposerEditor = $state(false);
 	let testLayerElement = $state<HTMLElement | null>(null);
@@ -297,6 +307,15 @@
 	}}>Toggle processing</button
 >
 <button type="button" onclick={() => (selectedChat.status = 'draft')}>Set draft status</button>
+<button
+	type="button"
+	onclick={() => panelActions?.toggleBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
+	>Open branch dropdown</button
+>
+<button type="button" onclick={() => (workspace.focusOwner = { kind: 'chat-list' })}
+	>Move command ownership</button
+>
+<div data-testid="branch-dropdown-open">{quickGitBranches.showBranchDropdown}</div>
 {#if showTestLayer}
 	<div
 		bind:this={testLayerElement}
@@ -311,7 +330,12 @@
 		{/if}
 	</div>
 {/if}
-<ConversationWorkspace isVisible={!showTestLayer} isPresented={true} {subagentToolbar} />
+<ConversationWorkspace
+	isVisible={!showTestLayer}
+	isPresented={true}
+	{subagentToolbar}
+	onRegisterPanelActions={(actions) => (panelActions = actions)}
+/>
 <ConversationPanel
 	surfaceId={CANONICAL_CHAT_SURFACE_ID}
 	chat={selectedChat}

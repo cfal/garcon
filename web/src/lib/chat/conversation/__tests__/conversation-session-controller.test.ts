@@ -2235,6 +2235,30 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('refreshes a draft path target after an unavailable rejection', async () => {
+		const draft = createRunningChat({
+			id: 'draft-1',
+			status: 'draft',
+			projectPath: '/workspace/draft-project',
+		});
+		const { deps } = createDeps(draft);
+		deps.sessions.isDraft = vi.fn(() => true);
+		deps.sessions.startupByChatId = { 'draft-1': createDraftStartup() };
+		deps.composerState.inputText = 'start this project';
+		mockStartChat.mockRejectedValueOnce(
+			new ApiError(409, 'Project folder unavailable', 'PROJECT_UNAVAILABLE'),
+		);
+
+		await expect(
+			new ConversationSessionController(deps).submitForChat('draft-1'),
+		).resolves.toBe('rejected');
+
+		expect(deps.onProjectUnavailable).toHaveBeenCalledWith({
+			kind: 'path',
+			projectPath: '/workspace/draft-project',
+		});
+	});
+
 	it('marks draft startup as submitting before attachment reads complete', async () => {
 		const draft = createRunningChat({
 			id: 'draft-1',
@@ -2548,10 +2572,12 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.applyProcessingEvent).not.toHaveBeenCalledWith('chat-1', false);
 	});
 
-	it('refreshes only the captured project target after an unavailable rejection', async () => {
+	it('settles an unavailable rejection before refreshing the captured project target', async () => {
 		const pending = deferred<Awaited<ReturnType<typeof runChat>>>();
+		const refresh = deferred<void>();
 		mockRunChat.mockReturnValueOnce(pending.promise);
 		const { deps } = createDeps();
+		deps.onProjectUnavailable.mockReturnValueOnce(refresh.promise);
 		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'check this project';
 		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
@@ -2569,6 +2595,13 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			projectPath: '/workspace/project',
 		});
+		expect(deps.composerState.inputText).toBe('check this project');
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: 'Failed to send message: Project folder unavailable',
+		});
+		expect(deps.composerState.isSubmitting).toBe(false);
+		refresh.resolve();
 	});
 
 	it('retries an ambiguous direct response once with the same identity', async () => {

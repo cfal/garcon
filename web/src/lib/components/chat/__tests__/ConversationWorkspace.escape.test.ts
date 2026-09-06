@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationWorkspaceEscapeHost from './ConversationWorkspaceEscapeHost.svelte';
 import { getChatExecutionControl, getChatMessages, stopChat } from '$lib/api/chats.js';
+import { getGitRefs } from '$lib/api/git.js';
 import { ToolResultMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
+import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 
 type BackgroundMessagesHandler = (
 	chatId: string,
@@ -41,6 +43,11 @@ vi.mock('$lib/api/chats.js', () => ({
 	updateChatModel: vi.fn(),
 	updateExecutionSettings: vi.fn(),
 }));
+
+vi.mock('$lib/api/git.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/git.js')>();
+	return { ...actual, getGitRefs: vi.fn() };
+});
 
 vi.mock('$lib/chat/conversation/conversation-router-adapter.svelte.js', () => ({
 	mountConversationRouter: vi.fn(),
@@ -79,6 +86,7 @@ vi.mock('$lib/components/chat/QueuedInputsDialog.svelte', async () => ({
 const mockGetChatMessages = vi.mocked(getChatMessages);
 const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
 const mockStopChat = vi.mocked(stopChat);
+const mockGetGitRefs = vi.mocked(getGitRefs);
 
 describe('ConversationWorkspace Escape abort handling', () => {
 	beforeEach(() => {
@@ -132,6 +140,8 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				updatedAt: null,
 			},
 		});
+		mockGetGitRefs.mockReset();
+		mockGetGitRefs.mockResolvedValue({ refs: [] });
 	});
 
 	it('patches activity for a tool-only background reconnect batch', () => {
@@ -156,6 +166,29 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			),
 		).toBe(true);
 		expect(patchActivity).toHaveBeenCalledWith('chat-background', timestamp);
+	});
+
+	it('does not publish branch state after the initiating surface loses command ownership', async () => {
+		let resolveProject!: (value: ProjectResolutionResponse) => void;
+		let target!: ProjectTarget;
+		const fetchProjectResolution = vi.fn((requestedTarget: ProjectTarget) => {
+			target = requestedTarget;
+			return new Promise<ProjectResolutionResponse>((resolve) => {
+				resolveProject = resolve;
+			});
+		});
+		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
+		await fireEvent.click(screen.getByRole('button', { name: 'Move command ownership' }));
+		resolveProject({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		});
+		await waitFor(() => expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'));
+
+		expect(mockGetGitRefs).not.toHaveBeenCalled();
 	});
 
 	afterEach(() => {

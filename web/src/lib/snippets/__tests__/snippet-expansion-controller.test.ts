@@ -66,6 +66,31 @@ describe('SnippetExpansionController', () => {
 		expect(await running).toEqual({ kind: 'cancelled' });
 	});
 
+	it('owns and cancels preparation before expansion starts', async () => {
+		let resolvePreparation!: (value: {
+			request: ExpandSnippetRequest;
+			prepared: string;
+		}) => void;
+		let preparationSignal!: AbortSignal;
+		const expand = vi.fn();
+		const controller = new SnippetExpansionController({ expand });
+		const running = controller.runPrepared('review', (signal) => {
+			preparationSignal = signal;
+			return new Promise<{ request: ExpandSnippetRequest; prepared: string }>((resolve) => {
+				resolvePreparation = resolve;
+			});
+		});
+
+		expect(controller.pending).toBe(true);
+		expect(controller.pendingShortName).toBe('review');
+		controller.cancel();
+		expect(preparationSignal.aborted).toBe(true);
+		resolvePreparation({ request, prepared: 'context' });
+
+		expect(await running).toEqual({ kind: 'cancelled' });
+		expect(expand).not.toHaveBeenCalled();
+	});
+
 	it('clears pending state and propagates expansion errors', async () => {
 		const controller = new SnippetExpansionController({
 			expand: vi.fn().mockRejectedValue(new Error('unavailable')),

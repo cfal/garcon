@@ -91,6 +91,8 @@ export interface ChatSessionsPort {
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
 	patchActivity(chatId: string, timestamp: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
+	projectPathRevision(chatId: string): number;
+	onProjectPathChanged(listener: (chatId: string, projectPath: string | null) => void): () => void;
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
 	isChatProcessing(chatId: string): boolean;
 	processingPhase(chatId: string): ChatProcessingPhase | null;
@@ -316,6 +318,10 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
 	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
 	readonly #archiveProjection = new ChatArchiveProjectionState();
+	readonly #projectPathRevisions = new Map<string, number>();
+	readonly #projectPathListeners = new Set<
+		(chatId: string, projectPath: string | null) => void
+	>();
 
 	#byId = $derived.by(() => this.#archiveProjection.projectRecords(this.#baseById));
 	#order = $derived.by(() => this.#archiveProjection.projectOrder(this.#baseOrder, this.#byId));
@@ -369,10 +375,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (showLoading) this.isLoadingChats = true;
 		try {
 			const fetchChats = this.#deps.listChats ?? listChats;
+			const projectPathRevisions = new Map(this.#projectPathRevisions);
 			const res = await fetchChats();
 			this.lastSelectedChatId =
 				typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
-			this.upsertFromServer(res.sessions ?? []);
+			this.#upsertFromServer(res.sessions ?? [], projectPathRevisions);
 			this.#latestSuccessfulFetchGeneration = fetchGeneration;
 		} catch (err) {
 			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
@@ -655,6 +662,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	 *  for unchanged records to avoid unnecessary re-renders. Drafts that the
 	 *  server now owns get their startup config cleaned up. */
 	upsertFromServer(sessions: ChatSession[]): void {
+		this.#upsertFromServer(sessions);
+	}
+
+	#upsertFromServer(
+		sessions: ChatSession[],
+		requestProjectPathRevisions?: ReadonlyMap<string, number>,
+	): void {
 		const nextById: Record<string, ChatSessionRecord> = {};
 		const nextOrder: string[] = [];
 		const previousServerChatIds = new Set(
@@ -673,10 +687,22 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const startupIdsToRemove: string[] = [];
 
 		for (const session of sessions) {
-			const next = toRecord(session);
+			let next = toRecord(session);
 			next.processingPhase = this.#resolveProcessing(next.id, next.processingPhase);
 			next.isProcessing = next.processingPhase !== null;
 			const prev = this.#baseById[next.id];
+			const requestRevision = requestProjectPathRevisions?.get(next.id) ?? 0;
+			const currentRevision = this.projectPathRevision(next.id);
+			if (
+				prev &&
+				requestProjectPathRevisions &&
+				requestRevision !== currentRevision &&
+				next.projectPath !== prev.projectPath
+			) {
+				next = { ...next, projectPath: prev.projectPath };
+			} else if (prev?.projectPath !== next.projectPath) {
+				this.#publishProjectPathChanged(next.id, next.projectPath);
+			}
 			reconcileActivityProjection(prev, next);
 			if (prev && sameRecord(prev, next)) {
 				nextById[next.id] = prev;
@@ -703,6 +729,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const serverIdSet = new Set(nextOrder);
 		for (const chatId of previousServerChatIds) {
 			if (serverIdSet.has(chatId)) continue;
+			this.#publishProjectPathChanged(chatId, null);
 			this.#processingOverrides.delete(chatId);
 			this.#processingSnapshot?.delete(chatId);
 		}
@@ -789,6 +816,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
+		if (previous?.projectPath !== next.projectPath) {
+			this.#publishProjectPathChanged(entry.id, next.projectPath);
+		}
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
@@ -815,6 +845,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		this.#processingSnapshot?.delete(chatId);
 		removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
 		if (!this.#baseById[chatId]) return;
+		this.#publishProjectPathChanged(chatId, null);
 
 		const nextById = { ...this.#baseById };
 		delete nextById[chatId];
@@ -874,6 +905,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
+		if (typeof patch.projectPath === 'string' && patch.projectPath !== chat.projectPath) {
+			this.#publishProjectPathChanged(chatId, patch.projectPath);
+		}
 		const nextChat = {
 			...chat,
 			...patch,
@@ -883,6 +917,22 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			...this.#baseById,
 			[chatId]: nextChat,
 		};
+	}
+
+	projectPathRevision(chatId: string): number {
+		return this.#projectPathRevisions.get(chatId) ?? 0;
+	}
+
+	onProjectPathChanged(
+		listener: (chatId: string, projectPath: string | null) => void,
+	): () => void {
+		this.#projectPathListeners.add(listener);
+		return () => this.#projectPathListeners.delete(listener);
+	}
+
+	#publishProjectPathChanged(chatId: string, projectPath: string | null): void {
+		this.#projectPathRevisions.set(chatId, this.projectPathRevision(chatId) + 1);
+		for (const listener of this.#projectPathListeners) listener(chatId, projectPath);
 	}
 
 	/** Applies a server-confirmed lastReadAt and recomputes isUnread locally.

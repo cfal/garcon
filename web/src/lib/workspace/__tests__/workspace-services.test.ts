@@ -62,6 +62,37 @@ vi.mock('$lib/api/project-resolution.js', () => ({
 const DEFAULT_WINDOW: WorkspaceWindowId = 'window-main';
 const OTHER_WINDOW: WorkspaceWindowId = 'window-2';
 
+function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
+	return {
+		id: '1788698026082000',
+		parentChat: null,
+		agentId: 'codex',
+		agentOwnershipEpoch: 'epoch-1',
+		model: 'default',
+		permissionMode: 'default',
+		thinkingMode: 'none',
+		agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+		title: 'Project chat',
+		projectPath: '/workspace/project',
+		orderGroup: 'normal',
+		tags: [],
+		activity: {
+			createdAt: '2026-09-06T00:00:00.000Z',
+			lastActivityAt: '2026-09-06T00:00:00.000Z',
+			lastReadAt: '2026-09-06T00:00:00.000Z',
+		},
+		preview: { lastMessage: 'Initial preview' },
+		isPinned: false,
+		isArchived: false,
+		isActive: false,
+		isProcessing: false,
+		processingPhase: null,
+		canReloadFromNativeHistory: false,
+		isUnread: false,
+		...overrides,
+	};
+}
+
 function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
 	services: WorkspaceServices;
 	ghCapability: ReturnType<typeof createGhCapabilityStore>;
@@ -239,33 +270,7 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings.showQuickCommitTray = false;
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
-		const entry: ChatListEntry = {
-			id: '1788698026082000',
-			parentChat: null,
-			agentId: 'codex',
-			agentOwnershipEpoch: 'epoch-1',
-			model: 'default',
-			permissionMode: 'default',
-			thinkingMode: 'none',
-			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
-			title: 'Project chat',
-			projectPath: '/workspace/project',
-			orderGroup: 'normal',
-			tags: [],
-			activity: {
-				createdAt: '2026-09-06T00:00:00.000Z',
-				lastActivityAt: '2026-09-06T00:00:00.000Z',
-				lastReadAt: '2026-09-06T00:00:00.000Z',
-			},
-			preview: { lastMessage: 'Initial preview' },
-			isPinned: false,
-			isArchived: false,
-			isActive: false,
-			isProcessing: false,
-			processingPhase: null,
-			canReloadFromNativeHistory: false,
-			isUnread: false,
-		};
+		const entry = makeChatEntry();
 		assembled.chatSessions.upsertServerChat(entry);
 		assembled.chatSessions.setSelectedChatId(entry.id);
 		await vi.waitFor(() => expect(projectResolutionApiMocks.resolveProject).toHaveBeenCalledOnce());
@@ -275,6 +280,29 @@ describe('createWorkspaceServices', () => {
 		await tick();
 
 		expect(projectResolutionApiMocks.resolveProject).toHaveBeenCalledOnce();
+	});
+
+	it('renews demanded resolution after an A/B/A binding change in one reactive flush', async () => {
+		projectResolutionApiMocks.resolveProject.mockImplementation(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+		}));
+		rootLocalSettings = createLocalSettingsStore();
+		rootLocalSettings.showQuickCommitTray = true;
+		const assembled = assembleWorkspaceServices(rootLocalSettings);
+		services = assembled.services;
+		const entry = makeChatEntry({ projectPath: '/workspace/a' });
+		assembled.chatSessions.upsertServerChat(entry);
+		assembled.chatSessions.setSelectedChatId(entry.id);
+		await vi.waitFor(() => expect(projectResolutionApiMocks.resolveProject).toHaveBeenCalledOnce());
+
+		assembled.chatSessions.patchChat(entry.id, { projectPath: '/workspace/b' });
+		assembled.chatSessions.patchChat(entry.id, { projectPath: '/workspace/a' });
+
+		await vi.waitFor(() => expect(projectResolutionApiMocks.resolveProject).toHaveBeenCalledTimes(2));
+		expect(
+			projectResolutionApiMocks.resolveProject.mock.calls.map(([requested]) => requested.projectPath),
+		).toEqual(['/workspace/a', '/workspace/a']);
 	});
 
 	it('keeps a resolved destination when an old binding requests a metadata refresh', async () => {
@@ -298,6 +326,9 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
+		assembled.chatSessions.upsertServerChat(
+			makeChatEntry({ projectPath: oldTarget.projectPath }),
+		);
 		const refresh = vi
 			.spyOn(assembled.chatSessions, 'quietRefreshChats')
 			.mockResolvedValue(undefined);
@@ -317,6 +348,54 @@ describe('createWorkspaceServices', () => {
 		expect(refresh).toHaveBeenCalledOnce();
 		oldLease.release();
 		destinationLease.release();
+	});
+
+	it('skips binding refresh after the declared path has already changed', async () => {
+		projectResolutionApiMocks.resolveProject.mockRejectedValue(
+			new ApiError(409, 'changed', 'PROJECT_PATH_CHANGED'),
+		);
+		rootLocalSettings = createLocalSettingsStore();
+		const assembled = assembleWorkspaceServices(rootLocalSettings);
+		services = assembled.services;
+		assembled.chatSessions.upsertServerChat(makeChatEntry({ projectPath: '/workspace/new' }));
+		const refresh = vi.spyOn(assembled.chatSessions, 'quietRefreshChats');
+		const lease = services.projectResolution.retain({
+			kind: 'chat',
+			chatId: '1788698026082000',
+			projectPath: '/workspace/old',
+		});
+
+		await lease.resolve();
+
+		expect(refresh).not.toHaveBeenCalled();
+		lease.release();
+	});
+
+	it('coalesces binding refreshes while reconciliation is pending', async () => {
+		projectResolutionApiMocks.resolveProject.mockRejectedValue(
+			new ApiError(409, 'changed', 'PROJECT_PATH_CHANGED'),
+		);
+		rootLocalSettings = createLocalSettingsStore();
+		const assembled = assembleWorkspaceServices(rootLocalSettings);
+		services = assembled.services;
+		assembled.chatSessions.upsertServerChat(makeChatEntry({ projectPath: '/workspace/project' }));
+		const pendingRefresh = Promise.withResolvers<void>();
+		const refresh = vi
+			.spyOn(assembled.chatSessions, 'quietRefreshChats')
+			.mockReturnValue(pendingRefresh.promise);
+		const lease = services.projectResolution.retain({
+			kind: 'chat',
+			chatId: '1788698026082000',
+			projectPath: '/workspace/project',
+		});
+
+		await lease.resolve();
+		await lease.retry();
+
+		expect(refresh).toHaveBeenCalledOnce();
+		pendingRefresh.resolve();
+		await pendingRefresh.promise;
+		lease.release();
 	});
 
 	it('resolves partition bounds from the shared host measurement', async () => {

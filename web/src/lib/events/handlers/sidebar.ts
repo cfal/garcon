@@ -16,7 +16,6 @@ export interface SidebarContext {
 	navigateAwayFromChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
 	patchChatProjectPath: (chatId: string, patch: { projectPath: string }) => void;
-	invalidateProjectResolution: (chatId: string, preserveProjectPath?: string) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	refreshChats: () => void;
 	removeChatTranscript: (chatId: string) => void;
@@ -46,7 +45,6 @@ export function handleChatProjectPathUpdated(
 	ctx: SidebarContext,
 ) {
 	if (!msg.chatId || !msg.projectPath) return;
-	ctx.invalidateProjectResolution(msg.chatId, msg.projectPath);
 	ctx.patchChatProjectPath(msg.chatId, {
 		projectPath: msg.projectPath,
 	});

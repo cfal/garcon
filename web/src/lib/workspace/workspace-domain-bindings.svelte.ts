@@ -5,7 +5,6 @@ import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidati
 import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
-import { projectTargetKey } from '$shared/project-resolution';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import type {
 	ProjectResolutionLease,
@@ -31,7 +30,7 @@ export class WorkspaceDomainBindings {
 		this.#destroyEffects = $effect.root(() => {
 			const currentTargetKey = $derived.by(() => {
 				const target = deps.workspaceContext.currentTarget;
-				return target ? projectTargetKey(target) : null;
+				return target ? deps.projectResolution.lifecycleKey(target) : null;
 			});
 
 			$effect(() => {

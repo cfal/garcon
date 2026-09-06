@@ -182,9 +182,6 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		chatPresentations: {
 			clearDeletedChat: vi.fn(),
 		},
-		projectResolution: {
-			invalidateChat: vi.fn(),
-		},
 		notifyCompletion: vi.fn(),
 		...overrides,
 	};
@@ -303,9 +300,6 @@ describe('event router integration', () => {
 
 		expect(stores.sessions.patchChat).toHaveBeenCalledWith('chat-b', {
 			projectPath: '/workspace/worktree',
-		});
-		expect(stores.projectResolution.invalidateChat).toHaveBeenCalledWith('chat-b', {
-			preserveProjectPath: '/workspace/worktree',
 		});
 	});
 

@@ -105,9 +105,6 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		notifyCompletion: vi.fn(),
 		panels,
 		clearDeletedChat: vi.fn(),
-		projectResolution: {
-			invalidateChat: vi.fn(),
-		},
 	};
 }
 

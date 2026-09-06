@@ -81,10 +81,12 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 function createHarness(
@@ -98,6 +100,7 @@ function createHarness(
 	let selectedChatId =
 		options.selectedChatId === undefined ? (chats[0]?.id ?? null) : options.selectedChatId;
 	const callbacks = {
+		projectPathRevision: vi.fn(() => 0),
 		onQuietRefresh: vi.fn(async () => undefined),
 		onSelectChat: vi.fn(),
 		onNewChat: vi.fn(),
@@ -140,6 +143,7 @@ function createHarness(
 	return {
 		controller: new ChatActionController(deps),
 		callbacks,
+		chats,
 		setSelectedChatId(chatId: string | null) {
 			selectedChatId = chatId;
 		},
@@ -357,6 +361,113 @@ describe('ChatActionController', () => {
 		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
 			projectPath: '/workspace/canonical',
 		});
+	});
+
+	it('does not apply a PATCH result after a newer WebSocket path', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
+		const { controller, callbacks, chats } = createHarness();
+		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		chats[0] = makeChat({ projectPath: '/workspace/newer' });
+		pending.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/requested',
+			effectiveProjectKey: '/workspace/requested',
+			previousProjectPath: '/workspace/repo',
+		});
+
+		await update;
+
+		expect(callbacks.onProjectPathUpdated).not.toHaveBeenCalled();
+	});
+
+	it('applies a PATCH result idempotently after the same WebSocket path', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
+		const { controller, callbacks, chats } = createHarness();
+		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		chats[0] = makeChat({ projectPath: '/workspace/requested' });
+		pending.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/requested',
+			effectiveProjectKey: '/workspace/requested',
+			previousProjectPath: '/workspace/repo',
+		});
+
+		await update;
+
+		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
+			projectPath: '/workspace/requested',
+		});
+	});
+
+	it('does not apply a PATCH result after an observed A/B/A binding sequence', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
+		const { controller, callbacks, chats } = createHarness();
+		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		chats[0] = makeChat({ projectPath: '/workspace/temporary' });
+		callbacks.projectPathRevision.mockReturnValue(1);
+		chats[0] = makeChat({ projectPath: '/workspace/repo' });
+		callbacks.projectPathRevision.mockReturnValue(2);
+		pending.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/requested',
+			effectiveProjectKey: '/workspace/requested',
+			previousProjectPath: '/workspace/repo',
+		});
+
+		await update;
+
+		expect(callbacks.onProjectPathUpdated).not.toHaveBeenCalled();
+	});
+
+	it('lets a second project-path request supersede the first', async () => {
+		const first = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		const second = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath)
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const { controller, callbacks } = createHarness();
+		const firstUpdate = controller.updateProjectPath('chat-1', '/workspace/first');
+		const secondUpdate = controller.updateProjectPath('chat-1', '/workspace/second');
+		second.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/second',
+			effectiveProjectKey: '/workspace/second',
+			previousProjectPath: '/workspace/repo',
+		});
+		await secondUpdate;
+		first.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/first',
+			effectiveProjectKey: '/workspace/first',
+			previousProjectPath: '/workspace/repo',
+		});
+		await firstUpdate;
+
+		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledOnce();
+		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
+			projectPath: '/workspace/second',
+		});
+	});
+
+	it('rejects project-path updates without a current binding', async () => {
+		const missing = createHarness({ chats: [] });
+		const empty = createHarness({ chats: [makeChat({ projectPath: '' })] });
+
+		await expect(missing.controller.updateProjectPath('chat-1', '/workspace/new')).rejects.toThrow(
+			m.sidebar_project_path_errors_update_failed(),
+		);
+		await expect(empty.controller.updateProjectPath('chat-1', '/workspace/new')).rejects.toThrow(
+			m.sidebar_project_path_errors_update_failed(),
+		);
+		expect(chatsApi.updateChatProjectPath).not.toHaveBeenCalled();
 	});
 
 	it('upserts and selects a server-confirmed fork', async () => {

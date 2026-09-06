@@ -73,10 +73,12 @@
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		directAdmissionPending?: boolean;
 		requiresQueuedSubmission?: boolean;
+		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 		onsubmit?: () => void;
 		onSteerPreferredSubmit?: () => void;
 		onAbort?: () => void;
 		onQuickCommit?: () => void;
+		onChooseProjectFolder?: (chatId: string) => void;
 	}
 
 	let {
@@ -104,10 +106,12 @@
 		quickCommitSummary = null,
 		directAdmissionPending = false,
 		requiresQueuedSubmission: requiresQueuedSubmissionOverride,
+		fetchProjectResolution,
 		onsubmit = () => {},
 		onSteerPreferredSubmit = () => {},
 		onAbort = () => {},
 		onQuickCommit = () => {},
+		onChooseProjectFolder,
 	}: Props = $props();
 
 	const chatDrafts = new ChatDraftStore();
@@ -134,13 +138,19 @@
 	export function getProjectResolutionRequestCount(): number {
 		return projectResolutionRequestCount;
 	}
-	const projectResolution = new ProjectResolutionStore(async (target: ProjectTarget) => {
-		projectResolutionRequestCount += 1;
-		return {
-			target,
-			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
-		};
-	});
+	function getInitialProjectResolver() {
+		return (
+			fetchProjectResolution ??
+			(async (target: ProjectTarget) => {
+				projectResolutionRequestCount += 1;
+				return {
+					target,
+					resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+				};
+			})
+		);
+	}
+	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver());
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
@@ -337,6 +347,7 @@
 		supportsForkWhileRunning: () => true,
 		supportsSteering: (agentId: string) => agentId === 'codex',
 		supportsGoals: (agentId: string) => agentId === 'codex',
+		supportsUpdateProjectPath: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,
 			apiProviderId: null,
@@ -445,9 +456,10 @@
 	{isVisible}
 	{isPresented}
 	{composerEditorOpenRequestId}
-	{directAdmissionPending}
-	{requiresQueuedSubmission}
-	resendCandidates={transcript.resendCandidates}
+		{directAdmissionPending}
+		{requiresQueuedSubmission}
+		{onChooseProjectFolder}
+		resendCandidates={transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />
 

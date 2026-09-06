@@ -21,18 +21,26 @@ export interface ProjectResolutionLease {
 	release(): void;
 }
 
-interface ChatInvalidationOptions {
-	preserveProjectPath?: string;
-}
-
 interface RetainedRecord {
 	record: ProjectResolutionRecord;
 	references: number;
 }
 
+interface PendingResolution {
+	controller: AbortController;
+	completion: Promise<void>;
+	waiter: Promise<void>;
+}
+
+interface ChatBinding {
+	projectPath: string;
+	revision: number;
+}
+
 class ProjectResolutionRecord {
 	snapshot = $state<ProjectResolutionSnapshot>({ kind: 'unchecked' });
-	#request: { controller: AbortController; promise: Promise<void> } | null = null;
+	#request: PendingResolution | null = null;
+	#disposed = false;
 
 	constructor(
 		readonly target: ProjectTarget,
@@ -42,14 +50,25 @@ class ProjectResolutionRecord {
 	) {}
 
 	resolve(): Promise<void> {
-		if (this.#request) return this.#request.promise;
+		if (this.#disposed) return Promise.resolve();
+		if (this.#request) return this.#request.waiter;
 		const controller = new AbortController();
 		this.snapshot = { kind: 'resolving' };
-		const pending = { controller, promise: Promise.resolve() };
+		const pending: PendingResolution = {
+			controller,
+			completion: Promise.resolve(),
+			waiter: Promise.resolve(),
+		};
 		this.#request = pending;
 		const isCurrent = () =>
 			this.#request === pending && !controller.signal.aborted && this.isRetained();
-		pending.promise = this.fetchResolution(this.target, controller.signal)
+		let request: ReturnType<typeof resolveProject>;
+		try {
+			request = this.fetchResolution(this.target, controller.signal);
+		} catch (error) {
+			request = Promise.reject(error);
+		}
+		pending.completion = request
 			.then((response) => {
 				if (isCurrent()) this.snapshot = response.resolution;
 			})
@@ -70,27 +89,39 @@ class ProjectResolutionRecord {
 			.finally(() => {
 				if (this.#request === pending) this.#request = null;
 			});
-		return pending.promise;
+		pending.waiter = this.#waitForCurrentRequest(pending);
+		return pending.waiter;
 	}
 
 	retry(): Promise<void> {
-		this.invalidate();
+		if (this.#disposed) return Promise.resolve();
+		const previous = this.#request;
+		this.#request = null;
+		previous?.controller.abort();
+		this.snapshot = { kind: 'unchecked' };
 		return this.resolve();
 	}
 
-	invalidate(): void {
+	dispose(): void {
+		if (this.#disposed) return;
+		this.#disposed = true;
 		this.#request?.controller.abort();
 		this.#request = null;
 		this.snapshot = { kind: 'unchecked' };
 	}
 
-	dispose(): void {
-		this.invalidate();
+	async #waitForCurrentRequest(request: PendingResolution): Promise<void> {
+		await request.completion;
+		if (this.#disposed) return;
+		const current = this.#request;
+		if (current && current !== request) await current.waiter;
 	}
 }
 
 export class ProjectResolutionStore {
 	readonly #records = new SvelteMap<string, RetainedRecord>();
+	readonly #chatBindings = new SvelteMap<string, ChatBinding>();
+	#destroyed = false;
 
 	constructor(
 		private readonly fetchResolution: typeof resolveProject = resolveProject,
@@ -100,7 +131,11 @@ export class ProjectResolutionStore {
 	) {}
 
 	retain(target: ProjectTarget): ProjectResolutionLease {
+		if (this.#destroyed) throw new Error('Project resolution store has been destroyed');
 		const key = projectTargetKey(target);
+		if (target.kind === 'chat' && !this.#chatBindings.has(target.chatId)) {
+			this.#chatBindings.set(target.chatId, { projectPath: target.projectPath, revision: 0 });
+		}
 		let retained = this.#records.get(key);
 		if (!retained) {
 			const record = new ProjectResolutionRecord(
@@ -120,8 +155,14 @@ export class ProjectResolutionStore {
 			get snapshot() {
 				return record.snapshot;
 			},
-			resolve: () => record.resolve(),
-			retry: () => record.retry(),
+			resolve: () =>
+				released
+					? Promise.reject(new Error('Project resolution lease has been released'))
+					: record.resolve(),
+			retry: () =>
+				released
+					? Promise.reject(new Error('Project resolution lease has been released'))
+					: record.retry(),
 			release: () => {
 				if (released) return;
 				released = true;
@@ -139,20 +180,47 @@ export class ProjectResolutionStore {
 		return this.#records.get(projectTargetKey(target))?.record.snapshot ?? { kind: 'unchecked' };
 	}
 
-	invalidateChat(chatId: string, options: ChatInvalidationOptions = {}): void {
-		for (const retained of this.#records.values()) {
+	lifecycleKey(target: ProjectTarget): string {
+		const key = projectTargetKey(target);
+		if (target.kind === 'path') return key;
+		return `${key}\u0000${this.#chatBindings.get(target.chatId)?.revision ?? 0}`;
+	}
+
+	markObsoleteChatTargets(chatId: string, currentProjectPath: string): void {
+		const binding = this.#chatBindings.get(chatId);
+		if (binding?.projectPath === currentProjectPath) return;
+		this.#chatBindings.set(chatId, {
+			projectPath: currentProjectPath,
+			revision: (binding?.revision ?? 0) + 1,
+		});
+		for (const [key, retained] of this.#records) {
+			const target = retained.record.target;
 			if (
-				retained.record.target.kind === 'chat' &&
-				retained.record.target.chatId === chatId &&
-				retained.record.target.projectPath !== options.preserveProjectPath
-			) {
-				retained.record.invalidate();
-			}
+				target.kind !== 'chat' ||
+				target.chatId !== chatId ||
+				target.projectPath === currentProjectPath
+			)
+				continue;
+			retained.record.dispose();
+			this.#records.delete(key);
+		}
+	}
+
+	removeChatTargets(chatId: string): void {
+		this.#chatBindings.delete(chatId);
+		for (const [key, retained] of this.#records) {
+			const target = retained.record.target;
+			if (target.kind !== 'chat' || target.chatId !== chatId) continue;
+			retained.record.dispose();
+			this.#records.delete(key);
 		}
 	}
 
 	destroy(): void {
+		if (this.#destroyed) return;
+		this.#destroyed = true;
 		for (const retained of this.#records.values()) retained.record.dispose();
 		this.#records.clear();
+		this.#chatBindings.clear();
 	}
 }

@@ -33,7 +33,6 @@ import {
 } from '$lib/chat/conversation/pending-chat-handoff.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import type { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
 
@@ -151,7 +150,6 @@ export interface EventRouterStores {
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
 	chatPresentations: EventRouterChatPresentations;
-	projectResolution: Pick<ProjectResolutionStore, 'invalidateChat'>;
 	notifyCompletion: () => void;
 }
 
@@ -287,8 +285,6 @@ function buildDispatch(
 		navigateAwayFromChat: stores.navigation.navigateAwayFromChat,
 		patchChatTitle: (chatId, title) => stores.sessions.patchChat(chatId, { title }),
 		patchChatProjectPath: (chatId, patch) => stores.sessions.patchChat(chatId, patch),
-		invalidateProjectResolution: (chatId, preserveProjectPath) =>
-			stores.projectResolution.invalidateChat(chatId, { preserveProjectPath }),
 		patchLastReadAt: (chatId, lastReadAt) => stores.sessions.patchLastReadAt(chatId, lastReadAt),
 		refreshChats: () => {
 			void stores.sessions.quietRefreshChats();

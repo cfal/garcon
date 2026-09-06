@@ -17,7 +17,6 @@ import type { ResendCandidate } from '$shared/chat-view';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 import type { ConversationLifecyclePort } from './conversation-lifecycle-registry.svelte.js';
-import type { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 
 export interface ConversationRouterStoreDeps {
 	sessions: Pick<
@@ -59,7 +58,6 @@ export interface ConversationRouterStoreDeps {
 	chatDrafts?: Pick<ChatDraftStore, 'discardChat'>;
 	panels: ConversationPanelRegistry;
 	clearDeletedChat: (chatId: string) => void;
-	projectResolution: Pick<ProjectResolutionStore, 'invalidateChat'>;
 }
 
 export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
@@ -184,7 +182,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		chatPresentations: {
 			clearDeletedChat: deps.clearDeletedChat,
 		},
-		projectResolution: deps.projectResolution,
 		notifyCompletion: deps.notifyCompletion,
 	};
 }

@@ -173,7 +173,10 @@
 		});
 	});
 	const visibleProjectTargetsKey = $derived.by(() =>
-		visibleProjectTargets().map(projectTargetKey).sort().join('\u0000'),
+		visibleProjectTargets()
+			.map((target) => projectResolution.lifecycleKey(target))
+			.sort()
+			.join('\u0000'),
 	);
 
 	$effect(() => {

@@ -243,7 +243,6 @@
 				);
 			});
 		},
-		projectResolution,
 	});
 	reconnectCoordinator.mount();
 
@@ -299,6 +298,11 @@
 		},
 		requestProcessingSnapshot: (source) => ws.requestProcessingSnapshot(source),
 		onProjectUnavailable: async (target) => {
+			if (
+				target.kind === 'chat' &&
+				sessions.byId[target.chatId]?.projectPath !== target.projectPath
+			)
+				return;
 			const lease = projectResolution.retain(target);
 			try {
 				await lease.retry();
@@ -394,7 +398,7 @@
 		},
 		toggleBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
-			toggleCommitBranchDropdown(chatId);
+			toggleCommitBranchDropdown(surfaceId, chatId);
 		},
 		closeBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -644,7 +648,10 @@
 		});
 	}
 
-	async function toggleCommitBranchDropdown(chatId: string): Promise<void> {
+	async function toggleCommitBranchDropdown(
+		surfaceId: ChatViewSurfaceId,
+		chatId: string,
+	): Promise<void> {
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath) return;
 		if (
@@ -655,8 +662,25 @@
 			return;
 		}
 		const project = await resolveChatProject(chatId);
-		if (!project) return;
-		await quickGitBranches.openBranchDropdown(project.projectPath);
+		if (!project || !ownsConversationCommand(surfaceId, chatId)) return;
+		quickGitBranches.setProject(
+			project.projectPath,
+			quickGit.summaryFor(project.projectPath)?.branch,
+			project.effectiveProjectKey,
+		);
+		await quickGitBranches.openBranchDropdown(
+			project.projectPath,
+			project.effectiveProjectKey,
+		);
+	}
+
+	function ownsConversationCommand(surfaceId: ChatViewSurfaceId, chatId: string): boolean {
+		const owner = workspace.focusOwner;
+		return (
+			conversationPanels.panel(surfaceId)?.chatId === chatId &&
+			owner.kind !== 'chat-list' &&
+			owner.surfaceId === surfaceId
+		);
 	}
 
 	async function openNewBranchDialog(
@@ -664,7 +688,7 @@
 		chatId: string,
 	): Promise<void> {
 		const project = await resolveChatProject(chatId);
-		if (!project) return;
+		if (!project || !ownsConversationCommand(surfaceId, chatId)) return;
 		quickGitBranches.openNewBranchDialog(
 			project.projectPath,
 			surfaceId,
@@ -678,7 +702,7 @@
 		branch: string,
 	): Promise<void> {
 		const project = await resolveChatProject(chatId);
-		if (!project) return;
+		if (!project || !ownsConversationCommand(surfaceId, chatId)) return;
 		await quickGitBranches.switchBranch(
 			project.projectPath,
 			branch,

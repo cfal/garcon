@@ -269,10 +269,10 @@ export async function submitDraftRoute(
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) =>
 				m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
-			onRejected: async (failure) => {
+			onRejected: (failure) => {
 				deps.lifecycle.clearTurnStatus(chatId);
 				deps.sessions.applyProcessingEvent(chatId, null);
-				await refreshUnavailableProject(deps, context, failure);
+				refreshUnavailableProject(deps, context, failure);
 			},
 		});
 	} finally {
@@ -340,12 +340,16 @@ function refreshUnavailableProject(
 	deps: RouteDeps,
 	context: SubmissionContext,
 	error: unknown,
-): Promise<void> | void {
+): void {
 	if (!(error instanceof ApiError) || error.errorCode !== 'PROJECT_UNAVAILABLE') return;
 	const target: ProjectTarget = context.chat.status === 'draft'
 		? { kind: 'path', projectPath: context.chat.projectPath }
 		: { kind: 'chat', chatId: context.chatId, projectPath: context.chat.projectPath };
-	return deps.onProjectUnavailable?.(target);
+	try {
+		void Promise.resolve(deps.onProjectUnavailable?.(target)).catch(() => undefined);
+	} catch {
+		// Availability refresh is ancillary to the definitive submission result.
+	}
 }
 
 function requireTranscriptView(deps: RouteDeps, chatId: string): string {

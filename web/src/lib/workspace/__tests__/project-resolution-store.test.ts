@@ -62,7 +62,7 @@ describe('ProjectResolutionStore', () => {
 		expect(store.snapshotFor(target)).toEqual({ kind: 'unchecked' });
 	});
 
-	it('aborts and ignores a late result after invalidation', async () => {
+	it('aborts and ignores a late result after the target becomes obsolete', async () => {
 		const result = deferred<{
 			target: typeof target;
 			resolution: { kind: 'available'; effectiveProjectKey: string };
@@ -74,7 +74,7 @@ describe('ProjectResolutionStore', () => {
 		});
 		const lease = store.retain(target);
 		const pending = lease.resolve();
-		store.invalidateChat(CHAT_ID);
+		store.markObsoleteChatTargets(CHAT_ID, '/workspace/replacement');
 
 		expect(capturedSignal?.aborted).toBe(true);
 		result.resolve({
@@ -100,7 +100,7 @@ describe('ProjectResolutionStore', () => {
 		const lease = store.retain(destination);
 		const pending = lease.resolve();
 
-		store.invalidateChat(CHAT_ID, { preserveProjectPath: destination.projectPath });
+		store.markObsoleteChatTargets(CHAT_ID, destination.projectPath);
 
 		expect(capturedSignal?.aborted).toBe(false);
 		expect(lease.snapshot).toEqual({ kind: 'resolving' });
@@ -127,8 +127,8 @@ describe('ProjectResolutionStore', () => {
 		const lease = store.retain(destination);
 		await Promise.all([oldLease.resolve(), lease.resolve()]);
 
-		store.invalidateChat(CHAT_ID, { preserveProjectPath: destination.projectPath });
-		store.invalidateChat(CHAT_ID, { preserveProjectPath: destination.projectPath });
+		store.markObsoleteChatTargets(CHAT_ID, destination.projectPath);
+		store.markObsoleteChatTargets(CHAT_ID, destination.projectPath);
 
 		expect(fetchResolution).toHaveBeenCalledTimes(2);
 		expect(oldLease.snapshot).toEqual({ kind: 'unchecked' });
@@ -200,15 +200,46 @@ describe('ProjectResolutionStore', () => {
 			target,
 			resolution: { kind: 'available', effectiveProjectKey: '/stale/project' },
 		});
-		await original;
+		await Promise.resolve();
 		expect(lease.snapshot).toEqual({ kind: 'resolving' });
 		second.resolve({ target, resolution: { kind: 'unavailable', reason: 'not-found' } });
-		await retry;
+		await Promise.all([original, retry]);
 		expect(lease.snapshot).toEqual({ kind: 'unavailable', reason: 'not-found' });
 		lease.release();
 	});
 
-	it('prunes observations across repeated A/B/A target switches', async () => {
+	it('ignores an obsolete binding rejection after same-target retry', async () => {
+		const first = deferred<never>();
+		const second = deferred<{
+			target: typeof target;
+			resolution: { kind: 'available'; effectiveProjectKey: string };
+		}>();
+		const onBindingChanged = vi.fn();
+		const fetchResolution = vi
+			.fn()
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const store = new ProjectResolutionStore(fetchResolution, onBindingChanged);
+		const lease = store.retain(target);
+		const original = lease.resolve();
+		const retry = lease.retry();
+
+		first.reject(new ApiError(409, 'obsolete', 'PROJECT_PATH_CHANGED'));
+		second.resolve({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: '/real/current' },
+		});
+		await Promise.all([original, retry]);
+
+		expect(lease.snapshot).toEqual({
+			kind: 'available',
+			effectiveProjectKey: '/real/current',
+		});
+		expect(onBindingChanged).not.toHaveBeenCalled();
+		lease.release();
+	});
+
+	it('retires the prior incarnation across repeated A/B/A binding changes', async () => {
 		const targetB = { ...target, projectPath: '/workspace/project-b' } as const;
 		const fetchResolution = vi.fn(async (requested: ProjectTarget) => ({
 			target: requested,
@@ -219,23 +250,38 @@ describe('ProjectResolutionStore', () => {
 		}));
 		const store = new ProjectResolutionStore(fetchResolution);
 
+		const firstLifecycleKey = store.lifecycleKey(target);
 		const firstA = store.retain(target);
 		await firstA.resolve();
-		firstA.release();
-		const leaseB = store.retain(targetB);
-		await leaseB.resolve();
-		leaseB.release();
+		store.markObsoleteChatTargets(CHAT_ID, targetB.projectPath);
+		store.markObsoleteChatTargets(CHAT_ID, target.projectPath);
+		const secondLifecycleKey = store.lifecycleKey(target);
 		const secondA = store.retain(target);
 
 		expect(secondA.snapshot).toEqual({ kind: 'unchecked' });
-		expect(fetchResolution.mock.calls.map(([requested]) => requested.projectPath)).toEqual([
-			target.projectPath,
-			targetB.projectPath,
-		]);
+		expect(secondLifecycleKey).not.toBe(firstLifecycleKey);
+		expect(firstA.snapshot).toEqual({ kind: 'unchecked' });
+		await secondA.resolve();
+		expect(fetchResolution).toHaveBeenCalledTimes(2);
+		firstA.release();
 		secondA.release();
 	});
 
-	it('aborts every retained request when the owning workspace is destroyed', () => {
+	it('does not let released leases start or supersede requests', async () => {
+		const fetchResolution = vi.fn(async (requested: ProjectTarget) => ({
+			target: requested,
+			resolution: { kind: 'available' as const, effectiveProjectKey: '/real/project' },
+		}));
+		const store = new ProjectResolutionStore(fetchResolution);
+		const lease = store.retain(target);
+		lease.release();
+
+		await expect(lease.resolve()).rejects.toThrow('Project resolution lease has been released');
+		await expect(lease.retry()).rejects.toThrow('Project resolution lease has been released');
+		expect(fetchResolution).not.toHaveBeenCalled();
+	});
+
+	it('aborts every retained request when the owning workspace is destroyed', async () => {
 		const signals: AbortSignal[] = [];
 		const fetchResolution = vi.fn((_target, signal: AbortSignal) => {
 			signals.push(signal);
@@ -252,6 +298,8 @@ describe('ProjectResolutionStore', () => {
 		expect(signals).toHaveLength(2);
 		expect(signals.every((signal) => signal.aborted)).toBe(true);
 		expect(store.snapshotFor(target)).toEqual({ kind: 'unchecked' });
+		await expect(first.resolve()).resolves.toBeUndefined();
+		expect(() => store.retain(target)).toThrow('Project resolution store has been destroyed');
 	});
 
 	it('invalidates chat metadata when the server reports a changed binding', async () => {

@@ -144,7 +144,16 @@ export class GitBranchSelectorState {
 		this.isCreatingBranch = false;
 	}
 
-	async openBranchDropdown(projectPath: string): Promise<void> {
+	async openBranchDropdown(
+		projectPath: string,
+		expectedEffectiveProjectKey?: string,
+	): Promise<void> {
+		if (
+			expectedEffectiveProjectKey !== undefined &&
+			(this.currentProjectPath !== projectPath ||
+				this.currentEffectiveProjectKey !== expectedEffectiveProjectKey)
+		)
+			return;
 		this.showBranchDropdown = true;
 		await this.searchBranchRefs(projectPath);
 	}

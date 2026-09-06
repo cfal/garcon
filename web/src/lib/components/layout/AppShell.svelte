@@ -37,7 +37,6 @@
 		getSidebarProjectCollapse,
 		getGhCapability,
 		getWorkspaceCoordinator,
-		getProjectResolution,
 		getTransientLayers,
 		setChatDrafts,
 	} from '$lib/context';
@@ -78,7 +77,6 @@
 	const minuteClock = getMinuteClock();
 	const ghCapability = getGhCapability();
 	const workspace = getWorkspaceCoordinator();
-	const projectResolution = getProjectResolution();
 	const transientLayers = getTransientLayers();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
 	const chatDrafts = new ChatDraftStore();
@@ -106,6 +104,7 @@
 		get selectedChatId() {
 			return sessions.selectedChatId;
 		},
+		projectPathRevision: (chatId) => sessions.projectPathRevision(chatId),
 		onQuietRefresh: quietRefresh,
 		isArchiveMutationPending: (chatId) => sessions.isArchiveMutationPending(chatId),
 		startArchivingChats: (chatIds) => sessions.startArchivingChats(chatIds),
@@ -491,7 +490,6 @@
 	}
 
 	function handleChatProjectPathUpdated(chatId: string, patch: { projectPath: string }): void {
-		projectResolution.invalidateChat(chatId, { preserveProjectPath: patch.projectPath });
 		sessions.patchChat(chatId, { projectPath: patch.projectPath });
 	}
 

@@ -8,6 +8,7 @@ import type { ChatListEntry } from '$shared/chat-list';
 export interface ChatActionControllerDeps {
 	get chats(): ChatSessionRecord[];
 	get selectedChatId(): string | null;
+	projectPathRevision: (chatId: string) => number;
 	onQuietRefresh: () => Promise<void> | void;
 	isArchiveMutationPending: (chatId: string) => boolean;
 	startArchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
@@ -143,13 +144,18 @@ export class ChatActionController {
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<void> {
 		const expectedProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
-		if (!expectedProjectPath) return;
+		if (!expectedProjectPath) throw new Error(m.sidebar_project_path_errors_update_failed());
+		const expectedRevision = this.deps.projectPathRevision(chatId);
 		const generation = (this.#projectPathRequestGeneration.get(chatId) ?? 0) + 1;
 		this.#projectPathRequestGeneration.set(chatId, generation);
 		const result = await this.#sidebarController.updateProjectPath(chatId, projectPath);
 		if (this.#projectPathRequestGeneration.get(chatId) !== generation) return;
 		const currentProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
-		if (currentProjectPath !== expectedProjectPath && currentProjectPath !== result.projectPath)
+		if (
+			currentProjectPath !== result.projectPath &&
+			(currentProjectPath !== expectedProjectPath ||
+				this.deps.projectPathRevision(chatId) !== expectedRevision)
+		)
 			return;
 		this.deps.onProjectPathUpdated(chatId, {
 			projectPath: result.projectPath,
