@@ -11,7 +11,7 @@ import { Database } from 'bun:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
   AgentRunCommandRequest,
@@ -108,6 +108,7 @@ export interface OpenCodePaths {
   xdgCache: string;
   npmCache: string;
   managedConfig: string;
+  sessionIdentityProbePlugin: string;
   temp: string;
 }
 
@@ -128,6 +129,7 @@ export function openCodePaths(directories: IntegrationDirectories): OpenCodePath
     xdgCache: join(root, 'xdg-cache'),
     npmCache: join(root, 'npm-cache'),
     managedConfig: join(root, 'managed-config'),
+    sessionIdentityProbePlugin: join(root, 'session-identity-probe-plugin.js'),
     temp: join(root, 'tmp'),
   };
 }
@@ -246,6 +248,10 @@ export function startScriptedOpenCodeTestEnvironment(options: {
   proxy?: boolean;
   platform?: NodeJS.Platform;
   reasoningModel?: boolean;
+  sessionIdentityProbe?: {
+    ambientSessionId: string;
+    userPluginMarker: string;
+  };
   subagentDepth?: number;
 } = {}): ScriptedOpenCodeTestEnvironment {
   assertScriptedOpenCodePlatform(options.platform);
@@ -299,6 +305,16 @@ export function startScriptedOpenCodeTestEnvironment(options: {
     if (options.proxy) {
       environment.GARCON_TEST_OPENCODE_PROXY_DIR = paths.proxy;
     }
+    if (options.sessionIdentityProbe) {
+      environment.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+        formatter: false,
+        plugin: [[
+          pathToFileURL(paths.sessionIdentityProbePlugin).href,
+          { marker: options.sessionIdentityProbe.userPluginMarker },
+        ]],
+      });
+      environment.OPENCODE_SESSION_ID = options.sessionIdentityProbe.ambientSessionId;
+    }
     return environment;
   };
 
@@ -332,6 +348,16 @@ export function startScriptedOpenCodeTestEnvironment(options: {
       }), null, 2), {
         mode: 0o600,
       });
+      if (options.sessionIdentityProbe) {
+        await writeFile(paths.sessionIdentityProbePlugin, [
+          'export const SessionIdentityProbe = async (_input, options) => ({',
+          "  'shell.env': async (_hook, output) => {",
+          '    output.env.GARCON_TEST_USER_PLUGIN = options.marker;',
+          '  },',
+          '});',
+          '',
+        ].join('\n'), { mode: 0o600 });
+      }
       await writeOpenCodePluginSeed(paths.globalConfig);
       await writeOpenCodeSupervisorShim(paths.bin);
       const version = await verifyPinnedBinaryVersion({

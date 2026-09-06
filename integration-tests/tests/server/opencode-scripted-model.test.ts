@@ -407,6 +407,55 @@ describeOnLinux('OpenCode against a scripted model', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
+  test('propagates native session identity to shell calls without replacing user plugins', async () => {
+    environment?.dispose();
+    const ambientSessionId = marker('AMBIENT_SESSION_ID');
+    const userPluginMarker = marker('USER_PLUGIN');
+    environment = startScriptedOpenCodeTestEnvironment({
+      sessionIdentityProbe: { ambientSessionId, userPluginMarker },
+    });
+    const testEnvironment = requireEnvironment();
+    const reply = marker('SESSION_IDENTITY_REPLY');
+    const outputFileName = 'opencode-session-identity.txt';
+    const command = `printf '%s\\n%s\\n' "$OPENCODE_SESSION_ID" "$GARCON_TEST_USER_PLUGIN" > ${outputFileName}`;
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse('call_session_identity', 'bash', {
+      command,
+    })]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+
+    await withIntegrationFixture('opencode-scripted-session-identity', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('SESSION_IDENTITY_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const native = await openCodeNativeSession(fixture, chatId);
+      const transcript = await fixture.client.getMessages(chatId);
+      const bash = messagesOfType(transcript.messages, 'bash-tool-use').find(
+        (message) => message.command === command,
+      );
+      if (!bash) throw new Error('OpenCode session identity shell tool use was not rendered.');
+      const result = messagesOfType(transcript.messages, 'tool-result').find(
+        (message) => message.toolId === bash.toolId,
+      );
+      expect(result?.isError).toBe(false);
+      const shellEnvironment = await readFile(join(fixture.dirs.project, outputFileName), 'utf8');
+      expect(shellEnvironment).toBe(`${native.agentSessionId}\n${userPluginMarker}\n`);
+      expect(shellEnvironment).not.toContain(ambientSessionId);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('renders every non-blocking default built-in through the real binary', async () => {
     const testEnvironment = requireEnvironment();
     const webMarker = marker('WEBFETCH_BODY');

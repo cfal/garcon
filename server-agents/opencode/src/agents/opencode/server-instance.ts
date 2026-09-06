@@ -1,17 +1,92 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import type { OpenCodeInstance, OpenCodeServerTermination } from './instance-lifecycle.js';
+import { resolveSessionIdentityPluginUrl } from './session-identity-plugin.js';
+
+function pluginSpecifier(entry: unknown): string | null {
+  if (typeof entry === 'string') return entry;
+  if (
+    Array.isArray(entry)
+    && entry.length === 2
+    && typeof entry[0] === 'string'
+    && entry[1] !== null
+    && typeof entry[1] === 'object'
+    && !Array.isArray(entry[1])
+  ) {
+    return entry[0];
+  }
+  return null;
+}
+
+export function mergeOpenCodeConfigContent(
+  inheritedContent: string | undefined,
+  sessionIdentityPluginUrl: string,
+): string {
+  let inherited: unknown = {};
+  if (inheritedContent !== undefined && inheritedContent.trim() !== '') {
+    const errors: ParseError[] = [];
+    inherited = parse(inheritedContent, errors, {
+      allowTrailingComma: true,
+      disallowComments: false,
+    });
+    if (errors.length > 0) {
+      const first = errors[0]!;
+      throw new Error(
+        'Invalid inherited OPENCODE_CONFIG_CONTENT'
+        + ` at offset ${first.offset}: ${printParseErrorCode(first.error)}.`,
+      );
+    }
+  }
+  if (inherited === null || typeof inherited !== 'object' || Array.isArray(inherited)) {
+    throw new Error('Invalid inherited OPENCODE_CONFIG_CONTENT: expected a JSONC object.');
+  }
+
+  const config = inherited as Record<string, unknown>;
+  if (config.plugin !== undefined && !Array.isArray(config.plugin)) {
+    throw new Error('Invalid inherited OPENCODE_CONFIG_CONTENT: "plugin" must be an array.');
+  }
+  const plugins: unknown[] = config.plugin ?? [];
+  const invalidPluginIndex = plugins.findIndex((entry) => pluginSpecifier(entry) === null);
+  if (invalidPluginIndex >= 0) {
+    throw new Error(
+      'Invalid inherited OPENCODE_CONFIG_CONTENT:'
+      + ` "plugin[${invalidPluginIndex}]" must be a string or [specifier, options] tuple.`,
+    );
+  }
+  const sessionIdentityPluginEntry = plugins.findLast(
+    (entry) => pluginSpecifier(entry) === sessionIdentityPluginUrl,
+  ) ?? sessionIdentityPluginUrl;
+  return JSON.stringify({
+    ...config,
+    plugin: [
+      ...plugins.filter((entry) => pluginSpecifier(entry) !== sessionIdentityPluginUrl),
+      sessionIdentityPluginEntry,
+    ],
+  });
+}
 
 export function buildOpenCodeServerEnv(
   baseEnv: Record<string, string | undefined> = process.env,
+  sessionIdentityPluginUrl: string = resolveSessionIdentityPluginUrl(),
+  platform: NodeJS.Platform = process.platform,
 ): Record<string, string | undefined> {
-  const { OPENCODE_PURE: _pureMode, ...serverEnv } = baseEnv;
+  const serverEnv = { ...baseEnv };
+  let inheritedConfigContent = serverEnv.OPENCODE_CONFIG_CONTENT;
+  for (const key of Object.keys(serverEnv)) {
+    const normalizedKey = platform === 'win32' ? key.toUpperCase() : key;
+    if (normalizedKey === 'OPENCODE_CONFIG_CONTENT') {
+      inheritedConfigContent ??= serverEnv[key];
+      delete serverEnv[key];
+    } else if (normalizedKey === 'OPENCODE_PURE' || normalizedKey === 'OPENCODE_SESSION_ID') {
+      delete serverEnv[key];
+    }
+  }
   return {
     ...serverEnv,
-    // Empty content keeps OpenCode's built-in provider defaults active, including
-    // the five-minute header and inter-chunk stream timeouts adopted in 1.18.29;
-    // Garcon sets no turn deadline of its own, and chunk stalls stay retryable
-    // inside OpenCode.
-    OPENCODE_CONFIG_CONTENT: '{}',
+    OPENCODE_CONFIG_CONTENT: mergeOpenCodeConfigContent(
+      inheritedConfigContent,
+      sessionIdentityPluginUrl,
+    ),
     OPENCODE_DISABLE_AUTOUPDATE: '1',
   };
 }

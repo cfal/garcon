@@ -15,7 +15,7 @@ describe('OpenCode V1 automatic compaction architecture', () => {
       },
     );
 
-    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? '{}')).not.toHaveProperty('plugin');
+    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? '{}').plugin).toHaveLength(1);
     expect(environment).toMatchObject({
       KEEP_ME: 'yes',
       OPENCODE_DISABLE_AUTOCOMPACT: '0',
@@ -25,15 +25,16 @@ describe('OpenCode V1 automatic compaction architecture', () => {
     expect(environment).not.toHaveProperty('OPENCODE_PURE');
   });
 
-  it('[TLV5-OPENCODE.02-STATIC-01] keeps compaction enabled and ships no plugin or session-latest route', () => {
+  it('[TLV5-OPENCODE.02-STATIC-01] keeps compaction enabled without the retired operation identity plugin', () => {
     const serverInstance = readFileSync(new URL('../server-instance.ts', import.meta.url), 'utf8');
     const manifest = JSON.parse(readFileSync(new URL('package.json', PACKAGE_ROOT), 'utf8'));
 
     expect(serverInstance).not.toContain('OPENCODE_DISABLE_AUTOCOMPACT');
     expect(serverInstance).not.toContain('operation-identity-plugin');
-    expect(manifest.garconBuild).not.toHaveProperty('standaloneEntrypoints');
-    expect(manifest.exports).not.toHaveProperty('./operation-identity-plugin');
-    expect(existsSync(new URL('../operation-identity-plugin.js', import.meta.url))).toBe(false);
-    expect(existsSync(new URL('../operation-identity-plugin-host.ts', import.meta.url))).toBe(false);
+    expect(serverInstance).not.toContain("'--pure'");
+    expect(manifest.garconBuild.preMainModules).toEqual([
+      './src/build/prepare-compiled-runtime.ts',
+    ]);
+    expect(existsSync(new URL('../garcon-session-identity.mjs', import.meta.url))).toBe(true);
   });
 });
