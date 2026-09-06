@@ -55,7 +55,7 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
     environment = undefined;
   });
 
-  test('[TLV5-OPENCODE.01-SCRIPTED-01] [TLV5-OPENCODE.01-SCRIPTED-05] threshold compaction continues with only user-facing output and pins native markers', async () => {
+  test('[TLV5-OPENCODE.01-SCRIPTED-01] [TLV5-OPENCODE.01-SCRIPTED-05] threshold compaction shows a boundary and pins native markers', async () => {
     const testEnvironment = requireEnvironment();
     const prompt = marker('THRESHOLD_PROMPT');
     const toolOutput = marker('THRESHOLD_TOOL_OUTPUT');
@@ -93,6 +93,7 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
         'user-message',
         'bash-tool-use',
         'tool-result',
+        'compaction',
         'assistant-message',
       ]);
       expect(userContents(live.messages)).toEqual([prompt]);
@@ -101,6 +102,9 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
         expect.objectContaining({ command }),
       ]);
       expect(JSON.stringify(messagesOfType(live.messages, 'tool-result'))).toContain(toolOutput);
+      expect(messagesOfType(live.messages, 'compaction')).toEqual([
+        expect.objectContaining({ trigger: 'auto' }),
+      ]);
       expectCompactionInternalsHidden(live.messages, [summary]);
       expectTurnTerminalCount(fixture, eventCursor, chatId, turn.turnId, 'agent-run-finished');
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(3);
@@ -121,7 +125,11 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
       await reloadFromNativeHistory(fixture, chatId);
       const imported = await fixture.client.getMessages(chatId);
       expect(imported.transcriptViewId).not.toBe(restored.transcriptViewId);
-      expect(renderingProjection(imported.messages)).toEqual(liveProjection);
+      const reloadableProjection = renderingProjection(
+        live.messages.filter(({ message }) => message.type !== 'compaction'),
+      );
+      expect(renderingProjection(imported.messages)).toEqual(reloadableProjection);
+      expect(messagesOfType(imported.messages, 'compaction')).toEqual([]);
       expectCompactionInternalsHidden(imported.messages, [summary]);
     }, withScriptedOpenCode());
   }, 120_000);
@@ -161,10 +169,14 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
       const transcript = await fixture.client.getMessages(chatId);
       expect(transcript.messages.map((entry) => entry.message.type)).toEqual([
         'user-message',
+        'compaction',
         'assistant-message',
       ]);
       expect(userContents(transcript.messages)).toEqual([prompt]);
       expect(assistantContents(transcript.messages)).toEqual([answer]);
+      expect(messagesOfType(transcript.messages, 'compaction')).toEqual([
+        expect.objectContaining({ trigger: 'auto' }),
+      ]);
       expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
       expectCompactionInternalsHidden(transcript.messages, [overflow, summary]);
       expectTurnTerminalCount(fixture, eventCursor, chatId, turn.turnId, 'agent-run-finished');
@@ -226,10 +238,14 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
         'user-message',
         'assistant-message',
         'user-message',
+        'compaction',
         'assistant-message',
       ]);
       expect(userContents(transcript.messages)).toEqual([firstPrompt, secondPrompt]);
       expect(assistantContents(transcript.messages)).toEqual([firstAnswer, secondAnswer]);
+      expect(messagesOfType(transcript.messages, 'compaction')).toEqual([
+        expect.objectContaining({ trigger: 'auto' }),
+      ]);
       expectCompactionInternalsHidden(transcript.messages, [overflow, summary]);
       expectTurnTerminalCount(
         fixture,
@@ -583,11 +599,15 @@ async function exerciseInterruptedCompaction(
     expect(userContents(stopped.messages)).toEqual([prompt]);
     expect(assistantContents(stopped.messages)).toEqual([]);
     expect(messagesOfType(stopped.messages, 'error')).toEqual([]);
+    expect(messagesOfType(stopped.messages, 'compaction')).toEqual(
+      phase === 'continuation'
+        ? [expect.objectContaining({ trigger: 'auto' })]
+        : [],
+    );
     expectCompactionInternalsHidden(stopped.messages, [overflow, summary, stoppedAnswer]);
-    // The aborted summary replaced nothing, so reloading must not resurrect a
-    // compaction boundary the live transcript never published.
     await reloadFromNativeHistory(fixture, chatId);
     const reloaded = await fixture.client.getMessages(chatId);
+    // Automatic boundaries are live-only and intentionally absent after native Reload.
     expect(messagesOfType(reloaded.messages, 'compaction')).toEqual([]);
     expectCompactionInternalsHidden(reloaded.messages, [overflow, summary, stoppedAnswer]);
 
@@ -613,6 +633,7 @@ async function exerciseInterruptedCompaction(
       expect(userContents(recovered.messages)).toEqual([prompt, recoveryPrompt]);
       expect(assistantContents(recovered.messages)).toEqual([recoveryAnswer]);
       expect(messagesOfType(recovered.messages, 'error')).toEqual([]);
+      expect(messagesOfType(recovered.messages, 'compaction')).toEqual([]);
       expectCompactionInternalsHidden(recovered.messages, [
         overflow,
         summary,
@@ -688,7 +709,6 @@ function expectCompactionInternalsHidden(
   for (const value of [...markers, AUTOCONTINUE_TEXT]) {
     expect(rendered).not.toContain(value);
   }
-  expect(messages.map((entry) => entry.message.type)).not.toContain('compaction');
 }
 
 function expectTurnTerminalCount(
