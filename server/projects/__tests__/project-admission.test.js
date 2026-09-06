@@ -33,4 +33,14 @@ describe('ProjectAdmission', () => {
       reason: 'not-found',
     });
   });
+
+  it('passes through unexpected inspection failures', async () => {
+    const failure = new Error('device failed');
+    const admission = new ProjectAdmission(
+      { getChat: () => ({ projectPath: '/workspace/project' }) },
+      async () => { throw failure; },
+    );
+
+    await expect(admission.assertAvailable('1783725900000800')).rejects.toBe(failure);
+  });
 });

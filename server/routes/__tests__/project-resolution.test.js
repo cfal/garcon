@@ -98,4 +98,22 @@ describe('GET /api/v1/projects/resolve', () => {
     }
     expect(inspect).not.toHaveBeenCalled();
   });
+
+  it('returns unexpected inspection failures without caching them', async () => {
+    const failure = fixture({
+      inspect: mock(async () => { throw new Error('device failed'); }),
+    });
+    const response = await request(
+      failure.handler,
+      new URLSearchParams({ projectPath: '/workspace/project' }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+  });
 });

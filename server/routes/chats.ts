@@ -1,6 +1,5 @@
 // /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
-import { promises as fs } from 'fs';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
 import {
@@ -39,7 +38,6 @@ import type {
   SetLastSelectedChatResponse,
 } from '../../common/chat-list.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../lib/pagination.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   GoalControlDeliveryError,
@@ -64,6 +62,7 @@ import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
+import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 import type {
   CompleteChatHistoryResponse,
   TranscriptReadPurpose,
@@ -293,6 +292,7 @@ interface ChatRouteDeps {
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   searchIndex?: ChatSearchDep;
   lastSelectedChat?: LastSelectedChatState;
+  inspectProject?: typeof inspectProjectDirectory;
 }
 
 export default function createChatRoutes({
@@ -308,6 +308,7 @@ export default function createChatRoutes({
   chatListProjector,
   searchIndex,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
+  inspectProject = inspectProjectDirectory,
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
   const searchRoutes = createChatSearchRoutes({
@@ -335,24 +336,25 @@ export default function createChatRoutes({
     }
 
     try {
-      const projectPath = await assertRealWithinProjectBase(dirPath);
-      const stat = await fs.stat(projectPath);
-      if (!stat.isDirectory()) {
-        return pathValidationError('Not a directory', 'not_directory');
+      const resolution = await inspectProject(dirPath);
+      if (resolution.kind === 'unavailable') {
+        switch (resolution.reason) {
+          case 'not-found':
+            return pathValidationError('Path does not exist', 'path_not_found');
+          case 'not-a-directory':
+            return pathValidationError('Not a directory', 'not_directory');
+          case 'outside-base':
+            return pathValidationError(
+              'Path is outside the allowed base directory',
+              'outside_base_dir',
+            );
+          case 'permission-denied':
+            return pathValidationError('Permission denied', 'permission_denied');
+        }
       }
-      const isGitRepo = await isGitRepository(projectPath);
+      const isGitRepo = await isGitRepository(resolution.effectiveProjectKey);
       return Response.json({ valid: true, isGitRepo });
     } catch (error: unknown) {
-      if (isProjectBoundaryError(error)) {
-        return pathValidationError('Path is outside the allowed base directory', 'outside_base_dir');
-      }
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
-        return pathValidationError('Path does not exist', 'path_not_found');
-      }
-      if (err.code === 'EACCES' || err.code === 'EPERM') {
-        return pathValidationError('Permission denied', 'permission_denied');
-      }
       return pathValidationError((error as Error).message, 'unknown');
     }
   }
