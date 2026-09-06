@@ -17,7 +17,6 @@ import {
   type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
-import type { PinnedInsertPosition } from '../../common/settings.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
@@ -54,6 +53,7 @@ import type {
   ChatOrderComparatorOverrides,
   ChatReorderResult,
   ChatStartupPreferences,
+  UiSettings,
 } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
@@ -149,10 +149,7 @@ interface SettingsDep {
   getPinnedChatIds(): string[];
   getNormalChatIds(): string[];
   getArchivedChatIds(): string[];
-  getUiSettings(): {
-    pinnedInsertPosition?: PinnedInsertPosition;
-    chatTitle?: unknown;
-  } | null | undefined;
+  getUiSettings(): UiSettings | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
