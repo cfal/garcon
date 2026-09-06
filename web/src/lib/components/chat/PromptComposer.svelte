@@ -595,7 +595,6 @@
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		const value = target.value;
 		composerState.inputText = value;
-		autoResize();
 		const caret = textarea?.selectionStart ?? value.length;
 		ui.updateTriggers(
 			value,
