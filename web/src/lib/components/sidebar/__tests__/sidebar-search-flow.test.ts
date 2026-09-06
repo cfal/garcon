@@ -119,6 +119,7 @@ describe('sidebar search dialog flow', () => {
 		});
 
 		await waitFor(() => expect(scheduleTranscriptSearchRevalidation).toHaveBeenCalledTimes(1));
+		await new Promise((resolve) => setTimeout(resolve, 200));
 		expect(refreshTranscriptSearch).not.toHaveBeenCalled();
 	});
 
