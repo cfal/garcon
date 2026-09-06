@@ -334,6 +334,82 @@ describe('TerminalRegistry', () => {
 		]);
 	});
 
+	it('waits for concurrent List reconciliation before attaching a loaded runtime', async () => {
+		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
+		listTerminals
+			.mockResolvedValueOnce({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			})
+			.mockImplementationOnce(() => pendingList.promise);
+		const runtimeCreation = deferred<void>();
+		const registry = createRegistry({
+			createRuntime: async (options) => {
+				await runtimeCreation.promise;
+				return new FakeRuntime(options) as unknown as TerminalRuntime;
+			},
+		});
+		await registry.list();
+		transport.status = 'connected';
+
+		const attachment = registry.attach('terminal-1', 'restore');
+		const reconciliation = registry.list();
+		runtimeCreation.resolve();
+		await Promise.resolve();
+
+		expect(transport.sent).toEqual([]);
+		pendingList.resolve({ success: true, terminals: [metadata('terminal-1', 1)] });
+		await Promise.all([attachment, reconciliation]);
+
+		expect(registry.sessions['terminal-1']).toMatchObject({
+			attachmentState: 'connecting',
+			runtimeState: 'ready',
+		});
+		expect(transport.sent).toEqual([
+			{
+				type: 'terminal-attach',
+				terminalId: 'terminal-1',
+				clientId: 'client-1',
+				afterSequence: 0,
+				intent: 'restore',
+			},
+		]);
+	});
+
+	it('leaves attachment retryable when concurrent List reconciliation fails', async () => {
+		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
+		listTerminals
+			.mockResolvedValueOnce({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			})
+			.mockImplementationOnce(() => pendingList.promise);
+		const runtimeCreation = deferred<void>();
+		const registry = createRegistry({
+			createRuntime: async (options) => {
+				await runtimeCreation.promise;
+				return new FakeRuntime(options) as unknown as TerminalRuntime;
+			},
+		});
+		await registry.list();
+		transport.status = 'connected';
+
+		const attachment = registry.attach('terminal-1', 'restore');
+		const reconciliation = registry.list();
+		const reconciliationFailure = expect(reconciliation).rejects.toThrow('List failed');
+		runtimeCreation.resolve();
+		pendingList.reject(new Error('List failed'));
+
+		await reconciliationFailure;
+		await attachment;
+
+		expect(registry.sessions['terminal-1']).toMatchObject({
+			attachmentState: 'detached',
+			runtimeState: 'ready',
+		});
+		expect(transport.sent).toEqual([]);
+	});
+
 	it('keeps failed runtime presentation active and retries attachment', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,

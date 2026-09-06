@@ -270,15 +270,16 @@ export class TerminalRegistry {
 	}
 
 	async attach(terminalId: string, intent: 'restore' | 'takeover'): Promise<void> {
-		const session = this.sessions[terminalId];
-		if (!session) return;
+		if (!this.sessions[terminalId]) return;
 		const request = this.#beginAttachment(terminalId);
-		if (this.listStatus !== 'ready' || this.#transport.status !== 'connected') {
-			session.attachmentState = 'detached';
+		const canStart = this.#listPromise
+			? await this.#waitForAttachmentPreconditions(terminalId, request)
+			: this.#attachmentPreconditionsMet(terminalId, request);
+		if (!canStart) {
 			this.#finishAttachment(terminalId, request);
 			return;
 		}
-		session.attachmentState = 'connecting';
+		this.sessions[terminalId].attachmentState = 'connecting';
 		try {
 			await this.ensureRuntime(terminalId);
 		} catch (error) {
@@ -288,11 +289,10 @@ export class TerminalRegistry {
 			this.#finishAttachment(terminalId, request);
 			return;
 		}
-		if (
-			!this.#isCurrentAttachment(terminalId, request) ||
-			this.listStatus !== 'ready' ||
-			this.#transport.status !== 'connected'
-		) {
+		const canSend = this.#listPromise
+			? await this.#waitForAttachmentPreconditions(terminalId, request)
+			: this.#attachmentPreconditionsMet(terminalId, request);
+		if (!canSend) {
 			this.#finishAttachment(terminalId, request);
 			return;
 		}
@@ -657,6 +657,27 @@ export class TerminalRegistry {
 			Boolean(this.sessions[terminalId]) &&
 			this.#attachmentRequests.get(terminalId) === request
 		);
+	}
+
+	async #waitForAttachmentPreconditions(terminalId: string, request: symbol): Promise<boolean> {
+		while (this.#isCurrentAttachment(terminalId, request) && this.#listPromise) {
+			try {
+				await this.#listPromise;
+			} catch {
+				if (this.#isCurrentAttachment(terminalId, request)) {
+					this.sessions[terminalId].attachmentState = 'detached';
+				}
+				return false;
+			}
+		}
+		return this.#attachmentPreconditionsMet(terminalId, request);
+	}
+
+	#attachmentPreconditionsMet(terminalId: string, request: symbol): boolean {
+		if (!this.#isCurrentAttachment(terminalId, request)) return false;
+		if (this.listStatus === 'ready' && this.#transport.status === 'connected') return true;
+		this.sessions[terminalId].attachmentState = 'detached';
+		return false;
 	}
 
 	#finishAttachment(terminalId: string, request: symbol): void {

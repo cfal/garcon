@@ -15,6 +15,11 @@ interface PendingActivation {
 	reject: (error: unknown) => void;
 }
 
+interface PendingFocusIntent {
+	generation: number;
+	shouldApply: () => boolean;
+}
+
 export class SurfaceRendererActivationError extends Error {
 	constructor() {
 		super('Timed out while activating the surface renderer');
@@ -27,7 +32,9 @@ export class SurfaceFrameBridge {
 	#active = false;
 	#activationGeneration = 0;
 	#attached: { generation: number; token: symbol } | null = null;
+	#readyRenderer: { generation: number; token: symbol } | null = null;
 	#activation: PendingActivation | null = null;
+	#focusIntent: PendingFocusIntent | null = null;
 
 	provideRenderer(provider: RetainedRendererProvider): () => void {
 		const entry = { token: Symbol('surface-renderer'), value: provider };
@@ -36,12 +43,14 @@ export class SurfaceFrameBridge {
 		}
 		this.#provider = entry;
 		this.#attached = null;
+		this.#readyRenderer = null;
 		if (this.#active) this.#attachCurrent(entry);
 		return () => {
 			if (this.#provider?.token !== entry.token) return;
 			if (this.#attached?.token === entry.token) entry.value.detach();
 			this.#provider = null;
 			this.#attached = null;
+			this.#readyRenderer = null;
 		};
 	}
 
@@ -49,6 +58,8 @@ export class SurfaceFrameBridge {
 		this.#cancelPendingActivation();
 		this.#active = true;
 		const generation = ++this.#activationGeneration;
+		this.#readyRenderer = null;
+		this.#focusIntent = null;
 		let resolve!: () => void;
 		let reject!: (error: unknown) => void;
 		const promise = new Promise<void>((resolvePromise, rejectPromise) => {
@@ -70,6 +81,8 @@ export class SurfaceFrameBridge {
 				if (this.#activation !== activation || activation.settled) return;
 				this.#active = false;
 				this.#attached = null;
+				this.#readyRenderer = null;
+				this.#focusIntent = null;
 				activation.settled = true;
 				activation.timer = null;
 				activation.reject(new SurfaceRendererActivationError());
@@ -87,15 +100,31 @@ export class SurfaceFrameBridge {
 		this.#cancelPendingActivation();
 		const attached = this.#attached;
 		this.#attached = null;
+		this.#readyRenderer = null;
+		this.#focusIntent = null;
 		if (this.#provider && attached?.token === this.#provider.token) {
 			this.#provider.value.detach();
 		}
 	}
 
-	focusPrimary(): boolean {
-		if (!this.#provider) return false;
-		this.#provider.value.focusPrimary();
-		return true;
+	focusPrimary(shouldApplyDeferredFocus: () => boolean = () => true): boolean {
+		const provider = this.#provider;
+		if (
+			provider &&
+			this.#readyRenderer?.generation === this.#activationGeneration &&
+			this.#readyRenderer.token === provider.token
+		) {
+			this.#focusIntent = null;
+			provider.value.focusPrimary();
+			return true;
+		}
+		if (this.#active) {
+			this.#focusIntent = {
+				generation: this.#activationGeneration,
+				shouldApply: shouldApplyDeferredFocus,
+			};
+		}
+		return false;
 	}
 
 	#attachCurrent(provider: { token: symbol; value: RetainedRendererProvider }): void {
@@ -119,11 +148,18 @@ export class SurfaceFrameBridge {
 						this.#detachQuietly(provider.value);
 						return;
 					}
+					this.#readyRenderer = {
+						generation: activation.generation,
+						token: provider.token,
+					};
 					this.#resolveActivation(activation);
+					this.#applyPendingFocus(provider, activation.generation);
 				},
 				(error) => {
 					if (!this.#isCurrent(activation, provider.token)) return;
 					this.#attached = null;
+					this.#readyRenderer = null;
+					this.#focusIntent = null;
 					if (activation.timer) clearTimeout(activation.timer);
 					activation.settled = true;
 					activation.timer = null;
@@ -148,12 +184,36 @@ export class SurfaceFrameBridge {
 				this.#activationGeneration !== generation
 			) {
 				this.#detachQuietly(provider.value);
+				return;
 			}
+			this.#readyRenderer = { generation, token: provider.token };
+			this.#applyPendingFocus(provider, generation);
 		} catch {
 			if (this.#attached?.generation === generation && this.#attached.token === provider.token) {
 				this.#attached = null;
+				this.#readyRenderer = null;
+				this.#focusIntent = null;
 			}
 		}
+	}
+
+	#applyPendingFocus(
+		provider: { token: symbol; value: RetainedRendererProvider },
+		generation: number,
+	): void {
+		const intent = this.#focusIntent;
+		if (!intent || intent.generation !== generation) return;
+		this.#focusIntent = null;
+		if (
+			!this.#active ||
+			this.#provider?.token !== provider.token ||
+			this.#readyRenderer?.generation !== generation ||
+			this.#readyRenderer.token !== provider.token ||
+			!intent.shouldApply()
+		) {
+			return;
+		}
+		provider.value.focusPrimary();
 	}
 
 	#isCurrent(activation: PendingActivation, providerToken: symbol): boolean {
