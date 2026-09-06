@@ -687,22 +687,22 @@ describe('garcon-cli', () => {
       await fs.rm(nestedProject, { recursive: true, force: true });
 
       const status = await runCli(controlArguments(fixture, [
-		'status', chatId!, '--json',
+        'status', chatId!, '--json',
       ]));
       expect(status.exitCode).toBe(0);
-		const snapshot = JSON.parse(status.stdout);
+      const snapshot = JSON.parse(status.stdout);
       expect(snapshot).toMatchObject({
         chat: { id: chatId, projectPath: nestedProject },
-		transcript: { availability: 'available' },
+        transcript: { availability: 'available' },
       });
-		expect(userContents(snapshot.transcript.messages)).toContain('cli-removed-project');
+      expect(userContents(snapshot.transcript.messages)).toContain('cli-removed-project');
 
-		const rejected = await runCli(controlArguments(fixture, [
-			'send-async', chatId!, 'cli-unavailable-follow-up',
-		]));
-		expect(rejected.exitCode).toBe(3);
-		expect(rejected.stdout).toBe('');
-		expect(rejected.stderr).toContain('submission: Project folder unavailable (not-found)');
+      const rejected = await runCli(controlArguments(fixture, [
+        'send-async', chatId!, 'cli-unavailable-follow-up',
+      ]));
+      expect(rejected.exitCode).toBe(3);
+      expect(rejected.stdout).toBe('');
+      expect(rejected.stderr).toContain('submission: Project folder unavailable (not-found)');
     }, { namedWorkspace: WORKSPACE });
   });
 
