@@ -125,8 +125,8 @@ function dropCompactionPart(
 
 export interface OpenCodeCompactionBoundary {
   readonly row: CompactionMessage;
-  // The successful summary assistant's id anchors the boundary so point-fork
-  // boundaries match across live and reloaded transcripts.
+  // Manual boundaries retain their reload-stable point-fork anchor. Automatic
+  // boundaries use the same live anchor but are intentionally absent after Reload.
   readonly summaryMessageId: string;
 }
 

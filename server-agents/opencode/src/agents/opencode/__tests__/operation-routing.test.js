@@ -39,6 +39,12 @@ function createEventStream() {
       observe(event, completePrompt);
     },
     resolvePrompt,
+    failPrompt(messageId, message) {
+      const request = promptRequestsByMessage.get(messageId);
+      if (request) setImmediate(() => request.resolve({
+        error: { name: 'ProviderError', data: { message } },
+      }));
+    },
     prompt(input, options) {
       return new Promise((resolve, reject) => {
         const partId = input.parts[0].id;
@@ -1633,6 +1639,64 @@ describe('OpenCode operation routing', () => {
     expect(diagnostics.debug.filter(([message]) => (
       message === 'Adopted an OpenCode compaction part'
     ))).toHaveLength(1);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('keeps an automatic summary failure internal when the prompt fails', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
+      logger: diagnostics.logger,
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-prompt',
+      messageId: 'user-prompt',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-control',
+      sessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-summary-failed',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'assistant-summary',
+          role: 'assistant',
+          parentID: 'user-compaction',
+          summary: true,
+          time: { completed: 1 },
+          error: { name: 'ProviderError', data: { message: 'internal summary failure' } },
+        },
+      },
+    }, { completePrompt: false });
+    eventStream.push({
+      id: 'event-barrier',
+      type: 'session.compacted',
+      properties: { sessionID: 'session-1' },
+    });
+    await waitFor(() => diagnostics.debug.some((entry) => entry[1]?.eventId === 'event-barrier'));
+    eventStream.failPrompt('user-prompt', 'visible prompt failure');
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+
+    expect(events).toEqual([expect.objectContaining({
+      type: 'run-ended',
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: 'visible prompt failure' },
+    })]);
+    expect(JSON.stringify(events)).not.toContain('internal summary failure');
     eventStream.close();
     await runtime.shutdown();
   });

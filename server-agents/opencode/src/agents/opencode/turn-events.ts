@@ -210,6 +210,8 @@ export function openCodeEventBelongsToTurn(
     if (isOpenCodeCompactionAssistant(info)) {
       if (!turn.compaction) {
         if (!turn.automaticCompactionMessageIds.has(info.parentID)) return false;
+        // A recorded terminal means this automatic boundary already dispatched;
+        // terminal recording follows dispatch in the global event handler.
         if (turn.assistantTerminals.has(messageId)) return false;
         turn.automaticCompactionMessageIds.add(messageId);
       }

@@ -92,6 +92,7 @@ import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow, compactionBoun
 import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
 import {
   OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
+  latestOpenCodePromptTerminal,
   openCodeProviderFailureRow,
 } from './turn-failure.js';
 
@@ -679,7 +680,7 @@ export class OpenCodeRuntime {
     session.lastActivityAt = Date.now();
     this.#decisions.cancelForSession(agentSessionId, 'cancelled');
     this.#rejectTurnWaiter(agentSessionId, new Error(message));
-    const row = openCodeProviderFailureRow(message, entryId, session.turn.assistantMessageIds);
+    const row = openCodeProviderFailureRow(message, entryId, session.turn);
     this.#publishRows(agentSessionId, session.turn.operation, [row]);
     this.#publishFailed(agentSessionId, session.turn.operation, message);
   }
@@ -695,7 +696,7 @@ export class OpenCodeRuntime {
       if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
       return;
     }
-    const providerTerminal = Array.from(route.turn.assistantTerminals.values()).at(-1);
+    const providerTerminal = latestOpenCodePromptTerminal(route.turn);
     if (providerTerminal?.outcome === 'failed') {
       this.#failTurnForProviderError(
         route.sessionId, session, providerTerminal.error, providerTerminal.messageId,

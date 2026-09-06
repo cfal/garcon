@@ -604,6 +604,7 @@ async function exerciseInterruptedCompaction(
     expectCompactionInternalsHidden(stopped.messages, [overflow, summary, stoppedAnswer]);
     await reloadFromNativeHistory(fixture, chatId);
     const reloaded = await fixture.client.getMessages(chatId);
+    // Automatic boundaries are live-only and intentionally absent after native Reload.
     expect(messagesOfType(reloaded.messages, 'compaction')).toEqual([]);
     expectCompactionInternalsHidden(reloaded.messages, [overflow, summary, stoppedAnswer]);
 
