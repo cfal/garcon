@@ -155,6 +155,7 @@
 		},
 		isSurfaceCloseBlocked: () => false,
 	} satisfies TerminalSurfaceWorkspacePort;
+	void frameBridge.activate(false);
 
 	$effect(() => {
 		if (focusRequestToken > 0) frameBridge.focusPrimary();
@@ -163,7 +164,10 @@
 	setSurfaceFrameBridge(() => frameBridge);
 	setLocalSettings(localSettings);
 
-	onDestroy(() => localSettings.destroy());
+	onDestroy(() => {
+		frameBridge.deactivate();
+		localSettings.destroy();
+	});
 </script>
 
 <TerminalSurface {terminalId} {host} {terminals} {workspace} />
