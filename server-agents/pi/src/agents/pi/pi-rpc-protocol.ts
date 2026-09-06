@@ -1,4 +1,5 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
+import { CompactionMessage } from '@garcon/common/chat-types';
 import { parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import {
@@ -66,6 +67,39 @@ export function piUserMessageText(value: unknown): string | null {
     && typeof (part as Record<string, unknown>).text === 'string'
   )) as Record<string, unknown> | undefined;
   return typeof text?.text === 'string' ? text.text : null;
+}
+
+export function piCompactionMessage(
+  event: Record<string, unknown>,
+  timestamp: string,
+): CompactionMessage | null {
+  if (event.type !== 'compaction_end' || event.aborted !== false) return null;
+  if (!event.result || typeof event.result !== 'object' || Array.isArray(event.result)) return null;
+  const result = event.result as Record<string, unknown>;
+  const { summary, tokensBefore, estimatedTokensAfter } = result;
+  if (
+    typeof summary !== 'string'
+    || typeof tokensBefore !== 'number'
+    || !Number.isFinite(tokensBefore)
+    || tokensBefore < 0
+    || (
+      estimatedTokensAfter !== undefined
+      && (
+        typeof estimatedTokensAfter !== 'number'
+        || !Number.isFinite(estimatedTokensAfter)
+        || estimatedTokensAfter < 0
+      )
+    )
+  ) return null;
+  const reason = event.reason;
+  if (reason !== 'manual' && reason !== 'threshold' && reason !== 'overflow') return null;
+  return new CompactionMessage(
+    timestamp,
+    reason === 'manual' ? 'manual' : 'auto',
+    summary,
+    tokensBefore,
+    estimatedTokensAfter,
+  );
 }
 
 export function occurrenceCounts(values: readonly string[]): Map<string, number> {

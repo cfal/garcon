@@ -40,7 +40,9 @@ export interface ScriptedPiTestEnvironment {
   dispose(): void;
 }
 
-export function startScriptedPiTestEnvironment(): ScriptedPiTestEnvironment {
+export function startScriptedPiTestEnvironment(
+  options: { readonly compactionKeepRecentTokens?: number } = {},
+): ScriptedPiTestEnvironment {
   const model = FakeChatCompletionsModel.start();
   // The Pi bin uses /usr/bin/env node, so only the runner's node executable is exposed below.
   // Adding its whole directory would also expose ambient agent binaries to catalog discovery.
@@ -92,6 +94,11 @@ export function startScriptedPiTestEnvironment(): ScriptedPiTestEnvironment {
           },
         },
       }), { mode: 0o600 });
+      if (options.compactionKeepRecentTokens !== undefined) {
+        await writeFile(join(agentDir, 'settings.json'), JSON.stringify({
+          compaction: { keepRecentTokens: options.compactionKeepRecentTokens },
+        }), { mode: 0o600 });
+      }
     },
     dispose: () => model.stop(),
   };
