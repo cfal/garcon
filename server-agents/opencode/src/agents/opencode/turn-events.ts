@@ -25,6 +25,8 @@ export interface OpenCodeTurnContext {
   // status frames for the same scheduled attempt append one row, not many.
   lastRetryNoticeKey: string | null;
   providerContinuationMessageIds: Set<string>;
+  // Tracks automatic control messages and linked summary assistants so prompt
+  // failures exclude internal compaction work.
   automaticCompactionMessageIds: Set<string>;
   recentEventIds: Set<string>;
   providerSteeringPartIds: Set<string>;

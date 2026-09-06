@@ -68,6 +68,9 @@ publish an empty-summary automatic row on successful completion, and continue
 to suppress the provider's summary parts. Deduplicate by summary assistant ID
 so repeated terminal frames do not duplicate the row and separate automatic
 compactions in one turn remain visible.
+Adopted automatic summaries must remain excluded from prompt-failure terminal
+selection and fallback native anchors so internal compaction errors cannot
+replace the prompt's failure.
 
 Do not route `session.compacted` through the current session. That event has no
 operation identity, and using it would recreate the session-latest routing the
