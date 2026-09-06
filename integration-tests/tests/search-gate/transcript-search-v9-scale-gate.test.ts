@@ -92,6 +92,8 @@ async function loadSidebarSearchStore(): Promise<{
     server: { middlewareMode: true },
   });
   try {
+    // SSR compilation exercises the production deadline and commit control flow.
+    // Browser rune scheduling remains covered by the web Vitest suite.
     const loaded = await server.ssrLoadModule(
       '/src/lib/sidebar/search/sidebar-search-store.svelte.ts',
     ) as Record<string, unknown>;

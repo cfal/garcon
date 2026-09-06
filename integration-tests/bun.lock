@@ -13,6 +13,7 @@
         "opencode-ai": "1.18.29",
         "playwright": "1.62.1",
         "puppeteer-core": "25.8.0",
+        "svelte": "5.57.0",
         "typescript": "7.0.2",
         "vite": "^8.2.2",
       },
