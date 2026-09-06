@@ -383,7 +383,11 @@ describe('TerminalRegistry', () => {
 				success: true,
 				terminals: [metadata('terminal-1', 1)],
 			})
-			.mockImplementationOnce(() => pendingList.promise);
+			.mockImplementationOnce(() => pendingList.promise)
+			.mockResolvedValueOnce({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			});
 		const runtimeCreation = deferred<void>();
 		const registry = createRegistry({
 			createRuntime: async (options) => {
@@ -408,6 +412,21 @@ describe('TerminalRegistry', () => {
 			runtimeState: 'ready',
 		});
 		expect(transport.sent).toEqual([]);
+
+		registry.reattach('terminal-1');
+		await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+
+		expect(listTerminals).toHaveBeenCalledTimes(3);
+		expect(registry.listStatus).toBe('ready');
+		expect(transport.sent).toEqual([
+			{
+				type: 'terminal-attach',
+				terminalId: 'terminal-1',
+				clientId: 'client-1',
+				afterSequence: 0,
+				intent: 'takeover',
+			},
+		]);
 	});
 
 	it('keeps failed runtime presentation active and retries attachment', async () => {

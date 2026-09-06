@@ -272,6 +272,17 @@ export class TerminalRegistry {
 	async attach(terminalId: string, intent: 'restore' | 'takeover'): Promise<void> {
 		if (!this.sessions[terminalId]) return;
 		const request = this.#beginAttachment(terminalId);
+		if (intent === 'takeover' && this.listStatus === 'failed') {
+			try {
+				await this.list();
+			} catch {
+				if (this.#isCurrentAttachment(terminalId, request)) {
+					this.sessions[terminalId].attachmentState = 'detached';
+				}
+				this.#finishAttachment(terminalId, request);
+				return;
+			}
+		}
 		const canStart = this.#listPromise
 			? await this.#waitForAttachmentPreconditions(terminalId, request)
 			: this.#attachmentPreconditionsMet(terminalId, request);
