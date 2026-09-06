@@ -19,6 +19,7 @@
 		getSnippets,
 		getTransientLayers,
 		getWorkspaceShortcuts,
+		getProjectResolution,
 	} from '$lib/context';
 	import {
 		chatAttachmentAccept,
@@ -96,6 +97,8 @@
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
+	import ProjectAvailabilityNotice from '$lib/components/workspace/ProjectAvailabilityNotice.svelte';
+	import type { ProjectTarget } from '$shared/project-resolution';
 	interface Props {
 		onsubmit: () => void;
 		onSteerPreferredSubmit: () => void;
@@ -113,6 +116,7 @@
 		isVisible?: boolean;
 		isPresented?: boolean;
 		composerEditorOpenRequestId?: number;
+		onChooseProjectFolder?: (chatId: string) => void;
 	}
 
 	let {
@@ -129,6 +133,7 @@
 		isVisible = true,
 		isPresented: isPresentedOverride,
 		composerEditorOpenRequestId = 0,
+		onChooseProjectFolder,
 	}: Props = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 	const composerState = getComposerState();
@@ -142,6 +147,7 @@
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const workspaceShortcuts = getWorkspaceShortcuts();
+	const projectResolution = getProjectResolution();
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -166,11 +172,33 @@
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
 		return chat
-			? [chat.id, chat.status, chat.projectPath, chat.effectiveProjectKey].join('\u0000')
+			? [chat.id, chat.status, chat.projectPath].join('\u0000')
 			: '';
 	});
 	const snippetContextHint = $derived(
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
+	);
+	const selectedProjectTarget = $derived.by<ProjectTarget | null>(() => {
+		const chat = sessions.selectedChat;
+		if (!chat?.projectPath) return null;
+		return chat.status === 'draft'
+			? { kind: 'path', projectPath: chat.projectPath }
+			: { kind: 'chat', chatId: chat.id, projectPath: chat.projectPath };
+	});
+	const selectedProjectResolution = $derived(
+		selectedProjectTarget
+			? projectResolution.snapshotFor(selectedProjectTarget)
+			: { kind: 'unchecked' as const },
+	);
+	const completionProjectPath = $derived(
+		selectedProjectResolution.kind === 'available' ? selectedProjectTarget?.projectPath ?? '' : '',
+	);
+	const canChooseProjectFolder = $derived(
+		Boolean(
+			onChooseProjectFolder &&
+				sessions.selectedChat &&
+				modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId),
+		),
 	);
 
 	function requestComposerFocusForChat(chatId: string | null): void {
@@ -237,6 +265,17 @@
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		composerState.isDragActive = false;
+	});
+
+	$effect(() => {
+		const target = selectedProjectTarget;
+		if (!target || (!ui.showFileMenu && !ui.showSlashMenu)) return;
+		const lease = untrack(() => {
+			const retained = projectResolution.retain(target);
+			void retained.resolve();
+			return retained;
+		});
+		return () => lease.release();
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.
@@ -403,13 +442,37 @@
 		autoResize();
 	}
 
-	function snippetContext(): SnippetExpansionContext | null {
+	async function snippetContext(): Promise<{
+		context: SnippetExpansionContext;
+		chatId: string;
+		projectPath: string;
+	}> {
 		const chat = sessions.selectedChat;
 		const projectPath = chat?.projectPath.trim();
-		if (!chat || !projectPath) return null;
-		return chat.status === 'draft'
+		if (!chat || !projectPath) throw new Error(m.chat_new_chat_errors_project_path_required());
+		const target: ProjectTarget = chat.status === 'draft'
+			? { kind: 'path', projectPath }
+			: { kind: 'chat', chatId: chat.id, projectPath };
+		const lease = projectResolution.retain(target);
+		try {
+			await lease.resolve();
+			if (lease.snapshot.kind !== 'available') {
+				throw new Error(
+					lease.snapshot.kind === 'request-failed'
+						? lease.snapshot.message
+						: m.workspace_project_unavailable(),
+				);
+			}
+		} finally {
+			lease.release();
+		}
+		if (sessions.selectedChat?.id !== chat.id || sessions.selectedChat.projectPath.trim() !== projectPath) {
+			throw new Error(m.workspace_project_changed());
+		}
+		const context: SnippetExpansionContext = chat.status === 'draft'
 			? { type: 'new-chat', chatId: chat.id, projectPath }
 			: { type: 'chat', chatId: chat.id };
+		return { context, chatId: chat.id, projectPath };
 	}
 
 	function snippetErrorDetail(error: unknown): string {
@@ -438,22 +501,15 @@
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
-		const context = snippetContext();
-		if (!context) {
-			notifications.error(m.chat_new_chat_errors_project_path_required());
-			await settleComposerAfterSnippet();
-			return 'cancelled';
-		}
-		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
 		const start = range?.start ?? textarea.selectionStart;
 		const end = range?.end ?? textarea.selectionEnd;
 		try {
+			const operation = await snippetContext();
 			const result = await snippetExpansion.run({
 				shortName: snippet.shortName,
 				arguments: { type: 'value', value: argumentsText },
-				context,
+				context: operation.context,
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (
@@ -466,9 +522,9 @@
 				return 'cancelled';
 			}
 			if (
-				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath.trim() !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
+				sessions.selectedChatId !== operation.chatId ||
+				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
+				result.response.contextProjectPath !== operation.projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return 'cancelled';
@@ -493,28 +549,21 @@
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
-		const context = snippetContext();
-		if (!context) {
-			notifications.error(m.chat_new_chat_errors_project_path_required());
-			return;
-		}
-		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		try {
+			const operation = await snippetContext();
 			const result = await snippetExpansion.run({
 				shortName: command.shortName,
 				arguments: command.arguments,
-				context,
+				context: operation.context,
 			});
 			if (result.kind !== 'expanded') return;
 			if (
-				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath.trim() !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
+				sessions.selectedChatId !== operation.chatId ||
+				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return;
@@ -709,8 +758,15 @@
 	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
-			projectPath={sessions.selectedChat?.projectPath || ''}
+			projectPath={completionProjectPath}
 			isVisible={ui.showFileMenu}
+			projectPending={Boolean(
+				selectedProjectTarget &&
+					(selectedProjectResolution.kind === 'unchecked' ||
+						selectedProjectResolution.kind === 'resolving'),
+			)}
+			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
+				selectedProjectResolution.kind === 'request-failed'}
 			query={ui.fileQuery}
 			onSelect={insertFileMention}
 			onClose={() => ui.closeFileMenu()}
@@ -920,9 +976,16 @@
 		<SlashCommandMenu
 			bind:this={slashCommandMenu}
 			agent={agentState.agentId}
-			projectPath={sessions.selectedChat?.projectPath || ''}
+			projectPath={completionProjectPath}
 			chatId={sessions.selectedChatId}
 			isVisible={ui.showSlashMenu}
+			projectPending={Boolean(
+				selectedProjectTarget &&
+					(selectedProjectResolution.kind === 'unchecked' ||
+						selectedProjectResolution.kind === 'resolving'),
+			)}
+			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
+				selectedProjectResolution.kind === 'request-failed'}
 			query={ui.slashQuery}
 			supportsFork={modelCatalog.supportsFork(capabilityAgentId)}
 			supportsSteering={modelCatalog.supportsSteering(capabilityAgentId)}
@@ -949,6 +1012,35 @@
 {/snippet}
 
 <div class={composerShellClass} data-composer-shell>
+	{#if selectedProjectTarget && selectedProjectResolution.kind === 'unavailable'}
+		<div class="mb-2 rounded-lg border border-border bg-card px-4 py-3">
+			<ProjectAvailabilityNotice
+				projectPath={selectedProjectTarget.projectPath}
+				reason={selectedProjectResolution.reason}
+				onRetry={() => {
+					const lease = projectResolution.retain(selectedProjectTarget);
+					void lease.retry().finally(() => lease.release());
+				}}
+				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
+					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
+					: undefined}
+			/>
+		</div>
+	{:else if selectedProjectTarget && selectedProjectResolution.kind === 'request-failed'}
+		<div class="mb-2 rounded-lg border border-border bg-card px-4 py-3">
+			<ProjectAvailabilityNotice
+				projectPath={selectedProjectTarget.projectPath}
+				requestError={selectedProjectResolution.message}
+				onRetry={() => {
+					const lease = projectResolution.retain(selectedProjectTarget);
+					void lease.retry().finally(() => lease.release());
+				}}
+				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
+					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
+					: undefined}
+			/>
+		</div>
+	{/if}
 	<div class={composerFrameWrapperClass}>
 		{@render composerFrame()}
 	</div>

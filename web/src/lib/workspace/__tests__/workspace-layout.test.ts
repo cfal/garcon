@@ -289,7 +289,7 @@ describe('workspace layout reducer', () => {
 					invokerSurfaceId: sourceSurfaceId,
 					invokerHost: 'window-source',
 					chatId: 'chat-a',
-					effectiveProjectKey: null,
+					projectPath: null,
 					routeIdentity: '/chat/chat-a',
 				},
 			],

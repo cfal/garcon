@@ -14,8 +14,6 @@ function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessi
 		id,
 		parentChat: null,
 		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: `Chat ${id}`,
 		agentId: 'claude',

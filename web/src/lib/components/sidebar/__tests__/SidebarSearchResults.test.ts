@@ -14,8 +14,6 @@ function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): Ch
 	return {
 		id: `chat-${index}`,
 		projectPath: '/tmp/project',
-		effectiveProjectKey: '/tmp/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: `Chat ${index}`,
 		agentId: 'claude',

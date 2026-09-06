@@ -35,6 +35,7 @@
 		getSidebarProjectCollapse,
 		getGhCapability,
 		getWorkspaceCoordinator,
+		getProjectResolution,
 		getTransientLayers,
 		setChatDrafts,
 	} from '$lib/context';
@@ -74,6 +75,7 @@
 	const minuteClock = getMinuteClock();
 	const ghCapability = getGhCapability();
 	const workspace = getWorkspaceCoordinator();
+	const projectResolution = getProjectResolution();
 	const transientLayers = getTransientLayers();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
 	const chatDrafts = new ChatDraftStore();
@@ -481,7 +483,12 @@
 		chatId: string,
 		patch: { projectPath: string; effectiveProjectKey: string },
 	): void {
-		sessions.patchChat(chatId, patch);
+		projectResolution.invalidateChat(chatId);
+		sessions.patchChat(chatId, { projectPath: patch.projectPath });
+		projectResolution.seed(
+			{ kind: 'chat', chatId, projectPath: patch.projectPath },
+			{ kind: 'available', effectiveProjectKey: patch.effectiveProjectKey },
+		);
 	}
 
 	function requestDeleteChat(chat: ChatSessionRecord): void {

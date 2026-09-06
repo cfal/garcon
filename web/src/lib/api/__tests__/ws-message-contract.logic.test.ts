@@ -472,7 +472,6 @@ describe('parseServerWsMessage', () => {
 			projectPath: '/workspace/worktree',
 			effectiveProjectKey: '/workspace/worktree',
 			previousProjectPath: '/workspace/repo',
-			previousEffectiveProjectKey: '/workspace/repo',
 		});
 		expect(projectPathUpdated).toBeInstanceOf(ChatProjectPathUpdatedMessage);
 		expect((projectPathUpdated as ChatProjectPathUpdatedMessage).projectPath).toBe(

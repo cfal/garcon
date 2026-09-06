@@ -11,7 +11,6 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		model: 'opus',
 		title: 'A',
 		projectPath: '/p',
-		effectiveProjectKey: '/p',
 		orderGroup: 'normal',
 		tags: [],
 		permissionMode: 'default',

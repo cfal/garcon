@@ -584,8 +584,6 @@ export function transcriptSearchFacetSignature(chats: ChatSessionRecord[]): stri
 		chats.map((chat) => [
 			chat.id,
 			chat.projectPath,
-			chat.effectiveProjectKey,
-			chat.projectIdentityState,
 			chat.agentId,
 			chat.model,
 			chat.status,

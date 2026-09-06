@@ -16,6 +16,8 @@ import {
 	steerSubmissionRejection,
 } from './steer-submission-policy.js';
 import * as m from '$lib/paraglide/messages.js';
+import { ApiError } from '$lib/api/client.js';
+import type { ProjectTarget } from '$shared/project-resolution';
 
 type RouteDeps = Pick<
 	SessionControllerDeps,
@@ -27,6 +29,7 @@ type RouteDeps = Pick<
 	| 'conversationUi'
 	| 'startupCoordinator'
 	| 'scrollToBottom'
+	| 'onProjectUnavailable'
 >;
 
 export interface SubmissionContext {
@@ -101,6 +104,7 @@ export async function submitQueueRoute(
 					images: context.previousImages,
 				}),
 			refreshControl: () => queue.startControlRefresh(context.chatId),
+			onRejected: (failure) => refreshUnavailableProject(deps, context, failure),
 		});
 	} finally {
 		queue.finishSubmission(context.chatId);
@@ -140,6 +144,7 @@ export async function submitGoalControlRoute(
 					images: context.previousImages,
 				}),
 			refreshControl: () => queue.startControlRefresh(context.chatId),
+			onRejected: (failure) => refreshUnavailableProject(deps, context, failure),
 		});
 	} finally {
 		queue.finishSubmission(context.chatId);
@@ -263,9 +268,10 @@ export async function submitDraftRoute(
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) =>
 				m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
-			onRejected: () => {
+			onRejected: async (failure) => {
 				deps.lifecycle.clearTurnStatus(chatId);
 				deps.sessions.applyProcessingEvent(chatId, null);
+				await refreshUnavailableProject(deps, context, failure);
 			},
 		});
 	} finally {
@@ -322,10 +328,23 @@ export async function submitRunRoute(
 				m.chat_notice_failed_send_message({ detail: errorDetail(failure) }),
 			refreshOnAdmissionConflict: true,
 			refreshControl: () => queue.settleControlRefresh(queue.startControlRefresh(context.chatId)),
+			onRejected: (failure) => refreshUnavailableProject(deps, context, failure),
 		});
 	} finally {
 		deps.composerState.isSubmitting = false;
 	}
+}
+
+function refreshUnavailableProject(
+	deps: RouteDeps,
+	context: SubmissionContext,
+	error: unknown,
+): Promise<void> | void {
+	if (!(error instanceof ApiError) || error.errorCode !== 'PROJECT_UNAVAILABLE') return;
+	const target: ProjectTarget = context.chat.status === 'draft'
+		? { kind: 'path', projectPath: context.chat.projectPath }
+		: { kind: 'chat', chatId: context.chatId, projectPath: context.chat.projectPath };
+	return deps.onProjectUnavailable?.(target);
 }
 
 function requireTranscriptView(deps: RouteDeps, chatId: string): string {

@@ -46,8 +46,6 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		id: 'chat-a',
 		parentChat: null,
 		projectPath: '/repo',
-		effectiveProjectKey: '/repo',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat A',
 		agentId: 'claude',
@@ -184,6 +182,10 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		chatPresentations: {
 			clearDeletedChat: vi.fn(),
 		},
+		projectResolution: {
+			invalidateChat: vi.fn(),
+			seed: vi.fn(),
+		},
 		notifyCompletion: vi.fn(),
 		...overrides,
 	};
@@ -295,7 +297,6 @@ describe('event router integration', () => {
 					projectPath: '/workspace/worktree',
 					effectiveProjectKey: '/workspace/worktree',
 					previousProjectPath: '/workspace/repo',
-					previousEffectiveProjectKey: '/workspace/repo',
 				},
 			],
 			stores,
@@ -303,8 +304,12 @@ describe('event router integration', () => {
 
 		expect(stores.sessions.patchChat).toHaveBeenCalledWith('chat-b', {
 			projectPath: '/workspace/worktree',
-			effectiveProjectKey: '/workspace/worktree',
 		});
+		expect(stores.projectResolution.invalidateChat).toHaveBeenCalledWith('chat-b');
+		expect(stores.projectResolution.seed).toHaveBeenCalledWith(
+			{ kind: 'chat', chatId: 'chat-b', projectPath: '/workspace/worktree' },
+			{ kind: 'available', effectiveProjectKey: '/workspace/worktree' },
+		);
 	});
 
 	it('applies selected chat messages and patches the sidebar preview', () => {

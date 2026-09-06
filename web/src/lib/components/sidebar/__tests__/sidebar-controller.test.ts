@@ -34,8 +34,6 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
 		id: 'c-1',
 		projectPath: '/tmp/project',
-		effectiveProjectKey: '/tmp/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
@@ -204,7 +202,6 @@ describe('SidebarController', () => {
 					agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 					title: 'Fork',
 					projectPath: '/tmp/project',
-					effectiveProjectKey: '/tmp/project',
 					orderGroup: 'normal',
 					tags: [],
 					activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },

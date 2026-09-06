@@ -35,8 +35,6 @@ function chatRecord(): ChatSessionRecord {
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/repo',
-		effectiveProjectKey: '/repo',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat 1',
 		agentId: 'claude',

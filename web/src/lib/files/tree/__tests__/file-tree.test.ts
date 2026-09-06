@@ -301,7 +301,7 @@ describe('FileTreeStore', () => {
 		await tick();
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/workspace/project', effectiveProjectKey: null },
+			context: { chatId: 'draft', projectPath: '/workspace/project' },
 		});
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
 

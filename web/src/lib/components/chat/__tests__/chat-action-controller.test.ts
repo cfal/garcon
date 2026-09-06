@@ -28,8 +28,6 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/repo',
-		effectiveProjectKey: '/workspace/repo',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
@@ -64,7 +62,6 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		title: 'Fork',
 		projectPath: '/workspace/repo',
-		effectiveProjectKey: '/workspace/repo',
 		orderGroup: 'normal',
 		tags: [],
 		activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
@@ -259,7 +256,6 @@ describe('ChatActionController', () => {
 			projectPath: '/workspace/canonical',
 			effectiveProjectKey: '/workspace/canonical',
 			previousProjectPath: '/workspace/repo',
-			previousEffectiveProjectKey: '/workspace/repo',
 		});
 		const { controller, callbacks } = createHarness();
 

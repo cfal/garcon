@@ -11,8 +11,6 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',

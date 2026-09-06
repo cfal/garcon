@@ -2,6 +2,7 @@ import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
+import type { ProjectResolutionStore } from './project-resolution-store.svelte.js';
 import {
 	chatViewSurfaceId,
 	fileSurfaceId,
@@ -64,6 +65,7 @@ interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
 	terminals: TerminalRegistry;
 	workspaceContext: WorkspaceContextStore;
+	projectResolution: Pick<ProjectResolutionStore, 'retain'>;
 	appShell: AppShellStore;
 	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
@@ -152,7 +154,20 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			commit,
 			commitDestroyedRemoval: (surfaceId, mutations) =>
 				this.#presentation.commitDestroyedRemovals([surfaceId], mutations),
-			currentProjectPath: () => deps.workspaceContext.current?.projectPath ?? null,
+			resolveCurrentProjectPath: async () => {
+				const target = deps.workspaceContext.currentTarget;
+				if (!target) return null;
+				const lease = deps.projectResolution.retain(target);
+				try {
+					await lease.resolve();
+					const snapshot = lease.snapshot;
+					if (snapshot.kind === 'available') return target.projectPath;
+					if (snapshot.kind === 'request-failed') throw new Error(snapshot.message);
+					throw new Error(m.workspace_project_unavailable());
+				} finally {
+					lease.release();
+				}
+			},
 			isMobile: () => this.isMobile,
 			cancelWorkspaceDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
 			windowOf: (surfaceId) => this.#presentation.windowOf(surfaceId),

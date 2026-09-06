@@ -23,6 +23,8 @@
 		getGitQuickSummary,
 		getChatProcessingReconciler,
 		getModelCatalog,
+		getLocalSettings,
+		getProjectResolution,
 		getSurfaceFrames,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
@@ -74,6 +76,7 @@
 	import { cn } from '$lib/utils/cn';
 	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { projectTargetKey, type ProjectTarget } from '$shared/project-resolution';
 
 	let {
 		isMobile,
@@ -90,6 +93,8 @@
 	const terminals = getTerminalRegistry();
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
+	const localSettings = getLocalSettings();
+	const projectResolution = getProjectResolution();
 	const gitBranchActions = getGitBranchActions();
 	const gitQuickSummary = getGitQuickSummary();
 	const fileSessions = getFileSessions();
@@ -155,14 +160,63 @@
 				),
 			),
 	);
-	const visibleGitProjects = $derived.by<GitQuickProjectLease[]>(() =>
-		chatPresentations.flatMap(({ chatId }) => {
+	const visibleGitProjects = $derived.by<GitQuickProjectLease[]>(() => {
+		if (!localSettings.showQuickCommitTray) return [];
+		return chatPresentations.flatMap(({ chatId }) => {
 			const chat = sessions.byId[chatId];
-			return chat?.projectPath
+			if (!chat?.projectPath) return [];
+			const target = targetForChat(chat);
+			const resolution = projectResolution.snapshotFor(target);
+			return resolution.kind === 'available'
 				? [{ projectPath: chat.projectPath, isProcessing: chat.isProcessing }]
 				: [];
-		}),
-	);
+		});
+	});
+
+	$effect(() => {
+		const targets = new Map(
+			chatPresentations.flatMap(({ chatId }) => {
+				const chat = sessions.byId[chatId];
+				if (!chat?.projectPath) return [];
+				const target = targetForChat(chat);
+				return [[projectTargetKey(target), target] as const];
+			}),
+		);
+		const leases = untrack(() =>
+			[...targets.values()].map((target) => projectResolution.retain(target)),
+		);
+		return () => {
+			for (const lease of leases) lease.release();
+		};
+	});
+
+	$effect(() => {
+		if (!localSettings.showQuickCommitTray) return;
+		const targets = new Map(
+			chatPresentations.flatMap(({ chatId }) => {
+				const chat = sessions.byId[chatId];
+				if (!chat?.projectPath) return [];
+				const target = targetForChat(chat);
+				return [[projectTargetKey(target), target] as const];
+			}),
+		);
+		const leases = untrack(() =>
+			[...targets.values()].map((target) => {
+				const lease = projectResolution.retain(target);
+				void lease.resolve();
+				return lease;
+			}),
+		);
+		return () => {
+			for (const lease of leases) lease.release();
+		};
+	});
+
+	function targetForChat(chat: { id: string; status: string; projectPath: string }): ProjectTarget {
+		return chat.status === 'draft'
+			? { kind: 'path', projectPath: chat.projectPath }
+			: { kind: 'chat', chatId: chat.id, projectPath: chat.projectPath };
+	}
 	const rootState = new WorkspaceRootState({
 		get snapshot() {
 			return snapshot;
@@ -433,6 +487,12 @@
 				style={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
+				onChooseProjectFolder={
+					modelCatalog.supportsUpdateProjectPath(sessions.selectedChat?.agentId ?? '')
+					&& sessions.selectedChat
+						? () => chatActions.requestProjectPath(sessions.selectedChat!)
+						: undefined
+				}
 				frameBridge={rootState.frameBridge(surface.id)}
 			/>
 		{/key}

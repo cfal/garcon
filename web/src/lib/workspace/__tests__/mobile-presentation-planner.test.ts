@@ -9,7 +9,7 @@ import { MobilePresentationPlanner } from '../mobile-presentation-planner.js';
 
 describe('MobilePresentationPlanner', () => {
 	it('records and restores a route- and project-valid transient invoker', () => {
-		const context = { chatId: 'chat-a', effectiveProjectKey: 'project-a' };
+		const context = { chatId: 'chat-a', projectPath: '/project-a' };
 		const planner = new MobilePresentationPlanner({
 			getContext: () => context,
 			getRouteIdentity: () => '/chat/chat-a',
@@ -45,7 +45,7 @@ describe('MobilePresentationPlanner', () => {
 				invokerSurfaceId: 'singleton:git',
 				invokerHost: 'mobile',
 				chatId: 'chat-a',
-				effectiveProjectKey: 'project-a',
+				projectPath: '/project-a',
 				routeIdentity: '/chat/chat-a',
 			},
 		]);
@@ -57,7 +57,7 @@ describe('MobilePresentationPlanner', () => {
 
 	it('ignores stale return entries and falls back to non-excluded mobile recency', () => {
 		let routeIdentity = '/chat/chat-a';
-		const context = { chatId: 'chat-a', effectiveProjectKey: 'project-a' };
+		const context = { chatId: 'chat-a', projectPath: '/project-a' };
 		const planner = new MobilePresentationPlanner({
 			getContext: () => context,
 			getRouteIdentity: () => routeIdentity,

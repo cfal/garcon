@@ -44,7 +44,7 @@ function availableProject(chatId: string, projectPath: string) {
 function resolvingProject(chatId: string, projectPath: string) {
 	return {
 		kind: 'resolving' as const,
-		context: { chatId, projectPath, effectiveProjectKey: null },
+		context: { chatId, projectPath },
 	};
 }
 

@@ -154,8 +154,6 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Unread chat',
 		agentId: 'claude',
@@ -2215,8 +2213,6 @@ describe('ConversationSessionController', () => {
 		const draft = createRunningChat({
 			id: 'draft-1',
 			status: 'draft',
-			projectIdentityState: 'pending',
-			effectiveProjectKey: null,
 			model: 'opus',
 		});
 		const { deps } = createDeps(draft);

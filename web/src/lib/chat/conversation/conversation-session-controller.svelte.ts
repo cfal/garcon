@@ -43,6 +43,7 @@ import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte
 import { ConversationPermissionService } from './conversation-permission-service.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import type { ConversationSubmissionOutcome } from '$lib/chat/conversation/conversation-submission-outcome.js';
+import type { ProjectTarget } from '$shared/project-resolution';
 import { classifySubmission } from '$lib/chat/conversation/submission-classifier.js';
 import {
 	errorDetail,
@@ -249,6 +250,7 @@ export interface SessionControllerDeps {
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;
 	scrollToBottom: () => void;
+	onProjectUnavailable?: (target: ProjectTarget) => Promise<void> | void;
 }
 
 export class ConversationSessionController {

@@ -12,13 +12,24 @@
 	interface Props {
 		projectPath: string;
 		isVisible: boolean;
+		projectPending?: boolean;
+		projectUnavailable?: boolean;
 		query: string;
 		onSelect: (filePath: string) => void;
 		onClose: () => void;
 		position?: { top: number; left: number };
 	}
 
-	let { projectPath, isVisible, query, onSelect, onClose, position }: Props = $props();
+	let {
+		projectPath,
+		isVisible,
+		projectPending = false,
+		projectUnavailable = false,
+		query,
+		onSelect,
+		onClose,
+		position,
+	}: Props = $props();
 	const transientLayers = getTransientLayers();
 	const layerId = allocateTransientLayerId('file-mention');
 
@@ -176,11 +187,11 @@
 		style:left={position ? `${position.left}px` : undefined}
 	>
 		<ul bind:this={listElement} class="max-h-[200px] overflow-y-auto py-1" role="listbox">
-			{#if isLoading}
+			{#if isLoading || projectPending}
 				<li class="px-3 py-2 text-sm text-muted-foreground">
 					{m.filetree_loading()}
 				</li>
-			{:else if loadFailed}
+			{:else if loadFailed || projectUnavailable}
 				<li class="px-3 py-2 text-sm text-muted-foreground">
 					{m.filetree_check_project_path()}
 				</li>

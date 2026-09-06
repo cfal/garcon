@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { describe, expect, it, vi } from 'vitest';
+import type { ProjectTarget } from '$shared/project-resolution';
 import ProjectSurfaceGateTestHost from './ProjectSurfaceGateTestHost.svelte';
 
 const retained = {
@@ -13,7 +14,7 @@ describe('ProjectSurfaceGate', () => {
 			...retained,
 			projectState: {
 				kind: 'resolving',
-				context: { chatId: 'draft', projectPath: '/project', effectiveProjectKey: null },
+				context: { chatId: 'draft', projectPath: '/project' },
 			},
 		});
 
@@ -29,7 +30,7 @@ describe('ProjectSurfaceGate', () => {
 			...retained,
 			projectState: {
 				kind: 'resolving',
-				context: { chatId: 'draft', projectPath: '/other', effectiveProjectKey: null },
+				context: { chatId: 'draft', projectPath: '/other' },
 			},
 		});
 
@@ -57,5 +58,36 @@ describe('ProjectSurfaceGate', () => {
 		const action = screen.getByRole('button', { name: 'Project action' });
 		expect(action.parentElement?.hasAttribute('inert')).toBe(false);
 		expect(container.firstElementChild?.getAttribute('aria-busy')).toBe('false');
+	});
+
+	it('shows actionable unavailable feedback and retries the explicit target', async () => {
+		const target = { kind: 'path' as const, projectPath: '/missing-project' };
+		const fetchResolution = vi.fn(async (_target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
+		}));
+		const onChooseFolder = vi.fn();
+		render(ProjectSurfaceGateTestHost, {
+			props: {
+				...retained,
+				target,
+				onChooseFolder,
+				fetchResolution,
+				projectState: {
+					kind: 'unavailable',
+					context: { chatId: 'draft', projectPath: target.projectPath },
+					reason: 'not-found',
+				},
+			},
+		});
+
+		expect(screen.getByText('Project folder unavailable')).toBeTruthy();
+		expect(screen.getByText('The folder could not be found.')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+		expect(onChooseFolder).toHaveBeenCalledOnce();
+		await waitFor(() => expect(fetchResolution).toHaveBeenCalledOnce());
+		expect(fetchResolution.mock.calls[0]?.[0]).toEqual(target);
 	});
 });

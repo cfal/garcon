@@ -45,7 +45,7 @@ interface TerminalPlacementServiceDeps {
 	isWindowReserved(windowId: WorkspaceWindowId): boolean;
 	commit: WorkspaceCommit;
 	commitDestroyedRemoval(surfaceId: string, mutations: WorkspaceMutationPlan): Promise<boolean>;
-	currentProjectPath(): string | null;
+	resolveCurrentProjectPath(): Promise<string | null>;
 	isMobile(): boolean;
 	cancelWorkspaceDrag(): void;
 	windowOf(surfaceId: string): WorkspaceWindowId | null;
@@ -633,8 +633,9 @@ export class TerminalPlacementService {
 		}
 	}
 
-	#createWithRequestId(requestId: string): Promise<string> {
-		return this.deps.terminals.create(this.deps.currentProjectPath(), requestId);
+	async #createWithRequestId(requestId: string): Promise<string> {
+		const projectPath = await this.deps.resolveCurrentProjectPath();
+		return this.deps.terminals.create(projectPath, requestId);
 	}
 
 	#placementResolved(terminalId: string): boolean {

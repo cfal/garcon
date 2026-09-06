@@ -28,8 +28,6 @@ export interface ChatSessionRecord {
 	id: string;
 	parentChat: ParentChatRef | null;
 	projectPath: string;
-	effectiveProjectKey: string | null;
-	projectIdentityState: 'pending' | 'available';
 	orderGroup: ChatOrderGroup | null;
 	title: string;
 	agentId: SessionAgentId;

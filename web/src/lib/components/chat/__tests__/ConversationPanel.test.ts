@@ -66,8 +66,6 @@ function chat(): ChatSessionRecord {
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/project',
-		effectiveProjectKey: '/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',

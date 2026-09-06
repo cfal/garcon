@@ -10,6 +10,7 @@ import type {
 	ChatListRefreshRequestedMessage,
 	ChatProjectPathUpdatedMessage,
 } from '$shared/ws-events';
+import type { ProjectResolution, ProjectTarget } from '$shared/project-resolution';
 
 export interface SidebarContext {
 	removeChat: (chatId: string) => void;
@@ -17,8 +18,10 @@ export interface SidebarContext {
 	patchChatTitle: (chatId: string, title: string) => void;
 	patchChatProjectPath: (
 		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
+		patch: { projectPath: string },
 	) => void;
+	invalidateProjectResolution: (chatId: string) => void;
+	seedProjectResolution: (target: ProjectTarget, resolution: ProjectResolution) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	refreshChats: () => void;
 	removeChatTranscript: (chatId: string) => void;
@@ -48,10 +51,14 @@ export function handleChatProjectPathUpdated(
 	ctx: SidebarContext,
 ) {
 	if (!msg.chatId || !msg.projectPath || !msg.effectiveProjectKey) return;
+	ctx.invalidateProjectResolution(msg.chatId);
 	ctx.patchChatProjectPath(msg.chatId, {
 		projectPath: msg.projectPath,
-		effectiveProjectKey: msg.effectiveProjectKey,
 	});
+	ctx.seedProjectResolution(
+		{ kind: 'chat', chatId: msg.chatId, projectPath: msg.projectPath },
+		{ kind: 'available', effectiveProjectKey: msg.effectiveProjectKey },
+	);
 }
 
 export function handleChatListInvalidated(

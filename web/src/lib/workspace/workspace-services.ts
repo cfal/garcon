@@ -38,6 +38,7 @@ import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import { WorkspaceWindowDndController } from './window-dnd.svelte.js';
 import { WorkspaceHostGeometryState } from './workspace-host-geometry.svelte.js';
+import { ProjectResolutionStore } from './project-resolution-store.svelte.js';
 import {
 	floorWorkspacePixels,
 	resolveWorkspacePartitionRatioBounds,
@@ -100,6 +101,7 @@ export interface WorkspaceServices {
 	restore: ReturnType<typeof parsePersistedWorkspaceLayout>;
 	layout: WorkspaceLayoutReader;
 	context: ReturnType<typeof createWorkspaceContextStore>;
+	projectResolution: ProjectResolutionStore;
 	terminals: TerminalRegistry;
 	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
@@ -134,7 +136,15 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			});
 		},
 	});
-	const context = createWorkspaceContextStore(deps.chatSessions, deps.modelCatalog);
+	const projectResolution = new ProjectResolutionStore(undefined, (target) => {
+		projectResolution.invalidateChat(target.chatId);
+		void deps.chatSessions.quietRefreshChats();
+	});
+	const context = createWorkspaceContextStore(
+		deps.chatSessions,
+		deps.modelCatalog,
+		projectResolution,
+	);
 	let placement: WorkspaceCoordinator | null = null;
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
@@ -262,6 +272,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 	const domainBindings = new WorkspaceDomainBindings({
 		workspaceContext: context,
+		projectResolution,
 		ghCapability: deps.ghCapability,
 		localSettings: deps.localSettings,
 		singletons: singletonSurfaces,
@@ -308,6 +319,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		arbiter: new WorkspaceTransitionArbiter(layout, layout),
 		terminals,
 		workspaceContext: context,
+		projectResolution,
 		appShell: deps.appShell,
 		workspaceInteractionGate,
 		transientLayers,
@@ -350,6 +362,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		restore,
 		layout,
 		context,
+		projectResolution,
 		terminals,
 		workspaceInteractionGate,
 		transientLayers,
@@ -375,6 +388,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			singletonSurfaces.destroy();
 			gitQuickSummary.destroy();
 			gitBranchActions.destroy();
+			projectResolution.destroy();
 			persistence.destroy();
 		},
 	};

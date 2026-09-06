@@ -176,6 +176,7 @@ function createHarness(
 		arbiter: new WorkspaceTransitionArbiter(layout, commitPort),
 		terminals: terminals as never,
 		workspaceContext: { current: null } as never,
+		projectResolution: { retain: vi.fn() } as never,
 		appShell: appShell as never,
 		workspaceInteractionGate,
 		transientLayers,

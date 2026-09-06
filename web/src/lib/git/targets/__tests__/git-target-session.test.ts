@@ -134,7 +134,6 @@ describe('GitTargetSessionController', () => {
 			context: {
 				chatId: 'draft',
 				projectPath: '/new',
-				effectiveProjectKey: null,
 			},
 		});
 		load.resolve({ targets: [candidate('/old/worktree')] });

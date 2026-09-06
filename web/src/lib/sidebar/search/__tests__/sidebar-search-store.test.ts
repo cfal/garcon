@@ -14,8 +14,6 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Test chat',
 		agentId: 'claude',
@@ -813,8 +811,6 @@ describe('SidebarSearchStore', () => {
 			const baseline = transcriptSearchFacetSignature([chat]);
 			const changes: Partial<ChatSessionRecord>[] = [
 				{ projectPath: '/workspace/other' },
-				{ effectiveProjectKey: '/workspace/other' },
-				{ projectIdentityState: 'pending' },
 				{ agentId: 'codex' },
 				{ model: 'gpt-5.6-sol' },
 				{ status: 'draft' },

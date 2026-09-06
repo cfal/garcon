@@ -51,6 +51,7 @@
 		setSnippets,
 		setWorkspaceLayout,
 		setWorkspaceContext,
+		setProjectResolution,
 		setTerminalRegistry,
 		setWorkspaceCoordinator,
 		setWorkspaceWindowDnd,
@@ -137,6 +138,7 @@
 	});
 	const workspaceLayout = workspaceServices.layout;
 	const workspaceContext = workspaceServices.context;
+	const projectResolution = workspaceServices.projectResolution;
 	const terminals = workspaceServices.terminals;
 	const transientLayers = workspaceServices.transientLayers;
 	const surfaceFrames = workspaceServices.surfaceFrames;
@@ -174,6 +176,7 @@
 	setAppShell(appShell);
 	setWorkspaceLayout(workspaceLayout);
 	setWorkspaceContext(workspaceContext);
+	setProjectResolution(projectResolution);
 	setTerminalRegistry(terminals);
 	setWorkspaceCoordinator(workspace);
 	setWorkspaceWindowDnd(workspaceServices.windowDnd);

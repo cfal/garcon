@@ -49,8 +49,6 @@ function chat(
 	return {
 		id,
 		projectPath,
-		effectiveProjectKey: projectPath,
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: id,
 		agentId: 'claude',
