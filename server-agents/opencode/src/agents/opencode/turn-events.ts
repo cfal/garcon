@@ -25,6 +25,7 @@ export interface OpenCodeTurnContext {
   // status frames for the same scheduled attempt append one row, not many.
   lastRetryNoticeKey: string | null;
   providerContinuationMessageIds: Set<string>;
+  automaticCompactionMessageIds: Set<string>;
   recentEventIds: Set<string>;
   providerSteeringPartIds: Set<string>;
   pendingSteeringMessageIds: Set<string>;
@@ -110,6 +111,7 @@ export function createOpenCodeTurnContext(
     providerSteeringDeliveryUnconfirmed: false,
     lastRetryNoticeKey: null,
     providerContinuationMessageIds: new Set(),
+    automaticCompactionMessageIds: new Set(),
     recentEventIds: new Set(),
     providerSteeringPartIds: new Set(),
     pendingSteeringMessageIds: new Set(),
@@ -206,9 +208,11 @@ export function openCodeEventBelongsToTurn(
       return false;
     }
     if (isOpenCodeCompactionAssistant(info)) {
-      // The summary assistant is internal to ordinary turns; a compaction turn
-      // owns it as its terminal message.
-      if (!turn.compaction) return false;
+      if (!turn.compaction) {
+        if (!turn.automaticCompactionMessageIds.has(info.parentID)) return false;
+        if (turn.assistantTerminals.has(messageId)) return false;
+        turn.automaticCompactionMessageIds.add(messageId);
+      }
       turn.assistantMessageIds.add(messageId);
       return true;
     }

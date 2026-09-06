@@ -1532,7 +1532,7 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('routes an automatic compaction summary chain without rows, terminals, or warnings', async () => {
+  it('publishes one automatic boundary while hiding the compaction summary chain', async () => {
     const diagnostics = diagnosticLogger();
     const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
       logger: diagnostics.logger,
@@ -1595,13 +1595,40 @@ describe('OpenCode operation routing', () => {
       },
     });
     eventStream.push({
+      id: 'event-summary-message-replayed',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'assistant-summary',
+          role: 'assistant',
+          parentID: 'user-compaction',
+          summary: true,
+          finish: 'stop',
+          time: { completed: 1 },
+        },
+      },
+    }, { completePrompt: false });
+    eventStream.push({
       id: 'event-barrier',
       type: 'session.compacted',
       properties: { sessionID: 'session-1' },
     });
     await waitFor(() => diagnostics.debug.some((entry) => entry[1]?.eventId === 'event-barrier'));
 
-    expect(events).toEqual([]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'rows',
+        rows: [expect.objectContaining({
+          message: expect.objectContaining({
+            type: 'compaction',
+            trigger: 'auto',
+            summary: '',
+          }),
+        })],
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain('provider-created summary');
     expect(diagnostics.warnings).toEqual([]);
     expect(diagnostics.debug.filter(([message]) => (
       message === 'Adopted an OpenCode compaction part'

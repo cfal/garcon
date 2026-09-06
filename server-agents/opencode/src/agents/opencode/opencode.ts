@@ -27,7 +27,7 @@ import {
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
-import { CompactionMessage } from '@garcon/common/chat-types';
+import { CompactionMessage, type CompactionTrigger } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   runtimeRows,
@@ -88,7 +88,7 @@ import {
   modelsFromProviders,
   type OpenCodeModelOption,
 } from './model-catalog.js';
-import { adoptOpenCodeCompactionPartRoute, manualCompactionBoundaryRow } from './compaction-routing.js';
+import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow } from './compaction-routing.js';
 import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
 import {
   OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
@@ -918,7 +918,17 @@ export class OpenCodeRuntime {
 
   #dispatchOpenCodeEvent(event: SSEEvent, route: OpenCodeOperationRoute): void {
     if (route.turn.compaction) {
-      this.#dispatchCompactionBoundary(event, route);
+      this.#dispatchCompactionBoundary(event, route, 'manual');
+      return;
+    }
+    const messageId = event.properties?.info?.id
+      ?? event.properties?.part?.messageID
+      ?? event.properties?.messageID;
+    if (
+      typeof messageId === 'string'
+      && route.turn.automaticCompactionMessageIds.has(messageId)
+    ) {
+      this.#dispatchCompactionBoundary(event, route, 'auto');
       return;
     }
     const chatMessages = convertOpenCodeEventToChatMessages(event, route.turn, this.#logger);
@@ -929,13 +939,16 @@ export class OpenCodeRuntime {
     this.#publishRows(route.sessionId, route.turn.operation, chatMessages);
   }
 
-  // A manual compaction turn surfaces only the boundary marker; the provider's
-  // summary text and control parts stay internal to the native session.
-  #dispatchCompactionBoundary(event: SSEEvent, route: OpenCodeOperationRoute): void {
-    if (route.turn.compactionBoundaryPublished) return;
-    const boundary = manualCompactionBoundaryRow(event);
+  // Compaction summary text and control parts stay internal to the native session.
+  #dispatchCompactionBoundary(
+    event: SSEEvent,
+    route: OpenCodeOperationRoute,
+    trigger: CompactionTrigger,
+  ): void {
+    if (trigger === 'manual' && route.turn.compactionBoundaryPublished) return;
+    const boundary = compactionBoundaryRow(event, trigger);
     if (!boundary) return;
-    route.turn.compactionBoundaryPublished = true;
+    if (trigger === 'manual') route.turn.compactionBoundaryPublished = true;
     this.#publishRows(route.sessionId, route.turn.operation, [
       attachNativeMessageSource(boundary.row, { entryId: boundary.summaryMessageId }),
     ]);
