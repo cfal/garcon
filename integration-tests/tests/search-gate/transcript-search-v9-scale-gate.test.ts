@@ -1,6 +1,15 @@
 import { expect, test } from 'bun:test';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { rm, stat, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createServer, type ViteDevServer } from 'vite';
+import type {
+  ChatSearchIndexStatus,
+  ChatSearchPage,
+  ChatSearchRequest,
+  ChatSearchResponse,
+  ChatSearchResult,
+} from '../../../common/chat-search.js';
 import {
   SEARCH_CORPUS_TIER_ISOLATION,
   SEARCH_CORPUS_TIER_M,
@@ -37,6 +46,114 @@ const NEAR_CAP_PREFIX_P50_BUDGET_MS = 3_500;
 const CLIENT_PREFIX_BUDGET_MS = 4_500;
 
 type ServiceSearchRequest = Parameters<TranscriptSearchService['search']>[0];
+
+interface SidebarSearchStoreHarness {
+  transcriptSearchQuery: string;
+  transcriptSearchResults: ChatSearchResult[];
+  transcriptSearchIndex: ChatSearchIndexStatus | null;
+  transcriptSearchPage: ChatSearchPage | null;
+  readonly transcriptSearchRevalidating: boolean;
+  readonly transcriptSearchRevalidationError: string | null;
+  updateDraftQuery(query: string): void;
+  retryTranscriptSearchRevalidation(): Promise<void>;
+  destroy(): void;
+}
+
+type SidebarSearchStoreFactory = (deps: {
+  readonly getChats: () => Record<string, unknown>[];
+  readonly getSelectedChatId: () => string | null;
+  readonly getTranscriptSearchEnabled: () => boolean;
+  readonly getSearchResultSort: () => 'relevance';
+  readonly notifyError: (message: string) => void;
+  readonly searchChatTranscripts: (
+    request: ChatSearchRequest,
+    options?: { signal?: AbortSignal },
+  ) => Promise<ChatSearchResponse>;
+}) => SidebarSearchStoreHarness;
+
+async function loadSidebarSearchStore(): Promise<{
+  readonly create: SidebarSearchStoreFactory;
+  readonly server: ViteDevServer;
+}> {
+  const webRoot = join(import.meta.dir, '../../../web');
+  const server = await createServer({
+    root: webRoot,
+    configFile: false,
+    appType: 'custom',
+    logLevel: 'silent',
+    plugins: [svelte()],
+    resolve: {
+      alias: {
+        $lib: join(webRoot, 'src/lib'),
+        $shared: join(webRoot, '../common'),
+      },
+    },
+    optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true },
+  });
+  try {
+    const loaded = await server.ssrLoadModule(
+      '/src/lib/sidebar/search/sidebar-search-store.svelte.ts',
+    ) as Record<string, unknown>;
+    if (typeof loaded.createSidebarSearchStore !== 'function') {
+      throw new Error('Sidebar search store factory is unavailable');
+    }
+    return {
+      create: loaded.createSidebarSearchStore as SidebarSearchStoreFactory,
+      server,
+    };
+  } catch (error) {
+    await server.close();
+    throw error;
+  }
+}
+
+function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Search aborted', 'AbortError'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException('Search aborted', 'AbortError'));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function sidebarChat(chatId: string): Record<string, unknown> {
+  return {
+    id: chatId,
+    parentChat: null,
+    projectPath: '/workspace/search-gate',
+    effectiveProjectKey: '/workspace/search-gate',
+    projectIdentityState: 'available',
+    orderGroup: 'normal',
+    title: chatId,
+    agentId: 'claude',
+    model: 'sonnet',
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+    createdAt: null,
+    lastActivityAt: '2026-01-01T00:00:00.000Z',
+    lastReadAt: null,
+    isPinned: false,
+    isArchived: false,
+    isProcessing: false,
+    processingPhase: null,
+    canReloadFromNativeHistory: false,
+    isUnread: false,
+    status: 'running',
+    agentOwnershipEpoch: null,
+    tags: [],
+  };
+}
 
 function searchQuery(...markers: string[]): ServiceSearchRequest['query'] {
   return {
@@ -403,9 +520,11 @@ test('[TLV5-SEARCH.10-GATE-05] compact prefix retains near-cap client headroom',
     name: 'nearcap',
   });
   const service = searchService(fixture.workspaceDirectory);
+  let storeLoader: Awaited<ReturnType<typeof loadSidebarSearchStore>> | null = null;
+  let store: SidebarSearchStoreHarness | null = null;
   try {
     await service.enable(new AbortController().signal);
-    await service.search(prefixRequest(fixture));
+    const initial = await service.search(prefixRequest(fixture));
 
     const durations: number[] = [];
     for (let sample = 0; sample < 3; sample += 1) {
@@ -417,29 +536,82 @@ test('[TLV5-SEARCH.10-GATE-05] compact prefix retains near-cap client headroom',
     }
     expect(percentile(durations, 0.5)).toBeLessThan(NEAR_CAP_PREFIX_P50_BUDGET_MS);
 
-    let deadlineTriggered = false;
-    let deadline: ReturnType<typeof setTimeout> | null = null;
+    storeLoader = await loadSidebarSearchStore();
+    const allowedByChatId = new Map(
+      fixture.allowedChats.map((entry) => [entry.chatId, entry]),
+    );
+    const chats = fixture.allowedChats.map((entry) => sidebarChat(entry.chatId));
+    let requestCount = 0;
+    const searchChatTranscripts = async (
+      request: ChatSearchRequest,
+      options?: { signal?: AbortSignal },
+    ): Promise<ChatSearchResponse> => {
+      requestCount += 1;
+      const execution = new AbortController();
+      const executionTimeout = setTimeout(() => execution.abort(), 5_000);
+      try {
+        const result = await service.search({
+          query: searchQuery(...(request.textTokens ?? [request.query])),
+          allowedChats: (request.chatIds ?? fixture.allowedChats.map((entry) => entry.chatId))
+            .flatMap((chatId) => {
+              const allowed = allowedByChatId.get(chatId);
+              return allowed ? [allowed] : [];
+            }),
+          order: request.sort === 'activity' || request.sort === 'created'
+            ? 'allowlist'
+            : 'relevance',
+          mode: request.mode ?? 'page',
+          offset: request.offset ?? 0,
+          limit: request.limit ?? 20,
+          snippetLimit: request.snippetLimit ?? 3,
+          admissionSignal: options?.signal,
+          executionSignal: execution.signal,
+        });
+        await abortableDelay(200, options?.signal);
+        return {
+          query: request.query,
+          ...result,
+          results: [...result.results],
+        };
+      } finally {
+        clearTimeout(executionTimeout);
+      }
+    };
+    store = storeLoader.create({
+      getChats: () => chats,
+      getSelectedChatId: () => null,
+      getTranscriptSearchEnabled: () => true,
+      getSearchResultSort: () => 'relevance',
+      notifyError: () => undefined,
+      searchChatTranscripts,
+    });
+    store.updateDraftQuery(fixture.markerTerm);
+    store.transcriptSearchQuery = fixture.markerTerm;
+    store.transcriptSearchResults = initial.results.map((result) => ({
+      ...result,
+      snippets: [],
+    }));
+    store.transcriptSearchPage = initial.page;
+    store.transcriptSearchIndex = initial.index;
+
     const browserStarted = performance.now();
-    const browserVisible = service.search(prefixRequest(fixture)).then(async (result) => {
-      await Bun.sleep(200);
-      return result;
-    });
-    const deadlineFailure = new Promise<never>((_resolve, reject) => {
-      deadline = setTimeout(() => {
-        deadlineTriggered = true;
-        reject(new Error('CLIENT_PREFIX_TIMEOUT'));
-      }, 5_000);
-    });
-    const result = await Promise.race([browserVisible, deadlineFailure]);
-    if (deadline) clearTimeout(deadline);
-    expect(deadlineTriggered).toBe(false);
-    expect(performance.now() - browserStarted).toBeLessThan(CLIENT_PREFIX_BUDGET_MS);
-    expect(result.results).toHaveLength(500);
+    await store.retryTranscriptSearchRevalidation();
+    const browserElapsedMs = performance.now() - browserStarted;
+
+    expect(requestCount).toBe(1);
+    expect(store.transcriptSearchRevalidating).toBe(false);
+    expect(store.transcriptSearchRevalidationError).toBeNull();
+    expect(store.transcriptSearchResults).toHaveLength(500);
+    expect(store.transcriptSearchResults.every((result) => result.snippets.length === 1)).toBe(true);
+    expect(store.transcriptSearchResults[0]?.snippets[0]?.text).toContain(fixture.markerTerm);
+    expect(browserElapsedMs).toBeLessThan(CLIENT_PREFIX_BUDGET_MS);
     const stats = service.queryStats();
     expect(stats.served).toBe(5);
     expect(stats.p50Ms).toBeLessThan(NEAR_CAP_PREFIX_P50_BUDGET_MS);
     expect(stats.totalP50Ms).toBeLessThan(NEAR_CAP_PREFIX_P50_BUDGET_MS);
   } finally {
+    store?.destroy();
+    await storeLoader?.server.close();
     await service.close();
     await fixture.dispose();
   }
