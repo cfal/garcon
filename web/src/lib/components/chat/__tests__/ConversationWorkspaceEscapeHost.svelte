@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import ConversationWorkspace from '../ConversationWorkspace.svelte';
 	import ConversationPanel from '../ConversationPanel.svelte';
@@ -21,6 +22,7 @@
 		setConversationUi,
 		setConversationLifecycles,
 		setConversationPanels,
+		setProjectResolution,
 	} from '$lib/context';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -43,6 +45,7 @@
 	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
 		onPatchActivity?: (chatId: string, timestamp: string) => void;
@@ -75,6 +78,12 @@
 		tags: [],
 	});
 	setChatDrafts(new ChatDraftStore());
+	const projectResolution = new ProjectResolutionStore(async (target) => ({
+		target,
+		resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+	}));
+	setProjectResolution(projectResolution);
+	onDestroy(() => projectResolution.destroy());
 	const conversationUi = new ConversationUiState();
 	setConversationUi(conversationUi);
 

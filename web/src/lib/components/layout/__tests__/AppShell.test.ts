@@ -10,6 +10,7 @@ import { HOVER_CAPABLE_MEDIA_QUERY } from '$lib/layout/desktop-layout.js';
 import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
+import type { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock('$lib/context', () => ({
 	getNavigation: () => testContext.current?.navigation,
 	getNotifications: () => testContext.current?.notifications,
 	getRemoteSettings: () => testContext.current?.remoteSettings,
+	getProjectResolution: () => testContext.current?.projectResolution,
 	getSidebarProjectCollapse: () => testContext.current?.projectCollapse,
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
 	getTerminalRegistry: () => testContext.current?.terminals,
@@ -157,6 +159,9 @@ function installContext(): AppShellBreakpointWorkspace {
 	vi.spyOn(appShell, 'requestComposerFocus');
 	vi.spyOn(appShell, 'requestSidebarRecenterToSelected');
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+	const projectResolution = {
+		invalidateChat: vi.fn(),
+	} satisfies Pick<ProjectResolutionStore, 'invalidateChat'>;
 	let selectedChatId: string | null = null;
 	const sessions = {
 		orderedChats: [],
@@ -184,6 +189,7 @@ function installContext(): AppShellBreakpointWorkspace {
 	testContext.current = {
 		workspace,
 		transientLayers,
+		projectResolution,
 		navigation: {
 			onNavigateChatAboveRequested: noOpSubscription,
 			onNavigateChatBelowRequested: noOpSubscription,
