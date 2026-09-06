@@ -74,22 +74,11 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import X from '@lucide/svelte/icons/x';
-	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-	import type { AgentSettingDescriptor } from '$shared/agent-integration';
-	import type { JsonValue } from '$shared/json';
-	import type { ResendCandidate } from '$shared/chat-view';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-	} from '$lib/components/model-selector/model-selector-types';
-	import {
-		snippetTemplateUsesArguments,
-		type Snippet,
-		type SnippetExpansionContext,
-	} from '$shared/snippets';
+	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -97,27 +86,9 @@
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
+	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
+	import type { PromptComposerProps } from './prompt-composer-props.js';
 	import ProjectAvailabilityNotice from '$lib/components/workspace/ProjectAvailabilityNotice.svelte';
-	import type { ProjectTarget } from '$shared/project-resolution';
-	interface Props {
-		onsubmit: () => void;
-		onSteerPreferredSubmit: () => void;
-		onModelChange?: (selection: ModelSelectorChange) => void;
-		onPermissionModeChange?: (mode: PermissionMode) => void;
-		onThinkingModeChange?: (mode: ThinkingMode) => void;
-		onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
-		resendCandidates?: readonly ResendCandidate[];
-		onExcludeResendCandidate?: (ordinal: number) => void;
-		directAdmissionPending?: boolean;
-		requiresQueuedSubmission?: boolean;
-		// False when the composer is mounted but hidden (e.g. the Git tab is
-		// active). Focus requests must not be consumed while hidden, since
-		// focusing a display:none textarea is a silent no-op.
-		isVisible?: boolean;
-		isPresented?: boolean;
-		composerEditorOpenRequestId?: number;
-		onChooseProjectFolder?: (chatId: string) => void;
-	}
 
 	let {
 		onsubmit,
@@ -134,7 +105,7 @@
 		isPresented: isPresentedOverride,
 		composerEditorOpenRequestId = 0,
 		onChooseProjectFolder,
-	}: Props = $props();
+	}: PromptComposerProps = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 	const composerState = getComposerState();
 	const agentState = getAgentState();
@@ -148,6 +119,7 @@
 	const transientLayers = getTransientLayers();
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
+	const ui = new PromptComposerUiState();
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -171,33 +143,28 @@
 	const focusDelivery = new PromptComposerFocusDelivery();
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
-		return chat
-			? [chat.id, chat.status, chat.projectPath].join('\u0000')
-			: '';
+		return chat ? [chat.id, chat.status, chat.projectPath].join('\u0000') : '';
 	});
 	const snippetContextHint = $derived(
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
 	);
-	const selectedProjectTarget = $derived.by<ProjectTarget | null>(() => {
-		const chat = sessions.selectedChat;
-		if (!chat?.projectPath) return null;
-		return chat.status === 'draft'
-			? { kind: 'path', projectPath: chat.projectPath }
-			: { kind: 'chat', chatId: chat.id, projectPath: chat.projectPath };
+	const projectState = new PromptComposerProjectState({
+		get selectedChat() {
+			return sessions.selectedChat;
+		},
+		get completionDemand() {
+			return ui.showFileMenu || ui.showSlashMenu;
+		},
+		projectResolution,
 	});
-	const selectedProjectResolution = $derived(
-		selectedProjectTarget
-			? projectResolution.snapshotFor(selectedProjectTarget)
-			: { kind: 'unchecked' as const },
-	);
-	const completionProjectPath = $derived(
-		selectedProjectResolution.kind === 'available' ? selectedProjectTarget?.projectPath ?? '' : '',
-	);
+	const selectedProjectTarget = $derived(projectState.target);
+	const selectedProjectResolution = $derived(projectState.snapshot);
+	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
 		Boolean(
 			onChooseProjectFolder &&
-				sessions.selectedChat &&
-				modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId),
+			sessions.selectedChat &&
+			modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId),
 		),
 	);
 
@@ -213,8 +180,6 @@
 		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	// Ephemeral UI state extracted to companion class.
-	const ui = new PromptComposerUiState();
 	const promptRefinement = new PromptComposerRefinementController({
 		composer: composerState,
 		sessions,
@@ -267,17 +232,6 @@
 		composerState.isDragActive = false;
 	});
 
-	$effect(() => {
-		const target = selectedProjectTarget;
-		if (!target || (!ui.showFileMenu && !ui.showSlashMenu)) return;
-		const lease = untrack(() => {
-			const retained = projectResolution.retain(target);
-			void retained.resolve();
-			return retained;
-		});
-		return () => lease.release();
-	});
-
 	// Cancels path-bound expansion when a selected chat moves to another project.
 	$effect(() => {
 		const projectPath = sessions.selectedChat?.projectPath ?? null;
@@ -325,6 +279,7 @@
 
 	onDestroy(() => {
 		destroyed = true;
+		projectState.destroy();
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
 		imageAttachments.revokeAll();
@@ -442,39 +397,6 @@
 		autoResize();
 	}
 
-	async function snippetContext(): Promise<{
-		context: SnippetExpansionContext;
-		chatId: string;
-		projectPath: string;
-	}> {
-		const chat = sessions.selectedChat;
-		const projectPath = chat?.projectPath.trim();
-		if (!chat || !projectPath) throw new Error(m.chat_new_chat_errors_project_path_required());
-		const target: ProjectTarget = chat.status === 'draft'
-			? { kind: 'path', projectPath }
-			: { kind: 'chat', chatId: chat.id, projectPath };
-		const lease = projectResolution.retain(target);
-		try {
-			await lease.resolve();
-			if (lease.snapshot.kind !== 'available') {
-				throw new Error(
-					lease.snapshot.kind === 'request-failed'
-						? lease.snapshot.message
-						: m.workspace_project_unavailable(),
-				);
-			}
-		} finally {
-			lease.release();
-		}
-		if (sessions.selectedChat?.id !== chat.id || sessions.selectedChat.projectPath.trim() !== projectPath) {
-			throw new Error(m.workspace_project_changed());
-		}
-		const context: SnippetExpansionContext = chat.status === 'draft'
-			? { type: 'new-chat', chatId: chat.id, projectPath }
-			: { type: 'chat', chatId: chat.id };
-		return { context, chatId: chat.id, projectPath };
-	}
-
 	function snippetErrorDetail(error: unknown): string {
 		if (error instanceof ApiError) return error.details || error.message;
 		return error instanceof Error ? error.message : String(error);
@@ -505,7 +427,7 @@
 		const start = range?.start ?? textarea.selectionStart;
 		const end = range?.end ?? textarea.selectionEnd;
 		try {
-			const operation = await snippetContext();
+			const operation = await projectState.resolveSnippetContext();
 			const result = await snippetExpansion.run({
 				shortName: snippet.shortName,
 				arguments: { type: 'value', value: argumentsText },
@@ -554,7 +476,7 @@
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		try {
-			const operation = await snippetContext();
+			const operation = await projectState.resolveSnippetContext();
 			const result = await snippetExpansion.run({
 				shortName: command.shortName,
 				arguments: command.arguments,
@@ -662,9 +584,7 @@
 		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
 	);
 	const isQueueMode = $derived(requiresQueuedSubmission);
-	const hasQueuedAttachmentConflict = $derived(
-		isQueueMode && composerState.images.length > 0,
-	);
+	const hasQueuedAttachmentConflict = $derived(isQueueMode && composerState.images.length > 0);
 	const isDisabled = $derived(isDraftStartupSubmitting);
 
 	const canSubmit = $derived(
@@ -762,8 +682,8 @@
 			isVisible={ui.showFileMenu}
 			projectPending={Boolean(
 				selectedProjectTarget &&
-					(selectedProjectResolution.kind === 'unchecked' ||
-						selectedProjectResolution.kind === 'resolving'),
+				(selectedProjectResolution.kind === 'unchecked' ||
+					selectedProjectResolution.kind === 'resolving'),
 			)}
 			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
 				selectedProjectResolution.kind === 'request-failed'}
@@ -981,8 +901,8 @@
 			isVisible={ui.showSlashMenu}
 			projectPending={Boolean(
 				selectedProjectTarget &&
-					(selectedProjectResolution.kind === 'unchecked' ||
-						selectedProjectResolution.kind === 'resolving'),
+				(selectedProjectResolution.kind === 'unchecked' ||
+					selectedProjectResolution.kind === 'resolving'),
 			)}
 			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
 				selectedProjectResolution.kind === 'request-failed'}
@@ -1017,10 +937,7 @@
 			<ProjectAvailabilityNotice
 				projectPath={selectedProjectTarget.projectPath}
 				reason={selectedProjectResolution.reason}
-				onRetry={() => {
-					const lease = projectResolution.retain(selectedProjectTarget);
-					void lease.retry().finally(() => lease.release());
-				}}
+				onRetry={() => projectState.retry()}
 				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
 					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
 					: undefined}
@@ -1031,10 +948,7 @@
 			<ProjectAvailabilityNotice
 				projectPath={selectedProjectTarget.projectPath}
 				requestError={selectedProjectResolution.message}
-				onRetry={() => {
-					const lease = projectResolution.retain(selectedProjectTarget);
-					void lease.retry().finally(() => lease.release());
-				}}
+				onRetry={() => projectState.retry()}
 				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
 					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
 					: undefined}

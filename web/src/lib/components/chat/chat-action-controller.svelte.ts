@@ -12,10 +12,7 @@ export interface ChatActionControllerDeps {
 	onNewChat: () => void;
 	onDeleteChat: (chatId: string) => Promise<void> | void;
 	onRenameChat: (chatId: string, newTitle: string) => Promise<void> | void;
-	onProjectPathUpdated: (
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	) => void;
+	onProjectPathUpdated: (chatId: string, patch: { projectPath: string }) => void;
 	onUpsertServerChat: (entry: ChatListEntry) => void;
 	onReloadChat?: (chatId: string) => Promise<void> | void;
 	notifyError: (message: string) => void;
@@ -116,13 +113,10 @@ export class ChatActionController {
 		const result = await this.#sidebarController.updateProjectPath(chatId, projectPath);
 		if (this.#projectPathRequestGeneration.get(chatId) !== generation) return;
 		const currentProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
-		if (
-			currentProjectPath !== expectedProjectPath &&
-			currentProjectPath !== result.projectPath
-		) return;
+		if (currentProjectPath !== expectedProjectPath && currentProjectPath !== result.projectPath)
+			return;
 		this.deps.onProjectPathUpdated(chatId, {
 			projectPath: result.projectPath,
-			effectiveProjectKey: result.effectiveProjectKey,
 		});
 	}
 

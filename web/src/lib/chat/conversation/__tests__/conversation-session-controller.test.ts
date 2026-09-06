@@ -698,6 +698,7 @@ function createDeps(chat = createRunningChat()) {
 		setIsViewportPinnedToBottom: vi.fn(),
 		setInitialBottomRestorePending: vi.fn(),
 		scrollToBottom: vi.fn(),
+		onProjectUnavailable: vi.fn(),
 	} satisfies SessionControllerDeps & {
 		ws: {
 			sendMessage: ReturnType<typeof vi.fn>;
@@ -1577,10 +1578,7 @@ describe('ConversationSessionController', () => {
 
 		await controller.submitForChat('123');
 
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
-			'progress',
-			'Forking chat...',
-		);
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith('progress', 'Forking chat...');
 		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
 		expect(deps.chatState.localNotices).toEqual([]);
 		expect(deps.chatState.isUserScrolledUp).toBe(false);
@@ -1619,10 +1617,7 @@ describe('ConversationSessionController', () => {
 			sourceChatId: '123',
 			chatId: expect.stringMatching(/^\d+$/),
 		});
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
-			'progress',
-			'Forking chat...',
-		);
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith('progress', 'Forking chat...');
 		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
 		expect(deps.chatState.localNotices).toEqual([]);
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(createServerEntry('456'));
@@ -2553,6 +2548,29 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.applyProcessingEvent).not.toHaveBeenCalledWith('chat-1', false);
 	});
 
+	it('refreshes only the captured project target after an unavailable rejection', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof runChat>>>();
+		mockRunChat.mockReturnValueOnce(pending.promise);
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.composerState.inputText = 'check this project';
+		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
+
+		deps.sessions.byId['chat-1'] = {
+			...deps.sessions.byId['chat-1'],
+			projectPath: '/workspace/replacement',
+		};
+		pending.reject(new ApiError(409, 'Project folder unavailable', 'PROJECT_UNAVAILABLE'));
+		await expect(submission).resolves.toBe('rejected');
+
+		expect(deps.onProjectUnavailable).toHaveBeenCalledOnce();
+		expect(deps.onProjectUnavailable).toHaveBeenCalledWith({
+			kind: 'chat',
+			chatId: 'chat-1',
+			projectPath: '/workspace/project',
+		});
+	});
+
 	it('retries an ambiguous direct response once with the same identity', async () => {
 		mockRunChat.mockRejectedValueOnce(new TypeError('connection closed')).mockResolvedValueOnce({
 			success: true,
@@ -2690,8 +2708,7 @@ describe('ConversationSessionController', () => {
 			lastOrdinal: 10,
 		});
 		deps.chatState.getCursorForChat.mockImplementation((chatId) => ({
-			transcriptViewId:
-				chatId === 'chat-2' ? 'background-generation' : 'foreground-generation',
+			transcriptViewId: chatId === 'chat-2' ? 'background-generation' : 'foreground-generation',
 			lastOrdinal: chatId === 'chat-2' ? 20 : 10,
 		}));
 		mockCreateQueuedInput.mockResolvedValueOnce({
@@ -2705,10 +2722,7 @@ describe('ConversationSessionController', () => {
 			control: emptyControl(),
 		});
 
-		await new ConversationSessionController(deps).submitForChat(
-			'chat-2',
-			'background message',
-		);
+		await new ConversationSessionController(deps).submitForChat('chat-2', 'background message');
 
 		expect(deps.chatState.getCursorForChat).toHaveBeenCalledWith('chat-2');
 		expect(mockCreateQueuedInput).toHaveBeenCalledWith(

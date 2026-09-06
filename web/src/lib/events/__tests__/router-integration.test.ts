@@ -184,7 +184,6 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		},
 		projectResolution: {
 			invalidateChat: vi.fn(),
-			seed: vi.fn(),
 		},
 		notifyCompletion: vi.fn(),
 		...overrides,
@@ -305,11 +304,9 @@ describe('event router integration', () => {
 		expect(stores.sessions.patchChat).toHaveBeenCalledWith('chat-b', {
 			projectPath: '/workspace/worktree',
 		});
-		expect(stores.projectResolution.invalidateChat).toHaveBeenCalledWith('chat-b');
-		expect(stores.projectResolution.seed).toHaveBeenCalledWith(
-			{ kind: 'chat', chatId: 'chat-b', projectPath: '/workspace/worktree' },
-			{ kind: 'available', effectiveProjectKey: '/workspace/worktree' },
-		);
+		expect(stores.projectResolution.invalidateChat).toHaveBeenCalledWith('chat-b', {
+			preserveProjectPath: '/workspace/worktree',
+		});
 	});
 
 	it('applies selected chat messages and patches the sidebar preview', () => {

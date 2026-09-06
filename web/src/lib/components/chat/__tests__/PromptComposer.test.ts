@@ -1085,6 +1085,22 @@ describe('PromptComposer focus', () => {
 		expect(screen.queryByText('/fork')).toBeNull();
 	});
 
+	it('keeps completion project resolution stable across selected chat record updates', async () => {
+		const { component, rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-completion-resolution',
+			selectedStatus: 'running',
+			selectedIsProcessing: false,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/' } });
+		await waitFor(() => expect(component.getProjectResolutionRequestCount()).toBe(1));
+
+		await rerender({ selectedIsProcessing: true });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(component.getProjectResolutionRequestCount()).toBe(1);
+	});
+
 	it('offers /in only for an existing chat', async () => {
 		const { unmount } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
@@ -1755,7 +1771,7 @@ describe('PromptComposer focus', () => {
 
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 
-		await screen.findByText('Project path is required.');
+		await screen.findByText('Snippet expansion failed: Project path is required.');
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 		expect(textarea.value).toBe('/snippet review this');
 	});

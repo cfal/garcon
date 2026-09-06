@@ -249,7 +249,7 @@ describe('ChatActionController', () => {
 		});
 	});
 
-	it('updates tags and publishes the normalized project identity returned by the server', async () => {
+	it('updates tags and publishes the normalized project path returned by the server', async () => {
 		vi.mocked(chatsApi.updateChatProjectPath).mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
@@ -270,7 +270,6 @@ describe('ChatActionController', () => {
 		});
 		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
 			projectPath: '/workspace/canonical',
-			effectiveProjectKey: '/workspace/canonical',
 		});
 	});
 

@@ -8,6 +8,7 @@ import {
 } from '$lib/workspace/workspace-layout.svelte.js';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte.js';
+import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import {
 	chatViewSurfaceId,
 	portableSingletonDescriptor,
@@ -27,6 +28,7 @@ import type {
 	ConversationPanelRegistry,
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import type { ChatMessagesRequest } from '$lib/api/chats.js';
+import type { ProjectTarget } from '$shared/project-resolution';
 import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
@@ -45,6 +47,7 @@ vi.mock('$lib/context', () => ({
 	getConversationPanels: () => testContext.current?.conversationPanels,
 	getModelCatalog: () => testContext.current?.modelCatalog,
 	getNotifications: () => testContext.current?.notifications,
+	getProjectResolution: () => testContext.current?.projectResolution,
 	getSurfaceFrames: () => testContext.current?.surfaceFrames,
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
@@ -129,7 +132,7 @@ function emptyChatHistory(request: ChatMessagesRequest) {
 	};
 }
 
-function installContext() {
+function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?: boolean } = {}) {
 	const initial = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 		{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
 	]);
@@ -371,8 +374,14 @@ function installContext() {
 	};
 	const localSettings = {
 		terminalFontSize: '13',
+		showQuickCommitTray,
 		set: vi.fn(),
 	};
+	const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
+		target,
+		resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+	}));
+	const projectResolution = new ProjectResolutionStore(fetchProjectResolution);
 	const hostGeometry = {
 		size: null,
 		attach: () => undefined,
@@ -409,8 +418,19 @@ function installContext() {
 		},
 		ghCapability: { hasChecked: true, available: true },
 		notifications: { error: vi.fn() },
+		projectResolution,
 	};
-	return { layout, runtime, workspace, windowDnd, terminals, localSettings, hostGeometry };
+	return {
+		layout,
+		runtime,
+		workspace,
+		windowDnd,
+		terminals,
+		localSettings,
+		hostGeometry,
+		projectResolution,
+		fetchProjectResolution,
+	};
 }
 
 const chatActions = {
@@ -460,6 +480,7 @@ describe('WorkspaceRoot', () => {
 
 	afterEach(() => {
 		cleanup();
+		(testContext.current?.projectResolution as ProjectResolutionStore | undefined)?.destroy();
 		testContext.current = null;
 		vi.unstubAllGlobals();
 	});
@@ -536,6 +557,27 @@ describe('WorkspaceRoot', () => {
 
 		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
 		expect(chatApiMocks.getChatMessages).not.toHaveBeenCalled();
+	});
+
+	it('keeps visible project resolution stable across chat record updates', async () => {
+		const { layout, fetchProjectResolution } = installContext({ showQuickCommitTray: true });
+		renderRoot();
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
+		const sessions = testContext.current?.sessions as {
+			byId: Record<string, ChatSessionRecord>;
+		};
+
+		for (const patch of [
+			{ lastActivityAt: '2026-09-06T00:00:01.000Z' },
+			{ lastMessage: 'Updated preview' },
+			{ isProcessing: true, processingPhase: 'running' as const },
+		]) {
+			sessions.byId['chat-a'] = { ...sessions.byId['chat-a'], ...patch };
+			layout.publish(layout.revision, { ...layout.snapshot });
+			await tick();
+		}
+
+		expect(fetchProjectResolution).toHaveBeenCalledOnce();
 	});
 
 	it('adds Chat actions to the tab context menu', async () => {

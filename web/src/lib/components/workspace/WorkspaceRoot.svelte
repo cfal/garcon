@@ -172,36 +172,25 @@
 				: [];
 		});
 	});
+	const visibleProjectTargetsKey = $derived.by(() =>
+		visibleProjectTargets().map(projectTargetKey).sort().join('\u0000'),
+	);
 
 	$effect(() => {
-		const targets = new Map(
-			chatPresentations.flatMap(({ chatId }) => {
-				const chat = sessions.byId[chatId];
-				if (!chat?.projectPath) return [];
-				const target = targetForChat(chat);
-				return [[projectTargetKey(target), target] as const];
-			}),
-		);
-		const leases = untrack(() =>
-			[...targets.values()].map((target) => projectResolution.retain(target)),
-		);
+		if (!visibleProjectTargetsKey) return;
+		const targets = untrack(visibleProjectTargets);
+		const leases = untrack(() => targets.map((target) => projectResolution.retain(target)));
 		return () => {
 			for (const lease of leases) lease.release();
 		};
 	});
 
 	$effect(() => {
-		if (!localSettings.showQuickCommitTray) return;
-		const targets = new Map(
-			chatPresentations.flatMap(({ chatId }) => {
-				const chat = sessions.byId[chatId];
-				if (!chat?.projectPath) return [];
-				const target = targetForChat(chat);
-				return [[projectTargetKey(target), target] as const];
-			}),
-		);
+		const quickCommitVisible = localSettings.showQuickCommitTray;
+		if (!quickCommitVisible || !visibleProjectTargetsKey) return;
+		const targets = untrack(visibleProjectTargets);
 		const leases = untrack(() =>
-			[...targets.values()].map((target) => {
+			targets.map((target) => {
 				const lease = projectResolution.retain(target);
 				void lease.resolve();
 				return lease;
@@ -211,6 +200,19 @@
 			for (const lease of leases) lease.release();
 		};
 	});
+
+	function visibleProjectTargets(): ProjectTarget[] {
+		return [
+			...new Map(
+				chatPresentations.flatMap(({ chatId }) => {
+					const chat = sessions.byId[chatId];
+					if (!chat?.projectPath) return [];
+					const target = targetForChat(chat);
+					return [[projectTargetKey(target), target] as const];
+				}),
+			).values(),
+		];
+	}
 
 	function targetForChat(chat: { id: string; status: string; projectPath: string }): ProjectTarget {
 		return chat.status === 'draft'
@@ -487,12 +489,11 @@
 				style={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
-				onChooseProjectFolder={
-					modelCatalog.supportsUpdateProjectPath(sessions.selectedChat?.agentId ?? '')
-					&& sessions.selectedChat
-						? () => chatActions.requestProjectPath(sessions.selectedChat!)
-						: undefined
-				}
+				onChooseProjectFolder={modelCatalog.supportsUpdateProjectPath(
+					sessions.selectedChat?.agentId ?? '',
+				) && sessions.selectedChat
+					? () => chatActions.requestProjectPath(sessions.selectedChat!)
+					: undefined}
 				frameBridge={rootState.frameBridge(surface.id)}
 			/>
 		{/key}

@@ -21,6 +21,10 @@ export interface ProjectResolutionLease {
 	release(): void;
 }
 
+interface ChatInvalidationOptions {
+	preserveProjectPath?: string;
+}
+
 interface RetainedRecord {
 	record: ProjectResolutionRecord;
 	references: number;
@@ -34,9 +38,7 @@ class ProjectResolutionRecord {
 		readonly target: ProjectTarget,
 		private readonly fetchResolution: typeof resolveProject,
 		private readonly isRetained: () => boolean,
-		private readonly onBindingChanged: (
-			target: Extract<ProjectTarget, { kind: 'chat' }>,
-		) => void,
+		private readonly onBindingChanged: (target: Extract<ProjectTarget, { kind: 'chat' }>) => void,
 	) {}
 
 	resolve(): Promise<void> {
@@ -45,11 +47,8 @@ class ProjectResolutionRecord {
 		this.snapshot = { kind: 'resolving' };
 		const pending = { controller, promise: Promise.resolve() };
 		this.#request = pending;
-		const isCurrent = () => (
-			this.#request === pending
-			&& !controller.signal.aborted
-			&& this.isRetained()
-		);
+		const isCurrent = () =>
+			this.#request === pending && !controller.signal.aborted && this.isRetained();
 		pending.promise = this.fetchResolution(this.target, controller.signal)
 			.then((response) => {
 				if (isCurrent()) this.snapshot = response.resolution;
@@ -61,9 +60,9 @@ class ProjectResolutionRecord {
 					message: error instanceof Error ? error.message : 'Project check failed',
 				};
 				if (
-					error instanceof ApiError
-					&& error.errorCode === 'PROJECT_PATH_CHANGED'
-					&& this.target.kind === 'chat'
+					error instanceof ApiError &&
+					error.errorCode === 'PROJECT_PATH_CHANGED' &&
+					this.target.kind === 'chat'
 				) {
 					this.onBindingChanged(this.target);
 				}
@@ -83,11 +82,6 @@ class ProjectResolutionRecord {
 		this.#request?.controller.abort();
 		this.#request = null;
 		this.snapshot = { kind: 'unchecked' };
-	}
-
-	seed(resolution: ProjectResolution): void {
-		this.invalidate();
-		this.snapshot = resolution;
 	}
 
 	dispose(): void {
@@ -145,16 +139,16 @@ export class ProjectResolutionStore {
 		return this.#records.get(projectTargetKey(target))?.record.snapshot ?? { kind: 'unchecked' };
 	}
 
-	invalidateChat(chatId: string): void {
+	invalidateChat(chatId: string, options: ChatInvalidationOptions = {}): void {
 		for (const retained of this.#records.values()) {
-			if (retained.record.target.kind === 'chat' && retained.record.target.chatId === chatId) {
+			if (
+				retained.record.target.kind === 'chat' &&
+				retained.record.target.chatId === chatId &&
+				retained.record.target.projectPath !== options.preserveProjectPath
+			) {
 				retained.record.invalidate();
 			}
 		}
-	}
-
-	seed(target: ProjectTarget, resolution: ProjectResolution): void {
-		this.#records.get(projectTargetKey(target))?.record.seed(resolution);
 	}
 
 	destroy(): void {

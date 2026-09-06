@@ -5,8 +5,12 @@ import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidati
 import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
+import { projectTargetKey } from '$shared/project-resolution';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
-import type { ProjectResolutionLease, ProjectResolutionStore } from './project-resolution-store.svelte.js';
+import type {
+	ProjectResolutionLease,
+	ProjectResolutionStore,
+} from './project-resolution-store.svelte.js';
 
 interface WorkspaceDomainBindingsDeps {
 	workspaceContext: WorkspaceContextStore;
@@ -25,18 +29,26 @@ export class WorkspaceDomainBindings {
 		let lastCommitInvalidationKey = '';
 		// Bindings run for the application lifetime, so every sink tolerates absent pre-auth context.
 		this.#destroyEffects = $effect.root(() => {
-			$effect(() => {
+			const currentTargetKey = $derived.by(() => {
 				const target = deps.workspaceContext.currentTarget;
+				return target ? projectTargetKey(target) : null;
+			});
+
+			$effect(() => {
+				if (!currentTargetKey) return;
+				const target = untrack(() => deps.workspaceContext.currentTarget);
 				if (!target) return;
 				const lease = untrack(() => deps.projectResolution.retain(target));
 				return () => lease.release();
 			});
 
 			$effect(() => {
-				const target = deps.workspaceContext.currentTarget;
-				const hasDemand = deps.singletons.hasVisibleProjectSurface
-					|| deps.localSettings.showQuickCommitTray;
-				if (!target || !hasDemand) return;
+				if (!currentTargetKey) return;
+				const hasDemand =
+					deps.singletons.hasVisibleProjectSurface || deps.localSettings.showQuickCommitTray;
+				if (!hasDemand) return;
+				const target = untrack(() => deps.workspaceContext.currentTarget);
+				if (!target) return;
 				const lease: ProjectResolutionLease = untrack(() => {
 					const retained = deps.projectResolution.retain(target);
 					void retained.resolve();

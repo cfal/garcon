@@ -10,6 +10,7 @@
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
+		setProjectResolution,
 		setRemoteSettings,
 		setSnippets,
 		setTransientLayers,
@@ -44,6 +45,8 @@
 	} from '$lib/workspace/workspace-shortcuts.js';
 	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
+	import type { ProjectTarget } from '$shared/project-resolution';
 
 	interface Props {
 		selectedChatId?: string;
@@ -127,6 +130,17 @@
 	});
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
+	let projectResolutionRequestCount = 0;
+	export function getProjectResolutionRequestCount(): number {
+		return projectResolutionRequestCount;
+	}
+	const projectResolution = new ProjectResolutionStore(async (target: ProjectTarget) => {
+		projectResolutionRequestCount += 1;
+		return {
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		};
+	});
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
@@ -349,6 +363,7 @@
 		applyOptimisticSnapshot: () => () => {},
 	} as never);
 	setNotifications(notifications);
+	setProjectResolution(projectResolution);
 	setSnippets(
 		createSnippetsStore({
 			get: async () => {
@@ -375,6 +390,7 @@
 	onDestroy(() => {
 		unsubscribeSidebarRecenter();
 		chatDrafts.destroy();
+		projectResolution.destroy();
 	});
 	const shortcutWorkspace = {
 		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },

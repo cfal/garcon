@@ -479,16 +479,9 @@
 		closeMobileSidebar();
 	}
 
-	function handleChatProjectPathUpdated(
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	): void {
-		projectResolution.invalidateChat(chatId);
+	function handleChatProjectPathUpdated(chatId: string, patch: { projectPath: string }): void {
+		projectResolution.invalidateChat(chatId, { preserveProjectPath: patch.projectPath });
 		sessions.patchChat(chatId, { projectPath: patch.projectPath });
-		projectResolution.seed(
-			{ kind: 'chat', chatId, projectPath: patch.projectPath },
-			{ kind: 'available', effectiveProjectKey: patch.effectiveProjectKey },
-		);
 	}
 
 	function requestDeleteChat(chat: ChatSessionRecord): void {
