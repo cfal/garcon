@@ -14,6 +14,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { resolveSearchWorkerEntrypoints } from '../build/standalone-entrypoint.js';
 import { searchFrames } from './query-frames.js';
+import { QueryLatencyStats } from './query-latency-stats.js';
 import {
   enqueueReaderWaiter,
   raceAgainstSignal,
@@ -38,6 +39,9 @@ import {
   SearchWorkerSupervisor,
   type WorkerRequestInput,
 } from './worker-supervisor.js';
+import { workerEventError } from './worker-error.js';
+
+export { TranscriptSearchWorkerError } from './worker-error.js';
 
 const SEARCH_DIRECTORY = 'transcript-search';
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -48,7 +52,6 @@ const SEARCH_READER_POOL_SIZE = 2;
 const SEARCH_MAX_QUEUED = 4;
 const SEARCH_MAINTENANCE_PASSES = 4;
 const STATUS_COALESCE_MS = 250;
-const QUERY_STATS_SAMPLE = 512;
 
 export interface TranscriptSearchServiceOptions {
   readonly workspaceDirectory: string;
@@ -93,13 +96,6 @@ const DISABLED_STATUS: TranscriptSearchStatusV1 = {
   updatedAt: new Date(0).toISOString(),
 };
 
-export class TranscriptSearchWorkerError extends Error {
-  constructor(readonly code: string, readonly retryable: boolean) {
-    super(code);
-    this.name = 'TranscriptSearchWorkerError';
-  }
-}
-
 type IngestJob =
   | {
       readonly kind: 'sync';
@@ -128,12 +124,6 @@ interface ReaderSlot {
   state: 'idle' | 'busy' | 'quarantined';
 }
 
-interface QueryLatencySample {
-  readonly admissionMs: number;
-  readonly executionMs: number;
-  readonly totalMs: number;
-}
-
 export class TranscriptSearchService {
   readonly #searchDirectory: string;
   readonly #dbPath: string;
@@ -146,9 +136,8 @@ export class TranscriptSearchService {
   readonly #jobChatIds = new Set<string>();
   readonly #searchWaiters: ReaderWaiter<ReaderSlot>[] = [];
   readonly #statusListeners = new Set<(status: TranscriptSearchStatusV1) => void>();
-  readonly #queryLatencySamples: QueryLatencySample[] = [];
+  readonly #queryStats = new QueryLatencyStats();
   readonly #lastLogAt = new Map<string, number>();
-  #queryCounters = { served: 0, timedOut: 0, rejectedBusy: 0 };
   #durableCounts = { indexed: 0, pending: 0, failed: 0 };
   #durableBacklogRows = 0;
   #activeJob: IngestJob | null = null;
@@ -387,26 +376,7 @@ export class TranscriptSearchService {
   }
 
   queryStats(): TranscriptSearchQueryStats {
-    const quantile = (field: keyof QueryLatencySample, value: number) => {
-      const sorted = this.#queryLatencySamples
-        .map((sample) => sample[field])
-        .sort((left, right) => left - right);
-      return sorted.length === 0
-      ? 0
-      : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * value))]!;
-    };
-    return {
-      ...this.#queryCounters,
-      p50Ms: quantile('executionMs', 0.5),
-      p95Ms: quantile('executionMs', 0.95),
-      maxMs: quantile('executionMs', 1),
-      admissionP50Ms: quantile('admissionMs', 0.5),
-      admissionP95Ms: quantile('admissionMs', 0.95),
-      admissionMaxMs: quantile('admissionMs', 1),
-      totalP50Ms: quantile('totalMs', 0.5),
-      totalP95Ms: quantile('totalMs', 0.95),
-      totalMaxMs: quantile('totalMs', 1),
-    };
+    return this.#queryStats.snapshot();
   }
 
   onStatusChanged(listener: (status: TranscriptSearchStatusV1) => void): () => void {
@@ -467,7 +437,7 @@ export class TranscriptSearchService {
       if ((error instanceof Error && error.name === 'AbortError')
           || (error instanceof Error && error.message === 'SEARCH_TIMEOUT')) {
         this.#retireAbandonedReader(slot);
-        this.#queryCounters.timedOut += 1;
+        this.#queryStats.recordTimedOut();
         this.#rateLimitedWarn('Transcript search query timeout', {
           code: 'SEARCH_TIMEOUT',
           admissionMs: Math.round(admissionMs),
@@ -494,9 +464,8 @@ export class TranscriptSearchService {
     if (event.results.some((result) => allowed.get(result.chatId) !== result.transcriptViewId)) {
       throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
     }
-    this.#queryCounters.served += 1;
     const completed = performance.now();
-    this.#recordQueryLatency({
+    this.#queryStats.recordServed({
       admissionMs,
       executionMs: completed - executionStarted,
       totalMs: completed - totalStarted,
@@ -573,7 +542,7 @@ export class TranscriptSearchService {
       return Promise.reject(new Error('SEARCH_INDEX_UNAVAILABLE'));
     }
     if (this.#searchWaiters.length >= SEARCH_MAX_QUEUED) {
-      this.#queryCounters.rejectedBusy += 1;
+      this.#queryStats.recordRejectedBusy();
       this.#rateLimitedWarn('Transcript search queue overflow', {
         code: 'SEARCH_INDEX_BUSY',
         depth: this.#searchWaiters.length,
@@ -585,7 +554,7 @@ export class TranscriptSearchService {
       admissionSignal,
       executionSignal,
       onExecutionTimeout: () => {
-        this.#queryCounters.timedOut += 1;
+        this.#queryStats.recordTimedOut();
       },
     });
   }
@@ -940,19 +909,6 @@ export class TranscriptSearchService {
     return 'ready';
   }
 
-  #recordQueryLatency(sample: QueryLatencySample): void {
-    const admissionMs = Math.round(sample.admissionMs);
-    const executionMs = Math.round(sample.executionMs);
-    this.#queryLatencySamples.push({
-      admissionMs,
-      executionMs,
-      totalMs: Math.max(Math.round(sample.totalMs), admissionMs + executionMs),
-    });
-    if (this.#queryLatencySamples.length > QUERY_STATS_SAMPLE) {
-      this.#queryLatencySamples.shift();
-    }
-  }
-
   #rejectQueues(error: Error): void {
     for (const job of [...this.#deleteQueue.splice(0), ...this.#buildQueue.splice(0)]) {
       this.#jobChatIds.delete(job.chatId);
@@ -1025,12 +981,6 @@ function chunkFrame(frame: TranscriptSearchSyncFrame): Array<{
       ? frame.advanceTo
       : rows[rows.length - 1]!.ordinal,
   }));
-}
-
-function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {
-  return event.type === 'error'
-    ? new TranscriptSearchWorkerError(event.code, event.retryable)
-    : null;
 }
 
 function isRepairableIndexPositionError(error: unknown): boolean {
