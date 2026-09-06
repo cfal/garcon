@@ -50,14 +50,20 @@
 			</div>
 		{/if}
 
-		<div class="bg-muted/50 border border-border rounded-lg">
-			<div class="flex items-center justify-between px-4 py-2">
-				<div class="text-sm font-medium text-foreground">
-					{m.sidebar_chats_pinned_insert_position()}
+		<div class="bg-muted/50 border border-border rounded-lg px-4 py-2">
+			<div class="flex items-center justify-between gap-4">
+				<div class="min-w-0">
+					<label class="text-sm font-medium text-foreground" for="remote-pinned-insert-position">
+						{m.sidebar_chats_pinned_insert_position()}
+					</label>
+					<p id="remote-pinned-insert-position-hint" class="mt-0.5 text-xs text-muted-foreground">
+						{m.sidebar_chats_pinned_insert_position_activity_hint()}
+					</p>
 				</div>
 				<select
-					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-					aria-label={m.sidebar_chats_pinned_insert_position()}
+					id="remote-pinned-insert-position"
+					class="shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+					aria-describedby="remote-pinned-insert-position-hint"
 					value={remoteSettings.snapshot?.ui.pinnedInsertPosition ?? 'top'}
 					onchange={(e) =>
 						onPinnedInsertPositionChange(

@@ -28,15 +28,17 @@ function buildSidebarRowModel(
 function buildSidebarDisplayChatIds(
 	input: Omit<
 		Parameters<typeof buildSidebarDisplayChatIdsBase>[0],
-		'inactivityDuration' | 'sortMode'
+		'inactivityDuration' | 'sortMode' | 'pinnedInsertPosition'
 	> & {
 		inactivityDuration?: SidebarInactivityDuration;
 		sortMode?: 'manual' | 'recent';
+		pinnedInsertPosition?: 'top' | 'bottom';
 	},
 ) {
 	return buildSidebarDisplayChatIdsBase({
 		inactivityDuration: TEST_INACTIVITY_DURATION,
 		sortMode: 'manual',
+		pinnedInsertPosition: 'top',
 		...input,
 	});
 }

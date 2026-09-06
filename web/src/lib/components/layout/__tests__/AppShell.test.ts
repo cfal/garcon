@@ -31,6 +31,7 @@ vi.mock('$lib/context', () => ({
 	getMinuteClock: () => testContext.current?.minuteClock,
 	getNavigation: () => testContext.current?.navigation,
 	getNotifications: () => testContext.current?.notifications,
+	getRemoteSettings: () => testContext.current?.remoteSettings,
 	getSidebarProjectCollapse: () => testContext.current?.projectCollapse,
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
 	getTerminalRegistry: () => testContext.current?.terminals,
@@ -184,6 +185,7 @@ function installContext(): AppShellBreakpointWorkspace {
 			},
 		},
 		localSettings: new AppShellLocalSettingsState(),
+		remoteSettings: { snapshot: null },
 		minuteClock: { currentTime: new Date('2025-01-02T00:00:00.000Z') },
 		terminals: { orderedSessions: [] },
 		notifications: {
