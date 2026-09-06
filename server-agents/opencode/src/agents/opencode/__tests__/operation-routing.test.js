@@ -163,6 +163,29 @@ function pushCompactionPart(eventStream, {
   });
 }
 
+function pushCompletedCompactionSummary(eventStream, {
+  eventId,
+  messageId,
+  parentId,
+  sessionId,
+}) {
+  eventStream.push({
+    id: eventId,
+    type: 'message.updated',
+    properties: {
+      sessionID: sessionId,
+      info: {
+        id: messageId,
+        role: 'assistant',
+        parentID: parentId,
+        summary: true,
+        finish: 'stop',
+        time: { completed: 1 },
+      },
+    },
+  }, { completePrompt: false });
+}
+
 function pushAssistant(eventStream, {
   eventNumber,
   messageId,
@@ -1538,7 +1561,7 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('publishes one automatic boundary while hiding the compaction summary chain', async () => {
+  it('publishes separate automatic boundaries while hiding compaction summary chains', async () => {
     const diagnostics = diagnosticLogger();
     const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
       logger: diagnostics.logger,
@@ -1562,21 +1585,12 @@ describe('OpenCode operation routing', () => {
       eventId: 'event-control',
       sessionId: 'session-1',
     });
-    eventStream.push({
-      id: 'event-summary-message',
-      type: 'message.updated',
-      properties: {
-        sessionID: 'session-1',
-        info: {
-          id: 'assistant-summary',
-          role: 'assistant',
-          parentID: 'user-compaction',
-          summary: true,
-          finish: 'stop',
-          time: { completed: 1 },
-        },
-      },
-    }, { completePrompt: false });
+    pushCompletedCompactionSummary(eventStream, {
+      eventId: 'event-summary-message',
+      messageId: 'assistant-summary',
+      parentId: 'user-compaction',
+      sessionId: 'session-1',
+    });
     eventStream.push({
       id: 'event-summary-part',
       type: 'message.part.updated',
@@ -1600,21 +1614,24 @@ describe('OpenCode operation routing', () => {
         delta: 'provider-created summary delta',
       },
     });
-    eventStream.push({
-      id: 'event-summary-message-replayed',
-      type: 'message.updated',
-      properties: {
-        sessionID: 'session-1',
-        info: {
-          id: 'assistant-summary',
-          role: 'assistant',
-          parentID: 'user-compaction',
-          summary: true,
-          finish: 'stop',
-          time: { completed: 1 },
-        },
-      },
-    }, { completePrompt: false });
+    pushCompletedCompactionSummary(eventStream, {
+      eventId: 'event-summary-message-replayed',
+      messageId: 'assistant-summary',
+      parentId: 'user-compaction',
+      sessionId: 'session-1',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-control-second',
+      messageId: 'user-compaction-second',
+      partId: 'part-compaction-second',
+      sessionId: 'session-1',
+    });
+    pushCompletedCompactionSummary(eventStream, {
+      eventId: 'event-summary-message-second',
+      messageId: 'assistant-summary-second',
+      parentId: 'user-compaction-second',
+      sessionId: 'session-1',
+    });
     eventStream.push({
       id: 'event-barrier',
       type: 'session.compacted',
@@ -1631,6 +1648,18 @@ describe('OpenCode operation routing', () => {
             trigger: 'auto',
             summary: '',
           }),
+          providerMeta: { entryId: 'assistant-summary' },
+        })],
+      }),
+      expect.objectContaining({
+        type: 'rows',
+        rows: [expect.objectContaining({
+          message: expect.objectContaining({
+            type: 'compaction',
+            trigger: 'auto',
+            summary: '',
+          }),
+          providerMeta: { entryId: 'assistant-summary-second' },
         })],
       }),
     ]);
@@ -1638,7 +1667,7 @@ describe('OpenCode operation routing', () => {
     expect(diagnostics.warnings).toEqual([]);
     expect(diagnostics.debug.filter(([message]) => (
       message === 'Adopted an OpenCode compaction part'
-    ))).toHaveLength(1);
+    ))).toHaveLength(2);
     eventStream.close();
     await runtime.shutdown();
   });
