@@ -6,6 +6,7 @@ import {
 	visibleChatSearchTimePrefix,
 } from '$lib/sidebar/search/search-result-order.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { compareChatOrderNewestFirst } from '$shared/chat-order-sort';
 
 function chat(
 	id: string,
@@ -57,6 +58,21 @@ describe('chat search result ordering', () => {
 			.toEqual(['older', 'newer']);
 		expect(sortChatSearchResults([older, newer], 'created').map((entry) => entry.id))
 			.toEqual(['newer', 'older']);
+	});
+
+	it('matches shared timestamp fallback semantics for decorated sorts', () => {
+		const input = [
+			chat('1700000000000000', null, null),
+			chat('not-canonical', 'invalid', '2026-01-02T00:00:00.000Z'),
+			chat('tied-b', '2026-01-01T00:00:00.000Z', 'invalid'),
+			chat('tied-a', '2026-01-01T00:00:00.000Z', null),
+		];
+		for (const sort of ['activity', 'created'] as const) {
+			const compare = compareChatOrderNewestFirst(sort);
+			const expected = [...input]
+				.sort((left, right) => compare(left, right) || left.id.localeCompare(right.id));
+			expect(sortChatSearchResults(input, sort)).toEqual(expected);
+		}
 	});
 
 	it('replays a committed ID order while leaving source records live', () => {

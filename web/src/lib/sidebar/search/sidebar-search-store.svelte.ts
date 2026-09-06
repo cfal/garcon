@@ -28,7 +28,6 @@ import {
 	sortChatSearchResultsWithCommittedTimeOrder,
 	visibleChatSearchTimePrefix,
 } from '$lib/sidebar/search/search-result-order.js';
-import { compareChatOrderNewestFirst } from '$shared/chat-order-sort';
 import type {
 	ChatSearchIndexStatus,
 	ChatSearchPage,
@@ -138,36 +137,23 @@ export class SidebarSearchStore {
 	private transcriptSearchRevalidationDirty = false;
 	private transcriptSearchCommittedTimeOrder = $state<string[] | null>(null);
 	private observedTranscriptSearchCandidateSignature: string | null = null;
-
-	constructor(private readonly deps: SidebarSearchStoreDeps) {}
-
-	get parsedQuery(): ChatFilterSpec {
-		return parseChatSearch(this.activeQuery);
-	}
-
-	get parsedDraftQuery(): ChatFilterSpec {
-		return parseChatSearch(this.draftQuery);
-	}
-
-	get filteredChats(): ChatSessionRecord[] {
-		const filter = this.parsedQuery;
+	#parsedQuery = $derived(parseChatSearch(this.activeQuery));
+	#parsedDraftQuery = $derived(parseChatSearch(this.draftQuery));
+	#filteredChats = $derived.by(() => {
 		const chats = this.deps.getChats();
-		const metadataMatches = isEmptyFilter(filter)
+		const metadataMatches = isEmptyFilter(this.#parsedQuery)
 			? chats
-			: chats.filter((chat) => matchesChatFilter(chat, filter));
+			: chats.filter((chat) => matchesChatFilter(chat, this.#parsedQuery));
 		return this.mergeTranscriptMatches(this.activeQuery, metadataMatches);
-	}
-
-	get dialogFilteredChats(): ChatSessionRecord[] {
-		const filter = this.parsedDraftQuery;
+	});
+	#dialogFilteredChats = $derived.by(() => {
 		const chats = this.deps.getChats();
-		if (isEmptyFilter(filter)) return chats;
-		return chats.filter((chat) => matchesChatFilter(chat, filter));
-	}
-
-	get dialogDisplayChats(): ChatSessionRecord[] {
+		if (isEmptyFilter(this.#parsedDraftQuery)) return chats;
+		return chats.filter((chat) => matchesChatFilter(chat, this.#parsedDraftQuery));
+	});
+	#dialogDisplayChats = $derived.by(() => {
 		const sort = this.deps.getSearchResultSort();
-		const merged = this.mergeTranscriptMatches(this.draftQuery, this.dialogFilteredChats);
+		const merged = this.mergeTranscriptMatches(this.draftQuery, this.#dialogFilteredChats);
 		const sorted = sortChatSearchResultsWithCommittedTimeOrder(
 			merged,
 			sort,
@@ -179,10 +165,35 @@ export class SidebarSearchStore {
 			new Set(this.transcriptSearchResults.map((result) => result.chatId)),
 			this.transcriptSearchPage?.hasMore === true && !this.transcriptSearchLimitReached,
 		);
+	});
+	#transcriptSearchResultsByChatId = $derived(
+		new Map(this.transcriptSearchResults.map((result) => [result.chatId, result])),
+	);
+
+	constructor(private readonly deps: SidebarSearchStoreDeps) {}
+
+	get parsedQuery(): ChatFilterSpec {
+		return this.#parsedQuery;
+	}
+
+	get parsedDraftQuery(): ChatFilterSpec {
+		return this.#parsedDraftQuery;
+	}
+
+	get filteredChats(): ChatSessionRecord[] {
+		return this.#filteredChats;
+	}
+
+	get dialogFilteredChats(): ChatSessionRecord[] {
+		return this.#dialogFilteredChats;
+	}
+
+	get dialogDisplayChats(): ChatSessionRecord[] {
+		return this.#dialogDisplayChats;
 	}
 
 	get transcriptSearchResultsByChatId(): Map<string, ChatSearchResult> {
-		return new Map(this.transcriptSearchResults.map((result) => [result.chatId, result]));
+		return this.#transcriptSearchResultsByChatId;
 	}
 
 	get canLoadMoreTranscriptResults(): boolean {
@@ -910,44 +921,39 @@ export class SidebarSearchStore {
 	}
 }
 
-export function transcriptSearchCandidateSignature(
-	chats: ChatSessionRecord[],
-	query: string,
-): string {
-	return JSON.stringify(candidateChatsForSearch(chats, query).map((chat) => chat.id).sort());
+export interface TranscriptSearchInvalidationProjection {
+	readonly hasTranscriptTerms: boolean;
+	readonly candidateSignature: string;
+	readonly contentSignature: string;
+	readonly timeOrderSignature: string;
 }
 
-export function transcriptSearchContentRevisionSignature(
-	chats: ChatSessionRecord[],
-	query: string,
-): string {
-	return JSON.stringify(
-		candidateChatsForSearch(chats, query)
-			.map((chat) => [chat.id, chat.lastActivityAt] as const)
-			.sort(([left], [right]) => left.localeCompare(right)),
-	);
-}
+export const EMPTY_TRANSCRIPT_SEARCH_INVALIDATION: TranscriptSearchInvalidationProjection = {
+	hasTranscriptTerms: false,
+	candidateSignature: '',
+	contentSignature: '',
+	timeOrderSignature: '',
+};
 
-export function transcriptSearchTimeOrderSignature(
-	chats: ChatSessionRecord[],
+export function transcriptSearchInvalidationProjection(
+	chats: readonly ChatSessionRecord[],
 	query: string,
 	sort: ChatSearchSort,
-): string {
-	if (sort === 'relevance') return '';
-	const compareTime = compareChatOrderNewestFirst(sort);
-	return JSON.stringify(
-		candidateChatsForSearch(chats, query)
-			.sort((left, right) => compareTime(left, right) || left.id.localeCompare(right.id))
-			.map((chat) => chat.id),
-	);
-}
-
-function candidateChatsForSearch(
-	chats: ChatSessionRecord[],
-	query: string,
-): ChatSessionRecord[] {
-	const spec = { ...parseChatSearch(query), textTokens: [] };
-	return isEmptyFilter(spec) ? [...chats] : chats.filter((chat) => matchesChatFilter(chat, spec));
+): TranscriptSearchInvalidationProjection {
+	const spec = parseChatSearch(query);
+	if (spec.textTokens.length === 0) return EMPTY_TRANSCRIPT_SEARCH_INVALIDATION;
+	const facetSpec = { ...spec, textTokens: [] };
+	const candidates = isEmptyFilter(facetSpec)
+		? [...chats]
+		: chats.filter((chat) => matchesChatFilter(chat, facetSpec));
+	const lexical = [...candidates].sort((left, right) => left.id.localeCompare(right.id));
+	const timeOrder = captureChatSearchTimeOrder(candidates, sort);
+	return {
+		hasTranscriptTerms: true,
+		candidateSignature: JSON.stringify(lexical.map((chat) => chat.id)),
+		contentSignature: JSON.stringify(lexical.map((chat) => [chat.id, chat.lastActivityAt])),
+		timeOrderSignature: timeOrder === null ? '' : JSON.stringify(timeOrder),
+	};
 }
 
 function dedupeSearchResults(results: readonly ChatSearchResult[]): ChatSearchResult[] {

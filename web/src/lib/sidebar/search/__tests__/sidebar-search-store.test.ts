@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	createSidebarSearchStore,
-	transcriptSearchCandidateSignature,
-	transcriptSearchContentRevisionSignature,
+	EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
+	transcriptSearchInvalidationProjection,
 	type SidebarSearchStoreDeps,
 } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { SavedChatSearch } from '$lib/api/settings';
@@ -11,6 +11,7 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { ApiError } from '$lib/api/client';
 import type { TranscriptSearchStatusV1 } from '$shared/chat-search';
 import type { ChatSearchPage, ChatSearchResponse } from '$shared/chat-search';
+import { ReactiveChatList } from './reactive-chat-list.svelte.js';
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -824,7 +825,9 @@ describe('SidebarSearchStore', () => {
 		});
 
 		it('removes cached transcript matches when live facet metadata stops matching', async () => {
-			const chats = [makeChat({ id: 'c1', title: 'Hidden match', tags: ['ops'] })];
+			const chats = new ReactiveChatList([
+				makeChat({ id: 'c1', title: 'Hidden match', tags: ['ops'] }),
+			]);
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValue({
@@ -848,12 +851,15 @@ describe('SidebarSearchStore', () => {
 						resultsTruncated: false,
 					},
 				});
-			const { store } = createStore(chats, null, { searchChatTranscripts });
+			const { store } = createStore([], null, {
+				searchChatTranscripts,
+				getChats: () => chats.chats,
+			});
 			store.updateDraftQuery('needle tag:ops');
 			await store.refreshTranscriptSearch('needle tag:ops');
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c1']);
 
-			chats[0] = makeChat({ id: 'c1', title: 'Hidden match', tags: ['dev'] });
+			chats.replace(0, makeChat({ id: 'c1', title: 'Hidden match', tags: ['dev'] }));
 			expect(store.dialogDisplayChats).toEqual([]);
 		});
 
@@ -923,16 +929,43 @@ describe('SidebarSearchStore', () => {
 	});
 
 	describe('transcript search invalidation', () => {
+		it('memoizes expensive projections across unrelated highlight changes', () => {
+			const { store } = createStore([makeChat({ id: 'c1', title: 'Needle' })]);
+			store.updateDraftQuery('needle');
+			const display = store.dialogDisplayChats;
+			const results = store.transcriptSearchResultsByChatId;
+
+			store.highlightedResultIndex = 1;
+
+			expect(store.dialogDisplayChats).toBe(display);
+			expect(store.transcriptSearchResultsByChatId).toBe(results);
+		});
+
 		it('separates candidate membership from content revisions', () => {
 			const chat = makeChat({ id: 'c1', tags: ['ops'], lastActivityAt: null });
 			const query = 'needle tag:ops';
-			const membership = transcriptSearchCandidateSignature([chat], query);
-			const content = transcriptSearchContentRevisionSignature([chat], query);
+			const projection = transcriptSearchInvalidationProjection([chat], query, 'relevance');
 			const activityChange = { ...chat, lastActivityAt: '2026-03-27T09:00:00.000Z' };
-			expect(transcriptSearchCandidateSignature([activityChange], query)).toBe(membership);
-			expect(transcriptSearchContentRevisionSignature([activityChange], query)).not.toBe(content);
-			expect(transcriptSearchCandidateSignature([{ ...chat, tags: ['dev'] }], query))
-				.not.toBe(membership);
+			const changedContent = transcriptSearchInvalidationProjection(
+				[activityChange],
+				query,
+				'relevance',
+			);
+			expect(changedContent.candidateSignature).toBe(projection.candidateSignature);
+			expect(changedContent.contentSignature).not.toBe(projection.contentSignature);
+			expect(transcriptSearchInvalidationProjection(
+				[{ ...chat, tags: ['dev'] }],
+				query,
+				'relevance',
+			).candidateSignature).not.toBe(projection.candidateSignature);
+		});
+
+		it('bypasses catalog traversal when the query has no transcript terms', () => {
+			const chats = [makeChat({ id: 'c1' })];
+			expect(transcriptSearchInvalidationProjection(chats, '', 'activity'))
+				.toBe(EMPTY_TRANSCRIPT_SEARCH_INVALIDATION);
+			expect(transcriptSearchInvalidationProjection(chats, 'title:test', 'activity'))
+				.toBe(EMPTY_TRANSCRIPT_SEARCH_INVALIDATION);
 		});
 
 		it('does not apply a stale time frontier while the draft query is ahead', async () => {
