@@ -32,7 +32,6 @@ import {
 } from './chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';
 import { queueDrainOptions } from './chats/chat-execution-options.js';
-import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
@@ -88,6 +87,7 @@ import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
+import { ProjectAdmission } from './projects/project-admission.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
 import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
@@ -230,7 +230,6 @@ export async function startServer(): Promise<void> {
         logger.warn('chat-title: failed to record recent icons:', errorMessage(error));
       }
     });
-    const pathCache = new PathCache();
     const terminalManager = new TerminalManager();
     const terminalStream = new TerminalStreamHandler(terminalManager);
     const wsAdmission = new WebSocketAdmissionController(config.maxWsClients);
@@ -514,6 +513,7 @@ export async function startServer(): Promise<void> {
     await shareStore.init();
 
     const commandLedger = new CommandLedger(workspaceDir);
+    const projectAdmission = new ProjectAdmission(chatRegistry);
     queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
@@ -521,8 +521,11 @@ export async function startServer(): Promise<void> {
       (chatId) => queueDrainOptions(chatId, chatRegistry),
       (chatId) => chatRegistry.hasChat(chatId),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
-      (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
-      agentCommands.appendControlReceipt,
+      {
+        projectAdmission,
+        unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
+        appendControlReceipt: agentCommands.appendControlReceipt,
+      },
     );
     executionQueries = queue;
     const transcriptReload = new TranscriptReloadService({
@@ -554,7 +557,6 @@ export async function startServer(): Promise<void> {
       settings,
       metadata,
       processing: chatProcessingActivity,
-      pathCache,
       canReloadFromNativeHistory(_chatId, session) {
         return Boolean(
           session.agentSessionId
@@ -606,7 +608,6 @@ export async function startServer(): Promise<void> {
       },
       transcripts: transcriptLedger,
       chatListProjector,
-      pathCache,
       ownership: agentOwnership,
       handoffs,
       transientFeeds,
@@ -714,7 +715,6 @@ export async function startServer(): Promise<void> {
       recentTitleIcons,
       queue,
       processing: chatProcessingActivity,
-      pathCache,
       metadata,
       chatViews: chatViewPages,
       shareSnapshots: transcriptReader,

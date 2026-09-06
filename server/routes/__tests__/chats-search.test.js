@@ -5,7 +5,6 @@ import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 function createRoutesFixture({
-  unavailableProjectPaths = [],
   lastActivityAtByChat = {},
   withoutSearchIndex = false,
 } = {}) {
@@ -81,15 +80,6 @@ function createRoutesFixture({
     pauseChatQueue: mock(async () => ({ entries: [], pause: null, version: 2 })),
     resumeChatQueue: mock(async () => ({ entries: [], pause: null, version: 3 })),
   };
-  const unavailablePaths = new Set(unavailableProjectPaths);
-  const pathCache = {
-    resolveProjectPaths: mock(async (projectPaths) => new Map(
-      projectPaths.map((projectPath) => [projectPath, {
-        available: !unavailablePaths.has(projectPath),
-        effectiveProjectKey: unavailablePaths.has(projectPath) ? null : projectPath,
-      }]),
-    )),
-  };
   const metadata = {
     listAllChatMetadata: mock(() => new Map()),
     getChatMetadata: mock(() => null),
@@ -160,18 +150,15 @@ function createRoutesFixture({
     })),
   };
   const chatListProjector = {
-    buildMany: mock(async (entries, statuses) => new Map(
-      entries.flatMap(([chatId, session]) => {
-        const status = statuses.get(session.projectPath);
-        return status?.available && status.effectiveProjectKey ? [[chatId, {
+    buildMany: mock((entries) => new Map(
+      entries.map(([chatId]) => [chatId, {
           id: chatId,
           activity: {
             createdAt: null,
             lastActivityAt: lastActivityAtByChat[chatId] ?? null,
             lastReadAt: null,
           },
-        }]] : [];
-      }),
+        }]),
     )),
   };
   const commandLedger = createRouteCommandLedger('chats-search');
@@ -180,7 +167,6 @@ function createRoutesFixture({
     settings,
     queue,
     processing: { phase: mock(() => null) },
-    pathCache,
     metadata,
     chatViews,
     agents,
@@ -255,10 +241,8 @@ describe('POST /api/v1/chats/search', () => {
     });
   });
 
-  it('excludes chats whose project paths are unavailable', async () => {
-    const { routes, searchIndex } = createRoutesFixture({
-      unavailableProjectPaths: ['/tmp/other-project'],
-    });
+  it('includes chats without checking project path availability', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
 
     const response = await postSearch(routes, {
       query: 'needle',
@@ -267,7 +251,7 @@ describe('POST /api/v1/chats/search', () => {
 
     expect(response.status).toBe(200);
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
-      allowedChatIds: ['c1'],
+      allowedChatIds: ['c1', 'c2'],
     }));
   });
 

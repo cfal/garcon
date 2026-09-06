@@ -55,6 +55,8 @@ import {
   type ServerControlInput,
   type UserInputAdmissionOptions,
   type ProcessingInvalidatedCallback,
+  type ProjectAdmissionPort,
+  type ProjectUnavailableCallback,
   type QueueCommandMutationResult,
   type QueueDrainOptionsResolver,
   type SessionStoppedCallback,
@@ -89,6 +91,12 @@ export {
 
 const logger = createLogger('queue');
 
+interface ChatExecutionCoordinatorOptions {
+  projectAdmission: ProjectAdmissionPort;
+  unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
+  appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
+}
+
 export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordinatorEvents> implements ChatExecutionService {
   #locks = new KeyedPromiseLock();
   #shuttingDown = false;
@@ -98,6 +106,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #turnRunner: AgentTurnRunnerPort;
   #getDrainOptions: QueueDrainOptionsResolver;
   #chatExists: ChatExistsResolver;
+  #projectAdmission: ProjectAdmissionPort;
   #queueDrainer: QueueDrainer;
   #controlOperations: ChatExecutionControlOperations;
   #acceptedInputHandler: AcceptedInputHandler;
@@ -114,8 +123,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
     controls: ChatExecutionControlRepository,
-    unsettledQueueReceiptKeys: (chatId: string) => ReadonlySet<string> = () => new Set(),
-    appendControlReceipt: (chatId: string, entry: StoredControlInputEntry) => void = () => undefined,
+    options: ChatExecutionCoordinatorOptions,
   ) {
     super();
     if (!turnRunner) throw new Error('ChatExecutionCoordinator requires an agent turn runner');
@@ -125,9 +133,15 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (!controls) {
       throw new Error('ChatExecutionCoordinator requires an execution control repository');
     }
+    if (!options?.projectAdmission) {
+      throw new Error('ChatExecutionCoordinator requires project admission');
+    }
+    const unsettledQueueReceiptKeys = options.unsettledQueueReceiptKeys ?? (() => new Set());
+    const appendControlReceipt = options.appendControlReceipt ?? (() => undefined);
     this.#turnRunner = turnRunner;
     this.#getDrainOptions = getDrainOptions;
     this.#chatExists = chatExists;
+    this.#projectAdmission = options.projectAdmission;
     this.#acceptedInputTranscript = new AcceptedInputTranscript(inputTranscript);
     this.#controlOperations = new ChatExecutionControlOperations(controls, {
       runExclusive: (chatId, operation) => this.#locks.runExclusive(`chat:${chatId}`, operation),
@@ -136,7 +150,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       publish: (chatId, control) => {
         this.emit('execution-control-updated', chatId, control);
       },
-    });
+    }, options.projectAdmission);
     const inputDeliveryOptions = {
       turnRunner: this.#turnRunner,
       ownership: this.#ownership,
@@ -181,6 +195,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
           this.#checkpointDirect(reservation);
           reservation.executionAdmission.signal.throwIfAborted();
         },
+        hasMatchingInput: (chatId, content, inputOptions) => (
+          this.#acceptedInputTranscript.hasMatching(chatId, content, inputOptions)
+        ),
         admitInput: (chatId, content, options) => (
           this.admitUserInput(chatId, content, options)
         ),
@@ -197,12 +214,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         ),
         steer: (...args) => this.#steerInputDelivery.deliver(...args),
       },
+      projectAdmission: options.projectAdmission,
     });
     this.#queueDrainer = new QueueDrainer({
       ownership: this.#ownership,
       controls: this.#controlOperations,
       turnRunner: this.#turnRunner,
       getDrainOptions: this.#getDrainOptions,
+      projectAdmission: options.projectAdmission,
       callbacks: {
         isShuttingDown: () => this.#shuttingDown,
         registerQueued: (chatId, content, options) => (
@@ -213,6 +232,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
           this.#acceptedInputTranscript.discard(chatId, clientMessageId);
         },
         publishIdle: (chatId) => { this.emit('chat-idle', chatId); },
+        publishProjectUnavailable: (chatId, error) => {
+          this.emit('project-unavailable', chatId, error);
+        },
         publishTurnFailed: (chatId, message, options) => {
           this.emit('turn-failed', chatId, message, options);
         },
@@ -232,6 +254,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
   onChatIdle(cb: ChatIdleCallback): void {
     this.on('chat-idle', cb);
+  }
+  onProjectUnavailable(cb: ProjectUnavailableCallback): void {
+    this.on('project-unavailable', cb);
   }
   onTurnFailed(cb: TurnFailedCallback): void {
     this.on('turn-failed', cb);
@@ -392,8 +417,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#acceptedInputHandler.move(input);
   }
 
-  async scheduleDirectInput(input: AcceptedDirectInput): Promise<void> {
-    await this.#acceptedInputHandler.schedule(input);
+  async scheduleDirectInput(input: AcceptedDirectInput): Promise<import('./types.ts').DirectInputScheduleOutcome> {
+    return this.#acceptedInputHandler.schedule(input);
   }
 
   async runInitialInput(input: AcceptedDirectInput): Promise<void> {
@@ -490,8 +515,12 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return control;
   }
 
+  async discardPendingChatInput(chatId: string): Promise<StoredChatExecutionControlState> {
+    return this.#controlOperations.discardPendingInput(chatId);
+  }
+
   async pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState> {
-    return this.#controlOperations.pause(chatId);
+    return (await this.#controlOperations.pause(chatId)).control;
   }
 
   async resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState> {
@@ -549,7 +578,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
     this.#ownership.notifyOwnersChanged();
     if (!drainRequested || !this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
-    await this.triggerDrain(reservation.chatId);
+    try {
+      await this.triggerDrain(reservation.chatId);
+    } catch (error) {
+      logger.warn('Deferred queue drain failed after exclusive operation release', {
+        chatId: reservation.chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   completeDirectTurn(reservation: DirectTurnReservation): Promise<void> { return this.#finishDirect(reservation, 'completed'); }
@@ -757,6 +793,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (hasPendingTurnInput(control) || control.pause) {
         throw controlInputBlockedError();
       }
+      await this.#projectAdmission.assertAvailable(chatId);
+      this.#checkpointDirect(reservation);
+      reservation.executionAdmission.signal.throwIfAborted();
       options = {
         ...this.#getDrainOptions(chatId),
         clientRequestId,

@@ -11,10 +11,9 @@ import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
-import {
-  hasPendingTurnInput,
-  toClientChatExecutionControlState,
-} from '../chat-execution/control-state.ts';
+import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
+import type { TranscriptSnapshotReservation } from '../chat-execution/types.ts';
+import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import { withCurrentExecutionControl } from '../lib/command-execution-control-error.js';
 import { resolveUpdatedProjectPath } from '../lib/command-project-path.js';
@@ -446,7 +445,7 @@ export class SessionCommands {
   }
 
   private async updateProjectPathLocked(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
-    let chat = this.deps.chats.getChat(input.chatId);
+    const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
@@ -458,7 +457,6 @@ export class SessionCommands {
       );
     }
 
-    const previousStatus = await this.deps.pathCache.resolveProjectPath(chat.projectPath);
     const nextProjectPath = await resolveUpdatedProjectPath(input.projectPath);
     const effectiveProjectKey = nextProjectPath;
     if (nextProjectPath === chat.projectPath) {
@@ -468,78 +466,88 @@ export class SessionCommands {
         projectPath: chat.projectPath,
         effectiveProjectKey,
         previousProjectPath: chat.projectPath,
-        previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
       };
     }
 
-    await this.assertChatIdleForProjectPathUpdate(input.chatId, chat);
-    await this.deps.agents.currentTranscriptViewId(input.chatId);
-    const refreshedChat = this.deps.chats.getChat(input.chatId);
-    if (!refreshedChat) {
-      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
-    }
-    chat = refreshedChat;
-    const nativeSession = await this.nativeSessionForProjectPathUpdate(input.chatId, chat);
+    const reservation = this.reserveProjectPathUpdate(input.chatId);
+    try {
+      await this.assertChatIdleForProjectPathUpdate(chat);
+      await this.deps.agents.currentTranscriptViewId(input.chatId);
+      const refreshedChat = this.deps.chats.getChat(input.chatId);
+      if (!refreshedChat) {
+        throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      }
+      const activeChat = refreshedChat;
+      const nativeSession = await this.nativeSessionForProjectPathUpdate(input.chatId, activeChat);
 
-    const event = {
-      chatId: input.chatId,
-      projectPath: nextProjectPath,
-      effectiveProjectKey,
-      previousProjectPath: chat.projectPath,
-      previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
-    };
-    let relocatedSession: StartedAgentSession | null = null;
-    const updated = await runProjectPathUpdateTransaction({
-      chatId: input.chatId,
-      agentId: chat.agentId,
-      fallbackNativeSession:
-        nativeSession !== chat.nativeSession ? nativeSession : undefined,
-      prepare: () => this.deps.agents.prepareProjectPathUpdate(chat.agentId, {
+      const event = {
         chatId: input.chatId,
-        agentSessionId: chat.agentSessionId,
-        previousProjectPath: chat.projectPath,
-        nextProjectPath,
-        nativeSession,
-      }),
-      persist: async (nextNativeSession) => {
-        const persisted = await this.deps.chats.updateProjectPath(
-          input.chatId,
-          {
-            ...event,
-            ...(nextNativeSession !== undefined
-              ? { nativeSession: nextNativeSession }
-              : {}),
-          },
-          { flush: true },
-        );
-        if (persisted?.agentSessionId && nextNativeSession !== undefined) {
-          relocatedSession = {
-            agentSessionId: persisted.agentSessionId,
-            nativeSession: nextNativeSession,
-            nativeSeedReceipt: persisted.nativeSeedReceipt ?? null,
-          };
+        projectPath: nextProjectPath,
+        effectiveProjectKey,
+        previousProjectPath: activeChat.projectPath,
+      };
+      let relocatedSession: StartedAgentSession | null = null;
+      const updated = await runProjectPathUpdateTransaction({
+        chatId: input.chatId,
+        agentId: activeChat.agentId,
+        fallbackNativeSession:
+          nativeSession !== activeChat.nativeSession ? nativeSession : undefined,
+        prepare: () => this.deps.agents.prepareProjectPathUpdate(activeChat.agentId, {
+          chatId: input.chatId,
+          agentSessionId: activeChat.agentSessionId,
+          previousProjectPath: activeChat.projectPath,
+          nextProjectPath,
+          nativeSession,
+        }),
+        persist: async (nextNativeSession) => {
+          const persisted = await this.deps.chats.updateProjectPath(
+            input.chatId,
+            {
+              ...event,
+              ...(nextNativeSession !== undefined
+                ? { nativeSession: nextNativeSession }
+                : {}),
+            },
+            { flush: true },
+          );
+          if (persisted?.agentSessionId && nextNativeSession !== undefined) {
+            relocatedSession = {
+              agentSessionId: persisted.agentSessionId,
+              nativeSession: nextNativeSession,
+              nativeSeedReceipt: persisted.nativeSeedReceipt ?? null,
+            };
+          }
+          return persisted;
+        },
+        logger,
+      });
+      if (!updated) {
+        throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      }
+      await this.deps.queue.discardPendingChatInput(input.chatId);
+      if (relocatedSession) {
+        try {
+          this.deps.agents.publishSessionFact(input.chatId, relocatedSession);
+        } catch (error) {
+          logger.warn('Project-path session publication failed after persistence', {
+            chatId: input.chatId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-        return persisted;
-      },
-      logger,
-    });
-    if (!updated) {
-      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      }
+      return {
+        success: true,
+        chatId: input.chatId,
+        projectPath: updated.projectPath,
+        effectiveProjectKey,
+        previousProjectPath: event.previousProjectPath,
+      };
+    } finally {
+      await this.deps.queue.releaseTranscriptSnapshot(reservation);
     }
-    if (relocatedSession) {
-      this.deps.agents.publishSessionFact(input.chatId, relocatedSession);
-    }
-    return {
-      success: true,
-      chatId: input.chatId,
-      projectPath: updated.projectPath,
-      effectiveProjectKey,
-      previousProjectPath: event.previousProjectPath,
-      previousEffectiveProjectKey: event.previousEffectiveProjectKey,
-    };
   }
 
-  private async assertChatIdleForProjectPathUpdate(chatId: string, chat: ChatRegistryEntry): Promise<void> {
+  private async assertChatIdleForProjectPathUpdate(chat: ChatRegistryEntry): Promise<void> {
     if (chat.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
@@ -549,17 +557,13 @@ export class SessionCommands {
       );
     }
 
-    const queue = await this.deps.queue.readChatExecutionControl(chatId);
-    if (hasPendingTurnInput(queue)) {
-      throw new CommandValidationError(
-        'CHAT_NOT_IDLE',
-        'Clear or run pending messages before updating the project path',
-        409,
-        true,
-      );
-    }
+  }
 
-    if (this.deps.queue.ownsExecution(chatId)) {
+  private reserveProjectPathUpdate(chatId: string): TranscriptSnapshotReservation {
+    try {
+      return this.deps.queue.reserveTranscriptSnapshot(chatId);
+    } catch (error) {
+      if (!(error instanceof DomainError) || error.code !== 'SESSION_BUSY') throw error;
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
         'Cannot update project path while a turn is being prepared or finalized',
@@ -567,7 +571,6 @@ export class SessionCommands {
         true,
       );
     }
-
   }
 
   private async nativeSessionForProjectPathUpdate(

@@ -32,9 +32,11 @@ import type {
   AcceptedQueueEntrySteer,
   AcceptedQueueEntrySteerOutcome,
   CapturedSteerTarget,
+  DirectInputScheduleOutcome,
   DirectTurnReservation,
   UserInputAdmissionOptions,
   QueueCommandMutationResult,
+  ProjectAdmissionPort,
 } from './types.ts';
 import {
   hasPendingTurnInput,
@@ -49,6 +51,11 @@ export interface AcceptedInputCoordinator {
   requestDrain(chatId: string, context: string): void;
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation;
   checkpoint(reservation: DirectTurnReservation): void;
+  hasMatchingInput(
+    chatId: string,
+    content: string,
+    options: UserInputAdmissionOptions,
+  ): boolean;
   admitInput(
     chatId: string,
     content: string,
@@ -84,15 +91,18 @@ export interface AcceptedInputCoordinator {
 export interface AcceptedInputDeps {
   controls: ChatExecutionControlOperations;
   coordinator: AcceptedInputCoordinator;
+  projectAdmission: ProjectAdmissionPort;
 }
 
 export class AcceptedInputHandler {
   readonly #controls: ChatExecutionControlOperations;
   readonly #coordinator: AcceptedInputCoordinator;
+  readonly #projectAdmission: ProjectAdmissionPort;
 
   constructor(deps: AcceptedInputDeps) {
     this.#controls = deps.controls;
     this.#coordinator = deps.coordinator;
+    this.#projectAdmission = deps.projectAdmission;
   }
 
   async enqueue(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult> {
@@ -172,14 +182,15 @@ export class AcceptedInputHandler {
     }
   }
 
-  async schedule(input: AcceptedDirectInput): Promise<void> {
+  async schedule(input: AcceptedDirectInput): Promise<DirectInputScheduleOutcome> {
     const reservation = await this.#prepareDirect(input);
-    if (!reservation) return;
+    if (!reservation) return 'duplicate';
     this.#coordinator.trackDispatch(
       this.#coordinator.runDirect(reservation, input.content, input.options, input.dispatch).catch((error) => {
         logger.error('commands: run failed:', error instanceof Error ? error.message : String(error));
       }),
     );
+    return 'scheduled';
   }
 
   async runInitial(input: AcceptedDirectInput): Promise<void> {
@@ -207,6 +218,10 @@ export class AcceptedInputHandler {
       this.#checkpoint(reservation);
       const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
+      await this.#checkpointAfter(
+        reservation,
+        this.#projectAdmission.assertAvailable(input.command.chatId),
+      );
       await this.#checkpointAfter(
         reservation,
         input.settlement.markScheduled(input.command, options.turnId!),
@@ -560,12 +575,29 @@ export class AcceptedInputHandler {
     }
     try {
       this.#checkpoint(reservation);
+      const duplicate = await this.#checkpointAfter(
+        reservation,
+        Promise.resolve(this.#coordinator.hasMatchingInput(
+          input.command.chatId,
+          input.content,
+          { ...input.options, userMessagePresentation: input.userMessagePresentation },
+        )),
+      );
+      if (duplicate) {
+        await input.settlement.settleDuplicateInput(input.command);
+        await this.#coordinator.releaseDirect(reservation);
+        return null;
+      }
       const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
       await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare({
           signal: reservation.executionAdmission.signal,
           assertAdmissionActive: () => this.#checkpoint(reservation),
         })));
+      await this.#checkpointAfter(
+        reservation,
+        this.#projectAdmission.assertAvailable(input.command.chatId),
+      );
       const inserted = await this.#checkpointAfter(
         reservation,
         this.#coordinator.admitInput(input.command.chatId, input.content, { ...input.options, userMessagePresentation: input.userMessagePresentation }),

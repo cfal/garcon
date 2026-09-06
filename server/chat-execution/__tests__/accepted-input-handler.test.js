@@ -4,6 +4,7 @@ import { DuplicateGoalControlInputError } from '../goal-control-delivery.ts';
 import {
   DomainError,
   GoalControlDeliveryError,
+  ProjectUnavailableError,
   QueueEntrySteerError,
   SteerDeliveryError,
 } from '../../lib/domain-error.ts';
@@ -109,6 +110,7 @@ function scaffold(overrides = {}) {
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
     checkpoint: mock(() => undefined),
+    hasMatchingInput: mock(async () => false),
     admitInput: mock(async () => true),
     discardPreparedInput: mock(() => undefined),
     releaseDirect: mock(async () => undefined),
@@ -116,6 +118,7 @@ function scaffold(overrides = {}) {
     trackDispatch: mock(() => undefined),
     deliverGoalControl: mock(async () => false),
     steer: mock(async () => ({ turnId: 'turn-1' })),
+    assertProjectAvailable: mock(async () => undefined),
     ...overrides,
   };
   const handler = new AcceptedInputHandler({
@@ -134,6 +137,7 @@ function scaffold(overrides = {}) {
       requestDrain: m.requestDrain,
       reserveDirect: m.reserveDirect,
       checkpoint: m.checkpoint,
+      hasMatchingInput: m.hasMatchingInput,
       admitInput: m.admitInput,
       discardPreparedInput: m.discardPreparedInput,
       releaseDirect: m.releaseDirect,
@@ -141,6 +145,9 @@ function scaffold(overrides = {}) {
       trackDispatch: m.trackDispatch,
       deliverGoalControl: m.deliverGoalControl,
       steer: m.steer,
+    },
+    projectAdmission: {
+      assertAvailable: m.assertProjectAvailable,
     },
   });
   return { m, handler };
@@ -234,6 +241,63 @@ describe('AcceptedInputHandler', () => {
     expect(m.releaseDirect).toHaveBeenCalledOnce();
     expect(m.runDirect).not.toHaveBeenCalled();
     expect(settle.markScheduled).not.toHaveBeenCalled();
+  });
+
+  test('skips control, preparation, and project admission for a matching input', async () => {
+    const settle = settlement();
+    const { handler, m } = scaffold({ hasMatchingInput: mock(async () => true) });
+    const prepare = mock(async () => undefined);
+
+    await handler.schedule({
+      command: command(),
+      content: 'already committed',
+      options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
+      settlement: settle,
+      preparation: {
+        operation: 'fork-run',
+        prepare,
+        compensate: mock(async () => undefined),
+      },
+    });
+
+    expect(settle.settleDuplicateInput).toHaveBeenCalledWith(command());
+    expect(m.read).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(m.assertProjectAvailable).not.toHaveBeenCalled();
+    expect(m.admitInput).not.toHaveBeenCalled();
+  });
+
+  test('compensates preparation when the project is unavailable before transcript admission', async () => {
+    const events = [];
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const settle = settlement({
+      markPreScheduleFailure: mock(async () => { events.push('settled'); }),
+    });
+    const { handler, m } = scaffold({
+      assertProjectAvailable: mock(async () => { throw unavailable; }),
+      releaseDirect: mock(async () => { events.push('released'); }),
+    });
+
+    await expect(handler.schedule({
+      command: command(),
+      content: 'new work',
+      options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
+      settlement: settle,
+      preparation: {
+        operation: 'chat-start',
+        prepare: mock(async () => { events.push('prepared'); }),
+        compensate: mock(async () => { events.push('compensated'); }),
+      },
+    })).rejects.toBe(unavailable);
+
+    expect(events).toEqual(['prepared', 'compensated', 'released', 'settled']);
+    expect(m.admitInput).not.toHaveBeenCalled();
+    expect(m.runDirect).not.toHaveBeenCalled();
+    expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
+      error: unavailable,
+      retryable: true,
+      preserveForkPreparation: false,
+    });
   });
 
   test('admits direct presentation without exposing it to provider run options', async () => {

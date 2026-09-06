@@ -20,7 +20,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 import { DomainError } from '../../lib/domain-error.js';
 
 const SOURCE_CHAT_ID = '1783725900000300';
@@ -59,7 +59,6 @@ const queue = {
   releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
   ownsExecution: mock(() => false),
 };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -91,14 +90,13 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-fork');
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
   processing: { phase: mock(() => null) },
-  pathCache,
   metadata,
   chatViews,
   agents,
@@ -110,7 +108,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pathCache,
 		chatListProjector,
   }),
 });
@@ -299,7 +296,6 @@ describe('POST /api/v1/chats/fork', () => {
       id: TARGET_CHAT_ID,
       agentId: 'test-agent',
       projectPath: '/proj',
-      effectiveProjectKey: '/proj',
       orderGroup: 'orphan',
     });
   });

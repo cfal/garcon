@@ -6,7 +6,7 @@ import {
   type StoredQueueEntry,
 } from './control-state.ts';
 import { createLogger } from '../lib/log.ts';
-import { DomainError } from '../lib/domain-error.ts';
+import { DomainError, ProjectUnavailableError } from '../lib/domain-error.ts';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type { DequeuedTurnInput } from './chat-execution-control-transitions.ts';
@@ -14,6 +14,7 @@ import type { ExecutionOwnership } from './execution-ownership.ts';
 import {
   executionTurnIdentity,
   type AgentTurnRunnerPort,
+  type ProjectAdmissionPort,
   type QueueDrainOptionsResolver,
 } from './types.ts';
 
@@ -25,6 +26,7 @@ export interface QueueDispatchCallbacks {
   appendControlReceipt(chatId: string, entry: StoredControlInputEntry): void;
   discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
   publishIdle(chatId: string): void;
+  publishProjectUnavailable(chatId: string, error: ProjectUnavailableError): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
   retireAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
 }
@@ -34,6 +36,7 @@ export interface QueueDispatchDeps {
   controls: ChatExecutionControlOperations;
   turnRunner: AgentTurnRunnerPort;
   getDrainOptions: QueueDrainOptionsResolver;
+  projectAdmission: ProjectAdmissionPort;
   callbacks: QueueDispatchCallbacks;
 }
 
@@ -80,6 +83,27 @@ export class QueueDrainer {
         await lingering.waitUntilSettled();
         continue;
       }
+
+      const pending = await controls.read(chatId);
+      if (!hasPendingTurnInput(pending)) {
+        callbacks.publishIdle(chatId);
+        return;
+      }
+      if (
+        pending.pause
+        || pending.entries.some((entry) => entry.status === 'steering')
+        || this.#shouldHalt(chatId)
+      ) return;
+      try {
+        await this.deps.projectAdmission.assertAvailable(chatId);
+      } catch (error) {
+        if (!(error instanceof ProjectUnavailableError)) throw error;
+        if (this.#shouldHalt(chatId)) return;
+        const paused = await controls.pause(chatId);
+        if (paused.changed) callbacks.publishProjectUnavailable(chatId, error);
+        return;
+      }
+      if (this.#shouldHalt(chatId)) return;
 
       let options: RunAgentTurnOptions | undefined;
       let inputInserted = false;

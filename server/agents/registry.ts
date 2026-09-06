@@ -77,6 +77,11 @@ export interface AgentRegistryServiceContract {
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
   currentTranscriptViewId(chatId: string): Promise<string>;
+  hasMatchingInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions,
+  ): boolean;
   publishSessionFact(chatId: string, session: StartedAgentSession): void;
   resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
   captureSteerTarget(chatId: string): AgentSteerTarget | null;
@@ -523,6 +528,30 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#commitInput(chatId, message, options, view.viewId);
   }
 
+  hasMatchingInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions,
+  ): boolean {
+    if (!this.#registry.getChat(chatId)) return false;
+    const current = this.#ledger.existingCurrentView(chatId);
+    if (!current) return false;
+    try {
+      return this.#ledger.hasMatchingInputSubmission({
+        chatId,
+        viewId: options.transcriptViewId
+          ? transcriptViewId(options.transcriptViewId)
+          : current.viewId,
+        message,
+        attachments: inputAttachments(options),
+        clientMessageId: options.clientMessageId ?? null,
+        steer: options.commandType === 'steer',
+      });
+    } catch (error) {
+      throw mapInputSubmissionError(error);
+    }
+  }
+
   admitQueuedInput(
     chatId: string,
     message: UserMessage,
@@ -552,12 +581,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       : false;
     const boundary = pending && !alreadyConsumed ? pending : null;
     const viewId = options.transcriptViewId ? transcriptViewId(options.transcriptViewId) : currentViewId;
-    const attachments = (options.images ?? []).map((image) => ({
-      kind: 'image' as const,
-      data: image.data,
-      name: image.name ?? null,
-      mimeType: image.mimeType ?? 'application/octet-stream',
-    }));
+    const attachments = inputAttachments(options);
     const slashLeading = message.content.trimStart().startsWith('/');
     let composition;
     try {
@@ -593,13 +617,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
           : {}),
       });
     } catch (error) {
-      if (error instanceof StaleTranscriptViewError) {
-        throw new DomainError('STALE_TRANSCRIPT_VIEW', error.message, 409, false, { cause: error });
-      }
-      if (error instanceof SubmissionConflictError) {
-        throw new DomainError('IDEMPOTENCY_CONFLICT', error.message, 409, false, { cause: error });
-      }
-      throw error;
+      throw mapInputSubmissionError(error);
     }
     if (pending && (alreadyConsumed || composition.inserted)) {
       const current = this.#registry.getChat(chatId);
@@ -646,6 +664,25 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
   getAgentCatalogEntries() { return this.#catalog.getAgentCatalogEntries(); }
+}
+
+function inputAttachments(options: UserInputAdmissionOptions) {
+  return (options.images ?? []).map((image) => ({
+    kind: 'image' as const,
+    data: image.data,
+    name: image.name ?? null,
+    mimeType: image.mimeType ?? 'application/octet-stream',
+  }));
+}
+
+function mapInputSubmissionError(error: unknown): unknown {
+  if (error instanceof StaleTranscriptViewError) {
+    return new DomainError('STALE_TRANSCRIPT_VIEW', error.message, 409, false, { cause: error });
+  }
+  if (error instanceof SubmissionConflictError) {
+    return new DomainError('IDEMPOTENCY_CONFLICT', error.message, 409, false, { cause: error });
+  }
+  return error;
 }
 
 function messageText(message: ChatMessage): string {

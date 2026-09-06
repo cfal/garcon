@@ -20,7 +20,6 @@ import {
   createRouteChatListProjector,
   createRouteCommandLedger,
   createRouteCommandService,
-  createRoutePathCache,
 } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000400';
@@ -76,7 +75,6 @@ const settings = {
   })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -104,7 +102,6 @@ const chatListProjector = createRouteChatListProjector({
   settings,
   metadata,
   agents,
-  pathCache,
 });
 
 const chatsRoutes = createChatRoutes({
@@ -112,7 +109,6 @@ const chatsRoutes = createChatRoutes({
   settings,
   queue,
   processing: { phase: mock(() => null) },
-  pathCache,
   metadata,
   chatViews,
   agents,
@@ -124,7 +120,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-    pathCache,
     chatListProjector,
   }),
 });

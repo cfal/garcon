@@ -35,7 +35,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000900';
 const CHAT_ID_2 = '1783725900000901';
@@ -95,7 +95,6 @@ const queue = {
 	abortForChatDeletion: mock(() => Promise.resolve(true)),
 	deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
 };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -117,7 +116,7 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-title');
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 const recentTitleIcons = {
   getRecentIcons: () => [],
 };
@@ -128,7 +127,6 @@ const chatsRoutes = createChatRoutes({
   recentTitleIcons,
   queue,
   processing: { phase: mock(() => null) },
-  pathCache,
   metadata,
   chatViews,
   agents,
@@ -140,7 +138,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pathCache,
 		chatListProjector,
   }),
 });
@@ -149,7 +146,6 @@ const allMocks = [
   registry.listAllChats, metadata.listAllChatMetadata, registry.getChat, registry.removeChat,
 	queue.abortForChatDeletion, queue.deleteChatQueueFile,
   settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
-  pathCache.resolveProjectPaths,
   parseJsonBody, generateChatTitleFromMessage,
 ];
 
@@ -171,12 +167,6 @@ describe('GET /api/chats title resolution', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
-	pathCache.resolveProjectPaths.mockImplementation((projectPaths) => Promise.resolve(new Map(
-		projectPaths.map((projectPath) => [projectPath, {
-			available: true,
-			effectiveProjectKey: projectPath,
-		}]),
-	)));
   });
 
   it('uses override title when session name exists', async () => {
@@ -245,13 +235,7 @@ describe('GET /api/chats title resolution', () => {
     expect(settings.ensureInNormal).not.toHaveBeenCalled();
   });
 
-  it('checks project path availability concurrently', async () => {
-    let resolveSlow;
-    const slowCheck = new Promise((resolve) => { resolveSlow = resolve; });
-    let resolveFirstCall;
-    const firstCall = new Promise((resolve) => { resolveFirstCall = resolve; });
-    let fastCalled = false;
-
+  it('lists chats without resolving project paths', async () => {
     registry.listAllChats.mockImplementation(() => ({
       [CHAT_ID_5]: chatEntry({ projectPath: '/slow' }),
       [CHAT_ID_6]: chatEntry({ projectPath: '/fast' }),
@@ -260,25 +244,7 @@ describe('GET /api/chats title resolution', () => {
     settings.getPinnedChatIds.mockImplementation(() => []);
     settings.getNormalChatIds.mockImplementation(() => [CHAT_ID_5, CHAT_ID_6]);
     settings.getArchivedChatIds.mockImplementation(() => []);
-	pathCache.resolveProjectPaths.mockImplementation(async (projectPaths) => {
-		const entries = await Promise.all(projectPaths.map(async (projectPath) => {
-			if (projectPath === '/slow') {
-				resolveFirstCall();
-				await slowCheck;
-			}
-			if (projectPath === '/fast') fastCalled = true;
-			return [projectPath, { available: true, effectiveProjectKey: projectPath }];
-		}));
-		return new Map(entries);
-	});
-
-    const responsePromise = handler();
-    await firstCall;
-
-    expect(fastCalled).toBe(true);
-    resolveSlow(true);
-
-    const response = await responsePromise;
+    const response = await handler();
     const body = await response.json();
     expect(body.sessions.map((session) => session.id)).toEqual([CHAT_ID_5, CHAT_ID_6]);
   });

@@ -12,6 +12,7 @@ import { createLogger } from '../lib/log.ts';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
 import {
   clearQueue,
+  discardPendingInput,
   createQueueEntry,
   deleteQueueEntry,
   moveQueueEntry,
@@ -32,6 +33,7 @@ import {
 import {
   transitionContext,
   transitionError,
+  type ProjectAdmissionPort,
   type QueueCommandMutationResult,
 } from './types.ts';
 
@@ -48,6 +50,7 @@ export class ChatExecutionControlOperations {
   constructor(
     private readonly repository: ChatExecutionControlRepository,
     private readonly host: ChatExecutionControlOperationsHost,
+    private readonly projectAdmission: ProjectAdmissionPort,
   ) {}
 
   async read(chatId: string): Promise<StoredChatExecutionControlState> {
@@ -64,11 +67,15 @@ export class ChatExecutionControlOperations {
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
-      const committed = await this.#commitTransition(
-        chatId,
+      const transition = createQueueEntry(
         current,
-        createQueueEntry(current, { content, command, submission }, this.#transitionContext(chatId)),
+        { content, command, submission },
+        this.#transitionContext(chatId),
       );
+      if (transition.outcome.status === 'ok' && !transition.outcome.value.duplicate) {
+        await this.projectAdmission.assertAvailable(chatId);
+      }
+      const committed = await this.#commitTransition(chatId, current, transition);
       const result = committed.value;
       if (!result.duplicate) {
         this.#logMutation('create', chatId, result.entryId, committed.control, result.entry?.revision);
@@ -195,6 +202,17 @@ export class ChatExecutionControlOperations {
     });
   }
 
+  async discardPendingInput(chatId: string): Promise<StoredChatExecutionControlState> {
+    return this.host.runExclusive(chatId, async () => {
+      const current = await this.#load(chatId);
+      return (await this.#commitTransition(
+        chatId,
+        current,
+        discardPendingInput(current, transitionContext()),
+      )).control;
+    });
+  }
+
   async enqueueControl(
     chatId: string,
     input: Omit<StoredControlInputEntry, 'id'>,
@@ -212,7 +230,10 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async pause(chatId: string): Promise<StoredChatExecutionControlState> {
+  async pause(chatId: string): Promise<{
+    control: StoredChatExecutionControlState;
+    changed: boolean;
+  }> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const committed = await this.#commitTransition(
@@ -221,7 +242,7 @@ export class ChatExecutionControlOperations {
         pauseQueue(current, transitionContext()),
       );
       if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control);
-      return committed.control;
+      return { control: committed.control, changed: committed.changed };
     });
   }
 

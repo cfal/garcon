@@ -39,11 +39,6 @@ export interface ChatSearchDep {
 
 interface ChatSearchRouteDeps {
   registry: IChatRegistry;
-  pathCache: {
-    resolveProjectPaths(projectPaths: string[]): Promise<
-      Map<string, { available: boolean; effectiveProjectKey: string | null }>
-    >;
-  };
   chatListProjector: ChatListProjector;
   searchIndex?: ChatSearchDep;
 }
@@ -53,7 +48,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   postSearchNavigate(body: unknown): Promise<Response>;
   getSearchStatus(): Response;
 } {
-  const { registry, pathCache, chatListProjector, searchIndex } = deps;
+  const { registry, chatListProjector, searchIndex } = deps;
 
   async function postSearchChats(body: unknown, request?: Request): Promise<Response> {
     try {
@@ -70,7 +65,6 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         textTokens: search.textTokens,
         allowedChatIds: await searchableChatIds(
           registry,
-          pathCache,
           chatListProjector,
           search.chatIds,
         ),
@@ -198,16 +192,12 @@ function parseSearchRequest(body: unknown): ChatSearchRequest {
 
 async function searchableChatIds(
   registry: IChatRegistry,
-  pathCache: ChatSearchRouteDeps['pathCache'],
   chatListProjector: ChatListProjector,
   requestedChatIds: string[] | undefined,
 ): Promise<string[]> {
   const sessions = registry.listAllChats();
   const sessionEntries = Object.entries(sessions);
-  const statuses = await pathCache.resolveProjectPaths(
-    sessionEntries.map(([, session]) => session.projectPath),
-  );
-  const visibleEntries = await chatListProjector.buildMany(sessionEntries, statuses);
+  const visibleEntries = chatListProjector.buildMany(sessionEntries);
   if (requestedChatIds !== undefined) {
     return requestedChatIds.filter((chatId) => visibleEntries.has(chatId));
   }

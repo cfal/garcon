@@ -846,13 +846,19 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       restoreIfCurrent();
       throw error;
     }
-    this.#emitChatProjectPathUpdated({
-      chatId: update.chatId,
-      projectPath: update.projectPath,
-      effectiveProjectKey: update.effectiveProjectKey,
-      previousProjectPath: update.previousProjectPath,
-      previousEffectiveProjectKey: update.previousEffectiveProjectKey,
-    });
+    try {
+      this.#emitChatProjectPathUpdated({
+        chatId: update.chatId,
+        projectPath: update.projectPath,
+        effectiveProjectKey: update.effectiveProjectKey,
+        previousProjectPath: update.previousProjectPath,
+      });
+    } catch (error) {
+      logger.warn('Project-path update publication failed after persistence', {
+        chatId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     return { id, ...existing };
   }
 

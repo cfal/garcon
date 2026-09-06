@@ -2,14 +2,11 @@
 // param, enforcing the project-base boundary. Shared by routes that operate
 // against a project directory (files, slash-command discovery).
 
-import { promises as fs } from 'fs';
-import { hasNodeErrorCode } from '../lib/errors.js';
-import {
-  assertRealWithinProjectBase,
-  isProjectBoundaryError,
-  projectBoundaryErrorResponse,
-} from '../lib/path-boundary.ts';
+import type { ProjectUnavailableReason } from '../../common/project-resolution.js';
+import { jsonError } from '../lib/http-error.js';
+import { projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
 import type { IChatRegistry } from '../chats/store.js';
+import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 
 export type ProjectPathResolution =
   | { projectPath: string; error?: undefined }
@@ -18,29 +15,35 @@ export type ProjectPathResolution =
 export async function resolveAccessibleProjectPath(
   projectPath: string,
 ): Promise<ProjectPathResolution> {
-  let resolvedProjectPath = projectPath;
-  try {
-    resolvedProjectPath = await assertRealWithinProjectBase(projectPath);
-  } catch (error) {
-    if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
-    if (hasNodeErrorCode(error, 'ENOENT') || hasNodeErrorCode(error, 'ENOTDIR')) {
-      return { error: projectPathNotFoundResponse(resolvedProjectPath) };
-    }
-    throw error;
-  }
-
-  try {
-    await fs.access(resolvedProjectPath);
-    return { projectPath: resolvedProjectPath };
-  } catch {
-    return { error: projectPathNotFoundResponse(resolvedProjectPath) };
-  }
+  const resolution = await inspectProjectDirectory(projectPath);
+  return resolution.kind === 'available'
+    ? { projectPath: resolution.effectiveProjectKey }
+    : { error: unavailableResponse(projectPath, resolution.reason) };
 }
 
 function projectPathNotFoundResponse(projectPath: string): Response {
   return Response.json(
     { error: `Project path not found: ${projectPath}` },
     { status: 404 },
+  );
+}
+
+function unavailableResponse(projectPath: string, reason: ProjectUnavailableReason): Response {
+  if (reason === 'not-found') return projectPathNotFoundResponse(projectPath);
+  if (reason === 'outside-base') return projectBoundaryErrorResponse();
+  if (reason === 'not-a-directory') {
+    return jsonError(
+      `Project path is not a directory: ${projectPath}`,
+      400,
+      'PROJECT_PATH_NOT_DIRECTORY',
+      false,
+    );
+  }
+  return jsonError(
+    `Project folder cannot be accessed: ${projectPath}`,
+    403,
+    'VALIDATION_FAILED',
+    false,
   );
 }
 

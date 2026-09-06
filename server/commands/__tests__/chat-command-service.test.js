@@ -15,6 +15,7 @@ import {
   GoalControlDeliveryError,
   SteerDeliveryError,
   DomainError,
+  ProjectUnavailableError,
 } from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
@@ -143,7 +144,6 @@ function projectedChat(chatId, projectPath = '/repo', source = {}) {
     agentOwnershipEpoch: source.agentOwnershipEpoch ?? 'epoch-1',
     title: 'Chat',
     projectPath,
-    effectiveProjectKey: projectPath,
     orderGroup: 'normal',
     tags: [],
     activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
@@ -481,6 +481,7 @@ function makeService(overrides = {}) {
       return { chatId, reservationId: `snapshot-${chatId}` };
     }),
     releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
+    discardPendingChatInput: mock(() => Promise.resolve(storedQueue())),
     reserveDirectTurn: mock((chatId) => directReservation(chatId)),
     assertDirectTurnReservationActive: mock(() => undefined),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
@@ -693,14 +694,6 @@ function makeService(overrides = {}) {
       return Promise.resolve(projectedChat(chatId, chat?.projectPath ?? '/repo', chat));
     }),
   };
-  const pathCache = {
-    resolveProjectPath: mock((projectPath) =>
-      Promise.resolve({
-        available: true,
-        effectiveProjectKey: projectPath,
-      }),
-    ),
-  };
   const fileMentions = overrides.fileMentions ?? {
     resolve: mock(async (command) => command),
   };
@@ -716,7 +709,6 @@ function makeService(overrides = {}) {
     agents,
     fileMentions,
     chatListProjector,
-    pathCache,
     forkChatFileCopy,
     transcripts,
     ownership,
@@ -738,7 +730,6 @@ function makeService(overrides = {}) {
     ledger,
     sessions,
     chatListProjector,
-    pathCache,
     ownership,
     handoffs,
     handoffPreparations,
@@ -748,13 +739,18 @@ function makeService(overrides = {}) {
 function makeInputProjection(overrides = {}) {
   return {
     admitInput: mock(async () => ({ inserted: true })),
+    hasMatchingInput: mock(async () => false),
     admitQueuedInput: mock(() => ({ inserted: true })),
     discardPreparedInput: mock(() => undefined),
     ...overrides,
   };
 }
 
-function makeRealQueue(inputProjection, turnRunnerOverrides = {}) {
+function makeRealQueue(
+  inputProjection,
+  turnRunnerOverrides = {},
+  projectAdmission = { assertAvailable: mock(async () => undefined) },
+) {
   return new ChatExecutionCoordinator(
     workspaceDir,
     {
@@ -768,6 +764,9 @@ function makeRealQueue(inputProjection, turnRunnerOverrides = {}) {
     () => ({}),
     () => true,
     new InMemoryChatExecutionControlRepository('server-instance-test'),
+    {
+      projectAdmission,
+    },
   );
 }
 
@@ -2061,6 +2060,80 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-1',
       commandType: 'agent-run',
     });
+  });
+
+  it('retries the same unavailable-project command until the folder is restored', async () => {
+    let available = false;
+    const projectAdmission = {
+      assertAvailable: mock(async () => {
+        if (!available) throw new ProjectUnavailableError('/repo', 'not-found');
+      }),
+    };
+    const inputProjection = makeInputProjection();
+    const runAgentTurn = mock(async () => undefined);
+    const queueService = makeRealQueue(inputProjection, { runAgentTurn }, projectAdmission);
+    const { service, ledger } = makeService({ queueService });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue after restore',
+      clientRequestId: 'req-project-restore',
+      clientMessageId: 'msg-project-restore',
+    };
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(service.submitRun(input)).rejects.toMatchObject({
+        code: 'PROJECT_UNAVAILABLE',
+        status: 409,
+        retryable: false,
+      });
+    }
+    expect(await readLedgerRecord(ledger, 'agent-run', input.clientRequestId)).toMatchObject({
+      status: 'failed',
+      errorCode: 'PRE_SCHEDULE_FAILED',
+    });
+    await expect(service.submitRun({ ...input, command: 'changed content' })).rejects.toMatchObject({
+      code: 'IDEMPOTENCY_CONFLICT',
+    });
+
+    available = true;
+    await expect(service.submitRun(input)).resolves.toMatchObject({ status: 'accepted' });
+    await queueService.waitForDispatches();
+
+    expect(projectAdmission.assertAvailable).toHaveBeenCalledTimes(3);
+    expect(inputProjection.admitInput).toHaveBeenCalledTimes(1);
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles a new request for matching committed input as a duplicate before rechecking the project', async () => {
+    let matching = false;
+    const inputProjection = makeInputProjection({
+      hasMatchingInput: mock(() => matching),
+    });
+    const projectAdmission = { assertAvailable: mock(async () => undefined) };
+    const queueService = makeRealQueue(inputProjection, {}, projectAdmission);
+    const { service } = makeService({ queueService });
+    const firstInput = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'committed input',
+      clientRequestId: 'req-committed-first',
+      clientMessageId: 'msg-committed',
+    };
+
+    const first = await service.submitRun(firstInput);
+    await queueService.waitForDispatches();
+    queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, {
+      clientRequestId: firstInput.clientRequestId,
+      turnId: first.turnId,
+    });
+    matching = true;
+
+    await expect(service.submitRun({
+      ...firstInput,
+      clientRequestId: 'req-committed-second',
+    })).resolves.toMatchObject({ status: 'duplicate' });
+
+    expect(inputProjection.admitInput).toHaveBeenCalledTimes(1);
+    expect(projectAdmission.assertAvailable).toHaveBeenCalledTimes(1);
   });
 
   it('replays an admitted run before revalidating changed persisted defaults', async () => {
@@ -5165,7 +5238,6 @@ describe('ChatCommandService', () => {
       projectPath: realNextPath,
       effectiveProjectKey: realNextPath,
       previousProjectPath: '/repo',
-      previousEffectiveProjectKey: '/repo',
     });
     expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith(
       'claude',
@@ -5183,7 +5255,6 @@ describe('ChatCommandService', () => {
         projectPath: realNextPath,
         effectiveProjectKey: realNextPath,
         previousProjectPath: '/repo',
-        previousEffectiveProjectKey: '/repo',
       }),
       { flush: true },
     );
@@ -5191,7 +5262,7 @@ describe('ChatCommandService', () => {
   });
 
   it('maps unresolvable project path updates to not found', async () => {
-    const { service, chats, agents } = makeService();
+    const { service, chats, agents, queue } = makeService();
     const projectPaths = await createUnresolvableProjectPaths();
 
     for (const projectPath of projectPaths) {
@@ -5203,6 +5274,7 @@ describe('ChatCommandService', () => {
 
     expect(chats.updateProjectPath).not.toHaveBeenCalled();
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(queue.discardPendingChatInput).not.toHaveBeenCalled();
   });
 
   it('persists a prepared native session before provider cleanup', async () => {
@@ -5302,6 +5374,7 @@ describe('ChatCommandService', () => {
 
     expect(rollback).toHaveBeenCalledTimes(1);
     expect(commit).not.toHaveBeenCalled();
+    expect(fixture.queue.discardPendingChatInput).not.toHaveBeenCalled();
   });
 
   it('rolls back an unchanged native binding when registry persistence fails', async () => {
@@ -5537,7 +5610,7 @@ describe('ChatCommandService', () => {
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects project path updates while a queued turn is waiting', async () => {
+  it('clears a queued turn after a project path update commits', async () => {
     const { service, queue, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
@@ -5545,17 +5618,16 @@ describe('ChatCommandService', () => {
       queueEntry('queued-1', 'continue', 'queued'),
     ]));
 
-    await expect(
-      service.updateProjectPath({
-        chatId: SOURCE_CHAT_ID,
-        projectPath: nextPath,
-      }),
-    ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
 
-    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
+    expect(queue.discardPendingChatInput).toHaveBeenCalledWith(SOURCE_CHAT_ID);
   });
 
-  it('rejects project path updates while a queued entry is steering', async () => {
+  it('clears a steering queue entry after a project path update commits', async () => {
     const { service, queue, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
@@ -5563,17 +5635,16 @@ describe('ChatCommandService', () => {
       queueEntry('steering-1', 'continue', 'steering'),
     ]));
 
-    await expect(
-      service.updateProjectPath({
-        chatId: SOURCE_CHAT_ID,
-        projectPath: nextPath,
-      }),
-    ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
 
-    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
+    expect(queue.discardPendingChatInput).toHaveBeenCalledWith(SOURCE_CHAT_ID);
   });
 
-  it('rejects project path updates while private control input is waiting', async () => {
+  it('clears private control input after a project path update commits', async () => {
     const { service, queue, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
@@ -5581,13 +5652,77 @@ describe('ChatCommandService', () => {
       controlEntries: [controlEntry('control-1')],
     }));
 
-    await expect(
-      service.updateProjectPath({
-        chatId: SOURCE_CHAT_ID,
-        projectPath: nextPath,
-      }),
-    ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
 
+    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
+    expect(queue.discardPendingChatInput).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+  });
+
+  it('atomically discards both pending lanes and pauses through the real coordinator', async () => {
+    const queueService = makeRealQueue(makeInputProjection());
+    const publishSessionFact = mock(() => {
+      throw new Error('publication failed');
+    });
+    const relocated = {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      value: { path: '/synthetic/relocated.jsonl', agentSessionId: 'agent-1' },
+    };
+    const { service } = makeService({
+      queueService,
+      agents: {
+        prepareProjectPathUpdate: mock(async () => ({
+          nativeSession: relocated,
+          commit: mock(async () => undefined),
+          rollback: mock(async () => undefined),
+        })),
+        publishSessionFact,
+      },
+    });
+    await queueService.createChatQueueEntry(SOURCE_CHAT_ID, 'queued work');
+    await queueService.pauseChatQueue(SOURCE_CHAT_ID);
+    const { id: _id, ...pendingControl } = controlEntry('control-pending');
+    await queueService.deliverInterAgentControlInput(
+      SOURCE_CHAT_ID,
+      pendingControl,
+      new AbortController().signal,
+    );
+    await queueService.waitForDispatches();
+    const nextPath = path.join(projectBaseDir, 'real-discard');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
+
+    expect(await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).toMatchObject({
+      entries: [],
+      controlEntries: [],
+      pause: null,
+    });
+    expect(publishSessionFact).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves pending work when an unchanged project path is submitted', async () => {
+    const { service, queue, agents } = makeService({
+      session: { projectPath: projectBaseDir },
+    });
+
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: projectBaseDir,
+    })).resolves.toMatchObject({
+      success: true,
+      projectPath: projectBaseDir,
+      previousProjectPath: projectBaseDir,
+    });
+
+    expect(queue.reserveTranscriptSnapshot).not.toHaveBeenCalled();
+    expect(queue.discardPendingChatInput).not.toHaveBeenCalled();
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
@@ -5669,21 +5804,8 @@ describe('ChatCommandService', () => {
     let compactTurn;
     const compactStarted = deferred();
     const releaseCompact = deferred();
-    const queueReadStarted = deferred();
-    const releaseQueueRead = deferred();
     const queueService = makeRealQueue(inputProjection, {
       isChatRunning: mock(() => runtimeRunning),
-    });
-    const readChatExecutionControl = queueService.readChatExecutionControl.bind(queueService);
-    let holdNextQueueRead = false;
-    queueService.readChatExecutionControl = mock(async (...args) => {
-      const queue = await readChatExecutionControl(...args);
-      if (holdNextQueueRead) {
-        holdNextQueueRead = false;
-        queueReadStarted.resolve();
-        await releaseQueueRead.promise;
-      }
-      return queue;
     });
     const { service, agents } = makeService({
       queueService,
@@ -5712,26 +5834,18 @@ describe('ChatCommandService', () => {
       await compactStarted.promise;
       expect(queueService.ownsExecution(SOURCE_CHAT_ID)).toBe(true);
 
-      holdNextQueueRead = true;
       pathUpdate = service.updateProjectPath({
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
       });
-      await waitForCheckpoint(queueReadStarted.promise, pathUpdate, 'project path update');
-
-      releaseCompact.resolve();
-      await service.waitForBackgroundTasks();
-      // The direct reservation is gone but its attempt is retained, so the chat still owns
-      // execution across the handoff; that is one question now, not two.
-      expect(queueService.ownsExecution(SOURCE_CHAT_ID)).toBe(true);
-
-      releaseQueueRead.resolve();
       await expect(pathUpdate).rejects.toMatchObject({
         code: 'CHAT_NOT_IDLE',
         message: 'Cannot update project path while a turn is being prepared or finalized',
       });
       expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
 
+      releaseCompact.resolve();
+      await service.waitForBackgroundTasks();
       runtimeRunning = false;
       queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
       expect(queueService.ownsExecution(SOURCE_CHAT_ID)).toBe(false);
@@ -5741,7 +5855,6 @@ describe('ChatCommandService', () => {
       })).resolves.toMatchObject({ success: true });
     } finally {
       releaseCompact.resolve();
-      releaseQueueRead.resolve();
       await service.waitForBackgroundTasks();
       runtimeRunning = false;
       if (compactTurn) queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
@@ -5750,7 +5863,7 @@ describe('ChatCommandService', () => {
   });
 
   it('does not persist a project path when provider preparation fails', async () => {
-    const { service, chats } = makeService({
+    const { service, chats, queue } = makeService({
       agents: {
         prepareProjectPathUpdate: mock(async () => {
           throw new Error('provider is not idle');
@@ -5769,6 +5882,7 @@ describe('ChatCommandService', () => {
       message: 'provider is not idle',
     });
     expect(chats.updateProjectPath).not.toHaveBeenCalled();
+    expect(queue.discardPendingChatInput).not.toHaveBeenCalled();
   });
 
   it('serializes new direct admission behind project path preparation', async () => {

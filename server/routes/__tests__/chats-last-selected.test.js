@@ -34,18 +34,6 @@ function createFixture() {
     abortForChatDeletion: mock(() => Promise.resolve(false)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
   };
-  const pathCache = {
-    resolveProjectPath: mock((projectPath) => Promise.resolve({
-      available: true,
-      effectiveProjectKey: projectPath,
-    })),
-    resolveProjectPaths: mock((projectPaths) => Promise.resolve(new Map(
-      projectPaths.map((projectPath) => [projectPath, {
-        available: true,
-        effectiveProjectKey: projectPath,
-      }]),
-    ))),
-  };
   const metadata = {
     addNewChatMetadata: mock(() => undefined),
     listAllChatMetadata: mock(() => new Map()),
@@ -66,13 +54,12 @@ function createFixture() {
     isAgentSessionRunning: mock(() => false),
   };
   const lastSelectedChat = new InMemoryLastSelectedChatState();
-  const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+  const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
   const routes = createChatRoutes({
     registry,
     settings,
     queue,
     processing: { phase: mock(() => null) },
-    pathCache,
     metadata,
     chatViews,
     agents,
@@ -81,7 +68,7 @@ function createFixture() {
     lastSelectedChat,
   });
 
-  return { agents, lastSelectedChat, metadata, pathCache, registry, routes, settings };
+  return { agents, lastSelectedChat, metadata, registry, routes, settings };
 }
 
 function chatEntry(projectPath = '/proj') {
@@ -131,20 +118,14 @@ describe('last selected chat routes', () => {
     expect(body.sessions).toHaveLength(1);
   });
 
-  it('returns null when remembered chat is path-filtered but keeps memory', async () => {
+  it('returns a remembered chat even when its project path is unavailable', async () => {
     fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
     fixture.registry.listAllChats.mockImplementation(() => ({ [CHAT_ID]: chatEntry('/missing') }));
-	fixture.pathCache.resolveProjectPaths.mockImplementation((projectPaths) => Promise.resolve(new Map(
-		projectPaths.map((projectPath) => [projectPath, {
-			available: false,
-			effectiveProjectKey: null,
-		}]),
-	)));
 
     const response = await fixture.routes['/api/v1/chats'].GET();
     const body = await response.json();
 
-    expect(body.lastSelectedChatId).toBeNull();
+    expect(body.lastSelectedChatId).toBe(CHAT_ID);
     expect(fixture.lastSelectedChat.getLastSelectedChatId()).toBe(CHAT_ID);
   });
 

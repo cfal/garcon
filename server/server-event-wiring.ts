@@ -546,7 +546,6 @@ export function wireServerEvents({
         payload.projectPath,
         payload.effectiveProjectKey,
         payload.previousProjectPath,
-        payload.previousEffectiveProjectKey,
       ),
     );
   });
@@ -583,6 +582,11 @@ export function wireServerEvents({
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
     scheduleChatTask(chatId, 'server-events: queued turn failure handling failed', () =>
       handleQueueFailure(chatId, queueErrorMessage, options));
+  });
+  queue.onProjectUnavailable((chatId, error) => {
+    scheduleChatTask(chatId, 'server-events: project unavailable notice failed', () => {
+      notifyOperationalNotice(chatId, 'warning', error.message);
+    });
   });
   queue.onTurnSettled((chatId, turn) => {
     if (turn) agentRegistry.settleTurn(chatId, turn);

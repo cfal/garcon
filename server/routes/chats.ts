@@ -161,12 +161,6 @@ interface SettingsDep {
   sortChatOrder(compareChatIds: ChatOrderIdComparator): Promise<{ changed: boolean }>;
 }
 
-interface PathCacheDep {
-  resolveProjectPaths(
-    projectPaths: readonly string[],
-  ): Promise<Map<string, import('../chats/path-cache.js').ProjectPathStatus>>;
-}
-
 interface MetadataDep {
   listAllChatMetadata(): Map<string, ChatMetadata>;
   getChatMetadata(chatId: string): ChatMetadata | null;
@@ -292,7 +286,6 @@ interface ChatRouteDeps {
   recentTitleIcons: RecentTitleIconSource;
   queue: QueueDep;
   processing: Pick<ChatProcessingActivity, 'phase'>;
-  pathCache: PathCacheDep;
   metadata: MetadataDep;
   chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
@@ -308,7 +301,6 @@ export default function createChatRoutes({
   recentTitleIcons,
   queue,
   processing,
-  pathCache,
   metadata,
   chatViews,
   agents,
@@ -320,7 +312,6 @@ export default function createChatRoutes({
   const commands = commandService;
   const searchRoutes = createChatSearchRoutes({
     registry,
-    pathCache,
     chatListProjector,
     searchIndex,
   });
@@ -328,14 +319,13 @@ export default function createChatRoutes({
   function validatedLastSelectedChatId(
     rememberedChatId: string | null,
     allSessions: Record<string, unknown>,
-    visibleEntries: Map<string, ChatListEntry>,
   ): string | null {
     if (!rememberedChatId) return null;
     if (!(rememberedChatId in allSessions)) {
       lastSelectedChat.clearIf(rememberedChatId);
       return null;
     }
-    return visibleEntries.has(rememberedChatId) ? rememberedChatId : null;
+    return rememberedChatId;
   }
 
   async function validateStartPath(_request: Request, url: URL): Promise<Response> {
@@ -374,8 +364,7 @@ export default function createChatRoutes({
       const normalList = settings.getNormalChatIds();
       const archivedList = settings.getArchivedChatIds();
       const sessionEntries = Object.entries(sessions);
-      const statuses = await pathCache.resolveProjectPaths(sessionEntries.map(([, session]) => session.projectPath));
-      const entryMap = await chatListProjector.buildMany(sessionEntries, statuses);
+      const entryMap = chatListProjector.buildMany(sessionEntries);
       const orderedFrom = (ids: string[], group: ChatOrderGroup): ChatListEntry[] =>
         ids.flatMap((id) => {
           const entry = entryMap.get(id);
@@ -395,7 +384,6 @@ export default function createChatRoutes({
       const lastSelectedChatId = validatedLastSelectedChatId(
         lastSelectedChat.getLastSelectedChatId(),
         sessions,
-        entryMap,
       );
       const body: ChatListResponse = {
         sessions: all,

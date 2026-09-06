@@ -21,12 +21,12 @@ import { createChatSnapshotRoutes } from './chat-snapshot.js';
 import { createChatRowRoutes } from './chat-rows.js';
 import { createChatExportRoutes } from './chat-export.js';
 import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
+import { createProjectResolutionRoutes } from './project-resolution.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
-import type { PathCache } from '../chats/path-cache.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import type { ShareTranscriptSnapshotPort } from './shares.js';
@@ -59,7 +59,6 @@ export default function createAllRoutes({
   recentTitleIcons,
   queue,
   processing,
-  pathCache,
   metadata,
   chatViews,
   shareSnapshots,
@@ -90,7 +89,6 @@ export default function createAllRoutes({
   recentTitleIcons: RecentTitleIconSource;
   queue: ChatExecutionService;
   processing: ChatProcessingActivity;
-  pathCache: PathCache;
   metadata: MetadataIndex;
   chatViews: TranscriptPageReader;
   shareSnapshots: ShareTranscriptSnapshotPort;
@@ -128,6 +126,7 @@ export default function createAllRoutes({
     ...createChatRowRoutes(chatRows),
     ...createChatExportRoutes(transcriptExport),
     ...createChatHandoffArtifactRoutes(handoffArtifact),
+    ...createProjectResolutionRoutes({ registry }),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
@@ -138,7 +137,6 @@ export default function createAllRoutes({
       recentTitleIcons,
       queue,
       processing,
-      pathCache,
       metadata,
       chatViews,
       agents,

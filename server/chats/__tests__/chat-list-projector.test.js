@@ -60,14 +60,6 @@ function makeDeps() {
       },
       processing: { phase: mock(() => 'running') },
       canReloadFromNativeHistory: mock(() => true),
-      pathCache: {
-        resolveProjectPath: mock(() =>
-          Promise.resolve({
-            available: true,
-            effectiveProjectKey: '/real/project',
-          }),
-        ),
-      },
     },
   };
 }
@@ -76,24 +68,13 @@ describe('ChatListProjector', () => {
   it('projects the complete canonical list entry for list and command paths', async () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);
-    const statuses = new Map([
-      [
-        '/alias',
-        {
-          available: true,
-          effectiveProjectKey: '/real/project',
-        },
-      ],
-    ]);
-
-    const many = await projector.buildMany([[CHAT_ID, session]], statuses);
-    const one = await projector.buildOne(CHAT_ID);
+    const many = projector.buildMany([[CHAT_ID, session]]);
+    const one = projector.buildOne(CHAT_ID);
 
     expect(one).toEqual(many.get(CHAT_ID));
     expect(one).toMatchObject({
       id: CHAT_ID,
       parentChat: null,
-      effectiveProjectKey: '/real/project',
       orderGroup: 'normal',
       isPinned: false,
       isArchived: false,
@@ -105,7 +86,7 @@ describe('ChatListProjector', () => {
     });
   });
 
-  it('projects immutable child parentage without changing the summary', async () => {
+  it('projects immutable child parentage without changing the summary', () => {
     const parentChat = Object.freeze({
       chatId: '1783725900000800',
       relation: 'fork',
@@ -116,12 +97,9 @@ describe('ChatListProjector', () => {
     session.parentChat = parentChat;
 
     const projector = new ChatListProjector(deps);
-    const many = await projector.buildMany(
-      [[CHAT_ID, session]],
-      new Map([['/alias', { available: true, effectiveProjectKey: '/real/project' }]]),
-    );
+    const many = projector.buildMany([[CHAT_ID, session]]);
 
-    expect((await projector.buildOne(CHAT_ID))?.parentChat).toBe(parentChat);
+    expect(projector.buildOne(CHAT_ID)?.parentChat).toBe(parentChat);
     expect(many.get(CHAT_ID)?.parentChat).toBe(parentChat);
     expect(projector.buildSummary(CHAT_ID)?.chat).not.toHaveProperty('parentChat');
   });
@@ -130,9 +108,6 @@ describe('ChatListProjector', () => {
     const { deps, session } = makeDeps();
     session.tags = ['Review Needed', 'cli', 'review-needed'];
     session.modelProtocol = 'anthropic-messages';
-    deps.pathCache.resolveProjectPath.mockImplementation(() => {
-      throw new Error('summary must not resolve the project path');
-    });
     const projector = new ChatListProjector(deps);
 
     expect(projector.buildSummary(CHAT_ID)).toEqual({
@@ -158,7 +133,6 @@ describe('ChatListProjector', () => {
       },
       processingPhase: 'running',
     });
-    expect(deps.pathCache.resolveProjectPath).not.toHaveBeenCalled();
     expect(deps.processing.phase).toHaveBeenCalledTimes(1);
   });
 
@@ -184,36 +158,25 @@ describe('ChatListProjector', () => {
     );
   });
 
-  it('uses pinned, normal, archived precedence for corrupt overlap', async () => {
+  it('uses pinned, normal, archived precedence for corrupt overlap', () => {
     const { deps } = makeDeps();
     deps.settings.getPinnedChatIds.mockReturnValue([CHAT_ID]);
     deps.settings.getArchivedChatIds.mockReturnValue([CHAT_ID]);
     const projector = new ChatListProjector(deps);
 
-    const entry = await projector.buildOne(CHAT_ID);
+    const entry = projector.buildOne(CHAT_ID);
 
     expect(entry?.orderGroup).toBe('pinned');
     expect(entry?.isPinned).toBe(true);
     expect(entry?.isArchived).toBe(false);
   });
 
-  it('omits unavailable sessions', async () => {
+  it('includes sessions without resolving their project paths', () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);
 
-    const entries = await projector.buildMany(
-      [[CHAT_ID, session]],
-      new Map([
-        [
-          '/alias',
-          {
-            available: false,
-            effectiveProjectKey: null,
-          },
-        ],
-      ]),
-    );
+    const entries = projector.buildMany([[CHAT_ID, session]]);
 
-    expect(entries.size).toBe(0);
+    expect(entries.get(CHAT_ID)?.projectPath).toBe('/alias');
   });
 });

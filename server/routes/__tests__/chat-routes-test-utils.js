@@ -5,28 +5,12 @@ import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
-import { mock } from 'bun:test';
 
 export function createRouteCommandLedger(label = 'chat-routes') {
   return new CommandLedger(path.join(os.tmpdir(), `garcon-${label}-ledger-${randomUUID()}`));
 }
 
-export function createRoutePathCache() {
-  return {
-    resolveProjectPath: mock(async (projectPath) => ({
-      available: true,
-      effectiveProjectKey: projectPath,
-    })),
-    resolveProjectPaths: mock(async (projectPaths) => new Map(
-      [...new Set(projectPaths)].map((projectPath) => [projectPath, {
-        available: true,
-        effectiveProjectKey: projectPath,
-      }]),
-    )),
-  };
-}
-
-export function createRouteChatListProjector({ registry, settings, metadata, agents, pathCache }) {
+export function createRouteChatListProjector({ registry, settings, metadata, agents }) {
   const processing = {
     phase(chatId) {
       const session = registry.getChat(chatId);
@@ -40,7 +24,6 @@ export function createRouteChatListProjector({ registry, settings, metadata, age
     settings,
     metadata,
     processing,
-    pathCache,
     canReloadFromNativeHistory: () => false,
   });
 }
@@ -51,9 +34,8 @@ export function createRouteCommandService({
   settings,
   metadata,
   agents,
-  commandLedger,
+	commandLedger,
 	handoffs,
-	pathCache,
 	chatListProjector,
   forkChatFileCopy: forkChatFileCopyOverride,
   ownership,
@@ -113,7 +95,6 @@ export function createRouteCommandService({
         return true;
       },
     },
-	pathCache: pathCache ?? createRoutePathCache(),
 	chatListProjector: chatListProjector ?? {
 		buildOne: async (chatId) => {
 			const session = registry.getChat(chatId);
@@ -131,7 +112,6 @@ export function createRouteCommandService({
 				},
 				title: 'Chat',
 				projectPath: session.projectPath,
-				effectiveProjectKey: session.projectPath,
 				orderGroup: 'normal',
 				tags: session.tags ?? [],
 				activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
