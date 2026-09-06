@@ -567,6 +567,35 @@ describe('TerminalRegistry', () => {
 		expect(transport.status).toBe('idle');
 	});
 
+	it('keeps a delayed initialization failure suspended after logout', async () => {
+		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
+		listTerminals.mockImplementationOnce(() => pendingList.promise).mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+
+		const initialization = registry.initialize();
+		registry.authChanged(false);
+		pendingList.reject(new Error('List failed'));
+		await initialization;
+
+		expect(registry.listStatus).toBe('failed');
+		expect(transport.status).toBe('idle');
+		expect(transport.connectCount).toBe(0);
+		expect(transport.sent).toEqual([]);
+
+		registry.authChanged(true);
+		expect(transport.status).toBe('connecting');
+		await transport.open();
+		await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+		expect(transport.sent[0]).toMatchObject({
+			type: 'terminal-attach',
+			terminalId: 'terminal-1',
+			intent: 'restore',
+		});
+	});
+
 	it('suspends on logout and reconnects existing sessions after login', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,

@@ -164,7 +164,7 @@ export class TerminalRegistry {
 			await this.list();
 		} catch {
 			// The stream retries reconciliation when the initial control-plane request fails.
-			this.#transport.connect();
+			if (!this.#authSuspended) this.#transport.connect();
 		}
 	}
 
@@ -595,7 +595,7 @@ export class TerminalRegistry {
 
 	#syncTransportDemand(): void {
 		if (this.#authSuspended) return;
-		if (this.orderedSessions.length > 0) {
+		if (this.listStatus === 'failed' || this.orderedSessions.length > 0) {
 			if (this.#transport.status === 'idle' || this.#transport.status === 'waiting-auth') {
 				this.#transport.connect();
 			}
