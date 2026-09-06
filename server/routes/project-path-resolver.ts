@@ -14,8 +14,9 @@ export type ProjectPathResolution =
 
 export async function resolveAccessibleProjectPath(
   projectPath: string,
+  inspect = inspectProjectDirectory,
 ): Promise<ProjectPathResolution> {
-  const resolution = await inspectProjectDirectory(projectPath);
+  const resolution = await inspect(projectPath);
   return resolution.kind === 'available'
     ? { projectPath: resolution.effectiveProjectKey }
     : { error: unavailableResponse(projectPath, resolution.reason) };
