@@ -467,6 +467,34 @@ describe('ChatExecutionCoordinator', () => {
       .toHaveLength(1);
   });
 
+  it('rejects queued inter-agent control input when the project is unavailable', async () => {
+    const controlRepository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const control = controlRepository.load('chat-1');
+    control.pause = {
+      id: 'pause-1',
+      kind: 'manual',
+      pausedAt: '2026-08-29T00:00:00.000Z',
+    };
+    controlRepository.save('chat-1', control);
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const fixture = createFixture({
+      controlRepository,
+      projectAdmission: {
+        assertAvailable: mock(async () => { throw unavailable; }),
+      },
+    });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput(),
+      new AbortController().signal,
+    )).rejects.toBe(unavailable);
+
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+  });
+
   it('drains preserved control input after the public queue is cleared', async () => {
     const provider = deferred();
     const fixture = createFixture({
@@ -486,10 +514,12 @@ describe('ChatExecutionCoordinator', () => {
 
     const release = coordinator.releaseTranscriptSnapshot(snapshot);
     await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    await release;
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
     const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
     await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
     provider.resolve();
-    await release;
+    await coordinator.waitForDispatches();
 
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
   });
@@ -508,6 +538,7 @@ describe('ChatExecutionCoordinator', () => {
     );
 
     await coordinator.releaseTranscriptSnapshot(snapshot);
+    await waitFor(() => !coordinator.ownsExecution('chat-1'));
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
       .toHaveLength(1);
     expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();

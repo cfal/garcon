@@ -220,11 +220,11 @@ export class ChatExecutionControlOperations {
     return this.host.runExclusive(chatId, async () => {
       this.#assertChatExists(chatId);
       const current = await this.#load(chatId);
-      const committed = await this.#commitTransition(
-        chatId,
-        current,
-        enqueueControlInput(current, input, transitionContext()),
-      );
+      const transition = enqueueControlInput(current, input, transitionContext());
+      if (transition.outcome.status === 'ok') {
+        await this.projectAdmission.assertAvailable(chatId);
+      }
+      const committed = await this.#commitTransition(chatId, current, transition);
       this.#logControlMutation('enqueue', chatId, committed.value, committed.control);
       return { entry: committed.value, control: committed.control };
     });

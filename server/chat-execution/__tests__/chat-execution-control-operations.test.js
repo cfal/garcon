@@ -96,6 +96,29 @@ describe('ChatExecutionControlOperations', () => {
     });
   });
 
+  it('checks project availability before committing private control input', async () => {
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const operations = new ChatExecutionControlOperations(
+      repository,
+      host(),
+      { assertAvailable: mock(async () => { throw unavailable; }) },
+    );
+
+    await expect(operations.enqueueControl('chat-1', {
+      content: '<garcon-message>message</garcon-message>',
+      transcriptViewId: 'view-1',
+      createdAt: '2026-08-29T00:00:00.000Z',
+      receipt: {
+        title: 'Inter-agent message',
+        content: 'message',
+        detail: { type: 'inter-agent-message-received', fromChatId: null },
+      },
+    })).rejects.toBe(unavailable);
+
+    expect((await repository.load('chat-1')).controlEntries).toEqual([]);
+  });
+
   it('does not recheck project availability for a duplicate queue command', async () => {
     const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
     const assertAvailable = mock(async () => undefined);

@@ -300,6 +300,31 @@ describe('AcceptedInputHandler', () => {
     });
   });
 
+  test('rejects compact when the project is unavailable and releases ownership', async () => {
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const settle = settlement();
+    const dispatch = mock(async () => undefined);
+    const { handler, m } = scaffold({
+      assertProjectAvailable: mock(async () => { throw unavailable; }),
+    });
+
+    await expect(handler.scheduleOperation({
+      command: command(),
+      settlement: settle,
+      dispatch,
+    })).rejects.toBe(unavailable);
+
+    expect(m.releaseDirect).toHaveBeenCalledOnce();
+    expect(m.runDirect).not.toHaveBeenCalled();
+    expect(m.trackDispatch).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(settle.markScheduled).not.toHaveBeenCalled();
+    expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
+      error: unavailable,
+      retryable: true,
+    });
+  });
+
   test('admits direct presentation without exposing it to provider run options', async () => {
     const presentation = { origin: 'cli', style: 'notice', title: 'Context' };
     const { handler, m } = scaffold();
