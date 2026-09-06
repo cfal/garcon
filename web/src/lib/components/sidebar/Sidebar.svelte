@@ -141,6 +141,7 @@
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		chatItemLayout: localSettings.sidebarChatItemLayout,
 		sortMode: localSettings.sidebarSortMode,
+		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 	});
 	let transcriptSearchTarget = $derived(
 		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
@@ -173,6 +174,7 @@
 			currentTime,
 			inactivityDuration: displayOptions.inactivityDuration,
 			sortMode: displayOptions.sortMode,
+			pinnedInsertPosition: displayOptions.pinnedInsertPosition,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),

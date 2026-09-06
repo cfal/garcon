@@ -107,6 +107,13 @@ test('chat sort presets atomically reorder every persisted group and survive res
       await fixture.client.waitForTurnTerminal(chatId, run.turnId);
     }
 
+    expect(await fixture.client.updateSettings({
+      ui: { pinnedInsertPosition: 'bottom' },
+    })).toMatchObject({
+      success: true,
+      settings: { ui: { pinnedInsertPosition: 'bottom' } },
+    });
+
     const activityCursor = fixture.client.markEvents();
     expect(await fixture.client.sortChatOrder({ sortKey: 'activity' })).toEqual({
       success: true,
@@ -120,7 +127,7 @@ test('chat sort presets atomically reorder every persisted group and survive res
     ))).toHaveLength(1);
 
     listed = await fixture.client.listChats();
-    const expectedPinned = [chatIds[0], chatIds[1]];
+    const expectedPinned = [chatIds[1], chatIds[0]];
     const expectedNormal = [chatIds[4], hiddenChatId, chatIds[5]];
     const expectedArchived = [chatIds[2], chatIds[3]];
     expect(idsForGroup(listed.sessions, 'pinned')).toEqual(expectedPinned);

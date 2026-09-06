@@ -17,6 +17,7 @@ import {
   type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
+import type { PinnedInsertPosition } from '../../common/settings.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
@@ -49,7 +50,11 @@ import {
 } from '../lib/domain-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
-import type { ChatReorderResult, ChatStartupPreferences } from '../settings/types.js';
+import type {
+  ChatOrderComparatorOverrides,
+  ChatReorderResult,
+  ChatStartupPreferences,
+} from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import {
@@ -144,7 +149,7 @@ interface SettingsDep {
   getPinnedChatIds(): string[];
   getNormalChatIds(): string[];
   getArchivedChatIds(): string[];
-  getUiSettings(): { chatTitle?: unknown } | null | undefined;
+  getUiSettings(): { pinnedInsertPosition?: PinnedInsertPosition } | null | undefined;
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
@@ -158,7 +163,10 @@ interface SettingsDep {
     request: ReorderChatRequest,
     isKnownChat: (chatId: string) => boolean,
   ): Promise<ChatReorderResult>;
-  sortChatOrder(compareChatIds: ChatOrderIdComparator): Promise<{ changed: boolean }>;
+  sortChatOrder(
+    compareChatIds: ChatOrderIdComparator,
+    comparatorOverrides?: ChatOrderComparatorOverrides,
+  ): Promise<{ changed: boolean }>;
 }
 
 interface PathCacheDep {
@@ -741,7 +749,12 @@ export default function createChatRoutes({
         request.sortKey,
         metadata.listAllChatMetadata(),
       );
-      const result = await settings.sortChatOrder(compareChatIds);
+      const comparatorOverrides: ChatOrderComparatorOverrides =
+        request.sortKey === 'activity'
+        && settings.getUiSettings()?.pinnedInsertPosition === 'bottom'
+          ? { pinned: (leftChatId, rightChatId) => compareChatIds(rightChatId, leftChatId) }
+          : {};
+      const result = await settings.sortChatOrder(compareChatIds, comparatorOverrides);
       return Response.json({
         success: true,
         sortKey: request.sortKey,

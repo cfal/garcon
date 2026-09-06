@@ -4,6 +4,7 @@ import type {
 	SidebarInactivityDuration,
 	SidebarSortMode,
 } from '$lib/stores/local-settings.svelte';
+import type { PinnedInsertPosition } from '$shared/settings';
 
 export interface SidebarDisplayOptions {
 	grouping: SidebarChatGrouping;
@@ -11,6 +12,7 @@ export interface SidebarDisplayOptions {
 	groupNestedProjectPaths: boolean;
 	chatItemLayout: SidebarChatItemLayout;
 	sortMode: SidebarSortMode;
+	pinnedInsertPosition: PinnedInsertPosition;
 }
 
 export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
@@ -19,6 +21,7 @@ export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
 	groupNestedProjectPaths: false,
 	chatItemLayout: 'compact',
 	sortMode: 'manual',
+	pinnedInsertPosition: 'top',
 };
 
 export function sidebarGroupingUsesProjects(grouping: SidebarChatGrouping): boolean {
