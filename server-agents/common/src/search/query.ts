@@ -15,13 +15,18 @@ import {
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_PREFIX_SIZE,
+  CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS,
   CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
 } from '@garcon/common/chat-search';
 import type { TranscriptSearchOrder } from './worker-protocol.js';
 
-const MAX_SNIPPET_CHARS = 512;
+const SNIPPET_PREFIX = '... ';
+const SNIPPET_SUFFIX = ' ...';
+const MAX_SNIPPET_CHARS = CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS
+  - [...SNIPPET_PREFIX].length
+  - [...SNIPPET_SUFFIX].length;
 export const SEARCH_QUERY_MATCH_ROW_LIMIT = 10_000;
 
 const SEARCHABLE_STATE_JOIN = `
@@ -153,7 +158,7 @@ function snippetWindow(body: string, tokens: SnippetToken[], firstTokenIndex: nu
   const characters = [...normalized];
   const text = characters.slice(0, MAX_SNIPPET_CHARS).join('');
   const hasSuffix = endToken < tokens.length || characters.length > MAX_SNIPPET_CHARS;
-  return `${startToken > 0 ? '... ' : ''}${text}${hasSuffix ? ' ...' : ''}`;
+  return `${startToken > 0 ? SNIPPET_PREFIX : ''}${text}${hasSuffix ? SNIPPET_SUFFIX : ''}`;
 }
 
 function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
