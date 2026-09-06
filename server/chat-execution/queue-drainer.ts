@@ -100,14 +100,16 @@ export class QueueDrainer {
         || pending.entries.some((entry) => entry.status === 'steering')
         || this.#shouldHalt(chatId)
       ) return;
-      try {
-        await this.deps.projectAdmission.assertAvailable(chatId);
-      } catch (error) {
-        if (!(error instanceof ProjectUnavailableError)) throw error;
-        if (this.#shouldHalt(chatId)) return;
-        const paused = await controls.pause(chatId);
-        if (paused.changed) callbacks.publishProjectUnavailable(chatId, error);
-        return;
+      if (pending.entries.length > 0) {
+        try {
+          await this.deps.projectAdmission.assertAvailable(chatId);
+        } catch (error) {
+          if (!(error instanceof ProjectUnavailableError)) throw error;
+          if (this.#shouldHalt(chatId)) return;
+          const paused = await controls.pause(chatId);
+          if (paused.changed) callbacks.publishProjectUnavailable(chatId, error);
+          return;
+        }
       }
       if (this.#shouldHalt(chatId)) return;
 

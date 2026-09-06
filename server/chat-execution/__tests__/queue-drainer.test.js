@@ -4,11 +4,11 @@ import { DomainError, ProjectUnavailableError } from '../../lib/domain-error.ts'
 
 const TS = '2026-08-15T00:00:00.000Z';
 
-function control(entries = []) {
+function control(entries = [], controlEntries = []) {
   return {
     serverInstanceId: 'server-1',
     entries,
-    controlEntries: [],
+    controlEntries,
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
@@ -401,6 +401,60 @@ describe('QueueDrainer', () => {
     expect(callbacks.registerQueued).not.toHaveBeenCalled();
     expect(callbacks.publishProjectUnavailable).toHaveBeenCalledWith('chat-1', unavailable);
     expect(callbacks.publishTurnFailed).not.toHaveBeenCalled();
+  });
+
+  it('does not create a hidden pause for an unavailable control-only lane', async () => {
+    const entry = {
+      id: 'control-1',
+      content: '<garcon-message>message</garcon-message>',
+      transcriptViewId: 'view-1',
+      createdAt: TS,
+      receipt: {
+        title: 'Inter-agent message',
+        content: 'message',
+        detail: { type: 'inter-agent-message-received', fromChatId: null },
+      },
+    };
+    const pending = control([], [entry]);
+    const pause = mock(async () => ({ control: pending, changed: true }));
+    const assertAvailable = mock(async () => {
+      throw new ProjectUnavailableError('/workspace/missing', 'not-found');
+    });
+    const runAgentTurn = mock(async () => {
+      throw new Error('provider could not start in the project directory');
+    });
+    const callbacks = queueCallbacks();
+    const drainer = new QueueDrainer({
+      ownership: idleOwnership({
+        installAttempt: () => ({ signal: new AbortController().signal }),
+        beginFinalization: () => ({ settle: mock(() => undefined) }),
+        setActiveDrainEntry: mock(() => undefined),
+      }),
+      controls: {
+        read: mock(async () => pending),
+        pause,
+        dequeueNextTurn: mock(async (_chatId, admit) => {
+          const controlEntry = pending.controlEntries.shift();
+          if (!controlEntry) return null;
+          const input = { kind: 'control', entry: controlEntry };
+          return { input, control: pending, inserted: admit(input) };
+        }),
+      },
+      turnRunner: { isChatRunning: () => false, runAgentTurn },
+      getDrainOptions: () => ({}),
+      projectAdmission: { assertAvailable },
+      callbacks,
+    });
+
+    await drainer.run('chat-1');
+
+    expect(assertAvailable).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+    expect(pending.controlEntries).toEqual([]);
+    expect(callbacks.appendControlReceipt).toHaveBeenCalledWith('chat-1', entry);
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
+    expect(callbacks.publishProjectUnavailable).not.toHaveBeenCalled();
+    expect(callbacks.publishTurnFailed).toHaveBeenCalledTimes(1);
   });
 
   it('does not resolve empty, paused, or steering-blocked queues', async () => {
