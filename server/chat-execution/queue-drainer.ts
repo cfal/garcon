@@ -106,8 +106,9 @@ export class QueueDrainer {
         } catch (error) {
           if (!(error instanceof ProjectUnavailableError)) throw error;
           if (this.#shouldHalt(chatId)) return;
-          const paused = await controls.pause(chatId);
-          if (paused.changed) callbacks.publishProjectUnavailable(chatId, error);
+          const paused = await controls.pauseForUnavailableProject(chatId);
+          if (!paused.changed) continue;
+          callbacks.publishProjectUnavailable(chatId, error);
           return;
         }
       }

@@ -46,6 +46,8 @@ export interface ChatExecutionControlOperationsHost {
   publish(chatId: string, control: StoredChatExecutionControlState): void;
 }
 
+type ControlChangeResult = { control: StoredChatExecutionControlState; changed: boolean };
+
 export class ChatExecutionControlOperations {
   constructor(
     private readonly repository: ChatExecutionControlRepository,
@@ -230,12 +232,22 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async pause(chatId: string): Promise<{
-    control: StoredChatExecutionControlState;
-    changed: boolean;
-  }> {
+  async pause(chatId: string): Promise<ControlChangeResult> {
+    return this.#pause(chatId);
+  }
+
+  async pauseForUnavailableProject(chatId: string): Promise<ControlChangeResult> {
+    return this.#pause(chatId, (current) =>
+      current.entries.length > 0 && current.entries.every((entry) => entry.status === 'queued'));
+  }
+
+  async #pause(
+    chatId: string,
+    eligible: (control: StoredChatExecutionControlState) => boolean = () => true,
+  ): Promise<ControlChangeResult> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
+      if (!eligible(current)) return { control: cloneStoredChatExecutionControl(current), changed: false };
       const committed = await this.#commitTransition(
         chatId,
         current,
@@ -249,7 +261,7 @@ export class ChatExecutionControlOperations {
   async resume(
     chatId: string,
     pauseId: string,
-  ): Promise<{ control: StoredChatExecutionControlState; changed: boolean }> {
+  ): Promise<ControlChangeResult> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const committed = await this.#commitTransition(

@@ -1,4 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { ChatExecutionControlOperations } from '../chat-execution-control-operations.ts';
+import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
 import { QueueDrainer } from '../queue-drainer.ts';
 import { DomainError, ProjectUnavailableError } from '../../lib/domain-error.ts';
 
@@ -20,6 +22,20 @@ function control(entries = [], controlEntries = []) {
 
 function availableProjectAdmission() {
   return { assertAvailable: mock(async () => undefined) };
+}
+
+function privateControlEntry(id = 'control-1') {
+  return {
+    id,
+    content: '<garcon-message>message</garcon-message>',
+    transcriptViewId: 'view-1',
+    createdAt: TS,
+    receipt: {
+      title: 'Inter-agent message',
+      content: 'message',
+      detail: { type: 'inter-agent-message-received', fromChatId: null },
+    },
+  };
 }
 
 function idleOwnership(overrides = {}) {
@@ -379,14 +395,17 @@ describe('QueueDrainer', () => {
       status: 'queued',
       submission: null,
     };
-    const pending = control([entry]);
+    const pending = control([entry], [privateControlEntry()]);
     const dequeueNextTurn = mock(async () => null);
-    const pause = mock(async () => ({ control: { ...pending, pause: { id: 'pause-1' } }, changed: true }));
+    const pauseForUnavailableProject = mock(async () => ({
+      control: { ...pending, pause: { id: 'pause-1' } },
+      changed: true,
+    }));
     const callbacks = queueCallbacks();
     const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
     const drainer = new QueueDrainer({
       ownership: idleOwnership(),
-      controls: { read: mock(async () => pending), pause, dequeueNextTurn },
+      controls: { read: mock(async () => pending), pauseForUnavailableProject, dequeueNextTurn },
       turnRunner: { isChatRunning: () => false, runAgentTurn: mock(async () => undefined) },
       getDrainOptions: () => ({}),
       projectAdmission: { assertAvailable: mock(async () => { throw unavailable; }) },
@@ -396,7 +415,7 @@ describe('QueueDrainer', () => {
 
     await drainer.run('chat-1');
 
-    expect(pause).toHaveBeenCalledWith('chat-1');
+    expect(pauseForUnavailableProject).toHaveBeenCalledWith('chat-1');
     expect(dequeueNextTurn).not.toHaveBeenCalled();
     expect(callbacks.registerQueued).not.toHaveBeenCalled();
     expect(callbacks.publishProjectUnavailable).toHaveBeenCalledWith('chat-1', unavailable);
@@ -404,19 +423,9 @@ describe('QueueDrainer', () => {
   });
 
   it('does not create a hidden pause for an unavailable control-only lane', async () => {
-    const entry = {
-      id: 'control-1',
-      content: '<garcon-message>message</garcon-message>',
-      transcriptViewId: 'view-1',
-      createdAt: TS,
-      receipt: {
-        title: 'Inter-agent message',
-        content: 'message',
-        detail: { type: 'inter-agent-message-received', fromChatId: null },
-      },
-    };
+    const entry = privateControlEntry();
     const pending = control([], [entry]);
-    const pause = mock(async () => ({ control: pending, changed: true }));
+    const pauseForUnavailableProject = mock(async () => ({ control: pending, changed: true }));
     const assertAvailable = mock(async () => {
       throw new ProjectUnavailableError('/workspace/missing', 'not-found');
     });
@@ -432,7 +441,7 @@ describe('QueueDrainer', () => {
       }),
       controls: {
         read: mock(async () => pending),
-        pause,
+        pauseForUnavailableProject,
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const controlEntry = pending.controlEntries.shift();
           if (!controlEntry) return null;
@@ -449,12 +458,70 @@ describe('QueueDrainer', () => {
     await drainer.run('chat-1');
 
     expect(assertAvailable).not.toHaveBeenCalled();
-    expect(pause).not.toHaveBeenCalled();
+    expect(pauseForUnavailableProject).not.toHaveBeenCalled();
     expect(pending.controlEntries).toEqual([]);
     expect(callbacks.appendControlReceipt).toHaveBeenCalledWith('chat-1', entry);
     expect(runAgentTurn).toHaveBeenCalledTimes(1);
     expect(callbacks.publishProjectUnavailable).not.toHaveBeenCalled();
     expect(callbacks.publishTurnFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks visible pause eligibility after project resolution', async () => {
+    for (const mutation of ['clear', 'delete']) {
+      const repository = new InMemoryChatExecutionControlRepository('server-1');
+      const controls = new ChatExecutionControlOperations(
+        repository,
+        {
+          runExclusive: (_chatId, operation) => operation(),
+          chatExists: () => true,
+          unsettledQueueReceiptKeys: () => new Set(),
+          publish: () => undefined,
+        },
+        availableProjectAdmission(),
+      );
+      const created = await controls.create('chat-1', 'queued input');
+      const { id: _id, ...controlInput } = privateControlEntry();
+      await controls.enqueueControl('chat-1', controlInput);
+      const resolution = Promise.withResolvers();
+      const resolutionStarted = Promise.withResolvers();
+      const callbacks = queueCallbacks();
+      const runAgentTurn = mock(async () => {
+        throw new Error('provider could not start in the project directory');
+      });
+      const drainer = new QueueDrainer({
+        ownership: idleOwnership({
+          installAttempt: () => ({ signal: new AbortController().signal }),
+          beginFinalization: () => ({ settle: mock(() => undefined) }),
+          setActiveDrainEntry: mock(() => undefined),
+        }),
+        controls,
+        turnRunner: { isChatRunning: () => false, runAgentTurn },
+        getDrainOptions: () => ({}),
+        projectAdmission: {
+          assertAvailable: mock(async () => {
+            resolutionStarted.resolve();
+            await resolution.promise;
+            throw new ProjectUnavailableError('/workspace/missing', 'not-found');
+          }),
+        },
+        callbacks,
+      });
+
+      const drain = drainer.run('chat-1');
+      await resolutionStarted.promise;
+      if (mutation === 'clear') await controls.clear('chat-1');
+      else await controls.delete('chat-1', created.entryId);
+      resolution.resolve();
+      await drain;
+
+      const final = await controls.read('chat-1');
+      expect(final.entries, mutation).toEqual([]);
+      expect(final.controlEntries, mutation).toEqual([]);
+      expect(final.pause, mutation).toBeNull();
+      expect(callbacks.publishProjectUnavailable, mutation).not.toHaveBeenCalled();
+      expect(callbacks.appendControlReceipt, mutation).toHaveBeenCalledTimes(1);
+      expect(runAgentTurn, mutation).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('does not resolve empty, paused, or steering-blocked queues', async () => {
@@ -480,6 +547,7 @@ describe('QueueDrainer', () => {
         controls: {
           read: mock(async () => pending),
           pause: mock(async () => ({ control: pending, changed: false })),
+          pauseForUnavailableProject: mock(async () => ({ control: pending, changed: false })),
           dequeueNextTurn: mock(async () => null),
         },
         turnRunner: { isChatRunning: () => false, runAgentTurn: mock(async () => undefined) },
@@ -514,6 +582,10 @@ describe('QueueDrainer', () => {
       controls: {
         read: mock(async () => control([entry])),
         pause: mock(async () => ({ control: control([entry]), changed: true })),
+        pauseForUnavailableProject: mock(async () => ({
+          control: control([entry]),
+          changed: true,
+        })),
         dequeueNextTurn,
       },
       turnRunner: { isChatRunning: () => false, runAgentTurn: mock(async () => undefined) },
