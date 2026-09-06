@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	createSidebarSearchStore,
-	EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
-	transcriptSearchInvalidationProjection,
 	type SidebarSearchStoreDeps,
 } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
+import {
+	EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
+	transcriptSearchInvalidationProjection,
+} from '$lib/sidebar/search/transcript-search-invalidation.js';
 import type { SavedChatSearch } from '$lib/api/settings';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { ApiError } from '$lib/api/client';

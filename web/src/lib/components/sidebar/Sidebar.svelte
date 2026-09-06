@@ -31,7 +31,7 @@
 	import {
 		EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
 		transcriptSearchInvalidationProjection,
-	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
+	} from '$lib/sidebar/search/transcript-search-invalidation.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
 	import {

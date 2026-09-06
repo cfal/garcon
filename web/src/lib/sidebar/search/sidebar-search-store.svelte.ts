@@ -28,6 +28,12 @@ import {
 	sortChatSearchResultsWithCommittedTimeOrder,
 	visibleChatSearchTimePrefix,
 } from '$lib/sidebar/search/search-result-order.js';
+import {
+	dedupeSearchResults,
+	forwardAbort,
+	isTranscriptSearchIndexPartial,
+	waitForTranscriptIndexRetry,
+} from '$lib/sidebar/search/transcript-search-request.js';
 import type {
 	ChatSearchIndexStatus,
 	ChatSearchPage,
@@ -971,81 +977,6 @@ export class SidebarSearchStore {
 		this.deps.logError?.(logMessage, error);
 		this.deps.notifyError(userMessage);
 	}
-}
-
-export interface TranscriptSearchInvalidationProjection {
-	readonly hasTranscriptTerms: boolean;
-	readonly candidateSignature: string;
-	readonly contentSignature: string;
-	readonly timeOrderSignature: string;
-}
-
-export const EMPTY_TRANSCRIPT_SEARCH_INVALIDATION: TranscriptSearchInvalidationProjection = {
-	hasTranscriptTerms: false,
-	candidateSignature: '',
-	contentSignature: '',
-	timeOrderSignature: '',
-};
-
-export function transcriptSearchInvalidationProjection(
-	chats: readonly ChatSessionRecord[],
-	query: string,
-	sort: ChatSearchSort,
-): TranscriptSearchInvalidationProjection {
-	const spec = parseChatSearch(query);
-	if (spec.textTokens.length === 0) return EMPTY_TRANSCRIPT_SEARCH_INVALIDATION;
-	const facetSpec = { ...spec, textTokens: [] };
-	const candidates = isEmptyFilter(facetSpec)
-		? [...chats]
-		: chats.filter((chat) => matchesChatFilter(chat, facetSpec));
-	const lexical = [...candidates].sort((left, right) => left.id.localeCompare(right.id));
-	const timeOrder = captureChatSearchTimeOrder(candidates, sort);
-	return {
-		hasTranscriptTerms: true,
-		candidateSignature: JSON.stringify(lexical.map((chat) => chat.id)),
-		contentSignature: JSON.stringify(lexical.map((chat) => [chat.id, chat.lastActivityAt])),
-		timeOrderSignature: timeOrder === null ? '' : JSON.stringify(timeOrder),
-	};
-}
-
-function dedupeSearchResults(results: readonly ChatSearchResult[]): ChatSearchResult[] {
-	const seen = new Set<string>();
-	return results.filter((result) => {
-		if (seen.has(result.chatId)) return false;
-		seen.add(result.chatId);
-		return true;
-	});
-}
-
-function isTranscriptSearchIndexPartial(index: ChatSearchIndexStatus): boolean {
-	return index.pendingChatCount > 0 || index.unindexedChatCount > 0;
-}
-
-function forwardAbort(source: AbortSignal | undefined, target: AbortController): () => void {
-	if (!source) return () => {};
-	const abort = () => target.abort();
-	source.addEventListener('abort', abort, { once: true });
-	if (source.aborted) abort();
-	return () => source.removeEventListener('abort', abort);
-}
-
-function waitForTranscriptIndexRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const abortError = () => new DOMException('Search aborted', 'AbortError');
-		if (signal?.aborted) {
-			reject(abortError());
-			return;
-		}
-		const handleAbort = () => {
-			clearTimeout(timeoutId);
-			reject(abortError());
-		};
-		const timeoutId = setTimeout(() => {
-			signal?.removeEventListener('abort', handleAbort);
-			resolve();
-		}, delayMs);
-		signal?.addEventListener('abort', handleAbort, { once: true });
-	});
 }
 
 export function createSidebarSearchStore(deps: SidebarSearchStoreDeps): SidebarSearchStore {
