@@ -29,6 +29,7 @@
 		getAppShell,
 		getWs,
 		getLocalSettings,
+		getRemoteSettings,
 		getMinuteClock,
 		getNotifications,
 		getSidebarSearch,
@@ -68,6 +69,7 @@
 	const appShell = getAppShell();
 	const ws = getWs();
 	const localSettings = getLocalSettings();
+	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const sidebarSearch = getSidebarSearch();
 	const projectCollapse = getSidebarProjectCollapse();
@@ -181,6 +183,7 @@
 			currentTime: minuteClock.currentTime,
 			inactivityDuration: localSettings.sidebarInactivityDuration,
 			sortMode: localSettings.sidebarSortMode,
+			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),

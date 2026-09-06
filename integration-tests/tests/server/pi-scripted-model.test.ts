@@ -97,6 +97,57 @@ describe('Pi against a scripted model', () => {
     }, withScriptedPi());
   }, 120_000);
 
+  test('publishes a boundary when the pinned Pi CLI automatically compacts', async () => {
+    environment?.dispose();
+    environment = startScriptedPiTestEnvironment({ compactionKeepRecentTokens: 1 });
+    const testEnvironment = environment;
+    const prompt = marker('COMPACTION_PROMPT');
+    const reply = marker('COMPACTION_REPLY');
+    const summary = marker('COMPACTION_SUMMARY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply, {
+      usage: {
+        prompt_tokens: 120_000,
+        completion_tokens: 1_000,
+        total_tokens: 121_000,
+      },
+    })]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(summary)]);
+
+    await withIntegrationFixture('pi-scripted-compaction', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const native = await piNativeSession(fixture, chatId);
+      expect(await readFile(native.path, 'utf8')).toContain('"totalTokens":121000');
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(transcript.messages.map(({ message }) => message.type)).toEqual([
+        'user-message',
+        'assistant-message',
+        'compaction',
+      ]);
+      expect(messagesOfType(transcript.messages, 'compaction')).toEqual([
+        expect.objectContaining({
+          trigger: 'auto',
+          summary: expect.stringContaining(summary),
+          preTokens: 121_000,
+        }),
+      ]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedPi());
+  }, 120_000);
+
   test('accepts Pi-clamped thinking for a model without an off level', async () => {
     const testEnvironment = requireEnvironment();
     const reply = marker('CLAMPED_THINKING_REPLY');

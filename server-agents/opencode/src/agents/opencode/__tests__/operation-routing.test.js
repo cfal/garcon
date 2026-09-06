@@ -39,6 +39,12 @@ function createEventStream() {
       observe(event, completePrompt);
     },
     resolvePrompt,
+    failPrompt(messageId, message) {
+      const request = promptRequestsByMessage.get(messageId);
+      if (request) setImmediate(() => request.resolve({
+        error: { name: 'ProviderError', data: { message } },
+      }));
+    },
     prompt(input, options) {
       return new Promise((resolve, reject) => {
         const partId = input.parts[0].id;
@@ -155,6 +161,29 @@ function pushCompactionPart(eventStream, {
     type: 'message.part.updated',
     properties: { sessionID: sessionId, part },
   });
+}
+
+function pushCompletedCompactionSummary(eventStream, {
+  eventId,
+  messageId,
+  parentId,
+  sessionId,
+}) {
+  eventStream.push({
+    id: eventId,
+    type: 'message.updated',
+    properties: {
+      sessionID: sessionId,
+      info: {
+        id: messageId,
+        role: 'assistant',
+        parentID: parentId,
+        summary: true,
+        finish: 'stop',
+        time: { completed: 1 },
+      },
+    },
+  }, { completePrompt: false });
 }
 
 function pushAssistant(eventStream, {
@@ -1532,7 +1561,118 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
-  it('routes an automatic compaction summary chain without rows, terminals, or warnings', async () => {
+  it('publishes separate automatic boundaries while hiding compaction summary chains', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
+      logger: diagnostics.logger,
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-prompt',
+      messageId: 'user-prompt',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-control',
+      sessionId: 'session-1',
+    });
+    pushCompletedCompactionSummary(eventStream, {
+      eventId: 'event-summary-message',
+      messageId: 'assistant-summary',
+      parentId: 'user-compaction',
+      sessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-summary-part',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-summary',
+          messageID: 'assistant-summary',
+          type: 'text',
+          text: 'provider-created summary',
+        },
+      },
+    });
+    eventStream.push({
+      id: 'event-summary-delta',
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-summary',
+        partID: 'part-summary',
+        delta: 'provider-created summary delta',
+      },
+    });
+    pushCompletedCompactionSummary(eventStream, {
+      eventId: 'event-summary-message-replayed',
+      messageId: 'assistant-summary',
+      parentId: 'user-compaction',
+      sessionId: 'session-1',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-control-second',
+      messageId: 'user-compaction-second',
+      partId: 'part-compaction-second',
+      sessionId: 'session-1',
+    });
+    pushCompletedCompactionSummary(eventStream, {
+      eventId: 'event-summary-message-second',
+      messageId: 'assistant-summary-second',
+      parentId: 'user-compaction-second',
+      sessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-barrier',
+      type: 'session.compacted',
+      properties: { sessionID: 'session-1' },
+    });
+    await waitFor(() => diagnostics.debug.some((entry) => entry[1]?.eventId === 'event-barrier'));
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'rows',
+        rows: [expect.objectContaining({
+          message: expect.objectContaining({
+            type: 'compaction',
+            trigger: 'auto',
+            summary: '',
+          }),
+          providerMeta: { entryId: 'assistant-summary' },
+        })],
+      }),
+      expect.objectContaining({
+        type: 'rows',
+        rows: [expect.objectContaining({
+          message: expect.objectContaining({
+            type: 'compaction',
+            trigger: 'auto',
+            summary: '',
+          }),
+          providerMeta: { entryId: 'assistant-summary-second' },
+        })],
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain('provider-created summary');
+    expect(diagnostics.warnings).toEqual([]);
+    expect(diagnostics.debug.filter(([message]) => (
+      message === 'Adopted an OpenCode compaction part'
+    ))).toHaveLength(2);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('keeps an automatic summary failure internal when the prompt fails', async () => {
     const diagnostics = diagnosticLogger();
     const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
       logger: diagnostics.logger,
@@ -1557,7 +1697,7 @@ describe('OpenCode operation routing', () => {
       sessionId: 'session-1',
     });
     eventStream.push({
-      id: 'event-summary-message',
+      id: 'event-summary-failed',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
@@ -1566,46 +1706,26 @@ describe('OpenCode operation routing', () => {
           role: 'assistant',
           parentID: 'user-compaction',
           summary: true,
-          finish: 'stop',
           time: { completed: 1 },
+          error: { name: 'ProviderError', data: { message: 'internal summary failure' } },
         },
       },
     }, { completePrompt: false });
-    eventStream.push({
-      id: 'event-summary-part',
-      type: 'message.part.updated',
-      properties: {
-        sessionID: 'session-1',
-        part: {
-          id: 'part-summary',
-          messageID: 'assistant-summary',
-          type: 'text',
-          text: 'provider-created summary',
-        },
-      },
-    });
-    eventStream.push({
-      id: 'event-summary-delta',
-      type: 'message.part.delta',
-      properties: {
-        sessionID: 'session-1',
-        messageID: 'assistant-summary',
-        partID: 'part-summary',
-        delta: 'provider-created summary delta',
-      },
-    });
     eventStream.push({
       id: 'event-barrier',
       type: 'session.compacted',
       properties: { sessionID: 'session-1' },
     });
     await waitFor(() => diagnostics.debug.some((entry) => entry[1]?.eventId === 'event-barrier'));
+    eventStream.failPrompt('user-prompt', 'visible prompt failure');
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
 
-    expect(events).toEqual([]);
-    expect(diagnostics.warnings).toEqual([]);
-    expect(diagnostics.debug.filter(([message]) => (
-      message === 'Adopted an OpenCode compaction part'
-    ))).toHaveLength(1);
+    expect(events).toEqual([expect.objectContaining({
+      type: 'run-ended',
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: 'visible prompt failure' },
+    })]);
+    expect(JSON.stringify(events)).not.toContain('internal summary failure');
     eventStream.close();
     await runtime.shutdown();
   });

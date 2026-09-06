@@ -34,6 +34,8 @@
 		selectableAgentIds?: readonly SessionAgentId[];
 		recents?: ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
+		wrapInForm?: boolean;
+		onFormSubmit?: () => void;
 	}
 
 	let {
@@ -48,6 +50,8 @@
 		selectableAgentIds,
 		recents = [],
 		preferRecentsOnOpen = false,
+		wrapInForm = false,
+		onFormSubmit = () => {},
 	}: Props = $props();
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
@@ -169,11 +173,26 @@
 	} as unknown as ModelCatalogStore);
 </script>
 
-<ModelSelectorPopover
-	{value}
-	{mode}
-	{onChange}
-	{recents}
-	{preferRecentsOnOpen}
-	{selectableAgentIds}
-/>
+{#snippet selector()}
+	<ModelSelectorPopover
+		{value}
+		{mode}
+		{onChange}
+		{recents}
+		{preferRecentsOnOpen}
+		{selectableAgentIds}
+	/>
+{/snippet}
+
+{#if wrapInForm}
+	<form
+		onsubmit={(event) => {
+			event.preventDefault();
+			onFormSubmit();
+		}}
+	>
+		{@render selector()}
+	</form>
+{:else}
+	{@render selector()}
+{/if}

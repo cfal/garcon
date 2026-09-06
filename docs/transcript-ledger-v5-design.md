@@ -1,10 +1,20 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 34 integrated design. Supersedes
+Status: revision 35 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 35 makes automatic compaction boundaries visible as best-effort live
+provider rows. Claude and Codex retain their existing conversion. OpenCode
+publishes from the successfully completed summary assistant already correlated
+to the owning operation; Pi publishes from a successful structured
+`compaction_end`. These informational rows add no session-latest routing,
+durable provider correlation, or native-history reconstruction. They survive
+ordinary restart once committed to the ledger, while explicit native Reload
+may omit them or lose trigger provenance. The bounded scope and provider
+evidence are recorded in `docs/provider-compaction-rows-design.md`.
 
 Revision 34 prevents native-history persistence lag from deleting the only
 receipt evidence for a completed preamble turn. A provider-origin `run-ended`
@@ -2141,9 +2151,10 @@ relevant-entry definition under the 10.2 obligation.
   Normal execution, previews, and Reload remain directory-scoped. Pinned V1
   automatic compaction runs with marker-part routing (#529): OpenCode marks
   its compaction control and continuation parts, the runtime adopts them into
-  the owning turn's route, and a successful overflow summary continues the
-  turn with only user-facing output. Session-latest routing remains forbidden
-  and deleted. The integration has no manual compaction facet. Native-fidelity
+  the owning turn's route, and a successful summary adds one informational
+  compaction row before the turn continues with user-facing output.
+  Session-latest routing remains forbidden and deleted. The integration has no
+  manual compaction facet. Native-fidelity
   fork uses the provider's server-side session fork at an exclusive
   message boundary resolved from the anchor row's `providerMeta`; the boundary
   is message-granular, an unpersisted anchor refuses as not settled, and
@@ -2581,10 +2592,10 @@ The catalog cites this revision, but its inventory is not repeated here.
 - **OpenCode V1 compaction**: the owned process does not force autocompaction
   off and preserves operator overrides; the session-latest continuation map
   and plugin remain absent. Scripted fixtures prove threshold and first-turn
-  overflow compaction continue with only user-facing output through the
-  owning turn's route, overflow replay inherits operation metadata without
-  duplicating the user row, and interruption during summary and continuation
-  leaves the next turn clean.
+  overflow compaction add one informational boundary through the owning
+  turn's route before continuing with user-facing output, overflow replay
+  inherits operation metadata without duplicating the user row, and
+  interruption during summary and continuation leaves the next turn clean.
 - **Handoff**: the 12.1 ordering (reservation, empty queue, close,
   verified checkpoint, then decision) with fault injection at an
   injected sync/rename seam; crash before the decision restores the
@@ -2899,11 +2910,12 @@ stabilization defects. The current case inventory and gate status live in
     machine are deleted.
 24. Pinned OpenCode V1 automatic compaction is marker-routed: OpenCode marks
     its compaction control and continuation parts, the runtime adopts them
-    into the owning turn's route, and a successful overflow summary continues
-    the turn with only user-facing output, while an unmarked or failed
-    compaction surfaces as that operation's visible failure. Session-latest
-    continuation routing stays deleted. Directoryless legacy import remains
-    an explicit follow-up.
+    into the owning turn's route, and a successful summary publishes one
+    informational compaction boundary before the turn continues with
+    user-facing output. An unmarked or failed compaction surfaces as that
+    operation's visible failure. Session-latest continuation routing stays
+    deleted. Native Reload reconstruction and directoryless legacy import
+    remain explicit follow-ups.
 25. Preambles are provider-neutral core composition. The current enabled
     catalog resolves once at the first ordinary input after new chat, fork,
     continuation, or in-place agent switch. Each active `{{chat_id}}` in a

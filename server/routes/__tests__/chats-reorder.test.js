@@ -39,6 +39,7 @@ const settings = {
   getPinnedChatIds: mock(() => []),
   getNormalChatIds: mock(() => []),
   getArchivedChatIds: mock(() => []),
+  getUiSettings: mock(() => ({ pinnedInsertPosition: 'top' })),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
@@ -298,6 +299,8 @@ describe('POST /api/v1/chats/sort', () => {
     registry.getChat.mockClear();
     settings.sortChatOrder.mockClear();
     settings.sortChatOrder.mockResolvedValue({ changed: true });
+    settings.getUiSettings.mockClear();
+    settings.getUiSettings.mockReturnValue({ pinnedInsertPosition: 'top' });
     metadata.listAllChatMetadata.mockClear();
     metadata.listAllChatMetadata.mockReturnValue(new Map([
       ['older-active', {
@@ -336,17 +339,33 @@ describe('POST /api/v1/chats/sort', () => {
   });
 
   it('builds the creation comparator from metadata', async () => {
+    settings.getUiSettings.mockReturnValue({ pinnedInsertPosition: 'bottom' });
     await callSort({ sortKey: 'created' });
-    const compare = settings.sortChatOrder.mock.calls[0][0];
+    const [compare, comparatorOverrides] = settings.sortChatOrder.mock.calls[0];
 
     expect(['older-active', 'newer-idle'].sort(compare))
       .toEqual(['newer-idle', 'older-active']);
+    expect(comparatorOverrides).toEqual({});
   });
 
   it('builds the activity comparator from metadata', async () => {
     await callSort({ sortKey: 'activity' });
-    const compare = settings.sortChatOrder.mock.calls[0][0];
+    const [compare, comparatorOverrides] = settings.sortChatOrder.mock.calls[0];
 
+    expect(['older-active', 'newer-idle'].sort(compare))
+      .toEqual(['older-active', 'newer-idle']);
+    expect(comparatorOverrides).toEqual({});
+  });
+
+  it('inverts only pinned activity ordering when pinned chats are added at the bottom', async () => {
+    settings.getUiSettings.mockReturnValue({ pinnedInsertPosition: 'bottom' });
+
+    await callSort({ sortKey: 'activity' });
+    const [compare, comparatorOverrides] = settings.sortChatOrder.mock.calls[0];
+
+    expect(typeof comparatorOverrides.pinned).toBe('function');
+    expect(['older-active', 'newer-idle'].sort(comparatorOverrides.pinned))
+      .toEqual(['newer-idle', 'older-active']);
     expect(['older-active', 'newer-idle'].sort(compare))
       .toEqual(['older-active', 'newer-idle']);
   });
