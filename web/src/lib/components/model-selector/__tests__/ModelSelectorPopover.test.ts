@@ -191,6 +191,26 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
+	it('does not submit a surrounding form when the compact provider selector opens', async () => {
+		installMatchMedia(true);
+		const onSubmit = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			onChange: vi.fn(),
+			wrapInForm: true,
+			onFormSubmit: onSubmit,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
+
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(screen.getByText('Codex Model 0')).toBeTruthy();
+	});
+
 	it('stages a desktop generation model until an effort is selected', async () => {
 		const onChange = vi.fn();
 
