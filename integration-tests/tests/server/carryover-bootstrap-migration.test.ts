@@ -152,6 +152,7 @@ describe('carryover bootstrap migration', () => {
               model: 'post-migration-model',
               projectPath: fixture.dirs.project,
               agentSettingsById: {},
+              preambleSelection: { revision: 0, orderedPreambleIds: [] },
               parentChat: null,
             });
             await registry.flush();

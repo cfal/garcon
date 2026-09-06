@@ -326,6 +326,13 @@ export async function forkChatFileCopy({
       carryOverSegments: [],
       nativeSeedReceipt: nativeFork?.nativeSeedReceipt ?? null,
       carryOverMigrationQuarantine: null,
+      // Fork configuration copies the source registry selection current at fork
+      // preparation, even for a historical watermark, and diverges from
+      // revision zero.
+      preambleSelection: {
+        revision: 0,
+        orderedPreambleIds: [...sourceSession.preambleSelection.orderedPreambleIds],
+      },
       parentChat: {
         chatId: sourceChatId,
         relation: 'fork',

@@ -10,6 +10,8 @@ import {
 const AT = '2026-09-03T10:00:00.000Z';
 const VIEW_ID = 'view-one';
 const BOUNDARY = { kind: 'new-chat', ownershipEpoch: 'epoch-one' };
+const PREAMBLE_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+const PREAMBLE_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
 
 function application(contents = ['Private first body', 'Private second body']) {
   return createPreamblePrefix({
@@ -22,8 +24,8 @@ function rowGroup({
   ordinal = 1,
   clientMessageId = 'message-one',
   preambles = [
-    { id: 'preamble-a', title: 'First' },
-    { id: 'preamble-b', title: 'Second' },
+    { id: PREAMBLE_A, title: 'First' },
+    { id: PREAMBLE_B, title: 'Second' },
   ],
 } = {}) {
   return [
@@ -93,8 +95,8 @@ describe('preamble history evidence', () => {
       receipt: application().receipt,
       boundary: BOUNDARY,
       preambles: [
-        { id: 'preamble-a', title: 'First' },
-        { id: 'preamble-b', title: 'Second' },
+        { id: PREAMBLE_A, title: 'First' },
+        { id: PREAMBLE_B, title: 'Second' },
       ],
       requiresNativeOccurrence: false,
     }]);
@@ -125,12 +127,12 @@ describe('preamble history evidence', () => {
   it('retains repeated exact receipts as ordered evidence', () => {
     const applied = application();
     const evidence = collectPreambleHistoryEvidence([
-      ...rowGroup({ applied, preambles: [{ id: 'preamble-a', title: 'First' }] }),
+      ...rowGroup({ applied, preambles: [{ id: PREAMBLE_A, title: 'First' }] }),
       ...rowGroup({
         applied,
         ordinal: 3,
         clientMessageId: 'message-two',
-        preambles: [{ id: 'preamble-b', title: 'Second' }],
+        preambles: [{ id: PREAMBLE_B, title: 'Second' }],
       }),
     ]);
 
@@ -191,13 +193,13 @@ describe('preamble native-history sanitation', () => {
     const evidence = collectPreambleHistoryEvidence([
       ...rowGroup({
         applied: absent,
-        preambles: [{ id: 'preamble-a', title: 'Absent' }],
+        preambles: [{ id: PREAMBLE_A, title: 'Absent' }],
       }),
       ...rowGroup({
         applied: present,
         ordinal: 3,
         clientMessageId: 'message-two',
-        preambles: [{ id: 'preamble-b', title: 'Present' }],
+        preambles: [{ id: PREAMBLE_B, title: 'Present' }],
       }),
     ]);
     const result = sanitizeRecordedPreamblePrefixes({
@@ -209,7 +211,7 @@ describe('preamble native-history sanitation', () => {
       kind: 'sanitized',
       messages: [{
         message: { content: 'Visible prompt' },
-        application: { preambles: [{ id: 'preamble-b', title: 'Present' }] },
+        application: { preambles: [{ id: PREAMBLE_B, title: 'Present' }] },
       }],
     });
   });
@@ -217,12 +219,12 @@ describe('preamble native-history sanitation', () => {
   it('consumes repeated identical receipts in ledger order', () => {
     const applied = application();
     const evidence = collectPreambleHistoryEvidence([
-      ...rowGroup({ applied, preambles: [{ id: 'preamble-a', title: 'First' }] }),
+      ...rowGroup({ applied, preambles: [{ id: PREAMBLE_A, title: 'First' }] }),
       ...rowGroup({
         applied,
         ordinal: 3,
         clientMessageId: 'message-two',
-        preambles: [{ id: 'preamble-b', title: 'Second' }],
+        preambles: [{ id: PREAMBLE_B, title: 'Second' }],
       }),
     ]);
     const result = sanitizeRecordedPreamblePrefixes({
@@ -249,13 +251,13 @@ describe('preamble native-history sanitation', () => {
     const evidence = collectPreambleHistoryEvidence([
       ...rowGroup({
         applied: shorter,
-        preambles: [{ id: 'preamble-a', title: 'Shorter' }],
+        preambles: [{ id: PREAMBLE_A, title: 'Shorter' }],
       }),
       ...rowGroup({
         applied: longer,
         ordinal: 3,
         clientMessageId: 'message-two',
-        preambles: [{ id: 'preamble-b', title: 'Longer' }],
+        preambles: [{ id: PREAMBLE_B, title: 'Longer' }],
       }),
     ]);
 
@@ -330,13 +332,13 @@ describe('preamble native-history sanitation', () => {
     const evidence = collectPreambleHistoryEvidence([
       ...rowGroup({
         applied,
-        preambles: [{ id: 'preamble-a', title: 'Optional' }],
+        preambles: [{ id: PREAMBLE_A, title: 'Optional' }],
       }),
       ...rowGroup({
         applied,
         ordinal: 3,
         clientMessageId: 'message-two',
-        preambles: [{ id: 'preamble-b', title: 'Required' }],
+        preambles: [{ id: PREAMBLE_B, title: 'Required' }],
       }),
       providerRunEndedRow(5),
     ]);

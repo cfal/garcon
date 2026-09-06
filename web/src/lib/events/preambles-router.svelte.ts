@@ -1,7 +1,12 @@
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+import type { ChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 import type { WsConnection } from '$lib/ws/connection.svelte.js';
 import { createDrainCursor, type DrainHandle } from '$lib/ws/drain';
-import { parseServerWsMessage, PreamblesInvalidatedMessage } from '$shared/ws-events';
+import {
+	ChatPreamblesInvalidatedMessage,
+	parseServerWsMessage,
+	PreamblesInvalidatedMessage,
+} from '$shared/ws-events';
 
 export class PreamblesRouter {
 	#handle: DrainHandle | null = null;
@@ -9,6 +14,7 @@ export class PreamblesRouter {
 	constructor(
 		private readonly ws: WsConnection,
 		private readonly preambles: Pick<PreamblesStore, 'refreshIfLoaded'>,
+		private readonly selectionInvalidations?: Pick<ChatPreambleSelectionInvalidationHub, 'publish'>,
 	) {}
 
 	start(): void {
@@ -20,6 +26,12 @@ export class PreamblesRouter {
 			const parsed = parseServerWsMessage(message.data);
 			if (parsed instanceof PreamblesInvalidatedMessage) {
 				void this.preambles.refreshIfLoaded();
+			} else if (parsed instanceof ChatPreamblesInvalidatedMessage) {
+				this.selectionInvalidations?.publish({
+					kind: 'selection',
+					chatId: parsed.chatId,
+					revision: parsed.revision,
+				});
 			}
 		}
 	}

@@ -19,9 +19,12 @@ import type {
   AppendChatRowRequest,
   AppendChatRowResult,
   AppendInputRequest,
+  AppendSelectionChangeNoticeResult,
   InputComposition,
   LedgerCliRowNoticeRow,
   LedgerCheckpoint,
+  LedgerPreambleSelectionChangedNoticeDetail,
+  LedgerPreambleSelectionChangedNoticeRow,
   LedgerRow,
   LedgerRowDraft,
   LedgerSessionRow,
@@ -36,7 +39,9 @@ import type {
 import { ensureLedgerChatDirectory, ensureLedgerRootDirectory } from './directories.js';
 import {
   isLedgerCliRowNoticeRow,
+  isLedgerPreambleSelectionChangedNoticeRow,
   isPresentationOnlyProviderRow,
+  PREAMBLES_UPDATED_MESSAGE,
   transcriptViewId,
 } from './contracts.js';
 import {
@@ -48,6 +53,18 @@ import {
   TranscriptViewNotInitializedError,
 } from './errors.js';
 import { LedgerFailureFences } from './failure-fences.js';
+import type { ConnectionEntry } from './connection-entry.js';
+import {
+  closeConnection,
+  configureConnection,
+  createSchema,
+  loadAndCleanViews,
+  openConnection,
+  rehydrateConnection,
+  toView,
+  validateSchema,
+  viewRecord,
+} from './connection-setup.js';
 import { lstatIfExists, statSizeIfExists } from './file-stat.js';
 import { readProviderActivityWatermark } from './native-activity-query.js';
 import {
@@ -68,24 +85,6 @@ const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const CHAT_DIRECTORY_PATTERN = /^[A-Za-z0-9_-]+$/;
 const logger = createLogger('ledger:store');
 
-interface ViewRecord {
-  readonly view_id: string;
-  readonly status: 'current' | 'staging';
-  readonly created_at: string;
-  readonly content_start_ordinal: number;
-}
-
-interface ConnectionEntry {
-  readonly chatId: string;
-  readonly directory: string;
-  readonly db: Database;
-  current: TranscriptView | null;
-  nextOrdinal: number;
-}
-
-type ConnectionCloseAttempt =
-  | { readonly closed: true; readonly checkpointFailure: Error | null }
-  | { readonly closed: false; readonly failure: Error };
 
 export interface TranscriptLedgerStoreOptions {
   readonly connectionCacheSize?: number;
@@ -282,6 +281,57 @@ export class TranscriptLedgerStore {
       runTransaction(entry.db, () => insertEncodedRows(entry.db, request.viewId, [encoded], ordinal));
       entry.nextOrdinal += 1;
       return { row: row as LedgerCliRowNoticeRow, inserted: true };
+    });
+  }
+
+  // Idempotent by the private notice's clientMessageId in the current view's
+  // submission index; the fingerprint proves retry identity.
+  // Reads one submission-indexed row in the current view for identity checks
+  // that must precede any mutation.
+  findSubmissionRow(
+    chatId: string,
+    viewId: TranscriptViewId,
+    clientMessageId: string,
+  ): LedgerRow | null {
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      return readSubmission(entry.db, viewId, clientMessageId);
+    });
+  }
+
+  appendSelectionChangeNotice(
+    chatId: string,
+    request: {
+      readonly viewId: TranscriptViewId;
+      readonly at: string;
+      readonly detail: LedgerPreambleSelectionChangedNoticeDetail;
+    },
+  ): AppendSelectionChangeNoticeResult {
+    const draft: LedgerRowDraft = {
+      kind: 'notice',
+      at: request.at,
+      message: PREAMBLES_UPDATED_MESSAGE,
+      detail: { ...request.detail, preambles: request.detail.preambles.map((p) => ({ ...p })) },
+      providerMeta: null,
+    };
+    const encoded = { draft, ...encodeLedgerDraft(draft) };
+    return this.#write(chatId, (entry) => {
+      this.#assertCurrent(entry, request.viewId);
+      const existing = readSubmission(entry.db, request.viewId, request.detail.clientMessageId);
+      if (existing) {
+        if (
+          !isLedgerPreambleSelectionChangedNoticeRow(existing)
+          || existing.detail.requestFingerprint !== request.detail.requestFingerprint
+        ) {
+          throw new SubmissionConflictError(request.detail.clientMessageId);
+        }
+        return { row: existing, inserted: false };
+      }
+      const ordinal = entry.nextOrdinal;
+      const [row] = materializeRows(request.viewId, [encoded], ordinal);
+      runTransaction(entry.db, () => insertEncodedRows(entry.db, request.viewId, [encoded], ordinal));
+      entry.nextOrdinal += 1;
+      return { row: row as LedgerPreambleSelectionChangedNoticeRow, inserted: true };
     });
   }
 
@@ -816,157 +866,6 @@ function insertEncodedRows(
   });
 }
 
-function openConnection(
-  rootDirectory: string,
-  chatId: string,
-  synchronous: 'NORMAL' | 'FULL',
-): ConnectionEntry {
-  const directory = ensureLedgerChatDirectory(rootDirectory, chatId);
-  const databasePath = path.join(directory, 'ledger.sqlite');
-  const existed = (statSizeIfExists(databasePath) ?? 0) > 0;
-  const db = new Database(databasePath);
-  try {
-    configureConnection(db, synchronous);
-    if (!existed) createSchema(db);
-    else validateSchema(db);
-    const current = loadAndCleanViews(db);
-    chmodSync(databasePath, 0o600);
-    return {
-      chatId,
-      directory,
-      db,
-      current,
-      nextOrdinal: current ? nextOrdinal(db, current.viewId) : 1,
-    };
-  } catch (error) {
-    db.close();
-    throw error;
-  }
-}
-
-function configureConnection(db: Database, synchronous: 'NORMAL' | 'FULL'): void {
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec(`PRAGMA synchronous = ${synchronous}`);
-  db.exec('PRAGMA foreign_keys = ON');
-  db.exec('PRAGMA busy_timeout = 5000');
-}
-
-function createSchema(db: Database): void {
-  runTransaction(db, () => {
-    db.exec(`
-      CREATE TABLE transcript_views (
-        view_id               TEXT PRIMARY KEY,
-        status                TEXT NOT NULL CHECK (status IN ('current', 'staging')),
-        created_at            TEXT NOT NULL,
-        content_start_ordinal INTEGER NOT NULL
-      ) STRICT;
-
-      CREATE UNIQUE INDEX transcript_one_current
-        ON transcript_views(status)
-        WHERE status = 'current';
-
-      CREATE TABLE transcript_rows (
-        view_id           TEXT NOT NULL
-                          REFERENCES transcript_views(view_id) ON DELETE CASCADE,
-        ordinal           INTEGER NOT NULL,
-        kind              TEXT NOT NULL,
-        at                TEXT NOT NULL,
-        client_message_id TEXT,
-        payload_json      TEXT NOT NULL,
-        PRIMARY KEY (view_id, ordinal)
-      ) WITHOUT ROWID, STRICT;
-
-      CREATE UNIQUE INDEX transcript_submission
-        ON transcript_rows(view_id, client_message_id)
-        WHERE client_message_id IS NOT NULL;
-    `);
-    db.exec(`PRAGMA user_version = ${LEDGER_SCHEMA_VERSION}`);
-  });
-}
-
-function validateSchema(db: Database): void {
-  const version = Number(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0);
-  if (version !== LEDGER_SCHEMA_VERSION) {
-    throw new LedgerSchemaError(`Unsupported transcript ledger schema version ${version}`);
-  }
-  const required = new Set(['transcript_views', 'transcript_rows']);
-  const records = db.query<{ name: string }, []>(`
-    SELECT name FROM sqlite_master
-    WHERE type = 'table' AND name IN ('transcript_views', 'transcript_rows')
-  `).all();
-  for (const record of records) required.delete(record.name);
-  if (required.size > 0) throw new LedgerSchemaError('Transcript ledger schema is incomplete');
-}
-
-function loadAndCleanViews(db: Database): TranscriptView | null {
-  const views = loadViews(db);
-  const current = validatedCurrentView(views);
-  if (views.some((view) => view.status === 'staging')) {
-    db.query("DELETE FROM transcript_views WHERE status = 'staging'").run();
-  }
-  return current;
-}
-
-function loadViews(db: Database): readonly ViewRecord[] {
-  return runQuery(() => (
-    db.query<ViewRecord, []>(`
-      SELECT view_id, status, created_at, content_start_ordinal
-      FROM transcript_views
-    `).all()
-  ));
-}
-
-function validatedCurrentView(views: readonly ViewRecord[]): TranscriptView | null {
-  const current = views.filter((view) => view.status === 'current');
-  if (current.length !== 1 && views.length > 0) {
-    throw new LedgerSchemaError('Established transcript ledger must have exactly one current view');
-  }
-  return current[0] ? toView(current[0]) : null;
-}
-
-function rehydrateConnection(entry: ConnectionEntry): void {
-  const current = validatedCurrentView(loadViews(entry.db));
-  const ordinal = current ? nextOrdinal(entry.db, current.viewId) : 1;
-  entry.current = current;
-  entry.nextOrdinal = ordinal;
-}
-
-function viewRecord(
-  db: Database,
-  viewId: TranscriptViewId,
-  status: 'current' | 'staging',
-): ViewRecord | null {
-  return runQuery(() => (
-    db.query<ViewRecord, [string, string]>(`
-      SELECT view_id, status, created_at, content_start_ordinal
-      FROM transcript_views WHERE view_id = ? AND status = ?
-    `).get(viewId, status) ?? null
-  ));
-}
-
-function toView(record: ViewRecord): TranscriptView {
-  return {
-    viewId: transcriptViewId(record.view_id),
-    status: record.status,
-    createdAt: record.created_at,
-    contentStartOrdinal: record.content_start_ordinal,
-  };
-}
-
-function closeConnection(entry: ConnectionEntry): ConnectionCloseAttempt {
-  let checkpointFailure: Error | null = null;
-  try {
-    entry.db.exec('PRAGMA wal_checkpoint(PASSIVE)');
-  } catch (error) {
-    checkpointFailure = asError(error);
-  }
-  try {
-    entry.db.close();
-  } catch (error) {
-    return { closed: false, failure: asError(error) };
-  }
-  return { closed: true, checkpointFailure };
-}
 
 function validateChatDirectoryName(chatId: string): void {
   if (!CHAT_DIRECTORY_PATTERN.test(chatId)) {

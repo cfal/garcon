@@ -13,11 +13,13 @@ import type { AgentCommandImage } from '@garcon/common/ws-requests';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { CarryOverSegmentRef } from '../chats/store.js';
 import type { TurnCommandType } from '../lib/turn-identity.js';
-import type { PendingPreambleBoundary } from '@garcon/common/preambles';
+import type { ChatPreambleSelection, PendingPreambleBoundary } from '@garcon/common/preambles';
 
 export type { AgentCommandImage, PermissionMode, ThinkingMode };
 export type AgentName = string;
 export type AgentExecutionCommandType = TurnCommandType;
+
+export type { ChatPreambleSelection };
 
 export interface PersistedChatExecutionConfig {
   projectPath?: string;
@@ -96,6 +98,7 @@ export interface AgentChatEntry {
   carryOverSegments?: readonly CarryOverSegmentRef[];
   carryOverMigrationQuarantine?: { artifactId: string; errorCode: string } | null;
   pendingPreambleBoundary?: PendingPreambleBoundary | null;
+  preambleSelection?: ChatPreambleSelection;
 }
 
 export interface RequiredChatExecutionConfig extends PersistedChatExecutionConfig {

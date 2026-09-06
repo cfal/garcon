@@ -97,6 +97,19 @@ async function quarantineStateFile(filePath: string, cause: unknown): Promise<ne
   throw new CorruptStateFileError(filePath, quarantinePath, { cause });
 }
 
+// Distinguishes failures before rename (state unchanged) from failures after
+// rename (candidate is authoritative in the file; durability unknown).
+export class AtomicJsonWriteError extends Error {
+  constructor(
+    message: string,
+    readonly renamed: boolean,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'AtomicJsonWriteError';
+  }
+}
+
 export async function writeJsonFileAtomic(
   filePath: string,
   value: unknown,
@@ -115,8 +128,21 @@ export async function writeJsonFileAtomic(
     await file.sync();
     await file.close();
     file = null;
-    await fs.rename(tempPath, filePath);
-    await syncDirectory(dir);
+    let renamed = false;
+    try {
+      await fs.rename(tempPath, filePath);
+      renamed = true;
+      await syncDirectory(dir);
+    } catch (error) {
+      const detail = error instanceof Error ? `: ${error.message}` : '';
+      throw new AtomicJsonWriteError(
+        renamed
+          ? `Atomic write of ${base} renamed the candidate but could not confirm directory durability${detail}`
+          : `Atomic write of ${base} failed before rename${detail}`,
+        renamed,
+        { cause: error },
+      );
+    }
   } catch (error) {
     if (file) await file.close().catch(() => {});
     await fs.unlink(tempPath).catch(() => {});

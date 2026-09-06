@@ -9,6 +9,7 @@ import { importNativeHistoryDrafts } from '../native-history-seed.ts';
 
 const AT = '2026-08-15T00:00:00.000Z';
 const SESSION_ID = 'native-session-1';
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('native history ledger seed', () => {
   it('strips the exact carried-context prefix without shifting provider metadata', async () => {
@@ -95,7 +96,7 @@ describe('native history ledger seed', () => {
       preambleEvidence: [{
         receipt: application.receipt,
         boundary,
-        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
         requiresNativeOccurrence: false,
       }],
       async *load() {
@@ -115,7 +116,7 @@ describe('native history ledger seed', () => {
         message: 'Preambles applied',
         detail: {
           type: 'preamble-application',
-          preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+          preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
         },
       },
       {
@@ -138,7 +139,7 @@ describe('native history ledger seed', () => {
     const preambleEvidence = [{
       receipt: application.receipt,
       boundary: { kind: 'fork', ownershipEpoch: 'ownership-1' },
-      preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+      preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
       requiresNativeOccurrence: false,
     }];
 
@@ -168,7 +169,7 @@ describe('native history ledger seed', () => {
       preambleEvidence: [{
         receipt: application.receipt,
         boundary: { kind: 'new-chat', ownershipEpoch: 'ownership-1' },
-        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
         requiresNativeOccurrence: true,
       }],
       async *load() {
@@ -187,7 +188,7 @@ describe('native history ledger seed', () => {
     const preambleEvidence = [{
       receipt: application.receipt,
       boundary: { kind: 'fork', ownershipEpoch: 'ownership-1' },
-      preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+      preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
       requiresNativeOccurrence: false,
     }];
 

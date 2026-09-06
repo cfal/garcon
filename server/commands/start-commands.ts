@@ -8,6 +8,7 @@ import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import { createLogger } from '../lib/log.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
+import { resolveNewChatPreambleSelection } from '../preambles/selection.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -89,6 +90,18 @@ export class StartCommands {
       throw new CommandValidationError('VALIDATION_FAILED', 'agentSettings must be owned by agentId');
     }
 
+    const projectPath = await resolveStartProjectPath(input.projectPath);
+    // Omitted IDs resolve the newest defaults here, at actual creation; an
+    // explicit list is proven safe against this same catalog snapshot.
+    const preambleSelection = resolveNewChatPreambleSelection({
+      catalog: this.deps.preambles.snapshot(),
+      canonicalProjectPath: projectPath,
+      chatId,
+      ...(input.orderedPreambleIds === undefined
+        ? {}
+        : { orderedPreambleIds: input.orderedPreambleIds }),
+    });
+
     return {
       origin: input.origin,
       chatId,
@@ -96,7 +109,7 @@ export class StartCommands {
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
       agentId: input.agentId,
-      projectPath: await resolveStartProjectPath(input.projectPath),
+      projectPath,
       idempotencyProjectPath,
       command: input.command,
       images,
@@ -107,7 +120,12 @@ export class StartCommands {
       permissionMode: input.permissionMode,
       thinkingMode: input.thinkingMode,
       agentSettings: input.agentSettings,
-      tags: input.tags ?? [], userMessagePresentation: input.userMessagePresentation,
+      tags: input.tags ?? [],
+      userMessagePresentation: input.userMessagePresentation,
+      ...(input.orderedPreambleIds === undefined
+        ? {}
+        : { orderedPreambleIds: input.orderedPreambleIds }),
+      preambleSelection,
     };
   }
 
@@ -168,6 +186,7 @@ export class StartCommands {
             permissionMode: input.permissionMode,
             thinkingMode: input.thinkingMode,
             agentSettingsById: { [input.agentId]: input.agentSettings },
+            preambleSelection: input.preambleSelection,
             parentChat: input.parentChatId === null
               ? null
               : { chatId: input.parentChatId, relation: 'delegation' },
@@ -284,6 +303,9 @@ function startPayload(input: NormalizedChatStart): Record<string, unknown> {
     thinkingMode: input.thinkingMode,
     agentSettings: input.agentSettings,
     tags: input.tags,
+    // Only the canonical request intent is fingerprinted, so a catalog change
+    // does not turn an identical retry into an idempotency conflict.
+    orderedPreambleIds: input.orderedPreambleIds ?? null,
     userMessagePresentation: input.userMessagePresentation ?? null,
   };
 }
@@ -309,6 +331,7 @@ function startReplayPayload(
     thinkingMode: input.thinkingMode,
     agentSettings: input.agentSettings,
     tags: input.tags ?? [],
+    orderedPreambleIds: input.orderedPreambleIds ?? null,
     userMessagePresentation: input.userMessagePresentation ?? null,
   };
 }

@@ -29,6 +29,7 @@ const DISCOVERY_PROVIDER_AT = '2026-08-16T00:00:01.000Z';
 const CHAT_ROW_AT = '2026-08-16T00:01:00.000Z';
 const CHAT_ID = 'fold-matrix-chat';
 const VIEW_ID = transcriptViewId('fold-matrix-view');
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 const QUARANTINE_DETAIL = {
   type: 'carryover-migration-quarantine',
   artifactId: 'artifact-1',
@@ -228,7 +229,7 @@ describe('transcript ledger read-fold matrix', () => {
         steer: false,
         preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'epoch-one' },
         preambles: [{
-          id: 'preamble-1',
+          id: PREAMBLE_ID,
           enabled: true,
           title: 'Repository conventions',
           content: 'private body sentinel',
@@ -254,7 +255,7 @@ describe('transcript ledger read-fold matrix', () => {
           ordinal: 1,
           message: new TranscriptNoticeMessage(AT, 'Preambles applied', {
             type: 'preamble-application',
-            preambles: [{ id: 'preamble-1', title: 'Repository conventions' }],
+            preambles: [{ id: PREAMBLE_ID, title: 'Repository conventions' }],
           }),
         },
         {

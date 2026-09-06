@@ -240,6 +240,7 @@ export async function submitDraftRoute(
 		command: context.text,
 		images: context.images.length > 0 ? context.images : undefined,
 		tags: startup.tags,
+		orderedPreambleIds: startup.orderedPreambleIds,
 	});
 	const composerRevisionAfterClear = beginOptimisticInput(
 		deps,

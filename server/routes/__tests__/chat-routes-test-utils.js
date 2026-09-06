@@ -78,6 +78,7 @@ export function createRouteCommandService({
     agents,
     ledger: commandLedger,
     transientFeeds: transientFeeds ?? { validateAction: () => undefined },
+    preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
 	handoffs: handoffs ?? {
 		resolveTarget: async ({ handoff }) => ({
 			agentId: handoff.target.agentId,

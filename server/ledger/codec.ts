@@ -23,13 +23,17 @@ import type {
 import type {
   LedgerAgentSwitchDetail,
   LedgerCliRowNoticeDetail,
+  LedgerPreambleSelectionChangedNoticeDetail,
   LedgerPermissionRow,
   LedgerRow,
   LedgerRowDraft,
   LedgerUserInputDetail,
   TranscriptViewId,
 } from './contracts.js';
-import { isLedgerCliRowNoticeDetail } from './contracts.js';
+import {
+  isLedgerCliRowNoticeDetail,
+  isLedgerPreambleSelectionChangedNoticeDetail,
+} from './contracts.js';
 
 export interface StoredLedgerRow {
   readonly view_id: string;
@@ -53,7 +57,9 @@ export function encodeLedgerDraft(draft: LedgerRowDraft): {
     ? draft.detail.clientMessageId
     : draft.kind === 'notice' && isLedgerCliRowNoticeDetail(draft.detail)
       ? draft.detail.clientMessageId
-      : null;
+      : draft.kind === 'notice' && isLedgerPreambleSelectionChangedNoticeDetail(draft.detail)
+        ? draft.detail.clientMessageId
+        : null;
   const value = draftValue(draft);
   return {
     clientMessageId,
@@ -88,12 +94,20 @@ export function decodeLedgerRow(row: StoredLedgerRow): LedgerRow {
       const message = nonEmptyString(value.message, 'notice message');
       const detail = jsonObject(value.detail, 'notice detail');
       const cliRowDetail = parseLedgerCliRowNoticeDetail(detail);
+      const selectionChangeDetail = parseLedgerPreambleSelectionChangedNoticeDetail(detail);
       if (cliRowDetail) {
         if (cliRowDetail.clientMessageId !== row.client_message_id) {
           throw new TypeError('Stored chat row identity does not match its payload');
         }
         if (payload.providerMeta !== null) {
           throw new TypeError('Stored chat row provider metadata must be null');
+        }
+      } else if (selectionChangeDetail) {
+        if (selectionChangeDetail.clientMessageId !== row.client_message_id) {
+          throw new TypeError('Stored preamble selection notice identity does not match its payload');
+        }
+        if (payload.providerMeta !== null) {
+          throw new TypeError('Stored preamble selection notice provider metadata must be null');
         }
       } else if (row.client_message_id !== null) {
         throw new TypeError('Stored notice has an unexpected client message identity');
@@ -102,7 +116,7 @@ export function decodeLedgerRow(row: StoredLedgerRow): LedgerRow {
         ...base,
         kind: 'notice',
         message,
-        detail: cliRowDetail ?? detail,
+        detail: cliRowDetail ?? selectionChangeDetail ?? detail,
       };
     }
     case 'agent-switch':
@@ -215,6 +229,22 @@ export function parseLedgerCliRowNoticeDetail(
     format: isCliRowFormat(detail.format) ? detail.format : 'plain',
     disclosure: coerceDurableCliBodyDisclosure(detail.disclosure),
     title: detail.title,
+  };
+}
+
+export function parseLedgerPreambleSelectionChangedNoticeDetail(
+  detail: JsonObject,
+): LedgerPreambleSelectionChangedNoticeDetail | null {
+  if (detail.type !== 'preamble-selection-change') return null;
+  if (!isLedgerPreambleSelectionChangedNoticeDetail(detail)) {
+    throw new TypeError('Stored preamble selection notice detail is invalid');
+  }
+  return {
+    type: 'preamble-selection-change',
+    clientMessageId: detail.clientMessageId,
+    requestFingerprint: detail.requestFingerprint,
+    selectionRevision: detail.selectionRevision,
+    preambles: detail.preambles.map((preamble) => ({ ...preamble })),
   };
 }
 

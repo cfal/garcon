@@ -5,6 +5,7 @@ import { transcriptViewId } from '../../ledger/contracts.js';
 import { createPreamblePrefix } from '../../../common/preamble-prefix.js';
 
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 function deferred() {
   let resolve;
@@ -33,6 +34,8 @@ function sourceSession(overrides = {}) {
     carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
+    preambleSelection: { revision: 3, orderedPreambleIds: ['3502b645-222b-49d2-ac39-1c91f9fb1174'] },
     parentChat: null,
     ...overrides,
   };
@@ -567,7 +570,7 @@ describe('forkChatFileCopy', () => {
       message: 'Preambles applied',
       detail: {
         type: 'preamble-application',
-        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
       },
       providerMeta: null,
     };
@@ -588,7 +591,7 @@ describe('forkChatFileCopy', () => {
       preambleEvidence: [{
         receipt: application.receipt,
         boundary,
-        preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+        preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
         requiresNativeOccurrence: false,
       }],
     }));
@@ -611,7 +614,7 @@ describe('forkChatFileCopy', () => {
         message: 'Preambles applied',
         detail: {
           type: 'preamble-application',
-          preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+          preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
         },
         providerMeta: null,
       };

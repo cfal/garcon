@@ -7,6 +7,9 @@ export const PREAMBLE_COMBINED_MAX_LENGTH = 64_000;
 export const PREAMBLE_PATH_RULE_MAX_COUNT = 32;
 export const PREAMBLE_FILE_CONTEXT_SEPARATOR = '\n\nReferenced file contents from @file mentions:\n\n';
 export const PREAMBLE_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
+// Lifetime bounds cover active plus retired IDs; tombstones are never pruned.
+export const PREAMBLE_ID_LIFETIME_MAX_COUNT = 100_000;
+export const PREAMBLES_FILE_MAX_BYTES = 64 * 1024 * 1024;
 
 const PREAMBLE_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;
 
@@ -15,13 +18,81 @@ export const PREAMBLE_BOUNDARY_KINDS = [
   'fork',
   'continuation',
   'agent-switch',
+  'selection-change',
 ] as const;
 
 export type PreambleBoundaryKind = (typeof PREAMBLE_BOUNDARY_KINDS)[number];
 
-export interface PendingPreambleBoundary {
-  readonly kind: PreambleBoundaryKind;
-  readonly ownershipEpoch: string;
+export type PendingPreambleBoundary =
+  | {
+      readonly kind: Exclude<PreambleBoundaryKind, 'selection-change'>;
+      readonly ownershipEpoch: string;
+    }
+  | {
+      readonly kind: 'selection-change';
+      readonly ownershipEpoch: string;
+      readonly selectionRevision: number;
+    };
+
+// A selection-change boundary is repeatable within one ownership epoch, so its
+// full identity includes the selection revision it was armed for.
+export function samePreambleBoundary(
+  left: PendingPreambleBoundary,
+  right: PendingPreambleBoundary,
+): boolean {
+  if (left.kind !== right.kind || left.ownershipEpoch !== right.ownershipEpoch) {
+    return false;
+  }
+  if (left.kind !== 'selection-change') return true;
+  return right.kind === 'selection-change'
+    && left.selectionRevision === right.selectionRevision;
+}
+
+export type PreambleId = string;
+
+const PREAMBLE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+export function isPreambleId(value: unknown): value is PreambleId {
+  return typeof value === 'string' && PREAMBLE_ID_PATTERN.test(value);
+}
+
+export interface ChatPreambleSelection {
+  readonly revision: number;
+  readonly orderedPreambleIds: readonly PreambleId[];
+}
+
+export type PreambleSelectionUnavailableReason =
+  | 'missing'
+  | 'disabled'
+  | 'out-of-scope';
+
+export interface PreambleSelectionReference {
+  readonly id: PreambleId;
+  readonly title: string;
+}
+
+export interface UnavailablePreambleSelectionReference {
+  readonly id: PreambleId;
+  readonly reason: PreambleSelectionUnavailableReason;
+}
+
+export interface PreambleSelectionProjection {
+  readonly catalogRevision: number;
+  readonly eligiblePreambles: readonly PreambleSelectionReference[];
+  readonly unavailable: readonly UnavailablePreambleSelectionReference[];
+}
+
+export const PREAMBLE_SELECTION_UNAVAILABLE_REASONS = [
+  'missing',
+  'disabled',
+  'out-of-scope',
+] as const;
+
+export function isPreambleSelectionUnavailableReason(
+  value: unknown,
+): value is PreambleSelectionUnavailableReason {
+  return typeof value === 'string'
+    && (PREAMBLE_SELECTION_UNAVAILABLE_REASONS as readonly string[]).includes(value);
 }
 
 export interface PreambleProjectPathRule {
@@ -113,6 +184,13 @@ export const PREAMBLE_ERROR_CODES = {
   projectPathNotDirectory: 'PREAMBLE_PROJECT_PATH_NOT_DIRECTORY',
   envelopeMismatch: 'PREAMBLE_ENVELOPE_MISMATCH',
   slashCommandBlocked: 'PREAMBLE_SLASH_COMMAND_BLOCKED',
+  idCollision: 'PREAMBLE_ID_COLLISION',
+  idLifetimeLimitReached: 'PREAMBLE_ID_LIFETIME_LIMIT_REACHED',
+  catalogSaveUnknown: 'PREAMBLE_CATALOG_SAVE_UNKNOWN',
+  selectionRevisionConflict: 'PREAMBLE_SELECTION_REVISION_CONFLICT',
+  selectionCompositionInvalid: 'PREAMBLE_SELECTION_COMPOSITION_INVALID',
+  selectionNoticeFailed: 'PREAMBLE_SELECTION_NOTICE_FAILED',
+  selectionSaveUnknown: 'PREAMBLE_SELECTION_SAVE_UNKNOWN',
 } as const;
 
 export type PreambleErrorCode = (typeof PREAMBLE_ERROR_CODES)[keyof typeof PREAMBLE_ERROR_CODES];
@@ -128,10 +206,7 @@ export function renderPreambleContent(content: string, chatId: string): string {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === null || prototype === Object.prototype
-    ? value as Record<string, unknown>
-    : null;
+  return value as Record<string, unknown>;
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -158,10 +233,100 @@ export function isPreambleBoundaryKind(value: unknown): value is PreambleBoundar
 
 export function normalizePendingPreambleBoundary(value: unknown): PendingPreambleBoundary | null {
   const raw = asRecord(value);
-  if (!raw || !hasOnlyKeys(raw, ['kind', 'ownershipEpoch'])) return null;
+  if (!raw || !isPreambleBoundaryKind(raw.kind)) return null;
   const ownershipEpoch = nonEmptyString(raw.ownershipEpoch);
-  if (!isPreambleBoundaryKind(raw.kind) || !ownershipEpoch) return null;
+  if (!ownershipEpoch) return null;
+  if (raw.kind === 'selection-change') {
+    if (!hasOnlyKeys(raw, ['kind', 'ownershipEpoch', 'selectionRevision'])) return null;
+    if (!Number.isSafeInteger(raw.selectionRevision) || (raw.selectionRevision as number) < 0) {
+      return null;
+    }
+    return {
+      kind: 'selection-change',
+      ownershipEpoch,
+      selectionRevision: raw.selectionRevision as number,
+    };
+  }
+  if (!hasOnlyKeys(raw, ['kind', 'ownershipEpoch'])) return null;
   return { kind: raw.kind, ownershipEpoch };
+}
+
+// Persistence parsing performs no catalog lookup: missing IDs stay saved, order is
+// preserved, and nothing is truncated, deduplicated, or sorted.
+export function normalizeChatPreambleSelection(value: unknown): ChatPreambleSelection | null {
+  const raw = asRecord(value);
+  if (
+    !raw
+    || !hasOnlyKeys(raw, ['revision', 'orderedPreambleIds'])
+    || !Number.isSafeInteger(raw.revision)
+    || (raw.revision as number) < 0
+    || !Array.isArray(raw.orderedPreambleIds)
+    || raw.orderedPreambleIds.length > PREAMBLE_MAX_COUNT
+  ) return null;
+  const orderedPreambleIds: PreambleId[] = [];
+  const seen = new Set<PreambleId>();
+  for (const id of raw.orderedPreambleIds) {
+    if (!isPreambleId(id) || seen.has(id)) return null;
+    seen.add(id);
+    orderedPreambleIds.push(id);
+  }
+  return { revision: raw.revision as number, orderedPreambleIds };
+}
+
+export function normalizePreambleSelectionReference(
+  value: unknown,
+): PreambleSelectionReference | null {
+  const raw = asRecord(value);
+  if (!raw || !hasOnlyKeys(raw, ['id', 'title'])) return null;
+  if (!isPreambleId(raw.id)) return null;
+  const title = normalizePreambleTitle(raw.title);
+  return title ? { id: raw.id, title } : null;
+}
+
+export function normalizeUnavailablePreambleSelectionReference(
+  value: unknown,
+): UnavailablePreambleSelectionReference | null {
+  const raw = asRecord(value);
+  if (
+    !raw
+    || !hasOnlyKeys(raw, ['id', 'reason'])
+    || !isPreambleId(raw.id)
+    || !isPreambleSelectionUnavailableReason(raw.reason)
+  ) return null;
+  return { id: raw.id, reason: raw.reason };
+}
+
+export function normalizePreambleSelectionProjection(
+  value: unknown,
+): PreambleSelectionProjection | null {
+  const raw = asRecord(value);
+  if (
+    !raw
+    || !hasOnlyKeys(raw, ['catalogRevision', 'eligiblePreambles', 'unavailable'])
+    || !Number.isSafeInteger(raw.catalogRevision)
+    || (raw.catalogRevision as number) < 0
+    || !Array.isArray(raw.eligiblePreambles)
+    || raw.eligiblePreambles.length > PREAMBLE_MAX_COUNT
+    || !Array.isArray(raw.unavailable)
+    || raw.unavailable.length > PREAMBLE_MAX_COUNT
+  ) return null;
+  const eligiblePreambles: PreambleSelectionReference[] = [];
+  const eligibleIds = new Set<PreambleId>();
+  for (const item of raw.eligiblePreambles) {
+    const reference = normalizePreambleSelectionReference(item);
+    if (!reference || eligibleIds.has(reference.id)) return null;
+    eligibleIds.add(reference.id);
+    eligiblePreambles.push(reference);
+  }
+  const unavailable: UnavailablePreambleSelectionReference[] = [];
+  const unavailableIds = new Set<PreambleId>();
+  for (const item of raw.unavailable) {
+    const reference = normalizeUnavailablePreambleSelectionReference(item);
+    if (!reference || unavailableIds.has(reference.id) || eligibleIds.has(reference.id)) return null;
+    unavailableIds.add(reference.id);
+    unavailable.push(reference);
+  }
+  return { catalogRevision: raw.catalogRevision as number, eligiblePreambles, unavailable };
 }
 
 export function isPreamblesInvalidationReason(
@@ -235,7 +400,7 @@ export function normalizePreamble(value: unknown): Preamble | null {
   ])) {
     return null;
   }
-  const id = nonEmptyString(raw.id);
+  const id = isPreambleId(raw.id) ? raw.id : null;
   const definition = normalizePreambleDefinitionInput({
     enabled: raw.enabled,
     title: raw.title,

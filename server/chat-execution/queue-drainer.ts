@@ -7,6 +7,7 @@ import {
 } from './control-state.ts';
 import { createLogger } from '../lib/log.ts';
 import { DomainError } from '../lib/domain-error.ts';
+import { isRecoverablePreambleAdmissionError } from '../preambles/selection.js';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type { DequeuedTurnInput } from './chat-execution-control-transitions.ts';
@@ -34,6 +35,11 @@ export interface QueueDispatchDeps {
   controls: ChatExecutionControlOperations;
   turnRunner: AgentTurnRunnerPort;
   getDrainOptions: QueueDrainOptionsResolver;
+  // Shared with selection Save and direct admission; held around the dequeue
+  // transition so a queued input resolves selection at admission, never before
+  // a Save's update-notice attempt. Expressed as a function port so the lock
+  // type itself stays inside the coordinator.
+  runSelectionAdmissionExclusive<T>(chatId: string, operation: () => Promise<T>): Promise<T>;
   callbacks: QueueDispatchCallbacks;
 }
 
@@ -86,25 +92,28 @@ export class QueueDrainer {
       const admission = { failure: null as DomainError | null };
       let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
       try {
-        result = await controls.dequeueNextTurn(chatId, (input) => {
-          options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
-          if (input.kind === 'control') {
-            callbacks.appendControlReceipt(chatId, input.entry);
-            inputInserted = true;
-            return true;
-          }
-          try {
-            inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
-          } catch (error) {
-            if (
-              !(error instanceof DomainError)
-              || error.code !== 'PREAMBLE_SLASH_COMMAND_BLOCKED'
-            ) throw error;
-            admission.failure = error;
-            return false;
-          }
-          return inputInserted;
-        });
+        // The dequeue transition and its synchronous registerQueued() callback
+        // run inside the selection/admission lock; the callback itself stays
+        // synchronous, so it never awaits inside the dequeue.
+        result = await this.deps.runSelectionAdmissionExclusive(
+          chatId,
+          () => controls.dequeueNextTurn(chatId, (input) => {
+            options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
+            if (input.kind === 'control') {
+              callbacks.appendControlReceipt(chatId, input.entry);
+              inputInserted = true;
+              return true;
+            }
+            try {
+              inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
+            } catch (error) {
+              if (!isRecoverablePreambleAdmissionError(error)) throw error;
+              admission.failure = error;
+              return false;
+            }
+            return inputInserted;
+          }),
+        );
       } catch (error) {
         if (inputInserted) callbacks.discardPreparedInput(chatId, options?.clientMessageId);
         throw error;
