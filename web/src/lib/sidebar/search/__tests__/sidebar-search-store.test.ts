@@ -1768,6 +1768,74 @@ describe('SidebarSearchStore', () => {
 			},
 		);
 
+		it.each([50, 500])(
+			'bounds sustained invalidation cadence at a %i-position frontier',
+			async (frontier) => {
+				vi.useFakeTimers();
+				try {
+					let invalidationVersion = 0;
+					let committedVersion = 0;
+					let activeRequests = 0;
+					let maxActiveRequests = 0;
+					const searchChatTranscripts = vi
+						.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+						.mockImplementation((_request) => {
+							const evaluatedVersion = invalidationVersion;
+							activeRequests += 1;
+							maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+							return new Promise((resolve) => {
+								setTimeout(() => {
+									activeRequests -= 1;
+									committedVersion = evaluatedVersion;
+									resolve({
+										...makeSearchResponse(
+											[makeSearchResult('c1')],
+											makeSearchPage(600, {
+												limit: frontier,
+												hasMore: true,
+												nextOffset: frontier,
+											}),
+										),
+										mode: 'prefix',
+									});
+								}, 20);
+							});
+						});
+					const { store } = createStore([makeChat({ id: 'c1' })], null, {
+						searchChatTranscripts,
+					});
+					store.updateDraftQuery('needle');
+					store.transcriptSearchQuery = 'needle';
+					store.transcriptSearchResults = [makeSearchResult('c1')];
+					store.transcriptSearchPage = makeSearchPage(600, {
+						limit: frontier,
+						hasMore: true,
+						nextOffset: frontier,
+					});
+
+					for (let event = 0; event < 31; event += 1) {
+						invalidationVersion += 1;
+						store.scheduleTranscriptSearchRevalidation();
+						await vi.advanceTimersByTimeAsync(100);
+					}
+					await vi.runAllTimersAsync();
+
+					expect(searchChatTranscripts.mock.calls.length).toBeGreaterThanOrEqual(1);
+					expect(searchChatTranscripts.mock.calls.length).toBeLessThanOrEqual(4);
+					expect(searchChatTranscripts.mock.calls.every(([request]) => (
+						request.mode === 'prefix'
+						&& request.offset === 0
+						&& request.limit === frontier
+					))).toBe(true);
+					expect(maxActiveRequests).toBe(1);
+					expect(committedVersion).toBe(invalidationVersion);
+					store.destroy();
+				} finally {
+					vi.useRealTimers();
+				}
+			},
+		);
+
 		it('preserves a user highlight changed while revalidation is loading', async () => {
 			const refreshed = Promise.withResolvers<ChatSearchResponse>();
 			const searchChatTranscripts = vi
