@@ -6,13 +6,14 @@ import {
 	resolveFileIdentity,
 	saveText,
 } from '$lib/api/files.js';
-import {
+import type {
 	CodeEditorController,
-	type EditorPresentationSettings,
+	EditorPresentationSettings,
 } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
 import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
+import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type {
 	DesktopPlacement,
@@ -78,7 +79,16 @@ export interface FileSessionsDeps {
 	readText?: typeof readText;
 	readContent?: typeof readContent;
 	saveText?: typeof saveText;
+	loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
+	reloadApplication?: () => void;
 	openMainInert?<T>(commitOpen: () => T): T;
+}
+
+export interface FileEditorRuntimeModule {
+	CodeEditorController: new (
+		session: FileSession,
+		settings: EditorPresentationSettings,
+	) => CodeEditorController;
 }
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown']);
@@ -100,6 +110,18 @@ function rendererMode(path: string, requested: FileOpenMode): FileRendererMode {
 	return 'code';
 }
 
+async function loadEditorRuntime(): Promise<FileEditorRuntimeModule> {
+	try {
+		return await import('$lib/files/editor/code-editor-controller.svelte.js');
+	} catch (error) {
+		throw new ModuleImportError(error);
+	}
+}
+
+function reloadApplication(): void {
+	if (typeof window !== 'undefined') window.location.reload();
+}
+
 export class FileSessionRegistry {
 	sessions = $state.raw<Readonly<Record<string, FileSession>>>({});
 	guardRequest = $state<FileGuardRequest | null>(null);
@@ -112,6 +134,7 @@ export class FileSessionRegistry {
 	#overwriteResolve: ((choice: 'overwrite' | 'cancel') => void) | null = null;
 	#creationQueue = new SerialQueue();
 	#decisionQueue = new SerialQueue();
+	#editorRuntimePromise: Promise<FileEditorRuntimeModule> | null = null;
 	#isDark = false;
 
 	constructor(private readonly deps: FileSessionsDeps) {}
@@ -298,6 +321,11 @@ export class FileSessionRegistry {
 	}
 
 	async reload(sessionId: string): Promise<void> {
+		const session = this.get(sessionId);
+		if (session?.loadError && session.loadErrorRequiresPageReload) {
+			(this.deps.reloadApplication ?? reloadApplication)();
+			return;
+		}
 		await this.refresh(sessionId);
 	}
 
@@ -425,9 +453,6 @@ export class FileSessionRegistry {
 					? 'markdown'
 					: 'text';
 		session.requestLocation(request.line, request.col);
-		if (session.rendererMode !== 'image') {
-			session.editor = new CodeEditorController(session, this.#editorSettings());
-		}
 		// Publishes the session in its initial loading state so a renderer cannot attach
 		// to empty content while placement waits for its first frame.
 		session.loading = true;
@@ -476,19 +501,50 @@ export class FileSessionRegistry {
 		session.loadController = controller;
 		session.loading = true;
 		session.loadError = null;
+		session.loadErrorRequiresPageReload = false;
 		try {
-			const loaded = await this.#readLatest(session, controller.signal);
-			if (controller.signal.aborted) return;
+			const [loaded] = await Promise.all([
+				this.#readLatest(session, controller.signal),
+				this.#ensureEditor(session, controller),
+			]);
+			if (!this.#isCurrentInitialLoad(session, controller)) return;
 			this.#commitLoadedContent(session, loaded);
 		} catch (error) {
-			if (isAbortError(error)) return;
+			if (isAbortError(error) || !this.#isCurrentInitialLoad(session, controller)) return;
+			controller.abort();
 			session.loadError = error instanceof Error ? error.message : String(error);
+			session.loadErrorRequiresPageReload = error instanceof ModuleImportError;
 		} finally {
 			if (session.loadController === controller) {
 				session.loadController = null;
 				session.loading = false;
 			}
 		}
+	}
+
+	async #ensureEditor(session: FileSession, controller: AbortController): Promise<void> {
+		if (session.rendererMode === 'image' || session.editor) return;
+		const runtime = await this.#loadEditorRuntime();
+		if (!this.#isCurrentInitialLoad(session, controller)) return;
+		session.editor = new runtime.CodeEditorController(session, this.#editorSettings());
+	}
+
+	#loadEditorRuntime(): Promise<FileEditorRuntimeModule> {
+		this.#editorRuntimePromise ??= (this.deps.loadEditorRuntime ?? loadEditorRuntime)().catch(
+			(error) => {
+				this.#editorRuntimePromise = null;
+				throw error;
+			},
+		);
+		return this.#editorRuntimePromise;
+	}
+
+	#isCurrentInitialLoad(session: FileSession, controller: AbortController): boolean {
+		return (
+			this.get(session.id) === session &&
+			!controller.signal.aborted &&
+			session.loadController === controller
+		);
 	}
 
 	async #readLatest(session: FileSession, signal: AbortSignal): Promise<LoadedFileContent> {

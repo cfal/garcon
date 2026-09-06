@@ -124,6 +124,10 @@
 	});
 
 	let isMobile = $derived(workspace.isMobile);
+	let viewportWidth = $state<number>();
+	const mobileBreakpointMatches = $derived(
+		viewportWidth === undefined ? undefined : viewportWidth <= 768,
+	);
 	let mobileAppHeight = $state<number | null>(null);
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
@@ -272,32 +276,30 @@
 	});
 
 	$effect(() => {
-		if (typeof window === 'undefined') return;
-		const mql = window.matchMedia('(max-width: 768px)');
+		const matches = mobileBreakpointMatches;
+		if (matches === undefined) return;
+		let cancelled = false;
+		let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-		function applyBreakpoint(matches: boolean): void {
-			if (matches) void workspace.enterMobilePresentation();
-			else {
-				void workspace.exitMobilePresentation();
-				appShell.setSidebarOpen(false);
-			}
+		function transitionBreakpoint(matches: boolean): Promise<void> {
+			if (matches) return workspace.enterMobilePresentation();
+			const transition = workspace.exitMobilePresentation();
+			appShell.setSidebarOpen(false);
+			return transition;
 		}
 
-		applyBreakpoint(mql.matches);
+		void untrack(() => transitionBreakpoint(matches)).catch(() => {
+			if (cancelled) return;
+			retryTimer = setTimeout(() => {
+				retryTimer = null;
+				if (cancelled) return;
+				void untrack(() => transitionBreakpoint(matches)).catch(() => undefined);
+			}, 0);
+		});
 
-		function onChange(e: MediaQueryListEvent) {
-			applyBreakpoint(e.matches);
-		}
-
-		function onResize(): void {
-			applyBreakpoint(mql.matches);
-		}
-
-		mql.addEventListener('change', onChange);
-		window.addEventListener('resize', onResize);
 		return () => {
-			mql.removeEventListener('change', onChange);
-			window.removeEventListener('resize', onResize);
+			cancelled = true;
+			if (retryTimer) clearTimeout(retryTimer);
 		};
 	});
 
@@ -698,6 +700,8 @@
 		</div>
 	</div>
 {/snippet}
+
+<svelte:window bind:innerWidth={viewportWidth} />
 
 <div
 	class="flex w-screen overflow-hidden bg-background text-foreground"

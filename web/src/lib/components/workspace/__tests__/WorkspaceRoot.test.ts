@@ -366,7 +366,7 @@ function installContext() {
 		orderedSessions: [] as TerminalClientSession[],
 		sessions: {} as Record<string, TerminalClientSession>,
 		listStatus: 'ready' as const,
-		ensureRuntime: vi.fn(() => ({
+		ensureRuntime: vi.fn(async () => ({
 			clipboardMessage: '',
 			pasteFromClipboard: vi.fn(async () => true),
 		})),
@@ -611,6 +611,9 @@ describe('WorkspaceRoot', () => {
 				latestOutputSequence: 0,
 			},
 			attachmentState: 'attached',
+			runtimeState: 'ready',
+			runtimeError: null,
+			runtimeErrorRequiresPageReload: false,
 			lastReceivedSequence: 0,
 			replayTruncatedAt: null,
 		};

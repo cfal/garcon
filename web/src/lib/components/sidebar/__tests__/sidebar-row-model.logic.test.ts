@@ -366,6 +366,31 @@ describe('sidebar row model', () => {
 		).toEqual(['normal-p2-a']);
 	});
 
+	it('is unchanged when rebuilt from its visible orders', () => {
+		const chats = [
+			chat('pinned', '/workspace/repo', { orderGroup: 'pinned', isPinned: true }),
+			chat('outer-active', '/workspace/repo', {
+				lastActivityAt: '2025-06-01T11:00:00.000Z',
+			}),
+			chat('nested-inactive', '/workspace/repo/packages/app'),
+			chat('other-archived', '/workspace/other', {
+				orderGroup: 'archived',
+				isArchived: true,
+			}),
+		];
+		const input = {
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity' as const,
+			currentTime: TEST_NOW,
+			groupNestedProjectPaths: true,
+			collapsedProjectKeys: new Set([sidebarProjectKey('/workspace/repo')]),
+		};
+		const base = buildSidebarRowModel(input);
+
+		expect(buildSidebarRowModel({ ...input, orders: base.visibleOrders })).toEqual(base);
+	});
+
 	it('builds display chat ids with collapsed nested groups', () => {
 		const chats = [
 			chat('outer', '/workspace/repo'),
