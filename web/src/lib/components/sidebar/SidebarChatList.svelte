@@ -101,9 +101,7 @@
 
 	let isFiltered = $derived(searchFilter.trim().length > 0);
 	let sortByRecent = $derived(displayOptions.sortMode === 'recent');
-	// Recent-activity sort ranks every chat newest-first within its pin/archive
-	// group; manual order defers to the server-persisted drag order. Filtered
-	// results are already recency-ordered upstream, so re-sorting is idempotent.
+	// Re-sorting filtered results also applies the pinned placement policy.
 	let displayedChats = $derived.by(() => {
 		const source = isFiltered ? filteredChats : chats;
 		return sortByRecent
