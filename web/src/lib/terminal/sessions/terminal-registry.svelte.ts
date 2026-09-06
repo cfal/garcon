@@ -127,6 +127,7 @@ export class TerminalRegistry {
 	#runtimeModulePromise: Promise<TerminalRuntimeModule> | null = null;
 	#listPromise: Promise<void> | null = null;
 	#sessionMutationVersion = 0;
+	#authSuspended = false;
 	#destroyed = false;
 
 	constructor(deps: TerminalRegistryDeps) {
@@ -158,6 +159,7 @@ export class TerminalRegistry {
 	}
 
 	async initialize(): Promise<void> {
+		this.#authSuspended = false;
 		try {
 			await this.list();
 		} catch {
@@ -402,6 +404,7 @@ export class TerminalRegistry {
 	}
 
 	authChanged(authenticated: boolean): void {
+		this.#authSuspended = !authenticated;
 		if (!authenticated) {
 			this.#invalidateAttachments();
 			this.#transport.suspend();
@@ -575,6 +578,7 @@ export class TerminalRegistry {
 	}
 
 	#restoreAttachments(): void {
+		if (this.#authSuspended) return;
 		for (const session of Object.values(this.sessions)) {
 			if (session.attachmentState === 'taken-over') continue;
 			void this.attach(session.metadata.terminalId, 'restore');
@@ -590,6 +594,7 @@ export class TerminalRegistry {
 	}
 
 	#syncTransportDemand(): void {
+		if (this.#authSuspended) return;
 		if (this.orderedSessions.length > 0) {
 			if (this.#transport.status === 'idle' || this.#transport.status === 'waiting-auth') {
 				this.#transport.connect();
@@ -686,7 +691,13 @@ export class TerminalRegistry {
 
 	#attachmentPreconditionsMet(terminalId: string, request: symbol): boolean {
 		if (!this.#isCurrentAttachment(terminalId, request)) return false;
-		if (this.listStatus === 'ready' && this.#transport.status === 'connected') return true;
+		if (
+			!this.#authSuspended &&
+			this.listStatus === 'ready' &&
+			this.#transport.status === 'connected'
+		) {
+			return true;
+		}
 		this.sessions[terminalId].attachmentState = 'detached';
 		return false;
 	}

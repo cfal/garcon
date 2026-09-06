@@ -585,6 +585,44 @@ describe('TerminalRegistry', () => {
 		expect(transport.status).toBe('connecting');
 	});
 
+	it('keeps a delayed Reattach reconciliation suspended after logout', async () => {
+		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
+		listTerminals
+			.mockResolvedValueOnce({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			})
+			.mockRejectedValueOnce(new Error('List failed'))
+			.mockImplementationOnce(() => pendingList.promise)
+			.mockResolvedValue({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			});
+		const registry = createRegistry();
+		await registry.list();
+		transport.status = 'connected';
+		await expect(registry.list()).rejects.toThrow('List failed');
+
+		registry.reattach('terminal-1');
+		registry.authChanged(false);
+		pendingList.resolve({ success: true, terminals: [metadata('terminal-1', 1)] });
+		await vi.waitFor(() => expect(registry.listStatus).toBe('ready'));
+
+		expect(transport.status).toBe('idle');
+		expect(transport.connectCount).toBe(1);
+		expect(transport.sent).toEqual([]);
+
+		registry.authChanged(true);
+		expect(transport.status).toBe('connecting');
+		await transport.open();
+		await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+		expect(transport.sent[0]).toMatchObject({
+			type: 'terminal-attach',
+			terminalId: 'terminal-1',
+			intent: 'restore',
+		});
+	});
+
 	it('reconnects waiting-auth transport after authentication refreshes', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,
