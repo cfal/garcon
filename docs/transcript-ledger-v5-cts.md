@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 34 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 35 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -25,13 +25,19 @@ distinct same-length prefix during native sanitation.
 Revision 34 makes a native occurrence mandatory after a provider-origin
 terminal proves the preamble turn completed; persistence lag fails retryably
 before Reload cutover or native-fidelity target publication.
+Revision 35 adds revisioned ordered per-chat preamble selections, canonical
+UUID-v4 catalog identity with permanent retirement, registry-first live Save,
+and distinct title-only update notices. Missing selected IDs remain durable and
+skip safely; omitted creation defaults, explicit empty, inheritance, selected
+order, direct/queued admission serialization, and REST/WebSocket/browser
+contracts become conformance obligations.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 34, SHA-256
-  `b24125600fb05861659e06b9d24242cdc45088479453a8109ab43e7c5a99347e`
+- `docs/transcript-ledger-v5-design.md`, revision 35, SHA-256
+  `f990a32653b4e326e9922863453db195ddfea9ffb6e8f1153707d473e5e60329`
 
-Current inventory: 417 discovered stable IDs, validated by
+Current inventory: 419 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -404,10 +410,16 @@ routine local testing.
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | TLV5-PREAMBLE.01      | The public application notice contains only a fixed type plus unique immutable `{id, title}` snapshots; bodies, paths, scopes, revisions, and receipts are rejected. | Shared contract                                        |
 | TLV5-PREAMBLE.02      | A matched boundary expands active `{{chat_id}}` tokens with the target chat ID, commits one adjacent notice/input group atomically, stores its private proof and exact expanded-prefix receipt using SHA-256 over little-endian UTF-16 code units, and keeps the body only in the transient provider prefix; a zero match stores only the proof-bearing input. | Store and service unit                                 |
-| TLV5-PREAMBLE.03      | New chat, fork, continuation, and in-place agent-switch boundaries resolve the current enabled matching catalog once in visible order and use that target chat ID for expansion; blocked provider slash input stores nothing and retains the boundary. | Core unit, server black-box, provider scripted         |
+| TLV5-PREAMBLE.03      | Lifecycle and selection-change boundaries resolve the chat's ordered selection against the current enabled matching catalog once and use that target chat ID for expansion; blocked provider slash input stores nothing and retains the complete boundary identity. | Core unit, server black-box, provider scripted         |
 | TLV5-PREAMBLE.04      | Reload and native-fidelity fork collect exact binding evidence, sanitize carried context before receipt-proven prefixes, hash exact UTF-16 code units without surrogate replacement, require one matching receipt signature before selecting the earliest unused exact receipt, reconstruct the notice and private input fields, tolerate absent native occurrences only without provider-completion proof, retry before publication when completed turns are not yet persisted, and fail closed on unprovable, ambiguous, or excess leading frames. | Native-import, Reload, fork, and scripted-provider unit |
 | TLV5-PREAMBLE.05      | Application notices render, freeze, share, and export with IDs/titles only while remaining absent from search, preview, resend, model context, and carryover input. | Canonical read-fold matrix and presentation tests      |
-| TLV5-PREAMBLE.06      | The lazy SPA catalog creates, edits, deletes, reorders, filters, disables, and re-enables entries; scoped rules retain independent nested flags, the composer identifies the supported `{{chat_id}}` token, and the historical application row remains title-only and adjacent. | Component and Lightpanda browser behavior              |
+| TLV5-PREAMBLE.06      | The lazy SPA catalog creates, edits, deletes, reorders, filters, disables, and re-enables entries; scoped rules retain independent nested flags, the composer identifies the supported `{{chat_id}}` token, and historical application/update rows remain title-only. | Component and Lightpanda browser behavior              |
+| TLV5-PREAMBLE.07      | Catalog IDs are server-generated canonical UUID v4 values; deletion atomically retires each ID forever under bounded version-2 storage, including ambiguous post-rename durability. | Shared/store contract and fault injection              |
+| TLV5-PREAMBLE.08      | Every chat persists a revisioned ordered ID list; missing, disabled, and out-of-scope IDs remain selected with exact reasons but contribute no prefix, application notice, or slash block. | Registry, resolution, and server black-box             |
+| TLV5-PREAMBLE.09      | Omitted new-chat selection resolves current server defaults, explicit empty means none, forks and continuations clone source-current IDs at revision zero, and agent switch preserves selection/revision. | Command, lifecycle, and server black-box               |
+| TLV5-PREAMBLE.10      | Existing-chat Save is view-qualified, revisioned, idempotent, registry-first, and serialized before the next direct/queued admission without changing active provider work; partial and unknown outcomes never claim rollback. | Service fault/concurrency unit and server black-box    |
+| TLV5-PREAMBLE.11      | `Preambles updated` is a distinct title-only notice with empty-state support and ordinary notice folds; REST/WebSocket/browser parsers reject malformed identity, projection, and ordering relationships. | Shared/API/WS/component contract                       |
+| TLV5-PREAMBLE.12      | Exact selected-order composition validation runs at changed Save, explicit creation, and admission; typed slash/composition failures retain prepared targets and cannot wedge queued successors. | Core/queue unit and server black-box                   |
 
 ### Presentation-Only Chat Rows
 
@@ -695,6 +707,29 @@ classification, durable ordinals, and provider-metadata privacy.
 `TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01` is the required subtype companion:
 it proves that CLI rows of every style and integration-owned `ErrorMessage` rows
 remain presentation-only even though the latter retains `provider-row` kind.
+`PREAMBLE-SELECTION.01-CONTRACT-01` and the canonical matrix distinguish the
+two preamble facts: `preamble-application` survives frozen projection and is
+receipt-backed, while `preamble-selection-changed` is an ordinary public
+notice that renders, shares, and exports but is absent from every conversational
+fold and may be dropped by manual native Reload.
+
+## Per-Chat Preamble Selection Coverage
+
+| Requirement | Primary evidence | State |
+| ----------- | ---------------- | ----- |
+| TLV5-PREAMBLE.07 | Shared UUID guards, catalog v2 migration/store collision and phase-aware fault tests | Covered |
+| TLV5-PREAMBLE.08 | Registry codec/clone tests, ordered selection projection units, deleted-ID server case | Covered |
+| TLV5-PREAMBLE.09 | Start/fork/continuation/ownership units and server creation/fork cases | Covered |
+| TLV5-PREAMBLE.10 | Selection service/store fault and lock-interleaving units plus server Save workflow | Covered |
+| TLV5-PREAMBLE.11 | Shared response/notice, route, WebSocket, controller, and component tests | Covered |
+| TLV5-PREAMBLE.12 | Selected composition, registry admission, accepted-input, and queue-drainer tests | Covered |
+
+Browser behavior uses one shared selection panel for New Chat and existing
+chat editing. Component coverage locks draft suspension/restoration around
+catalog management, captured chat/view targeting, reconnect refresh, dirty
+invalidation preservation, candidate eligibility labels, keyboard submission,
+spinner/duplicate gating, and empty/update rendering. Lightpanda proves the
+creation and existing-chat Save/application flows through real transport.
 
 ## Browser Behavior Matrix
 
@@ -818,6 +853,10 @@ Static negative guards should reject reintroduction of:
 | Evicted ledger close fails                                           | Failure belongs to evicted chat; requested chat opens                     | Covered                                         |
 | Evicted ledger passive checkpoint fails                              | Evicted chat is never fenced; requested chat opens                        | Covered                                         |
 | Permission response fails after claim                                | Claim restored only while exact occurrence remains actionable             | Covered                                         |
+| Catalog write fails after rename while retiring an ID                | Candidate/tombstone stays installed; later catalog mutations fence         | Covered unit                                    |
+| Selection registry write fails before or after rename                | Old state remains before rename; candidate stays installed and Saves fence after rename | Covered unit                         |
+| Selection notice append fails after registry decision                | Typed committed partial result; no compensation or fabricated notice       | Covered unit and server black-box               |
+| Selection Save races direct or queued ordinary admission             | One total order; admission cannot pass the Save's notice attempt            | Covered unit                                    |
 
 ## Existing Evidence Catalog
 
@@ -889,6 +928,11 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PREAMBLE.04-NATIVE-UNIT-01 | `server/ledger/__tests__/preamble-history.test.js`: exact UTF-16 code-unit receipt sanitation strips the private prefix, rejects lone-surrogate replacement, maps distinct and byte-identical evidence deterministically without a provider-visible application identifier, counts required completed-turn occurrences by signature, retries on persistence lag, rejects prefix-related signature ambiguity, and returns immutable application evidence for reconstruction | PREAMBLE.04 |
 | TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01 | `server/ledger/__tests__/read-fold-matrix.test.js`: the application notice stays visible and body-free while every conversational fold excludes it | PREAMBLE.05, L01.02 |
 | TLV5-PREAMBLE.06-LIGHTPANDA-01 | `integration-tests/tests/e2e/preambles.test.ts` and the preamble component suite: the SPA manages enabled and scoped catalog entries, documents `{{chat_id}}`, and renders the historical application notice adjacent to its user row | PREAMBLE.06 |
+| PREAMBLE-SELECTION.01-CONTRACT-01/02 | `common/__tests__/transcript-notice-contract.test.js`: the public update detail permits empty title snapshots, rejects private data, and round-trips through the shared notice contract | PREAMBLE.11 |
+| PREAMBLE-SELECTION.02-SERVER-01..05 | `integration-tests/tests/server/per-chat-preambles.test.ts`: registry-first Save, selected-order next-input application, explicit empty, idempotency/conflicts, unsafe-order rejection, fork inheritance, deleted-ID retention, and preview semantics cross HTTP, WebSocket, registry, and ledger boundaries | PREAMBLE.08 through PREAMBLE.12 |
+| PREAMBLE-SELECTION.03-LIGHTPANDA-01/02 | `integration-tests/tests/e2e/per-chat-preambles.test.ts`: New Chat sends explicit chat order, existing-chat Save renders its update row without provider work, the next ordinary input applies once, and the following turn is unprefixed | PREAMBLE.09 through PREAMBLE.11 |
+| PREAMBLE-SELECTION-STORE-UNIT | `server/preambles/__tests__/store-v2.test.js` and `server/chats/__tests__/store.test.js`: canonical generation, tombstones, lifetime/file bounds, phase-aware durability, normalized selection cloning, complete boundary binding, and field-isolated publication | PREAMBLE.07, PREAMBLE.08, PREAMBLE.10 |
+| PREAMBLE-SELECTION-SERVICE-UNIT | `server/preambles/__tests__/chat-selection-service.test.js`, `server/agents/__tests__/registry-session-cache.test.js`, and `server/chat-execution/__tests__/queue-drainer.test.js`: Save/admission locking, partial outcomes, complete proof identity, selected-order composition, and recoverable direct/queued rejection | PREAMBLE.10, PREAMBLE.12 |
 | TLV5-L01.02-EXPORT-SERVER-01   | `integration-tests/tests/server/garcon-cli-export.test.ts`: authenticated CLI export captures succinct Markdown and XML artifacts, applies filters, preserves ordinal gaps, and writes/replaces files atomically | L01.02 |
 | TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
 | TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01 | `server/chats/search/__tests__/controller-service.test.js`: a chat adopted while a resync replacement is held remains searchable after exclusive pruning refreshes the catalog | L01.02, ADOPT.01 |

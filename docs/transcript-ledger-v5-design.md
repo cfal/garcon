@@ -1,10 +1,37 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 34 integrated design. Supersedes
+Status: revision 35 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 35 adds ordered per-chat preamble selection while retaining the
+workspace catalog as the body, enablement, and project-scope authority. Every
+chat stores an explicit revisioned ID list in `chats.json`; missing, disabled,
+and out-of-scope IDs stay selected but are skipped. New independent chats use
+server-resolved defaults when the creation request omits the list, while an
+explicit empty list means none. Forks and continuations copy the source's
+current list at revision zero, and in-place agent switches preserve the list
+and revision. Application order is the chat's saved order.
+
+Catalog IDs are server-generated canonical lowercase UUID v4 values.
+`preambles.json` version 2 permanently records deleted IDs in a bounded
+tombstone set, so an unavailable saved reference can never resolve to a new
+definition. Active and retired IDs are disjoint, never reused, and protected by
+phase-aware atomic persistence: a renamed catalog candidate remains installed
+and later mutations fence when directory-sync durability is unknown.
+
+An existing-chat selection Save is intentionally lean and registry-first. It
+persists selection plus a revision-qualified `selection-change` boundary,
+then appends an idempotent title-only `Preambles updated` notice. Save never
+starts, steers, interrupts, or changes admitted provider work; the next
+ordinary direct or queued input applies the then-current eligible selection.
+Save and admission share a narrow per-chat lock. A process failure between the
+registry decision and notice commit may permanently omit that update notice;
+the authoritative selection and the later atomic `Preambles applied`/input
+pair remain correct. Typed REST, WebSocket, and browser contracts expose only
+IDs, titles, revisions, and eligibility reasons, never bodies or scopes.
 
 Revision 34 prevents native-history persistence lag from deleting the only
 receipt evidence for a completed preamble turn. A provider-origin `run-ended`
@@ -460,7 +487,10 @@ The decisions:
   opt-out state, is process-ephemeral overlay and dies on restart. A matched
   preamble application is one core-originated row group: its typed notice and
   boundary input commit atomically at adjacent ordinals and broadcast as one
-  ordered batch.
+  ordered batch. A preamble selection Save is a separate cross-store operation:
+  `chats.json` commits first and its update notice follows. The documented
+  crash window may lose only that presentation notice, never the registry
+  decision or a later application row group.
 - **L4 Durable before dispatch, idempotent by message identity.** An
   immediate input is appended and committed before provider dispatch; a
   steer before delivery is attempted; a dequeued queued entry before its
@@ -474,7 +504,10 @@ The decisions:
   row uses the same view-local identity and conflict boundary over its type,
   title, and content, but never dispatches agent work.
   A pending preamble boundary is consumed only by the committed input's
-  private boundary proof. A matching application's body-free prefix receipt
+  private boundary proof. Lifecycle proofs retain `{kind, ownershipEpoch}`;
+  repeatable `selection-change` proofs additionally include the selection
+  revision, and proof lookup and compare-and-clear use the complete identity.
+  A matching application's body-free prefix receipt
   covers the exact target-chat-expanded prefix, is server-derived, and is
   excluded from the submission fingerprint, so an
   identical retry returns the original input without another notice, prefix,
@@ -583,8 +616,9 @@ The decisions:
   mechanics stay behind `@garcon/server-agent-interface` under
   `server-agents/<id>/`. Capabilities are nullable facets, never
   optional methods or boolean flags. Preamble selection, target-chat template
-  expansion, framing, prompt concatenation, receipt validation, and
-  normalized-history sanitation remain in provider-neutral core. Integrations receive the existing single opaque
+  expansion, ordered per-chat resolution, framing, prompt concatenation,
+  receipt validation, and normalized-history sanitation remain in
+  provider-neutral core. Integrations receive the existing single opaque
   prompt and expose the existing normalized import stream unchanged.
 
 ## 3. Data Model
@@ -697,7 +731,13 @@ Kind semantics:
   A preamble application uses the fixed message `Preambles applied` and exact
   public detail `{type: 'preamble-application', preambles: [{id, title}, ...]}`.
   The ID/title pairs are immutable snapshots; no body, scope, path, catalog
-  revision, or receipt is present.
+  revision, or receipt is present. A configuration change uses the distinct
+  fixed message `Preambles updated`. Its private ledger detail is
+  `{type: 'preamble-selection-change', clientMessageId, requestFingerprint,
+  selectionRevision, preambles}` for view-local idempotency; presentation
+  exposes only `{type: 'preamble-selection-changed', preambles}`. The list may
+  be empty and renders as `None enabled`. It never participates in application
+  evidence or native prefix sanitation.
 - `agent-switch`: the durable ownership boundary written at in-place
   handoff, carrying `{fromAgentId, toAgentId, fromModel, toModel}` and
   rendered as the shared `AgentSwitchMessage`. V4 synthesized this
@@ -796,6 +836,32 @@ null. Old session rows remain readable history — handoff never deletes a
 native session, and prior refs stay recorded for any future product
 flow. Reusing an old session never inserts rows before
 `content_start_ordinal`.
+
+### 3.5 Per-chat preamble selection authority
+
+`chats.json` owns each chat's fixed-size configuration:
+
+```ts
+interface ChatPreambleSelection {
+  readonly revision: number;
+  readonly orderedPreambleIds: readonly string[];
+}
+```
+
+The list contains at most 100 unique canonical UUID-v4 IDs and is cloned on
+every registry ingress and egress. Missing persisted selection means revision
+zero and an empty list; a present malformed selection fails registry loading.
+Selection bodies, titles, scopes, paths, and catalog snapshots never enter the
+registry. A `selection-change` pending boundary stores the current ownership
+epoch and selection revision; every registry mutation verifies that binding.
+
+The workspace catalog remains authoritative for definitions and eligibility.
+Its version-2 file stores active ordered definitions plus permanent retired-ID
+tombstones. Resolution iterates the chat list, looks up each active catalog
+record, and classifies it as eligible, missing, disabled, or out of scope.
+Unavailable IDs remain in the list and contribute no prefix, application
+notice, or slash-command block. Filtering the catalog through a selection set
+is forbidden because it would restore catalog order instead of chat order.
 
 ## 4. Storage: One SQLite Database Per Chat
 
@@ -1247,8 +1313,11 @@ The guarantee is durable before provider dispatch, not durable at send:
 - An **immediate input** (starting a turn now) is validated under the
   ownership and pending-ownership fences, appended, and committed before
   provider dispatch. If its binding has a pending preamble boundary, core
-  resolves the current enabled catalog against the canonical project path.
-  A nonempty match plus an otherwise-unhandled slash-leading input is rejected
+  resolves the chat's saved selection against one current catalog snapshot and
+  the canonical project path, preserving selected-ID order and skipping
+  unavailable references. It validates the exact selected composition,
+  including target-chat expansion, size, and reserved-separator safety. A
+  nonempty eligible set plus an otherwise-unhandled slash-leading input is rejected
   before admission and leaves the boundary armed; otherwise the input commits
   the boundary proof and consumes it exactly once. Each matched body expands
   the shared `{{chat_id}}` token to this target chat ID before prefix framing;
@@ -1292,6 +1361,14 @@ The guarantee is durable before provider dispatch, not durable at send:
   a still-queued entry only removes it from the queue. Restart
   intentionally loses queued entries and does not reconstruct them or
   mark them.
+
+Direct admission and queued dequeue share the selection/admission lock with
+selection Save. A direct input observes either the old selection before Save or
+the new selection after the update-notice attempt. Queue draining takes the
+same lock around dequeue plus synchronous admission, so a queued entry waits
+rather than disappearing or being permanently paused. A slash-blocked or
+composition-invalid queued entry is consumed with its typed actionable turn
+failure, leaves the boundary armed, and allows later entries to drain.
 
 Submission is idempotent by `(chatId, transcriptViewId,
 clientMessageId)`. The client generates `clientMessageId` once per
@@ -1408,6 +1485,40 @@ V4's pending-input settlement machinery (`settledInputRequests`,
 native-binding proof) is deleted. What survives under that last name is
 only the client's in-flight marker from 7.1, which crosses no boundary.
 
+### 7.4 Preamble selection configuration
+
+Existing-chat configuration uses `GET /api/v1/chats/preambles?chatId=...`
+and `PUT /api/v1/chats/preambles`. The GET adopts and returns one coherent
+current target containing chat/view identity, the normalized selection,
+canonical chat project path, catalog revision, eligible `{id,title}` snapshots,
+and unavailable `{id,reason}` references. The PUT is view-qualified,
+revision-checked, limited to 32 KiB before JSON decoding, and idempotent by its
+client message identity. A completed duplicate is checked before the expected
+selection revision; changed identity reuse conflicts. An unchanged list
+returns without composition validation, persistence, notice, invalidation, or
+reapplication.
+
+A changed Save holds the chat mutation lock followed by the selection/admission
+lock, captures one catalog snapshot, validates the eligible selected-order
+composition, and writes selection plus pending boundary to `chats.json`. It
+then appends the idempotent update notice and schedules the body-free
+`chat-preambles-invalidated {chatId, revision}` event behind committed-row
+fanout on the per-chat server-event queue. A pre-rename registry failure leaves
+the old selection. A post-rename durability ambiguity retains the candidate,
+fences another Save until explicit reconciliation, and reports commit state as
+unknown. A later notice failure reports that the selection committed and never
+compensates it.
+
+Pre-creation projection uses side-effect-free
+`POST /api/v1/preambles/selection-preview`. Omitted IDs request current
+server defaults for the canonical project path; present IDs project the exact
+draft, including explicit empty and missing references. Actual creation repeats
+omitted-default resolution. Browser state keeps defaults distinct from an
+explicit draft, captures `{chatId, transcriptViewId}` before opening an
+existing-chat editor, preserves dirty drafts across catalog management and
+invalidation, refreshes loaded selection on reconnect, and uses one gated
+click/Enter/shortcut submission path.
+
 ## 8. Permission History
 
 Permission lifecycle is durable ledger history, not a transient-only
@@ -1492,6 +1603,7 @@ presentation-only in every consumer fold.
 | error `provider-row` | yes | no | no | no | yes | yes |
 | ledger-private `chat-id-request` notice | no | no | no | no | no | no |
 | typed `preamble-application` notice | yes | no | no | no | yes | yes |
+| typed `preamble-selection-changed` notice | yes | no | no | no | yes | yes |
 | every other `notice` | yes | no | no | no | yes | yes |
 | `agent-switch` | yes | no | no | no | yes | yes |
 | permission rows | specialized | no | no | no | specialized | yes |
@@ -1539,7 +1651,9 @@ model context, carryover, or export.
   to the conversational matrix: it preserves carryover-quarantine and typed
   preamble-application notices. The former keeps permanent prior loss visible;
   the latter preserves immutable title snapshots next to copied boundary
-  inputs. Neither notice enters model context.
+  inputs. Selection-change notices are ordinary presentation notices and are
+  dropped by frozen projection and manual native Reload. None of these notices
+  enters model context.
 - **Shares are snapshot artifacts**: publishing a share copies its
   rendering fold into the share store (the existing product behavior —
   `server/routes/shares.ts`, `server/chats/share-store.ts`,
@@ -1883,6 +1997,14 @@ crashes before registration may orphan a provider artifact; existing
 best-effort rollback applies and the residue is a named accepted loss —
 no new journal is invented for it.
 
+Fork and continuation configuration is independent of transcript seeding. Each
+target clones the source chat's current ordered preamble IDs at preparation and
+starts at selection revision zero, including a historical-point fork. An
+in-place agent switch preserves the current selection and revision while its
+new lifecycle boundary supersedes an older selection-change boundary. A
+delegated independent chat and a scheduled new chat use ordinary creation
+defaults unless an explicit list is present.
+
 ## 12. Handoff, Continuation, and Fork
 
 Three distinct product operations. None deletes a native session, and
@@ -2175,6 +2297,15 @@ relevant-entry definition under the 10.2 obligation.
 | Crash after an input's commit, before dispatch | Accepted loss: a retry returns the existing row and never re-dispatches; the row shows the will-send-with-next-message affordance and the next fresh input's scan is the recovery path. |
 | Pending preamble boundary with enabled matches receives an otherwise-unhandled slash command | Typed `PREAMBLE_SLASH_COMMAND_BLOCKED`; no input, notice, prefix, or dispatch; the prepared target and boundary remain available for a later ordinary input. An identical command retry returns the same typed rejection. |
 | Candidate preamble catalog exceeds the combined budget after `{{chat_id}}` expansion | Mutation fails before persistence; every valid chat ID is 16 digits, so the fixed validation sample exactly bounds runtime output. |
+| Catalog deletion commits | The active UUID moves to the permanent tombstone set in the same revisioned write; saved chat references remain `missing` and can never resolve to another record. |
+| Catalog rename completes but directory sync is unknown | The candidate and tombstones remain installed, catalog mutation fences, and clients receive the typed unknown outcome; no later mutation can resurrect an ID. |
+| Existing-chat selection Save fails before registry rename | The old selection remains authoritative and no update notice is appended. |
+| Process fails after selection registry commit and before update-notice commit | The new selection and boundary remain authoritative; that one `Preambles updated` row may be absent permanently and is never synthesized. |
+| Update-notice append fails after registry commit | Typed partial failure reports `selectionCommitted: true`; core does not restore the old selection or fabricate a row. |
+| Selection registry rename completes but durability is unknown | The candidate remains installed, another Save fences until reconciliation, and the client must refresh before editing. |
+| Selected ID is missing, disabled, or out of scope | The ID stays saved with its reason and is skipped without failing admission. |
+| Selected-order composition is unsafe at Save or explicit creation | Typed `PREAMBLE_SELECTION_COMPOSITION_INVALID`; no selection or target is persisted. |
+| Catalog/path changes make a saved order unsafe at admission | Direct input stores nothing; a prepared target remains available; a queued entry receives the recoverable failure and later entries continue; the boundary stays armed. |
 | Crash after a preamble boundary input commits but before the registry clear is durable | The input's private boundary proof suppresses reapplication and repairs the stale pending boundary only for the matching ownership epoch. |
 | Reload cannot durably flush the current registry before view replacement | Reload aborts before cutover; it cannot delete the only zero-match proof while disk still records the boundary as armed. |
 | Native import contains an exact receipt-matched preamble prefix | Core strips the receipt-covered prefix, reconstructs its title-only notice, and restores the private receipt and boundary proof on the imported input. |
@@ -2319,6 +2450,11 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     compactions, so run identity cannot bound discovery requests. A looping
     provider can therefore request repeated disclosures within one run; each
     iteration requires another provider emission and control delivery.
+23. A process crash after an existing-chat preamble selection commits to
+    `chats.json` but before its presentation notice commits may permanently
+    omit that one `Preambles updated` row. The selection and next-input
+    application boundary remain authoritative; no recovery journal or notice
+    backfill exists.
 
 ## 17. Testing Strategy
 
@@ -2542,7 +2678,13 @@ The catalog cites this revision, but its inventory is not repeated here.
   retention and typed replay, registry flush before Reload cutover, absent
   native evidence, fail-closed mismatches, duplicate admission, reserved
   separator boundaries, share/export privacy, and provider-neutral scripted
-  prompt delivery. `server-agents/**` contains no preamble-specific code.
+  prompt delivery. Per-chat selection cases additionally cover UUID-v4
+  generation and permanent retirement, missing-reference retention, ordered
+  resolution, omitted versus explicit creation, fork/continuation inheritance,
+  revision-qualified repeat application, registry-first partial outcomes,
+  direct/queued serialization, REST/WS parsing, reconnect refresh, and shared
+  New Chat/existing-chat picker behavior. `server-agents/**` contains no
+  preamble-specific code.
 - **Reload**: gated on a native-bound binding with a non-null
   `nativeHistoryImport` (direct chats expose no Reload); staged build
   under a `staging` view with schema-enforced uniqueness; the frozen
@@ -2905,9 +3047,13 @@ stabilization defects. The current case inventory and gate status live in
     continuation routing stays deleted. Directoryless legacy import remains
     an explicit follow-up.
 25. Preambles are provider-neutral core composition. The current enabled
-    catalog resolves once at the first ordinary input after new chat, fork,
-    continuation, or in-place agent switch. Each active `{{chat_id}}` in a
-    matched body expands to that target chat's 16-digit ID, escaped tokens
+    catalog and the chat's explicit ordered selection resolve once at the first
+    ordinary input after a lifecycle or selection-change boundary. New
+    independent chats use server defaults when selection is omitted; explicit
+    empty means none; forks and continuations clone source-current IDs at
+    revision zero; agent switches preserve selection. Missing, disabled, and
+    out-of-scope IDs remain selected but are skipped. Each active `{{chat_id}}`
+    in an eligible body expands to that target chat's 16-digit ID, escaped tokens
     become literal, and unsupported variables remain unchanged; catalog
     validation applies the same fixed-length rendering before persistence. A nonempty slash-leading provider
     command is rejected before admission and leaves the boundary armed; core
@@ -2921,6 +3067,14 @@ stabilization defects. The current case inventory and gate status live in
     flushes current registry state before Reload can delete the only zero-match
     proof. Provider integrations retain their existing opaque-prompt and
     normalized-history contracts; `server-agents/**` gains no preamble logic.
+26. Preamble catalog identity is canonical server-generated UUID v4 with
+    permanent version-2 tombstones. Existing-chat Save is registry-first and
+    provider-independent: it never changes current work, arms the next ordinary
+    input, and appends a distinct idempotent title-only update notice. Save and
+    direct/queued admission serialize through one internal lock. The accepted
+    registry-commit/notice-crash gap loses only configuration presentation;
+    application remains an adjacent atomic notice/input group with exact native
+    sanitation evidence.
 
 Also resolved across revisions: store-what-you-showed with one core ledger and
 view-wide ordinals; pre-V5 adoption reconstructing the served composite from
