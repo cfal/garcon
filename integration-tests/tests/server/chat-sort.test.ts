@@ -68,7 +68,7 @@ test('chat sort presets atomically reorder every persisted group and survive res
       beforeStart: () => rename(secondaryProject, unavailableProject),
     });
     let listed = await fixture.client.listChats();
-    expect(listed.sessions.some((chat) => chat.id === hiddenChatId)).toBe(false);
+    expect(listed.sessions.some((chat) => chat.id === hiddenChatId)).toBe(true);
 
     const createdCursor = fixture.client.markEvents();
     expect(await fixture.client.sortChatOrder({ sortKey: 'created' })).toEqual({
