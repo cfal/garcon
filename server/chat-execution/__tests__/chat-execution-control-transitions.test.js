@@ -5,6 +5,7 @@ import {
 } from '../control-state.ts';
 import {
   clearQueue,
+  discardPendingInput,
   consumeQueueSteer,
   createQueueEntry,
   dequeueNextTurn,
@@ -255,5 +256,35 @@ describe('chat execution control transitions', () => {
     expect(cleared.next.controlEntries).toHaveLength(1);
     expect(cleared.next.pause).toBeNull();
     expect(value(dequeueNextTurn(cleared.next, context(5)))?.kind).toBe('control');
+  });
+
+  it('discards both pending lanes and pauses while preserving receipts', () => {
+    const created = add(initial(), 'future work', 1, {
+      command: { key: 'command-1', entryId: 'entry-1' },
+    });
+    const controlQueued = enqueueControlInput(created.next, controlInput('control'), context(2));
+    const paused = pauseQueue(controlQueued.next, context(3));
+    const current = {
+      ...paused.next,
+      recentlyDispatched: [{
+        entryId: 'sent-1',
+        revision: 1,
+        dispatchedAt: context(3).now,
+      }],
+      resumePauses: [{ id: 'resume-1', kind: 'manual', pausedAt: context(2).now }],
+    };
+
+    const discarded = discardPendingInput(current, context(4));
+
+    expect(discarded.changed).toBe(true);
+    expect(discarded.next.entries).toEqual([]);
+    expect(discarded.next.controlEntries).toEqual([]);
+    expect(discarded.next.pause).toBeNull();
+    expect(discarded.next.resumePauses).toBeUndefined();
+    expect(discarded.next.appliedCommands).toEqual(current.appliedCommands);
+    expect(discarded.next.recentlyDispatched).toEqual(current.recentlyDispatched);
+    expect(discarded.next.version).toBe(current.version + 1);
+    expect(current.entries).toHaveLength(1);
+    expect(current.controlEntries).toHaveLength(1);
   });
 });

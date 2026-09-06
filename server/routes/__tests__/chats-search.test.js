@@ -6,7 +6,6 @@ import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 function createRoutesFixture({
-  unavailableProjectPaths = [],
   lastActivityAtByChat = {},
   createdAtByChat = {},
   withoutSearchIndex = false,
@@ -82,15 +81,6 @@ function createRoutesFixture({
     clearChatQueue: mock(async () => ({ entries: [], pause: null, version: 2 })),
     pauseChatQueue: mock(async () => ({ entries: [], pause: null, version: 2 })),
     resumeChatQueue: mock(async () => ({ entries: [], pause: null, version: 3 })),
-  };
-  const unavailablePaths = new Set(unavailableProjectPaths);
-  const pathCache = {
-    resolveProjectPaths: mock(async (projectPaths) => new Map(
-      projectPaths.map((projectPath) => [projectPath, {
-        available: !unavailablePaths.has(projectPath),
-        effectiveProjectKey: unavailablePaths.has(projectPath) ? null : projectPath,
-      }]),
-    )),
   };
   const metadata = {
     listAllChatMetadata: mock(() => new Map()),
@@ -177,18 +167,15 @@ function createRoutesFixture({
     })),
   };
   const chatListProjector = {
-    buildMany: mock(async (entries, statuses) => new Map(
-      entries.flatMap(([chatId, session]) => {
-        const status = statuses.get(session.projectPath);
-        return status?.available && status.effectiveProjectKey ? [[chatId, {
+    buildMany: mock((entries) => new Map(
+      entries.map(([chatId]) => [chatId, {
           id: chatId,
           activity: {
             createdAt: createdAtByChat[chatId] ?? null,
             lastActivityAt: lastActivityAtByChat[chatId] ?? null,
             lastReadAt: null,
           },
-        }]] : [];
-      }),
+        }]),
     )),
   };
   const commandLedger = createRouteCommandLedger('chats-search');
@@ -197,7 +184,6 @@ function createRoutesFixture({
     settings,
     queue,
     processing: { phase: mock(() => null) },
-    pathCache,
     metadata,
     chatViews,
     agents,
@@ -213,7 +199,7 @@ function createRoutesFixture({
     }),
   });
 
-  return { routes, searchIndex, registry, agents, pathCache, chatListProjector };
+  return { routes, searchIndex, registry, agents, chatListProjector };
 }
 
 async function postSearch(routes, body, signal) {
@@ -248,33 +234,11 @@ describe('POST /api/v1/chats/search', () => {
   });
 
   it('returns a quiet client-closed response for caller cancellation', async () => {
-    const {
-      routes, searchIndex, pathCache, chatListProjector,
-    } = createRoutesFixture();
+    const { routes, searchIndex, chatListProjector } = createRoutesFixture();
     const abort = new AbortController();
     abort.abort();
 
     const response = await postSearch(routes, { query: 'needle' }, abort.signal);
-
-    expect(response.status).toBe(499);
-    expect(await response.text()).toBe('');
-    expect(pathCache.resolveProjectPaths).not.toHaveBeenCalled();
-    expect(chatListProjector.buildMany).not.toHaveBeenCalled();
-    expect(searchIndex.search).not.toHaveBeenCalled();
-  });
-
-  it('returns 499 when cancellation arrives during path preparation', async () => {
-    const {
-      routes, searchIndex, pathCache, chatListProjector,
-    } = createRoutesFixture();
-    const pendingStatuses = Promise.withResolvers();
-    pathCache.resolveProjectPaths.mockReturnValueOnce(pendingStatuses.promise);
-    const abort = new AbortController();
-
-    const pendingResponse = postSearch(routes, { query: 'needle' }, abort.signal);
-    abort.abort();
-    pendingStatuses.resolve(new Map());
-    const response = await pendingResponse;
 
     expect(response.status).toBe(499);
     expect(await response.text()).toBe('');
@@ -284,7 +248,7 @@ describe('POST /api/v1/chats/search', () => {
 
   it('searches only requested chats that still exist in the registry', async () => {
     const {
-      routes, searchIndex, registry, pathCache, chatListProjector,
+      routes, searchIndex, registry, chatListProjector,
     } = createRoutesFixture();
 
     const response = await postSearch(routes, {
@@ -315,14 +279,11 @@ describe('POST /api/v1/chats/search', () => {
     });
     expect(registry.listAllChats).not.toHaveBeenCalled();
     expect(registry.getChat.mock.calls.map(([chatId]) => chatId)).toEqual(['c2', 'missing']);
-    expect(pathCache.resolveProjectPaths).toHaveBeenCalledWith(['/tmp/other-project']);
     expect(chatListProjector.buildMany.mock.calls[0][0].map(([chatId]) => chatId)).toEqual(['c2']);
   });
 
-  it('excludes chats whose project paths are unavailable', async () => {
-    const { routes, searchIndex } = createRoutesFixture({
-      unavailableProjectPaths: ['/tmp/other-project'],
-    });
+  it('includes chats without checking project path availability', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
 
     const response = await postSearch(routes, {
       query: 'needle',
@@ -331,13 +292,13 @@ describe('POST /api/v1/chats/search', () => {
 
     expect(response.status).toBe(200);
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
-      allowedChatIds: ['c1'],
+      allowedChatIds: ['c1', 'c2'],
     }));
   });
 
   it('preserves deduplicated explicit request order for relevance search', async () => {
     const {
-      routes, searchIndex, registry, pathCache, chatListProjector,
+      routes, searchIndex, registry, chatListProjector,
     } = createRoutesFixture();
 
     const response = await postSearch(routes, {
@@ -348,10 +309,6 @@ describe('POST /api/v1/chats/search', () => {
     expect(response.status).toBe(200);
     expect(registry.listAllChats).not.toHaveBeenCalled();
     expect(registry.getChat.mock.calls.map(([chatId]) => chatId)).toEqual(['c2', 'c1']);
-    expect(pathCache.resolveProjectPaths).toHaveBeenCalledWith([
-      '/tmp/other-project',
-      '/tmp/project',
-    ]);
     expect(chatListProjector.buildMany.mock.calls[0][0].map(([chatId]) => chatId))
       .toEqual(['c2', 'c1']);
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({

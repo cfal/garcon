@@ -433,6 +433,27 @@ export function clearQueue(
   return accepted(next, undefined, true);
 }
 
+export function discardPendingInput(
+  current: StoredChatExecutionControlState,
+  context: TransitionContext,
+): ControlTransition<void> {
+  const next = cloneStoredChatExecutionControl(current);
+  if (
+    next.entries.length === 0
+    && next.controlEntries.length === 0
+    && !next.pause
+    && !next.resumePauses?.length
+  ) {
+    return accepted(next, undefined, false);
+  }
+  next.entries = [];
+  next.controlEntries = [];
+  next.pause = null;
+  delete next.resumePauses;
+  bump(next, context.now);
+  return accepted(next, undefined, true);
+}
+
 export function pauseQueue(
   current: StoredChatExecutionControlState,
   context: TransitionContext,

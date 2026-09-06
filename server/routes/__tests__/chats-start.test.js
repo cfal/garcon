@@ -28,7 +28,7 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 const testChats = new Map();
 const normalChatIds = [];
@@ -102,7 +102,6 @@ const queue = {
     }
   }),
 };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -130,14 +129,13 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-start');
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const routes = createChatRoutes({
   registry,
   settings,
   queue,
   processing: { phase: mock(() => null) },
-  pathCache,
   metadata,
   chatViews,
   agents,
@@ -149,7 +147,6 @@ const routes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pathCache,
 		chatListProjector,
   }),
 });

@@ -9,7 +9,6 @@ import { chatIdCreatedAt } from '../../common/chat-id.js';
 import { normalizeTags } from '../../common/tags.js';
 import type { ChatMetadata } from './metadata-store.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
-import type { PathCache, ProjectPathStatus } from './path-cache.js';
 import { extractFirstLine } from '../lib/text.js';
 import { carryOverRevision } from './carryover-segments.js';
 
@@ -36,7 +35,6 @@ export interface ChatListProjectorDeps {
   settings: ChatListProjectorSettings;
   metadata: ChatListProjectorMetadata;
   processing: { phase(chatId: string): ChatProcessingPhase | null };
-  pathCache: Pick<PathCache, 'resolveProjectPath'>;
   canReloadFromNativeHistory(chatId: string, session: ChatRegistryEntry): boolean;
 }
 
@@ -66,16 +64,13 @@ export class ChatListProjector {
     );
   }
 
-  async buildMany(
+  buildMany(
     sessions: readonly (readonly [string, ChatRegistryEntry])[],
-    statuses: ReadonlyMap<string, ProjectPathStatus>,
-  ): Promise<Map<string, ChatListEntry>> {
+  ): Map<string, ChatListEntry> {
     const metadata = this.deps.metadata.listAllChatMetadata();
     const membership = this.membershipSnapshot();
     const entries = new Map<string, ChatListEntry>();
     for (const [chatId, session] of sessions) {
-      const status = statuses.get(session.projectPath);
-      if (!status?.available || !status.effectiveProjectKey) continue;
       const chatMetadata = metadata.get(chatId) ?? null;
       const summary = this.#summary(chatId, session, chatMetadata);
       entries.set(
@@ -83,7 +78,6 @@ export class ChatListProjector {
         this.#listEntry(
           summary,
           session,
-          status.effectiveProjectKey,
           chatMetadata,
           membership,
         ),
@@ -92,19 +86,14 @@ export class ChatListProjector {
     return entries;
   }
 
-  async buildOne(chatId: string): Promise<ChatListEntry | null> {
+  buildOne(chatId: string): ChatListEntry | null {
     const session = this.deps.registry.getChat(chatId);
     if (!session) return null;
-    const status = await this.deps.pathCache.resolveProjectPath(
-      session.projectPath,
-    );
-    if (!status.available || !status.effectiveProjectKey) return null;
     const metadata = this.deps.metadata.getChatMetadata(chatId);
     const summary = this.#summary(chatId, session, metadata);
     return this.#listEntry(
       summary,
       session,
-      status.effectiveProjectKey,
       metadata,
       this.membershipSnapshot(),
     );
@@ -151,7 +140,6 @@ export class ChatListProjector {
   #listEntry(
     summary: ChatSummaryProjection,
     session: ChatRegistryEntry,
-    effectiveProjectKey: string,
     metadata: ChatMetadata | null,
     membership: ChatListMembershipSnapshot,
   ): ChatListEntry {
@@ -182,7 +170,6 @@ export class ChatListProjector {
       },
       title,
       projectPath: chat.projectPath,
-      effectiveProjectKey,
       orderGroup,
       tags: chat.tags,
       activity: {

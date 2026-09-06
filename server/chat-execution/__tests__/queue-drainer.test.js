@@ -1,8 +1,49 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { QueueDrainer } from '../queue-drainer.ts';
-import { DomainError } from '../../lib/domain-error.ts';
+import { DomainError, ProjectUnavailableError } from '../../lib/domain-error.ts';
 
 const TS = '2026-08-15T00:00:00.000Z';
+
+function control(entries = []) {
+  return {
+    serverInstanceId: 'server-1',
+    entries,
+    controlEntries: [],
+    recentlyDispatched: [],
+    appliedCommands: [],
+    pause: null,
+    reorderRevision: 0,
+    version: 1,
+    updatedAt: TS,
+  };
+}
+
+function availableProjectAdmission() {
+  return { assertAvailable: mock(async () => undefined) };
+}
+
+function idleOwnership(overrides = {}) {
+  return {
+    hasSuppression: () => false,
+    hasDirect: () => false,
+    attempt: () => null,
+    ...overrides,
+  };
+}
+
+function queueCallbacks(overrides = {}) {
+  return {
+    isShuttingDown: () => false,
+    registerQueued: mock(() => true),
+    appendControlReceipt: mock(() => undefined),
+    discardPreparedInput: mock(() => undefined),
+    publishIdle: mock(() => undefined),
+    publishProjectUnavailable: mock(() => undefined),
+    publishTurnFailed: mock(() => undefined),
+    retireAttempt: mock(() => undefined),
+    ...overrides,
+  };
+}
 
 describe('QueueDrainer', () => {
   it('discards a prepared input when queue removal fails after transcript admission', async () => {
@@ -27,12 +68,15 @@ describe('QueueDrainer', () => {
         attempt: () => null,
       },
       controls: {
+        read: mock(async () => control([entry])),
+        pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (chatId, admit) => {
           expect(chatId).toBe('chat-1');
           expect(admit({ kind: 'user', entry })).toBe(true);
           throw failure;
         }),
       },
+      projectAdmission: availableProjectAdmission(),
       turnRunner: {
         isChatRunning: () => false,
       },
@@ -44,6 +88,7 @@ describe('QueueDrainer', () => {
         appendControlReceipt: mock(() => undefined),
         discardPreparedInput,
         publishIdle: mock(() => undefined),
+        publishProjectUnavailable: mock(() => undefined),
         publishTurnFailed: mock(() => undefined),
         retireAttempt: mock(() => undefined),
       },
@@ -78,11 +123,14 @@ describe('QueueDrainer', () => {
         setActiveDrainEntry: mock(() => undefined),
       },
       controls: {
+        read: mock(async () => control([entry])),
+        pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const input = { kind: 'user', entry };
           return { input, control: {}, inserted: admit(input) };
         }),
       },
+      projectAdmission: availableProjectAdmission(),
       turnRunner: {
         isChatRunning: () => false,
         runAgentTurn,
@@ -92,12 +140,13 @@ describe('QueueDrainer', () => {
       callbacks: {
         isShuttingDown: () => {
           shutdownChecks += 1;
-          return shutdownChecks > 1;
+          return shutdownChecks > 3;
         },
         registerQueued: mock(() => true),
         appendControlReceipt: mock(() => undefined),
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
+        publishProjectUnavailable: mock(() => undefined),
         publishTurnFailed: mock(() => undefined),
         retireAttempt,
       },
@@ -160,18 +209,10 @@ describe('QueueDrainer', () => {
           const input = { kind: 'user', entry };
           return { input, control: {}, inserted: admit(input) };
         }),
-        read: mock(async () => ({
-          serverInstanceId: 'server-1',
-          entries: [],
-          controlEntries: [],
-          recentlyDispatched: [],
-          appliedCommands: [],
-          pause: null,
-          reorderRevision: 0,
-          version: 1,
-          updatedAt: TS,
-        })),
+        read: mock(async () => control([...entries])),
+        pause: mock(async () => ({ control: control([...entries]), changed: true })),
       },
+      projectAdmission: availableProjectAdmission(),
       turnRunner: {
         isChatRunning: () => false,
         runAgentTurn,
@@ -184,6 +225,7 @@ describe('QueueDrainer', () => {
         appendControlReceipt: mock(() => undefined),
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
+        publishProjectUnavailable: mock(() => undefined),
         publishTurnFailed,
         retireAttempt: mock(() => undefined),
       },
@@ -228,11 +270,14 @@ describe('QueueDrainer', () => {
         setActiveDrainEntry: mock(() => undefined),
       },
       controls: {
+        read: mock(async () => control([entry])),
+        pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const input = { kind: 'user', entry };
           return { input, control: {}, inserted: admit(input) };
         }),
       },
+      projectAdmission: availableProjectAdmission(),
       turnRunner: {
         isChatRunning: () => attempt?.isSettled ?? false,
         runAgentTurn: mock(() => providerRun),
@@ -245,6 +290,7 @@ describe('QueueDrainer', () => {
         appendControlReceipt: mock(() => undefined),
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
+        publishProjectUnavailable: mock(() => undefined),
         publishTurnFailed,
         retireAttempt: mock(() => undefined),
       },
@@ -283,10 +329,19 @@ describe('QueueDrainer', () => {
           events.push('dequeue:end');
           return null;
         }),
-        read: mock(async () => ({ entries: [], controlEntries: [], pause: null })),
+        read: mock(async () => control([{
+          id: 'entry-1',
+          content: 'queued input',
+          revision: 1,
+          createdAt: TS,
+          updatedAt: TS,
+          status: 'queued',
+          submission: { clientMessageId: 'message-1', transcriptViewId: 'view-1' },
+        }])),
       },
       turnRunner: { isChatRunning: () => false },
       getDrainOptions: () => ({}),
+      projectAdmission: availableProjectAdmission(),
       runSelectionAdmissionExclusive: (chatId, operation) => {
         events.push('lock:enter');
         return lock.runExclusive(`chat:${chatId}`, async () => {
@@ -304,6 +359,7 @@ describe('QueueDrainer', () => {
         appendControlReceipt: mock(() => {}),
         discardPreparedInput: mock(() => {}),
         publishIdle: mock(() => {}),
+        publishProjectUnavailable: mock(() => {}),
         publishTurnFailed: mock(() => {}),
         retireAttempt: mock(() => {}),
       },
@@ -311,5 +367,119 @@ describe('QueueDrainer', () => {
 
     await drainer.run('chat-1');
     expect(events).toEqual(['lock:enter', 'dequeue:begin', 'admit', 'dequeue:end', 'lock:exit']);
+  });
+
+  it('pauses an unavailable queue before dequeue or transcript admission', async () => {
+    const entry = {
+      id: 'entry-1',
+      content: 'queued input',
+      revision: 1,
+      createdAt: TS,
+      updatedAt: TS,
+      status: 'queued',
+      submission: null,
+    };
+    const pending = control([entry]);
+    const dequeueNextTurn = mock(async () => null);
+    const pause = mock(async () => ({ control: { ...pending, pause: { id: 'pause-1' } }, changed: true }));
+    const callbacks = queueCallbacks();
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const drainer = new QueueDrainer({
+      ownership: idleOwnership(),
+      controls: { read: mock(async () => pending), pause, dequeueNextTurn },
+      turnRunner: { isChatRunning: () => false, runAgentTurn: mock(async () => undefined) },
+      getDrainOptions: () => ({}),
+      projectAdmission: { assertAvailable: mock(async () => { throw unavailable; }) },
+      runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
+      callbacks,
+    });
+
+    await drainer.run('chat-1');
+
+    expect(pause).toHaveBeenCalledWith('chat-1');
+    expect(dequeueNextTurn).not.toHaveBeenCalled();
+    expect(callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(callbacks.publishProjectUnavailable).toHaveBeenCalledWith('chat-1', unavailable);
+    expect(callbacks.publishTurnFailed).not.toHaveBeenCalled();
+  });
+
+  it('does not resolve empty, paused, or steering-blocked queues', async () => {
+    const queued = {
+      id: 'entry-1',
+      content: 'queued input',
+      revision: 1,
+      createdAt: TS,
+      updatedAt: TS,
+      status: 'queued',
+      submission: null,
+    };
+    const assertAvailable = mock(async () => undefined);
+    const cases = [
+      control(),
+      { ...control([queued]), pause: { id: 'pause-1', kind: 'manual', pausedAt: TS } },
+      control([{ ...queued, status: 'steering' }]),
+    ];
+
+    for (const pending of cases) {
+      const drainer = new QueueDrainer({
+        ownership: idleOwnership(),
+        controls: {
+          read: mock(async () => pending),
+          pause: mock(async () => ({ control: pending, changed: false })),
+          dequeueNextTurn: mock(async () => null),
+        },
+        turnRunner: { isChatRunning: () => false, runAgentTurn: mock(async () => undefined) },
+        getDrainOptions: () => ({}),
+        projectAdmission: { assertAvailable },
+        runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
+        callbacks: queueCallbacks(),
+      });
+      await drainer.run('chat-1');
+    }
+
+    expect(assertAvailable).not.toHaveBeenCalled();
+  });
+
+  it('halts after deferred resolution when Stop acquires suppression', async () => {
+    const entry = {
+      id: 'entry-1',
+      content: 'queued input',
+      revision: 1,
+      createdAt: TS,
+      updatedAt: TS,
+      status: 'queued',
+      submission: null,
+    };
+    let suppressed = false;
+    let finishResolution;
+    const resolution = new Promise((resolve) => { finishResolution = resolve; });
+    const resolutionStarted = Promise.withResolvers();
+    const dequeueNextTurn = mock(async () => null);
+    const drainer = new QueueDrainer({
+      ownership: idleOwnership({ hasSuppression: () => suppressed }),
+      controls: {
+        read: mock(async () => control([entry])),
+        pause: mock(async () => ({ control: control([entry]), changed: true })),
+        dequeueNextTurn,
+      },
+      turnRunner: { isChatRunning: () => false, runAgentTurn: mock(async () => undefined) },
+      getDrainOptions: () => ({}),
+      projectAdmission: {
+        assertAvailable: mock(async () => {
+          resolutionStarted.resolve();
+          await resolution;
+        }),
+      },
+      runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
+      callbacks: queueCallbacks(),
+    });
+
+    const drain = drainer.run('chat-1');
+    await resolutionStarted.promise;
+    suppressed = true;
+    finishResolution();
+    await drain;
+
+    expect(dequeueNextTurn).not.toHaveBeenCalled();
   });
 });

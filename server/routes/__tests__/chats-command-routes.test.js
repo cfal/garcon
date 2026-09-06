@@ -67,7 +67,6 @@ import {
   createRouteChatListProjector,
   createRouteCommandLedger,
   createRouteCommandService,
-  createRoutePathCache,
 } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000700';
@@ -358,6 +357,7 @@ function createRouteAgent(sessionOverrides = {}) {
       return { chatId, reservationId: 'snapshot-reservation' };
     }),
     releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
+    discardPendingChatInput: mock(() => Promise.resolve(storedQueue())),
     readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -413,7 +413,6 @@ function createRouteAgent(sessionOverrides = {}) {
     }),
     waitForDispatches: mock(() => Promise.resolve(undefined)),
   };
-  const pathCache = createRoutePathCache();
   const metadata = {
     addNewChatMetadata: mock(() => undefined),
     listAllChatMetadata: mock(() => new Map()),
@@ -467,14 +466,12 @@ function createRouteAgent(sessionOverrides = {}) {
     settings,
     metadata,
     agents,
-    pathCache,
   });
   const routes = createChatRoutes({
     registry,
     settings,
     queue,
     processing: { phase: mock(() => null) },
-    pathCache,
     metadata,
     chatViews,
     agents,
@@ -486,7 +483,6 @@ function createRouteAgent(sessionOverrides = {}) {
       metadata,
       agents,
       commandLedger,
-      pathCache,
       chatListProjector,
       forkChatFileCopy: async (args) => {
         await forkChatFileCopy(args);
@@ -523,7 +519,6 @@ function createRouteAgent(sessionOverrides = {}) {
     registry,
     settings,
     queue,
-    pathCache,
     metadata,
     chatViews,
     agents,
@@ -1735,7 +1730,6 @@ describe('REST chat command routes', () => {
       projectPath: realNextPath,
       effectiveProjectKey: realNextPath,
       previousProjectPath: '/workspace/project',
-      previousEffectiveProjectKey: '/workspace/project',
     });
     expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledWith(
       'claude',
@@ -1802,7 +1796,7 @@ describe('REST chat command routes', () => {
     expect(agent.registry.updateProjectPath).not.toHaveBeenCalled();
   });
 
-  it('PATCH /project-path rejects chats with queued messages', async () => {
+  it('PATCH /project-path clears queued messages after the update commits', async () => {
     const agent = createRouteAgent();
     const nextPath = path.join(testBasePath, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
@@ -1816,8 +1810,9 @@ describe('REST chat command routes', () => {
       'PATCH',
     );
 
-    expect(response.status).toBe(409);
-    expect(body.errorCode).toBe('CHAT_NOT_IDLE');
-    expect(agent.agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, projectPath: await fs.realpath(nextPath) });
+    expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
+    expect(agent.queue.discardPendingChatInput).toHaveBeenCalledWith(CHAT_ID);
   });
 });

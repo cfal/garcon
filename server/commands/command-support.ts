@@ -46,7 +46,6 @@ import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js'
 import type { AgentHandoffService } from '../agents/agent-handoff-service.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
-import type { PathCache } from '../chats/path-cache.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
@@ -162,7 +161,6 @@ export interface ChatCommandServiceDeps {
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
   transcripts: TranscriptLedgerService;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
-  pathCache: Pick<PathCache, 'resolveProjectPath'>;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
   handoffs: Pick<
     AgentHandoffService,
@@ -441,7 +439,7 @@ export class CommandSupport {
     );
   }
 
-  projectCommandChatIfPresent(
+  async projectCommandChatIfPresent(
     chatId: string,
   ): Promise<import('../../common/chat-list.js').ChatListEntry | null> {
     return this.deps.chatListProjector.buildOne(chatId);
@@ -553,7 +551,7 @@ export class CommandSupport {
     if (input.images !== undefined) options.images = input.images;
 
     try {
-      await this.deps.queue.scheduleDirectInput({
+      const scheduleOutcome = await this.deps.queue.scheduleDirectInput({
         command: {
           key: ledger.record.key,
           chatId: input.chatId,
@@ -566,6 +564,13 @@ export class CommandSupport {
         settlement: this.settlement,
         preparation,
       });
+      if (scheduleOutcome === 'duplicate') {
+        return this.agentTurnResultWithOptionalChat(
+          ledger.record,
+          'duplicate',
+          Boolean(input.handoff),
+        );
+      }
     } catch (error) {
       throw await withCurrentExecutionControl({
         chatId: input.chatId,
