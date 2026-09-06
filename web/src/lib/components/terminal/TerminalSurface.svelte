@@ -48,7 +48,8 @@
 	let renameDialogOpen = $state(false);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
-	let runtime = $state<ReturnType<typeof terminals.ensureRuntime> | null>(null);
+	let runtime = $state<Awaited<ReturnType<typeof terminals.ensureRuntime>> | null>(null);
+	let runtimeTerminalId = $state<string | null>(null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [
@@ -114,13 +115,32 @@
 
 	$effect(() => {
 		const currentTerminalId = terminalId;
+		let cancelled = false;
 		if (!session) {
+			runtimeTerminalId = null;
 			runtime = null;
 			return;
 		}
+		if (untrack(() => runtimeTerminalId) !== currentTerminalId) {
+			runtimeTerminalId = currentTerminalId;
+			runtime = null;
+		}
 		// Creates the retained third-party runtime after render rather than from a template derivation.
-		const nextRuntime = untrack(() => terminals.ensureRuntime(currentTerminalId));
-		if (untrack(() => runtime) !== nextRuntime) runtime = nextRuntime;
+		void untrack(() => terminals.ensureRuntime(currentTerminalId))
+			.then((nextRuntime) => {
+				if (
+					cancelled ||
+					terminalId !== currentTerminalId ||
+					untrack(() => runtimeTerminalId) !== currentTerminalId
+				) {
+					return;
+				}
+				if (untrack(() => runtime) !== nextRuntime) runtime = nextRuntime;
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	function attachmentLabel(
@@ -305,6 +325,18 @@
 			</div>
 		</div>
 	{:else}
+		{#if session.runtimeError}
+			<div
+				class="flex shrink-0 items-center justify-between gap-3 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"
+			>
+				<span class="truncate">{session.runtimeError}</span>
+				<button
+					type="button"
+					class="shrink-0 rounded-md border border-status-error-border px-2 py-1 hover:bg-accent"
+					onclick={() => terminals.reattach(terminalId)}>{m.common_retry()}</button
+				>
+			</div>
+		{/if}
 		{#if session.replayTruncatedAt}
 			<div class="border-b border-border bg-muted px-3 py-1 text-xs text-muted-foreground">
 				{m.terminal_earlier_output_unavailable()}

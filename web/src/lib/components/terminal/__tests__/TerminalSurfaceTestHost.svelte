@@ -18,6 +18,7 @@
 
 	interface Props {
 		host: WorkspaceWindowId | 'mobile';
+		terminalId?: string;
 		onClose?: (surfaceId: string) => void;
 		onModifier?: (modifier: 'ctrl' | 'alt') => void;
 		onToolbarKey?: (key: string) => void;
@@ -27,13 +28,18 @@
 		onRename?: (terminalId: string, title: string | null) => void;
 		onFocus?: () => void;
 		onFontSize?: (fontSize: number) => void;
+		onReattach?: (terminalId: string) => void;
 		focusRequestToken?: number;
+		runtimeDelay?: Promise<void>;
+		runtimeDelays?: Readonly<Record<string, Promise<void>>>;
+		runtimeError?: string | null;
 		createError?: Error | null;
 		closeError?: Error | null;
 	}
 
 	let {
 		host,
+		terminalId = 'terminal-1',
 		onClose = () => undefined,
 		onModifier = () => undefined,
 		onToolbarKey = () => undefined,
@@ -43,37 +49,39 @@
 		onRename = () => undefined,
 		onFocus = () => undefined,
 		onFontSize = () => undefined,
+		onReattach = () => undefined,
 		focusRequestToken = 0,
+		runtimeDelay,
+		runtimeDelays,
+		runtimeError = null,
 		createError = null,
 		closeError = null,
 	}: Props = $props();
-	const terminalId = 'terminal-1';
 	const localSettings = createLocalSettingsStore();
-	const session: TerminalClientSession = {
-		metadata: {
-			terminalId,
-			displaySequence: 1,
-			title: null,
-			initialWorkingDirectory: '/workspace/project',
-			processStatus: 'running',
-			attachmentStatus: 'attached',
-			createdAt: '2026-07-13T00:00:00.000Z',
-			exitCode: null,
-			latestOutputSequence: 0,
-		},
-		attachmentState: 'attached',
-		lastReceivedSequence: 0,
-		replayTruncatedAt: null,
-	};
-	const secondSession = {
-		...session,
-		metadata: {
-			...session.metadata,
-			terminalId: 'terminal-2',
-			displaySequence: 2,
-			title: 'Build logs',
-		},
-	};
+	function sessionFor(
+		selectedTerminalId: string,
+		displaySequence: number,
+		title: string | null,
+	): TerminalClientSession {
+		return {
+			metadata: {
+				terminalId: selectedTerminalId,
+				displaySequence,
+				title,
+				initialWorkingDirectory: '/workspace/project',
+				processStatus: 'running',
+				attachmentStatus: 'attached',
+				createdAt: '2026-07-13T00:00:00.000Z',
+				exitCode: null,
+				latestOutputSequence: 0,
+			},
+			attachmentState: 'attached',
+			runtimeState: runtimeError ? 'failed' : 'ready',
+			runtimeError,
+			lastReceivedSequence: 0,
+			replayTruncatedAt: null,
+		};
+	}
 	const runtime: TerminalSurfaceRuntimePort = {
 		inputControls: {
 			ctrlMode: 'inactive',
@@ -96,21 +104,31 @@
 			{
 				type: 'register-surface',
 				surface: {
-					id: terminalSurfaceId(terminalId),
+					id: terminalSurfaceId('terminal-1'),
 					type: 'terminal',
-					terminalId,
+					terminalId: 'terminal-1',
 				},
 				windowId: 'window-main',
 			},
 		]),
 	);
 	const terminals = {
-		sessions: { [terminalId]: session, 'terminal-2': secondSession },
-		orderedSessions: [session, secondSession],
+		get sessions() {
+			return {
+				'terminal-1': sessionFor('terminal-1', 1, null),
+				'terminal-2': sessionFor('terminal-2', 2, 'Build logs'),
+			};
+		},
+		get orderedSessions() {
+			return Object.values(this.sessions);
+		},
 		listStatus: 'ready',
 		listError: null,
-		ensureRuntime: () => runtime,
-		reattach: () => undefined,
+		ensureRuntime: async (selectedTerminalId: string) => {
+			await (runtimeDelays?.[selectedTerminalId] ?? runtimeDelay);
+			return runtime;
+		},
+		reattach: (selectedTerminalId: string) => onReattach(selectedTerminalId),
 		rename: async (selectedTerminalId: string, title: string | null) => {
 			onRename(selectedTerminalId, title);
 		},

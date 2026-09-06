@@ -78,7 +78,10 @@ vi.mock('@xterm/addon-fit', () => ({ FitAddon: fakes.FitAddon }));
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: fakes.WebLinksAddon }));
 vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard: vi.fn() }));
 
-import { TerminalRuntime } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
+import {
+	createTerminalRuntime,
+	TerminalRuntime,
+} from '$lib/terminal/runtime/terminal-runtime.svelte.js';
 
 function deferred<T>() {
 	let resolve!: (value: T | PromiseLike<T>) => void;
@@ -246,5 +249,27 @@ describe('TerminalRuntime', () => {
 		const currentHost = measurableHost();
 		await attach(runtime, currentHost);
 		expect(fakes.terminals[0].element?.parentElement).toBe(currentHost);
+	});
+
+	it('retries async runtime creation after the stylesheet fails to load', async () => {
+		const options = { onInput: vi.fn(), onResize: vi.fn(), initialTheme: {} };
+		const firstCreation = createTerminalRuntime(options);
+		const firstLink = document.head.querySelector<HTMLLinkElement>(
+			'link[data-terminal-runtime-stylesheet]',
+		);
+		if (!firstLink) throw new Error('Expected terminal stylesheet link');
+		firstLink.dispatchEvent(new Event('error'));
+
+		await expect(firstCreation).rejects.toThrow();
+		expect(firstLink.isConnected).toBe(false);
+
+		const retry = createTerminalRuntime(options);
+		const retryLink = document.head.querySelector<HTMLLinkElement>(
+			'link[data-terminal-runtime-stylesheet]',
+		);
+		if (!retryLink) throw new Error('Expected retry terminal stylesheet link');
+		retryLink.dispatchEvent(new Event('load'));
+
+		await expect(retry).resolves.toBeInstanceOf(TerminalRuntime);
 	});
 });

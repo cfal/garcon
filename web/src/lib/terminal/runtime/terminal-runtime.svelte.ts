@@ -1,5 +1,5 @@
 import { Terminal, type ITheme } from '@xterm/xterm';
-import '@xterm/xterm/css/xterm.css';
+import terminalStylesheetUrl from '@xterm/xterm/css/xterm.css?url';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { copyToClipboard } from '$lib/utils/clipboard';
@@ -14,6 +14,30 @@ import {
 } from '$lib/terminal/runtime/terminal-font.js';
 import * as m from '$lib/paraglide/messages.js';
 
+let stylesheetPromise: Promise<void> | null = null;
+
+function loadTerminalStylesheet(): Promise<void> {
+	if (stylesheetPromise) return stylesheetPromise;
+	const link = document.createElement('link');
+	link.rel = 'stylesheet';
+	link.href = terminalStylesheetUrl;
+	link.dataset.terminalRuntimeStylesheet = '';
+	stylesheetPromise = new Promise<void>((resolve, reject) => {
+		link.addEventListener('load', () => resolve(), { once: true });
+		link.addEventListener(
+			'error',
+			() => reject(new Error(m.terminal_unavailable())),
+			{ once: true },
+		);
+		document.head.append(link);
+	}).catch((error) => {
+		stylesheetPromise = null;
+		link.remove();
+		throw error;
+	});
+	return stylesheetPromise;
+}
+
 export interface TerminalRuntimeOptions {
 	onInput(data: string): void;
 	onResize(size: { cols: number; rows: number }): void;
@@ -24,6 +48,13 @@ export interface TerminalRuntimeOptions {
 export interface TerminalRendererAttachment {
 	lease: number;
 	ready: Promise<void>;
+}
+
+export async function createTerminalRuntime(
+	options: TerminalRuntimeOptions,
+): Promise<TerminalRuntime> {
+	await loadTerminalStylesheet();
+	return new TerminalRuntime(options);
 }
 
 export class TerminalRuntime {

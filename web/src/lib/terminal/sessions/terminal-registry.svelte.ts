@@ -5,9 +5,9 @@ import {
 	terminateTerminal,
 } from '$lib/api/terminals.js';
 import { ApiError } from '$lib/api/client.js';
-import {
+import type {
 	TerminalRuntime,
-	type TerminalRuntimeOptions,
+	TerminalRuntimeOptions,
 } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
 import {
 	TerminalTransport,
@@ -21,6 +21,7 @@ import type {
 	TerminalStreamServerMessage,
 } from '$shared/terminal';
 import { TerminalThemeStore } from '$lib/terminal/runtime/terminal-theme.svelte.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export const TERMINAL_CREATE_RETRY_WINDOW_MS = 10 * 60 * 1000;
@@ -35,6 +36,8 @@ export type TerminalAttachmentState =
 export interface TerminalClientSession {
 	metadata: TerminalMetadata;
 	attachmentState: TerminalAttachmentState;
+	runtimeState: 'idle' | 'loading' | 'ready' | 'failed';
+	runtimeError: string | null;
 	lastReceivedSequence: number;
 	replayTruncatedAt: number | null;
 }
@@ -68,9 +71,14 @@ export interface TerminalRegistryDeps {
 	terminateTerminal?: typeof terminateTerminal;
 	renameTerminal?: typeof renameTerminal;
 	createTransport?: (options: TerminalTransportOptions) => TerminalTransportPort;
-	createRuntime?: (options: TerminalRuntimeOptions) => TerminalRuntime;
+	createRuntime?: (options: TerminalRuntimeOptions) => TerminalRuntime | Promise<TerminalRuntime>;
+	loadRuntime?: () => Promise<TerminalRuntimeModule>;
 	onSuccessfulList?(terminalIds: readonly string[]): void;
 	onSessionTerminated?(terminalId: string): void;
+}
+
+export interface TerminalRuntimeModule {
+	createTerminalRuntime(options: TerminalRuntimeOptions): Promise<TerminalRuntime>;
 }
 
 export interface TerminalTransportPort {
@@ -79,6 +87,10 @@ export interface TerminalTransportPort {
 	send(message: TerminalStreamClientMessage): boolean;
 	suspend(): void;
 	destroy(): void;
+}
+
+function loadRuntime(): Promise<TerminalRuntimeModule> {
+	return import('$lib/terminal/runtime/terminal-runtime.svelte.js');
 }
 
 export class TerminalRegistry {
@@ -90,6 +102,8 @@ export class TerminalRegistry {
 	readonly #deps: TerminalRegistryDeps;
 	readonly #transport: TerminalTransportPort;
 	readonly #runtimes = new Map<string, TerminalRuntime>();
+	readonly #runtimePromises = new Map<string, Promise<TerminalRuntime>>();
+	readonly #attachmentRequests = new Map<string, symbol>();
 	readonly #theme = new TerminalThemeStore();
 	readonly #runtimeThemeCleanups = new Map<string, () => void>();
 	readonly #now: () => number;
@@ -97,9 +111,9 @@ export class TerminalRegistry {
 	readonly #createTerminal: typeof createTerminal;
 	readonly #terminateTerminal: typeof terminateTerminal;
 	readonly #renameTerminal: typeof renameTerminal;
-	readonly #createRuntime: (options: TerminalRuntimeOptions) => TerminalRuntime;
 	readonly #sessionMutationVersions = new Map<string, number>();
 	readonly #outputFragments = new Map<string, PendingOutputFragments>();
+	#runtimeModulePromise: Promise<TerminalRuntimeModule> | null = null;
 	#listPromise: Promise<void> | null = null;
 	#sessionMutationVersion = 0;
 	#destroyed = false;
@@ -111,7 +125,6 @@ export class TerminalRegistry {
 		this.#createTerminal = deps.createTerminal ?? createTerminal;
 		this.#terminateTerminal = deps.terminateTerminal ?? terminateTerminal;
 		this.#renameTerminal = deps.renameTerminal ?? renameTerminal;
-		this.#createRuntime = deps.createRuntime ?? ((options) => new TerminalRuntime(options));
 		this.#transport = (deps.createTransport ?? ((options) => new TerminalTransport(options)))({
 			connection: deps.connection,
 			onMessage: (message) => this.#handleMessage(message),
@@ -164,6 +177,8 @@ export class TerminalRegistry {
 						: {
 								metadata,
 								attachmentState: 'detached',
+								runtimeState: 'idle',
+								runtimeError: null,
 								lastReceivedSequence: 0,
 								replayTruncatedAt: null,
 							};
@@ -234,7 +249,7 @@ export class TerminalRegistry {
 			});
 			this.#upsert(result.terminal, 'detached');
 			this.#clearCreateAttempt(requestId);
-			this.attach(result.terminal.terminalId, 'restore');
+			void this.attach(result.terminal.terminalId, 'restore');
 			return result.terminal.terminalId;
 		} catch (error) {
 			if (this.#isDefinitiveCreateError(error)) this.#clearCreateAttempt(requestId);
@@ -242,26 +257,47 @@ export class TerminalRegistry {
 		}
 	}
 
-	attach(terminalId: string, intent: 'restore' | 'takeover'): void {
+	async attach(terminalId: string, intent: 'restore' | 'takeover'): Promise<void> {
 		const session = this.sessions[terminalId];
 		if (!session) return;
+		const request = this.#beginAttachment(terminalId);
 		if (this.listStatus !== 'ready' || this.#transport.status !== 'connected') {
 			session.attachmentState = 'detached';
+			this.#finishAttachment(terminalId, request);
 			return;
 		}
 		session.attachmentState = 'connecting';
+		try {
+			await this.ensureRuntime(terminalId);
+		} catch (error) {
+			if (this.#isCurrentAttachment(terminalId, request) && !isAbortError(error)) {
+				this.sessions[terminalId].attachmentState = 'unavailable';
+			}
+			this.#finishAttachment(terminalId, request);
+			return;
+		}
+		if (
+			!this.#isCurrentAttachment(terminalId, request) ||
+			this.listStatus !== 'ready' ||
+			this.#transport.status !== 'connected'
+		) {
+			this.#finishAttachment(terminalId, request);
+			return;
+		}
+		const current = this.sessions[terminalId];
 		const sent = this.#transport.send({
 			type: 'terminal-attach',
 			terminalId,
 			clientId: this.#deps.getClientId(),
-			afterSequence: session.lastReceivedSequence,
+			afterSequence: current.lastReceivedSequence,
 			intent,
 		});
-		if (!sent) session.attachmentState = 'detached';
+		if (!sent) current.attachmentState = 'detached';
+		this.#finishAttachment(terminalId, request);
 	}
 
 	reattach(terminalId: string): void {
-		this.attach(terminalId, 'takeover');
+		void this.attach(terminalId, 'takeover');
 	}
 
 	async requestTermination(terminalId: string, requestId: string): Promise<void> {
@@ -288,23 +324,43 @@ export class TerminalRegistry {
 		return this.#runtimes.get(terminalId) ?? null;
 	}
 
-	ensureRuntime(terminalId: string): TerminalRuntime {
-		let runtime = this.#runtimes.get(terminalId);
-		if (runtime) return runtime;
-		runtime = this.#createRuntime({
-			initialTheme: this.#theme.theme,
-			onInput: (data) => {
-				if (this.sessions[terminalId]?.attachmentState !== 'attached') return;
-				this.#transport.send({ type: 'terminal-input', terminalId, data });
-			},
-			onResize: ({ cols, rows }) => {
-				if (this.sessions[terminalId]?.attachmentState !== 'attached') return;
-				this.#transport.send({ type: 'terminal-resize', terminalId, cols, rows });
-			},
-		});
-		this.#runtimes.set(terminalId, runtime);
-		this.#runtimeThemeCleanups.set(terminalId, this.#theme.register(runtime));
-		return runtime;
+	ensureRuntime(terminalId: string): Promise<TerminalRuntime> {
+		const existing = this.#runtimes.get(terminalId);
+		if (existing) return Promise.resolve(existing);
+		const pending = this.#runtimePromises.get(terminalId);
+		if (pending) return pending;
+		const session = this.sessions[terminalId];
+		if (!session) return Promise.reject(new Error(m.terminal_unavailable()));
+		session.runtimeState = 'loading';
+		session.runtimeError = null;
+		const creation = this.#createRuntime(terminalId)
+			.then((runtime) => {
+				if (!this.#isCurrentRuntimeRequest(terminalId, creation)) {
+					runtime.dispose();
+					throw new DOMException('Terminal runtime creation was superseded', 'AbortError');
+				}
+				this.#runtimes.set(terminalId, runtime);
+				this.#runtimeThemeCleanups.set(terminalId, this.#theme.register(runtime));
+				const current = this.sessions[terminalId];
+				current.runtimeState = 'ready';
+				current.runtimeError = null;
+				return runtime;
+			})
+			.catch((error) => {
+				if (this.#isCurrentRuntimeRequest(terminalId, creation) && !isAbortError(error)) {
+					const current = this.sessions[terminalId];
+					current.runtimeState = 'failed';
+					current.runtimeError = error instanceof Error ? error.message : m.terminal_unavailable();
+				}
+				throw error;
+			})
+			.finally(() => {
+				if (this.#runtimePromises.get(terminalId) === creation) {
+					this.#runtimePromises.delete(terminalId);
+				}
+			});
+		this.#runtimePromises.set(terminalId, creation);
+		return creation;
 	}
 
 	prepareRendererTransfer(terminalId: string): void {
@@ -317,6 +373,7 @@ export class TerminalRegistry {
 
 	authChanged(authenticated: boolean): void {
 		if (!authenticated) {
+			this.#invalidateAttachments();
 			this.#transport.suspend();
 			return;
 		}
@@ -325,12 +382,15 @@ export class TerminalRegistry {
 
 	destroy(): void {
 		this.#destroyed = true;
+		this.#invalidateAttachments();
 		this.#transport.destroy();
 		for (const attempt of Object.values(this.pendingCreates)) {
 			if (attempt.timer) clearTimeout(attempt.timer);
 		}
 		this.pendingCreates = {};
 		for (const terminalId of this.#runtimes.keys()) this.#disposeRuntime(terminalId);
+		this.#runtimePromises.clear();
+		this.#attachmentRequests.clear();
 		this.#sessionMutationVersions.clear();
 		this.#outputFragments.clear();
 	}
@@ -367,7 +427,10 @@ export class TerminalRegistry {
 		}
 		if (message.type === 'terminal-taken-over') {
 			const session = this.sessions[message.terminalId];
-			if (session) session.attachmentState = 'taken-over';
+			if (session) {
+				this.#attachmentRequests.delete(message.terminalId);
+				session.attachmentState = 'taken-over';
+			}
 			return;
 		}
 		if (message.type === 'terminal-terminated') {
@@ -398,13 +461,20 @@ export class TerminalRegistry {
 	#applyOutput(terminalId: string, sequence: number, data: string): void {
 		const session = this.sessions[terminalId];
 		if (!session || sequence <= session.lastReceivedSequence) return;
+		const runtime = this.#runtimes.get(terminalId);
+		if (!runtime) {
+			session.attachmentState = 'unavailable';
+			session.runtimeState = 'failed';
+			session.runtimeError = m.terminal_unavailable();
+			return;
+		}
 		session.lastReceivedSequence = sequence;
 		session.metadata.latestOutputSequence = Math.max(
 			session.metadata.latestOutputSequence,
 			sequence,
 		);
 		this.#recordSessionMutation(terminalId);
-		this.ensureRuntime(terminalId).write(data);
+		runtime.write(data);
 	}
 
 	#applyOutputFragment(
@@ -457,6 +527,8 @@ export class TerminalRegistry {
 				: {
 						metadata,
 						attachmentState,
+						runtimeState: 'idle',
+						runtimeError: null,
 						lastReceivedSequence: 0,
 						replayTruncatedAt: null,
 					},
@@ -473,11 +545,12 @@ export class TerminalRegistry {
 	#restoreAttachments(): void {
 		for (const session of Object.values(this.sessions)) {
 			if (session.attachmentState === 'taken-over') continue;
-			this.attach(session.metadata.terminalId, 'restore');
+			void this.attach(session.metadata.terminalId, 'restore');
 		}
 	}
 
 	#markDisconnected(): void {
+		this.#invalidateAttachments();
 		this.#outputFragments.clear();
 		for (const session of Object.values(this.sessions)) {
 			if (session.attachmentState !== 'taken-over') session.attachmentState = 'detached';
@@ -518,7 +591,66 @@ export class TerminalRegistry {
 		return error instanceof ApiError;
 	}
 
+	async #createRuntime(terminalId: string): Promise<TerminalRuntime> {
+		const options: TerminalRuntimeOptions = {
+			initialTheme: this.#theme.theme,
+			onInput: (data) => {
+				if (this.sessions[terminalId]?.attachmentState !== 'attached') return;
+				this.#transport.send({ type: 'terminal-input', terminalId, data });
+			},
+			onResize: ({ cols, rows }) => {
+				if (this.sessions[terminalId]?.attachmentState !== 'attached') return;
+				this.#transport.send({ type: 'terminal-resize', terminalId, cols, rows });
+			},
+		};
+		if (this.#deps.createRuntime) return this.#deps.createRuntime(options);
+		const runtime = await this.#loadRuntime();
+		return runtime.createTerminalRuntime(options);
+	}
+
+	#loadRuntime(): Promise<TerminalRuntimeModule> {
+		this.#runtimeModulePromise ??= (this.#deps.loadRuntime ?? loadRuntime)().catch((error) => {
+			this.#runtimeModulePromise = null;
+			throw error;
+		});
+		return this.#runtimeModulePromise;
+	}
+
+	#isCurrentRuntimeRequest(terminalId: string, request: Promise<TerminalRuntime>): boolean {
+		return (
+			!this.#destroyed &&
+			Boolean(this.sessions[terminalId]) &&
+			this.#runtimePromises.get(terminalId) === request
+		);
+	}
+
+	#beginAttachment(terminalId: string): symbol {
+		const request = Symbol('terminal-attachment');
+		this.#attachmentRequests.set(terminalId, request);
+		return request;
+	}
+
+	#isCurrentAttachment(terminalId: string, request: symbol): boolean {
+		return (
+			!this.#destroyed &&
+			Boolean(this.sessions[terminalId]) &&
+			this.#attachmentRequests.get(terminalId) === request
+		);
+	}
+
+	#finishAttachment(terminalId: string, request: symbol): void {
+		if (this.#attachmentRequests.get(terminalId) === request) {
+			this.#attachmentRequests.delete(terminalId);
+		}
+	}
+
+	#invalidateAttachments(): void {
+		this.#attachmentRequests.clear();
+	}
+
 	#disposeRuntime(terminalId: string): void {
+		this.#runtimePromises.delete(terminalId);
+		this.#attachmentRequests.delete(terminalId);
 		this.#outputFragments.delete(terminalId);
 		this.#runtimeThemeCleanups.get(terminalId)?.();
 		this.#runtimeThemeCleanups.delete(terminalId);

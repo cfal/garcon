@@ -14,6 +14,7 @@ import {
 	TERMINAL_CREATE_RETRY_WINDOW_MS,
 	TerminalRegistry,
 	type TerminalRegistryDeps,
+	type TerminalRuntimeModule,
 	type TerminalTransportPort,
 } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 
@@ -38,10 +39,12 @@ function metadata(
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 class FakeTransport implements TerminalTransportPort {
@@ -141,14 +144,19 @@ describe('TerminalRegistry', () => {
 		vi.useRealTimers();
 	});
 
-	function createRegistry(): TerminalRegistry {
+	function createRegistry(
+		overrides: {
+			createRuntime?: NonNullable<TerminalRegistryDeps['createRuntime']> | null;
+			loadRuntime?: NonNullable<TerminalRegistryDeps['loadRuntime']>;
+		} = {},
+	): TerminalRegistry {
 		const connection = {
 			isConnected: false,
 			sendMessage: () => false,
 			addMessageConsumer: () => () => undefined,
 			onConnectionChange: () => () => undefined,
 		} satisfies PrimaryWsConnectionPort;
-		return new TerminalRegistry({
+		const deps: TerminalRegistryDeps = {
 			connection,
 			getClientId: () => 'client-1',
 			now: () => now,
@@ -162,15 +170,21 @@ describe('TerminalRegistry', () => {
 				transport = new FakeTransport(options);
 				return transport;
 			},
-			createRuntime: (options) => {
-				const runtime = new FakeRuntime(options);
-				return runtime as unknown as TerminalRuntime;
-			},
 			onSessionTerminated: onSessionTerminated as NonNullable<
 				TerminalRegistryDeps['onSessionTerminated']
 			>,
 			onSuccessfulList,
-		});
+		};
+		if (overrides.createRuntime !== null) {
+			deps.createRuntime =
+				overrides.createRuntime ??
+				((options) => {
+					const runtime = new FakeRuntime(options);
+					return runtime as unknown as TerminalRuntime;
+				});
+		}
+		if (overrides.loadRuntime) deps.loadRuntime = overrides.loadRuntime;
+		return new TerminalRegistry(deps);
 	}
 
 	it('notifies layout reconciliation once per successful authoritative List', async () => {
@@ -203,10 +217,179 @@ describe('TerminalRegistry', () => {
 		await registry.list();
 
 		expect(registry.runtimeIfPresent('terminal-1')).toBeNull();
-		const runtime = registry.ensureRuntime('terminal-1');
+		const firstRequest = registry.ensureRuntime('terminal-1');
+		const secondRequest = registry.ensureRuntime('terminal-1');
+		expect(firstRequest).toBe(secondRequest);
+		expect(registry.sessions['terminal-1'].runtimeState).toBe('loading');
+		const runtime = await firstRequest;
 
 		expect(registry.runtimeIfPresent('terminal-1')).toBe(runtime);
-		expect(registry.ensureRuntime('terminal-1')).toBe(runtime);
+		expect(registry.sessions['terminal-1'].runtimeState).toBe('ready');
+		expect(await registry.ensureRuntime('terminal-1')).toBe(runtime);
+	});
+
+	it('retries a rejected runtime module load', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const loadRuntime = vi
+			.fn<() => Promise<TerminalRuntimeModule>>()
+			.mockRejectedValueOnce(new Error('Terminal chunk unavailable'))
+			.mockResolvedValue({
+				createTerminalRuntime: async (options) =>
+					new FakeRuntime(options) as unknown as TerminalRuntime,
+			});
+		const registry = createRegistry({ createRuntime: null, loadRuntime });
+		await registry.list();
+
+		await expect(registry.ensureRuntime('terminal-1')).rejects.toThrow(
+			'Terminal chunk unavailable',
+		);
+		const runtime = await registry.ensureRuntime('terminal-1');
+
+		expect(runtime).toBeInstanceOf(FakeRuntime);
+		expect(loadRuntime).toHaveBeenCalledTimes(2);
+		expect(registry.sessions['terminal-1'].runtimeState).toBe('ready');
+	});
+
+	it('loads one runtime before sending the latest attachment request', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const runtimeCreation = deferred<TerminalRuntime>();
+		let runtimeOptions: TerminalRuntimeOptions | null = null;
+		const createRuntime = vi.fn((options: TerminalRuntimeOptions) => {
+			runtimeOptions = options;
+			return runtimeCreation.promise;
+		});
+		const registry = createRegistry({ createRuntime });
+		await registry.list();
+		transport.status = 'connected';
+
+		const restore = registry.attach('terminal-1', 'restore');
+		const takeover = registry.attach('terminal-1', 'takeover');
+		const surfaceRuntime = registry.ensureRuntime('terminal-1');
+		expect(transport.sent).toEqual([]);
+		expect(createRuntime).toHaveBeenCalledOnce();
+		expect(registry.sessions['terminal-1'].runtimeState).toBe('loading');
+		transport.options.onMessage({
+			type: 'terminal-status',
+			terminal: metadata('terminal-1', 1, { latestOutputSequence: 4 }),
+		});
+		transport.options.onMessage({
+			type: 'terminal-replay-truncated',
+			terminalId: 'terminal-1',
+			firstSequence: 5,
+		});
+		if (!runtimeOptions) throw new Error('Expected terminal runtime options');
+		const runtime = new FakeRuntime(runtimeOptions) as unknown as TerminalRuntime;
+		runtimeCreation.resolve(runtime);
+
+		await Promise.all([restore, takeover]);
+		expect(await surfaceRuntime).toBe(runtime);
+		expect(registry.sessions['terminal-1'].runtimeState).toBe('ready');
+		expect(transport.sent).toEqual([
+			{
+					type: 'terminal-attach',
+					terminalId: 'terminal-1',
+					clientId: 'client-1',
+					afterSequence: 4,
+					intent: 'takeover',
+			},
+		]);
+	});
+
+	it('surfaces runtime failures and retries attachment', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		let attempt = 0;
+		const createRuntime = vi.fn((options: TerminalRuntimeOptions) => {
+			attempt += 1;
+			if (attempt === 1) return Promise.reject(new Error('Terminal chunk unavailable'));
+			return new FakeRuntime(options) as unknown as TerminalRuntime;
+		});
+		const registry = createRegistry({ createRuntime });
+		await registry.list();
+		transport.status = 'connected';
+
+		await registry.attach('terminal-1', 'restore');
+		expect(transport.sent).toEqual([]);
+		expect(registry.sessions['terminal-1']).toMatchObject({
+			attachmentState: 'unavailable',
+			runtimeState: 'failed',
+			runtimeError: 'Terminal chunk unavailable',
+		});
+
+		await registry.attach('terminal-1', 'takeover');
+		expect(createRuntime).toHaveBeenCalledTimes(2);
+		expect(registry.sessions['terminal-1'].runtimeState).toBe('ready');
+		expect(transport.sent).toHaveLength(1);
+		expect(transport.sent[0]).toMatchObject({ type: 'terminal-attach', intent: 'takeover' });
+	});
+
+	it('disposes a runtime that finishes loading after session removal', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const runtimeCreation = deferred<TerminalRuntime>();
+		let runtimeOptions: TerminalRuntimeOptions | null = null;
+		const registry = createRegistry({
+			createRuntime: (options) => {
+				runtimeOptions = options;
+				return runtimeCreation.promise;
+			},
+		});
+		await registry.list();
+		transport.status = 'connected';
+		const attachment = registry.attach('terminal-1', 'restore');
+		if (!runtimeOptions) throw new Error('Expected terminal runtime options');
+		const runtime = new FakeRuntime(runtimeOptions);
+
+		registry.disposeTerminatedSession('terminal-1');
+		runtimeCreation.resolve(runtime as unknown as TerminalRuntime);
+		await attachment;
+
+		expect(runtime.disposeCount).toBe(1);
+		expect(registry.runtimeIfPresent('terminal-1')).toBeNull();
+		expect(transport.sent).toEqual([]);
+	});
+
+	it('does not publish a superseded runtime after the terminal ID is reused', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const firstCreation = deferred<TerminalRuntime>();
+		const secondCreation = deferred<TerminalRuntime>();
+		const runtimeOptions: TerminalRuntimeOptions[] = [];
+		const createRuntime = vi.fn((options: TerminalRuntimeOptions) => {
+			runtimeOptions.push(options);
+			return runtimeOptions.length === 1 ? firstCreation.promise : secondCreation.promise;
+		});
+		const registry = createRegistry({ createRuntime });
+		await registry.list();
+
+		const firstRequest = registry.ensureRuntime('terminal-1');
+		registry.disposeTerminatedSession('terminal-1');
+		transport.options.onMessage({
+			type: 'terminal-status',
+			terminal: metadata('terminal-1', 2),
+		});
+		const secondRequest = registry.ensureRuntime('terminal-1');
+		const firstRuntime = new FakeRuntime(runtimeOptions[0]);
+		const secondRuntime = new FakeRuntime(runtimeOptions[1]);
+		firstCreation.resolve(firstRuntime as unknown as TerminalRuntime);
+		secondCreation.resolve(secondRuntime as unknown as TerminalRuntime);
+
+		await expect(firstRequest).rejects.toMatchObject({ name: 'AbortError' });
+		await expect(secondRequest).resolves.toBe(secondRuntime);
+		expect(firstRuntime.disposeCount).toBe(1);
+		expect(registry.runtimeIfPresent('terminal-1')).toBe(secondRuntime);
 	});
 
 	it('lists before opening the stream and lists again before restoring attachments', async () => {
@@ -223,15 +406,17 @@ describe('TerminalRegistry', () => {
 
 		await transport.open();
 		expect(listTerminals).toHaveBeenCalledTimes(2);
-		expect(transport.sent).toEqual([
-			{
-				type: 'terminal-attach',
-				terminalId: 'terminal-1',
-				clientId: 'client-1',
-				afterSequence: 0,
-				intent: 'restore',
-			},
-		]);
+		await vi.waitFor(() =>
+			expect(transport.sent).toEqual([
+				{
+						type: 'terminal-attach',
+						terminalId: 'terminal-1',
+						clientId: 'client-1',
+						afterSequence: 0,
+						intent: 'restore',
+				},
+			]),
+		);
 	});
 
 	it('does not open a terminal stream when no terminal sessions exist', async () => {
@@ -323,7 +508,7 @@ describe('TerminalRegistry', () => {
 			.mockImplementationOnce(() => pendingList.promise);
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
+		const runtime = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
 
 		const reconciliation = registry.list();
 		registry.disposeTerminatedSession('terminal-1');
@@ -434,7 +619,7 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
+		const runtime = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
 
 		transport.options.onMessage({ type: 'terminal-terminated', terminalId: 'terminal-1' });
 
@@ -455,15 +640,17 @@ describe('TerminalRegistry', () => {
 		transport.status = 'connected';
 		await transport.open();
 
-		expect(transport.sent).toEqual([
-			{
-				type: 'terminal-attach',
-				terminalId: 'terminal-1',
-				clientId: 'client-1',
-				afterSequence: 0,
-				intent: 'restore',
-			},
-		]);
+		await vi.waitFor(() =>
+			expect(transport.sent).toEqual([
+				{
+					type: 'terminal-attach',
+					terminalId: 'terminal-1',
+					clientId: 'client-1',
+					afterSequence: 0,
+					intent: 'restore',
+				},
+			]),
+		);
 		transport.options.onMessage({
 			type: 'terminal-error',
 			code: 'terminal-takeover-required',
@@ -490,11 +677,13 @@ describe('TerminalRegistry', () => {
 		expect(transport.sent).toEqual([]);
 
 		await transport.open();
-		expect(transport.sent[0]).toMatchObject({
-			type: 'terminal-attach',
-			terminalId: 'terminal-1',
-			intent: 'restore',
-		});
+		await vi.waitFor(() =>
+			expect(transport.sent[0]).toMatchObject({
+				type: 'terminal-attach',
+				terminalId: 'terminal-1',
+				intent: 'restore',
+			}),
+		);
 	});
 
 	it('opens the terminal stream after creating the first session', async () => {
@@ -557,6 +746,7 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
+		const runtime = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
 		transport.status = 'connected';
 		transport.options.onMessage({
 			type: 'terminal-replay-truncated',
@@ -587,7 +777,6 @@ describe('TerminalRegistry', () => {
 		await transport.open();
 
 		const session = registry.sessions['terminal-1'];
-		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
 		runtime.options.onInput('blocked');
 		runtime.options.onResize({ cols: 100, rows: 30 });
 		expect(session.replayTruncatedAt).toBe(2);
@@ -616,6 +805,7 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
+		const runtime = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
 		transport.options.onMessage({
 			type: 'terminal-attached',
 			terminal: metadata('terminal-1', 1, { latestOutputSequence: 2 }),
@@ -635,7 +825,6 @@ describe('TerminalRegistry', () => {
 			dataBase64: 'dHdv',
 		});
 
-		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
 		expect(runtime.writes).toEqual(['one']);
 		expect(registry.sessions['terminal-1'].lastReceivedSequence).toBe(1);
 
@@ -658,8 +847,8 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const first = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
-		const second = registry.ensureRuntime('terminal-2') as unknown as FakeRuntime;
+		const first = (await registry.ensureRuntime('terminal-1')) as unknown as FakeRuntime;
+		const second = (await registry.ensureRuntime('terminal-2')) as unknown as FakeRuntime;
 
 		await registry.requestTermination('terminal-1', 'terminate-1');
 		expect(terminateTerminal).toHaveBeenCalledWith({
