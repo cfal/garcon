@@ -618,9 +618,16 @@ describe('RemoteSettingsSection', () => {
 
 		const githubCliTitle = screen.getByText('GitHub CLI');
 		const pinnedChatsSetting = screen.getByText('Pinned chats are added to');
+		const pinnedChatsSelect = screen.getByRole('combobox', { name: 'Pinned chats are added to' });
 		expect(
 			githubCliTitle.compareDocumentPosition(pinnedChatsSetting) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+		expect(
+			screen.getByText(/recent-activity sorting also places the newest pinned chats/),
+		).toBeTruthy();
+		expect(pinnedChatsSelect.getAttribute('aria-describedby')).toBe(
+			'remote-pinned-insert-position-hint',
+		);
 	});
 
 	it('renders GitHub CLI guidance even while remote settings are loading', async () => {

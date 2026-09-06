@@ -5,9 +5,11 @@ import type {
 } from '../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
+  PersistedChatOrderGroup,
   ReorderChatErrorCode,
   ReorderChatResponse,
 } from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import type {
   AppIdentityUiSettings,
   AgentCommandsFeatureSettings,
@@ -29,6 +31,10 @@ export interface UiSettings {
   appIdentity?: AppIdentityUiSettings;
   [key: string]: unknown;
 }
+
+export type ChatOrderComparatorOverrides = Partial<
+  Record<PersistedChatOrderGroup, ChatOrderIdComparator>
+>;
 
 export type PathSettings = Record<string, unknown>;
 

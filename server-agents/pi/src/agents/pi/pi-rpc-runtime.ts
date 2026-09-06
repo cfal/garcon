@@ -37,6 +37,7 @@ import {
 import {
   classifyPiSteerRejection,
   occurrenceCounts,
+  piCompactionMessage,
   piUserMessageText,
   preparePiRpcPrompt,
   rejectedPiSteer,
@@ -649,6 +650,14 @@ export class PiRpcRuntime {
         sessionId: session.id,
         method: typeof event.method === 'string' ? event.method : 'unknown',
       });
+      return;
+    }
+
+    if (type === 'compaction_end') {
+      const turn = session.turn;
+      if (!turn) return;
+      const message = piCompactionMessage(event, timestamp);
+      if (message) this.#publishMessages(session, turn, [message]);
       return;
     }
 

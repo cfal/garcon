@@ -1,13 +1,13 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { isRecord } from '@garcon/common/json';
-import { CompactionMessage } from '@garcon/common/chat-types';
+import { CompactionMessage, type CompactionTrigger } from '@garcon/common/chat-types';
 import type {
   OpenCodeOperationRoute,
   OpenCodeOperationRoutes,
 } from './operation-routes.js';
 import { isOpenCodeCompactionAssistant, openCodeAssistantTerminal } from './sse-events.js';
 import type { SSEEvent } from './sse-events.js';
-import type { OpenCodeSession } from './turn-events.js';
+import type { OpenCodeSession, OpenCodeTurnContext } from './turn-events.js';
 
 type OpenCodeCompactionPartDropCode =
   | 'COMPACTION_PART_NO_SESSION'
@@ -76,7 +76,9 @@ export function adoptOpenCodeCompactionPartRoute(
   const adoption = operationRoutes.adoptCompactionPart(session.turn, event);
   switch (adoption.kind) {
     case 'adopted': {
-      const part = event.properties?.part;
+      if (isRecord(part) && part.auto === true) {
+        session.turn.automaticCompactionMessageIds.add(messageId);
+      }
       logger.debug('Adopted an OpenCode compaction part', {
         agentSessionId: sessionId,
         partId: typeof part?.id === 'string' ? part.id : null,
@@ -120,18 +122,34 @@ function dropCompactionPart(
   return null;
 }
 
-export interface OpenCodeManualCompactionBoundary {
+export interface OpenCodeCompactionBoundary {
   readonly row: CompactionMessage;
-  // The successful summary assistant's id anchors the boundary so point-fork
-  // boundaries match across live and reloaded transcripts.
+  // Manual boundaries retain their reload-stable point-fork anchor. Automatic
+  // boundaries use the same live anchor but are intentionally absent after Reload.
   readonly summaryMessageId: string;
 }
 
-// The single boundary row a manual compaction turn publishes: only a summary
-// assistant that finished successfully replaced prior context; a failed or
-// aborted summary leaves the boundary unmarked. Summary text and control parts
-// stay internal to the native session.
-export function manualCompactionBoundaryRow(event: SSEEvent): OpenCodeManualCompactionBoundary | null {
+// Classifies every internal compaction event so control parts, summary parts,
+// and the successful boundary all stay out of the ordinary message converter.
+export function compactionEventTrigger(
+  event: SSEEvent,
+  turn: OpenCodeTurnContext,
+): CompactionTrigger | null {
+  if (turn.compaction) return 'manual';
+  const messageId = event.properties?.info?.id
+    ?? event.properties?.part?.messageID
+    ?? event.properties?.messageID;
+  return typeof messageId === 'string' && turn.automaticCompactionMessageIds.has(messageId)
+    ? 'auto'
+    : null;
+}
+
+// Only a summary assistant that finished successfully replaced prior context.
+// Summary text and control parts stay internal to the native session.
+export function compactionBoundaryRow(
+  event: SSEEvent,
+  trigger: CompactionTrigger,
+): OpenCodeCompactionBoundary | null {
   if (event.type !== 'message.updated') return null;
   const info = event.properties?.info;
   if (!isRecord(info) || !isOpenCodeCompactionAssistant(info)) return null;
@@ -142,7 +160,7 @@ export function manualCompactionBoundaryRow(event: SSEEvent): OpenCodeManualComp
     : null;
   if (completed === null) return null;
   return {
-    row: new CompactionMessage(new Date(completed).toISOString(), 'manual', ''),
+    row: new CompactionMessage(new Date(completed).toISOString(), trigger, ''),
     summaryMessageId: terminal.messageId,
   };
 }
