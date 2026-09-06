@@ -13,6 +13,7 @@ import type {
 import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
 import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
+import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type {
 	DesktopPlacement,
@@ -79,6 +80,7 @@ export interface FileSessionsDeps {
 	readContent?: typeof readContent;
 	saveText?: typeof saveText;
 	loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
+	reloadApplication?: () => void;
 	openMainInert?<T>(commitOpen: () => T): T;
 }
 
@@ -108,8 +110,16 @@ function rendererMode(path: string, requested: FileOpenMode): FileRendererMode {
 	return 'code';
 }
 
-function loadEditorRuntime(): Promise<FileEditorRuntimeModule> {
-	return import('$lib/files/editor/code-editor-controller.svelte.js');
+async function loadEditorRuntime(): Promise<FileEditorRuntimeModule> {
+	try {
+		return await import('$lib/files/editor/code-editor-controller.svelte.js');
+	} catch (error) {
+		throw new ModuleImportError(error);
+	}
+}
+
+function reloadApplication(): void {
+	if (typeof window !== 'undefined') window.location.reload();
 }
 
 export class FileSessionRegistry {
@@ -311,6 +321,11 @@ export class FileSessionRegistry {
 	}
 
 	async reload(sessionId: string): Promise<void> {
+		const session = this.get(sessionId);
+		if (session?.loadError && session.loadErrorRequiresPageReload) {
+			(this.deps.reloadApplication ?? reloadApplication)();
+			return;
+		}
 		await this.refresh(sessionId);
 	}
 
@@ -486,6 +501,7 @@ export class FileSessionRegistry {
 		session.loadController = controller;
 		session.loading = true;
 		session.loadError = null;
+		session.loadErrorRequiresPageReload = false;
 		try {
 			const [loaded] = await Promise.all([
 				this.#readLatest(session, controller.signal),
@@ -497,6 +513,7 @@ export class FileSessionRegistry {
 			if (isAbortError(error) || !this.#isCurrentInitialLoad(session, controller)) return;
 			controller.abort();
 			session.loadError = error instanceof Error ? error.message : String(error);
+			session.loadErrorRequiresPageReload = error instanceof ModuleImportError;
 		} finally {
 			if (session.loadController === controller) {
 				session.loadController = null;

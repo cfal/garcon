@@ -16,6 +16,7 @@ import {
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame';
 import { ApiError } from '$lib/api/client.js';
+import { ModuleImportError } from '$lib/utils/module-import-error.js';
 
 const testEditorRuntime: FileEditorRuntimeModule = await import(
 	'$lib/files/editor/code-editor-controller.svelte.js'
@@ -60,6 +61,7 @@ function createHarness(
 		onOpenError?: (request: FileOpenRequest, error: unknown) => void;
 		onPublish?: (registry: FileSessionRegistry) => void | Promise<void>;
 		loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
+		reloadApplication?: () => void;
 	} = {},
 ) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
@@ -125,6 +127,7 @@ function createHarness(
 		readContent,
 		saveText,
 		loadEditorRuntime: options.loadEditorRuntime,
+		reloadApplication: options.reloadApplication,
 		onOpenError,
 	});
 	return {
@@ -333,6 +336,7 @@ describe('FileSessionRegistry', () => {
 		await vi.waitFor(() => expect(opened.loadError).toBe('Editor chunk unavailable'));
 		expect(opened.loading).toBe(false);
 		expect(opened.editor).toBeNull();
+		expect(opened.loadErrorRequiresPageReload).toBe(false);
 
 		await harness.registry.reload(opened.id);
 
@@ -340,6 +344,24 @@ describe('FileSessionRegistry', () => {
 		expect(opened.loadError).toBeNull();
 		expect(opened.editor).toBeTruthy();
 		expect(opened.content).toBe('initial');
+	});
+
+	it('reloads the page when a browser-cached editor module import fails', async () => {
+		const reloadApplication = vi.fn();
+		const loadEditorRuntime = vi
+			.fn<() => Promise<FileEditorRuntimeModule>>()
+			.mockRejectedValue(new ModuleImportError(new Error('Editor chunk unavailable')));
+		const harness = createHarness({ loadEditorRuntime, reloadApplication });
+
+		const opened = await harness.registry.open(request('src/reload-required.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loadError).toBe('Editor chunk unavailable'));
+		expect(opened.loadErrorRequiresPageReload).toBe(true);
+
+		await harness.registry.reload(opened.id);
+
+		expect(reloadApplication).toHaveBeenCalledOnce();
+		expect(loadEditorRuntime).toHaveBeenCalledOnce();
 	});
 
 	it('shares one successful editor runtime load across file sessions', async () => {

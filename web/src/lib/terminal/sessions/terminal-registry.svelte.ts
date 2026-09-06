@@ -22,6 +22,7 @@ import type {
 } from '$shared/terminal';
 import { TerminalThemeStore } from '$lib/terminal/runtime/terminal-theme.svelte.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
+import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export const TERMINAL_CREATE_RETRY_WINDOW_MS = 10 * 60 * 1000;
@@ -38,6 +39,7 @@ export interface TerminalClientSession {
 	attachmentState: TerminalAttachmentState;
 	runtimeState: 'idle' | 'loading' | 'ready' | 'failed';
 	runtimeError: string | null;
+	runtimeErrorRequiresPageReload: boolean;
 	lastReceivedSequence: number;
 	replayTruncatedAt: number | null;
 }
@@ -73,6 +75,7 @@ export interface TerminalRegistryDeps {
 	createTransport?: (options: TerminalTransportOptions) => TerminalTransportPort;
 	createRuntime?: (options: TerminalRuntimeOptions) => TerminalRuntime | Promise<TerminalRuntime>;
 	loadRuntime?: () => Promise<TerminalRuntimeModule>;
+	reloadApplication?: () => void;
 	onSuccessfulList?(terminalIds: readonly string[]): void;
 	onSessionTerminated?(terminalId: string): void;
 }
@@ -89,8 +92,16 @@ export interface TerminalTransportPort {
 	destroy(): void;
 }
 
-function loadRuntime(): Promise<TerminalRuntimeModule> {
-	return import('$lib/terminal/runtime/terminal-runtime.svelte.js');
+async function loadRuntime(): Promise<TerminalRuntimeModule> {
+	try {
+		return await import('$lib/terminal/runtime/terminal-runtime.svelte.js');
+	} catch (error) {
+		throw new ModuleImportError(error);
+	}
+}
+
+function reloadApplication(): void {
+	if (typeof window !== 'undefined') window.location.reload();
 }
 
 export class TerminalRegistry {
@@ -179,6 +190,7 @@ export class TerminalRegistry {
 								attachmentState: 'detached',
 								runtimeState: 'idle',
 								runtimeError: null,
+								runtimeErrorRequiresPageReload: false,
 								lastReceivedSequence: 0,
 								replayTruncatedAt: null,
 							};
@@ -297,6 +309,10 @@ export class TerminalRegistry {
 	}
 
 	reattach(terminalId: string): void {
+		if (this.sessions[terminalId]?.runtimeErrorRequiresPageReload) {
+			(this.#deps.reloadApplication ?? reloadApplication)();
+			return;
+		}
 		void this.attach(terminalId, 'takeover');
 	}
 
@@ -333,6 +349,7 @@ export class TerminalRegistry {
 		if (!session) return Promise.reject(new Error(m.terminal_unavailable()));
 		session.runtimeState = 'loading';
 		session.runtimeError = null;
+		session.runtimeErrorRequiresPageReload = false;
 		const creation = this.#createRuntime(terminalId)
 			.then((runtime) => {
 				if (!this.#isCurrentRuntimeRequest(terminalId, creation)) {
@@ -344,6 +361,7 @@ export class TerminalRegistry {
 				const current = this.sessions[terminalId];
 				current.runtimeState = 'ready';
 				current.runtimeError = null;
+				current.runtimeErrorRequiresPageReload = false;
 				return runtime;
 			})
 			.catch((error) => {
@@ -351,6 +369,7 @@ export class TerminalRegistry {
 					const current = this.sessions[terminalId];
 					current.runtimeState = 'failed';
 					current.runtimeError = error instanceof Error ? error.message : m.terminal_unavailable();
+					current.runtimeErrorRequiresPageReload = error instanceof ModuleImportError;
 				}
 				throw error;
 			})
@@ -466,6 +485,7 @@ export class TerminalRegistry {
 			session.attachmentState = 'unavailable';
 			session.runtimeState = 'failed';
 			session.runtimeError = m.terminal_unavailable();
+			session.runtimeErrorRequiresPageReload = false;
 			return;
 		}
 		session.lastReceivedSequence = sequence;
@@ -529,6 +549,7 @@ export class TerminalRegistry {
 						attachmentState,
 						runtimeState: 'idle',
 						runtimeError: null,
+						runtimeErrorRequiresPageReload: false,
 						lastReceivedSequence: 0,
 						replayTruncatedAt: null,
 					},

@@ -78,6 +78,7 @@
 			attachmentState: 'attached',
 			runtimeState: runtimeError ? 'failed' : 'ready',
 			runtimeError,
+			runtimeErrorRequiresPageReload: false,
 			lastReceivedSequence: 0,
 			replayTruncatedAt: null,
 		};

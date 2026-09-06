@@ -1,8 +1,14 @@
 <script lang="ts">
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import X from '@lucide/svelte/icons/x';
-	import { getFileSessions, getSurfaceFrames, getWorkspaceCoordinator } from '$lib/context';
+	import {
+		getFileSessions,
+		getSurfaceFrames,
+		getTerminalRegistry,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
 	import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame.js';
+	import { shouldWaitForTerminalRenderer } from '$lib/components/terminal/terminal-renderer-frame.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
@@ -31,9 +37,13 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const fileSessions = getFileSessions();
+	const terminals = getTerminalRegistry();
 	const surfaceFrames = getSurfaceFrames();
 	const fileSession = $derived(
 		surface.type === 'file' ? fileSessions.get(surface.fileSessionId) : null,
+	);
+	const terminalSession = $derived(
+		surface.type === 'terminal' ? (terminals.sessions[surface.terminalId] ?? null) : null,
 	);
 </script>
 
@@ -58,7 +68,7 @@
 		version: workspace.frameVersion(surface.id),
 		renderer: frameBridge,
 		waitForRenderer:
-			surface.type === 'terminal' ||
+			(surface.type === 'terminal' && shouldWaitForTerminalRenderer(terminalSession)) ||
 			(surface.type === 'file' && shouldWaitForFileRenderer(fileSession)),
 	}}
 >

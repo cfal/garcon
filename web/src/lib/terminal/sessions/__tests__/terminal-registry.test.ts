@@ -17,6 +17,9 @@ import {
 	type TerminalRuntimeModule,
 	type TerminalTransportPort,
 } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import { ModuleImportError } from '$lib/utils/module-import-error.js';
+import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
+import { shouldWaitForTerminalRenderer } from '$lib/components/terminal/terminal-renderer-frame.js';
 
 function metadata(
 	terminalId: string,
@@ -148,6 +151,7 @@ describe('TerminalRegistry', () => {
 		overrides: {
 			createRuntime?: NonNullable<TerminalRegistryDeps['createRuntime']> | null;
 			loadRuntime?: NonNullable<TerminalRegistryDeps['loadRuntime']>;
+			reloadApplication?: () => void;
 		} = {},
 	): TerminalRegistry {
 		const connection = {
@@ -174,6 +178,7 @@ describe('TerminalRegistry', () => {
 				TerminalRegistryDeps['onSessionTerminated']
 			>,
 			onSuccessfulList,
+			reloadApplication: overrides.reloadApplication,
 		};
 		if (overrides.createRuntime !== null) {
 			deps.createRuntime =
@@ -253,6 +258,34 @@ describe('TerminalRegistry', () => {
 		expect(registry.sessions['terminal-1'].runtimeState).toBe('ready');
 	});
 
+	it('reloads the page when a browser-cached terminal module import fails', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const reloadApplication = vi.fn();
+		const loadRuntime = vi
+			.fn<() => Promise<TerminalRuntimeModule>>()
+			.mockRejectedValue(new ModuleImportError(new Error('Terminal chunk unavailable')));
+		const registry = createRegistry({ createRuntime: null, loadRuntime, reloadApplication });
+		await registry.list();
+		transport.status = 'connected';
+
+		await registry.attach('terminal-1', 'restore');
+		expect(registry.sessions['terminal-1']).toMatchObject({
+			attachmentState: 'unavailable',
+			runtimeState: 'failed',
+			runtimeError: 'Terminal chunk unavailable',
+			runtimeErrorRequiresPageReload: true,
+		});
+
+		registry.reattach('terminal-1');
+
+		expect(reloadApplication).toHaveBeenCalledOnce();
+		expect(loadRuntime).toHaveBeenCalledOnce();
+		expect(transport.sent).toEqual([]);
+	});
+
 	it('loads one runtime before sending the latest attachment request', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,
@@ -301,7 +334,7 @@ describe('TerminalRegistry', () => {
 		]);
 	});
 
-	it('surfaces runtime failures and retries attachment', async () => {
+	it('keeps failed runtime presentation active and retries attachment', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,
 			terminals: [metadata('terminal-1', 1)],
@@ -322,13 +355,23 @@ describe('TerminalRegistry', () => {
 			attachmentState: 'unavailable',
 			runtimeState: 'failed',
 			runtimeError: 'Terminal chunk unavailable',
+			runtimeErrorRequiresPageReload: false,
 		});
+		const bridge = new SurfaceFrameBridge();
+		await expect(
+			bridge.activate(shouldWaitForTerminalRenderer(registry.sessions['terminal-1'])),
+		).resolves.toBeUndefined();
 
 		await registry.attach('terminal-1', 'takeover');
 		expect(createRuntime).toHaveBeenCalledTimes(2);
 		expect(registry.sessions['terminal-1'].runtimeState).toBe('ready');
 		expect(transport.sent).toHaveLength(1);
 		expect(transport.sent[0]).toMatchObject({ type: 'terminal-attach', intent: 'takeover' });
+		const attachRenderer = vi.fn();
+		bridge.provideRenderer({ attach: attachRenderer, detach: vi.fn(), focusPrimary: vi.fn() });
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(attachRenderer).toHaveBeenCalledOnce();
 	});
 
 	it('disposes a runtime that finishes loading after session removal', async () => {

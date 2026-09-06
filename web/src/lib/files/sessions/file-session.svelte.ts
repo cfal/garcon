@@ -36,6 +36,7 @@ export class FileSession {
 	dirty = $state(false);
 	loading = $state(false);
 	loadError = $state<string | null>(null);
+	loadErrorRequiresPageReload = $state(false);
 	saving = $state(false);
 	saveError = $state<string | null>(null);
 	isExternallyStale = $state(false);

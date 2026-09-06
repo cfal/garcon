@@ -578,6 +578,7 @@ describe('WorkspaceRoot', () => {
 			attachmentState: 'attached',
 			runtimeState: 'ready',
 			runtimeError: null,
+			runtimeErrorRequiresPageReload: false,
 			lastReceivedSequence: 0,
 			replayTruncatedAt: null,
 		};
