@@ -125,9 +125,10 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
       await reloadFromNativeHistory(fixture, chatId);
       const imported = await fixture.client.getMessages(chatId);
       expect(imported.transcriptViewId).not.toBe(restored.transcriptViewId);
-      expect(renderingProjection(imported.messages)).toEqual(renderingProjection(
+      const reloadableProjection = renderingProjection(
         live.messages.filter(({ message }) => message.type !== 'compaction'),
-      ));
+      );
+      expect(renderingProjection(imported.messages)).toEqual(reloadableProjection);
       expect(messagesOfType(imported.messages, 'compaction')).toEqual([]);
       expectCompactionInternalsHidden(imported.messages, [summary]);
     }, withScriptedOpenCode());
@@ -598,9 +599,11 @@ async function exerciseInterruptedCompaction(
     expect(userContents(stopped.messages)).toEqual([prompt]);
     expect(assistantContents(stopped.messages)).toEqual([]);
     expect(messagesOfType(stopped.messages, 'error')).toEqual([]);
-    const stoppedBoundaries = messagesOfType(stopped.messages, 'compaction');
-    expect(stoppedBoundaries).toHaveLength(phase === 'continuation' ? 1 : 0);
-    expect(stoppedBoundaries.every((boundary) => boundary.trigger === 'auto')).toBe(true);
+    expect(messagesOfType(stopped.messages, 'compaction')).toEqual(
+      phase === 'continuation'
+        ? [expect.objectContaining({ trigger: 'auto' })]
+        : [],
+    );
     expectCompactionInternalsHidden(stopped.messages, [overflow, summary, stoppedAnswer]);
     await reloadFromNativeHistory(fixture, chatId);
     const reloaded = await fixture.client.getMessages(chatId);

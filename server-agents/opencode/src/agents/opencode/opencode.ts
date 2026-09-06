@@ -88,7 +88,7 @@ import {
   modelsFromProviders,
   type OpenCodeModelOption,
 } from './model-catalog.js';
-import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow, compactionBoundaryTrigger } from './compaction-routing.js';
+import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow, compactionEventTrigger } from './compaction-routing.js';
 import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
 import {
   OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
@@ -918,7 +918,7 @@ export class OpenCodeRuntime {
   }
 
   #dispatchOpenCodeEvent(event: SSEEvent, route: OpenCodeOperationRoute): void {
-    const compactionTrigger = compactionBoundaryTrigger(event, route.turn);
+    const compactionTrigger = compactionEventTrigger(event, route.turn);
     if (compactionTrigger) {
       this.#dispatchCompactionBoundary(event, route, compactionTrigger);
       return;
@@ -934,10 +934,10 @@ export class OpenCodeRuntime {
     route: OpenCodeOperationRoute,
     trigger: CompactionTrigger,
   ): void {
-    if (trigger === 'manual' && route.turn.compactionBoundaryPublished) return;
+    if (trigger === 'manual' && route.turn.manualCompactionBoundaryPublished) return;
     const boundary = compactionBoundaryRow(event, trigger);
     if (!boundary) return;
-    if (trigger === 'manual') route.turn.compactionBoundaryPublished = true;
+    if (trigger === 'manual') route.turn.manualCompactionBoundaryPublished = true;
     this.#publishRows(route.sessionId, route.turn.operation, [
       attachNativeMessageSource(boundary.row, { entryId: boundary.summaryMessageId }),
     ]);

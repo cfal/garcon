@@ -13,9 +13,9 @@ export interface OpenCodeTurnContext {
   // A manual compaction turn: the provider's summary assistant settles the turn
   // and its internals stay out of the transcript.
   compaction?: boolean;
-  // One boundary row per manual compaction turn; completed timestamps persist
-  // across later message updates.
-  compactionBoundaryPublished?: boolean;
+  // Later message updates retain the completed timestamp, so a manual turn
+  // would otherwise republish its boundary.
+  manualCompactionBoundaryPublished?: boolean;
   // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
   providerMessageId: string | null;
   providerPromptPartId: string;

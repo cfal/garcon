@@ -25,6 +25,6 @@ export function openCodeProviderFailureRow(
     .filter((candidate) => !turn.automaticCompactionMessageIds.has(candidate))
     .at(-1);
   // Terminal failures use their exact assistant; control failures retain the last observed
-  // non-compaction assistant as the stable native occurrence used before this helper was extracted.
+  // non-compaction assistant as a stable native occurrence.
   return sourceEntryId ? attachNativeMessageSource(row, { entryId: sourceEntryId }) : row;
 }

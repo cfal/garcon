@@ -76,7 +76,6 @@ export function adoptOpenCodeCompactionPartRoute(
   const adoption = operationRoutes.adoptCompactionPart(session.turn, event);
   switch (adoption.kind) {
     case 'adopted': {
-      const part = event.properties?.part;
       if (isRecord(part) && part.auto === true) {
         session.turn.automaticCompactionMessageIds.add(messageId);
       }
@@ -130,7 +129,9 @@ export interface OpenCodeCompactionBoundary {
   readonly summaryMessageId: string;
 }
 
-export function compactionBoundaryTrigger(
+// Classifies every internal compaction event so control parts, summary parts,
+// and the successful boundary all stay out of the ordinary message converter.
+export function compactionEventTrigger(
   event: SSEEvent,
   turn: OpenCodeTurnContext,
 ): CompactionTrigger | null {
