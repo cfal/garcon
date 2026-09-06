@@ -174,6 +174,8 @@ function harness(options = {}) {
     })),
     queryStats: mock(() => ({
       served: 0, timedOut: 0, rejectedBusy: 0, p50Ms: 0, p95Ms: 0, maxMs: 0,
+      admissionP50Ms: 0, admissionP95Ms: 0, admissionMaxMs: 0,
+      totalP50Ms: 0, totalP95Ms: 0, totalMaxMs: 0,
     })),
     onStatusChanged: mock(() => () => {}),
     resyncHandler: null,

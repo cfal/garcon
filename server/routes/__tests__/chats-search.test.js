@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 
+import { compareChatOrderNewestFirst } from '../../../common/chat-order-sort.js';
 import createChatRoutes from '../chats.js';
 import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
@@ -139,6 +140,12 @@ function createRoutesFixture({
       p50Ms: 10,
       p95Ms: 30,
       maxMs: 40,
+      admissionP50Ms: 2,
+      admissionP95Ms: 4,
+      admissionMaxMs: 5,
+      totalP50Ms: 12,
+      totalP95Ms: 34,
+      totalMaxMs: 45,
     })),
     search: mock((request) => ({
       mode: request.mode,
@@ -206,7 +213,7 @@ function createRoutesFixture({
     }),
   });
 
-  return { routes, searchIndex, registry, agents };
+  return { routes, searchIndex, registry, agents, pathCache, chatListProjector };
 }
 
 async function postSearch(routes, body, signal) {
@@ -241,24 +248,49 @@ describe('POST /api/v1/chats/search', () => {
   });
 
   it('returns a quiet client-closed response for caller cancellation', async () => {
-    const { routes, searchIndex } = createRoutesFixture();
+    const {
+      routes, searchIndex, pathCache, chatListProjector,
+    } = createRoutesFixture();
     const abort = new AbortController();
     abort.abort();
-    searchIndex.search.mockImplementationOnce(({ signal }) => signal.throwIfAborted());
 
     const response = await postSearch(routes, { query: 'needle' }, abort.signal);
 
     expect(response.status).toBe(499);
     expect(await response.text()).toBe('');
+    expect(pathCache.resolveProjectPaths).not.toHaveBeenCalled();
+    expect(chatListProjector.buildMany).not.toHaveBeenCalled();
+    expect(searchIndex.search).not.toHaveBeenCalled();
+  });
+
+  it('returns 499 when cancellation arrives during path preparation', async () => {
+    const {
+      routes, searchIndex, pathCache, chatListProjector,
+    } = createRoutesFixture();
+    const pendingStatuses = Promise.withResolvers();
+    pathCache.resolveProjectPaths.mockReturnValueOnce(pendingStatuses.promise);
+    const abort = new AbortController();
+
+    const pendingResponse = postSearch(routes, { query: 'needle' }, abort.signal);
+    abort.abort();
+    pendingStatuses.resolve(new Map());
+    const response = await pendingResponse;
+
+    expect(response.status).toBe(499);
+    expect(await response.text()).toBe('');
+    expect(chatListProjector.buildMany).not.toHaveBeenCalled();
+    expect(searchIndex.search).not.toHaveBeenCalled();
   });
 
   it('searches only requested chats that still exist in the registry', async () => {
-    const { routes, searchIndex } = createRoutesFixture();
+    const {
+      routes, searchIndex, registry, pathCache, chatListProjector,
+    } = createRoutesFixture();
 
     const response = await postSearch(routes, {
       query: 'needle',
       textTokens: ['needle'],
-      chatIds: ['c2', 'missing'],
+      chatIds: ['c2', 'missing', 'c2'],
       limit: 5,
     });
 
@@ -281,6 +313,10 @@ describe('POST /api/v1/chats/search', () => {
       snippetLimit: 3,
       signal: expect.any(AbortSignal),
     });
+    expect(registry.listAllChats).not.toHaveBeenCalled();
+    expect(registry.getChat.mock.calls.map(([chatId]) => chatId)).toEqual(['c2', 'missing']);
+    expect(pathCache.resolveProjectPaths).toHaveBeenCalledWith(['/tmp/other-project']);
+    expect(chatListProjector.buildMany.mock.calls[0][0].map(([chatId]) => chatId)).toEqual(['c2']);
   });
 
   it('excludes chats whose project paths are unavailable', async () => {
@@ -299,8 +335,32 @@ describe('POST /api/v1/chats/search', () => {
     }));
   });
 
+  it('preserves deduplicated explicit request order for relevance search', async () => {
+    const {
+      routes, searchIndex, registry, pathCache, chatListProjector,
+    } = createRoutesFixture();
+
+    const response = await postSearch(routes, {
+      query: 'needle',
+      chatIds: ['c2', 'c1', 'c2'],
+    });
+
+    expect(response.status).toBe(200);
+    expect(registry.listAllChats).not.toHaveBeenCalled();
+    expect(registry.getChat.mock.calls.map(([chatId]) => chatId)).toEqual(['c2', 'c1']);
+    expect(pathCache.resolveProjectPaths).toHaveBeenCalledWith([
+      '/tmp/other-project',
+      '/tmp/project',
+    ]);
+    expect(chatListProjector.buildMany.mock.calls[0][0].map(([chatId]) => chatId))
+      .toEqual(['c2', 'c1']);
+    expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChatIds: ['c2', 'c1'],
+    }));
+  });
+
   it('searches all visible chats when chatIds is omitted', async () => {
-    const { routes, searchIndex } = createRoutesFixture();
+    const { routes, searchIndex, registry, chatListProjector } = createRoutesFixture();
 
     const response = await postSearch(routes, { query: 'needle' });
 
@@ -310,6 +370,9 @@ describe('POST /api/v1/chats/search', () => {
       sort: 'relevance',
       offset: 0,
     }));
+    expect(registry.listAllChats).toHaveBeenCalledTimes(1);
+    expect(chatListProjector.buildMany.mock.calls[0][0].map(([chatId]) => chatId))
+      .toEqual(['c1', 'c2']);
   });
 
   it('orders activity search candidates by recent activity', async () => {
@@ -326,6 +389,39 @@ describe('POST /api/v1/chats/search', () => {
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
       allowedChatIds: ['c2', 'c1'],
     }));
+  });
+
+  it('matches the shared time comparator for decorated server ordering', async () => {
+    const createdAtByChat = {
+      c1: 'invalid',
+      c2: '2026-07-01T00:00:00.000Z',
+    };
+    const lastActivityAtByChat = {
+      c1: '2026-08-01T00:00:00.000Z',
+      c2: '2026-01-01T00:00:00.000Z',
+    };
+    const timestamps = ['c1', 'c2'].map((id) => ({
+      id,
+      createdAt: createdAtByChat[id],
+      lastActivityAt: lastActivityAtByChat[id],
+    }));
+
+    for (const sort of ['activity', 'created']) {
+      const { routes, searchIndex } = createRoutesFixture({
+        createdAtByChat,
+        lastActivityAtByChat,
+      });
+      const response = await postSearch(routes, { query: 'needle', sort });
+      const expected = [...timestamps]
+        .sort((left, right) => compareChatOrderNewestFirst(sort)(left, right)
+          || left.id.localeCompare(right.id))
+        .map(({ id }) => id);
+
+      expect(response.status).toBe(200);
+      expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+        allowedChatIds: expected,
+      }));
+    }
   });
 
   it('searches no chats when chatIds is explicitly empty', async () => {
@@ -526,7 +622,20 @@ describe('GET /api/v1/chats/search/status', () => {
       version: 1,
       phase: 'disabled',
       chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
-      queryStats: { served: 0, timedOut: 0, rejectedBusy: 0 },
+      queryStats: {
+        served: 0,
+        timedOut: 0,
+        rejectedBusy: 0,
+        p50Ms: 0,
+        p95Ms: 0,
+        maxMs: 0,
+        admissionP50Ms: 0,
+        admissionP95Ms: 0,
+        admissionMaxMs: 0,
+        totalP50Ms: 0,
+        totalP95Ms: 0,
+        totalMaxMs: 0,
+      },
     });
   });
 });

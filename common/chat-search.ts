@@ -138,6 +138,12 @@ export interface TranscriptSearchQueryStatsV1 {
   readonly p50Ms: number;
   readonly p95Ms: number;
   readonly maxMs: number;
+  readonly admissionP50Ms: number;
+  readonly admissionP95Ms: number;
+  readonly admissionMaxMs: number;
+  readonly totalP50Ms: number;
+  readonly totalP95Ms: number;
+  readonly totalMaxMs: number;
 }
 
 export type TranscriptSearchStatusResponse = TranscriptSearchStatusV1 & {

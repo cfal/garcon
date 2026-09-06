@@ -21,7 +21,10 @@ import {
 } from '../../common/chat-search.js';
 import type { ChatListEntry } from '../../common/chat-list.js';
 import type { ChatOrderTimestamps } from '../../common/chat-order-sort.js';
-import { compareChatOrderNewestFirst } from '../../common/chat-order-sort.js';
+import {
+  chatActivityTimeMs,
+  chatCreationTimeMs,
+} from '../../common/chat-order-sort.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -95,16 +98,20 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         );
       }
       const search = parseSearchRequest(body);
+      request?.signal.throwIfAborted();
+      const allowedChatIds = await searchableChatIds(
+        registry,
+        pathCache,
+        chatListProjector,
+        search.chatIds,
+        search.sort,
+        request?.signal,
+      );
+      request?.signal.throwIfAborted();
       const result = await searchIndex.search({
         query: search.query,
         textTokens: search.textTokens,
-        allowedChatIds: await searchableChatIds(
-          registry,
-          pathCache,
-          chatListProjector,
-          search.chatIds,
-          search.sort,
-        ),
+        allowedChatIds,
         sort: search.sort,
         mode: search.mode,
         offset: search.offset,
@@ -164,6 +171,12 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
           p50Ms: 0,
           p95Ms: 0,
           maxMs: 0,
+          admissionP50Ms: 0,
+          admissionP95Ms: 0,
+          admissionMaxMs: 0,
+          totalP50Ms: 0,
+          totalP95Ms: 0,
+          totalMaxMs: 0,
         },
       } satisfies TranscriptSearchStatusResponse);
     }
@@ -257,29 +270,33 @@ async function searchableChatIds(
   chatListProjector: ChatListProjector,
   requestedChatIds: string[] | undefined,
   sort: ChatSearchSort,
+  signal?: AbortSignal,
 ): Promise<string[]> {
-  const sessions = registry.listAllChats();
-  const sessionEntries = Object.entries(sessions);
+  const sessionEntries = requestedChatIds === undefined
+    ? Object.entries(registry.listAllChats())
+    : [...new Set(requestedChatIds)].flatMap((chatId) => {
+      const session = registry.getChat(chatId);
+      return session ? [[chatId, session] as const] : [];
+    });
+  signal?.throwIfAborted();
   const statuses = await pathCache.resolveProjectPaths(
     sessionEntries.map(([, session]) => session.projectPath),
   );
+  signal?.throwIfAborted();
   const visibleEntries = await chatListProjector.buildMany(sessionEntries, statuses);
-  const entries = requestedChatIds === undefined
-    ? [...visibleEntries.values()]
-    : [...new Set(requestedChatIds)]
-      .map((chatId) => visibleEntries.get(chatId))
-      .filter((entry): entry is ChatListEntry => entry !== undefined);
+  const entries = [...visibleEntries.values()];
   if (sort === 'relevance') return entries.map((entry) => entry.id);
-  const compareTime = compareChatOrderNewestFirst(sort);
   const timestamps = (entry: ChatListEntry): ChatOrderTimestamps => ({
     id: entry.id,
     createdAt: entry.activity.createdAt,
     lastActivityAt: entry.activity.lastActivityAt,
   });
+  const timeFor = sort === 'created' ? chatCreationTimeMs : chatActivityTimeMs;
   return entries
-    .sort((left, right) => compareTime(timestamps(left), timestamps(right))
-      || left.id.localeCompare(right.id))
-    .map((entry) => entry.id);
+    .map((entry) => ({ entry, time: timeFor(timestamps(entry)) }))
+    .sort((left, right) => right.time - left.time
+      || left.entry.id.localeCompare(right.entry.id))
+    .map(({ entry }) => entry.id);
 }
 
 function optionalSearchSort(value: unknown): ChatSearchSort | undefined {

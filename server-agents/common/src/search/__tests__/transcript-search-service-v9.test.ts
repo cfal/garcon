@@ -589,9 +589,23 @@ describe('transcript search service v9', () => {
       'chat-queue', 'view-queue', 20, 'queuemarker',
     ))).rejects.toThrow('SEARCH_INDEX_BUSY');
     expect(held).toHaveLength(2);
+    expect(service.queryStats()).toMatchObject({
+      served: 0,
+      rejectedBusy: 1,
+      p50Ms: 0,
+      admissionP50Ms: 0,
+      totalP50Ms: 0,
+    });
     hold = false;
     for (const item of held.splice(0)) item.deliver(item.event);
     await expect(Promise.all(pending)).resolves.toHaveLength(6);
+    const queryStats = service.queryStats();
+    expect(queryStats.served).toBe(6);
+    expect(queryStats.admissionP50Ms).toBeGreaterThan(0);
+    expect(queryStats.admissionP50Ms).toBeGreaterThan(queryStats.p50Ms);
+    expect(queryStats.totalP50Ms).toBeGreaterThanOrEqual(queryStats.admissionP50Ms);
+    expect(queryStats.totalMaxMs).toBeGreaterThanOrEqual(queryStats.maxMs);
+    expect(queryStats.totalMaxMs).toBeGreaterThanOrEqual(queryStats.admissionMaxMs);
     await service.close();
   });
 
@@ -625,7 +639,13 @@ describe('transcript search service v9', () => {
     });
     abort.abort();
     await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
-    expect(service.queryStats().timedOut).toBe(0);
+    expect(service.queryStats()).toMatchObject({
+      served: 0,
+      timedOut: 0,
+      p50Ms: 0,
+      admissionP50Ms: 0,
+      totalP50Ms: 0,
+    });
     for (const item of held.splice(0)) item.deliver(item.event);
     await expect(Promise.all(admitted)).resolves.toHaveLength(2);
     expect(records.some((record) => (

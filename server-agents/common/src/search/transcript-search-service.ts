@@ -128,6 +128,12 @@ interface ReaderSlot {
   state: 'idle' | 'busy' | 'quarantined';
 }
 
+interface QueryLatencySample {
+  readonly admissionMs: number;
+  readonly executionMs: number;
+  readonly totalMs: number;
+}
+
 export class TranscriptSearchService {
   readonly #searchDirectory: string;
   readonly #dbPath: string;
@@ -140,7 +146,7 @@ export class TranscriptSearchService {
   readonly #jobChatIds = new Set<string>();
   readonly #searchWaiters: ReaderWaiter<ReaderSlot>[] = [];
   readonly #statusListeners = new Set<(status: TranscriptSearchStatusV1) => void>();
-  readonly #queryDurations: number[] = [];
+  readonly #queryLatencySamples: QueryLatencySample[] = [];
   readonly #lastLogAt = new Map<string, number>();
   #queryCounters = { served: 0, timedOut: 0, rejectedBusy: 0 };
   #durableCounts = { indexed: 0, pending: 0, failed: 0 };
@@ -381,15 +387,25 @@ export class TranscriptSearchService {
   }
 
   queryStats(): TranscriptSearchQueryStats {
-    const sorted = [...this.#queryDurations].sort((left, right) => left - right);
-    const at = (quantile: number) => sorted.length === 0
+    const quantile = (field: keyof QueryLatencySample, value: number) => {
+      const sorted = this.#queryLatencySamples
+        .map((sample) => sample[field])
+        .sort((left, right) => left - right);
+      return sorted.length === 0
       ? 0
-      : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * quantile))]!;
+      : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * value))]!;
+    };
     return {
       ...this.#queryCounters,
-      p50Ms: at(0.5),
-      p95Ms: at(0.95),
-      maxMs: sorted.at(-1) ?? 0,
+      p50Ms: quantile('executionMs', 0.5),
+      p95Ms: quantile('executionMs', 0.95),
+      maxMs: quantile('executionMs', 1),
+      admissionP50Ms: quantile('admissionMs', 0.5),
+      admissionP95Ms: quantile('admissionMs', 0.95),
+      admissionMaxMs: quantile('admissionMs', 1),
+      totalP50Ms: quantile('totalMs', 0.5),
+      totalP95Ms: quantile('totalMs', 0.95),
+      totalMaxMs: quantile('totalMs', 1),
     };
   }
 
@@ -420,11 +436,13 @@ export class TranscriptSearchService {
       throw new DOMException('Aborted', 'AbortError');
     }
     if (request.executionSignal.aborted) throw new Error('SEARCH_TIMEOUT');
+    const totalStarted = performance.now();
     const slot = await this.#acquireReaderSlot(
       request.admissionSignal,
       request.executionSignal,
     );
-    const started = performance.now();
+    const executionStarted = performance.now();
+    const admissionMs = executionStarted - totalStarted;
     const session = slot.supervisor.beginRequestSession();
     const frames = searchFrames(
       request.query,
@@ -452,7 +470,8 @@ export class TranscriptSearchService {
         this.#queryCounters.timedOut += 1;
         this.#rateLimitedWarn('Transcript search query timeout', {
           code: 'SEARCH_TIMEOUT',
-          executeMs: Math.round(performance.now() - started),
+          admissionMs: Math.round(admissionMs),
+          executeMs: Math.round(performance.now() - executionStarted),
           order: request.order,
           offset: request.offset,
           limit: request.limit,
@@ -476,7 +495,12 @@ export class TranscriptSearchService {
       throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
     }
     this.#queryCounters.served += 1;
-    this.#recordQueryDuration(performance.now() - started);
+    const completed = performance.now();
+    this.#recordQueryLatency({
+      admissionMs,
+      executionMs: completed - executionStarted,
+      totalMs: completed - totalStarted,
+    });
     return {
       mode: event.mode,
       snippetLimit: event.snippetLimit,
@@ -916,9 +940,17 @@ export class TranscriptSearchService {
     return 'ready';
   }
 
-  #recordQueryDuration(durationMs: number): void {
-    this.#queryDurations.push(Math.round(durationMs));
-    if (this.#queryDurations.length > QUERY_STATS_SAMPLE) this.#queryDurations.shift();
+  #recordQueryLatency(sample: QueryLatencySample): void {
+    const admissionMs = Math.round(sample.admissionMs);
+    const executionMs = Math.round(sample.executionMs);
+    this.#queryLatencySamples.push({
+      admissionMs,
+      executionMs,
+      totalMs: Math.max(Math.round(sample.totalMs), admissionMs + executionMs),
+    });
+    if (this.#queryLatencySamples.length > QUERY_STATS_SAMPLE) {
+      this.#queryLatencySamples.shift();
+    }
   }
 
   #rejectQueues(error: Error): void {
