@@ -4,7 +4,7 @@ Status: revision 6 — implementation complete
 
 Base: `bc8ddb47b4020f5a2dee3e73b1e6a2545c2a23fc` (`origin/main`)
 
-Implementation branch: `fix/web-performance-remediation` (local only, no upstream)
+Implementation: [`fix/web-performance-remediation`](https://github.com/cfal/garcon/tree/fix/web-performance-remediation), [PR #694](https://github.com/cfal/garcon/pull/694)
 
 Scope: `web/`. Goal: reduce startup work and avoid repeated sidebar/composer work on slow machines without changing protocol or UX behavior.
 
