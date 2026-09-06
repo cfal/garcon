@@ -149,7 +149,6 @@ export class SidebarSearchStore {
 	private transcriptSearchRevalidationTimer: ReturnType<typeof setTimeout> | null = null;
 	private transcriptSearchContentDirty = false;
 	private transcriptSearchPendingIndexCatchUp = false;
-	private transcriptSearchStatusRevision = 0;
 	private transcriptSearchOperation: TranscriptSearchOperation | null = null;
 	private lastTranscriptSearchRevalidationStartedAt = Number.NEGATIVE_INFINITY;
 	private transcriptSearchCommittedTimeOrder = $state<string[] | null>(null);
@@ -517,7 +516,6 @@ export class SidebarSearchStore {
 		const searchIndexChanged = previousStatus?.phase !== status.phase
 			|| status.chats.indexed > (previousStatus?.chats.indexed ?? -1);
 		if (!searchIndexChanged) return;
-		this.transcriptSearchStatusRevision += 1;
 		if (this.transcriptSearchOperation || this.transcriptSearchIndexing) {
 			this.scheduleTranscriptSearchRevalidation('index');
 		}
@@ -568,7 +566,6 @@ export class SidebarSearchStore {
 		this.transcriptSearchRevalidationPromise = null;
 		this.transcriptSearchContentDirty = false;
 		this.transcriptSearchPendingIndexCatchUp = false;
-		this.transcriptSearchStatusRevision = 0;
 		this.transcriptSearchOperation = null;
 		this.lastTranscriptSearchRevalidationStartedAt = Number.NEGATIVE_INFINITY;
 		this.clearTranscriptSearchTimers();
@@ -593,7 +590,6 @@ export class SidebarSearchStore {
 		}
 
 		this.transcriptSearchOperation = 'initial';
-		const statusRevisionAtStart = this.transcriptSearchStatusRevision;
 		const waitForRetry = this.deps.waitForTranscriptIndexRetry ?? waitForTranscriptIndexRetry;
 		try {
 			for (let attempt = 0; attempt < TRANSCRIPT_SEARCH_MAX_ATTEMPTS; attempt += 1) {
@@ -639,9 +635,6 @@ export class SidebarSearchStore {
 				if (!responseIsPartial) {
 					this.transcriptSearchPendingIndexCatchUp = false;
 					return;
-				}
-				if (this.transcriptSearchStatusRevision !== statusRevisionAtStart) {
-					this.transcriptSearchPendingIndexCatchUp = true;
 				}
 				this.transcriptSearchLoading = false;
 				return;
@@ -785,7 +778,6 @@ export class SidebarSearchStore {
 		const timeout = setTimeout(() => abort.abort(), TRANSCRIPT_SEARCH_REVALIDATION_TIMEOUT_MS);
 		const consumedContentDirty = this.transcriptSearchContentDirty;
 		const consumedIndexCatchUp = this.transcriptSearchPendingIndexCatchUp;
-		const statusRevisionAtStart = this.transcriptSearchStatusRevision;
 		this.transcriptSearchContentDirty = false;
 		this.transcriptSearchPendingIndexCatchUp = false;
 		this.transcriptSearchOperation = 'revalidate';
@@ -814,8 +806,6 @@ export class SidebarSearchStore {
 				this.transcriptSearchIndexing = isTranscriptSearchIndexPartial(result.index);
 				if (!this.transcriptSearchIndexing) {
 					this.transcriptSearchPendingIndexCatchUp = false;
-				} else if (this.transcriptSearchStatusRevision !== statusRevisionAtStart) {
-					this.transcriptSearchPendingIndexCatchUp = true;
 				}
 				this.restoreHighlightedChat(highlightedChatId);
 				this.transcriptSearchRevalidationVersion += 1;
@@ -899,7 +889,6 @@ export class SidebarSearchStore {
 		this.transcriptSearchRevalidationPromise = null;
 		this.transcriptSearchContentDirty = false;
 		this.transcriptSearchPendingIndexCatchUp = false;
-		this.transcriptSearchStatusRevision = 0;
 		this.transcriptSearchOperation = null;
 		this.lastTranscriptSearchRevalidationStartedAt = Number.NEGATIVE_INFINITY;
 	}

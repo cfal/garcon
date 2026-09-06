@@ -1,9 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import {
-  CHAT_SEARCH_MAX_PAGE_SIZE,
-  CHAT_SEARCH_MAX_PREFIX_SIZE,
-  type TranscriptSearchAllowedChat,
-} from '@garcon/common/chat-search';
+import type { TranscriptSearchAllowedChat } from '@garcon/common/chat-search';
 import { searchTranscriptIndexV1 } from './query.js';
 import { openSearchReadDatabase } from './schema.js';
 import type { ReaderEvent, ReaderRequest } from './worker-protocol.js';
@@ -42,13 +38,7 @@ function handle(request: ReaderRequest): void {
         return;
       case 'search-start': {
         if (!db || closing) throw new Error('READER_UNAVAILABLE');
-        const maximumLimit = request.mode === 'prefix'
-          ? CHAT_SEARCH_MAX_PREFIX_SIZE
-          : CHAT_SEARCH_MAX_PAGE_SIZE;
-        if (searches.has(request.requestId)
-            || !Number.isSafeInteger(request.limit)
-            || request.limit < 1
-            || request.limit > maximumLimit) {
+        if (searches.has(request.requestId)) {
           throw new Error('INVALID_SEARCH_REQUEST');
         }
         searches.set(request.requestId, {
