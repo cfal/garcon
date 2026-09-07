@@ -60,6 +60,10 @@
 	let closeFocusReturnTarget: HTMLElement | null = null;
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
+	const singleTabMenuSurfaceId = $derived.by(() => {
+		const [surfaceId] = tabs.order;
+		return tabs.order.length === 1 && surfaceId && hasContextMenu(surfaceId) ? surfaceId : null;
+	});
 
 	$effect(() => {
 		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
@@ -264,6 +268,13 @@
 			restoreFocusAfterClose(trigger, returnTarget);
 		}
 	}
+
+	function restoreSingleTabMenuFocus(event: Event): void {
+		event.preventDefault();
+		tabViewport
+			?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+			?.focus();
+	}
 </script>
 
 {#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
@@ -373,7 +384,7 @@
 		class={tabFrameClass(renderedLabelMode, showInlineClose)}
 		data-window-tab-measure-id={measurement ? surfaceId : undefined}
 	>
-		{#if measurement || !hasContextMenu(surfaceId)}
+		{#if measurement || singleTabMenuSurfaceId || !hasContextMenu(surfaceId)}
 			{@render tabButton(surfaceId, measurement, {})}
 		{:else}
 			<ContextMenu>
@@ -397,21 +408,47 @@
 	</div>
 {/snippet}
 
-<div
-	bind:this={tabViewport}
-	class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
-	role="tablist"
-	tabindex="-1"
-	aria-label={m.workspace_window_views()}
-	data-workspace-window-tabs={windowId}
-	data-workspace-tab-label-mode={labelMode}
-	ondragover={(event) => dnd.handleTabListDragOver(windowId, event)}
-	ondrop={(event) => void commitTabDrop(null, event)}
->
-	{#each displayedSurfaceIds as surfaceId (surfaceId)}
-		{@render tab(surfaceId)}
-	{/each}
-</div>
+{#snippet tabList(triggerProps: Record<string, unknown>)}
+	<div
+		{...triggerProps}
+		bind:this={tabViewport}
+		class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+		role="tablist"
+		tabindex="-1"
+		aria-label={m.workspace_window_views()}
+		data-workspace-window-tabs={windowId}
+		data-workspace-tab-label-mode={labelMode}
+		ondragover={(event) => dnd.handleTabListDragOver(windowId, event)}
+		ondrop={(event) => void commitTabDrop(null, event)}
+	>
+		{#each displayedSurfaceIds as surfaceId (surfaceId)}
+			{@render tab(surfaceId)}
+		{/each}
+	</div>
+{/snippet}
+
+{#if singleTabMenuSurfaceId}
+	<ContextMenu>
+		<ContextMenuTrigger>
+			{#snippet child({ props })}
+				{@render tabList(props)}
+			{/snippet}
+		</ContextMenuTrigger>
+		<WorkspaceWindowTabMenu
+			menu={contextMenuPrimitives}
+			{windowId}
+			{tabs}
+			surfaceId={singleTabMenuSurfaceId}
+			{hiddenSurfaceIds}
+			{labelFor}
+			{onSelect}
+			{surfaceMenuItems}
+			onContextMenuCloseAutoFocus={restoreSingleTabMenuFocus}
+		/>
+	</ContextMenu>
+{:else}
+	{@render tabList({})}
+{/if}
 
 <div
 	bind:this={measurementRail}

@@ -4,7 +4,7 @@ import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
-import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
+import { portableSingletonDescriptor, TERMINAL_LAUNCHER_ID } from '$lib/workspace/surface-types.js';
 import type {
 	DesktopWorkspaceNode,
 	SurfaceDescriptor,
@@ -141,6 +141,10 @@ const terminalSurface = {
 	id: 'terminal:terminal-a',
 	type: 'terminal',
 	terminalId: 'terminal-a',
+} as const satisfies SurfaceDescriptor;
+const terminalLauncherSurface = {
+	id: TERMINAL_LAUNCHER_ID,
+	type: 'terminal-launcher',
 } as const satisfies SurfaceDescriptor;
 const otherChatSurface = {
 	id: 'chat-view:window-two',
@@ -588,6 +592,81 @@ describe('WorkspaceWindowTitleBar', () => {
 				.getByRole('tab', { name: 'Chat A' })
 				.classList.contains('bg-workspace-window-tab-selected-inactive'),
 		).toBe(false);
+	});
+
+	it('opens the sole tab menu from the trailing title-bar space and the tab', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id]));
+		const tablist = screen.getByRole('tablist');
+		const tab = screen.getByRole('tab', { name: 'Chat A' });
+
+		await fireEvent.contextMenu(tablist, { clientX: 300, clientY: 12 });
+		const trailingSpaceMenu = await screen.findByRole('menu');
+		expect(
+			trailingSpaceMenu.getAttribute('data-workspace-window-tab-context-menu'),
+		).toBe(chatSurface.id);
+		expect(
+			Array.from(
+				trailingSpaceMenu.querySelectorAll<HTMLElement>('[data-workspace-window-tab-action]'),
+				(item) => item.dataset.workspaceWindowTabAction,
+			),
+		).toEqual(localTabActionOrder);
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(tab));
+
+		await fireEvent.contextMenu(tab);
+		await screen.findByRole('menuitem', { name: m.workspace_close_tab() });
+		expect(
+			document.querySelectorAll(
+				`[data-workspace-window-tab-context-menu="${chatSurface.id}"]`,
+			),
+		).toHaveLength(1);
+	});
+
+	it('keeps multi-tab trailing title-bar space outside tab context menus', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+
+		await fireEvent.contextMenu(screen.getByRole('tablist'));
+		expect(screen.queryByRole('menu')).toBeNull();
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		expect(await screen.findByRole('menu')).toBeTruthy();
+	});
+
+	it('keeps a sole terminal launcher outside tab context menus', async () => {
+		runtime.surfaces = { [terminalLauncherSurface.id]: terminalLauncherSurface };
+		renderTitleBar(workspaceWindow([terminalLauncherSurface.id]));
+
+		await fireEvent.contextMenu(screen.getByRole('tablist'));
+		await fireEvent.contextMenu(screen.getByRole('tab'));
+
+		expect(screen.queryByRole('menu')).toBeNull();
+	});
+
+	it('opens the sole tab menu from a touch long-press on trailing title-bar space', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id]));
+		const tablist = screen.getByRole('tablist');
+
+		await fireEvent.pointerDown(tablist, {
+			pointerType: 'touch',
+			pointerId: 1,
+			isPrimary: true,
+			clientX: 300,
+			clientY: 12,
+		});
+		const closeItem = await screen.findByRole(
+			'menuitem',
+			{ name: m.workspace_close_tab() },
+			{ timeout: 1_000 },
+		);
+		await fireEvent.pointerUp(tablist, {
+			pointerType: 'touch',
+			pointerId: 1,
+			isPrimary: true,
+		});
+
+		expect(closeItem).toBeTruthy();
 	});
 
 	it('activates the surface from inactive window chrome without hijacking controls', async () => {
