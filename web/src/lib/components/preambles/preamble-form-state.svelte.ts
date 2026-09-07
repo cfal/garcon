@@ -1,11 +1,18 @@
 import {
 	PREAMBLE_CONTENT_MAX_LENGTH,
+	PREAMBLE_AGENT_FILTER_MAX_COUNT,
 	PREAMBLE_FILE_CONTEXT_SEPARATOR,
 	PREAMBLE_PATH_RULE_MAX_COUNT,
+	PREAMBLE_TAG_FILTER_MAX_COUNT,
+	PREAMBLE_TAG_MAX_CODE_POINTS,
 	PREAMBLE_TITLE_MAX_CODE_POINTS,
 	type Preamble,
 	type PreambleDefinitionInput,
+	type PreambleScope,
+	type PreambleTagMatchMode,
 } from '$shared/preambles';
+import type { AgentId } from '$shared/agents';
+import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -21,6 +28,9 @@ export class PreambleFormState {
 	content = $state('');
 	scopeType = $state<'global' | 'project-paths'>('global');
 	pathRules = $state<PreamblePathRuleDraft[]>([]);
+	agentIds = $state<AgentId[]>([]);
+	tagFilterMode = $state<PreambleTagMatchMode>('any');
+	tagFilterTags = $state<string[]>([]);
 	saving = $state(false);
 	error = $state<string | null>(null);
 
@@ -46,9 +56,11 @@ export class PreambleFormState {
 	}
 
 	get scopeError(): string | null {
-		return this.scopeGroupError
-			?? this.pathRules.map((rule) => this.pathRuleError(rule.key)).find(Boolean)
-			?? null;
+		return (
+			this.scopeGroupError ??
+			this.pathRules.map((rule) => this.pathRuleError(rule.key)).find(Boolean) ??
+			null
+		);
 	}
 
 	get scopeGroupError(): string | null {
@@ -72,7 +84,8 @@ export class PreambleFormState {
 		const rule = this.pathRules.find((candidate) => candidate.key === key);
 		const projectPath = rule?.projectPath.trim() ?? '';
 		if (!projectPath) return m.preambles_path_required();
-		return this.pathRules.filter((candidate) => candidate.projectPath.trim() === projectPath).length > 1
+		return this.pathRules.filter((candidate) => candidate.projectPath.trim() === projectPath)
+			.length > 1
 			? m.preambles_duplicate_path()
 			: null;
 	}
@@ -82,9 +95,13 @@ export class PreambleFormState {
 		this.title = preamble?.title ?? '';
 		this.content = preamble?.content ?? '';
 		this.scopeType = preamble?.scope.type ?? 'global';
-		this.pathRules = preamble?.scope.type === 'project-paths'
-			? preamble.scope.rules.map((rule) => ({ key: createRandomId(), ...rule }))
-			: [];
+		this.pathRules =
+			preamble?.scope.type === 'project-paths'
+				? preamble.scope.rules.map((rule) => ({ key: createRandomId(), ...rule }))
+				: [];
+		this.agentIds = preamble ? [...preamble.agentIds] : [];
+		this.tagFilterMode = preamble?.tagFilter.mode ?? 'any';
+		this.tagFilterTags = preamble ? [...preamble.tagFilter.tags] : [];
 		this.saving = false;
 		this.error = null;
 	}
@@ -105,21 +122,52 @@ export class PreambleFormState {
 		if (rule) rule.projectPath = projectPath;
 	}
 
+	toggleAgent(agentId: AgentId): boolean {
+		if (this.agentIds.includes(agentId)) {
+			this.agentIds = this.agentIds.filter((candidate) => candidate !== agentId);
+			return true;
+		}
+		if (this.agentIds.length >= PREAMBLE_AGENT_FILTER_MAX_COUNT) return false;
+		this.agentIds = [...this.agentIds, agentId];
+		return true;
+	}
+
+	addTag(raw: string): boolean {
+		const tag = normalizeTagSlug(raw);
+		const invalid =
+			!tag ||
+			Array.from(tag).length > PREAMBLE_TAG_MAX_CODE_POINTS ||
+			this.tagFilterTags.includes(tag) ||
+			this.tagFilterTags.length >= PREAMBLE_TAG_FILTER_MAX_COUNT;
+		if (invalid) return false;
+		this.tagFilterTags = [...this.tagFilterTags, tag];
+		return true;
+	}
+
+	removeTag(tag: string): void {
+		this.tagFilterTags = this.tagFilterTags.filter((candidate) => candidate !== tag);
+	}
+
 	buildDefinition(): PreambleDefinitionInput | null {
 		if (!this.canSave) return null;
 		return {
 			enabled: this.enabled,
 			title: this.title.trim(),
 			content: this.content,
-			scope: this.scopeType === 'global'
-				? { type: 'global' }
-				: {
-						type: 'project-paths',
-						rules: this.pathRules.map((rule) => ({
-							projectPath: rule.projectPath.trim(),
-							includeNested: rule.includeNested,
-						})),
-					},
+			agentIds: [...this.agentIds],
+			tagFilter: { mode: this.tagFilterMode, tags: [...this.tagFilterTags] },
+			scope: this.#buildScope(),
+		};
+	}
+
+	#buildScope(): PreambleScope {
+		if (this.scopeType === 'global') return { type: 'global' };
+		return {
+			type: 'project-paths',
+			rules: this.pathRules.map((rule) => ({
+				projectPath: rule.projectPath.trim(),
+				includeNested: rule.includeNested,
+			})),
 		};
 	}
 }

@@ -7,7 +7,7 @@ import {
   PREAMBLES_FILE_MAX_BYTES,
   normalizePreamble,
   type Preamble,
-  type PreambleDefinitionInput,
+  type PreambleDefinition,
   type PreamblesSnapshot,
 } from '../../common/preambles.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
@@ -256,7 +256,7 @@ export class PreambleStore {
 
   async update(
     id: string,
-    definition: PreambleDefinitionInput,
+    definition: PreambleDefinition,
     updatedAt: string,
     expectedRevision: number,
   ): Promise<void> {

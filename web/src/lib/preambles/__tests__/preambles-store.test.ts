@@ -10,6 +10,8 @@ function preamble(id: string): Preamble {
 		title: `Preamble ${id}`,
 		content: `Content ${id}`,
 		scope: { type: 'global' },
+		agentIds: [],
+		tagFilter: { mode: 'any', tags: [] },
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
 	};
@@ -41,9 +43,10 @@ describe('PreamblesStore', () => {
 	it('optimistically reorders and applies the server revision', async () => {
 		let resolveMutation!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
 		const reorder = vi.fn(
-			() => new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-				resolveMutation = resolve;
-			}),
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveMutation = resolve;
+				}),
 		);
 		const store = new PreamblesStore({ reorder });
 		store.applySnapshot(snapshot(2, ['a', 'b']));
@@ -79,12 +82,18 @@ describe('PreamblesStore', () => {
 		const store = new PreamblesStore({ get, update });
 		store.applySnapshot(snapshot(3, ['a']));
 
-		await expect(store.update('a', {
-			enabled: true,
-			title: 'Edited preamble a',
-			content: 'Edited content a',
-			scope: { type: 'global' },
-		}, 3)).rejects.toBe(conflict);
+		await expect(
+			store.update(
+				'a',
+				{
+					enabled: true,
+					title: 'Edited preamble a',
+					content: 'Edited content a',
+					scope: { type: 'global' },
+				},
+				3,
+			),
+		).rejects.toBe(conflict);
 
 		expect(update).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 3 }));
 		expect(get).toHaveBeenCalledOnce();
@@ -94,20 +103,22 @@ describe('PreamblesStore', () => {
 	it('performs a post-conflict read after joining an in-flight refresh', async () => {
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
 		const resolvers: Array<(value: PreamblesSnapshot) => void> = [];
-		const get = vi.fn(
-			() => new Promise<PreamblesSnapshot>((resolve) => resolvers.push(resolve)),
-		);
+		const get = vi.fn(() => new Promise<PreamblesSnapshot>((resolve) => resolvers.push(resolve)));
 		const update = vi.fn().mockRejectedValue(conflict);
 		const store = new PreamblesStore({ get, update });
 		store.applySnapshot(snapshot(3, ['a']));
 		const refreshing = store.refresh();
 
-		const updating = store.update('a', {
-			enabled: true,
-			title: 'Edited preamble a',
-			content: 'Edited content a',
-			scope: { type: 'global' },
-		}, 3);
+		const updating = store.update(
+			'a',
+			{
+				enabled: true,
+				title: 'Edited preamble a',
+				content: 'Edited content a',
+				scope: { type: 'global' },
+			},
+			3,
+		);
 		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
 		resolvers[0]!(snapshot(3, ['a']));
 		await refreshing;
@@ -122,22 +133,30 @@ describe('PreamblesStore', () => {
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
 		let rejectRefresh!: (error: Error) => void;
 		const refreshFailure = new Error('refresh unavailable');
-		const get = vi.fn()
-			.mockImplementationOnce(() => new Promise<PreamblesSnapshot>((_resolve, reject) => {
-				rejectRefresh = reject;
-			}))
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<PreamblesSnapshot>((_resolve, reject) => {
+						rejectRefresh = reject;
+					}),
+			)
 			.mockResolvedValueOnce(snapshot(4, ['a', 'b']));
 		const update = vi.fn().mockRejectedValue(conflict);
 		const store = new PreamblesStore({ get, update });
 		store.applySnapshot(snapshot(3, ['a']));
 		const refreshing = store.refresh().catch((error) => error);
 
-		const updating = store.update('a', {
-			enabled: true,
-			title: 'Edited preamble a',
-			content: 'Edited content a',
-			scope: { type: 'global' },
-		}, 3);
+		const updating = store.update(
+			'a',
+			{
+				enabled: true,
+				title: 'Edited preamble a',
+				content: 'Edited content a',
+				scope: { type: 'global' },
+			},
+			3,
+		);
 		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
 		rejectRefresh(refreshFailure);
 
@@ -150,22 +169,30 @@ describe('PreamblesStore', () => {
 	it('retries when a conflict joins a failing refresh-loop load', async () => {
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
 		let rejectRefresh!: (error: Error) => void;
-		const get = vi.fn()
-			.mockImplementationOnce(() => new Promise<PreamblesSnapshot>((_resolve, reject) => {
-				rejectRefresh = reject;
-			}))
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<PreamblesSnapshot>((_resolve, reject) => {
+						rejectRefresh = reject;
+					}),
+			)
 			.mockResolvedValueOnce(snapshot(4, ['a', 'b']));
 		const update = vi.fn().mockRejectedValue(conflict);
 		const store = new PreamblesStore({ get, update });
 		store.applySnapshot(snapshot(3, ['a']));
 		const refreshing = store.refreshIfLoaded();
 
-		const updating = store.update('a', {
-			enabled: true,
-			title: 'Edited preamble a',
-			content: 'Edited content a',
-			scope: { type: 'global' },
-		}, 3);
+		const updating = store.update(
+			'a',
+			{
+				enabled: true,
+				title: 'Edited preamble a',
+				content: 'Edited content a',
+				scope: { type: 'global' },
+			},
+			3,
+		);
 		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
 		rejectRefresh(new Error('refresh unavailable'));
 
@@ -177,9 +204,7 @@ describe('PreamblesStore', () => {
 
 	it('refreshes again when invalidated during an in-flight load', async () => {
 		const resolvers: Array<(value: PreamblesSnapshot) => void> = [];
-		const get = vi.fn(
-			() => new Promise<PreamblesSnapshot>((resolve) => resolvers.push(resolve)),
-		);
+		const get = vi.fn(() => new Promise<PreamblesSnapshot>((resolve) => resolvers.push(resolve)));
 		const store = new PreamblesStore({ get });
 		store.applySnapshot(snapshot(1, ['a']));
 

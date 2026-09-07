@@ -1,10 +1,15 @@
 import { CHAT_ID_TEMPLATE_TOKEN, CHAT_ID_TEMPLATE_VARIABLE, expandTemplate } from './template-tokens.js';
+import { isAgentId, type AgentId } from './agents.js';
+import { normalizeTagSlug } from './tags.js';
 
 export const PREAMBLE_MAX_COUNT = 100;
 export const PREAMBLE_TITLE_MAX_CODE_POINTS = 120;
 export const PREAMBLE_CONTENT_MAX_LENGTH = 32_000;
 export const PREAMBLE_COMBINED_MAX_LENGTH = 64_000;
 export const PREAMBLE_PATH_RULE_MAX_COUNT = 32;
+export const PREAMBLE_AGENT_FILTER_MAX_COUNT = 32;
+export const PREAMBLE_TAG_FILTER_MAX_COUNT = 32;
+export const PREAMBLE_TAG_MAX_CODE_POINTS = 64;
 export const PREAMBLE_FILE_CONTEXT_SEPARATOR = '\n\nReferenced file contents from @file mentions:\n\n';
 export const PREAMBLE_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
 // Lifetime bounds cover active plus retired IDs; tombstones are never pruned.
@@ -107,12 +112,24 @@ export type PreambleScope =
       readonly rules: readonly PreambleProjectPathRule[];
     };
 
-export interface Preamble {
-  readonly id: string;
+export type PreambleTagMatchMode = 'any' | 'all';
+
+export interface PreambleTagFilter {
+  readonly mode: PreambleTagMatchMode;
+  readonly tags: readonly string[];
+}
+
+export interface PreambleDefinition {
   readonly enabled: boolean;
   readonly title: string;
   readonly content: string;
   readonly scope: PreambleScope;
+  readonly agentIds: readonly AgentId[];
+  readonly tagFilter: PreambleTagFilter;
+}
+
+export interface Preamble extends PreambleDefinition {
+  readonly id: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -122,6 +139,8 @@ export interface PreambleDefinitionInput {
   readonly title: string;
   readonly content: string;
   readonly scope: PreambleScope;
+  readonly agentIds?: readonly AgentId[];
+  readonly tagFilter?: PreambleTagFilter;
 }
 
 export interface PreamblesSnapshot {
@@ -370,11 +389,60 @@ export function normalizePreambleScope(value: unknown): PreambleScope | null {
   return { type: 'project-paths', rules };
 }
 
-export function normalizePreambleDefinitionInput(value: unknown): PreambleDefinitionInput | null {
+function normalizePreambleAgentIds(value: unknown): AgentId[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > PREAMBLE_AGENT_FILTER_MAX_COUNT) return null;
+  const agentIds: AgentId[] = [];
+  const seen = new Set<AgentId>();
+  for (const agentId of value) {
+    if (!isAgentId(agentId) || seen.has(agentId)) return null;
+    seen.add(agentId);
+    agentIds.push(agentId);
+  }
+  return agentIds;
+}
+
+function normalizePreambleTagFilter(value: unknown): PreambleTagFilter | null {
+  if (value === undefined) return { mode: 'any', tags: [] };
   const raw = asRecord(value);
-  if (!raw || !hasOnlyKeys(raw, ['enabled', 'title', 'content', 'scope'])) return null;
+  if (
+    !raw
+    || !hasOnlyKeys(raw, ['mode', 'tags'])
+    || (raw.mode !== 'any' && raw.mode !== 'all')
+    || !Array.isArray(raw.tags)
+    || raw.tags.length > PREAMBLE_TAG_FILTER_MAX_COUNT
+  ) return null;
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const valueTag of raw.tags) {
+    if (typeof valueTag !== 'string') return null;
+    const tag = normalizeTagSlug(valueTag);
+    if (
+      !tag
+      || tag !== valueTag
+      || Array.from(tag).length > PREAMBLE_TAG_MAX_CODE_POINTS
+      || seen.has(tag)
+    ) return null;
+    seen.add(tag);
+    tags.push(tag);
+  }
+  return { mode: raw.mode, tags };
+}
+
+export function normalizePreambleDefinitionInput(value: unknown): PreambleDefinition | null {
+  const raw = asRecord(value);
+  if (!raw || !hasOnlyKeys(raw, [
+    'enabled',
+    'title',
+    'content',
+    'scope',
+    'agentIds',
+    'tagFilter',
+  ])) return null;
   const title = normalizePreambleTitle(raw.title);
   const scope = normalizePreambleScope(raw.scope);
+  const agentIds = normalizePreambleAgentIds(raw.agentIds);
+  const tagFilter = normalizePreambleTagFilter(raw.tagFilter);
   if (
     typeof raw.enabled !== 'boolean'
     || !title
@@ -383,8 +451,17 @@ export function normalizePreambleDefinitionInput(value: unknown): PreambleDefini
     || raw.content.length > PREAMBLE_CONTENT_MAX_LENGTH
     || raw.content.includes(PREAMBLE_FILE_CONTEXT_SEPARATOR)
     || !scope
+    || !agentIds
+    || !tagFilter
   ) return null;
-  return { enabled: raw.enabled, title, content: raw.content, scope };
+  return {
+    enabled: raw.enabled,
+    title,
+    content: raw.content,
+    scope,
+    agentIds,
+    tagFilter,
+  };
 }
 
 export function normalizePreamble(value: unknown): Preamble | null {
@@ -395,6 +472,8 @@ export function normalizePreamble(value: unknown): Preamble | null {
     'title',
     'content',
     'scope',
+    'agentIds',
+    'tagFilter',
     'createdAt',
     'updatedAt',
   ])) {
@@ -406,6 +485,8 @@ export function normalizePreamble(value: unknown): Preamble | null {
     title: raw.title,
     content: raw.content,
     scope: raw.scope,
+    agentIds: raw.agentIds,
+    tagFilter: raw.tagFilter,
   });
   const createdAt = timestamp(raw.createdAt);
   const updatedAt = timestamp(raw.updatedAt);

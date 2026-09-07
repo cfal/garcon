@@ -12,6 +12,8 @@ function globalPreamble(id: string, title: string, content: string): Preamble {
 		title,
 		content,
 		scope: { type: 'global' },
+		agentIds: [],
+		tagFilter: { mode: 'any', tags: [] },
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
 	};
@@ -28,6 +30,53 @@ function projectPreamble(id: string, title: string, content: string): Preamble {
 }
 
 describe('PreamblesSection', () => {
+	it('creates automatic agent and all-tag filters from the catalog editor', async () => {
+		const created = globalPreamble('created', 'Filtered conventions', 'Use filtered conventions.');
+		const create = vi.fn().mockResolvedValue({
+			success: true,
+			snapshot: {
+				revision: 1,
+				preambles: [
+					{
+						...created,
+						agentIds: ['codex'],
+						tagFilter: { mode: 'all', tags: ['review-needed'] },
+					},
+				],
+			},
+		});
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 0, preambles: [] },
+			deps: { create },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add preamble' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle Codex' }));
+		await fireEvent.click(screen.getByRole('radio', { name: 'All of these tags' }));
+		const tagInput = screen.getByRole('combobox', { name: 'Add a preamble tag filter' });
+		await fireEvent.input(tagInput, { target: { value: 'Review Needed' } });
+		await fireEvent.keyDown(tagInput, { key: 'Enter' });
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Title' }), {
+			target: { value: 'Filtered conventions' },
+		});
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Preamble text' }), {
+			target: { value: 'Use filtered conventions.' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Save Preamble' }));
+
+		expect(create).toHaveBeenCalledWith({
+			expectedRevision: 0,
+			preamble: {
+				enabled: true,
+				title: 'Filtered conventions',
+				content: 'Use filtered conventions.',
+				scope: { type: 'global' },
+				agentIds: ['codex'],
+				tagFilter: { mode: 'all', tags: ['review-needed'] },
+			},
+		});
+	});
+
 	it('renders singular and plural project path counts', () => {
 		const single = projectPreamble('single-path', 'Single path', 'Single path body.');
 		const multiple: Preamble = {
@@ -65,7 +114,8 @@ describe('PreamblesSection', () => {
 		expect(screen.queryByText('Global conventions')).toBeNull();
 		expect(screen.getByText('Project conventions')).toBeTruthy();
 		expect(
-			(screen.getByRole('button', { name: 'Move Project conventions up' }) as HTMLButtonElement).disabled,
+			(screen.getByRole('button', { name: 'Move Project conventions up' }) as HTMLButtonElement)
+				.disabled,
 		).toBe(true);
 
 		await fireEvent.input(filter, { target: { value: '/WORKSPACE/PROJECT' } });
@@ -96,6 +146,8 @@ describe('PreamblesSection', () => {
 				title: 'Global conventions',
 				content: 'Use the shared defaults.',
 				scope: { type: 'global' },
+				agentIds: [],
+				tagFilter: { mode: 'any', tags: [] },
 			},
 		});
 		expect(await screen.findByText('Disabled')).toBeTruthy();
@@ -107,7 +159,9 @@ describe('PreamblesSection', () => {
 		let store!: PreamblesStore;
 		render(PreamblesSectionTestHost, {
 			snapshot: { revision: 1, preambles: [original] },
-			onStore: (value: PreamblesStore) => { store = value; },
+			onStore: (value: PreamblesStore) => {
+				store = value;
+			},
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
@@ -133,9 +187,7 @@ describe('PreamblesSection', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
 
-		const help = await screen.findByText(
-			'Use {{chat_id}} for the chat receiving this preamble.',
-		);
+		const help = await screen.findByText('Use {{chat_id}} for the chat receiving this preamble.');
 		const composer = screen.getByRole('textbox', { name: 'Preamble text' });
 		expect(composer.getAttribute('aria-describedby')).toContain(help.id);
 	});
@@ -156,15 +208,17 @@ describe('PreamblesSection', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Save Preamble' }));
 
-		await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({
-			expectedRevision: 1,
-		})));
+		await waitFor(() =>
+			expect(update).toHaveBeenCalledWith(
+				expect.objectContaining({
+					expectedRevision: 1,
+				}),
+			),
+		);
 		expect(get).toHaveBeenCalledOnce();
 		expect(await screen.findByText(/changed while the editor was open/i)).toBeTruthy();
 		const saveButton = await screen.findByRole('button', { name: 'Save Preamble' });
-		expect(
-			(saveButton as HTMLButtonElement).disabled,
-		).toBe(true);
+		expect((saveButton as HTMLButtonElement).disabled).toBe(true);
 		await fireEvent.click(saveButton);
 		expect(update).toHaveBeenCalledOnce();
 	});
@@ -183,8 +237,9 @@ describe('PreamblesSection', () => {
 		await fireEvent.click(await screen.findByRole('button', { name: 'Save Preamble' }));
 
 		expect(await screen.findByText(/changed while the editor was open/i)).toBeTruthy();
-		expect((screen.getByRole('button', { name: 'Save Preamble' }) as HTMLButtonElement).disabled)
-			.toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Save Preamble' }) as HTMLButtonElement).disabled,
+		).toBe(true);
 		await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Preamble text' }), {
 			key: 'Enter',
 			ctrlKey: true,
@@ -193,14 +248,16 @@ describe('PreamblesSection', () => {
 	});
 
 	it('disables catalog entry points while a row mutation is pending', async () => {
-		let resolveReorder!: (value: {
-			success: true;
-			snapshot: PreamblesSnapshot;
-		}) => void;
-		const reorder = vi.fn(() => new Promise<{
-			success: true;
-			snapshot: PreamblesSnapshot;
-		}>((resolve) => { resolveReorder = resolve; }));
+		let resolveReorder!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		const reorder = vi.fn(
+			() =>
+				new Promise<{
+					success: true;
+					snapshot: PreamblesSnapshot;
+				}>((resolve) => {
+					resolveReorder = resolve;
+				}),
+		);
 		const first = globalPreamble('first', 'First conventions', 'First body.');
 		const second = globalPreamble('second', 'Second conventions', 'Second body.');
 		render(PreamblesSectionTestHost, {
@@ -210,18 +267,21 @@ describe('PreamblesSection', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Move Second conventions up' }));
 		await waitFor(() => expect(reorder).toHaveBeenCalledOnce());
-		expect((screen.getByRole('button', { name: 'Add preamble' }) as HTMLButtonElement).disabled)
-			.toBe(true);
-		expect((screen.getByRole('button', { name: 'Refresh preambles' }) as HTMLButtonElement).disabled)
-			.toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Add preamble' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Refresh preambles' }) as HTMLButtonElement).disabled,
+		).toBe(true);
 
 		resolveReorder({
 			success: true,
 			snapshot: { revision: 2, preambles: [second, first] },
 		});
 		await waitFor(() => {
-			expect((screen.getByRole('button', { name: 'Add preamble' }) as HTMLButtonElement).disabled)
-				.toBe(false);
+			expect(
+				(screen.getByRole('button', { name: 'Add preamble' }) as HTMLButtonElement).disabled,
+			).toBe(false);
 		});
 	});
 
@@ -262,9 +322,9 @@ describe('PreamblesSection', () => {
 		await fireEvent.input(pathInputs[1]!, { target: { value: '/workspace/duplicate' } });
 		await fireEvent.input(pathInputs[2]!, { target: { value: '/workspace/duplicate' } });
 
-		const descriptions = pathInputs.map((input) => document.getElementById(
-			input.getAttribute('aria-describedby') ?? '',
-		)?.textContent);
+		const descriptions = pathInputs.map(
+			(input) => document.getElementById(input.getAttribute('aria-describedby') ?? '')?.textContent,
+		);
 		expect(descriptions[0]).toContain('at least one');
 		expect(descriptions[1]).toContain('unique');
 		expect(descriptions[2]).toContain('unique');

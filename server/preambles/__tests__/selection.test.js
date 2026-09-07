@@ -22,6 +22,8 @@ function preamble(id, title, content, overrides = {}) {
     title,
     content,
     scope: { type: 'global' },
+    agentIds: [],
+    tagFilter: { mode: 'any', tags: [] },
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -99,9 +101,50 @@ describe('resolvePreambleSelection', () => {
           scope: { type: 'project-paths', rules: [{ projectPath: '/repo', includeNested: true }] },
         }),
       ),
-      '/repo',
+      { canonicalProjectPath: '/repo', agentId: 'claude', tags: [] },
     );
     expect(ids).toEqual([ID_A, ID_MISSING]);
+  });
+
+  it('uses agent and any/all tag filters only for automatic new-chat defaults', () => {
+    const snapshot = catalog(
+      preamble(ID_A, 'All agents', 'first'),
+      preamble(ID_B, 'Codex backend', 'second', {
+        agentIds: ['codex'],
+        tagFilter: { mode: 'any', tags: ['backend', 'frontend'] },
+      }),
+      preamble(ID_MISSING, 'Claude reviewed backend', 'third', {
+        agentIds: ['claude'],
+        tagFilter: { mode: 'all', tags: ['backend', 'reviewed'] },
+      }),
+    );
+    expect(defaultOrderedPreambleIds(snapshot, {
+      canonicalProjectPath: '/repo',
+      agentId: 'codex',
+      tags: ['backend'],
+    })).toEqual([ID_A, ID_B]);
+    expect(defaultOrderedPreambleIds(snapshot, {
+      canonicalProjectPath: '/repo',
+      agentId: 'claude',
+      tags: ['backend', 'reviewed'],
+    })).toEqual([ID_A, ID_MISSING]);
+    expect(defaultOrderedPreambleIds(snapshot, {
+      canonicalProjectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
+    })).toEqual([ID_A]);
+
+    const explicit = resolveNewChatPreambleSelection({
+      catalog: snapshot,
+      canonicalProjectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
+      chatId: '1783725900000200',
+      orderedPreambleIds: [ID_B],
+    });
+    expect(explicit.orderedPreambleIds).toEqual([ID_B]);
+    expect(resolvePreambleSelection(explicit, snapshot, '/repo').eligible.map((entry) => entry.id))
+      .toEqual([ID_B]);
   });
 
   it('resolves an omitted creation selection to defaults and stores explicit lists exactly', () => {
@@ -109,17 +152,23 @@ describe('resolvePreambleSelection', () => {
     expect(resolveNewChatPreambleSelection({
       catalog: snapshot,
       canonicalProjectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
       chatId: '1783725900000200',
     })).toEqual({ revision: 0, orderedPreambleIds: [ID_A] });
     expect(resolveNewChatPreambleSelection({
       catalog: snapshot,
       canonicalProjectPath: '/repo',
+      agentId: 'codex',
+      tags: ['manual'],
       chatId: '1783725900000200',
       orderedPreambleIds: [ID_MISSING],
     })).toEqual({ revision: 0, orderedPreambleIds: [ID_MISSING] });
     expect(resolveNewChatPreambleSelection({
       catalog: snapshot,
       canonicalProjectPath: '/repo',
+      agentId: 'codex',
+      tags: ['manual'],
       chatId: '1783725900000200',
       orderedPreambleIds: [],
     })).toEqual({ revision: 0, orderedPreambleIds: [] });
@@ -132,6 +181,8 @@ describe('resolvePreambleSelection', () => {
         preamble(ID_B, 'Head', 'Synthetic content\n\n'),
       ),
       canonicalProjectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
       chatId: '1783725900000200',
       orderedPreambleIds: [ID_A, ID_B],
     })).toThrowError(expect.objectContaining({

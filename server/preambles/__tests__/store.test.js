@@ -26,6 +26,8 @@ function preamble(id, overrides = {}) {
     title: `Preamble ${id}`,
     content: `Body ${id}`,
     scope: { type: 'global' },
+    agentIds: [],
+    tagFilter: { mode: 'any', tags: [] },
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -51,7 +53,10 @@ describe('PreambleStore', () => {
     await store.init();
 
     expect(store.snapshot()).toEqual({ revision: 0, preambles: [] });
-    await store.create(preamble(ID_A), 0);
+    await store.create(preamble(ID_A, {
+      agentIds: ['codex'],
+      tagFilter: { mode: 'all', tags: ['backend', 'review-needed'] },
+    }), 0);
     await store.create(preamble(ID_B), 1);
     await store.reorder([ID_B, ID_A], 2);
 
@@ -112,6 +117,8 @@ describe('PreambleStore', () => {
       title: 'Updated',
       content: 'Updated body',
       scope: { type: 'global' },
+      agentIds: [],
+      tagFilter: { mode: 'any', tags: [] },
     }, AT, 1);
     expect(store.snapshot().preambles[0]).toMatchObject({
       id: ID_A,

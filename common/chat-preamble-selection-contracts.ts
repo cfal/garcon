@@ -6,6 +6,8 @@ import {
   requiredCommandCorrelationId,
 } from './command-request-validation.js';
 import { InvalidChatIdError, parseChatId } from './chat-id.js';
+import { isAgentId, type AgentId } from './agents.js';
+import { normalizeTags } from './tags.js';
 import {
   isPreambleId,
   normalizeChatPreambleSelection,
@@ -55,6 +57,8 @@ export interface UpdateChatPreambleSelectionResponse {
 
 export interface PreambleSelectionPreviewRequest {
   readonly projectPath: string;
+  readonly agentId: AgentId;
+  readonly tags: readonly string[];
   readonly orderedPreambleIds?: readonly PreambleId[];
 }
 
@@ -131,18 +135,37 @@ export function parseUpdateChatPreambleSelectionRequest(
 export function parsePreambleSelectionPreviewRequest(
   value: unknown,
 ): PreambleSelectionPreviewRequest {
-  const body = strictRecord(value, ['projectPath', 'orderedPreambleIds']);
+  const body = strictRecord(value, ['projectPath', 'agentId', 'tags', 'orderedPreambleIds']);
   const projectPath = body.projectPath;
   if (typeof projectPath !== 'string' || projectPath.trim().length === 0) {
     throw new CommandRequestValidationError('projectPath is required');
   }
+  if (!isAgentId(body.agentId)) {
+    throw new CommandRequestValidationError('agentId is invalid');
+  }
+  const rawTags = body.tags;
+  if (!Array.isArray(rawTags) || !rawTags.every((tag) => typeof tag === 'string')) {
+    throw new CommandRequestValidationError('tags must be an array of strings');
+  }
+  const tags = normalizeTags(rawTags);
+  if (
+    tags.length !== rawTags.length
+    || tags.some((tag, index) => tag !== rawTags[index])
+  ) {
+    throw new CommandRequestValidationError('tags must be normalized, unique, and sorted');
+  }
   if (body.orderedPreambleIds === undefined) {
-    return { projectPath };
+    return { projectPath, agentId: body.agentId, tags };
   }
   if (!Array.isArray(body.orderedPreambleIds)) {
     throw new CommandRequestValidationError('orderedPreambleIds must be an array');
   }
-  return { projectPath, orderedPreambleIds: requiredOrderedPreambleIds(body.orderedPreambleIds) };
+  return {
+    projectPath,
+    agentId: body.agentId,
+    tags,
+    orderedPreambleIds: requiredOrderedPreambleIds(body.orderedPreambleIds),
+  };
 }
 
 function projectionPartitionsSelection(

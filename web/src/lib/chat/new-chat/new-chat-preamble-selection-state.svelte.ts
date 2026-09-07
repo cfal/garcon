@@ -3,6 +3,8 @@ import {
 	type PreambleSelectionPreviewResponse,
 } from '$lib/api/chat-preambles.js';
 import type { PathValidationStatus } from '$lib/chat/new-chat/new-chat-submit.js';
+import { normalizeTags } from '$lib/utils/tags.js';
+import type { AgentId } from '$shared/agents';
 import type { PreambleId, PreambleSelectionProjection } from '$shared/preambles';
 
 export type NewChatPreambleChoice =
@@ -12,6 +14,8 @@ export type NewChatPreambleChoice =
 interface NewChatPreambleSelectionStateOptions {
 	readonly trimmedPath: string;
 	readonly validationStatus: PathValidationStatus;
+	readonly agentId: AgentId;
+	readonly chatTags: readonly string[];
 }
 
 export class NewChatPreambleSelectionState {
@@ -22,7 +26,7 @@ export class NewChatPreambleSelectionState {
 
 	#previewVersion = 0;
 	#choiceVersion = 0;
-	#previewSourcePath = '';
+	#previewSourceContext = '';
 
 	constructor(private readonly options: NewChatPreambleSelectionStateOptions) {}
 
@@ -59,14 +63,23 @@ export class NewChatPreambleSelectionState {
 	}
 
 	pathValidationStarted(): void {
-		const projectPath = this.options.trimmedPath;
+		const context = this.#previewContext();
 		this.#previewVersion += 1;
 		if (
-			this.options.validationStatus === 'invalid'
-			|| (this.#previewSourcePath !== '' && projectPath !== this.#previewSourcePath)
+			this.options.validationStatus === 'invalid' ||
+			(this.#previewSourceContext !== '' && context.key !== this.#previewSourceContext)
 		) {
 			this.#clearPreview();
 		}
+	}
+
+	automaticFiltersChanged(): void {
+		if (this.choice.mode === 'explicit') return;
+		this.#refreshForCurrentContext();
+	}
+
+	catalogChanged(): void {
+		this.#refreshForCurrentContext();
 	}
 
 	invalidatePreview(): void {
@@ -75,7 +88,8 @@ export class NewChatPreambleSelectionState {
 	}
 
 	async refreshPreview(): Promise<void> {
-		const projectPath = this.options.trimmedPath;
+		const context = this.#previewContext();
+		const projectPath = context.projectPath;
 		if (!projectPath || this.options.validationStatus === 'invalid') {
 			this.invalidatePreview();
 			return;
@@ -88,14 +102,16 @@ export class NewChatPreambleSelectionState {
 		try {
 			const preview: PreambleSelectionPreviewResponse = await preambleSelectionPreview({
 				projectPath,
+				agentId: context.agentId,
+				tags: context.tags,
 				...this.creationFields,
 			});
-			if (!this.#isCurrentPreview(version, choiceVersion, projectPath)) return;
+			if (!this.#isCurrentPreview(version, choiceVersion, context.key)) return;
 			this.preview = preview.projection;
 			this.canonicalProjectPath = preview.canonicalProjectPath;
-			this.#previewSourcePath = projectPath;
+			this.#previewSourceContext = context.key;
 		} catch {
-			if (!this.#isCurrentPreview(version, choiceVersion, projectPath)) return;
+			if (!this.#isCurrentPreview(version, choiceVersion, context.key)) return;
 			this.#clearPreview();
 		} finally {
 			if (version === this.#previewVersion) this.previewLoading = false;
@@ -104,21 +120,48 @@ export class NewChatPreambleSelectionState {
 
 	reset(): void {
 		this.choice = { mode: 'defaults' };
-		this.#clearPreview();
-		this.#previewVersion += 1;
 		this.#choiceVersion += 1;
+		this.#refreshForCurrentContext();
 	}
 
 	#clearPreview(): void {
 		this.preview = null;
 		this.previewLoading = false;
 		this.canonicalProjectPath = '';
-		this.#previewSourcePath = '';
+		this.#previewSourceContext = '';
 	}
 
-	#isCurrentPreview(version: number, choiceVersion: number, projectPath: string): boolean {
-		return version === this.#previewVersion
-			&& choiceVersion === this.#choiceVersion
-			&& projectPath === this.options.trimmedPath;
+	#refreshForCurrentContext(): void {
+		this.invalidatePreview();
+		if (this.options.validationStatus === 'valid') void this.refreshPreview();
+	}
+
+	#previewContext(): {
+		readonly projectPath: string;
+		readonly agentId: AgentId;
+		readonly tags: readonly string[];
+		readonly key: string;
+	} {
+		const projectPath = this.options.trimmedPath;
+		const agentId = this.options.agentId;
+		const tags = normalizeTags(this.options.chatTags);
+		const key =
+			this.choice.mode === 'defaults'
+				? `${projectPath}\u0000${agentId}\u0000${tags.join('\u0000')}`
+				: `${projectPath}\u0000explicit`;
+		return {
+			projectPath,
+			agentId,
+			tags,
+			key,
+		};
+	}
+
+	#isCurrentPreview(version: number, choiceVersion: number, contextKey: string): boolean {
+		return (
+			version === this.#previewVersion &&
+			choiceVersion === this.#choiceVersion &&
+			contextKey === this.#previewContext().key
+		);
 	}
 }

@@ -7,7 +7,7 @@ import {
   PREAMBLE_MAX_COUNT,
   type CreatePreambleRequest,
   type Preamble,
-  type PreambleDefinitionInput,
+  type PreambleDefinition,
   type PreamblesInvalidationReason,
   type PreamblesSnapshot,
   type RemovePreambleRequest,
@@ -109,7 +109,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     return this.#changed(reason);
   }
 
-  async #definition(value: unknown): Promise<PreambleDefinitionInput> {
+  async #definition(value: unknown): Promise<PreambleDefinition> {
     const definition = normalizePreambleDefinitionInput(value);
     if (!definition) throw this.#validationError();
     if (definition.scope.type === 'global') return definition;

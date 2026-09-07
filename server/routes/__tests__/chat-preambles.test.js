@@ -46,6 +46,8 @@ function routes(selection = {}) {
       title: 'Repository conventions',
       content: 'body',
       scope: { type: 'global' },
+      agentIds: [],
+      tagFilter: { mode: 'any', tags: [] },
       createdAt: '2026-09-03T10:00:00.000Z',
       updatedAt: '2026-09-03T10:00:00.000Z',
     }],
@@ -187,7 +189,7 @@ describe('chat preamble routes', () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ projectPath: '/repo' }),
+        body: JSON.stringify({ projectPath: '/repo', agentId: 'claude', tags: [] }),
       },
     ));
     const body = await response.json();

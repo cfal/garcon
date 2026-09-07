@@ -12,7 +12,11 @@ import {
   type UnavailablePreambleSelectionReference,
 } from '../../common/preambles.js';
 import { DomainError } from '../lib/domain-error.js';
-import { preambleRuleMatches } from './matching.js';
+import {
+  preambleMatchesNewChatDefaults,
+  preambleRuleMatches,
+  type NewChatPreambleContext,
+} from './matching.js';
 
 const CHAT_ID_VALIDATION_SAMPLE = '1'.repeat(CHAT_ID_LENGTH);
 
@@ -66,13 +70,13 @@ export function projectPreambleSelection(
   };
 }
 
-// New-chat defaults: enabled, matching catalog IDs in catalog order.
+// Automatic filters choose creation-time IDs; later selection resolution ignores them.
 export function defaultOrderedPreambleIds(
   catalog: PreamblesSnapshot,
-  canonicalProjectPath: string,
+  context: NewChatPreambleContext,
 ): PreambleId[] {
   return catalog.preambles
-    .filter((preamble) => preamble.enabled && preambleScopeMatches(preamble, canonicalProjectPath))
+    .filter((preamble) => preambleMatchesNewChatDefaults(preamble, context))
     .map((preamble) => preamble.id);
 }
 
@@ -121,13 +125,19 @@ export function isRecoverablePreambleAdmissionError(
 export function resolveNewChatPreambleSelection(input: {
   readonly catalog: PreamblesSnapshot;
   readonly canonicalProjectPath: string;
+  readonly agentId: NewChatPreambleContext['agentId'];
+  readonly tags: readonly string[];
   readonly chatId: string;
   readonly orderedPreambleIds?: readonly PreambleId[];
 }): ChatPreambleSelection {
   if (input.orderedPreambleIds === undefined) {
     return {
       revision: 0,
-      orderedPreambleIds: defaultOrderedPreambleIds(input.catalog, input.canonicalProjectPath),
+      orderedPreambleIds: defaultOrderedPreambleIds(input.catalog, {
+        canonicalProjectPath: input.canonicalProjectPath,
+        agentId: input.agentId,
+        tags: input.tags,
+      }),
     };
   }
   const selection: ChatPreambleSelection = {

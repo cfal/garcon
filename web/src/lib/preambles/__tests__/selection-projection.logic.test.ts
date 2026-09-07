@@ -16,6 +16,8 @@ function preamble(id: PreambleId, overrides: Partial<Preamble> = {}): Preamble {
 		title: `Title ${id}`,
 		content: `Body ${id}`,
 		scope: { type: 'global' },
+		agentIds: [],
+		tagFilter: { mode: 'any', tags: [] },
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
 		...overrides,
@@ -28,10 +30,7 @@ describe('projectDraftSelection', () => {
 			draftIds: [ID_MISSING, ID_A, ID_B],
 			savedProjection: null,
 			catalog: {
-				preambles: [
-					preamble(ID_A),
-					preamble(ID_B, { enabled: false }),
-				],
+				preambles: [preamble(ID_A), preamble(ID_B, { enabled: false })],
 			},
 			canonicalProjectPath: '/repo',
 		});
@@ -138,8 +137,8 @@ describe('candidateUnavailableReason', () => {
 		});
 		expect(candidateUnavailableReason(scoped, '/repo/child')).toBeNull();
 		expect(candidateUnavailableReason(scoped, '/other')).toBe('out-of-scope');
-		expect(
-			candidateUnavailableReason(preamble(ID_B, { enabled: false }), '/repo'),
-		).toBe('disabled');
+		expect(candidateUnavailableReason(preamble(ID_B, { enabled: false }), '/repo')).toBe(
+			'disabled',
+		);
 	});
 });

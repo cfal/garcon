@@ -15,6 +15,8 @@ describe('PreambleFormState', () => {
 			enabled: true,
 			title: 'Repository conventions',
 			content: 'Keep exact whitespace.\n',
+			agentIds: [],
+			tagFilter: { mode: 'any', tags: [] },
 			scope: { type: 'global' },
 		});
 	});
@@ -30,10 +32,38 @@ describe('PreambleFormState', () => {
 			title: 'Disabled preamble',
 			content: 'Disabled content',
 			scope: { type: 'global' },
+			agentIds: [],
+			tagFilter: { mode: 'any', tags: [] },
 			createdAt: '2029-01-01T00:00:00.000Z',
 			updatedAt: '2029-01-01T00:00:00.000Z',
 		});
 		expect(form.enabled).toBe(false);
+	});
+
+	it('round-trips agent and tag filters and normalizes newly entered tags', () => {
+		const form = new PreambleFormState();
+		form.reset({
+			id: 'filtered',
+			enabled: true,
+			title: 'Filtered preamble',
+			content: 'Filtered content',
+			scope: { type: 'global' },
+			agentIds: ['codex', 'unavailable-agent'],
+			tagFilter: { mode: 'all', tags: ['backend', 'review-needed'] },
+			createdAt: '2029-01-01T00:00:00.000Z',
+			updatedAt: '2029-01-01T00:00:00.000Z',
+		});
+
+		expect(form.toggleAgent('codex')).toBe(true);
+		expect(form.addTag(' Release Ready ')).toBe(true);
+		expect(form.addTag('release-ready')).toBe(false);
+		expect(form.buildDefinition()).toMatchObject({
+			agentIds: ['unavailable-agent'],
+			tagFilter: {
+				mode: 'all',
+				tags: ['backend', 'review-needed', 'release-ready'],
+			},
+		});
 	});
 
 	it('preserves independent nested choices across multiple path rules', () => {
@@ -68,8 +98,9 @@ describe('PreambleFormState', () => {
 
 		expect(form.contentError).toContain('reserved');
 		expect(form.scopeError).toContain('unique');
-		expect(form.pathRules.every((rule) => form.pathRuleError(rule.key)?.includes('unique')))
-			.toBe(true);
+		expect(form.pathRules.every((rule) => form.pathRuleError(rule.key)?.includes('unique'))).toBe(
+			true,
+		);
 		expect(form.canSave).toBe(false);
 	});
 
@@ -115,6 +146,8 @@ describe('PreambleFormState', () => {
 					type: 'project-paths',
 					rules: [{ projectPath: '/workspace/project', includeNested: true }],
 				},
+				agentIds: [],
+				tagFilter: { mode: 'any', tags: [] },
 				createdAt: '2029-01-01T00:00:00.000Z',
 				updatedAt: '2029-01-01T00:00:00.000Z',
 			});
