@@ -34,6 +34,10 @@ import {
 	isTranscriptSearchIndexPartial,
 	waitForTranscriptIndexRetry,
 } from '$lib/sidebar/search/transcript-search-request.js';
+import {
+	facetFilteredChats,
+	mergeTranscriptMatches,
+} from '$lib/sidebar/search/transcript-search-merge.js';
 import type {
 	ChatSearchIndexStatus,
 	ChatSearchPage,
@@ -160,7 +164,10 @@ export class SidebarSearchStore {
 		const metadataMatches = isEmptyFilter(this.#parsedQuery)
 			? chats
 			: chats.filter((chat) => matchesChatFilter(chat, this.#parsedQuery));
-		return this.mergeTranscriptMatches(this.activeQuery, metadataMatches);
+		return mergeTranscriptMatches(this.activeQuery, metadataMatches, chats, {
+			query: this.transcriptSearchQuery,
+			results: this.transcriptSearchResults,
+		});
 	});
 	#dialogFilteredChats = $derived.by(() => {
 		const chats = this.deps.getChats();
@@ -169,7 +176,15 @@ export class SidebarSearchStore {
 	});
 	#dialogDisplayChats = $derived.by(() => {
 		const sort = this.deps.getSearchResultSort();
-		const merged = this.mergeTranscriptMatches(this.draftQuery, this.#dialogFilteredChats);
+		const merged = mergeTranscriptMatches(
+			this.draftQuery,
+			this.#dialogFilteredChats,
+			this.deps.getChats(),
+			{
+				query: this.transcriptSearchQuery,
+				results: this.transcriptSearchResults,
+			},
+		);
 		const sorted = sortChatSearchResultsWithCommittedTimeOrder(
 			merged,
 			sort,
@@ -558,7 +573,7 @@ export class SidebarSearchStore {
 			return;
 		}
 
-		const candidateChats = this.facetFilteredChats(spec);
+		const candidateChats = facetFilteredChats(spec, this.deps.getChats());
 		const candidateIds = candidateChats.map((chat) => chat.id);
 		const sort = this.deps.getSearchResultSort();
 		const committedTimeOrder = captureChatSearchTimeOrder(candidateChats, sort);
@@ -691,7 +706,7 @@ export class SidebarSearchStore {
 		const signal = this.transcriptSearchAbort?.signal;
 		const query = this.transcriptSearchQuery;
 		const spec = parseChatSearch(query);
-		const candidateIds = this.facetFilteredChats(spec).map((chat) => chat.id);
+		const candidateIds = facetFilteredChats(spec, this.deps.getChats()).map((chat) => chat.id);
 		this.transcriptSearchPageError = null;
 		this.transcriptSearchLoadingMore = true;
 		this.transcriptSearchOperation = 'append';
@@ -780,7 +795,7 @@ export class SidebarSearchStore {
 		const generationSignal = this.transcriptSearchAbort?.signal;
 		const query = this.transcriptSearchQuery;
 		const spec = parseChatSearch(query);
-		const candidateChats = this.facetFilteredChats(spec);
+		const candidateChats = facetFilteredChats(spec, this.deps.getChats());
 		const candidateIds = candidateChats.map((chat) => chat.id);
 		if (candidateIds.length === 0) return Promise.resolve();
 		const sort = this.deps.getSearchResultSort();
@@ -950,34 +965,6 @@ export class SidebarSearchStore {
 		if (origin === 'search-dialog') {
 			this.resumeSearchDialog();
 		}
-	}
-
-	private facetFilteredChats(spec: ChatFilterSpec): ChatSessionRecord[] {
-		const facetSpec: ChatFilterSpec = { ...spec, textTokens: [] };
-		const chats = this.deps.getChats();
-		if (isEmptyFilter(facetSpec)) return chats;
-		return chats.filter((chat) => matchesChatFilter(chat, facetSpec));
-	}
-
-	private mergeTranscriptMatches(
-		query: string,
-		metadataMatches: ChatSessionRecord[],
-	): ChatSessionRecord[] {
-		if (this.transcriptSearchQuery !== query || this.transcriptSearchResults.length === 0) {
-			return metadataMatches;
-		}
-		const chatsById = new Map(this.deps.getChats().map((chat) => [chat.id, chat]));
-		const candidateIds = new Set(
-			this.facetFilteredChats(parseChatSearch(query)).map((chat) => chat.id),
-		);
-		const seen = new Set(metadataMatches.map((chat) => chat.id));
-		const transcriptOnly = this.transcriptSearchResults
-			.map((result) => chatsById.get(result.chatId))
-			.filter((chat): chat is ChatSessionRecord => {
-				if (!chat) return false;
-				return candidateIds.has(chat.id) && !seen.has(chat.id);
-			});
-		return [...metadataMatches, ...transcriptOnly];
 	}
 
 	private createEditorState(query: string): SavedSearchEditorState {
