@@ -4,7 +4,7 @@ Renders mermaid diagram from fenced code block source.
 Lazy-loads the mermaid library on first render via mermaid-loader.
 -->
 <script lang="ts">
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
@@ -27,6 +27,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	);
 
 	let renderedSvg = $state('');
+	let renderedSource = $state('');
 	let renderError = $state('');
 	let loading = $state(true);
 	let copied = $state(false);
@@ -67,6 +68,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		if (!text) {
 			loading = false;
 			renderedSvg = '';
+			renderedSource = '';
 			renderError = '';
 			return;
 		}
@@ -74,7 +76,10 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		const currentText = text;
 		const currentThemeId = mermaidThemeId;
 		loading = true;
-		renderedSvg = '';
+		if (untrack(() => renderedSource !== currentText)) {
+			renderedSvg = '';
+			renderedSource = '';
+		}
 		renderError = '';
 
 		let active = true;
@@ -84,10 +89,13 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 			(svg) => {
 				if (!isCurrentRender()) return;
 				renderedSvg = svg;
+				renderedSource = currentText;
 				loading = false;
 			},
 			(error) => {
 				if (!isCurrentRender()) return;
+				renderedSvg = '';
+				renderedSource = '';
 				renderError = error instanceof Error ? error.message : m.chat_mermaid_render_failed();
 				loading = false;
 			},
@@ -186,7 +194,12 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	</div>
 </div>
 
-<MermaidViewerDialog open={viewerOpen} svg={renderedSvg} onOpenChange={handleViewerOpenChange} />
+<MermaidViewerDialog
+	open={viewerOpen}
+	source={renderedSource}
+	svg={renderedSvg}
+	onOpenChange={handleViewerOpenChange}
+/>
 
 <style>
 	.mermaid-container :global(svg) {

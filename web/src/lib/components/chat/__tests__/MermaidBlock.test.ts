@@ -73,6 +73,62 @@ describe('MermaidBlock', () => {
 		await waitFor(() => expect(screen.getByLabelText('current diagram')).toBeTruthy());
 	});
 
+	it('preserves manual viewer zoom and position across a theme render', async () => {
+		let resolveThemeRender!: (svg: string) => void;
+		mockedRenderMermaid
+			.mockResolvedValueOnce('<svg viewBox="0 0 200 100" aria-label="Initial diagram"></svg>')
+			.mockReturnValueOnce(
+				new Promise<string>((resolve) => {
+					resolveThemeRender = resolve;
+				}),
+			);
+		const rendered = render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			themeId: 'classic-light',
+		});
+		const expandButton = await screen.findByRole('button', { name: 'Expand diagram' });
+		await waitFor(() => expect((expandButton as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(expandButton);
+
+		const viewport = screen.getByRole('region', {
+			name: 'Mermaid diagram viewport; drag to pan, pinch or Control- or Command-wheel to zoom',
+		});
+		const stage = viewport.querySelector<HTMLElement>('.mermaid-zoom-stage');
+		expect(stage).toBeTruthy();
+		Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 100 });
+		Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 80 });
+		viewport.getBoundingClientRect = () => new DOMRect(0, 0, 100, 80);
+		stage!.getBoundingClientRect = () =>
+			new DOMRect(
+				Number.parseFloat(stage!.style.left) - viewport.scrollLeft,
+				Number.parseFloat(stage!.style.top) - viewport.scrollTop,
+				Number.parseFloat(stage!.style.width),
+				Number.parseFloat(stage!.style.height),
+			);
+		await fireEvent.click(screen.getByRole('button', { name: 'Fit to window (0)' }));
+		for (let zoomStep = 0; zoomStep < 4; zoomStep += 1) {
+			await fireEvent.click(screen.getByRole('button', { name: 'Zoom in (+)' }));
+		}
+		viewport.scrollLeft = 80;
+		viewport.scrollTop = 40;
+		const zoomLabel = screen.getByText('126%');
+
+		rendered.component.setThemeId('colorblind-light');
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
+		expect(zoomLabel).toBeTruthy();
+		expect(screen.getByLabelText('Initial diagram')).toBeTruthy();
+
+		resolveThemeRender('<svg viewBox="0 0 200 100" aria-label="Rethemed diagram"></svg>');
+		await waitFor(() => expect(screen.getAllByLabelText('Rethemed diagram')).toHaveLength(2));
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+		);
+
+		expect(screen.getByText('126%')).toBeTruthy();
+		expect(viewport.scrollLeft).toBeCloseTo(80, 3);
+		expect(viewport.scrollTop).toBeCloseTo(40, 3);
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});
