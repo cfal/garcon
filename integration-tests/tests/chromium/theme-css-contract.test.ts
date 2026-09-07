@@ -49,7 +49,12 @@ async function readRenderedColors(
   options: {
     pseudoElement?: string;
   } = {},
-): Promise<{ foreground: string; background: string; surface: string }> {
+): Promise<{
+  foreground: string;
+  background: string;
+  border: string;
+  surface: string;
+}> {
   return page.locator(selector).evaluate((element, colorOptions) => {
     const surface = getComputedStyle(document.body).backgroundColor;
     const style = getComputedStyle(element, colorOptions.pseudoElement);
@@ -94,6 +99,7 @@ async function readRenderedColors(
     return {
       foreground: composite(style.color, background, style.filter),
       background,
+      border: style.borderColor,
       surface,
     };
   }, options);
@@ -165,8 +171,11 @@ describe("compiled theme CSS", () => {
         body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
           <div id="dialog-surface" style="background:var(--dialog-surface)">
             <select class="select-native"><option>Theme</option></select>
-            <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Input placeholder">
+            <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
             <textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+          </div>
+          <div class="bg-popover">
+            <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
           </div>
           <button id="git-action-commit" class="bg-git-action-commit text-git-action-foreground hover:bg-git-action-commit-hover">Commit</button>
           <button id="git-action-pull" class="bg-git-action-pull text-git-action-foreground hover:bg-git-action-pull-hover">Pull</button>
@@ -418,6 +427,31 @@ describe("compiled theme CSS", () => {
           `${profile.id} virtual hunk header`,
         ).toBeGreaterThanOrEqual(4.5);
 
+        const destructiveMenuItem = page.locator("#destructive-menu-item");
+        const normalDestructiveMenu = await readRenderedColors(
+          page,
+          "#destructive-menu-item",
+        );
+        await destructiveMenuItem.evaluate((element) => {
+          element.setAttribute("data-highlighted", "");
+        });
+        const highlightedDestructiveMenu = await readRenderedColors(
+          page,
+          "#destructive-menu-item",
+        );
+        await destructiveMenuItem.evaluate((element) => {
+          element.removeAttribute("data-highlighted");
+        });
+        for (const [interaction, colors] of Object.entries({
+          normal: normalDestructiveMenu,
+          highlighted: highlightedDestructiveMenu,
+        })) {
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile.id} destructive menu item ${interaction}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+
         const scrollAreaThumb = await readNormalAndHoveredColors(
           page,
           "#scroll-area-thumb",
@@ -449,69 +483,58 @@ describe("compiled theme CSS", () => {
           contrastRatio(scrollbarColors.background, scrollbarColors.surface),
           `${profile} scrollbar thumb`,
         ).toBeGreaterThanOrEqual(3);
-        const colors = await page.evaluate(() => {
-          const select = document.querySelector<HTMLElement>(".select-native");
-          const input = document.querySelector<HTMLElement>("#input-boundary");
-          const textarea =
-            document.querySelector<HTMLElement>("#textarea-boundary");
-          const dialogSurface =
-            document.querySelector<HTMLElement>("#dialog-surface");
-          if (!select || !input || !textarea || !dialogSurface) {
-            throw new Error("Missing theme contrast fixtures");
-          }
-          const composite = (foreground: string, background: string) => {
-            const canvas = document.createElement("canvas");
-            canvas.width = 1;
-            canvas.height = 1;
-            const context = canvas.getContext("2d");
-            if (!context) throw new Error("Missing canvas context");
-            context.fillStyle = background;
-            context.fillRect(0, 0, 1, 1);
-            context.fillStyle = foreground;
-            context.fillRect(0, 0, 1, 1);
-            const [red, green, blue] = context
-              .getImageData(0, 0, 1, 1)
-              .data.slice(0, 3);
-            return `rgb(${red}, ${green}, ${blue})`;
-          };
-          const surfaceStyle = getComputedStyle(dialogSurface);
-          const selectStyle = getComputedStyle(select);
-          const inputStyle = getComputedStyle(input);
-          const textareaStyle = getComputedStyle(textarea);
-          return {
-            adjacentSurface: surfaceStyle.backgroundColor,
-            inputBorder: inputStyle.borderColor,
-            inputBackground: composite(
-              inputStyle.backgroundColor,
-              surfaceStyle.backgroundColor,
-            ),
-            inputPlaceholder: getComputedStyle(input, "::placeholder").color,
-            textareaBackground: composite(
-              textareaStyle.backgroundColor,
-              surfaceStyle.backgroundColor,
-            ),
-            textareaPlaceholder: getComputedStyle(textarea, "::placeholder")
-              .color,
-            selectBackground: selectStyle.backgroundColor,
-            selectBorder: selectStyle.borderColor,
-          };
-        });
+        const [
+          dialogSurface,
+          select,
+          input,
+          inputPlaceholder,
+          textareaPlaceholder,
+        ] = await Promise.all([
+          readRenderedColors(page, "#dialog-surface"),
+          readRenderedColors(page, ".select-native"),
+          readRenderedColors(page, "#input-boundary"),
+          readRenderedColors(page, "#input-boundary", {
+            pseudoElement: "::placeholder",
+          }),
+          readRenderedColors(page, "#textarea-boundary", {
+            pseudoElement: "::placeholder",
+          }),
+        ]);
         expect(
-          contrastRatio(colors.inputBorder, colors.adjacentSurface),
+          contrastRatio(input.border, dialogSurface.background),
           `${profile} input boundary`,
         ).toBeGreaterThanOrEqual(3);
         expect(
-          contrastRatio(colors.selectBorder, colors.selectBackground),
+          contrastRatio(select.border, select.background),
           `${profile} native-select boundary`,
         ).toBeGreaterThanOrEqual(3);
         expect(
-          contrastRatio(colors.inputPlaceholder, colors.inputBackground),
+          contrastRatio(
+            inputPlaceholder.foreground,
+            inputPlaceholder.background,
+          ),
           `${profile} input placeholder`,
         ).toBeGreaterThanOrEqual(4.5);
         expect(
-          contrastRatio(colors.textareaPlaceholder, colors.textareaBackground),
+          contrastRatio(
+            textareaPlaceholder.foreground,
+            textareaPlaceholder.background,
+          ),
           `${profile} textarea placeholder`,
         ).toBeGreaterThanOrEqual(4.5);
+
+        for (const [label, selector] of [
+          ["syntax", "#virtual-context-normal-cm-code-keyword"],
+          ["input", "#input-boundary"],
+        ] as const) {
+          const selection = await readRenderedColors(page, selector, {
+            pseudoElement: "::selection",
+          });
+          expect(
+            contrastRatio(selection.foreground, selection.background),
+            `${profile} ${label} selection`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
       }
     } finally {
       await context.close();

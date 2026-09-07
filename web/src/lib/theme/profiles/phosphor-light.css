@@ -234,9 +234,11 @@
 	}
 }
 
-:root:where([data-theme='phosphor-light']) ::selection {
-	background-color: hsl(var(--primary) / 0.3);
-	color: inherit;
+@layer base {
+	:root:where([data-theme='phosphor-light']) ::selection {
+		background-color: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+	}
 }
 
 :root:where([data-theme='phosphor-light'])
