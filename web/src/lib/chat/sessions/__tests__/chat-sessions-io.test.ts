@@ -845,6 +845,95 @@ describe('ChatSessionsStore IO', () => {
 		await Promise.all([first, second]);
 	});
 
+	it('treats a transport failure after dispatch as an unknown tag outcome', async () => {
+		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const recoverChatTags = vi.fn(() => recovery.promise);
+		const applyChatTagDelta = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.applyChatTagDelta({
+			chatId: 'chat-1', addTags: ['review'],
+		})).rejects.toThrow('Failed to fetch');
+
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+		expect(recoverChatTags).toHaveBeenCalledTimes(1);
+		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await vi.waitFor(() => expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false));
+	});
+
+	it('requires another recovery response after a newer unknown tag outcome', async () => {
+		const firstRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const secondRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const secondMutation = deferred<never>();
+		const recoverChatTags = vi.fn()
+			.mockImplementationOnce(() => firstRecovery.promise)
+			.mockImplementationOnce(() => secondRecovery.promise);
+		const unknown = new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN');
+		const applyChatTagDelta = vi.fn()
+			.mockRejectedValueOnce(unknown)
+			.mockImplementationOnce(() => secondMutation.promise);
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		const first = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['alpha'] });
+		const second = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['beta'] });
+		await expect(first).rejects.toBe(unknown);
+		secondMutation.reject(unknown);
+		await expect(second).rejects.toBe(unknown);
+		const confirmation = store.recoverChatTags('chat-1');
+
+		firstRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['alpha'] });
+		await vi.waitFor(() => expect(recoverChatTags).toHaveBeenCalledTimes(2));
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+		expect(store.byId['chat-1'].tags).toEqual(['ready']);
+
+		secondRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['beta'] });
+		await confirmation;
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false);
+		expect(store.byId['chat-1'].tags).toEqual(['beta']);
+	});
+
+	it('allows an explicit confirmation retry after automatic recovery fails', async () => {
+		const unknown = new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN');
+		const recoverChatTags = vi.fn()
+			.mockRejectedValueOnce(new TypeError('Offline'))
+			.mockResolvedValueOnce({ success: true, chatId: 'chat-1', tags: ['review'] });
+		const applyChatTagDelta = vi.fn().mockRejectedValueOnce(unknown);
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.applyChatTagDelta({
+			chatId: 'chat-1', addTags: ['review'],
+		})).rejects.toBe(unknown);
+		await flushMicrotasks();
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+
+		await expect(store.recoverChatTags('chat-1')).resolves.toMatchObject({ tags: ['review'] });
+		expect(recoverChatTags).toHaveBeenCalledTimes(2);
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false);
+	});
+
+	it('keeps the pending tag projection until every concurrent writer settles', async () => {
+		const firstMutation = deferred<never>();
+		const secondMutation = deferred<never>();
+		const applyChatTagDelta = vi.fn()
+			.mockImplementationOnce(() => firstMutation.promise)
+			.mockImplementationOnce(() => secondMutation.promise);
+		const store = new ChatSessionsStore({ applyChatTagDelta });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		const first = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['alpha'] });
+		const second = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['beta'] });
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(true);
+		firstMutation.reject(new Error('First failed'));
+		await expect(first).rejects.toThrow('First failed');
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(true);
+		secondMutation.reject(new Error('Second failed'));
+		await expect(second).rejects.toThrow('Second failed');
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(false);
+	});
+
 	it('does not install an older tag response after newer server reconciliation', async () => {
 		const mutation = deferred<{
 			success: true;
