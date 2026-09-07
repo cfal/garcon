@@ -34,7 +34,7 @@
 	} from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
-	import { attachThinkingPulse } from '$lib/chat/composer/thinking-pulse.js';
+	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
@@ -683,7 +683,7 @@
 		data-composer
 		class={composerSurfaceClass}
 		aria-busy={promptTransformPending}
-		{@attach attachThinkingPulse}
+		{@attach attachProcessingPulse}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
 		{@attach promptRefinement.pending &&
 			!ui.composerEditorOpen &&

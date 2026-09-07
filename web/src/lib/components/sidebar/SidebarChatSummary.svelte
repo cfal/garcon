@@ -5,6 +5,7 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import { cn } from '$lib/utils/cn';
+	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
 	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
 	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
 
@@ -84,6 +85,7 @@
 					<span
 						class="sidebar-processing-indicator size-2 shrink-0 rounded-full bg-status-processing"
 						data-slot="sidebar-chat-processing-indicator"
+						{@attach attachProcessingPulse}
 					></span>
 				</span>
 			{:else if formattedTimestamp}
@@ -126,6 +128,7 @@
 						class="sidebar-processing-indicator size-2 shrink-0 rounded-full bg-status-processing"
 						aria-hidden="true"
 						data-slot="sidebar-chat-processing-indicator"
+						{@attach attachProcessingPulse}
 					></span>
 				{/if}
 			</div>

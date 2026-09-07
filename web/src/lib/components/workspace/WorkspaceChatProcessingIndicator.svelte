@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
+	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
 
 	let {
 		statusId,
@@ -19,5 +20,6 @@
 	<span
 		class="workspace-chat-processing-indicator size-2 rounded-full bg-status-processing"
 		aria-hidden="true"
+		{@attach attachProcessingPulse}
 	></span>
 </span>
