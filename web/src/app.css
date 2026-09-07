@@ -523,6 +523,12 @@
 		box-sizing: border-box;
 	}
 
+	/* Pairs CodeMirror text with its separately painted selection layer. */
+	.cm-line::selection,
+	.cm-line ::selection {
+		color: hsl(var(--foreground));
+	}
+
 	html,
 	body {
 		height: 100%;

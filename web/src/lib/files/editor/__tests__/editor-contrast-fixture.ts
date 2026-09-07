@@ -1,7 +1,7 @@
 import { javascript } from '@codemirror/lang-javascript';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorSelection, EditorState } from '@codemirror/state';
+import { drawSelection, EditorView } from '@codemirror/view';
 import { editorThemeExtension, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
 
 const SOURCE = `// retained comment
@@ -21,7 +21,9 @@ export function mountEditor(parent: HTMLElement, themeId: EditorThemeId): Editor
 		parent,
 		state: EditorState.create({
 			doc: SOURCE,
+			selection: EditorSelection.single(0, SOURCE.length),
 			extensions: [
+				drawSelection(),
 				javascript(),
 				syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 				editorThemeExtension(themeId),
