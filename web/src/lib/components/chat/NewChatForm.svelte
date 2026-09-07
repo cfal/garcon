@@ -139,6 +139,7 @@
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
 	let observedPreambleCatalogRevision: number | null = null;
+	let refreshedPreambleCatalogRevision: number | null = null;
 	let observedPreambleInvalidationVersion = preamblesCatalog.invalidationVersion;
 	const initialContentReady = $derived(form.settingsLoaded);
 	const preambleSummaryLoading = $derived(
@@ -238,21 +239,19 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
+	// Keeps the preview at or ahead of the loaded catalog without refetching its first match.
 	$effect(() => {
 		const revision = preamblesCatalog.snapshot?.revision;
+		const previewRevision = form.preambles.preview?.catalogRevision;
 		if (revision === undefined) return;
-		if (observedPreambleCatalogRevision === null) {
-			observedPreambleCatalogRevision = revision;
-			untrack(() => {
-				const previewRevision = form.preambles.preview?.catalogRevision;
-				if (previewRevision !== undefined && previewRevision < revision) {
-					form.preambles.catalogChanged();
-				}
-			});
-			return;
-		}
-		if (revision === observedPreambleCatalogRevision) return;
+
+		const revisionChanged =
+			observedPreambleCatalogRevision !== null && revision !== observedPreambleCatalogRevision;
 		observedPreambleCatalogRevision = revision;
+		const previewIsStale = previewRevision !== undefined && previewRevision < revision;
+		if (!revisionChanged && !previewIsStale) return;
+		if (refreshedPreambleCatalogRevision === revision) return;
+		refreshedPreambleCatalogRevision = revision;
 		untrack(() => form.preambles.catalogChanged());
 	});
 

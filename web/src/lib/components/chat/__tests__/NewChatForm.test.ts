@@ -295,6 +295,34 @@ describe('NewChatForm', () => {
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(3);
 	});
 
+	it('refreshes a stale preview that resolves after the catalog loads', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const firstPreview = deferred<PreambleSelectionPreviewResponse>();
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockReturnValueOnce(firstPreview.promise)
+			.mockResolvedValueOnce(previewResponse(2, 'e767feba-8cbf-4ec4-9b16-f907bcb40836', 'Current'));
+		let preambles!: PreamblesStore;
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				onPreambles: (store) => (preambles = store),
+			},
+		});
+
+		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce());
+		preambles.applySnapshot({ revision: 2, preambles: [] });
+		firstPreview.resolve(previewResponse(1, '3502b645-222b-49d2-ac39-1c91f9fb1174', 'Stale'));
+
+		expect(await screen.findByText('Current')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2);
+	});
+
 	it('refreshes the preview after an invalidation without loading the catalog', async () => {
 		stubMatchMedia(false);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
