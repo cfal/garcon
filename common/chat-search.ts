@@ -9,6 +9,7 @@ export const CHAT_SEARCH_MAX_PREFIX_SIZE = 500;
 export const CHAT_SEARCH_MAX_OFFSET = 9_999;
 export const CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT = 3;
 export const CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS = 520;
+export const CHAT_SEARCH_MAX_CHAT_IDS = 10_000;
 export const CHAT_SEARCH_SORT_VALUES = ['relevance', 'activity', 'created'] as const;
 export const CHAT_SEARCH_RESULT_MODES = ['page', 'prefix'] as const;
 
@@ -97,6 +98,194 @@ export interface ChatSearchResponse {
   results: ChatSearchResult[];
   page: ChatSearchPage;
   index: ChatSearchIndexStatus;
+}
+
+export function parseChatSearchResponse(
+  request: ChatSearchRequest,
+  value: unknown,
+): ChatSearchResponse {
+  const response = chatSearchRecord(value);
+  if (!response || typeof response.query !== 'string') invalidChatSearchResponse('response');
+  const expectedMode = request.mode ?? 'page';
+  const expectedSnippetLimit = request.snippetLimit ?? CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
+  const expectedOffset = request.offset ?? 0;
+  const expectedLimit = request.limit ?? CHAT_SEARCH_DEFAULT_PAGE_SIZE;
+  if (response.mode !== expectedMode) invalidChatSearchResponse('mode does not match request');
+  if (response.snippetLimit !== expectedSnippetLimit) {
+    invalidChatSearchResponse('snippetLimit does not match request');
+  }
+  if (!Array.isArray(response.results)) invalidChatSearchResponse('results');
+  const results = response.results.map((result) => parseChatSearchResult(
+    result,
+    expectedSnippetLimit,
+  ));
+  const page = chatSearchRecord(response.page);
+  if (!page) invalidChatSearchResponse('page');
+  const maximumLimit = expectedMode === 'prefix'
+    ? CHAT_SEARCH_MAX_PREFIX_SIZE
+    : CHAT_SEARCH_MAX_PAGE_SIZE;
+  if (
+    !isNonNegativeSafeInteger(page.offset)
+    || page.offset > CHAT_SEARCH_MAX_OFFSET
+    || page.offset !== expectedOffset
+  ) invalidChatSearchResponse('offset does not match request');
+  if (
+    !isPositiveSafeInteger(page.limit)
+    || page.limit > maximumLimit
+    || page.limit !== expectedLimit
+  ) invalidChatSearchResponse('limit does not match request');
+  if (expectedMode === 'prefix' && (page.offset !== 0 || expectedSnippetLimit !== 1)) {
+    invalidChatSearchResponse('prefix projection');
+  }
+  if (
+    !isNonNegativeSafeInteger(page.total)
+    || typeof page.hasMore !== 'boolean'
+    || (page.nextOffset !== null && !isPositiveSafeInteger(page.nextOffset))
+  ) invalidChatSearchResponse('page fields');
+  if (page.hasMore !== (page.nextOffset !== null)) {
+    invalidChatSearchResponse('cursor presence');
+  }
+  if (
+    page.nextOffset !== null
+    && (
+      page.nextOffset <= page.offset
+      || page.nextOffset > CHAT_SEARCH_MAX_OFFSET
+      || page.nextOffset > page.offset + page.limit
+      || page.nextOffset > page.total
+    )
+  ) invalidChatSearchResponse('cursor bounds');
+  if (
+    results.length > page.limit
+    || results.length > Math.max(0, page.total - page.offset)
+  ) invalidChatSearchResponse('result window');
+  const index = parseChatSearchIndexStatus(response.index);
+  return {
+    query: response.query,
+    mode: expectedMode,
+    snippetLimit: expectedSnippetLimit,
+    results,
+    page: {
+      offset: page.offset,
+      limit: page.limit,
+      total: page.total,
+      hasMore: page.hasMore,
+      nextOffset: page.nextOffset,
+    },
+    index,
+  };
+}
+
+export function compileChatSearchQuery(
+  query: string,
+  textTokens?: readonly string[],
+): ChatSearchQueryV1 {
+  const quoted = new Map<string, number>();
+  for (const match of query.matchAll(/"([^"]+)"|'([^']+)'/g)) {
+    const value = (match[1] ?? match[2] ?? '').toLowerCase();
+    quoted.set(value, (quoted.get(value) ?? 0) + 1);
+  }
+  const terms = textTokens?.length
+    ? textTokens.map((text) => {
+      const key = text.toLowerCase();
+      const count = quoted.get(key) ?? 0;
+      if (count > 0) quoted.set(key, count - 1);
+      return { text, phrase: /\s/u.test(text) || count > 0 };
+    })
+    : [...query.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)].map((match) => ({
+      text: match[1] ?? match[2] ?? match[3] ?? '',
+      phrase: match[1] !== undefined || match[2] !== undefined,
+    }));
+  return {
+    version: 1,
+    clauses: terms.map((term) => ({
+      kind: term.phrase ? 'phrase' as const : 'all-words' as const,
+      tokens: (term.text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
+        text,
+        normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
+        match: !term.phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
+          ? 'prefix' as const
+          : 'exact' as const,
+      })),
+    })).filter((clause) => clause.tokens.length > 0),
+  };
+}
+
+function parseChatSearchResult(value: unknown, snippetLimit: number): ChatSearchResult {
+  const result = chatSearchRecord(value);
+  if (
+    !result
+    || typeof result.chatId !== 'string'
+    || result.chatId.length === 0
+    || typeof result.transcriptViewId !== 'string'
+    || result.transcriptViewId.length === 0
+    || typeof result.score !== 'number'
+    || !Number.isFinite(result.score)
+    || !isNonNegativeSafeInteger(result.matchedMessageCount)
+    || !Array.isArray(result.snippets)
+    || result.snippets.length > snippetLimit
+  ) invalidChatSearchResponse('result');
+  const snippets = result.snippets.map((valueSnippet) => {
+    const snippet = chatSearchRecord(valueSnippet);
+    if (
+      !snippet
+      || !isPositiveSafeInteger(snippet.ordinal)
+      || !['user', 'assistant', 'tool', 'system'].includes(String(snippet.role))
+      || (snippet.timestamp !== null && typeof snippet.timestamp !== 'string')
+      || typeof snippet.text !== 'string'
+    ) invalidChatSearchResponse('snippet');
+    return {
+      ordinal: snippet.ordinal,
+      role: snippet.role as ChatSearchSnippetRole,
+      timestamp: snippet.timestamp,
+      text: snippet.text,
+    };
+  });
+  return {
+    chatId: result.chatId,
+    transcriptViewId: result.transcriptViewId,
+    score: result.score,
+    matchedMessageCount: result.matchedMessageCount,
+    snippets,
+  };
+}
+
+function parseChatSearchIndexStatus(value: unknown): ChatSearchIndexStatus {
+  const index = chatSearchRecord(value);
+  if (
+    !index
+    || !isNonNegativeSafeInteger(index.indexedChatCount)
+    || !isNonNegativeSafeInteger(index.pendingChatCount)
+    || !isNonNegativeSafeInteger(index.failedChatCount)
+    || !isNonNegativeSafeInteger(index.unindexedChatCount)
+    || !isNonNegativeSafeInteger(index.unsupportedChatCount)
+    || typeof index.resultsTruncated !== 'boolean'
+  ) invalidChatSearchResponse('index');
+  return {
+    indexedChatCount: index.indexedChatCount,
+    pendingChatCount: index.pendingChatCount,
+    failedChatCount: index.failedChatCount,
+    unindexedChatCount: index.unindexedChatCount,
+    unsupportedChatCount: index.unsupportedChatCount,
+    resultsTruncated: index.resultsTruncated,
+  };
+}
+
+function chatSearchRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function invalidChatSearchResponse(reason: string): never {
+  throw new Error(`Invalid chat search response: ${reason}`);
 }
 
 export type TranscriptSearchPhase =

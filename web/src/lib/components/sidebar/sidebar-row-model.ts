@@ -1,5 +1,5 @@
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
-import { chatOrderGroupFor } from '$lib/sidebar/search/chat-order-group.js';
+import { chatOrderGroupFor } from '$shared/chat-filter-query';
 import type {
 	SidebarChatGrouping,
 	SidebarInactivityDuration,

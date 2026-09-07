@@ -19,7 +19,7 @@ import {
 	matchesChatFilter,
 	parseChatSearch,
 	type ChatFilterSpec,
-} from '$lib/sidebar/search/sidebar-search.js';
+} from '$shared/chat-filter-query';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
