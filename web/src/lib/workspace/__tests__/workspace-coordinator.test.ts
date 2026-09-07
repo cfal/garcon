@@ -297,6 +297,52 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface('singleton:chat-canvas')).toBeNull();
 	});
 
+	it('reuses Chat in another window when its requested anchor no longer exists', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.closeWindow('window-files');
+		await expect(coordinator.openChatBeside('chat-a', 'window-files')).resolves.toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+	});
+
+	it('opens alongside by reusing the existing Chat on mobile', async () => {
+		const { coordinator, layout, appShell } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonAsTab('chat-canvas', 'window-main');
+		appShell.isMobile = true;
+		await coordinator.enterMobilePresentation();
+		await expect(coordinator.openChatBeside('chat-a', 'window-main')).resolves.toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(
+			chatViewSurfaceId('window-main'),
+		);
+	});
+
+	it('preserves the Chat and Canvas tabs when splitting alongside is blocked', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonAsTab('chat-canvas', 'window-main');
+		await coordinator.enterWindowFullscreen('window-main');
+		await expect(coordinator.openChatBeside('chat-a', 'window-main')).rejects.toBeInstanceOf(
+			WorkspaceSplitBlockedError,
+		);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:chat-canvas');
+	});
+
+	it('rolls back a failed alongside transfer publication', async () => {
+		const { coordinator, layout } = createHarness({ failLayoutPublishAt: 3 });
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer: () => publication });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonAsTab('chat-canvas', 'window-main');
+		await expect(coordinator.openChatBeside('chat-a', 'window-main')).rejects.toThrow(
+			'layout publication failed',
+		);
+		expect(publication.rollback).toHaveBeenCalledOnce();
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+	});
+
 	it('places a file as a tab in the target window', async () => {
 		const { coordinator, layout } = createHarness();
 

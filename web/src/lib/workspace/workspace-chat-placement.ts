@@ -124,16 +124,16 @@ export class WorkspaceChatPlacementService {
 					);
 				}
 				if (this.deps.isMobile()) return this.#existingPlacementPlan(latest, chatId)!;
+				const requestedAnchor = targetWindowId ?? this.deps.lastFocusedWindowId();
+				if (requestedAnchor && requestedAnchor !== placement.windowId) {
+					return this.#existingPlacementPlan(latest, chatId)!;
+				}
 				const anchorWindowId = this.deps.resolveWindowId(
 					latest,
 					targetWindowId ?? this.deps.lastFocusedWindowId(),
 				);
 				const sourceWindow = windowNodeById(latest.desktopRoot, placement.windowId);
-				if (
-					!sourceWindow ||
-					!this.#isAvailable(placement) ||
-					this.deps.windowReservations.has(anchorWindowId)
-				) {
+				if (!sourceWindow || !this.#isAvailable(placement)) {
 					return { destination: null, mutations: [] };
 				}
 				if (placement.windowId !== anchorWindowId || sourceWindow.tabs.order.length === 1) {
@@ -243,9 +243,7 @@ export class WorkspaceChatPlacementService {
 			if (this.deps.surfaceReservations.has(surfaceId)) {
 				return { destination: null, mutations: [] };
 			}
-			const mutations: WorkspaceLayoutMutation[] = [
-				{ type: 'set-window-chat', windowId, chatId },
-			];
+			const mutations: WorkspaceLayoutMutation[] = [{ type: 'set-window-chat', windowId, chatId }];
 			if (this.deps.isMobile()) {
 				mutations.push({
 					type: 'set-mobile-presentation',
