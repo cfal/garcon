@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles.js';
+import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 import type {
 	Preamble,
 	PreambleId,
@@ -521,8 +522,9 @@ describe('NewChatPreamblePicker', () => {
 		});
 	});
 
-	it('restores focus before refreshing a local defaults draft', async () => {
+	it('refreshes a local defaults draft and restores focus before it settles', async () => {
 		let appShell!: AppShellStore;
+		let preambles!: PreamblesStore;
 		let resolveRefresh!: (preview: PreambleSelectionPreviewResponse) => void;
 		const loadAutomaticPreview = vi
 			.fn()
@@ -542,6 +544,9 @@ describe('NewChatPreamblePicker', () => {
 			onAppShell: (value) => {
 				appShell = value;
 			},
+			onPreambles: (value) => {
+				preambles = value;
+			},
 		});
 
 		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
@@ -549,12 +554,19 @@ describe('NewChatPreamblePicker', () => {
 			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
 		});
 		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
+		preambles.applySnapshot({ ...snapshot(), revision: 5 });
+		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledTimes(2));
 		appShell.closePreambles();
 
 		await waitFor(() => {
-			expect(loadAutomaticPreview).toHaveBeenCalledTimes(2);
 			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));
 		});
-		resolveRefresh(automaticPreviewResponse([ID_ELIGIBLE]));
+		resolveRefresh(automaticPreviewResponse([]));
+		await waitFor(() => {
+			const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect(within(eligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe('false');
+		});
 	});
 });

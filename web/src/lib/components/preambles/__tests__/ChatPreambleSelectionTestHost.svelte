@@ -35,6 +35,7 @@
 		},
 		onRefreshPreview = () => undefined,
 		onAppShell,
+		onPreambles,
 	}: {
 		mode?: 'panel' | 'new-chat';
 		pickerOpen?: boolean;
@@ -55,12 +56,14 @@
 		onLoadAutomaticPreview?: () => Promise<PreambleSelectionPreviewResponse>;
 		onRefreshPreview?: () => void | Promise<void>;
 		onAppShell?: (store: AppShellStore) => void;
+		onPreambles?: (store: PreamblesStore) => void;
 	} = $props();
 
 	const appShell = createAppShellStore();
 	const preambles = new PreamblesStore();
 	preambles.applySnapshot(untrack(() => snapshot));
 	untrack(() => onAppShell?.(appShell));
+	untrack(() => onPreambles?.(preambles));
 	setAppShell(appShell);
 	setPreambles(preambles);
 	setChatPreambleSelectionInvalidationHub(createChatPreambleSelectionInvalidationHub());

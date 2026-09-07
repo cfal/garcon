@@ -182,6 +182,23 @@ async function inputAtCaret(
 	await fireEvent.input(textarea, eventInit);
 }
 
+function previewResponse(
+	catalogRevision: number,
+	id: string,
+	title: string,
+): PreambleSelectionPreviewResponse {
+	return {
+		success: true,
+		canonicalProjectPath: '/workspace/project',
+		orderedPreambleIds: [id],
+		projection: {
+			catalogRevision,
+			eligiblePreambles: [{ id, title }],
+			unavailable: [],
+		},
+	};
+}
+
 describe('NewChatForm', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -255,20 +272,6 @@ describe('NewChatForm', () => {
 		);
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
-		const previewResponse = (
-			catalogRevision: number,
-			id: string,
-			title: string,
-		): PreambleSelectionPreviewResponse => ({
-			success: true,
-			canonicalProjectPath: '/workspace/project',
-			orderedPreambleIds: [id],
-			projection: {
-				catalogRevision,
-				eligiblePreambles: [{ id, title }],
-				unavailable: [],
-			},
-		});
 		vi.mocked(preamblesApi.preambleSelectionPreview)
 			.mockResolvedValueOnce(previewResponse(1, '3502b645-222b-49d2-ac39-1c91f9fb1174', 'First'))
 			.mockResolvedValueOnce(previewResponse(2, 'e767feba-8cbf-4ec4-9b16-f907bcb40836', 'Second'))
@@ -290,6 +293,36 @@ describe('NewChatForm', () => {
 		preambles.applySnapshot({ revision: 3, preambles: [] });
 		expect(await screen.findByText('Third')).toBeTruthy();
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(3);
+	});
+
+	it('refreshes the preview after an invalidation without loading the catalog', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const firstId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+		const secondId = 'e767feba-8cbf-4ec4-9b16-f907bcb40836';
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockResolvedValueOnce(previewResponse(1, firstId, 'First'))
+			.mockResolvedValueOnce(previewResponse(2, secondId, 'Second'));
+		const loadPreambles = vi.fn();
+		let preambles!: PreamblesStore;
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				loadPreambles,
+				onPreambles: (store) => (preambles = store),
+			},
+		});
+
+		expect(await screen.findByText('First')).toBeTruthy();
+		await preambles.refreshIfLoaded();
+		expect(await screen.findByText('Second')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2);
+		expect(loadPreambles).not.toHaveBeenCalled();
 	});
 
 	it('reveals the form after reseeding while the current path is invalid', async () => {

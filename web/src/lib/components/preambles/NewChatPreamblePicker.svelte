@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getPreambles } from '$lib/context';
 	import type { NewChatPreambleChoice } from '$lib/chat/new-chat/new-chat-preamble-selection-state.svelte.js';
 	import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles.js';
 	import ChatPreambleSelectionPanel from './ChatPreambleSelectionPanel.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { PreambleId, PreambleSelectionProjection } from '$shared/preambles';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 
 	interface Props {
 		open: boolean;
@@ -46,11 +46,13 @@
 	}: Props = $props();
 
 	const appShell = getAppShell();
+	const preamblesCatalog = getPreambles();
 	let draftIds = $state<PreambleId[]>([]);
 	let draftMode = $state<NewChatPreambleChoice['mode']>('defaults');
 	let hasManualChanges = $state(false);
 	let automaticPreview = $state<AutomaticPreviewState>({ status: 'parent' });
 	let automaticPreviewVersion = 0;
+	let observedPreambleCatalogRevision: number | null = null;
 	let wasOpen = false;
 
 	function initialDraftIds(
@@ -86,6 +88,19 @@
 			draftIds = [...defaultsIds];
 			automaticPreview = { status: 'parent' };
 		}
+	});
+
+	$effect(() => {
+		const revision = preamblesCatalog.snapshot?.revision;
+		if (revision === undefined) return;
+		if (observedPreambleCatalogRevision === null) {
+			observedPreambleCatalogRevision = revision;
+			return;
+		}
+		if (revision === observedPreambleCatalogRevision) return;
+		observedPreambleCatalogRevision = revision;
+		if (!open || draftMode !== 'defaults' || choice.mode !== 'explicit') return;
+		untrack(() => void loadAutomaticDraft());
 	});
 
 	const displayedProjection = $derived.by(() => {
@@ -171,7 +186,6 @@
 			'[data-slot="new-chat-preamble-manage-catalog"]',
 		);
 		opener?.focus({ preventScroll: true });
-		void refreshAutomaticDraftAfterCatalogChange();
 	}
 
 	async function loadAutomaticDraft(): Promise<void> {
@@ -192,12 +206,6 @@
 
 	function isCurrentAutomaticPreview(version: number): boolean {
 		return version === automaticPreviewVersion && open;
-	}
-
-	async function refreshAutomaticDraftAfterCatalogChange(): Promise<void> {
-		if (draftMode === 'defaults' && choice.mode === 'explicit') {
-			await loadAutomaticDraft();
-		}
 	}
 
 	function handleReset(): void {

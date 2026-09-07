@@ -139,6 +139,7 @@
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
 	let observedPreambleCatalogRevision: number | null = null;
+	let observedPreambleInvalidationVersion = preamblesCatalog.invalidationVersion;
 	const initialContentReady = $derived(form.settingsLoaded);
 	const preambleSummaryLoading = $derived(
 		form.trimmedPath.length > 0 &&
@@ -252,6 +253,14 @@
 		}
 		if (revision === observedPreambleCatalogRevision) return;
 		observedPreambleCatalogRevision = revision;
+		untrack(() => form.preambles.catalogChanged());
+	});
+
+	$effect(() => {
+		const invalidationVersion = preamblesCatalog.invalidationVersion;
+		if (invalidationVersion === observedPreambleInvalidationVersion) return;
+		observedPreambleInvalidationVersion = invalidationVersion;
+		if (preamblesCatalog.hasLoaded) return;
 		untrack(() => form.preambles.catalogChanged());
 	});
 
