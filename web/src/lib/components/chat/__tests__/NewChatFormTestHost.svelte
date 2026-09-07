@@ -8,14 +8,17 @@
 		setRemoteSettings,
 		setChatSessions,
 		setNotifications,
+		setPreambles,
 		setSnippets,
 		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
+	import type { PreamblesSnapshot } from '$shared/preambles';
 	import type { ChatId } from '$shared/chat-id';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
@@ -41,6 +44,7 @@
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
 		onStartChat?: (config: NewChatConfig, chatId: ChatId) => void;
+		preambleSnapshot?: PreamblesSnapshot;
 	}
 
 	let {
@@ -53,6 +57,7 @@
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
 		onStartChat = () => {},
+		preambleSnapshot = { revision: 0, preambles: [] },
 	}: Props = $props();
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
@@ -75,6 +80,10 @@
 	} as never);
 
 	setNotifications(notifications);
+	const preambles = new PreamblesStore();
+	const getInitialPreambleSnapshot = () => preambleSnapshot;
+	preambles.applySnapshot(getInitialPreambleSnapshot());
+	setPreambles(preambles);
 	setCanonicalWorkspaceLayout();
 
 	let seedListener = () => {};
@@ -124,9 +133,10 @@
 	function modelsForAgent(agentId: string): ModelOption[] {
 		if (
 			agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID &&
-				endpointBackedDirectModel &&
-				!modelsAvailable
-			) return [];
+			endpointBackedDirectModel &&
+			!modelsAvailable
+		)
+			return [];
 		return [modelForAgent(agentId)];
 	}
 

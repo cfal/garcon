@@ -6,6 +6,7 @@
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
+		setPreambles,
 		setRemoteSettings,
 		setSnippets,
 		setTransientLayers,
@@ -16,6 +17,7 @@
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
@@ -38,6 +40,9 @@
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
 	setNotifications(createNotificationsStore());
+	const preambles = new PreamblesStore();
+	preambles.applySnapshot({ revision: 0, preambles: [] });
+	setPreambles(preambles);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 	setSnippets(

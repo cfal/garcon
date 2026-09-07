@@ -34,6 +34,7 @@
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import NewChatPreamblePicker from '../preambles/NewChatPreamblePicker.svelte';
+	import NewChatPreambleSummary from '../preambles/NewChatPreambleSummary.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';
 	import {
@@ -43,6 +44,7 @@
 		getRemoteSettings,
 		getChatSessions,
 		getNotifications,
+		getPreambles,
 		getSnippets,
 		getTransientLayers,
 		getWorkspaceLayout,
@@ -58,7 +60,6 @@
 	import FileVideo from '@lucide/svelte/icons/file-video';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
-	import { Button } from '$lib/components/ui/button';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type {
 		ModelSelectorChange,
@@ -94,6 +95,7 @@
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
+	const preamblesCatalog = getPreambles();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
@@ -136,6 +138,7 @@
 	let preamblePickerOpen = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
+	let observedPreambleCatalogRevision = -1;
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
 	);
@@ -202,6 +205,7 @@
 	onMount(() => {
 		reseed();
 		form.loadSettingsAndModels();
+		void preamblesCatalog.ensureLoaded().catch(() => undefined);
 		const removeSeedListener = appShell.onNewChatDialogSeed(() => reseed());
 		const mql = window.matchMedia('(max-width: 768px)');
 		isMobile = mql.matches;
@@ -225,6 +229,13 @@
 	$effect(() => {
 		const selectableAgentIds = newChatAgentIds;
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
+	});
+
+	$effect(() => {
+		const revision = preamblesCatalog.snapshot?.revision;
+		if (revision === undefined || revision === observedPreambleCatalogRevision) return;
+		observedPreambleCatalogRevision = revision;
+		untrack(() => form.preambles.catalogChanged());
 	});
 
 	// Focus textarea when path validates successfully, but not while browsing.
@@ -699,40 +710,26 @@
 					onClose={() => (form.showTagInput = false)}
 				/>
 
-				<div class="flex flex-wrap items-center gap-2" data-slot="new-chat-preambles-row">
-					<span class="text-xs text-muted-foreground" data-slot="new-chat-preambles-label">
-						{m.preambles_label_with_count({ count: form.preambles.previewCount })}
-					</span>
-					<Button
-						variant="ghost"
-						size="sm"
-						data-slot="new-chat-preambles-configure"
-						disabled={!form.preambles.configurable}
-						onclick={() => (preamblePickerOpen = true)}
-					>
-						{m.preamble_selection_configure()}
-					</Button>
-					{#if form.preambles.choice.mode === 'explicit'}
-						<Button
-							variant="ghost"
-							size="sm"
-							data-slot="new-chat-preambles-reset"
-							onclick={() => form.preambles.resetToDefaults()}
-						>
-							{m.preamble_selection_reset_defaults()}
-						</Button>
-					{/if}
-				</div>
+				<NewChatPreambleSummary
+					preview={form.preambles.preview}
+					loading={form.preambles.previewLoading}
+					configurable={form.preambles.configurable}
+					retryable={form.validationStatus === 'valid'}
+					onEdit={() => (preamblePickerOpen = true)}
+					onRetry={() => void form.preambles.refreshPreview()}
+				/>
 
 				<NewChatPreamblePicker
 					open={preamblePickerOpen}
 					choice={form.preambles.choice}
 					defaultsIds={(form.preambles.preview?.eligiblePreambles ?? []).map((entry) => entry.id)}
+					previewLoading={form.preambles.previewLoading}
 					canonicalProjectPath={form.preambles.canonicalProjectPath || form.trimmedPath}
 					projection={form.preambles.preview}
 					onClose={() => (preamblePickerOpen = false)}
 					onApplyExplicit={(ids) => form.preambles.setExplicit(ids)}
 					onResetToDefaults={() => form.preambles.resetToDefaults()}
+					onRefreshPreview={() => form.preambles.refreshPreview()}
 				/>
 
 				{#if displayedFormError}

@@ -35,7 +35,9 @@ vi.mock('$lib/preambles/chat-selection-controller.svelte.js', () => ({
 		move(): void {}
 		remove(): void {}
 		add(): void {}
-		refreshBase(): Promise<void> { return Promise.resolve(); }
+		refreshBase(): Promise<void> {
+			return Promise.resolve();
+		}
 	},
 }));
 
@@ -51,16 +53,29 @@ afterEach(() => {
 describe('ChatPreambleSelectionDialog', () => {
 	it('uses the captured target, exposes stable slots, and closes its controller on destruction', async () => {
 		const rendered = render(ChatPreambleSelectionDialogTestHost);
-		await waitFor(() => expect(controller.open).toHaveBeenCalledWith({
-			chatId: '1783725900000200',
-			transcriptViewId: 'view-a',
-		}));
+		await waitFor(() =>
+			expect(controller.open).toHaveBeenCalledWith({
+				chatId: '1783725900000200',
+				transcriptViewId: 'view-a',
+			}),
+		);
 		const dialog = document.querySelector<HTMLElement>(
 			'[data-slot="chat-preamble-selection-dialog"]',
 		);
 		expect(dialog).not.toBeNull();
-		expect(document.querySelector('[data-slot="chat-preamble-selection-scroll-body"]'))
-			.not.toBeNull();
+		expect(
+			document.querySelector('[data-slot="chat-preamble-selection-scroll-body"]'),
+		).not.toBeNull();
+		const footer = dialog!.querySelector('form');
+		const managePreambles = footer?.querySelector<HTMLElement>(
+			'[data-slot="chat-preamble-selection-manage-catalog"]',
+		);
+		expect(managePreambles?.textContent?.trim()).toBe('Manage preambles');
+		expect(managePreambles?.closest('form')).not.toBeNull();
+		expect(footer?.firstElementChild?.getAttribute('data-slot')).toBe(
+			'chat-preamble-selection-manage-catalog',
+		);
+		expect(footer?.classList.contains('justify-between')).toBe(true);
 
 		await fireEvent.keyDown(dialog!, { key: 'Enter', metaKey: true });
 		expect(controller.save).toHaveBeenCalledOnce();

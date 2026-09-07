@@ -24,17 +24,19 @@ function slots(name: string): HTMLElement[] {
 	return [...document.querySelectorAll<HTMLElement>(`[data-slot="${name}"]`)];
 }
 
-function preamble(
-	id: PreambleId,
-	title: string,
-	overrides: Partial<Preamble> = {},
-): Preamble {
+function slotText(root: HTMLElement, name: string): string {
+	return root.querySelector<HTMLElement>(`[data-slot="${name}"]`)?.textContent?.trim() ?? '';
+}
+
+function preamble(id: PreambleId, title: string, overrides: Partial<Preamble> = {}): Preamble {
 	return {
 		id,
 		enabled: true,
 		title,
 		content: `Synthetic body for ${title}`,
 		scope: { type: 'global' },
+		agentIds: [],
+		tagFilter: { mode: 'any', tags: [] },
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
 		...overrides,
@@ -66,6 +68,19 @@ const unavailableProjection: PreambleSelectionProjection = {
 	],
 };
 
+function resolvedProjection(ids: readonly PreambleId[]): PreambleSelectionProjection {
+	const preambles = snapshot().preambles;
+	return {
+		catalogRevision: 4,
+		eligiblePreambles: ids.map((id) => {
+			const entry = preambles.find((preamble) => preamble.id === id);
+			if (!entry) throw new Error(`Missing test preamble: ${id}`);
+			return { id, title: entry.title };
+		}),
+		unavailable: [],
+	};
+}
+
 afterEach(() => cleanup());
 
 describe('ChatPreambleSelectionPanel', () => {
@@ -80,12 +95,14 @@ describe('ChatPreambleSelectionPanel', () => {
 
 		expect(screen.getByText('None enabled')).toBeTruthy();
 		const rows = slots('chat-preamble-selection-row');
-		expect(rows).toHaveLength(2);
-		expect(rows[0]!.querySelector('[data-slot="chat-preamble-selection-row-status"]')?.textContent)
-			.toBe('Deleted or unavailable');
-		expect(rows[1]!.querySelector('[data-slot="chat-preamble-selection-row-status"]')?.textContent)
-			.toBe('Disabled globally');
-		await fireEvent.click(within(rows[0]!).getByRole('button', { name: /Remove/ }));
+		expect(rows).toHaveLength(3);
+		const disabledRow = rows.find((row) => row.textContent?.includes('Disabled conventions'))!;
+		expect(
+			disabledRow.querySelector('[data-slot="chat-preamble-selection-row-status"]')?.textContent,
+		).toBe('Disabled globally');
+		const missingRow = slot('chat-preamble-selection-missing-row');
+		expect(within(missingRow).getByText('Deleted or unavailable')).toBeTruthy();
+		await fireEvent.click(within(missingRow).getByRole('checkbox', { name: /Remove/ }));
 		expect(remove).toHaveBeenCalledWith(ID_MISSING);
 	});
 
@@ -100,19 +117,49 @@ describe('ChatPreambleSelectionPanel', () => {
 			},
 		});
 
-		await fireEvent.click(slot('chat-preamble-selection-toggle-candidates'));
-		const candidates = slots('chat-preamble-selection-candidate');
+		const candidates = slots('chat-preamble-selection-row');
 		const disabled = candidates.find((row) => row.textContent?.includes('Disabled conventions'))!;
 		const scoped = candidates.find((row) => row.textContent?.includes('Scoped conventions'))!;
 		expect(within(disabled).getByText('Disabled globally')).toBeTruthy();
 		expect(within(scoped).getByText('Outside this project')).toBeTruthy();
-		expect((within(disabled).getByRole('button') as HTMLButtonElement).disabled).toBe(true);
-		expect((within(scoped).getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+		expect((within(disabled).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+		expect((within(scoped).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+	});
+
+	it('keeps catalog row order while exposing selected order and checkbox membership', async () => {
+		const move = vi.fn();
+		const remove = vi.fn();
+		render(ChatPreambleSelectionTestHost, {
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED, ID_ELIGIBLE],
+			projection: {
+				catalogRevision: 4,
+				eligiblePreambles: [{ id: ID_ELIGIBLE, title: 'Eligible conventions' }],
+				unavailable: [{ id: ID_DISABLED, reason: 'disabled' }],
+			},
+			onMove: move,
+			onRemove: remove,
+		});
+
+		const rows = slots('chat-preamble-selection-row');
+		expect(rows.map((row) => slotText(row, 'chat-preamble-selection-row-title'))).toEqual([
+			'Eligible conventions',
+			'Disabled conventions',
+			'Scoped conventions',
+		]);
+		expect(within(rows[0]!).getByText('#2')).toBeTruthy();
+		expect(within(rows[1]!).getByText('#1')).toBeTruthy();
+		await fireEvent.click(within(rows[0]!).getByRole('button', { name: /Move Eligible.*up/ }));
+		expect(move).toHaveBeenCalledWith(ID_ELIGIBLE, 'up');
+		const disabledCheckbox = within(rows[1]!).getByRole('checkbox') as HTMLInputElement;
+		expect(disabledCheckbox.disabled).toBe(false);
+		await fireEvent.click(disabledCheckbox);
+		expect(remove).toHaveBeenCalledWith(ID_DISABLED);
 	});
 });
 
 describe('NewChatPreamblePicker', () => {
-	it('uses the same gate for Ctrl+Enter and Apply', async () => {
+	it('keeps untouched defaults automatic for Ctrl+Enter and Apply', async () => {
 		const apply = vi.fn();
 		const close = vi.fn();
 		render(ChatPreambleSelectionTestHost, {
@@ -120,14 +167,155 @@ describe('NewChatPreamblePicker', () => {
 			snapshot: snapshot(),
 			draftIds: [ID_ELIGIBLE],
 			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
 			onApplyExplicit: apply,
 			onClose: close,
 		});
 
 		const dialog = slot('new-chat-preamble-selection-dialog');
 		await fireEvent.keyDown(dialog, { key: 'Enter', ctrlKey: true });
-		expect(apply).toHaveBeenCalledWith([ID_ELIGIBLE]);
+		expect(apply).not.toHaveBeenCalled();
 		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it('freezes a touched draft through the shared keyboard submission gate', async () => {
+		const apply = vi.fn();
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_ELIGIBLE],
+			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
+			onApplyExplicit: apply,
+		});
+
+		const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+			row.textContent?.includes('Eligible conventions'),
+		)!;
+		await fireEvent.click(within(eligibleRow).getByRole('checkbox', { name: /Remove/ }));
+		await fireEvent.keyDown(slot('new-chat-preamble-selection-dialog'), {
+			key: 'Enter',
+			ctrlKey: true,
+		});
+		expect(apply).toHaveBeenCalledWith([]);
+	});
+
+	it('follows refreshed defaults through catalog management while untouched', async () => {
+		let appShell!: AppShellStore;
+		const apply = vi.fn();
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_ELIGIBLE],
+			defaultsIds: [ID_ELIGIBLE],
+			canonicalProjectPath: '/workspace/other',
+			projection: resolvedProjection([ID_ELIGIBLE]),
+			onApplyExplicit: apply,
+			onAppShell: (value) => {
+				appShell = value;
+			},
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
+		await rendered.rerender({
+			defaultsIds: [ID_ELIGIBLE, ID_SCOPED],
+			projection: resolvedProjection([ID_ELIGIBLE, ID_SCOPED]),
+		});
+		appShell.closePreambles();
+
+		await waitFor(() => {
+			const scopedRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Scoped conventions'),
+			)!;
+			expect((within(scopedRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+			expect(within(scopedRow).getByText('#2')).toBeTruthy();
+		});
+		await fireEvent.click(slot('new-chat-preamble-apply'));
+		expect(apply).not.toHaveBeenCalled();
+	});
+
+	it('retains untouched defaults while a refreshed preview is pending', async () => {
+		const apply = vi.fn();
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_ELIGIBLE],
+			defaultsIds: [ID_ELIGIBLE],
+			canonicalProjectPath: '/workspace/other',
+			projection: resolvedProjection([ID_ELIGIBLE]),
+			onApplyExplicit: apply,
+		});
+
+		await rendered.rerender({ defaultsIds: [], previewLoading: true, projection: null });
+		const pendingRows = slots('chat-preamble-selection-row');
+		const pendingEligibleRow = pendingRows.find((row) =>
+			row.textContent?.includes('Eligible conventions'),
+		)!;
+		const pendingScopedRow = pendingRows.find((row) =>
+			row.textContent?.includes('Scoped conventions'),
+		)!;
+		expect((within(pendingEligibleRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
+			true,
+		);
+		expect((within(pendingScopedRow).getByRole('checkbox') as HTMLInputElement).disabled).toBe(
+			true,
+		);
+
+		await fireEvent.click(within(pendingScopedRow).getByRole('checkbox'));
+		await rendered.rerender({
+			defaultsIds: [ID_ELIGIBLE, ID_SCOPED],
+			previewLoading: false,
+			projection: resolvedProjection([ID_ELIGIBLE, ID_SCOPED]),
+		});
+
+		await waitFor(() => {
+			const resolvedRows = slots('chat-preamble-selection-row');
+			const resolvedScopedRow = resolvedRows.find((row) =>
+				row.textContent?.includes('Scoped conventions'),
+			)!;
+			expect((within(resolvedScopedRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
+				true,
+			);
+			expect(within(resolvedScopedRow).getByText('#2')).toBeTruthy();
+		});
+		await fireEvent.click(slot('new-chat-preamble-apply'));
+		expect(apply).not.toHaveBeenCalled();
+	});
+
+	it('retains untouched defaults and offers retry after preview refresh fails', async () => {
+		const apply = vi.fn();
+		const refresh = vi.fn();
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_ELIGIBLE],
+			defaultsIds: [ID_ELIGIBLE],
+			canonicalProjectPath: '/workspace/other',
+			projection: resolvedProjection([ID_ELIGIBLE]),
+			onApplyExplicit: apply,
+			onRefreshPreview: refresh,
+		});
+
+		await rendered.rerender({ defaultsIds: [], previewLoading: true, projection: null });
+		await rendered.rerender({ defaultsIds: [], previewLoading: false, projection: null });
+
+		const failedRows = slots('chat-preamble-selection-row');
+		const failedEligibleRow = failedRows.find((row) =>
+			row.textContent?.includes('Eligible conventions'),
+		)!;
+		const failedScopedRow = failedRows.find((row) =>
+			row.textContent?.includes('Scoped conventions'),
+		)!;
+		expect((within(failedEligibleRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
+			true,
+		);
+		expect((within(failedScopedRow).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+		expect(slot('new-chat-preamble-preview-status').getAttribute('role')).toBe('alert');
+
+		await fireEvent.click(slot('new-chat-preamble-preview-retry'));
+		expect(refresh).toHaveBeenCalledOnce();
+		await fireEvent.click(slot('new-chat-preamble-apply'));
+		expect(apply).not.toHaveBeenCalled();
 	});
 
 	it('suspends for catalog management, preserves the draft, and restores focus', async () => {
@@ -138,14 +326,18 @@ describe('NewChatPreamblePicker', () => {
 			snapshot: snapshot(),
 			draftIds: [ID_ELIGIBLE, ID_DISABLED],
 			defaultsIds: [ID_ELIGIBLE, ID_DISABLED],
+			projection: resolvedProjection([ID_ELIGIBLE]),
 			onClose: close,
-			onAppShell: (value) => { appShell = value; },
+			onAppShell: (value) => {
+				appShell = value;
+			},
 		});
 
 		const selectedRows = slots('chat-preamble-selection-row');
-		await fireEvent.click(
-			within(selectedRows[0]!).getByRole('button', { name: /Remove/ }),
-		);
+		const eligibleRow = selectedRows.find((row) =>
+			row.textContent?.includes('Eligible conventions'),
+		)!;
+		await fireEvent.click(within(eligibleRow).getByRole('checkbox', { name: /Remove/ }));
 		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
 		expect(appShell.showPreambles).toBe(true);
 		await waitFor(() => {
@@ -156,10 +348,13 @@ describe('NewChatPreamblePicker', () => {
 		appShell.closePreambles();
 		await waitFor(() => {
 			expect(slot('new-chat-preamble-selection-dialog')).toBeTruthy();
-			expect(slots('chat-preamble-selection-row')).toHaveLength(1);
-			expect(document.activeElement).toBe(
-				slot('new-chat-preamble-manage-catalog'),
+			const returnedEligibleRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect((within(returnedEligibleRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
+				false,
 			);
+			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));
 		});
 	});
 });
