@@ -112,12 +112,26 @@ async function expectLaneScroll(
       { cause: error },
     );
   }
+  if (tolerance === undefined) return;
+  const settled = await settledLaneScrollTop(fixture, columnId);
+  if (Math.abs(settled - expected) > tolerance) {
+    throw new Error(`Expected settled lane ${columnId} scrollTop ${expected}, received ${settled}.`);
+  }
 }
 
-async function laneScrollTop(fixture: ChromiumFixture, columnId: string): Promise<number> {
-  return fixture.page
-    .locator(`[data-chat-board-lane-list="${columnId}"]`)
-    .evaluate((element) => element.scrollTop);
+async function settledLaneScrollTop(fixture: ChromiumFixture, columnId: string): Promise<number> {
+  return fixture.page.locator(`[data-chat-board-lane-list="${columnId}"]`).evaluate(async (element) => {
+    let previous = element.scrollTop;
+    let stableFrames = 0;
+    for (let frame = 0; frame < 60; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const current = element.scrollTop;
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames === 3) return current;
+    }
+    throw new Error('Chat Board lane scroll did not settle within 60 animation frames.');
+  });
 }
 
 async function constrainBoardWidth(fixture: ChromiumFixture, width: number | null): Promise<void> {
@@ -134,7 +148,7 @@ async function constrainBoardWidth(fixture: ChromiumFixture, width: number | nul
   }, width);
 }
 
-async function resizeBoardAcrossFrames(
+async function resizeBoardDuringRemount(
   fixture: ChromiumFixture,
   firstWidth: number,
   finalWidth: number,
@@ -145,7 +159,7 @@ async function resizeBoardAcrossFrames(
         const observer = new MutationObserver(() => {
           if (element.dataset.presentationBand !== 'narrow') return;
           observer.disconnect();
-          requestAnimationFrame(() => resolve());
+          resolve();
         });
         observer.observe(element, {
           attributes: true,
@@ -197,10 +211,10 @@ describe('Chromium Chat Board interactions', () => {
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
       await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
-      const settledReadyScrollTop = await laneScrollTop(fixture, READY_COLUMN_ID);
+      const settledReadyScrollTop = await settledLaneScrollTop(fixture, READY_COLUMN_ID);
       await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
-      const settledReviewScrollTop = await laneScrollTop(fixture, REVIEW_COLUMN_ID);
+      const settledReviewScrollTop = await settledLaneScrollTop(fixture, REVIEW_COLUMN_ID);
 
       markPhase('repeating narrow lane switches without scroll drift');
       for (let index = 0; index < 8; index += 1) {
@@ -220,7 +234,7 @@ describe('Chromium Chat Board interactions', () => {
 
       markPhase('coalescing consecutive presentation changes');
       await invoker.focus();
-      await resizeBoardAcrossFrames(fixture, 480, 1_000);
+      await resizeBoardDuringRemount(fixture, 480, 1_000);
       await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
       await fixture.page.waitForFunction(
         ({ columnId }) => {
