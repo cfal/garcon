@@ -1116,8 +1116,7 @@ export class SpaDriver {
     }, chatId);
   }
 
-  async openSidebarChatInNewWindow(text: string): Promise<string> {
-    const existingWindowIds = new Set(await this.workspaceWindowIds());
+  async openSidebarChatActionsContaining(text: string): Promise<void> {
     await this.#page.evaluate((expected) => {
       const summary = [
         ...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]'),
@@ -1129,6 +1128,11 @@ export class SpaDriver {
       if (!trigger) throw new Error(`Missing sidebar Chat actions for: ${expected}`);
       trigger.click();
     }, text);
+  }
+
+  async openSidebarChatInNewWindow(text: string): Promise<string> {
+    const existingWindowIds = new Set(await this.workspaceWindowIds());
+    await this.openSidebarChatActionsContaining(text);
     await this.waitForMenuItemEnabled('Open in new window');
     await this.clickMenuItem('Open in new window');
     const newWindowItem = await this.#waitForFirstEnabledMenuItem(

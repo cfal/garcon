@@ -366,6 +366,30 @@ describe('sidebar row model', () => {
 		).toEqual(['normal-p2-a']);
 	});
 
+	it('keeps optimistic archive order in recent-sorted display ids', () => {
+		const optimistic = chat('optimistic', '/workspace/p1', {
+			isArchived: true,
+			orderGroup: 'archived',
+			lastActivityAt: '2025-01-01T00:00:00.000Z',
+		});
+		const archived = chat('archived', '/workspace/p1', {
+			isArchived: true,
+			orderGroup: 'archived',
+			lastActivityAt: '2025-02-01T00:00:00.000Z',
+		});
+
+		expect(
+			buildSidebarDisplayChatIds({
+				displayedChats: [optimistic, archived],
+				optimisticArchiveOrder: [optimistic, archived],
+				isChatOptimisticallyArchived: (chatId) => chatId === optimistic.id,
+				grouping: 'none',
+				currentTime: TEST_NOW,
+				sortMode: 'recent',
+			}),
+		).toEqual(['optimistic', 'archived']);
+	});
+
 	it('is unchanged when rebuilt from its visible orders', () => {
 		const chats = [
 			chat('pinned', '/workspace/repo', { orderGroup: 'pinned', isPinned: true }),

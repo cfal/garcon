@@ -7,6 +7,7 @@ import { ChatRegistry } from '../store.ts';
 
 const CHAT_ID = '1783725900000200';
 const SECOND_CHAT_ID = '1783725900000201';
+const THIRD_CHAT_ID = '1783725900000202';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 const nativeSession = (ownerId, value = { path: '/tmp/native.jsonl' }) => ({
@@ -328,6 +329,81 @@ describe('ChatRegistry', () => {
     expect(updated).toMatchObject({ model: 'model-b', projectPath: '/repo' });
     expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
     expect(registry.getChatByAgentSessionId('native-2')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('looks up one exact current native session binding globally', () => {
+    registry.addChat(newChat({ agentSessionId: 'ses_session-123' }));
+
+    expect(registry.lookupNativeSession('ses_session-123')).toEqual({
+      status: 'found',
+      chatId: CHAT_ID,
+    });
+    expect(registry.lookupNativeSession('SES_session-123')).toEqual({ status: 'not-found' });
+    expect(registry.lookupNativeSession('ses_session')).toEqual({ status: 'not-found' });
+    expect(registry.lookupNativeSession('missing')).toEqual({ status: 'not-found' });
+  });
+
+  it('reports duplicate bindings within one agent as ambiguous', () => {
+    registry.addChat(newChat({ agentSessionId: 'duplicate' }));
+    registry.addChat(newChat({ id: SECOND_CHAT_ID, agentSessionId: 'duplicate' }));
+
+    expect(registry.lookupNativeSession('duplicate')).toEqual({ status: 'ambiguous' });
+    expect(registry.lookupNativeSession('duplicate', 'test')).toEqual({ status: 'ambiguous' });
+  });
+
+  it('applies the exact agent filter before deciding uniqueness', () => {
+    registry.addChat(newChat({ agentSessionId: 'shared' }));
+    registry.addChat(newChat({
+      id: SECOND_CHAT_ID,
+      agentId: 'codex',
+      agentSettingsById: { codex: envelope('codex') },
+      agentSessionId: 'shared',
+    }));
+
+    expect(registry.lookupNativeSession('shared')).toEqual({ status: 'ambiguous' });
+    expect(registry.lookupNativeSession('shared', 'test')).toEqual({
+      status: 'found',
+      chatId: CHAT_ID,
+    });
+    expect(registry.lookupNativeSession('shared', 'codex')).toEqual({
+      status: 'found',
+      chatId: SECOND_CHAT_ID,
+    });
+    expect(registry.lookupNativeSession('shared', 'claude')).toEqual({ status: 'not-found' });
+  });
+
+  it('keeps filtered duplicates ambiguous when another agent also matches', () => {
+    registry.addChat(newChat({ agentSessionId: 'shared' }));
+    registry.addChat(newChat({ id: SECOND_CHAT_ID, agentSessionId: 'shared' }));
+    registry.addChat(newChat({
+      id: THIRD_CHAT_ID,
+      agentId: 'codex',
+      agentSettingsById: { codex: envelope('codex') },
+      agentSessionId: 'shared',
+    }));
+
+    expect(registry.lookupNativeSession('shared', 'test')).toEqual({ status: 'ambiguous' });
+    expect(registry.lookupNativeSession('shared', 'codex')).toEqual({
+      status: 'found',
+      chatId: THIRD_CHAT_ID,
+    });
+  });
+
+  it('stops resolving replaced, handoff-cleared, and removed bindings', () => {
+    registry.addChat(newChat({ agentSessionId: 'original' }));
+    registry.updateChat(CHAT_ID, { agentSessionId: 'replacement' });
+    expect(registry.lookupNativeSession('original')).toEqual({ status: 'not-found' });
+    expect(registry.lookupNativeSession('replacement')).toEqual({
+      status: 'found',
+      chatId: CHAT_ID,
+    });
+
+    registry.updateChat(CHAT_ID, { agentSessionId: null });
+    expect(registry.lookupNativeSession('replacement')).toEqual({ status: 'not-found' });
+
+    registry.updateChat(CHAT_ID, { agentSessionId: 'removed' });
+    registry.removeChat(CHAT_ID);
+    expect(registry.lookupNativeSession('removed')).toEqual({ status: 'not-found' });
   });
 
   it('reports existence for own keys only', () => {
@@ -882,6 +958,20 @@ describe('ChatRegistry', () => {
 
     expect(registry.getChat(CHAT_ID)).toEqual(persistedEntry());
     expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('preserves duplicate binding ambiguity after persisted registry reload', async () => {
+    await registry.flush();
+    await writeRegistry({
+      [CHAT_ID]: persistedEntry({ agentSessionId: 'ses_duplicate' }),
+      [SECOND_CHAT_ID]: persistedEntry({ agentSessionId: 'ses_duplicate' }),
+    });
+    registry = new ChatRegistry(tempDir);
+
+    await registry.init();
+
+    expect(registry.lookupNativeSession('ses_duplicate')).toEqual({ status: 'ambiguous' });
+    expect(registry.lookupNativeSession('ses_duplicate', 'test')).toEqual({ status: 'ambiguous' });
   });
 
   it('normalizes absent and malformed persisted parentage to roots', async () => {

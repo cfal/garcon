@@ -8,6 +8,7 @@ export type CliErrorPhase =
   | 'chat status'
   | 'export'
   | 'handoff artifact'
+  | 'native session lookup'
   | 'submission'
   | 'title update'
   | 'receipt polling'

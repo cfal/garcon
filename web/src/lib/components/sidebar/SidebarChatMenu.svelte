@@ -47,6 +47,7 @@
 		newWindowEdges: WorkspaceSplitAdmissions;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: boolean;
 		onRename: () => void;
 		onDetails: () => void;
 		onShare: () => void;
@@ -69,6 +70,7 @@
 		newWindowEdges,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = false,
 		onRename,
 		onDetails,
 		onShare,
@@ -183,11 +185,21 @@
 	<DropdownMenuSeparator />
 {/if}
 
-<DropdownMenuItem onclick={() => onTogglePinned(session.id)}>
+<DropdownMenuItem
+	disabled={isArchiveMutationPending}
+	onclick={() => {
+		if (!isArchiveMutationPending) onTogglePinned(session.id);
+	}}
+>
 	<Pin />
 	{isPinned ? m.sidebar_chats_unpin() : m.sidebar_chats_pin()}
 </DropdownMenuItem>
-<DropdownMenuItem onclick={() => onToggleArchive(session.id)}>
+<DropdownMenuItem
+	disabled={isArchiveMutationPending}
+	onclick={() => {
+		if (!isArchiveMutationPending) onToggleArchive(session.id);
+	}}
+>
 	<Archive class={cn(isArchived ? 'text-muted-foreground' : '')} />
 	{isArchived ? m.sidebar_chats_unarchive() : m.sidebar_chats_archive()}
 </DropdownMenuItem>

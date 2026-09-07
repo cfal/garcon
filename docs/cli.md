@@ -99,6 +99,17 @@ bun cli/main.ts list reasoning-efforts --agent codex
 
 List commands print compact tables and accept `--json` for scripts and agents.
 
+## Lookup By Native Session
+
+Resolve an agent's current native session binding through the authenticated server:
+
+```bash
+garcon-cli lookup-native-session session-123
+garcon-cli lookup-native-session session-123 --agent codex
+```
+
+The optional `--agent` filter uses an exact agent ID. Without it, every current agent binding in the connected workspace is searched. Exactly one match prints only the 16-digit Garcon chat ID and a newline. No match or multiple matches fails without writing to stdout. Historical, replaced, handed-off, cleared, and deleted bindings are not searched.
+
 ## Message Presentation
 
 Start, resume, and `send-async` messages can add a visual header with `--message-title` and `--message-style info|notice|error|custom`. A title alone uses `notice`. Custom styling uses `--color <light[,dark]>`.
