@@ -105,6 +105,33 @@ describe('ChatBoardFocusController', () => {
 		);
 	});
 
+	it('preserves a control focused between consecutive presentation changes', () => {
+		const root = document.createElement('section');
+		root.innerHTML = `
+			<button type="button" data-chat-board-selector>Board selector</button>
+			<div data-lanes>
+				<section data-chat-board-column-id="a">
+					<article data-chat-board-occurrence="a:chat-1">
+						<button type="button" data-chat-board-focus-target="transition">Transition</button>
+					</article>
+				</section>
+			</div>
+		`;
+		document.body.append(root);
+		const controller = new ChatBoardFocusController();
+		controller.setRoot(root);
+		root.querySelector<HTMLButtonElement>('[data-chat-board-focus-target="transition"]')!.focus();
+
+		controller.preparePresentationChange('narrow', 'a');
+		root.querySelector<HTMLElement>('[data-lanes]')!.replaceChildren();
+		const selector = root.querySelector<HTMLButtonElement>('[data-chat-board-selector]')!;
+		selector.focus();
+		controller.preparePresentationChange('wide', 'a');
+		controller.completePresentationChange();
+
+		expect(document.activeElement).toBe(selector);
+	});
+
 	it('does not steal focus owned outside the board', () => {
 		const outside = document.createElement('button');
 		const root = document.createElement('section');

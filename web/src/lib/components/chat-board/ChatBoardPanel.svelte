@@ -238,47 +238,38 @@
 		return generation;
 	}
 
+	function isCurrentLaneRemount(generation: number): boolean {
+		return pendingLaneScrollRestore?.generation === generation;
+	}
+
+	function nextAnimationFrame(): Promise<void> {
+		return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+	}
+
+	function restoreMountedLaneScrollPositions(targets: ReadonlyMap<string, number>): void {
+		const boardId = selectedBoard?.id;
+		if (!boardId || !rootRef) return;
+		for (const viewport of rootRef.querySelectorAll<HTMLElement>('[data-chat-board-lane-list]')) {
+			const columnId = viewport.dataset.chatBoardLaneList;
+			const scrollTop = columnId ? targets.get(laneScrollKey(boardId, columnId)) : undefined;
+			if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
+		}
+	}
+
 	async function restoreAfterLaneRemount(generation: number): Promise<void> {
 		await tick();
-		if (pendingLaneScrollRestore?.generation !== generation) return;
-		requestAnimationFrame(() => {
-			if (pendingLaneScrollRestore?.generation !== generation) return;
-			requestAnimationFrame(() => {
-				const pending = pendingLaneScrollRestore;
-				if (pending?.generation !== generation) return;
-				const boardId = selectedBoard?.id;
-				if (boardId && rootRef) {
-					for (const viewport of rootRef.querySelectorAll<HTMLElement>(
-						'[data-chat-board-lane-list]',
-					)) {
-						const columnId = viewport.dataset.chatBoardLaneList;
-						const scrollTop = columnId
-							? pending.targets.get(laneScrollKey(boardId, columnId))
-							: undefined;
-						if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
-					}
-				}
-				requestAnimationFrame(() => {
-					if (pendingLaneScrollRestore?.generation !== generation) return;
-					const restoredBoardId = selectedBoard?.id;
-					if (restoredBoardId && rootRef) {
-						for (const viewport of rootRef.querySelectorAll<HTMLElement>(
-							'[data-chat-board-lane-list]',
-						)) {
-							const columnId = viewport.dataset.chatBoardLaneList;
-							if (columnId) {
-								laneScrollOffsets.set(
-									laneScrollKey(restoredBoardId, columnId),
-									viewport.scrollTop,
-								);
-							}
-						}
-					}
-					pendingLaneScrollRestore = null;
-					focusController.completePresentationChange();
-				});
-			});
-		});
+		if (!isCurrentLaneRemount(generation)) return;
+		await nextAnimationFrame();
+		if (!isCurrentLaneRemount(generation)) return;
+		await nextAnimationFrame();
+		const pending = pendingLaneScrollRestore;
+		if (pending?.generation !== generation) return;
+		restoreMountedLaneScrollPositions(pending.targets);
+		await nextAnimationFrame();
+		if (!isCurrentLaneRemount(generation)) return;
+		pendingLaneScrollRestore = null;
+		rememberMountedLaneScrollPositions();
+		focusController.completePresentationChange();
 	}
 
 	function openTransition(

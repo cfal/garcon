@@ -86,54 +86,81 @@ async function expectLaneScroll(
   fixture: ChromiumFixture,
   columnId: string,
   expected: number,
-	tolerance?: number,
+  tolerance?: number,
 ): Promise<void> {
-	const selector = `[data-chat-board-lane-list="${columnId}"]`;
-	try {
-		await fixture.page.waitForFunction(
-			({ selector: laneSelector, scrollTop, allowedDifference }) => {
-				const element = document.querySelector<HTMLElement>(laneSelector);
-				return (
-					element !== null && Math.abs(element.scrollTop - scrollTop) <= allowedDifference
-				);
-			},
-			{
-				selector,
-				scrollTop: expected,
-				allowedDifference: tolerance ?? Math.max(12, expected * 0.25),
-			},
-		);
-	} catch (error) {
-		const actual = await fixture.page.locator(selector).evaluate((element) => ({
-			scrollTop: element.scrollTop,
-			scrollHeight: element.scrollHeight,
-			clientHeight: element.clientHeight,
-		}));
-		throw new Error(
-			`Expected lane ${columnId} scrollTop ${expected}, received ${JSON.stringify(actual)}.`,
-			{ cause: error },
-		);
-	}
+  const selector = `[data-chat-board-lane-list="${columnId}"]`;
+  try {
+    await fixture.page.waitForFunction(
+      ({ selector: laneSelector, scrollTop, allowedDifference }) => {
+        const element = document.querySelector<HTMLElement>(laneSelector);
+        return element !== null && Math.abs(element.scrollTop - scrollTop) <= allowedDifference;
+      },
+      {
+        selector,
+        scrollTop: expected,
+        allowedDifference: tolerance ?? Math.max(12, expected * 0.25),
+      },
+    );
+  } catch (error) {
+    const actual = await fixture.page.locator(selector).evaluate((element) => ({
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    throw new Error(
+      `Expected lane ${columnId} scrollTop ${expected}, received ${JSON.stringify(actual)}.`,
+      { cause: error },
+    );
+  }
 }
 
 async function laneScrollTop(fixture: ChromiumFixture, columnId: string): Promise<number> {
-	return fixture.page
-		.locator(`[data-chat-board-lane-list="${columnId}"]`)
-		.evaluate((element) => element.scrollTop);
+  return fixture.page
+    .locator(`[data-chat-board-lane-list="${columnId}"]`)
+    .evaluate((element) => element.scrollTop);
 }
 
 async function constrainBoardWidth(fixture: ChromiumFixture, width: number | null): Promise<void> {
-	await fixture.page.locator('[data-chat-board-panel]').evaluate((element, constrainedWidth) => {
-		if (constrainedWidth === null) {
-			element.style.removeProperty('width');
-			element.style.removeProperty('max-width');
-			element.style.removeProperty('flex');
-			return;
-		}
-		element.style.width = `${constrainedWidth}px`;
-		element.style.maxWidth = `${constrainedWidth}px`;
-		element.style.flex = '0 0 auto';
-	}, width);
+  await fixture.page.locator('[data-chat-board-panel]').evaluate((element, constrainedWidth) => {
+    if (constrainedWidth === null) {
+      element.style.removeProperty('width');
+      element.style.removeProperty('max-width');
+      element.style.removeProperty('flex');
+      return;
+    }
+    element.style.width = `${constrainedWidth}px`;
+    element.style.maxWidth = `${constrainedWidth}px`;
+    element.style.flex = '0 0 auto';
+  }, width);
+}
+
+async function resizeBoardAcrossFrames(
+  fixture: ChromiumFixture,
+  firstWidth: number,
+  finalWidth: number,
+): Promise<void> {
+  await fixture.page.locator('[data-chat-board-panel]').evaluate(
+    async (element, widths) => {
+      const narrowPresentation = new Promise<void>((resolve) => {
+        const observer = new MutationObserver(() => {
+          if (element.dataset.presentationBand !== 'narrow') return;
+          observer.disconnect();
+          requestAnimationFrame(() => resolve());
+        });
+        observer.observe(element, {
+          attributes: true,
+          attributeFilter: ['data-presentation-band'],
+        });
+      });
+      element.style.width = `${widths.first}px`;
+      element.style.maxWidth = `${widths.first}px`;
+      element.style.flex = '0 0 auto';
+      await narrowPresentation;
+      element.style.width = `${widths.final}px`;
+      element.style.maxWidth = `${widths.final}px`;
+    },
+    { first: firstWidth, final: finalWidth },
+  );
 }
 
 describe('Chromium Chat Board interactions', () => {
@@ -163,33 +190,51 @@ describe('Chromium Chat Board interactions', () => {
       expect(reviewScrollTop).toBeGreaterThan(0);
 
       markPhase('switching lanes after entering narrow presentation');
-			await constrainBoardWidth(fixture, 480);
+      await constrainBoardWidth(fixture, 480);
       await fixture.page.locator('[data-chat-board-panel][data-presentation-band="narrow"]').waitFor();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
-			await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
-			await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
-			await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
-			await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
-			const settledReadyScrollTop = await laneScrollTop(fixture, READY_COLUMN_ID);
-			await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
-			await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
-			const settledReviewScrollTop = await laneScrollTop(fixture, REVIEW_COLUMN_ID);
+      await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
+      await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
+      await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
+      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
+      const settledReadyScrollTop = await laneScrollTop(fixture, READY_COLUMN_ID);
+      await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
+      await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
+      const settledReviewScrollTop = await laneScrollTop(fixture, REVIEW_COLUMN_ID);
 
-			markPhase('repeating narrow lane switches without scroll drift');
-			for (let index = 0; index < 8; index += 1) {
-				await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
-				await expectLaneScroll(fixture, READY_COLUMN_ID, settledReadyScrollTop, 1);
-				await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
-				await expectLaneScroll(fixture, REVIEW_COLUMN_ID, settledReviewScrollTop, 1);
-			}
+      markPhase('repeating narrow lane switches without scroll drift');
+      for (let index = 0; index < 8; index += 1) {
+        await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
+        await expectLaneScroll(fixture, READY_COLUMN_ID, settledReadyScrollTop, 1);
+        await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
+        await expectLaneScroll(fixture, REVIEW_COLUMN_ID, settledReviewScrollTop, 1);
+      }
 
-			markPhase('restoring both lanes after leaving narrow presentation');
-			await constrainBoardWidth(fixture, null);
-			await fixture.page
-				.locator('[data-chat-board-panel]:not([data-presentation-band="narrow"])')
-				.waitFor();
+      markPhase('restoring both lanes after leaving narrow presentation');
+      await constrainBoardWidth(fixture, null);
+      await fixture.page
+        .locator('[data-chat-board-panel]:not([data-presentation-band="narrow"])')
+        .waitFor();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
+
+      markPhase('coalescing consecutive presentation changes');
+      await invoker.focus();
+      await resizeBoardAcrossFrames(fixture, 480, 1_000);
+      await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
+      await fixture.page.waitForFunction(
+        ({ columnId }) => {
+          const active = document.activeElement;
+          return (
+            active instanceof HTMLElement &&
+            active.matches(
+              `[data-chat-board-column-id="${columnId}"] [data-chat-board-occurrence] [data-chat-board-focus-target="transition"]`,
+            )
+          );
+        },
+        { columnId: READY_COLUMN_ID },
+      );
+      expect(await invoker.evaluate((element) => document.activeElement === element)).toBe(true);
       fixture.assertNoBrowserErrors();
     });
   });

@@ -9,11 +9,15 @@ type PendingFocusTarget =
 			readonly control: string;
 	  };
 
+interface PendingPresentationFocus {
+	readonly target: PendingFocusTarget;
+	readonly band: ChatBoardPresentationBand;
+	readonly activeColumnId: string | null;
+}
+
 export class ChatBoardFocusController {
 	#root: HTMLElement | null = null;
-	#pendingFocus: PendingFocusTarget | null = null;
-	#pendingBand: ChatBoardPresentationBand | null = null;
-	#pendingActiveColumnId: string | null = null;
+	#pending: PendingPresentationFocus | null = null;
 
 	setRoot(root: HTMLElement | null): void {
 		this.#root = root;
@@ -23,57 +27,62 @@ export class ChatBoardFocusController {
 		nextBand: ChatBoardPresentationBand,
 		activeColumnId: string | null,
 	): void {
-		this.#pendingBand = nextBand;
-		this.#pendingActiveColumnId = activeColumnId;
-		if (!this.#root) return;
-		const active = document.activeElement;
-		if (this.#pendingFocus) {
-			if (
-				active instanceof HTMLElement &&
-				active !== document.body &&
-				!this.#root.contains(active)
-			) {
-				this.#clearPendingFocus();
+		if (this.#pending) {
+			const pending = { ...this.#pending, band: nextBand, activeColumnId };
+			this.#pending = pending;
+			if (!this.#root) return;
+			const active = document.activeElement;
+			if (!(active instanceof HTMLElement) || active === document.body) return;
+			if (!this.#root.contains(active)) {
+				this.#pending = null;
+				return;
 			}
+			const target = this.#captureFocusTarget(active);
+			if (!target) {
+				this.#pending = null;
+				return;
+			}
+			this.#pending = { ...pending, target };
 			return;
 		}
+		if (!this.#root) return;
+		const active = document.activeElement;
 		if (!(active instanceof HTMLElement) || !this.#root.contains(active)) return;
+		const target = this.#captureFocusTarget(active);
+		if (target) this.#pending = { target, band: nextBand, activeColumnId };
+	}
+
+	#captureFocusTarget(active: HTMLElement): PendingFocusTarget | null {
 		const tab = active.closest<HTMLElement>('[data-chat-board-tab]');
 		if (tab?.dataset.chatBoardTab) {
-			this.#pendingFocus = { kind: 'lane', columnId: tab.dataset.chatBoardTab };
-			return;
+			return { kind: 'lane', columnId: tab.dataset.chatBoardTab };
 		}
 		const lane = active.closest<HTMLElement>('[data-chat-board-column-id]');
 		const columnId = lane?.dataset.chatBoardColumnId;
-		if (!columnId) return;
+		if (!columnId) return null;
 		const occurrence = active.closest<HTMLElement>('[data-chat-board-occurrence]');
 		const control = active.closest<HTMLElement>('[data-chat-board-focus-target]');
 		const occurrenceKey = occurrence?.dataset.chatBoardOccurrence;
 		const controlName = control?.dataset.chatBoardFocusTarget;
-		this.#pendingFocus =
-			occurrenceKey && controlName
-				? { kind: 'occurrence', columnId, occurrenceKey, control: controlName }
-				: { kind: 'lane', columnId };
+		if (!occurrenceKey || !controlName) return { kind: 'lane', columnId };
+		return { kind: 'occurrence', columnId, occurrenceKey, control: controlName };
 	}
 
 	completePresentationChange(): void {
-		const target = this.#pendingFocus;
-		const pendingBand = this.#pendingBand;
-		const activeColumnId = this.#pendingActiveColumnId;
-		this.#clearPendingFocus();
-		if (!target) return;
-		if (pendingBand === 'narrow' && activeColumnId && target.columnId !== activeColumnId) {
+		const pending = this.#pending;
+		this.#pending = null;
+		if (!pending) return;
+		const { target, band, activeColumnId } = pending;
+		if (
+			band === 'narrow' &&
+			activeColumnId &&
+			target.columnId !== activeColumnId
+		) {
 			this.focusLane(activeColumnId);
 			return;
 		}
 		if (target.kind === 'occurrence' && this.#focusOccurrenceControl(target)) return;
 		this.focusLane(target.columnId);
-	}
-
-	#clearPendingFocus(): void {
-		this.#pendingFocus = null;
-		this.#pendingBand = null;
-		this.#pendingActiveColumnId = null;
 	}
 
 	#focusOccurrenceControl(target: Extract<PendingFocusTarget, { kind: 'occurrence' }>): boolean {
