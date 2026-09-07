@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { main } from '../main.js';
-import type { CliOutput } from '../output.js';
+import { createCliOutput, type CliOutput } from '../output.js';
 
 const CHAT_ID = '1785337200123456';
 
@@ -37,6 +37,19 @@ function capturedOutput(): {
       stopped() {},
       diagnostic(message) { diagnostics.push(message); },
     },
+  };
+}
+
+function capturedStreams() {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  return {
+    stdout,
+    stderr,
+    output: createCliOutput(
+      { write(chunk) { stdout.push(chunk); } },
+      { write(chunk) { stderr.push(chunk); } },
+    ),
   };
 }
 
@@ -134,6 +147,123 @@ function addChatRowResponse(init?: RequestInit): Response {
 }
 
 describe('main', () => {
+  test('prints only the native session lookup chat ID', async () => {
+    const capture = capturedStreams();
+    let submitted: unknown;
+    const exitCode = await main([
+      'lookup-native-session', 'session-123', '--agent', 'codex',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      readStdin: async () => { throw new Error('stdin must not be read'); },
+      fetch: async (_input, init) => {
+        submitted = JSON.parse(String(init?.body));
+        return Response.json({ chatId: CHAT_ID });
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(submitted).toEqual({ nativeSessionId: 'session-123', agent: 'codex' });
+    expect(capture.stdout.join('')).toBe(`${CHAT_ID}\n`);
+    expect(capture.stderr.join('')).toBe('');
+  });
+
+  test.each([
+    {
+      response: () => Response.json({
+        success: false,
+        error: 'No chat matches the native session ID',
+        errorCode: 'NATIVE_SESSION_NOT_FOUND',
+        retryable: false,
+      }, { status: 404 }),
+      exitCode: 2,
+      diagnostic: 'No chat matches the native session ID',
+    },
+    {
+      response: () => Response.json({
+        success: false,
+        error: 'Multiple chats match the native session ID',
+        errorCode: 'NATIVE_SESSION_AMBIGUOUS',
+        retryable: false,
+      }, { status: 409 }),
+      exitCode: 2,
+      diagnostic: 'Multiple chats match the native session ID',
+    },
+    {
+      response: () => Response.json({
+        success: false,
+        error: 'Unsupported agent: cursor',
+        errorCode: 'UNSUPPORTED_AGENT',
+        retryable: false,
+      }, { status: 422 }),
+      exitCode: 2,
+      diagnostic: 'Unsupported agent: cursor',
+    },
+    {
+      response: () => Response.json({
+        success: false,
+        error: 'Invalid token',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      }, { status: 401 }),
+      exitCode: 3,
+      diagnostic: 'authentication:',
+    },
+    {
+      response: () => Response.json({ chatId: 'invalid' }),
+      exitCode: 3,
+      diagnostic: 'server returned an invalid native session lookup response',
+    },
+  ])('keeps lookup HTTP failures off stdout: $diagnostic', async ({ response, exitCode, diagnostic }) => {
+    const capture = capturedStreams();
+    const result = await main(['lookup-native-session', 'session-123'], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async () => response(),
+    });
+
+    expect(result).toBe(exitCode);
+    expect(capture.stdout.join('')).toBe('');
+    expect(capture.stderr.join('')).toContain(diagnostic);
+    expect(capture.stderr).toHaveLength(1);
+  });
+
+  test('keeps native session lookup connection failures off stdout', async () => {
+    const capture = capturedStreams();
+    const exitCode = await main(['lookup-native-session', 'session-123'], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async () => { throw new TypeError('connection refused'); },
+    });
+
+    expect(exitCode).toBe(3);
+    expect(capture.stdout.join('')).toBe('');
+    expect(capture.stderr.join('')).toContain(
+      'native session lookup: request could not reach the Garcon server',
+    );
+    expect(capture.stderr).toHaveLength(1);
+  });
+
+  test.each([
+    ['missing positional argument', ['lookup-native-session']],
+    ['extra positional argument', ['lookup-native-session', 'one', 'two']],
+    ['duplicate agent option', [
+      'lookup-native-session', 'session-123', '--agent', 'codex', '--agent', 'claude',
+    ]],
+    ['unknown option', ['lookup-native-session', 'session-123', '--unknown']],
+  ])('keeps lookup argument failure off stdout: %s', async (_label, args) => {
+    const capture = capturedStreams();
+    const exitCode = await main(args, {
+      output: capture.output,
+      discoverRuntime: async () => { throw new Error('discovery must not run'); },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(capture.stdout.join('')).toBe('');
+    expect(capture.stderr).toHaveLength(1);
+    expect(capture.stderr[0]).toStartWith('arguments:');
+  });
+
   test('status reads one snapshot without reading stdin or resolving a project path', async () => {
     const capture = capturedOutput();
     let requestedUrl = '';

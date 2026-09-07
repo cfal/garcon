@@ -47,6 +47,7 @@
     "./model-catalog": "./model-catalog.ts",
     "./model-routing": "./model-routing.ts",
     "./models": "./models.ts",
+    "./native-session-lookup": "./native-session-lookup.ts",
     "./prompt-refinement": "./prompt-refinement.ts",
     "./preamble-prefix": "./preamble-prefix.ts",
     "./preambles": "./preambles.ts",

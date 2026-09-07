@@ -729,3 +729,61 @@ describe('handoff artifact arguments', () => {
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'handoff the review' });
   });
 });
+
+describe('native session lookup arguments', () => {
+  test('documents and parses the positional lookup with an optional exact agent ID', () => {
+    expect(CLI_HELP).toContain(
+      'Lookup the Garcon chat associated with a native agent session ID.',
+    );
+    expect(parseCliArgs(['lookup-native-session', 'session-123'], ENV)).toEqual({
+      kind: 'lookup-native-session',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      nativeSessionId: 'session-123',
+    });
+    expect(parseCliArgs([
+      '--workspace', 'review',
+      'lookup-native-session', 'ses_123',
+      '--agent', 'codex',
+    ], ENV)).toEqual({
+      kind: 'lookup-native-session',
+      workspace: 'review',
+      configDir: '/home/test/.garcon',
+      nativeSessionId: 'ses_123',
+      agentId: 'codex',
+    });
+  });
+
+  test('preserves native session IDs as ordinary argv data', () => {
+    expect(parseCliArgs([
+      'lookup-native-session', 'ses_$(touch should-not-run);$HOME',
+    ], ENV)).toMatchObject({
+      nativeSessionId: 'ses_$(touch should-not-run);$HOME',
+    });
+  });
+
+  test.each([
+    [['lookup-native-session'], 'requires one native session ID'],
+    [['lookup-native-session', 'one', 'two'], 'accepts exactly one native session ID'],
+    [['lookup-native-session', ''], 'native session ID is required'],
+    [['lookup-native-session', 'x'.repeat(257)], 'native session ID must be at most 256 bytes'],
+    [['lookup-native-session', 'session\nid'], 'native session ID must not contain control characters'],
+    [['lookup-native-session', 'session-123', '--agent', 'Codex'], '--agent must be a valid agent ID'],
+    [['lookup-native-session', 'session-123', '--agent', 'codex', '--agent', 'claude'], 'only once'],
+    [['lookup-native-session', 'session-123', '--provider', 'provider'], '--provider cannot be used'],
+    [['lookup-native-session', 'session-123', '--json'], '--json cannot be used'],
+    [['lookup-native-session', 'session-123', '--unknown'], 'Unknown option'],
+  ])('rejects invalid lookup arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('treats an option-terminated lookup token as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex', '--model', 'gpt', '--',
+      'lookup-native-session', 'session-123',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      prompt: 'lookup-native-session session-123',
+    });
+  });
+});
