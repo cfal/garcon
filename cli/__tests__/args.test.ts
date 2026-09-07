@@ -73,8 +73,8 @@ describe('parseCliArgs', () => {
       kind: 'resume',
       userMessagePresentation: { origin: 'cli', style: 'error', disclosure: 'collapsed' },
     });
-    expect(parseCliArgs(['send-async', CHAT_ID, '--collapsible', 'prompt'], ENV)).toMatchObject({
-      kind: 'send-async',
+    expect(parseCliArgs(['resume-async', CHAT_ID, '--collapsible', 'prompt'], ENV)).toMatchObject({
+      kind: 'resume-async',
       userMessagePresentation: { origin: 'cli', disclosure: 'collapsed' },
     });
   });
@@ -196,7 +196,7 @@ describe('parseCliArgs', () => {
     { args: ['resume', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot' },
     { args: ['start', '--parent', 'invalid', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--parent must be a valid' },
     { args: ['start', '--parent', PARENT_CHAT_ID, '--parent', CHAT_ID, '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'only once' },
-    { args: ['send-async', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot be used' },
+    { args: ['resume-async', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot be used' },
     { args: ['resume', CHAT_ID, '--provider', 'p', 'prompt'], message: 'require --model' },
     { args: ['start', '--endpoint', 'e', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'requires --provider' },
     { args: ['start', '--workspace', '../other', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'without path separators' },
@@ -229,6 +229,8 @@ describe('parseCliArgs', () => {
   test('requires a known explicit command', () => {
     expect(() => parseCliArgs([], ENV)).toThrow('a command is required');
     expect(() => parseCliArgs(['Review', 'this'], ENV)).toThrow('unknown command: Review');
+    expect(() => parseCliArgs(['send-async', CHAT_ID, 'message'], ENV))
+      .toThrow('unknown command: send-async');
   });
 
   test('parses start-async with the new-chat options', () => {
@@ -256,6 +258,9 @@ describe('parseCliArgs', () => {
     );
     expect(CLI_HELP).toContain(
       'resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
+    );
+    expect(CLI_HELP).toContain(
+      'resume-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>',
     );
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
@@ -358,7 +363,7 @@ describe('parseCliArgs', () => {
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--messages', '1'], message: '--messages cannot be used with wait' },
     { args: ['list', 'agents', '--messages', '1'], message: '--messages cannot be used with list' },
     { args: ['stop', CHAT_ID, '--messages', '1'], message: '--messages cannot be used with stop' },
-    { args: ['send-async', CHAT_ID, '--messages', '1', 'message'], message: '--messages cannot be used with send-async' },
+    { args: ['resume-async', CHAT_ID, '--messages', '1', 'message'], message: '--messages cannot be used with resume-async' },
     { args: ['start', '--agent', 'codex', '--model', 'gpt', '--messages', '1', 'prompt'], message: '--messages cannot be used with start' },
   ])('rejects invalid status arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
@@ -377,15 +382,15 @@ describe('parseCliArgs', () => {
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--collapsible'], message: '--collapsible cannot be used with wait' },
     { args: ['list', 'agents', '--turn', 'turn-1'], message: '--turn cannot be used with list' },
     { args: ['stop', CHAT_ID, '--turn', 'turn-1'], message: '--turn cannot be used with stop' },
-    { args: ['send-async', CHAT_ID, '--turn', 'turn-1', 'message'], message: '--turn cannot be used with send-async' },
+    { args: ['resume-async', CHAT_ID, '--turn', 'turn-1', 'message'], message: '--turn cannot be used with resume-async' },
     { args: ['start', '--agent', 'codex', '--model', 'gpt', '--turn', 'turn-1', 'prompt'], message: '--turn cannot be used with start' },
   ])('rejects invalid wait arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 
-  test('parses a minimal send-async command', () => {
-    expect(parseCliArgs(['send-async', CHAT_ID, 'Implement the review'], ENV)).toEqual({
-      kind: 'send-async',
+  test('parses a minimal resume-async command', () => {
+    expect(parseCliArgs(['resume-async', CHAT_ID, 'Implement the review'], ENV)).toEqual({
+      kind: 'resume-async',
       workspace: 'default',
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
@@ -395,30 +400,30 @@ describe('parseCliArgs', () => {
     });
   });
 
-  test('parses send-async message presentation', () => {
+  test('parses resume-async message presentation', () => {
     expect(parseCliArgs([
-      'send-async', CHAT_ID,
+      'resume-async', CHAT_ID,
       '--message-title', 'Blocker',
       '--message-style', 'info',
       'Do not deploy',
     ], ENV)).toMatchObject({
-      kind: 'send-async',
+      kind: 'resume-async',
       message: 'Do not deploy',
       userMessagePresentation: { origin: 'cli', style: 'info', title: 'Blocker' },
     });
   });
 
-  test('parses a connection-qualified send-async with --allow-steer before or after the chat ID', () => {
+  test('parses a connection-qualified resume-async with --allow-steer before or after the chat ID', () => {
     expect(parseCliArgs([
       '--workspace', 'work',
       '--config-dir', '/conf',
       '--server', 'http://127.0.0.1:8080',
-      'send-async',
+      'resume-async',
       '--allow-steer',
       CHAT_ID,
       'Follow up',
     ], ENV)).toEqual({
-      kind: 'send-async',
+      kind: 'resume-async',
       workspace: 'work',
       configDir: '/conf',
       serverUrl: 'http://127.0.0.1:8080',
@@ -427,23 +432,23 @@ describe('parseCliArgs', () => {
       message: 'Follow up',
       readsMessageFromStdin: false,
     });
-    expect(parseCliArgs(['send-async', CHAT_ID, '--allow-steer', 'Follow up'], ENV)).toMatchObject({
-      kind: 'send-async',
+    expect(parseCliArgs(['resume-async', CHAT_ID, '--allow-steer', 'Follow up'], ENV)).toMatchObject({
+      kind: 'resume-async',
       chatId: CHAT_ID,
       allowSteer: true,
       message: 'Follow up',
     });
   });
 
-  test('reads the send-async message from stdin and preserves quoted whitespace', () => {
-    expect(parseCliArgs(['send-async', CHAT_ID, '-'], ENV)).toMatchObject({
-      kind: 'send-async',
+  test('reads the resume-async message from stdin and preserves quoted whitespace', () => {
+    expect(parseCliArgs(['resume-async', CHAT_ID, '-'], ENV)).toMatchObject({
+      kind: 'resume-async',
       chatId: CHAT_ID,
       message: null,
       readsMessageFromStdin: true,
     });
-    expect(parseCliArgs(['send-async', CHAT_ID, '  preserve  spacing  '], ENV)).toMatchObject({
-      kind: 'send-async',
+    expect(parseCliArgs(['resume-async', CHAT_ID, '  preserve  spacing  '], ENV)).toMatchObject({
+      kind: 'resume-async',
       message: '  preserve  spacing  ',
     });
   });
@@ -462,9 +467,9 @@ describe('parseCliArgs', () => {
     });
   });
 
-  test('accepts a send-async message after the option terminator', () => {
-    expect(parseCliArgs(['send-async', CHAT_ID, '--', '--fix-the-parser'], ENV)).toMatchObject({
-      kind: 'send-async',
+  test('accepts a resume-async message after the option terminator', () => {
+    expect(parseCliArgs(['resume-async', CHAT_ID, '--', '--fix-the-parser'], ENV)).toMatchObject({
+      kind: 'resume-async',
       chatId: CHAT_ID,
       message: '--fix-the-parser',
     });
@@ -475,10 +480,10 @@ describe('parseCliArgs', () => {
       'start',
       '--agent', 'codex',
       '--model', 'gpt',
-      '--', 'send-async', 'is', 'the', 'command', 'to', 'review',
+      '--', 'resume-async', 'is', 'the', 'command', 'to', 'review',
     ], ENV)).toMatchObject({
       kind: 'start',
-      prompt: 'send-async is the command to review',
+      prompt: 'resume-async is the command to review',
     });
     expect(parseCliArgs([
       'start',
@@ -492,25 +497,25 @@ describe('parseCliArgs', () => {
   });
 
   test.each([
-    { args: ['send-async'], message: 'requires a chat ID and one message' },
-    { args: ['send-async', CHAT_ID], message: 'requires a chat ID and one message' },
-    { args: ['send-async', CHAT_ID, 'a', 'b'], message: 'requires a chat ID and one message' },
-    { args: ['send-async', '123', 'message'], message: 'valid Garcon chat ID' },
-    { args: ['send-async', CHAT_ID, '   '], message: 'message must not be empty' },
+    { args: ['resume-async'], message: 'requires a chat ID and one message' },
+    { args: ['resume-async', CHAT_ID], message: 'requires a chat ID and one message' },
+    { args: ['resume-async', CHAT_ID, 'a', 'b'], message: 'requires a chat ID and one message' },
+    { args: ['resume-async', '123', 'message'], message: 'valid Garcon chat ID' },
+    { args: ['resume-async', CHAT_ID, '   '], message: 'message must not be empty' },
     { args: ['stop', CHAT_ID, 'extra'], message: 'exactly one chat ID' },
     { args: ['stop', '123'], message: 'valid Garcon chat ID' },
     { args: ['stop'], message: 'exactly one chat ID' },
-    { args: ['send-async', CHAT_ID, '--cwd', '.', 'message'], message: '--cwd cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--agent', 'codex', 'message'], message: '--agent cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--provider', 'p', 'message'], message: '--provider cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--endpoint', 'e', 'message'], message: '--endpoint cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--model', 'gpt', 'message'], message: '--model cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--permissions', 'acceptEdits', 'message'], message: '--permissions cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--reasoning-effort', 'high', 'message'], message: '--reasoning-effort cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--title', 'T', 'message'], message: '--title cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--tag', 'review', 'message'], message: '--tag cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--resume', CHAT_ID, 'message'], message: 'Unknown option' },
-    { args: ['send-async', CHAT_ID, '--json', 'message'], message: '--json cannot be used with send-async' },
+    { args: ['resume-async', CHAT_ID, '--cwd', '.', 'message'], message: '--cwd cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--agent', 'codex', 'message'], message: '--agent cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--provider', 'p', 'message'], message: '--provider cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--endpoint', 'e', 'message'], message: '--endpoint cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--model', 'gpt', 'message'], message: '--model cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--permissions', 'acceptEdits', 'message'], message: '--permissions cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--reasoning-effort', 'high', 'message'], message: '--reasoning-effort cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--title', 'T', 'message'], message: '--title cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--tag', 'review', 'message'], message: '--tag cannot be used with resume-async' },
+    { args: ['resume-async', CHAT_ID, '--resume', CHAT_ID, 'message'], message: 'Unknown option' },
+    { args: ['resume-async', CHAT_ID, '--json', 'message'], message: '--json cannot be used with resume-async' },
     { args: ['stop', CHAT_ID, '--cwd', '.'], message: '--cwd cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--agent', 'codex'], message: '--agent cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--provider', 'p'], message: '--provider cannot be used with stop' },
@@ -528,12 +533,12 @@ describe('parseCliArgs', () => {
     { args: ['start', '--agent', 'codex', '--model', 'gpt', '--allow-steer', 'prompt'], message: '--allow-steer cannot be used with start' },
     { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: 'Unknown option' },
     { args: ['start', '--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer cannot be used with start' },
-    { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
-    { args: ['send-async', CHAT_ID, '--message-style', 'INFO', 'message'], message: 'must be one of: info, notice, error, custom' },
-    { args: ['send-async', CHAT_ID, '--message-style', 'custom', 'message'], message: 'requires --color' },
-    { args: ['send-async', CHAT_ID, '--message-style', 'error', '--color', '7c3aed', 'message'], message: 'preset --message-style' },
-    { args: ['send-async', CHAT_ID, '--color', 'red', 'message'], message: 'six-digit hex colors' },
-    { args: ['send-async', CHAT_ID, '--markdown', 'message'], message: '--markdown cannot be used with send-async' },
+    { args: ['resume-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
+    { args: ['resume-async', CHAT_ID, '--message-style', 'INFO', 'message'], message: 'must be one of: info, notice, error, custom' },
+    { args: ['resume-async', CHAT_ID, '--message-style', 'custom', 'message'], message: 'requires --color' },
+    { args: ['resume-async', CHAT_ID, '--message-style', 'error', '--color', '7c3aed', 'message'], message: 'preset --message-style' },
+    { args: ['resume-async', CHAT_ID, '--color', 'red', 'message'], message: 'six-digit hex colors' },
+    { args: ['resume-async', CHAT_ID, '--markdown', 'message'], message: '--markdown cannot be used with resume-async' },
     { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: '--message-title cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--collapsible'], message: '--collapsible cannot be used with stop' },
     { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
@@ -733,7 +738,7 @@ describe('add-row arguments', () => {
     [['add-row', CHAT_ID, '--type', 'notice', '--title', 'x'.repeat(121), 'content'], 'title must be at most 120 characters'],
     [['add-row', CHAT_ID, '--type', 'notice', '--title', 'one', '--title', 'two', 'content'], 'only once'],
     [['add-row', CHAT_ID, '--type', 'notice', '--json', 'content'], '--json cannot be used with add-row'],
-    [['send-async', CHAT_ID, '--type', 'notice', 'content'], '--type cannot be used with send-async'],
+    [['resume-async', CHAT_ID, '--type', 'notice', 'content'], '--type cannot be used with resume-async'],
     [['stop', CHAT_ID, '--type', 'notice'], '--type cannot be used with stop'],
     [['status', CHAT_ID, '--type', 'notice'], '--type cannot be used with status'],
     [['list', 'agents', '--type', 'notice'], '--type cannot be used with list'],
@@ -793,7 +798,7 @@ describe('export arguments', () => {
     [['status', CHAT_ID, '--format', 'xml'], '--format cannot be used with status'],
     [['wait', CHAT_ID, '--turn', 'turn-1', '--exclude', 'tools'], '--exclude cannot be used with wait'],
     [['list', 'agents', '--output', 'file'], '--output cannot be used with list'],
-    [['send-async', CHAT_ID, '--force', 'message'], '--force cannot be used with send-async'],
+    [['resume-async', CHAT_ID, '--force', 'message'], '--force cannot be used with resume-async'],
     [['start', '--agent', 'codex', '--model', 'gpt', '--format', 'xml', 'prompt'], '--format cannot be used with start'],
   ])('rejects invalid export arguments: %s', (args, message) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
@@ -866,7 +871,7 @@ describe('handoff artifact arguments', () => {
     [['export', CHAT_ID, '--context-window-size', '500000'], '--context-window-size cannot be used with export'],
     [['status', CHAT_ID, '--context-window-size', '500000'], '--context-window-size cannot be used with status'],
     [['list', 'agents', '--context-window-size', '500000'], '--context-window-size cannot be used with list'],
-    [['send-async', CHAT_ID, '--context-window-size', '500000', 'message'], '--context-window-size cannot be used with send-async'],
+    [['resume-async', CHAT_ID, '--context-window-size', '500000', 'message'], '--context-window-size cannot be used with resume-async'],
     [['start', '--agent', 'codex', '--model', 'gpt', '--context-window-size', '500000', 'prompt'], '--context-window-size cannot be used with start'],
   ])('rejects invalid handoff arguments: %s', (args, message) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);

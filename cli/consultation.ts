@@ -52,7 +52,7 @@ export interface ConsultationDependencies {
 const START_CHAT_ID_ATTEMPTS = 3;
 
 // The cli tag records creation provenance only. Every started chat receives it;
-// resumes, send-async, steer, and stop never add it.
+// resumes, resume-async, steer, and stop never add it.
 function startTags(additionalTags: readonly string[] | undefined): string[] {
   return normalizeTags(['cli', ...(additionalTags ?? [])]);
 }

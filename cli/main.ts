@@ -2,7 +2,7 @@ import packageJson from '../package.json' with { type: 'json' };
 import fs from 'node:fs/promises';
 import { CLI_HELP, parseCliArgs, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
-import { sendChatAsync, stopChat } from './chat-control.js';
+import { resumeChatAsync, stopChat } from './chat-control.js';
 import { runAddRow, validateAddRowContent } from './chat-row.js';
 import { runChatStatus } from './chat-status.js';
 import { runChatExport } from './chat-export.js';
@@ -142,7 +142,7 @@ function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
       .includes(command.kind)
   ) return 'terminal interrupted; the read-only operation was canceled';
   return command !== undefined
-    && (command.kind === 'send-async' || command.kind === 'stop' || command.kind === 'start-async')
+    && (command.kind === 'resume-async' || command.kind === 'stop' || command.kind === 'start-async')
     ? 'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying'
     : 'terminal interrupted; no Garcon agent was stopped';
 }
@@ -217,7 +217,7 @@ export async function main(
       await stopChat(command.chatId, client, output, options.signal);
       return 0;
     }
-    if (command.kind === 'send-async') {
+    if (command.kind === 'resume-async') {
       const message = command.readsMessageFromStdin
         ? await readConfiguredStdin(options)
         : command.message ?? '';
@@ -225,7 +225,7 @@ export async function main(
         throw new CliError('arguments', 'the message read from stdin must not be empty', 2);
       }
       const client = await connectedClient(command, options);
-      await sendChatAsync({
+      await resumeChatAsync({
         chatId: command.chatId,
         content: message,
         allowSteer: command.allowSteer,

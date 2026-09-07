@@ -76,8 +76,8 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] start [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] start-async [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] resume-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
   garcon-cli [options] list <resource>
-  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
   garcon-cli [options] stop <chat-id>
   garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
@@ -89,11 +89,10 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] handoff <chat-id> [--context-window-size <tokens>] [--output <path>] [--force]
   garcon-cli [connection options] lookup-native-session <native-session-id> [--agent <agent-id>]
 
-start and resume wait for the accepted turn. start-async returns after acceptance.
+start and resume wait for the accepted turn. start-async and resume-async return after acceptance.
 The selected permission mode may allow the agent to edit files and run tools.
-send-async submits one turn and returns immediately; it inherits the chat's
-saved execution settings, so it may edit files or run tools. Use - as the
-message to read UTF-8 text from stdin. stop uses the same command as the SPA
+resume-async inherits the chat's saved execution settings, so it may edit files
+or run tools. Use - as the message to read UTF-8 text from stdin. stop uses the same command as the SPA
 Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
 add-row appends one durable presentation-only CLI row to chat history.
@@ -143,7 +142,7 @@ Options:
   --message-style <style>      Style this CLI user message: info, notice, error, or custom
   --color <light[,dark]>       Custom six-digit hex accent; one value applies to both themes
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
-  --allow-steer                With send-async, steer the active turn when busy; never queues
+  --allow-steer                With resume-async, steer the active turn when busy; never queues
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
   --type <style>               Add-row style: info, notice, error, or custom
@@ -175,7 +174,7 @@ Options:
 
 Use a single - as the prompt to read UTF-8 text from stdin.
 Use -- before prompt text that begins with an option-like token.
-The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
+The cli tag records creation through garcon-cli; resume, resume-async, and stop never add it.`;
 
 export interface CliEnvironment {
   GARCON_CONFIG_DIR?: string;
@@ -245,8 +244,8 @@ export interface ListCliCommand extends CliConnectionOptions {
   endpointId?: string;
 }
 
-export interface SendAsyncCliCommand extends CliConnectionOptions {
-  kind: 'send-async';
+export interface ResumeAsyncCliCommand extends CliConnectionOptions {
+  kind: 'resume-async';
   chatId: ChatId;
   allowSteer: boolean;
   message: string | null;
@@ -341,7 +340,7 @@ export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
   | ListCliCommand
-  | SendAsyncCliCommand
+  | ResumeAsyncCliCommand
   | StopCliCommand
   | AddRowCliCommand
   | StatusCliCommand
@@ -502,7 +501,7 @@ function isListResource(value: string): value is ListResource {
   return (LIST_RESOURCE_VALUES as readonly string[]).includes(value);
 }
 
-type ControlCommandKind = 'send-async' | 'stop' | 'add-row' | 'read';
+type ControlCommandKind = 'resume-async' | 'stop' | 'add-row' | 'read';
 
 const CONNECTION_OPTION_KEYS = ['workspace', 'config-dir', 'server'] as const;
 
@@ -522,7 +521,7 @@ function rejectOptionsExcept(
   }
 }
 
-const SEND_ASYNC_OPTIONS = optionSet(
+const RESUME_ASYNC_OPTIONS = optionSet(
   'allow-steer',
   'message-title',
   'message-style',
@@ -585,16 +584,16 @@ function parseControlChatId(value: string, command: ControlCommandKind): ChatId 
   }
 }
 
-function parseSendAsync(
+function parseResumeAsync(
   parsed: ReturnType<typeof parseArgs>,
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
-): SendAsyncCliCommand {
-  rejectOptionsExcept(values, SEND_ASYNC_OPTIONS, 'send-async');
+): ResumeAsyncCliCommand {
+  rejectOptionsExcept(values, RESUME_ASYNC_OPTIONS, 'resume-async');
   if (parsed.positionals.length !== 3) {
-    throw argumentError('send-async requires a chat ID and one message');
+    throw argumentError('resume-async requires a chat ID and one message');
   }
-  const chatId = parseControlChatId(parsed.positionals[1]!, 'send-async');
+  const chatId = parseControlChatId(parsed.positionals[1]!, 'resume-async');
   const messageArgument = parsed.positionals[2]!;
   const readsMessageFromStdin = messageArgument === '-';
   const message = readsMessageFromStdin ? null : messageArgument;
@@ -603,7 +602,7 @@ function parseSendAsync(
   }
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   return {
-    kind: 'send-async',
+    kind: 'resume-async',
     ...connection,
     chatId,
     allowSteer: values['allow-steer'] === true,
@@ -1161,7 +1160,7 @@ export function parseCliArgs(
 
   const commandName = parsed.positionals[0];
   if (commandName === undefined) throw argumentError('a command is required');
-  if (commandName === 'send-async') return parseSendAsync(parsed, values, connection);
+  if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
   if (commandName === 'stop') return parseStop(parsed, values, connection);
   if (commandName === 'add-row') return parseAddRow(parsed, values, connection);
   if (commandName === 'wait') return parseWait(parsed, values, connection);

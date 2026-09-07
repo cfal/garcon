@@ -527,10 +527,10 @@ describe('main', () => {
     }
   });
 
-  test('send-async delivers to an idle chat and exits after acceptance', async () => {
+  test('resume-async delivers to an idle chat and exits after acceptance', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, 'Implement the review',
+      'resume-async', CHAT_ID, 'Implement the review',
     ], {
       fetch: (input, init) => String(input).includes('/snapshot?')
         ? controlSnapshotResponse()
@@ -542,10 +542,10 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
-  test('send-async without --allow-steer reports busy and exits 3', async () => {
+  test('resume-async without --allow-steer reports busy and exits 3', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, 'Implement the review',
+      'resume-async', CHAT_ID, 'Implement the review',
     ], {
       fetch: async (input) => String(input).includes('/snapshot?')
         ? controlSnapshotResponse()
@@ -562,11 +562,11 @@ describe('main', () => {
     expect(capture.diagnostics[0]).toContain('--allow-steer');
   });
 
-  test('send-async with --allow-steer steers the active turn', async () => {
+  test('resume-async with --allow-steer steers the active turn', async () => {
     const capture = capturedOutput();
     let runCalls = 0;
     const exitCode = await main([
-      'send-async', CHAT_ID, '--allow-steer', 'Also update the migration test.',
+      'resume-async', CHAT_ID, '--allow-steer', 'Also update the migration test.',
     ], {
       fetch: async (input, init) => {
         const url = String(input);
@@ -599,10 +599,10 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
-  test('send-async rejects empty stdin content before any network submission', async () => {
+  test('resume-async rejects empty stdin content before any network submission', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, '-',
+      'resume-async', CHAT_ID, '-',
     ], {
       fetch: async () => { throw new Error('network must not be reached'); },
       discoverRuntime: stubDiscovery,
@@ -850,11 +850,11 @@ describe('main', () => {
     expect(capture.diagnostics[0]).toContain('could not stop');
   });
 
-  test('interrupts a send-async stdin read with the control-aware diagnostic', async () => {
+  test('interrupts a resume-async stdin read with the control-aware diagnostic', async () => {
     const controller = new AbortController();
     const capture = capturedOutput();
     const result = main([
-      'send-async', CHAT_ID, '-',
+      'resume-async', CHAT_ID, '-',
     ], {
       signal: controller.signal,
       readStdin: () => new Promise(() => undefined),

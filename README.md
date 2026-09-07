@@ -115,7 +115,7 @@ bun cli/main.ts --workspace default start --cwd /path/to/project \
   "Implement the validation and run its focused tests."
 
 # Deliver a new turn, or steer the target when it is already busy.
-bun cli/main.ts --workspace default send-async 1785337200123456 \
+bun cli/main.ts --workspace default resume-async 1785337200123456 \
   --allow-steer "Address the review finding and rerun the tests."
 
 # Find prior work and inspect bounded context around a search result.
