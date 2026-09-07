@@ -15,16 +15,11 @@ import {
 } from '$shared/chat-snapshot';
 import type { ApiProtocol } from '$shared/api-providers';
 import {
-	CHAT_MESSAGES_MAX_LIMIT,
-	isRelationallyValidBoundedTranscriptPage,
-	isRelationallyValidTranscriptPage,
-	parseChatHistoryState,
-	parseResendCandidates,
-	parseTranscriptMessages,
+	parseChatHistoryResponse,
 	type ChatHistoryResponse,
-	type TranscriptMessage,
-	type TranscriptReadPurpose,
+	type ChatMessagesRequest,
 } from '$shared/chat-view';
+export type { ChatMessagesRequest } from '$shared/chat-view';
 import type {
 	ChatListEntry,
 	ChatListResponse,
@@ -34,6 +29,7 @@ import type {
 	SetLastSelectedChatRequest,
 	SetLastSelectedChatResponse,
 } from '$shared/chat-list';
+import { parseChatListResponse } from '$shared/chat-list';
 import type {
 	AgentInterruptAndSendCommandRequest,
 	AgentInterruptAndSendResponse,
@@ -75,16 +71,10 @@ import type {
 	GenerateChatTitleResponse,
 } from '$shared/chat-title-contracts';
 import {
-	CHAT_SEARCH_DEFAULT_PAGE_SIZE,
-	CHAT_SEARCH_MAX_OFFSET,
-	CHAT_SEARCH_MAX_PAGE_SIZE,
-	CHAT_SEARCH_MAX_PREFIX_SIZE,
-	CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
-	type ChatSearchIndexStatus,
+	parseChatSearchResponse,
 	type ChatSearchNavigateRequest,
 	type ChatSearchNavigateResponse,
 	type ChatSearchRequest,
-	type ChatSearchResult,
 	type ChatSearchResponse,
 	type TranscriptSearchStatusResponse,
 } from '$shared/chat-search';
@@ -145,34 +135,9 @@ export type { ChatDetailsResponse } from '$shared/chat-details';
 
 export type ListChatsResponse = ChatListResponse;
 
-function hasConsistentProcessingPhase(
-	entry: Pick<ChatListEntry, 'isProcessing' | 'processingPhase'>,
-): boolean {
-	return (
-		(entry.processingPhase === null ||
-			entry.processingPhase === 'running' ||
-			entry.processingPhase === 'stopping') &&
-		entry.isProcessing === (entry.processingPhase !== null)
-	);
-}
-
 /** Lists all chat sessions. */
 export async function listChats(): Promise<ListChatsResponse> {
-	const response = await apiGet<ListChatsResponse>('/api/v1/chats');
-	if (
-		!response ||
-		!Array.isArray(response.sessions) ||
-		response.sessions.some(
-			(entry) =>
-				!entry ||
-				typeof entry !== 'object' ||
-				typeof entry.isProcessing !== 'boolean' ||
-				!hasConsistentProcessingPhase(entry),
-		)
-	) {
-		throw new Error('Invalid chat list processing response');
-	}
-	return response;
+	return parseChatListResponse(await apiGet<unknown>('/api/v1/chats'));
 }
 
 export async function setLastSelectedChat(
@@ -380,92 +345,6 @@ export async function updateChatProjectPath(
 	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
 }
 
-function requireNonEmptyString(value: unknown, fieldName: string): string {
-	if (typeof value !== 'string' || value.trim().length === 0) {
-		throw new Error(`Invalid chat messages page: ${fieldName}`);
-	}
-	return value;
-}
-
-function requireNonNegativeInteger(value: unknown, fieldName: string): number {
-	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-		throw new Error(`Invalid chat messages page: ${fieldName}`);
-	}
-	return value;
-}
-
-function requirePositiveInteger(value: unknown, fieldName: string): number {
-	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-		throw new Error(`Invalid chat messages page: ${fieldName}`);
-	}
-	return value;
-}
-
-function requireNullablePositiveInteger(value: unknown, fieldName: string): number | null {
-	return value === null ? null : requirePositiveInteger(value, fieldName);
-}
-
-export type ChatMessagesRequest = {
-	chatId: string;
-	limit?: number;
-} & (
-	| {
-			beforeOrdinal?: undefined;
-			transcriptViewId?: string;
-			purpose?: TranscriptReadPurpose;
-		}
-	| {
-			beforeOrdinal: number;
-			transcriptViewId: string;
-			purpose?: never;
-		}
-);
-
-interface ValidatedChatMessagesPage {
-	chatId: string;
-	transcriptViewId: string;
-	messages: TranscriptMessage[];
-	lastOrdinal: number;
-	pageOldestOrdinal: number;
-	pageNewestOrdinal: number;
-	nextBeforeOrdinal: number | null;
-	hasMore: boolean;
-	limit: number;
-}
-
-function invalidChatMessagesPage(reason: string): never {
-	throw new Error(`Invalid chat messages page: ${reason}`);
-}
-
-function validateChatMessagesPage(
-	request: ChatMessagesRequest,
-	page: ValidatedChatMessagesPage,
-): void {
-	if (page.chatId !== request.chatId) invalidChatMessagesPage('chatId does not match request');
-	const expectedLimit = Math.min(request.limit ?? 50, CHAT_MESSAGES_MAX_LIMIT);
-	if (page.limit !== expectedLimit) invalidChatMessagesPage('limit does not match request');
-	if (
-		request.transcriptViewId !== undefined
-		&& page.transcriptViewId !== request.transcriptViewId
-	) {
-		invalidChatMessagesPage('transcriptViewId does not match request');
-	}
-	const effectiveBefore = Math.min(
-		request.beforeOrdinal ?? page.lastOrdinal + 1,
-		page.lastOrdinal + 1,
-	);
-	if (page.pageNewestOrdinal !== effectiveBefore - 1) {
-		invalidChatMessagesPage('pageNewestOrdinal does not match the effective request boundary');
-	}
-	if (page.messages.length > page.limit) invalidChatMessagesPage('messages exceed limit');
-	if (!isRelationallyValidTranscriptPage(page)) {
-		invalidChatMessagesPage('ordinal relations are inconsistent');
-	}
-	if (!isRelationallyValidBoundedTranscriptPage(page, page.limit)) {
-		invalidChatMessagesPage('raw continuation does not match the bounded interval');
-	}
-}
-
 export async function getChatMessages(params: ChatMessagesRequest): Promise<ChatHistoryResponse> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
@@ -480,69 +359,8 @@ export async function getChatMessages(params: ChatMessagesRequest): Promise<Chat
 	if (params.purpose !== undefined) {
 		query.set('purpose', params.purpose);
 	}
-	const response = await apiGet<{
-		historyState?: unknown;
-		chatId?: unknown;
-		messages?: unknown;
-		transcriptViewId?: unknown;
-		lastOrdinal?: unknown;
-		pageOldestOrdinal?: unknown;
-		pageNewestOrdinal?: unknown;
-		nextBeforeOrdinal?: unknown;
-		resendCandidates?: unknown;
-		hasMore?: unknown;
-		limit?: unknown;
-	}>(`/api/v1/chats/messages?${query.toString()}`);
-	const historyState = parseChatHistoryState(response.historyState);
-	if (historyState === null) throw new Error('Invalid chat messages page: historyState');
-	const chatId = requireNonEmptyString(response.chatId, 'chatId');
-	if (chatId !== params.chatId) invalidChatMessagesPage('chatId does not match request');
-	if (historyState.kind !== 'complete') {
-		if (!Array.isArray(response.messages) || response.messages.length !== 0) {
-			throw new Error('Invalid unavailable chat history: messages');
-		}
-		for (const field of [
-			'transcriptViewId',
-			'lastOrdinal',
-			'pageOldestOrdinal',
-			'pageNewestOrdinal',
-			'nextBeforeOrdinal',
-			'hasMore',
-			'limit',
-		] as const) {
-			if (response[field] !== undefined) {
-				throw new Error(`Invalid unavailable chat history: ${field}`);
-			}
-		}
-		return { historyState, chatId, messages: [] };
-	}
-	const messages = parseTranscriptMessages(response.messages);
-	if (messages === null) throw new Error('Invalid chat messages page: messages');
-	const resendCandidates = parseResendCandidates(response.resendCandidates);
-	if (resendCandidates === null) {
-		throw new Error('Invalid chat messages page: resendCandidates');
-	}
-	if (typeof response.hasMore !== 'boolean') {
-		throw new Error('Invalid chat messages page: hasMore');
-	}
-	const page = {
-		historyState,
-		chatId,
-		messages,
-		resendCandidates,
-		transcriptViewId: requireNonEmptyString(response.transcriptViewId, 'transcriptViewId'),
-		lastOrdinal: requireNonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
-		pageOldestOrdinal: requireNonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
-		pageNewestOrdinal: requireNonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
-		nextBeforeOrdinal: requireNullablePositiveInteger(
-			response.nextBeforeOrdinal,
-			'nextBeforeOrdinal',
-		),
-		hasMore: response.hasMore,
-		limit: requirePositiveInteger(response.limit, 'limit'),
-	};
-	validateChatMessagesPage(params, page);
-	return page;
+	const response = await apiGet<unknown>(`/api/v1/chats/messages?${query.toString()}`);
+	return parseChatHistoryResponse(params, response);
 }
 
 // Resolves one search result to a browser ordinal under its composite content
@@ -563,164 +381,26 @@ export async function navigateToSearchResult(
 	};
 }
 
+function requireNonEmptyString(value: unknown, fieldName: string): string {
+	if (typeof value !== 'string' || value.trim().length === 0) {
+		throw new Error(`Invalid chat search navigation response: ${fieldName}`);
+	}
+	return value;
+}
+
+function requirePositiveInteger(value: unknown, fieldName: string): number {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+		throw new Error(`Invalid chat search navigation response: ${fieldName}`);
+	}
+	return value;
+}
+
 export async function searchChatTranscripts(
 	request: ChatSearchRequest,
 	options?: ApiFetchOptions,
 ): Promise<ChatSearchResponse> {
 	const response = await apiPost<unknown>('/api/v1/chats/search', request, options);
 	return parseChatSearchResponse(request, response);
-}
-
-function parseChatSearchResponse(
-	request: ChatSearchRequest,
-	value: unknown,
-): ChatSearchResponse {
-	const response = searchRecord(value);
-	if (!response || typeof response.query !== 'string') invalidChatSearchResponse('response');
-	const expectedMode = request.mode ?? 'page';
-	const expectedSnippetLimit = request.snippetLimit ?? CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
-	const expectedOffset = request.offset ?? 0;
-	const expectedLimit = request.limit ?? CHAT_SEARCH_DEFAULT_PAGE_SIZE;
-	if (response.mode !== expectedMode) invalidChatSearchResponse('mode does not match request');
-	if (response.snippetLimit !== expectedSnippetLimit) {
-		invalidChatSearchResponse('snippetLimit does not match request');
-	}
-	if (!Array.isArray(response.results)) invalidChatSearchResponse('results');
-	const results = response.results.map((result) => parseChatSearchResult(
-		result,
-		expectedSnippetLimit,
-	));
-	const page = searchRecord(response.page);
-	if (!page) invalidChatSearchResponse('page');
-	const maximumLimit = expectedMode === 'prefix'
-		? CHAT_SEARCH_MAX_PREFIX_SIZE
-		: CHAT_SEARCH_MAX_PAGE_SIZE;
-	if (!isNonNegativeSafeInteger(page.offset)
-		|| page.offset > CHAT_SEARCH_MAX_OFFSET
-		|| page.offset !== expectedOffset) {
-		invalidChatSearchResponse('offset does not match request');
-	}
-	if (!isPositiveSafeInteger(page.limit)
-		|| page.limit > maximumLimit
-		|| page.limit !== expectedLimit) {
-		invalidChatSearchResponse('limit does not match request');
-	}
-	if (expectedMode === 'prefix'
-		&& (page.offset !== 0 || expectedSnippetLimit !== 1)) {
-		invalidChatSearchResponse('prefix projection');
-	}
-	if (!isNonNegativeSafeInteger(page.total)
-		|| typeof page.hasMore !== 'boolean'
-		|| (page.nextOffset !== null && !isPositiveSafeInteger(page.nextOffset))) {
-		invalidChatSearchResponse('page fields');
-	}
-	if (page.hasMore !== (page.nextOffset !== null)) {
-		invalidChatSearchResponse('cursor presence');
-	}
-	if (page.nextOffset !== null
-		&& (page.nextOffset <= page.offset
-			|| page.nextOffset > CHAT_SEARCH_MAX_OFFSET
-			|| page.nextOffset > page.offset + page.limit
-			|| page.nextOffset > page.total)) {
-		invalidChatSearchResponse('cursor bounds');
-	}
-	if (results.length > page.limit
-		|| results.length > Math.max(0, page.total - page.offset)) {
-		invalidChatSearchResponse('result window');
-	}
-	const index = parseChatSearchIndexStatus(response.index);
-	return {
-		query: response.query,
-		mode: expectedMode,
-		snippetLimit: expectedSnippetLimit,
-		results,
-		page: {
-			offset: page.offset,
-			limit: page.limit,
-			total: page.total,
-			hasMore: page.hasMore,
-			nextOffset: page.nextOffset,
-		},
-		index,
-	};
-}
-
-function parseChatSearchResult(value: unknown, snippetLimit: number): ChatSearchResult {
-	const result = searchRecord(value);
-	if (!result
-		|| typeof result.chatId !== 'string'
-		|| result.chatId.length === 0
-		|| typeof result.transcriptViewId !== 'string'
-		|| result.transcriptViewId.length === 0
-		|| typeof result.score !== 'number'
-		|| !Number.isFinite(result.score)
-		|| !isNonNegativeSafeInteger(result.matchedMessageCount)
-		|| !Array.isArray(result.snippets)
-		|| result.snippets.length > snippetLimit) {
-		invalidChatSearchResponse('result');
-	}
-	const snippets = result.snippets.map((valueSnippet) => {
-		const snippet = searchRecord(valueSnippet);
-		if (!snippet
-			|| !isPositiveSafeInteger(snippet.ordinal)
-			|| !['user', 'assistant', 'tool', 'system'].includes(String(snippet.role))
-			|| (snippet.timestamp !== null && typeof snippet.timestamp !== 'string')
-			|| typeof snippet.text !== 'string') {
-			invalidChatSearchResponse('snippet');
-		}
-		return {
-			ordinal: snippet.ordinal,
-			role: snippet.role as ChatSearchResult['snippets'][number]['role'],
-			timestamp: snippet.timestamp,
-			text: snippet.text,
-		};
-	});
-	return {
-		chatId: result.chatId,
-		transcriptViewId: result.transcriptViewId,
-		score: result.score,
-		matchedMessageCount: result.matchedMessageCount,
-		snippets,
-	};
-}
-
-function parseChatSearchIndexStatus(value: unknown): ChatSearchIndexStatus {
-	const index = searchRecord(value);
-	if (!index
-		|| !isNonNegativeSafeInteger(index.indexedChatCount)
-		|| !isNonNegativeSafeInteger(index.pendingChatCount)
-		|| !isNonNegativeSafeInteger(index.failedChatCount)
-		|| !isNonNegativeSafeInteger(index.unindexedChatCount)
-		|| !isNonNegativeSafeInteger(index.unsupportedChatCount)
-		|| typeof index.resultsTruncated !== 'boolean') {
-		invalidChatSearchResponse('index');
-	}
-	return {
-		indexedChatCount: index.indexedChatCount,
-		pendingChatCount: index.pendingChatCount,
-		failedChatCount: index.failedChatCount,
-		unindexedChatCount: index.unindexedChatCount,
-		unsupportedChatCount: index.unsupportedChatCount,
-		resultsTruncated: index.resultsTruncated,
-	};
-}
-
-function searchRecord(value: unknown): Record<string, unknown> | null {
-	return typeof value === 'object' && value !== null && !Array.isArray(value)
-		? value as Record<string, unknown>
-		: null;
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-	return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
-}
-
-function invalidChatSearchResponse(reason: string): never {
-	throw new Error(`Invalid chat search response: ${reason}`);
 }
 
 export async function getTranscriptSearchStatus(

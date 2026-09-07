@@ -108,6 +108,7 @@ function startArguments(
   return [
     '--config-dir', fixture.dirs.config,
     '--workspace', WORKSPACE,
+    'start',
     '--cwd', fixture.dirs.project,
     '--agent', agent.agentId,
     '--provider', agent.provider.providerId,
@@ -193,6 +194,7 @@ describe('garcon-cli', () => {
       const started = await runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
+        'start',
         '--cwd', fixture.dirs.project,
         '--agent', agent.agentId,
         '--provider', agent.provider.providerId,
@@ -224,7 +226,7 @@ describe('garcon-cli', () => {
       const resumed = await runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
-        '--resume', chatId!,
+        'resume', chatId!,
         '--title', 'CLI follow-up review',
         '--message-title', 'Follow-up context',
         '--message-style', 'info',
@@ -278,6 +280,32 @@ describe('garcon-cli', () => {
     }, { namedWorkspace: WORKSPACE });
   });
 
+  test('start-async returns after acceptance while the visible turn keeps running', async () => {
+    await withIntegrationFixture('garcon-cli-start-async', async (fixture) => {
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-start-async' });
+      const arguments_ = startArguments(fixture, 'cli-start-async');
+      arguments_[arguments_.indexOf('start')] = 'start-async';
+
+      const started = await runCli(arguments_);
+
+      expect(started.exitCode).toBe(0);
+      expect(started.stderr).toBe('');
+      expect(started.stdout).toMatch(/^chat id: \d{16}\nturn id: [^\n]+\n$/);
+      const chatId = started.stdout.match(/^chat id: (\d{16})$/m)?.[1];
+      const turnId = started.stdout.match(/^turn id: ([^\n]+)$/m)?.[1];
+      expect(chatId).toBeString();
+      expect(turnId).toBeString();
+      await held.received;
+      expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId))
+        .toMatchObject({ isProcessing: true, tags: ['cli'] });
+
+      held.releaseEcho();
+      expect((await fixture.client.waitForTurnTerminal(chatId!, turnId!, {
+        timeoutMs: 30_000,
+      })).type).toBe('agent-run-finished');
+    }, { namedWorkspace: WORKSPACE });
+  });
+
   test('starts a delegated child with durable parentage', async () => {
     await withIntegrationFixture('garcon-cli-delegated-parent', async (fixture) => {
       const parent = await runCli(startArguments(fixture, 'parent-implementation'));
@@ -324,6 +352,7 @@ describe('garcon-cli', () => {
       const started = await runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
+        'start',
         '--cwd', fixture.dirs.project,
         '--agent', source.agentId,
         '--provider', source.provider.providerId,
@@ -342,7 +371,7 @@ describe('garcon-cli', () => {
       const handoffRun = runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
-        '--resume', chatId!,
+        'resume', chatId!,
         '--agent', target.agentId,
         '--provider', target.provider.providerId,
         '--endpoint', target.provider.endpointId,
@@ -382,7 +411,7 @@ describe('garcon-cli', () => {
       const returnRun = runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
-        '--resume', chatId!,
+        'resume', chatId!,
         '--agent', source.agentId,
         '--provider', source.provider.providerId,
         '--endpoint', source.provider.endpointId,
@@ -950,7 +979,7 @@ describe('garcon-cli', () => {
       expect(before.sessions.find((chat) => chat.id === chatId)?.tags).not.toContain('cli');
 
       const resumed = await runCli(controlArguments(fixture, [
-        '--resume', chatId, 'cli-no-tag-follow-up',
+        'resume', chatId, 'cli-no-tag-follow-up',
       ]));
 
       expect(resumed.exitCode).toBe(0);

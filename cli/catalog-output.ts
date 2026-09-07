@@ -1,4 +1,5 @@
 import type { ApiProtocol } from '@garcon/common/api-providers';
+import { formatTextTable } from './text-table.js';
 
 export type CatalogQueryResult =
   | {
@@ -60,36 +61,15 @@ export type CatalogQueryResult =
       reasoningEfforts: string[];
     };
 
-function cleanCell(value: string): string {
-  return value.replace(/\s+/g, ' ').trim() || '-';
-}
-
-function table(headers: readonly string[], rows: readonly (readonly string[])[]): string {
-  const cleanHeaders = headers.map(cleanCell);
-  const cleanRows = rows.map((row) => row.map(cleanCell));
-  const widths = cleanHeaders.map((header, column) => Math.max(
-    header.length,
-    ...cleanRows.map((row) => row[column]?.length ?? 0),
-  ));
-  const render = (row: readonly string[]) => row
-    .map((cell, column) => column === row.length - 1 ? cell : cell.padEnd(widths[column] ?? 0))
-    .join('  ');
-  return [
-    render(cleanHeaders),
-    render(widths.map((width) => '-'.repeat(width))),
-    ...cleanRows.map(render),
-  ].join('\n');
-}
-
 function humanListing(result: CatalogQueryResult): string {
   switch (result.resource) {
     case 'agents':
-      return table(
+      return formatTextTable(
         ['AGENT', 'LABEL', 'DEFAULT MODEL'],
         result.agents.map((agent) => [agent.id, agent.label, agent.defaultModel]),
       );
     case 'providers':
-      return table(
+      return formatTextTable(
         ['PROVIDER', 'LABEL', 'ENDPOINTS'],
         result.providers.map((provider) => [
           provider.id,
@@ -98,7 +78,7 @@ function humanListing(result: CatalogQueryResult): string {
         ]),
       );
     case 'endpoints':
-      return table(
+      return formatTextTable(
         ['PROVIDER', 'ENDPOINT', 'PROTOCOL', 'DEFAULT MODEL'],
         result.endpoints.map((endpoint) => [
           endpoint.providerId,
@@ -108,7 +88,7 @@ function humanListing(result: CatalogQueryResult): string {
         ]),
       );
     case 'models':
-      return table(
+      return formatTextTable(
         ['MODEL', 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
         result.models.map((model) => [
           model.value,
@@ -119,7 +99,7 @@ function humanListing(result: CatalogQueryResult): string {
         ]),
       );
     case 'permissions':
-      return table(
+      return formatTextTable(
         ['PERMISSION', 'DEFAULT'],
         result.permissions.map((value) => [
           value,
@@ -127,7 +107,7 @@ function humanListing(result: CatalogQueryResult): string {
         ]),
       );
     case 'reasoning-efforts':
-      return table(
+      return formatTextTable(
         ['REASONING EFFORT', 'DEFAULT'],
         result.reasoningEfforts.map((value) => [
           value,

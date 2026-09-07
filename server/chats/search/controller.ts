@@ -1,13 +1,12 @@
 import {
+  compileChatSearchQuery,
   CHAT_SEARCH_DEFAULT_PAGE_SIZE,
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_PREFIX_SIZE,
   CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
-  CHAT_SEARCH_MIN_PREFIX_CHARS,
   type ChatSearchIndexStatus,
   type ChatSearchPage,
-  type ChatSearchQueryV1,
   type ChatSearchResult,
   type ChatSearchResultMode,
   type ChatSearchSort,
@@ -19,7 +18,7 @@ import type { AgentLogger } from '@garcon/server-agent-interface';
 import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
 import type { HistoricalSearchMessageRow } from '@garcon/server-agent-common/search/rows';
 import type { SearchChatState } from '@garcon/server-agent-common/search/schema';
-import type {
+import {
   TranscriptSearchQueryStats,
   TranscriptSearchService,
   TranscriptSearchSyncFrame,
@@ -214,7 +213,7 @@ export class TranscriptSearchController {
         throw new RangeError('Invalid transcript search prefix projection');
       }
       const response = await this.#deps.service.search({
-        query: compileQuery(options.query, options.textTokens),
+        query: compileChatSearchQuery(options.query, options.textTokens),
         allowedChats,
         order: (options.sort ?? 'relevance') === 'relevance' ? 'relevance' : 'allowlist',
         mode,
@@ -751,38 +750,6 @@ function searchableMessage(row: LedgerRow): ChatMessage | null {
     default:
       return null;
   }
-}
-
-function compileQuery(query: string, textTokens?: readonly string[]): ChatSearchQueryV1 {
-  const quoted = new Map<string, number>();
-  for (const match of query.matchAll(/"([^"]+)"|'([^']+)'/g)) {
-    const value = (match[1] ?? match[2] ?? '').toLowerCase();
-    quoted.set(value, (quoted.get(value) ?? 0) + 1);
-  }
-  const raw = textTokens?.length
-    ? textTokens.map((text) => {
-      const key = text.toLowerCase();
-      const count = quoted.get(key) ?? 0;
-      if (count > 0) quoted.set(key, count - 1);
-      return { text, phrase: /\s/u.test(text) || count > 0 };
-    })
-    : [...query.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)].map((match) => ({
-      text: match[1] ?? match[2] ?? match[3] ?? '',
-      phrase: match[1] !== undefined || match[2] !== undefined,
-    }));
-  return {
-    version: 1,
-    clauses: raw.map((term) => ({
-      kind: term.phrase ? 'phrase' as const : 'all-words' as const,
-      tokens: (term.text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
-        text,
-        normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
-        match: !term.phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
-          ? 'prefix' as const
-          : 'exact' as const,
-      })),
-    })).filter((clause) => clause.tokens.length > 0),
-  };
 }
 
 function clampLimit(limit: number | undefined, mode: ChatSearchResultMode): number {
