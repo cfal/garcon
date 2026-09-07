@@ -7,8 +7,11 @@ import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
 import * as clientChatId from '$shared/client-chat-id';
 import * as preamblesApi from '$lib/api/chat-preambles';
+import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
+import type { PreamblesSnapshot } from '$shared/preambles';
+import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -179,6 +182,23 @@ async function inputAtCaret(
 	await fireEvent.input(textarea, eventInit);
 }
 
+function previewResponse(
+	catalogRevision: number,
+	id: string,
+	title: string,
+): PreambleSelectionPreviewResponse {
+	return {
+		success: true,
+		canonicalProjectPath: '/workspace/project',
+		orderedPreambleIds: [id],
+		projection: {
+			catalogRevision,
+			eligiblePreambles: [{ id, title }],
+			unavailable: [],
+		},
+	};
+}
+
 describe('NewChatForm', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -194,51 +214,228 @@ describe('NewChatForm', () => {
 		}));
 	});
 
-	it('presents automatic preambles as pills in a composer-aligned editable surface', async () => {
+	it('reveals the form after settings and loads preamble data independently', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		const validation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		vi.mocked(chatsApi.validateStart).mockReturnValue(validation.promise);
+		const catalog = deferred<PreamblesSnapshot>();
+		const preview = deferred<PreambleSelectionPreviewResponse>();
+		const loadPreambles = vi.fn(() => catalog.promise);
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockReturnValueOnce(preview.promise);
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				loadPreambles,
+			},
+		});
+
+		const content = document.querySelector<HTMLElement>('[data-slot="new-chat-form-content"]')!;
+		await waitFor(() => {
+			expect(content.classList.contains('invisible')).toBe(false);
+			expect(content.hasAttribute('inert')).toBe(false);
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		expect(screen.getByText('Fetching preambles…')).toBeTruthy();
+		expect(loadPreambles).not.toHaveBeenCalled();
+		expect(preamblesApi.preambleSelectionPreview).not.toHaveBeenCalled();
+
+		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenCalledOnce());
+		validation.resolve({ valid: true, isGitRepo: false });
+		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce());
+		expect(content.classList.contains('invisible')).toBe(false);
+		preview.resolve({
+			success: true,
+			canonicalProjectPath: '/workspace/project',
+			orderedPreambleIds: [],
+			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
+		});
+		expect(await screen.findByText('No preambles will be applied')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
+		await waitFor(() => expect(loadPreambles).toHaveBeenCalledOnce());
+		expect(screen.getByText('Loading preambles...')).toBeTruthy();
+		catalog.resolve({ revision: 1, preambles: [] });
+		await waitFor(() => expect(screen.queryByText('Loading preambles...')).toBeNull());
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce();
+		expect(screen.getByText('No preambles will be applied')).toBeTruthy();
+	});
+
+	it('refreshes previews when the catalog is newer and after later revisions', async () => {
 		stubMatchMedia(false);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
-		const preambleId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockResolvedValueOnce(previewResponse(1, '3502b645-222b-49d2-ac39-1c91f9fb1174', 'First'))
+			.mockResolvedValueOnce(previewResponse(2, 'e767feba-8cbf-4ec4-9b16-f907bcb40836', 'Second'))
+			.mockResolvedValueOnce(previewResponse(3, 'fe5ff036-59fc-40ad-86ab-e069f96713c8', 'Third'));
+		let preambles!: PreamblesStore;
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				onPreambles: (store) => (preambles = store),
+			},
+		});
+
+		expect(await screen.findByText('First')).toBeTruthy();
+		preambles.applySnapshot({ revision: 2, preambles: [] });
+		expect(await screen.findByText('Second')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2);
+
+		preambles.applySnapshot({ revision: 3, preambles: [] });
+		expect(await screen.findByText('Third')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(3);
+	});
+
+	it('refreshes a stale preview that resolves after the catalog loads', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const firstPreview = deferred<PreambleSelectionPreviewResponse>();
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockReturnValueOnce(firstPreview.promise)
+			.mockResolvedValueOnce(previewResponse(2, 'e767feba-8cbf-4ec4-9b16-f907bcb40836', 'Current'));
+		let preambles!: PreamblesStore;
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				onPreambles: (store) => (preambles = store),
+			},
+		});
+
+		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce());
+		preambles.applySnapshot({ revision: 2, preambles: [] });
+		firstPreview.resolve(previewResponse(1, '3502b645-222b-49d2-ac39-1c91f9fb1174', 'Stale'));
+
+		expect(await screen.findByText('Current')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2);
+	});
+
+	it('refreshes the preview after an invalidation without loading the catalog', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const firstId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+		const secondId = 'e767feba-8cbf-4ec4-9b16-f907bcb40836';
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockResolvedValueOnce(previewResponse(1, firstId, 'First'))
+			.mockResolvedValueOnce(previewResponse(2, secondId, 'Second'));
+		const loadPreambles = vi.fn();
+		let preambles!: PreamblesStore;
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				loadPreambles,
+				onPreambles: (store) => (preambles = store),
+			},
+		});
+
+		expect(await screen.findByText('First')).toBeTruthy();
+		await preambles.refreshIfLoaded();
+		expect(await screen.findByText('Second')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2);
+		expect(loadPreambles).not.toHaveBeenCalled();
+	});
+
+	it('reveals the form after reseeding while the current path is invalid', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart)
+			.mockResolvedValue({
+				valid: false,
+				error: 'Path does not exist',
+				errorCode: 'path_not_found',
+			})
+			.mockResolvedValueOnce({ valid: true, isGitRepo: false });
+
+		render(NewChatFormTestHost);
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce());
+		const pathInput = screen.getByRole('textbox', { name: 'Project Path' });
+		await fireEvent.input(pathInput, { target: { value: '/workspace/missing' } });
+		await screen.findByText('Path does not exist.');
+		expect(await screen.findByText('Preambles unavailable')).toBeTruthy();
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+
+		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+			const content = document.querySelector<HTMLElement>('[data-slot="new-chat-form-content"]')!;
+			expect(content.classList.contains('invisible')).toBe(false);
+		});
+	});
+
+	it('summarizes eligible preambles with responsive overflow counts', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const projectedPreambles = [
+			{
+				id: '3502b645-222b-49d2-ac39-1c91f9fb1174',
+				title: 'Repository conventions for exceptionally narrow workspaces',
+			},
+			{ id: 'e767feba-8cbf-4ec4-9b16-f907bcb40836', title: 'Review checklist' },
+			{ id: 'fe5ff036-59fc-40ad-86ab-e069f96713c8', title: 'Security constraints' },
+			{ id: 'd6ca191b-1f76-43df-982b-1f2487df7346', title: 'Coding conventions' },
+			{ id: 'e6792ec7-b484-420c-bf7b-b4d202b216a5', title: 'Release requirements' },
+		] as const;
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue({
 			success: true,
 			canonicalProjectPath: '/workspace/project',
-			orderedPreambleIds: [preambleId],
+			orderedPreambleIds: projectedPreambles.map((preamble) => preamble.id),
 			projection: {
 				catalogRevision: 1,
-				eligiblePreambles: [{ id: preambleId, title: 'Repository conventions' }],
+				eligiblePreambles: [...projectedPreambles],
 				unavailable: [],
 			},
 		});
 
-		render(NewChatFormTestHost, {
-			props: {
-				preambleSnapshot: {
-					revision: 1,
-					preambles: [
-						{
-							id: preambleId,
-							enabled: true,
-							title: 'Repository conventions',
-							content: 'Synthetic body',
-							scope: { type: 'global' },
-							agentIds: [],
-							tagFilter: { mode: 'any', tags: [] },
-							createdAt: '2029-01-01T00:00:00.000Z',
-							updatedAt: '2029-01-01T00:00:00.000Z',
-						},
-					],
-				},
-			},
-		});
+		render(NewChatFormTestHost);
 
-		expect(await screen.findByText('Repository conventions')).toBeTruthy();
-		const surface = document.querySelector<HTMLElement>('[data-slot="new-chat-preambles-row"]');
-		expect(surface?.classList.contains('border')).toBe(true);
-		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
-		expect(document.querySelector('[data-slot="new-chat-preamble-selection-dialog"]')).toBeTruthy();
+		expect(
+			await screen.findByText('Repository conventions for exceptionally narrow workspaces'),
+		).toBeTruthy();
+		expect(screen.getByText('Review checklist')).toBeTruthy();
+		expect(screen.queryByText('Security constraints')).toBeNull();
+		const label = document.querySelector<HTMLElement>('[data-slot="new-chat-preambles-label"]');
+		const pills = document.querySelectorAll<HTMLElement>('[data-slot="new-chat-preamble-pill"]');
+		const narrowOverflow = document.querySelector<HTMLElement>(
+			'[data-slot="new-chat-preambles-overflow-narrow"]',
+		);
+		const wideOverflow = document.querySelector<HTMLElement>(
+			'[data-slot="new-chat-preambles-overflow-wide"]',
+		);
+		expect(label?.textContent?.trim()).toBe('Preambles');
+		expect(pills).toHaveLength(2);
+		expect(narrowOverflow?.textContent?.trim()).toBe('and 4 more');
+		expect(wideOverflow?.textContent?.trim()).toBe('and 3 more');
 	});
 
 	it('retries a failed automatic preamble preview without opening the picker', async () => {
@@ -264,7 +461,8 @@ describe('NewChatForm', () => {
 
 		render(NewChatFormTestHost);
 
-		const retry = await screen.findByRole('button', { name: 'Refresh' });
+		expect((await screen.findByRole('alert')).textContent?.trim()).toBe('Preambles unavailable');
+		const retry = screen.getByRole('button', { name: 'Refresh' });
 		const edit = screen.getByRole('button', { name: 'Edit preambles' }) as HTMLButtonElement;
 		expect(edit.disabled).toBe(true);
 
@@ -375,7 +573,9 @@ describe('NewChatForm', () => {
 
 		const projectPathInput = screen.getByLabelText('Project Path');
 		const messageInput = screen.getByPlaceholderText('How can I help you today?');
-		const hiddenFormContainer = container.querySelector('.space-y-6[aria-hidden="true"]');
+		const hiddenFormContainer = container.querySelector(
+			'[data-slot="new-chat-form-content"][aria-hidden="true"]',
+		);
 
 		expect(screen.getByRole('status', { name: 'Loading chat defaults...' })).toBeTruthy();
 		expect(hiddenFormContainer).toBeTruthy();
@@ -391,13 +591,19 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		expect(container.querySelector('.space-y-6[aria-hidden="true"]')).toBeNull();
 		expect(
-			container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(projectPathInput),
+			container.querySelector('[data-slot="new-chat-form-content"][aria-hidden="true"]'),
+		).toBeNull();
+		expect(
+			container
+				.querySelector('[data-slot="new-chat-form-content"][aria-hidden="false"]')
+				?.contains(projectPathInput),
 		).toBe(true);
-		expect(container.querySelector('.space-y-6[aria-hidden="false"]')?.contains(messageInput)).toBe(
-			true,
-		);
+		expect(
+			container
+				.querySelector('[data-slot="new-chat-form-content"][aria-hidden="false"]')
+				?.contains(messageInput),
+		).toBe(true);
 	});
 
 	it('does not add bottom padding outside the shared composer bar', () => {

@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
+import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles.js';
+import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 import type {
 	Preamble,
 	PreambleId,
@@ -81,6 +84,19 @@ function resolvedProjection(ids: readonly PreambleId[]): PreambleSelectionProjec
 	};
 }
 
+function automaticPreviewResponse(
+	ids: readonly PreambleId[],
+	catalogRevision = 4,
+): PreambleSelectionPreviewResponse {
+	const projection = resolvedProjection(ids);
+	return {
+		success: true,
+		canonicalProjectPath: '/workspace/project',
+		orderedPreambleIds: [...ids],
+		projection: { ...projection, catalogRevision },
+	};
+}
+
 afterEach(() => cleanup());
 
 describe('ChatPreambleSelectionPanel', () => {
@@ -97,12 +113,13 @@ describe('ChatPreambleSelectionPanel', () => {
 		const rows = slots('chat-preamble-selection-row');
 		expect(rows).toHaveLength(3);
 		const disabledRow = rows.find((row) => row.textContent?.includes('Disabled conventions'))!;
-		expect(
-			disabledRow.querySelector('[data-slot="chat-preamble-selection-row-status"]')?.textContent,
-		).toBe('Disabled globally');
+		expect(within(disabledRow).getByText('Disabled conventions').getAttribute('title')).toBe(
+			'Disabled globally',
+		);
+		expect(disabledRow.getAttribute('title')).toBeNull();
 		const missingRow = slot('chat-preamble-selection-missing-row');
 		expect(within(missingRow).getByText('Deleted or unavailable')).toBeTruthy();
-		await fireEvent.click(within(missingRow).getByRole('checkbox', { name: /Remove/ }));
+		await fireEvent.click(within(missingRow).getByRole('switch', { name: /Remove/ }));
 		expect(remove).toHaveBeenCalledWith(ID_MISSING);
 	});
 
@@ -120,13 +137,38 @@ describe('ChatPreambleSelectionPanel', () => {
 		const candidates = slots('chat-preamble-selection-row');
 		const disabled = candidates.find((row) => row.textContent?.includes('Disabled conventions'))!;
 		const scoped = candidates.find((row) => row.textContent?.includes('Scoped conventions'))!;
-		expect(within(disabled).getByText('Disabled globally')).toBeTruthy();
-		expect(within(scoped).getByText('Outside this project')).toBeTruthy();
-		expect((within(disabled).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
-		expect((within(scoped).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+		expect(within(disabled).getByText('Disabled conventions').getAttribute('title')).toBe(
+			'Disabled globally',
+		);
+		expect(within(scoped).getByText('Scoped conventions').getAttribute('title')).toBe(
+			'Outside this project',
+		);
+		expect(document.querySelector('[data-slot="chat-preamble-selection-row-status"]')).toBeNull();
+		expect((within(disabled).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
+		expect((within(scoped).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
 	});
 
-	it('keeps catalog row order while exposing selected order and checkbox membership', async () => {
+	it('scopes unavailable reason descriptions to each panel instance', () => {
+		for (let index = 0; index < 2; index += 1) {
+			render(ChatPreambleSelectionTestHost, {
+				snapshot: snapshot(),
+				draftIds: [ID_ELIGIBLE],
+				projection: resolvedProjection([ID_ELIGIBLE]),
+			});
+		}
+
+		const reasonIds = slots('chat-preamble-selection-row')
+			.filter((row) => row.textContent?.includes('Disabled conventions'))
+			.map((row) => within(row).getByRole('switch').getAttribute('aria-describedby'));
+		expect(reasonIds).toHaveLength(2);
+		expect(new Set(reasonIds).size).toBe(2);
+		for (const reasonId of reasonIds) {
+			if (!reasonId) throw new Error('Unavailable switch is missing its reason description');
+			expect(document.getElementById(reasonId)?.textContent?.trim()).toBe('Disabled globally');
+		}
+	});
+
+	it('keeps catalog row order while exposing selected order and switch membership', async () => {
 		const move = vi.fn();
 		const remove = vi.fn();
 		render(ChatPreambleSelectionTestHost, {
@@ -147,13 +189,12 @@ describe('ChatPreambleSelectionPanel', () => {
 			'Disabled conventions',
 			'Scoped conventions',
 		]);
-		expect(within(rows[0]!).getByText('#2')).toBeTruthy();
-		expect(within(rows[1]!).getByText('#1')).toBeTruthy();
+		expect(document.querySelector('[data-slot="chat-preamble-selection-row-position"]')).toBeNull();
 		await fireEvent.click(within(rows[0]!).getByRole('button', { name: /Move Eligible.*up/ }));
 		expect(move).toHaveBeenCalledWith(ID_ELIGIBLE, 'up');
-		const disabledCheckbox = within(rows[1]!).getByRole('checkbox') as HTMLInputElement;
-		expect(disabledCheckbox.disabled).toBe(false);
-		await fireEvent.click(disabledCheckbox);
+		const disabledSwitch = within(rows[1]!).getByRole('switch') as HTMLButtonElement;
+		expect(disabledSwitch.disabled).toBe(false);
+		await fireEvent.click(disabledSwitch);
 		expect(remove).toHaveBeenCalledWith(ID_DISABLED);
 	});
 });
@@ -192,12 +233,248 @@ describe('NewChatPreamblePicker', () => {
 		const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
 			row.textContent?.includes('Eligible conventions'),
 		)!;
-		await fireEvent.click(within(eligibleRow).getByRole('checkbox', { name: /Remove/ }));
+		await fireEvent.click(within(eligibleRow).getByRole('switch', { name: /Remove/ }));
 		await fireEvent.keyDown(slot('new-chat-preamble-selection-dialog'), {
 			key: 'Enter',
 			ctrlKey: true,
 		});
 		expect(apply).toHaveBeenCalledWith([]);
+	});
+
+	it('keeps Reset to defaults local until Apply', async () => {
+		const applyDefaults = vi.fn();
+		const close = vi.fn();
+		const loadAutomaticPreview = vi.fn().mockResolvedValue(automaticPreviewResponse([ID_ELIGIBLE]));
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onApplyDefaults: applyDefaults,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+			onClose: close,
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect(within(eligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe('true');
+		});
+		expect(loadAutomaticPreview).toHaveBeenCalledOnce();
+		expect(applyDefaults).not.toHaveBeenCalled();
+		expect(close).not.toHaveBeenCalled();
+
+		await fireEvent.click(slot('new-chat-preamble-apply'));
+		expect(applyDefaults).toHaveBeenCalledOnce();
+		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it('disables Reset to defaults when an automatic preview cannot be loaded', async () => {
+		const loadAutomaticPreview = vi.fn();
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			canLoadAutomaticPreview: false,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+		});
+
+		const reset = slot('new-chat-preamble-reset-defaults') as HTMLButtonElement;
+		expect(reset.disabled).toBe(true);
+		await fireEvent.click(reset);
+		expect(loadAutomaticPreview).not.toHaveBeenCalled();
+		expect(document.querySelector('[data-slot="new-chat-preamble-preview-retry"]')).toBeNull();
+	});
+
+	it('discards a local Reset to defaults on Cancel', async () => {
+		const applyDefaults = vi.fn();
+		const close = vi.fn();
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onApplyDefaults: applyDefaults,
+			onLoadAutomaticPreview: async () => automaticPreviewResponse([ID_ELIGIBLE]),
+			onClose: close,
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+		});
+		await fireEvent.click(slot('new-chat-preamble-cancel'));
+
+		expect(applyDefaults).not.toHaveBeenCalled();
+		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it('discards a pending Reset preview when the picker closes and reopens', async () => {
+		let resolveAutomaticPreview!: (preview: PreambleSelectionPreviewResponse) => void;
+		const loadAutomaticPreview = vi.fn(
+			() =>
+				new Promise<PreambleSelectionPreviewResponse>((resolve) => {
+					resolveAutomaticPreview = resolve;
+				}),
+		);
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await rendered.rerender({ pickerOpen: false });
+		await rendered.rerender({ pickerOpen: true });
+		resolveAutomaticPreview(automaticPreviewResponse([ID_ELIGIBLE]));
+
+		await waitFor(() => {
+			const rows = slots('chat-preamble-selection-row');
+			const eligibleRow = rows.find((row) => row.textContent?.includes('Eligible conventions'))!;
+			const disabledRow = rows.find((row) => row.textContent?.includes('Disabled conventions'))!;
+			expect(within(eligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe('false');
+			expect(within(disabledRow).getByRole('switch').getAttribute('aria-checked')).toBe('true');
+		});
+	});
+
+	it('keeps Apply disabled and offers Retry when a local defaults preview fails', async () => {
+		const close = vi.fn();
+		const loadAutomaticPreview = vi
+			.fn()
+			.mockRejectedValueOnce(new Error('preview unavailable'))
+			.mockResolvedValueOnce(automaticPreviewResponse([ID_ELIGIBLE]));
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+			onClose: close,
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			expect(slot('new-chat-preamble-preview-status').getAttribute('role')).toBe('alert');
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(true);
+		});
+		await fireEvent.click(slot('new-chat-preamble-preview-retry'));
+		await waitFor(() => {
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+		});
+		expect(loadAutomaticPreview).toHaveBeenCalledTimes(2);
+		expect(close).not.toHaveBeenCalled();
+	});
+
+	it('follows a recovered parent preview after a defaults reload fails', async () => {
+		const refresh = vi.fn();
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_ELIGIBLE],
+			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
+			onLoadAutomaticPreview: vi.fn().mockRejectedValue(new Error('preview unavailable')),
+			onRefreshPreview: refresh,
+		});
+
+		const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+			row.textContent?.includes('Eligible conventions'),
+		)!;
+		await fireEvent.click(within(eligibleRow).getByRole('switch', { name: /Remove/ }));
+		await rendered.rerender({ defaultsIds: [], projection: null });
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			expect(slot('new-chat-preamble-preview-status').getAttribute('role')).toBe('alert');
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-preview-retry'));
+		expect(refresh).toHaveBeenCalledOnce();
+		await rendered.rerender({
+			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
+		});
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-slot="new-chat-preamble-preview-status"]')).toBeNull();
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+			const recoveredRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect(within(recoveredRow).getByRole('switch').getAttribute('aria-checked')).toBe('true');
+		});
+	});
+
+	it('ignores a failed defaults reload after adopting a recovered parent preview', async () => {
+		let rejectAutomaticPreview!: (error: Error) => void;
+		const loadAutomaticPreview = vi.fn(
+			() =>
+				new Promise<PreambleSelectionPreviewResponse>((_resolve, reject) => {
+					rejectAutomaticPreview = reject;
+				}),
+		);
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_ELIGIBLE],
+			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
+			onLoadAutomaticPreview: loadAutomaticPreview,
+		});
+
+		const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+			row.textContent?.includes('Eligible conventions'),
+		)!;
+		await fireEvent.click(within(eligibleRow).getByRole('switch', { name: /Remove/ }));
+		await rendered.rerender({ defaultsIds: [], projection: null });
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledOnce());
+
+		await rendered.rerender({
+			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
+		});
+		await waitFor(() => {
+			expect(document.querySelector('[data-slot="new-chat-preamble-preview-status"]')).toBeNull();
+		});
+		rejectAutomaticPreview(new Error('stale preview failure'));
+		await Promise.resolve();
+		await tick();
+
+		expect(document.querySelector('[data-slot="new-chat-preamble-preview-status"]')).toBeNull();
+		expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('disables Retry when the current path cannot load a preview', async () => {
+		const loadAutomaticPreview = vi.fn().mockRejectedValue(new Error('preview unavailable'));
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			expect(slot('new-chat-preamble-preview-status').getAttribute('role')).toBe('alert');
+		});
+		await rendered.rerender({ canLoadAutomaticPreview: false });
+
+		const retry = slot('new-chat-preamble-preview-retry') as HTMLButtonElement;
+		expect(retry.disabled).toBe(true);
+		await fireEvent.click(retry);
+		expect(loadAutomaticPreview).toHaveBeenCalledOnce();
 	});
 
 	it('follows refreshed defaults through catalog management while untouched', async () => {
@@ -227,8 +504,7 @@ describe('NewChatPreamblePicker', () => {
 			const scopedRow = slots('chat-preamble-selection-row').find((row) =>
 				row.textContent?.includes('Scoped conventions'),
 			)!;
-			expect((within(scopedRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
-			expect(within(scopedRow).getByText('#2')).toBeTruthy();
+			expect(within(scopedRow).getByRole('switch').getAttribute('aria-checked')).toBe('true');
 		});
 		await fireEvent.click(slot('new-chat-preamble-apply'));
 		expect(apply).not.toHaveBeenCalled();
@@ -254,14 +530,12 @@ describe('NewChatPreamblePicker', () => {
 		const pendingScopedRow = pendingRows.find((row) =>
 			row.textContent?.includes('Scoped conventions'),
 		)!;
-		expect((within(pendingEligibleRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
-			true,
+		expect(within(pendingEligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe(
+			'true',
 		);
-		expect((within(pendingScopedRow).getByRole('checkbox') as HTMLInputElement).disabled).toBe(
-			true,
-		);
+		expect((within(pendingScopedRow).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
 
-		await fireEvent.click(within(pendingScopedRow).getByRole('checkbox'));
+		await fireEvent.click(within(pendingScopedRow).getByRole('switch'));
 		await rendered.rerender({
 			defaultsIds: [ID_ELIGIBLE, ID_SCOPED],
 			previewLoading: false,
@@ -273,10 +547,9 @@ describe('NewChatPreamblePicker', () => {
 			const resolvedScopedRow = resolvedRows.find((row) =>
 				row.textContent?.includes('Scoped conventions'),
 			)!;
-			expect((within(resolvedScopedRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
-				true,
+			expect(within(resolvedScopedRow).getByRole('switch').getAttribute('aria-checked')).toBe(
+				'true',
 			);
-			expect(within(resolvedScopedRow).getByText('#2')).toBeTruthy();
 		});
 		await fireEvent.click(slot('new-chat-preamble-apply'));
 		expect(apply).not.toHaveBeenCalled();
@@ -306,10 +579,8 @@ describe('NewChatPreamblePicker', () => {
 		const failedScopedRow = failedRows.find((row) =>
 			row.textContent?.includes('Scoped conventions'),
 		)!;
-		expect((within(failedEligibleRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
-			true,
-		);
-		expect((within(failedScopedRow).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+		expect(within(failedEligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe('true');
+		expect((within(failedScopedRow).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
 		expect(slot('new-chat-preamble-preview-status').getAttribute('role')).toBe('alert');
 
 		await fireEvent.click(slot('new-chat-preamble-preview-retry'));
@@ -337,7 +608,7 @@ describe('NewChatPreamblePicker', () => {
 		const eligibleRow = selectedRows.find((row) =>
 			row.textContent?.includes('Eligible conventions'),
 		)!;
-		await fireEvent.click(within(eligibleRow).getByRole('checkbox', { name: /Remove/ }));
+		await fireEvent.click(within(eligibleRow).getByRole('switch', { name: /Remove/ }));
 		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
 		expect(appShell.showPreambles).toBe(true);
 		await waitFor(() => {
@@ -351,10 +622,103 @@ describe('NewChatPreamblePicker', () => {
 			const returnedEligibleRow = slots('chat-preamble-selection-row').find((row) =>
 				row.textContent?.includes('Eligible conventions'),
 			)!;
-			expect((within(returnedEligibleRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(
-				false,
+			expect(within(returnedEligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe(
+				'false',
 			);
 			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));
+		});
+	});
+
+	it('refreshes a local defaults draft and restores focus before it settles', async () => {
+		let appShell!: AppShellStore;
+		let preambles!: PreamblesStore;
+		let resolveRefresh!: (preview: PreambleSelectionPreviewResponse) => void;
+		const loadAutomaticPreview = vi
+			.fn()
+			.mockResolvedValueOnce(automaticPreviewResponse([ID_ELIGIBLE]))
+			.mockReturnValueOnce(
+				new Promise<PreambleSelectionPreviewResponse>((resolve) => {
+					resolveRefresh = resolve;
+				}),
+			);
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+			onAppShell: (value) => {
+				appShell = value;
+			},
+			onPreambles: (value) => {
+				preambles = value;
+			},
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+		});
+		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
+		preambles.applySnapshot({ ...snapshot(), revision: 5 });
+		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledTimes(2));
+		appShell.closePreambles();
+
+		await waitFor(() => {
+			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));
+		});
+		resolveRefresh(automaticPreviewResponse([]));
+		await waitFor(() => {
+			const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect(within(eligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe('false');
+		});
+	});
+
+	it('refreshes a stale defaults draft when the first catalog snapshot arrives', async () => {
+		let resolveCatalog!: (snapshot: PreamblesSnapshot) => void;
+		const loadPreambles = vi.fn(
+			() =>
+				new Promise<PreamblesSnapshot>((resolve) => {
+					resolveCatalog = resolve;
+				}),
+		);
+		let resolveInitialPreview!: (preview: PreambleSelectionPreviewResponse) => void;
+		const loadAutomaticPreview = vi
+			.fn()
+			.mockReturnValueOnce(
+				new Promise<PreambleSelectionPreviewResponse>((resolve) => {
+					resolveInitialPreview = resolve;
+				}),
+			)
+			.mockResolvedValueOnce(automaticPreviewResponse([], 5));
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: null,
+			loadPreambles,
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledOnce());
+		resolveInitialPreview(automaticPreviewResponse([ID_ELIGIBLE], 4));
+		await waitFor(() => {
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+		});
+
+		resolveCatalog({ ...snapshot(), revision: 5 });
+		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledTimes(2));
+		expect(loadPreambles).toHaveBeenCalledOnce();
+		await waitFor(() => {
+			const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect(within(eligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe('false');
 		});
 	});
 });

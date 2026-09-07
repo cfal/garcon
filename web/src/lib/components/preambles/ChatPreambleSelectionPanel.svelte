@@ -3,6 +3,7 @@
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Button } from '$lib/components/ui/button';
+	import { Switch } from '$lib/components/ui/switch';
 	import { getPreambles } from '$lib/context';
 	import {
 		candidateUnavailableReason,
@@ -37,6 +38,7 @@
 	}: Props = $props();
 
 	const catalog = getPreambles();
+	const componentId = $props.id();
 
 	$effect(() => {
 		void catalog.ensureLoaded().catch(() => undefined);
@@ -75,6 +77,10 @@
 		const selectedRow = draftRowsById.get(preamble.id);
 		if (selectedRow) return selectedRow.reason;
 		return candidateUnavailableReason(preamble, canonicalProjectPath);
+	}
+
+	function reasonDescriptionId(preambleId: PreambleId): string {
+		return `${componentId}-preamble-selection-reason-${preambleId}`;
 	}
 </script>
 
@@ -120,42 +126,20 @@
 				<svelte:boundary>
 					<div
 						data-slot="chat-preamble-selection-row"
-						class="flex min-w-0 items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+						class="flex min-w-0 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
 					>
-						<input
-							type="checkbox"
-							class="mt-1 shrink-0"
-							data-slot="chat-preamble-selection-checkbox"
-							checked={selected}
-							disabled={disabled || (!selected && reason !== null)}
-							aria-label={selected
-								? m.preamble_selection_remove({ title: preamble.title })
-								: m.preamble_selection_add_candidate({ title: preamble.title })}
-							onchange={(event) => toggleSelection(preamble.id, event.currentTarget.checked)}
-						/>
-						<div class="min-w-0 flex-1 space-y-1">
-							<span class="block break-words" data-slot="chat-preamble-selection-row-title">
+						<div class="min-w-0 flex-1">
+							<span
+								class="block break-words"
+								data-slot="chat-preamble-selection-row-title"
+								title={reason ? reasonLabel(reason) : undefined}
+							>
 								{preamble.title}
 							</span>
-							{#if selected || reason}
-								<div class="flex flex-wrap items-center gap-1.5">
-									{#if selected}
-										<span
-											class="text-xs tabular-nums text-muted-foreground"
-											data-slot="chat-preamble-selection-row-position"
-										>
-											{m.preamble_selection_selected_position({ position: selectedIndex + 1 })}
-										</span>
-									{/if}
-									{#if reason}
-										<span
-											class="max-w-full rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-											data-slot="chat-preamble-selection-row-status"
-										>
-											{reasonLabel(reason)}
-										</span>
-									{/if}
-								</div>
+							{#if reason}
+								<span id={reasonDescriptionId(preamble.id)} class="sr-only">
+									{reasonLabel(reason)}
+								</span>
 							{/if}
 						</div>
 						<span class="flex shrink-0 items-center gap-1">
@@ -180,6 +164,16 @@
 								<ArrowDown class="h-3.5 w-3.5" />
 							</Button>
 						</span>
+						<Switch
+							data-slot="chat-preamble-selection-checkbox"
+							checked={selected}
+							disabled={disabled || (!selected && reason !== null)}
+							aria-label={selected
+								? m.preamble_selection_remove({ title: preamble.title })
+								: m.preamble_selection_add_candidate({ title: preamble.title })}
+							aria-describedby={reason ? reasonDescriptionId(preamble.id) : undefined}
+							onCheckedChange={(checked) => toggleSelection(preamble.id, checked)}
+						/>
 					</div>
 					{#snippet failed()}
 						<div class="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
@@ -199,30 +193,15 @@
 					<svelte:boundary>
 						{@const selectedIndex = selectionIndexes.get(row.id) ?? -1}
 						<div
-							class="flex min-w-0 items-start gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm"
+							class="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm"
 							data-slot="chat-preamble-selection-missing-row"
 						>
-							<input
-								type="checkbox"
-								class="mt-1 shrink-0"
-								data-slot="chat-preamble-selection-checkbox"
-								checked
-								{disabled}
-								aria-label={m.preamble_selection_remove({ title: row.title ?? row.id })}
-								onchange={() => onRemove(row.id)}
-							/>
-							<div class="min-w-0 flex-1 space-y-1">
+							<div class="min-w-0 flex-1">
 								<span
 									class="block break-words text-muted-foreground"
 									data-slot="chat-preamble-selection-row-title"
 								>
 									{row.title ?? m.preamble_selection_status_missing()}
-								</span>
-								<span
-									class="block text-xs tabular-nums text-muted-foreground"
-									data-slot="chat-preamble-selection-row-position"
-								>
-									{m.preamble_selection_selected_position({ position: selectedIndex + 1 })}
 								</span>
 							</div>
 							<Button
@@ -243,6 +222,15 @@
 							>
 								<ArrowDown class="h-3.5 w-3.5" />
 							</Button>
+							<Switch
+								data-slot="chat-preamble-selection-checkbox"
+								checked
+								{disabled}
+								aria-label={m.preamble_selection_remove({ title: row.title ?? row.id })}
+								onCheckedChange={(checked) => {
+									if (!checked) onRemove(row.id);
+								}}
+							/>
 						</div>
 						{#snippet failed()}
 							<div class="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
