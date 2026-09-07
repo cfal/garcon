@@ -166,8 +166,8 @@
 	--diff-modified: 180 50% 90%;
 	--diff-modified-foreground: 180 60% 30%;
 	--diff-modified-border: 180 40% 65%;
-	--diff-addition: 210 80% 45%;
-	--diff-deletion: 30 90% 50%;
+	--diff-addition: 210 80% 43%;
+	--diff-deletion: 30 90% 34%;
 	--diff-hunk: 214 82% 45%;
 	--interactive-accent: 214 82% 42%;
 	--interactive-accent-foreground: 0 0% 98%;

@@ -187,6 +187,8 @@ describe('theme profile CSS sources', () => {
 			['git-action-publish-hover', 'git-action-foreground'],
 		] as const;
 		const foregrounds = [
+			'diff-addition',
+			'diff-deletion',
 			'git-added',
 			'git-deleted',
 			'git-modified',

@@ -26,12 +26,23 @@ async function applyProfile(
 async function readRenderedColors(
   page: Page,
   selector: string,
-  pseudoElement?: string,
+  options: {
+    pseudoElement?: string;
+    backgroundSelector?: string;
+  } = {},
 ): Promise<{ foreground: string; background: string; surface: string }> {
-  return page.locator(selector).evaluate((element, pseudo) => {
+  return page.locator(selector).evaluate((element, colorOptions) => {
     const surface = getComputedStyle(document.body).backgroundColor;
-    const style = getComputedStyle(element, pseudo);
-    const composite = (paint: string): string => {
+    const style = getComputedStyle(element, colorOptions.pseudoElement);
+    let backgroundStyle = style;
+    if (colorOptions.backgroundSelector) {
+      const backgroundElement = document.querySelector(
+        colorOptions.backgroundSelector,
+      );
+      if (!backgroundElement) throw new Error("Missing background fixture");
+      backgroundStyle = getComputedStyle(backgroundElement);
+    }
+    const composite = (paint: string, filter: string): string => {
       const canvas = document.createElement("canvas");
       canvas.width = 1;
       canvas.height = 1;
@@ -39,7 +50,7 @@ async function readRenderedColors(
       if (!context) throw new Error("Missing canvas context");
       context.fillStyle = surface;
       context.fillRect(0, 0, 1, 1);
-      context.filter = style.filter;
+      context.filter = filter;
       context.fillStyle = paint;
       context.fillRect(0, 0, 1, 1);
       const [red, green, blue] = context
@@ -48,11 +59,14 @@ async function readRenderedColors(
       return `rgb(${red}, ${green}, ${blue})`;
     };
     return {
-      foreground: composite(style.color),
-      background: composite(style.backgroundColor),
+      foreground: composite(style.color, style.filter),
+      background: composite(
+        backgroundStyle.backgroundColor,
+        backgroundStyle.filter,
+      ),
       surface,
     };
-  }, pseudoElement);
+  }, options);
 }
 
 async function readNormalAndHoveredColors(page: Page, selector: string) {
@@ -123,6 +137,7 @@ describe("compiled theme CSS", () => {
           <button id="filled-interactive-accent" class="bg-interactive-accent text-interactive-accent-foreground hover:brightness-110">Save</button>
           <button id="stage-action" class="bg-git-added/20 text-git-added hover:bg-git-added/30">Stage</button>
           <button id="unstage-action" class="bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30">Unstage</button>
+          <pre id="inline-diff" class="bg-muted/50"><span id="inline-diff-addition" class="text-diff-addition">+added</span><span id="inline-diff-deletion" class="text-diff-deletion">-deleted</span></pre>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
           <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
@@ -286,6 +301,18 @@ describe("compiled theme CSS", () => {
           }
         }
 
+        for (const kind of ["addition", "deletion"] as const) {
+          const colors = await readRenderedColors(
+            page,
+            `#inline-diff-${kind}`,
+            { backgroundSelector: "#inline-diff" },
+          );
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile.id} inline diff ${kind}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+
         const scrollAreaThumb = await readNormalAndHoveredColors(
           page,
           "#scroll-area-thumb",
@@ -309,11 +336,9 @@ describe("compiled theme CSS", () => {
           if (!scrollbar) throw new Error("Missing scrollbar fixture");
           return scrollbar.offsetWidth - scrollbar.clientWidth;
         });
-        const scrollbarColors = await readRenderedColors(
-          page,
-          "#scrollbar",
-          "::-webkit-scrollbar-thumb",
-        );
+        const scrollbarColors = await readRenderedColors(page, "#scrollbar", {
+          pseudoElement: "::-webkit-scrollbar-thumb",
+        });
         expect(scrollbarWidth, `${profile} scrollbar width`).toBe(10);
         expect(
           contrastRatio(scrollbarColors.background, scrollbarColors.surface),
