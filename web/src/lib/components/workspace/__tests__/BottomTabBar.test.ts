@@ -6,20 +6,25 @@ import BottomTabBar from '../BottomTabBar.svelte';
 afterEach(cleanup);
 
 describe('BottomTabBar', () => {
-	it('presents Chat Map as a dedicated current mobile destination', async () => {
+	it.each([
+		{ kind: 'chat-map', label: m.workspace_surface_chat_map_short },
+		{ kind: 'chat-canvas', label: m.workspace_surface_chat_canvas },
+	] as const)('presents $kind as a dedicated mobile destination', async ({ kind, label }) => {
 		const onTabChange = vi.fn();
 		render(BottomTabBar, {
-			activeItem: 'chat-map',
+			activeItem: kind,
 			pullRequestsAvailable: false,
 			onTabChange,
 			onMenuClick: vi.fn(),
 		});
 
-		const map = screen.getByRole('button', { name: m.workspace_surface_chat_map_short() });
-		expect(map.getAttribute('aria-current')).toBe('page');
+		const destination = screen.getByRole('button', { name: label() });
+		expect(destination.getAttribute('aria-current')).toBe('page');
 		expect(screen.queryByRole('button', { name: m.sidebar_navigation_pull_requests() })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_navigation_chat() }));
 		expect(onTabChange).toHaveBeenCalledWith('chat');
+		await fireEvent.click(destination);
+		expect(onTabChange).toHaveBeenLastCalledWith(kind);
 	});
 });

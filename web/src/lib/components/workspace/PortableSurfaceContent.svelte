@@ -23,7 +23,10 @@
 	);
 	const commitRenderer = lazyRenderer(() => import('$lib/components/git/CommitSurface.svelte'));
 	const chatMapRenderer = lazyRenderer(
-		() => import('$lib/components/chat-map/ChatMapSurface.svelte'),
+		() => import('$lib/components/chat-map/ChatMapPanel.svelte'),
+	);
+	const chatCanvasRenderer = lazyRenderer(
+		() => import('$lib/components/chat-canvas/ChatCanvasSurface.svelte'),
 	);
 </script>
 
@@ -209,6 +212,11 @@
 				{visible}
 				{presentation}
 			/>
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'chat-canvas'}
+		{@const controller = singletonSurfaces.chatCanvas()}
+		{#await chatCanvasRenderer() then ChatCanvasSurface}
+			<ChatCanvasSurface {controller} chats={sessions.orderedChats} {visible} {presentation} />
 		{/await}
 	{/if}
 

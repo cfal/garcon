@@ -704,12 +704,15 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(enterWindowFullscreen).not.toHaveBeenCalled();
 	});
 
-	it('opens plus-menu views as tabs in that window', async () => {
+	it.each([
+		{ kind: 'git-history', label: m.workspace_open_git_history },
+		{ kind: 'chat-canvas', label: m.workspace_open_chat_canvas },
+	] as const)('opens $kind from the plus menu as a tab in that window', async ({ kind, label }) => {
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
-		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_history() }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: label() }));
 
-		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
+		expect(openSingletonAsTab).toHaveBeenCalledWith(kind, 'window-main');
 	});
 
 	it('keeps all available view commands in canonical order before open terminals', async () => {
@@ -721,6 +724,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'files',
 			'commit',
 			'chat-map',
+			'chat-canvas',
 		] as const;
 		runtime.surfaces = Object.fromEntries(
 			[chatSurface, ...kinds.map((kind) => portableSingletonDescriptor(kind))].map((surface) => [
@@ -745,11 +749,12 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_chat_map(),
+			m.workspace_open_chat_canvas(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const terminal = screen.getByRole('menuitem', { name: 'Build logs' });
 
-		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6, 7]);
+		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
 		expect(items.indexOf(viewItems.at(-1)!)).toBeLessThan(items.indexOf(terminal));
 	});
 

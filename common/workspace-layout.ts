@@ -15,7 +15,8 @@ export type PersistedWorkspaceSurfaceRef =
         | "pull-requests"
         | "files"
         | "commit"
-        | "chat-map";
+        | "chat-map"
+        | "chat-canvas";
     }
   | { type: "terminal"; terminalId: string };
 

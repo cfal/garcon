@@ -59,6 +59,7 @@
 		files: m.workspace_surface_files,
 		commit: m.workspace_surface_commit,
 		'chat-map': m.workspace_surface_chat_map,
+		'chat-canvas': m.workspace_surface_chat_canvas,
 	};
 
 	function canOffer(kind: PortableSingletonKind): boolean {
@@ -82,6 +83,7 @@
 		if (kind === 'git-history') return m.workspace_open_git_history();
 		if (kind === 'git-compare') return m.workspace_open_git_compare();
 		if (kind === 'chat-map') return m.workspace_open_chat_map();
+		if (kind === 'chat-canvas') return m.workspace_open_chat_canvas();
 		return m.workspace_open_surface({ surface: singletonLabels[kind]() });
 	}
 

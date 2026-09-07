@@ -12,6 +12,8 @@ import { ApiError } from '$lib/api/client.js';
 import * as api from '$lib/api/chat-canvases.js';
 import { CanvasSession } from './canvas-session.svelte.js';
 import { browserCanvasRecovery, type CanvasRecoveryPort } from './canvas-recovery.js';
+import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface CanvasApiPort {
 	list(): Promise<CanvasListResponse>;
@@ -35,7 +37,7 @@ export interface CanvasViewport {
 	zoom: number;
 }
 
-export class CanvasController {
+export class CanvasController implements PortableSingletonController {
 	canvases = $state.raw<CanvasSummary[]>([]);
 	unavailableIds = $state.raw<string[]>([]);
 	session = $state.raw<CanvasSession | null>(null);
@@ -163,6 +165,14 @@ export class CanvasController {
 	}
 	setViewport(id: string, viewport: CanvasViewport): void {
 		this.#viewports.set(id, viewport);
+	}
+
+	setProjectState(projectState: WorkspaceProjectState): void {
+		void projectState;
+	}
+
+	setPresentationVisible(visible: boolean): void {
+		void visible;
 	}
 
 	dispose(): void {

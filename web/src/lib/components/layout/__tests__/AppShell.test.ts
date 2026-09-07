@@ -596,27 +596,33 @@ describe('AppShell responsive workspace binding', () => {
 		},
 	);
 
-	it('keeps Chat Map in the persistent mobile navigation and marks it active', async () => {
-		const workspace = installContext();
-		const mobile = reduceWorkspaceLayout(workspace.layout.snapshot, [
-			{
-				type: 'register-surface',
-				surface: portableSingletonDescriptor('chat-map'),
-			},
-			{
-				type: 'set-mobile-presentation',
-				activeId: 'singleton:chat-map',
-				returnStack: [],
-			},
-		]);
-		workspace.layout.publish(workspace.layout.revision, mobile);
-		workspace.isMobile = true;
-		setViewportWidth(390, false);
+	it.each([
+		{ kind: 'chat-map', label: 'Map' },
+		{ kind: 'chat-canvas', label: 'Canvas' },
+	] as const)(
+		'keeps $label in the persistent mobile navigation and marks it active',
+		async ({ kind, label }) => {
+			const workspace = installContext();
+			const mobile = reduceWorkspaceLayout(workspace.layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: portableSingletonDescriptor(kind),
+				},
+				{
+					type: 'set-mobile-presentation',
+					activeId: `singleton:${kind}`,
+					returnStack: [],
+				},
+			]);
+			workspace.layout.publish(workspace.layout.revision, mobile);
+			workspace.isMobile = true;
+			setViewportWidth(390, false);
 
-		render(AppShell);
-		const bottomBar = screen.getByTestId('bottom-tab-bar-stub');
-		expect(bottomBar.getAttribute('data-active-item')).toBe('chat-map');
-		await fireEvent.click(screen.getByRole('button', { name: 'Select Map tab' }));
-		expect(workspace.focusedMobileSingletons).toContain('chat-map');
-	});
+			render(AppShell);
+			const bottomBar = screen.getByTestId('bottom-tab-bar-stub');
+			expect(bottomBar.getAttribute('data-active-item')).toBe(kind);
+			await fireEvent.click(screen.getByRole('button', { name: `Select ${label} tab` }));
+			expect(workspace.focusedMobileSingletons).toContain(kind);
+		},
+	);
 });

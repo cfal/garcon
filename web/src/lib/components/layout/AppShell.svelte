@@ -179,6 +179,7 @@
 		if (surface?.type === 'singleton') {
 			if (surface.kind === 'pull-requests') return 'pull-requests';
 			if (surface.kind === 'chat-map') return 'chat-map';
+			if (surface.kind === 'chat-canvas') return 'chat-canvas';
 			if (surface.kind === 'git' || surface.kind === 'files') {
 				return surface.kind;
 			}

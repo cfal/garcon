@@ -111,6 +111,13 @@
 				action: () => void workspace.openSingleton('chat-map').catch(reportOpenError),
 			},
 			{
+				id: 'workspace-chat-canvas',
+				label: m.workspace_open_chat_canvas(),
+				description: m.command_open_panel({ panel: m.workspace_surface_chat_canvas() }),
+				category: categories.workspace,
+				action: () => void workspace.openSingleton('chat-canvas').catch(reportOpenError),
+			},
+			{
 				id: 'workspace-terminal',
 				label: m.command_switch_to_terminal(),
 				description: m.command_open_panel({ panel: m.workspace_surface_terminal() }),

@@ -47,8 +47,7 @@ describe('Chromium canvas recovery', () => {
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-      await page.getByRole('menuitem', { name: 'Open chat map' }).click();
-      await page.getByRole('button', { name: 'Canvases', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Open canvas' }).click();
       await saved(page);
       await page.getByLabel('Choose canvas').selectOption('damaged');
       await page.locator('.svelte-flow__node[data-id="research"]').waitFor();
@@ -122,8 +121,7 @@ describe('Chromium canvas recovery', () => {
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-      await page.getByRole('menuitem', { name: 'Open chat map' }).click();
-      await page.getByRole('button', { name: 'Canvases', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Open canvas' }).click();
       await page.locator('[data-canvas-flow]').waitFor();
       await page.getByText('Some saved canvases could not be read.', { exact: false }).waitFor();
 

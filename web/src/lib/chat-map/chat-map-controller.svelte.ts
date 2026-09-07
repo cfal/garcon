@@ -1,11 +1,8 @@
-import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
 
 export class ChatMapController implements PortableSingletonController {
 	query = $state('');
-	mode = $state<'lineage' | 'canvases'>('lineage');
-	readonly canvases = new CanvasController();
 	#collapsedNodeKeys = $state<ReadonlySet<string>>(new Set());
 
 	get collapsedNodeKeys(): ReadonlySet<string> {
@@ -45,7 +42,6 @@ export class ChatMapController implements PortableSingletonController {
 	}
 
 	dispose(): void {
-		this.canvases.dispose();
 		this.query = '';
 		this.#collapsedNodeKeys = new Set();
 	}

@@ -5,6 +5,7 @@ import type {
 } from '$shared/workspace-layout';
 import { isRecord } from '$shared/json';
 import {
+	PORTABLE_SINGLETON_KINDS,
 	WORKSPACE_WINDOW_RESOURCE_CEILING,
 	chatViewSurfaceId,
 	portableSingletonDescriptor,
@@ -41,15 +42,7 @@ export const WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS = 256;
 
 class WorkspaceLayoutBudgetExceeded extends Error {}
 
-const PORTABLE_SINGLETON_REF_KINDS = new Set<PortableSingletonKind>([
-	'git',
-	'git-history',
-	'git-compare',
-	'pull-requests',
-	'files',
-	'commit',
-	'chat-map',
-]);
+const PORTABLE_SINGLETON_REF_KINDS = new Set<PortableSingletonKind>(PORTABLE_SINGLETON_KINDS);
 
 function parseV2Ref(value: unknown): PersistedWorkspaceSurfaceRef | null {
 	if (!isRecord(value)) return null;

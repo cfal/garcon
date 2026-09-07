@@ -11,6 +11,7 @@ export const PORTABLE_SINGLETON_KINDS = [
 	'files',
 	'commit',
 	'chat-map',
+	'chat-canvas',
 ] as const;
 export const TRANSIENT_MOBILE_SINGLETON_KINDS = ['git-history', 'git-compare'] as const;
 

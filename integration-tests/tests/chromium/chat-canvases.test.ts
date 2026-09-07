@@ -84,10 +84,7 @@ describe('Chromium Chat Canvas', () => {
             '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
           )
           .click();
-        await page.getByRole('menuitem', { name: 'Open chat map' }).click();
-        await page
-          .getByRole('button', { name: 'Canvases', exact: true })
-          .click();
+        await page.getByRole('menuitem', { name: 'Open canvas' }).click();
         await page.locator(node('card')).waitFor({ state: 'visible' });
         markPhase('keeping graph node names in sync with live chat titles');
         await integration.client.updateSessionName(chatId, 'Accessible chat title');
@@ -213,7 +210,7 @@ describe('Chromium Chat Canvas', () => {
           .click();
         await page.locator(node('card')).waitFor({ state: 'hidden' });
         expect(await page.locator('.svelte-flow__node:visible').count()).toBe(0);
-        await page.getByRole('tab', { name: 'Chat Map', exact: true }).click();
+        await page.getByRole('tab', { name: 'Canvas', exact: true }).click();
         await page.locator(node('card')).waitFor({ state: 'visible' });
 
         markPhase('opening chats alongside and preserving canvas navigation');
@@ -224,7 +221,7 @@ describe('Chromium Chat Canvas', () => {
         await page.locator('[data-canvas-flow]').waitFor({ state: 'visible' });
         expect(
           await page
-            .getByRole('tab', { name: 'Chat Map', exact: true })
+            .getByRole('tab', { name: 'Canvas', exact: true })
             .getAttribute('aria-selected'),
         ).toBe('true');
         expect(
@@ -257,7 +254,14 @@ describe('Chromium Chat Canvas', () => {
             .getByRole('button', { name: 'Apply', exact: true })
             .click();
           await pendingSave;
-          await page.getByRole('button', { name: 'Lineage', exact: true }).click();
+          const canvasWindow = page
+            .locator('[data-workspace-window-id]')
+            .filter({ has: page.locator('[data-canvas-panel]:visible') });
+          await canvasWindow.locator('[data-workspace-window-add-trigger]').click();
+          await page.getByRole('menuitem', { name: 'Open chat map' }).click();
+          await page.locator('[data-chat-map-panel]').waitFor({ state: 'visible' });
+          expect(await page.getByRole('button', { name: 'Lineage', exact: true }).count()).toBe(0);
+          expect(await page.getByRole('button', { name: 'Canvases', exact: true }).count()).toBe(0);
           expect(
             await page.evaluate(() => {
               const event = new Event('beforeunload', { cancelable: true });
@@ -268,7 +272,7 @@ describe('Chromium Chat Canvas', () => {
         } finally {
           releaseSave();
         }
-        await page.getByRole('button', { name: 'Canvases', exact: true }).click();
+        await page.getByRole('tab', { name: 'Canvas', exact: true }).click();
         await saved(page);
         expect((await read()).content.title).toBe('Revised diagram');
         expect(
@@ -284,7 +288,7 @@ describe('Chromium Chat Canvas', () => {
         await page.setViewportSize({ width: 390, height: 844 });
         await page
           .getByRole('navigation', { name: 'Workspace navigation' })
-          .getByRole('button', { name: 'Map', exact: true })
+          .getByRole('button', { name: 'Canvas', exact: true })
           .click();
         await page.getByRole('button', { name: 'List', exact: true }).click();
         await page.locator('[data-canvas-list]').waitFor({ state: 'visible' });

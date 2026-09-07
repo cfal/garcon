@@ -548,14 +548,14 @@ describe('WorkspaceCoordinator', () => {
 		const prepareChatSurfaceTransfer = vi.fn(() => publication);
 		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
 		await coordinator.showChatInCurrentWindow('chat-a');
-		await coordinator.openSingletonAsTab('chat-map', 'window-main');
+		await coordinator.openSingletonAsTab('chat-canvas', 'window-main');
 		const sourceSurfaceId = chatViewSurfaceId('window-main');
 
 		const destinationWindowId = await coordinator.openChatBeside('chat-a', 'window-main', 'right');
 		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
 
 		expect(destinationWindowId).not.toBe('window-main');
-		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:chat-map');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:chat-canvas');
 		expect(layout.surface(sourceSurfaceId)).toBeNull();
 		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-a' });
 		expect(

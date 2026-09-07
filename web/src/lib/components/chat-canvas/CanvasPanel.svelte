@@ -26,6 +26,25 @@
 	let navigationError = $state<string | null>(null);
 	const session = $derived(controller.session);
 	const busy = $derived(controller.loading || session?.reloading === true);
+	const saveStatus = $derived.by(() => {
+		if (busy) return m.canvas_loading();
+		if (session?.saving) return m.canvas_saving();
+		if (session?.dirty || session?.conflict) return m.canvas_unsaved();
+		if (session) return m.canvas_saved();
+		return '';
+	});
+	const nameDialogTitle = $derived.by(() => {
+		switch (dialog) {
+			case 'create':
+				return m.canvas_create();
+			case 'rename':
+				return m.canvas_rename();
+			case 'copy':
+				return m.canvas_copy();
+			default:
+				return '';
+		}
+	});
 
 	onMount(() => {
 		if (!controller.loaded && presentation === 'mobile') controller.view = 'list';
@@ -80,7 +99,7 @@
 
 <section
 	class="flex h-full min-h-0 flex-col bg-background text-foreground"
-	aria-label={m.canvas_canvases()}
+	aria-label={m.workspace_surface_chat_canvas()}
 	data-canvas-panel
 >
 	<header class="shrink-0 border-b border-border bg-card p-3">
@@ -114,17 +133,7 @@
 				><button class="canvas-button" disabled={busy} onclick={() => (dialog = 'delete')}
 					>{m.canvas_delete()}</button
 				>{/if}
-			<span class="ml-auto text-xs text-muted-foreground" role="status"
-				>{busy
-					? m.canvas_loading()
-					: session?.saving
-						? m.canvas_saving()
-						: session?.dirty || session?.conflict
-							? m.canvas_unsaved()
-							: session
-								? m.canvas_saved()
-								: ''}</span
-			>
+			<span class="ml-auto text-xs text-muted-foreground" role="status">{saveStatus}</span>
 		</div>
 	</header>
 	{#if controller.unavailableIds.length}
@@ -196,11 +205,7 @@
 {#if dialog === 'create' || dialog === 'rename' || dialog === 'copy'}
 	{#key dialog}<CanvasNameDialog
 			errorMessage={controller.error || session?.error}
-			title={dialog === 'create'
-				? m.canvas_create()
-				: dialog === 'rename'
-					? m.canvas_rename()
-					: m.canvas_copy()}
+			title={nameDialogTitle}
 			initial={dialog === 'create' ? m.canvas_new_name() : (session?.document.content.title ?? '')}
 			onclose={() => (dialog = null)}
 			onsubmit={submitName}

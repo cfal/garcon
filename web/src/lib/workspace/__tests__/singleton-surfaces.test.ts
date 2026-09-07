@@ -126,20 +126,26 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.setPresentationVisible('git', true);
 		registry.setPresentationVisible('files', true);
 		registry.setPresentationVisible('chat-map', true);
+		registry.setPresentationVisible('chat-canvas', true);
 		const git = registry.gitWorkbench();
 		const files = registry.files();
 		const chatMap = registry.chatMap();
+		const chatCanvas = registry.chatCanvas();
 		chatMap.setQuery('retained query');
+		chatCanvas.view = 'list';
 		git.target.showTargetDialog = true;
 
 		registry.setPresentationVisible('git', false);
 		registry.setPresentationVisible('files', false);
 		registry.setPresentationVisible('chat-map', false);
+		registry.setPresentationVisible('chat-canvas', false);
 
 		expect(registry.gitWorkbench()).toBe(git);
 		expect(registry.files()).toBe(files);
 		expect(registry.chatMap()).toBe(chatMap);
+		expect(registry.chatCanvas()).toBe(chatCanvas);
 		expect(chatMap.query).toBe('retained query');
+		expect(chatCanvas.view).toBe('list');
 		expect(git.presentationVisible).toBe(false);
 		expect(git.target.showTargetDialog).toBe(false);
 		expect(files.presentationVisible).toBe(false);
@@ -184,6 +190,8 @@ describe('SingletonSurfaceRegistry', () => {
 		const firstPullRequests = registry.pullRequests();
 		const firstCommit = registry.commit();
 		const firstChatMap = registry.chatMap();
+		const firstChatCanvas = registry.chatCanvas();
+		const disposeChatCanvas = vi.spyOn(firstChatCanvas, 'dispose');
 
 		registry.disposeSurface('git');
 		registry.disposeSurface('files');
@@ -191,13 +199,29 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.disposeSurface('commit');
 		registry.disposeSurface('chat-map');
 
+		expect(registry.chatCanvas()).toBe(firstChatCanvas);
+		expect(disposeChatCanvas).not.toHaveBeenCalled();
+		registry.disposeSurface('chat-canvas');
+
 		expect(registry.gitWorkbench()).not.toBe(firstGit);
 		expect(registry.files()).not.toBe(firstFiles);
 		expect(registry.pullRequests()).not.toBe(firstPullRequests);
 		expect(registry.commit()).not.toBe(firstCommit);
 		expect(registry.chatMap()).not.toBe(firstChatMap);
+		expect(registry.chatCanvas()).not.toBe(firstChatCanvas);
+		expect(disposeChatCanvas).toHaveBeenCalledOnce();
 		expect(firstPullRequests.dispose).toHaveBeenCalledOnce();
 		expect(firstCommit.dispose).toHaveBeenCalledOnce();
+	});
+
+	it('does not classify Chat Map or Canvas as project surfaces', () => {
+		const { registry } = createRegistry();
+		registry.setPresentationVisible('chat-map', true);
+		registry.setPresentationVisible('chat-canvas', true);
+
+		expect(registry.hasVisibleProjectSurface).toBe(false);
+		registry.setPresentationVisible('git', true);
+		expect(registry.hasVisibleProjectSurface).toBe(true);
 	});
 
 	it('constructs independent Workbench, History, and Compare controllers', () => {
