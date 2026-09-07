@@ -828,8 +828,7 @@ describe('Lightpanda standalone Git views', () => {
         () => !document.querySelector('[data-workspace-surface-id="singleton:git-compare"]'),
         { timeout: 20_000 },
       );
-      await app.openWorkspaceWindowAddMenu(chatWindowId);
-      await app.waitForMenuItemEnabled('Open Git Compare');
+      await app.waitForWorkspaceWindowAddActionEnabled('Open Git Compare', chatWindowId);
       fixture.assertNoBrowserErrors();
     });
   });

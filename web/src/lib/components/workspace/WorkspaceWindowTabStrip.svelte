@@ -22,6 +22,7 @@
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
+	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -36,6 +37,7 @@
 		isCurrent,
 		isChatProcessing = () => false,
 		onVisibleChange,
+		onMeasureChange,
 		surfaceMenuItems,
 	}: {
 		windowId: WorkspaceWindowId;
@@ -48,6 +50,7 @@
 		isCurrent: boolean;
 		isChatProcessing?: (surfaceId: string) => boolean;
 		onVisibleChange?: (ids: readonly string[]) => void;
+		onMeasureChange?: (measure: WorkspaceWindowTabMeasure | null) => void;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 	} = $props();
 
@@ -69,6 +72,7 @@
 		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
 		const viewport = tabViewport;
 		const rail = measurementRail;
+		onMeasureChange?.(null);
 		if (!viewport || !rail || typeof ResizeObserver === 'undefined') return;
 		const observer = new ResizeObserver(recomputeVisibleTabs);
 		observer.observe(viewport);
@@ -77,7 +81,10 @@
 			observer.observe(item);
 		}
 		queueMicrotask(recomputeVisibleTabs);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			onMeasureChange?.(null);
+		};
 	});
 
 	$effect(() => {
@@ -130,8 +137,21 @@
 			const surfaceId = item.dataset.windowTabMeasureId;
 			if (surfaceId) widths.set(surfaceId, item.getBoundingClientRect().width);
 		}
+		const viewportWidth = tabViewport.clientWidth;
+		const hasCompleteMeasurements = tabs.order.every((surfaceId) => widths.has(surfaceId));
+		onMeasureChange?.(
+			hasCompleteMeasurements
+				? {
+						naturalWidth: tabs.order.reduce(
+							(sum, surfaceId, index) => sum + (widths.get(surfaceId) ?? 0) + (index > 0 ? 2 : 0),
+							0,
+						),
+						viewportWidth,
+					}
+				: null,
+		);
 		const capacity = resolveWindowTabCapacity({
-			containerWidth: tabViewport.clientWidth,
+			containerWidth: viewportWidth,
 			actionsWidth: 0,
 			auxiliaryWidth: 0,
 			gap: 0,

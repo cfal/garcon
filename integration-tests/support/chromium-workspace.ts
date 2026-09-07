@@ -21,3 +21,37 @@ export async function collapseCanonicalFilesWindow(page: Page): Promise<void> {
     windowCount - 1,
   );
 }
+
+async function workspaceWindowAddAction(page: Page, label: string, windowId?: string) {
+  const workspaceWindow = page.locator(
+    windowId
+      ? `[data-workspace-window-id="${windowId}"]`
+      : '[data-workspace-window-current="true"]',
+  );
+  await workspaceWindow.waitFor({ state: 'visible' });
+  const addControls = workspaceWindow.locator('[data-workspace-window-add-controls]');
+  const inlineAction = addControls.getByRole('button', {
+    name: label,
+    exact: true,
+  });
+  if ((await inlineAction.count()) > 0) return inlineAction;
+
+  await addControls.locator('[data-workspace-window-add-trigger]').click();
+  return page.getByRole('menuitem', { name: label, exact: true });
+}
+
+export async function clickWorkspaceWindowAddAction(
+  page: Page,
+  label: string,
+  windowId?: string,
+): Promise<void> {
+  await (await workspaceWindowAddAction(page, label, windowId)).click();
+}
+
+export async function waitForWorkspaceWindowAddActionEnabled(
+  page: Page,
+  label: string,
+  windowId?: string,
+): Promise<void> {
+  await (await workspaceWindowAddAction(page, label, windowId)).click({ trial: true });
+}

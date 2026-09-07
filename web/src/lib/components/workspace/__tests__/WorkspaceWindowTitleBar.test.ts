@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
+import WorkspaceWindowAddMenu from '../WorkspaceWindowAddMenu.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
@@ -12,6 +13,10 @@ import type {
 	WorkspaceWindowNode,
 } from '$lib/workspace/surface-types.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const {
@@ -789,6 +794,144 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_history() }));
 
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
+	});
+
+	it('keeps tab titles full while moving add actions in and out of the toolbar', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]));
+		const tabViewport = rendered.container.querySelector<HTMLElement>(
+			'[data-workspace-window-tabs="window-main"]',
+		)!;
+		const measurementTab = rendered.container.querySelector<HTMLElement>(
+			`[data-window-tab-measure-id="${chatSurface.id}"]`,
+		)!;
+		let viewportWidth = 190;
+		Object.defineProperty(tabViewport, 'clientWidth', {
+			configurable: true,
+			get: () => viewportWidth,
+		});
+		measurementTab.getBoundingClientRect = () => ({ width: 100 }) as DOMRect;
+
+		try {
+			ResizeObserverHarness.emit(tabViewport, viewportWidth);
+			await waitFor(() =>
+				expect(
+					rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+				).toHaveLength(3),
+			);
+			expect(tabViewport.dataset.workspaceTabLabelMode).toBe('full');
+
+			viewportWidth = 10;
+			ResizeObserverHarness.emit(tabViewport, viewportWidth);
+			await waitFor(() =>
+				expect(
+					rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+				).toHaveLength(0),
+			);
+			expect(tabViewport.dataset.workspaceTabLabelMode).not.toBe('full');
+
+			viewportWidth = 160;
+			ResizeObserverHarness.emit(tabViewport, viewportWidth);
+			await waitFor(() =>
+				expect(
+					rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+				).toHaveLength(2),
+			);
+			expect(tabViewport.dataset.workspaceTabLabelMode).toBe('full');
+		} finally {
+			rendered.unmount();
+			restoreResizeObserver();
+		}
+	});
+
+	it('moves an ordered action prefix inline without duplicating menu actions', async () => {
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 318 },
+		});
+		const expectedLabels = [
+			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
+			m.workspace_open_git_history(),
+			m.workspace_open_git_compare(),
+			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
+			m.workspace_open_chat_map(),
+			m.workspace_new_terminal(),
+		];
+
+		await waitFor(() =>
+			expect(
+				Array.from(
+					rendered.container.querySelectorAll<HTMLElement>('[data-workspace-window-add-inline]'),
+					(button) => button.getAttribute('aria-label'),
+				),
+			).toEqual(expectedLabels.slice(0, 3)),
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: expectedLabels[1] }));
+		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+		const menu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-add-menu="window-main"]',
+		)!;
+		expect(
+			within(menu)
+				.getAllByRole('menuitem')
+				.map((item) => item.textContent?.trim()),
+		).toEqual(expectedLabels.slice(3));
+		for (const label of expectedLabels.slice(0, 3)) {
+			expect(within(menu).queryByRole('menuitem', { name: label })).toBeNull();
+		}
+	});
+
+	it('hides the plus menu when every eligible action fits inline', async () => {
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+
+		await waitFor(() =>
+			expect(
+				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+			).toHaveLength(8),
+		);
+		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_new_terminal() }));
+		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
+	});
+
+	it('keeps saved terminals in plus without a leading separator', async () => {
+		runtime.terminalSessions = [
+			{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+		];
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+
+		await waitFor(() =>
+			expect(
+				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+			).toHaveLength(8),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+		const menu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-add-menu="window-main"]',
+		)!;
+
+		expect(within(menu).getAllByRole('menuitem')).toHaveLength(1);
+		expect(within(menu).getByRole('menuitem', { name: 'Build logs' })).toBeTruthy();
+		expect(menu.querySelector('[data-slot="dropdown-menu-separator"]')).toBeNull();
+		expect(within(menu).getByText(m.workspace_open_terminals())).toBeTruthy();
 	});
 
 	it('keeps view commands canonical and terminal options at the bottom', async () => {

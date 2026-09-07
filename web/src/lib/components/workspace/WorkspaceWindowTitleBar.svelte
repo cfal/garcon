@@ -12,6 +12,7 @@
 	import WorkspaceWindowAddMenu from './WorkspaceWindowAddMenu.svelte';
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
+	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
@@ -37,6 +38,7 @@
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
 	let visibleSurfaceIds = $state.raw<readonly string[]>([]);
+	let tabMeasure = $state.raw<WorkspaceWindowTabMeasure | null>(null);
 	const snapshot = $derived(workspace.layout.snapshot);
 	const fullscreen = $derived(snapshot.fullscreenWindowId === workspaceWindow.id);
 	const showActiveTreatment = $derived(isCurrent && !fullscreen);
@@ -115,12 +117,17 @@
 			{isCurrent}
 			isChatProcessing={isSurfaceChatProcessing}
 			onVisibleChange={(ids) => (visibleSurfaceIds = ids)}
+			onMeasureChange={(measure) => (tabMeasure = measure)}
 			{surfaceMenuItems}
 		/>
 	</div>
 	<div class="flex min-w-0 shrink-0 items-center gap-0.5">
 		<div class="flex min-w-0 shrink empty:hidden">{@render auxiliaryActions?.()}</div>
-		<WorkspaceWindowAddMenu windowId={workspaceWindow.id} tabs={workspaceWindow.tabs} />
+		<WorkspaceWindowAddMenu
+			windowId={workspaceWindow.id}
+			tabs={workspaceWindow.tabs}
+			measure={tabMeasure}
+		/>
 		<WorkspaceWindowMenu
 			windowId={workspaceWindow.id}
 			tabs={workspaceWindow.tabs}

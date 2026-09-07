@@ -5,6 +5,7 @@ import type { Locator, Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 import {
   canonicalFilesWindowId,
+  clickWorkspaceWindowAddAction,
   collapseCanonicalFilesWindow,
 } from '../../support/chromium-workspace.js';
 
@@ -89,8 +90,7 @@ async function openNewWindow(page: Page, label: string): Promise<string> {
     'data-workspace-window-active-surface',
   );
   if (!sourceWindowId) throw new Error('Current workspace window has no ID.');
-  await page.locator(`[data-workspace-window-add-trigger="${sourceWindowId}"]`).click();
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await clickWorkspaceWindowAddAction(page, label, sourceWindowId);
   await page.waitForFunction(
     ({ expectedWindowId, previousSurfaceId }) => {
       const workspaceWindow = document.querySelector<HTMLElement>(
@@ -137,8 +137,7 @@ async function openNewWindow(page: Page, label: string): Promise<string> {
 }
 
 async function openWindowTab(page: Page, windowId: string, label: string): Promise<void> {
-  await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await clickWorkspaceWindowAddAction(page, label, windowId);
 }
 
 interface ChatTranscriptPresentation {
@@ -806,6 +805,108 @@ async function resizeFirstPartition(page: Page): Promise<{ value: string; persis
 }
 
 describe('Chromium workspace windows', () => {
+  test('keeps full tab titles ahead of adaptive add actions', async () => {
+    await withChromiumFixture('workspace-window-adaptive-add-actions', async (fixture) => {
+      await fixture.page.setViewportSize({ width: 1440, height: 900 });
+      const chatId = await createChat(fixture, 'workspace-window-adaptive-add-actions');
+      await openChat(fixture, chatId);
+      await collapseCanonicalFilesWindow(fixture.page);
+      const windowId = await fixture.page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!windowId) throw new Error('Missing adaptive-action workspace window.');
+
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        return (
+          workspaceWindow
+            ?.querySelector('[data-workspace-window-tabs]')
+            ?.getAttribute('data-workspace-tab-label-mode') === 'full' &&
+          (workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length ?? 0) > 2
+        );
+      }, windowId);
+      const titlebar = fixture.page.locator(`[data-workspace-window-titlebar="${windowId}"]`);
+      const addControls = titlebar.locator(`[data-workspace-window-add-controls="${windowId}"]`);
+      const wideInlineCount = await addControls
+        .locator('[data-workspace-window-add-inline]')
+        .count();
+      expect(wideInlineCount).toBeGreaterThan(2);
+      expect(await addControls.locator('[data-workspace-window-add-trigger]').count()).toBe(0);
+
+      await titlebar.evaluate((element) => {
+        const header = element as HTMLElement;
+        const tabViewport = header.querySelector<HTMLElement>('[data-workspace-window-tabs]');
+        const actionControls = header.querySelector<HTMLElement>(
+          '[data-workspace-window-add-controls]',
+        );
+        const measuredTabs = [
+          ...header.querySelectorAll<HTMLElement>('[data-window-tab-measure-id]'),
+        ];
+        if (!tabViewport || !actionControls || measuredTabs.length === 0) {
+          throw new Error('Adaptive title-bar measurements are incomplete.');
+        }
+        const naturalTabWidth = measuredTabs.reduce(
+          (width, tab, index) => width + tab.getBoundingClientRect().width + (index > 0 ? 2 : 0),
+          0,
+        );
+        const fixedWidth =
+          header.getBoundingClientRect().width -
+          tabViewport.getBoundingClientRect().width -
+          actionControls.getBoundingClientRect().width;
+        const inlineButton = actionControls.querySelector<HTMLElement>(
+          '[data-workspace-window-add-inline]',
+        );
+        if (!inlineButton) throw new Error('Adaptive title bar has no inline action to measure.');
+        const controlWidth = inlineButton.getBoundingClientRect().width;
+        const controlGap = Number.parseFloat(getComputedStyle(actionControls).columnGap);
+        const twoInlineActionsAndMenuWidth = controlWidth * 3 + controlGap * 2;
+        header.style.width = `${Math.ceil(fixedWidth + naturalTabWidth + twoInlineActionsAndMenuWidth + 1)}px`;
+      });
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        return (
+          workspaceWindow
+            ?.querySelector('[data-workspace-window-tabs]')
+            ?.getAttribute('data-workspace-tab-label-mode') === 'full' &&
+          workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length === 2 &&
+          workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') !== null
+        );
+      }, windowId);
+
+      const inlineLabels = await addControls
+        .locator('[data-workspace-window-add-inline]')
+        .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
+      await addControls.locator('[data-workspace-window-add-trigger]').click();
+      const menu = fixture.page.locator(`[data-workspace-window-add-menu="${windowId}"]`);
+      const menuLabels = await menu
+        .getByRole('menuitem')
+        .evaluateAll((items) => items.map((item) => item.textContent?.trim() ?? ''));
+      expect(menuLabels).toHaveLength(wideInlineCount - 2);
+      expect(menuLabels.some((label) => inlineLabels.includes(label))).toBe(false);
+      await fixture.page.keyboard.press('Escape');
+
+      await titlebar.evaluate((element) => (element as HTMLElement).style.removeProperty('width'));
+      await fixture.page.waitForFunction(
+        ({ expectedCount, expectedWindowId }) => {
+          const workspaceWindow = document.querySelector<HTMLElement>(
+            `[data-workspace-window-id="${expectedWindowId}"]`,
+          );
+          return (
+            workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length ===
+              expectedCount &&
+            workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') === null
+          );
+        },
+        { expectedCount: wideInlineCount, expectedWindowId: windowId },
+      );
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('drags Chat onto any window, enforces split geometry, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
       await fixture.page.setViewportSize({ width: 1440, height: 900 });
@@ -841,7 +942,9 @@ describe('Chromium workspace windows', () => {
       await verifyCanonicalSeparatorClearance(fixture.page, chatWindowId, filesWindowId);
       expect(await fixture.page.locator('[data-workspace-window-focus-ring]').count()).toBe(0);
       expect(
-        await fixture.page.locator(`[data-workspace-window-add-trigger="${chatWindowId}"]`).count(),
+        await fixture.page
+          .locator(`[data-workspace-window-add-controls="${chatWindowId}"]`)
+          .count(),
       ).toBe(1);
       expect(
         await fixture.page
@@ -1450,11 +1553,12 @@ describe('Chromium workspace windows', () => {
       await fileTab.focus();
       await waitForCloseOpacity('1');
       await fixture.page.keyboard.press('Tab');
-      expect(
-        await fixture.page
-          .locator(`[data-workspace-window-add-trigger="${windowId}"]`)
-          .evaluate((element) => document.activeElement === element),
-      ).toBe(true);
+      const firstAddControl = fixture.page
+        .locator(`[data-workspace-window-add-controls="${windowId}"] button`)
+        .first();
+      expect(await firstAddControl.evaluate((element) => document.activeElement === element)).toBe(
+        true,
+      );
       await fixture.page.keyboard.press('Shift+Tab');
       expect(await fileTab.evaluate((element) => document.activeElement === element)).toBe(true);
 

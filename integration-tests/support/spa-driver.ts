@@ -572,9 +572,7 @@ export class SpaDriver {
       `[data-workspace-window-id="${sourceWindowId}"]`,
       (element) => (element as HTMLElement).dataset.workspaceWindowActiveSurface ?? null,
     );
-    await this.openWorkspaceWindowAddMenu(sourceWindowId);
-    await this.waitForMenuItemEnabled(name);
-    await this.clickMenuItem(name);
+    await this.clickWorkspaceWindowAddAction(name, sourceWindowId);
     await this.#page.waitForFunction(
       ({ expectedWindowId, previousSurfaceId }) => {
         const workspaceWindow = [
@@ -710,9 +708,7 @@ export class SpaDriver {
       await this.selectWorkspaceWindowSurfaceById(surfaceId, targetWindowId);
       return;
     }
-    await this.openWorkspaceWindowAddMenu(targetWindowId);
-    await this.waitForMenuItemEnabled(name);
-    await this.clickMenuItem(name);
+    await this.clickWorkspaceWindowAddAction(name, targetWindowId);
   }
 
   async selectWorkspaceWindowSurfaceById(surfaceId: string, windowId?: string): Promise<void> {
@@ -844,6 +840,59 @@ export class SpaDriver {
       if (!trigger) throw new Error(`Missing workspace window add menu: ${expectedWindowId}`);
       if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
     }, targetWindowId);
+  }
+
+  async clickWorkspaceWindowAddAction(name: string, windowId?: string): Promise<void> {
+    const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
+    const inlineStatus = await this.#page.evaluate(
+      ({ expectedName, expectedWindowId }) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        const action = [
+          ...(workspaceWindow?.querySelectorAll<HTMLButtonElement>(
+            '[data-workspace-window-add-inline]',
+          ) ?? []),
+        ].find((button) => button.getAttribute('aria-label') === expectedName);
+        if (!action) return 'menu';
+        if (action.disabled || action.getAttribute('aria-disabled') === 'true') return 'disabled';
+        action.click();
+        return 'clicked';
+      },
+      { expectedName: name, expectedWindowId: targetWindowId },
+    );
+    if (inlineStatus === 'clicked') return;
+    if (inlineStatus === 'disabled') throw new Error(`Workspace add action is disabled: ${name}`);
+
+    await this.openWorkspaceWindowAddMenu(targetWindowId);
+    await this.waitForMenuItemEnabled(name);
+    await this.clickMenuItem(name);
+  }
+
+  async waitForWorkspaceWindowAddActionEnabled(name: string, windowId?: string): Promise<void> {
+    const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
+    const inlineStatus = await this.#page.evaluate(
+      ({ expectedName, expectedWindowId }) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        const action = [
+          ...(workspaceWindow?.querySelectorAll<HTMLButtonElement>(
+            '[data-workspace-window-add-inline]',
+          ) ?? []),
+        ].find((button) => button.getAttribute('aria-label') === expectedName);
+        if (!action) return 'menu';
+        return action.disabled || action.getAttribute('aria-disabled') === 'true'
+          ? 'disabled'
+          : 'enabled';
+      },
+      { expectedName: name, expectedWindowId: targetWindowId },
+    );
+    if (inlineStatus === 'enabled') return;
+    if (inlineStatus === 'disabled') throw new Error(`Workspace add action is disabled: ${name}`);
+
+    await this.openWorkspaceWindowAddMenu(targetWindowId);
+    await this.waitForMenuItemEnabled(name);
   }
 
   async clickResponsiveAction(
