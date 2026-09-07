@@ -21,6 +21,7 @@
 		occurrenceIndex,
 		onOpen,
 		onTransition,
+		onRecover,
 	}: {
 		occurrence: ChatBoardOccurrence;
 		layout: ChatItemLayout;
@@ -33,6 +34,7 @@
 		occurrenceIndex: number;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence) => void;
+		onRecover: (chatId: string) => void;
 	} = $props();
 
 	let cardRef = $state<HTMLElement | null>(null);
@@ -117,18 +119,25 @@
 		</div>
 	</div>
 
-	{#if pending || recoveryRequired}
+	{#if recoveryRequired}
+		<button
+			type="button"
+			class="flex w-full items-center gap-1.5 border-t border-status-warning-border bg-status-warning/10 px-3 py-1 text-left text-[11px] font-medium text-status-warning-muted-foreground outline-none hover:bg-status-warning/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+			onclick={() => onRecover(occurrence.chat.id)}
+		>
+			<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
+			<span class="flex-1">{m.chat_board_confirming_tags()}</span>
+			<span class="underline decoration-current/50 underline-offset-2">
+				{m.chat_board_try_again()}
+			</span>
+		</button>
+	{:else if pending}
 		<div
-			class={cn(
-				'flex items-center gap-1.5 border-t px-3 py-1 text-[11px] font-medium',
-				recoveryRequired
-					? 'border-status-warning-border bg-status-warning/10 text-status-warning-muted-foreground'
-					: 'border-status-info-border bg-status-info text-status-info-foreground',
-			)}
+			class="flex items-center gap-1.5 border-t border-status-info-border bg-status-info px-3 py-1 text-[11px] font-medium text-status-info-foreground"
 			role="status"
 		>
 			<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
-			{recoveryRequired ? m.chat_board_confirming_tags() : m.chat_board_updating_tags()}
+			{m.chat_board_updating_tags()}
 		</div>
 	{/if}
 </article>

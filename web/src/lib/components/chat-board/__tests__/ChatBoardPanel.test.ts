@@ -6,6 +6,7 @@ import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte';
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub';
+import { ApiError } from '$lib/api/client';
 import ChatBoardPanelTestHost from './ChatBoardPanelTestHost.svelte';
 
 const column = {
@@ -135,6 +136,32 @@ describe('ChatBoardPanel', () => {
 		expect(onOpenChat).toHaveBeenCalledWith('chat-1');
 		await fireEvent.click(screen.getByRole('button', { name: 'Transition…' }));
 		expect(screen.getByRole('dialog', { name: 'Transition Chat' })).toBeTruthy();
+	});
+
+	it('offers an inline retry when saved tags could not be confirmed', async () => {
+		const recoverChatTags = vi.fn()
+			.mockRejectedValueOnce(new TypeError('Offline'))
+			.mockResolvedValueOnce({ success: true as const, chatId: 'chat-1', tags: ['ready'] });
+		const applyChatTagDelta = vi.fn().mockRejectedValue(
+			new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN'),
+		);
+		const sessions = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		await expect(sessions.applyChatTagDelta({
+			chatId: 'chat-1', addTags: ['review'],
+		})).rejects.toMatchObject({ errorCode: 'CHAT_TAG_SAVE_UNKNOWN' });
+		await waitFor(() => expect(recoverChatTags).toHaveBeenCalledTimes(1));
+
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
+		await fireEvent.click(screen.getByRole('button', { name: /Confirming saved tags.*Try again/ }));
+
+		await waitFor(() => expect(recoverChatTags).toHaveBeenCalledTimes(2));
+		expect(await screen.findByText('Saved tags confirmed.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /Confirming saved tags.*Try again/ })).toBeNull();
 	});
 
 	it('implements narrow lane tabs without changing selection during arrow-key focus', async () => {

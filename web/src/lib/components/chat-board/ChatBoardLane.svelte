@@ -24,6 +24,7 @@
 		canTransition,
 		onOpen,
 		onTransition,
+		onRecover,
 		onRegisterScroller,
 	}: {
 		lane: ChatBoardLaneProjection;
@@ -38,6 +39,7 @@
 		canTransition: boolean;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence) => void;
+		onRecover: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 	} = $props();
 
@@ -135,6 +137,7 @@
 		{canTransition}
 		{onOpen}
 		{onTransition}
+		{onRecover}
 		{onRegisterScroller}
 	/>
 </section>

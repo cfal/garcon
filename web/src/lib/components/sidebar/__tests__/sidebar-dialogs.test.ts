@@ -471,6 +471,53 @@ describe('Sidebar dialogs', () => {
 		}
 	});
 
+	it('retries tag confirmation without discarding the staged edit', async () => {
+		const onRetryRecovery = vi.fn()
+			.mockRejectedValueOnce(new TypeError('Offline'))
+			.mockResolvedValueOnce(undefined);
+		const onSave = vi.fn().mockResolvedValue(undefined);
+		const props = {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['existing'],
+				editingTags: ['existing', 'staged'],
+			},
+			allKnownTags: [],
+			currentTags: ['existing'],
+			recoveryRequired: true,
+			onClose: vi.fn(),
+			onSave,
+			onRetryRecovery,
+		};
+		const rendered = render(SidebarTagDialog, props);
+
+		try {
+			const input = screen.getByRole('textbox', { name: 'Type a tag and press Enter' });
+			expect(input.hasAttribute('disabled')).toBe(true);
+			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
+			expect(await screen.findByText('Saved tags still could not be confirmed. Check your connection and try again.')).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
+			await waitFor(() => expect(onRetryRecovery).toHaveBeenCalledTimes(2));
+			await rendered.rerender({
+				...props,
+				currentTags: ['saved'],
+				recoveryRequired: false,
+			});
+			expect(screen.getByRole('button', { name: 'Remove tag staged' })).toBeTruthy();
+			expect(screen.getByText('Tags changed since this editor opened. Review the latest saved tags before saving.')).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Review latest tags' }));
+			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+			await waitFor(() => {
+				expect(onSave).toHaveBeenCalledWith('chat-1', ['saved'], ['existing', 'staged']);
+			});
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
 	it('keeps the save-folder dialog open and shows the error when folder creation fails', async () => {
 		const onClose = vi.fn();
 		const onSave = vi.fn().mockRejectedValue(new Error('Folder create failed'));

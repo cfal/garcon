@@ -209,6 +209,16 @@
 		announcement = m.chat_board_transition_applied();
 	}
 
+	async function retryTagRecovery(chatId: string): Promise<void> {
+		announcement = m.chat_board_confirming_tags();
+		try {
+			await sessions.recoverChatTags(chatId);
+			announcement = m.chat_tags_confirmation_complete();
+		} catch {
+			announcement = m.chat_tags_confirmation_failed();
+		}
+	}
+
 	function openEditor(board: ChatBoard): void {
 		manageOpen = false;
 		editBoard = board;
@@ -398,6 +408,7 @@
 						canTransition={selectedBoard.columns.length > 1}
 						onOpen={onOpenChat}
 						onTransition={(occurrence) => openTransition(occurrence)}
+						onRecover={(chatId) => void retryTagRecovery(chatId)}
 						onRegisterScroller={registerScroller}
 					/>
 				</div>
@@ -424,6 +435,7 @@
 						canTransition={selectedBoard.columns.length > 1}
 						onOpen={onOpenChat}
 						onTransition={(occurrence) => openTransition(occurrence)}
+						onRecover={(chatId) => void retryTagRecovery(chatId)}
 						onRegisterScroller={registerScroller}
 					/>
 				{/each}

@@ -78,6 +78,7 @@
 		initialDestination ? [...initialTargetTags(initial.tags, initialDestination)] : [],
 	);
 	let submitting = $state(false);
+	let recovering = $state(false);
 	let submitError = $state<string | null>(null);
 	let forcedOutdated = $state(false);
 	let currentChat = $derived(sessions.byId[occurrence.chat.id] ?? null);
@@ -99,6 +100,9 @@
 			: null,
 	);
 	let sourceMatches = $derived(Boolean(source && chatMatchesBoardColumn(baseTags, source)));
+	let recoveryRequired = $derived(
+		sessions.tagRecoveryRequiredChatIds.has(occurrence.chat.id),
+	);
 	let canSubmit = $derived(
 		Boolean(
 			preview &&
@@ -110,7 +114,7 @@
 			!outdated &&
 			!preview.isNoop &&
 			(target.match === 'all' || preview.appliedTargetTags.length > 0) &&
-			!sessions.tagRecoveryRequiredChatIds.has(occurrence.chat.id),
+			!recoveryRequired,
 		),
 	);
 	let title = $derived(occurrence.chat.title || m.sidebar_chats_unnamed());
@@ -177,14 +181,12 @@
 			});
 			onApplied(occurrence.chat.id, target.id);
 		} catch (value) {
-			if (value instanceof ApiError && value.errorCode === 'CHAT_TAG_SAVE_UNKNOWN') {
+			if (
+				(value instanceof ApiError && value.errorCode === 'CHAT_TAG_SAVE_UNKNOWN') ||
+				recoveryRequired
+			) {
 				forcedOutdated = true;
-				submitError = m.chat_board_transition_unknown();
-				try {
-					await sessions.recoverChatTags(occurrence.chat.id);
-				} catch {
-					// The shared recovery fence keeps every tag writer disabled.
-				}
+				submitError = m.chat_tags_confirmation_unknown();
 			} else if (value instanceof ApiError && value.status === 409) {
 				forcedOutdated = true;
 				submitError = m.chat_board_transition_outdated();
@@ -198,6 +200,20 @@
 			}
 		} finally {
 			submitting = false;
+		}
+	}
+
+	async function retryRecovery(): Promise<void> {
+		if (!recoveryRequired || recovering) return;
+		recovering = true;
+		submitError = null;
+		try {
+			await sessions.recoverChatTags(occurrence.chat.id);
+			submitError = m.chat_board_transition_unknown();
+		} catch {
+			submitError = m.chat_tags_confirmation_failed();
+		} finally {
+			recovering = false;
 		}
 	}
 
@@ -356,10 +372,18 @@
 											: m.chat_board_transition_no_changes())}
 						</p>
 					{/if}
-					{#if outdated}
+					{#if recoveryRequired}
 						<Button
 							variant="outline"
-							disabled={submitting || sessions.tagRecoveryRequiredChatIds.has(occurrence.chat.id)}
+							disabled={submitting || recovering}
+							onclick={() => void retryRecovery()}
+						>
+							{recovering ? m.chat_board_confirming_tags() : m.chat_tags_retry_confirmation()}
+						</Button>
+					{:else if outdated}
+						<Button
+							variant="outline"
+							disabled={submitting || recovering}
 							onclick={reviewLatest}
 						>
 							{m.chat_board_review_latest()}

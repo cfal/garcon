@@ -25,6 +25,7 @@
 		canTransition,
 		onOpen,
 		onTransition,
+		onRecover,
 		onRegisterScroller,
 	}: {
 		columnId: string;
@@ -38,6 +39,7 @@
 		canTransition: boolean;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence) => void;
+		onRecover: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 	} = $props();
 
@@ -165,6 +167,7 @@
 								occurrenceIndex={virtualItem.index}
 								{onOpen}
 								{onTransition}
+								{onRecover}
 							/>
 							{#snippet failed()}
 								<button

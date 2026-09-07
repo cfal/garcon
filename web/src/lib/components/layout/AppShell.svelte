@@ -814,8 +814,16 @@
 <SidebarTagDialog
 	tagDialog={chatActionDialogs.tagDialog}
 	allKnownTags={sidebarSearch.allKnownTags}
+	currentTags={chatActionDialogs.tagDialog
+		? sessions.byId[chatActionDialogs.tagDialog.chatId]?.tags
+		: undefined}
+	recoveryRequired={Boolean(
+		chatActionDialogs.tagDialog &&
+			sessions.tagRecoveryRequiredChatIds.has(chatActionDialogs.tagDialog.chatId),
+	)}
 	onClose={() => chatActionDialogs.closeTagDialog()}
 	onSave={confirmChatTags}
+	onRetryRecovery={(chatId) => sessions.recoverChatTags(chatId).then(() => undefined)}
 />
 
 <ShareChatDialog

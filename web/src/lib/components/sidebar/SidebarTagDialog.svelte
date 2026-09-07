@@ -6,6 +6,8 @@
 	import X from '@lucide/svelte/icons/x';
 	import ColoredTag from '../shared/ColoredTag.svelte';
 	import { getTagColorClasses } from '$lib/utils/tag-colors';
+	import { normalizeTags } from '$shared/tags';
+	import SidebarTagRecoveryNotice from './SidebarTagRecoveryNotice.svelte';
 
 	interface TagDialogState {
 		chatId: string;
@@ -17,27 +19,50 @@
 	interface SidebarTagDialogProps {
 		tagDialog: TagDialogState | null;
 		allKnownTags: string[];
+		currentTags?: readonly string[];
+		recoveryRequired?: boolean;
 		onClose: () => void;
 		onSave: (chatId: string, baseTags: readonly string[], tags: string[]) => Promise<void> | void;
+		onRetryRecovery?: (chatId: string) => Promise<void> | void;
 	}
 
-	let { tagDialog, allKnownTags, onClose, onSave }: SidebarTagDialogProps = $props();
+	let {
+		tagDialog,
+		allKnownTags,
+		currentTags,
+		recoveryRequired = false,
+		onClose,
+		onSave,
+		onRetryRecovery,
+	}: SidebarTagDialogProps = $props();
 
 	let isOpen = $derived(tagDialog !== null);
 	let editingTags = $state<string[]>([]);
 	let inputValue = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let isSaving = $state(false);
+	let isRecovering = $state(false);
 	let saveError = $state<string | null>(null);
+	let recoveryError = $state<string | null>(null);
+	let baseTags = $state<string[]>([]);
 
 	$effect(() => {
 		if (tagDialog) {
+			baseTags = [...tagDialog.baseTags];
 			editingTags = [...tagDialog.editingTags];
 			inputValue = '';
 			saveError = null;
+			recoveryError = null;
 			isSaving = false;
+			isRecovering = false;
 		}
 	});
+
+	let latestTags = $derived(currentTags ?? tagDialog?.baseTags ?? []);
+	let baselineOutdated = $derived(
+		Boolean(tagDialog) && JSON.stringify(normalizeTags(baseTags)) !== JSON.stringify(normalizeTags(latestTags)),
+	);
+	let editsDisabled = $derived(isSaving || isRecovering || recoveryRequired || baselineOutdated);
 
 	let suggestions = $derived.by(() => {
 		const q = inputValue.trim().toLowerCase();
@@ -107,7 +132,7 @@
 		isSaving = true;
 		saveError = null;
 		try {
-			await onSave(tagDialog.chatId, tagDialog.baseTags, tagsForSave());
+			await onSave(tagDialog.chatId, baseTags, tagsForSave());
 		} catch (error) {
 			saveError = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -115,8 +140,28 @@
 		}
 	}
 
+	async function retryRecovery(): Promise<void> {
+		if (!tagDialog || !onRetryRecovery || isRecovering) return;
+		isRecovering = true;
+		recoveryError = null;
+		try {
+			await onRetryRecovery(tagDialog.chatId);
+			saveError = null;
+		} catch {
+			recoveryError = m.chat_tags_confirmation_failed();
+		} finally {
+			isRecovering = false;
+		}
+	}
+
+	function reviewLatestTags(): void {
+		baseTags = [...latestTags];
+		saveError = null;
+		recoveryError = null;
+	}
+
 	function requestClose() {
-		if (isSaving) return;
+		if (isSaving || isRecovering) return;
 		onClose();
 	}
 
@@ -128,9 +173,9 @@
 <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		class="max-w-md"
-		showCloseButton={!isSaving}
-		escapeKeydownBehavior={isSaving ? 'ignore' : 'close'}
-		interactOutsideBehavior={isSaving ? 'ignore' : 'close'}
+		showCloseButton={!isSaving && !isRecovering}
+		escapeKeydownBehavior={isSaving || isRecovering ? 'ignore' : 'close'}
+		interactOutsideBehavior={isSaving || isRecovering ? 'ignore' : 'close'}
 	>
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_tags_manage()}</Dialog.Title>
@@ -149,7 +194,7 @@
 								tag,
 							)}"
 							aria-label={m.sidebar_tags_remove({ tag })}
-							disabled={isSaving}
+							disabled={editsDisabled}
 							onclick={() => removeTag(tag)}
 						>
 							{tag}
@@ -166,7 +211,7 @@
 					placeholder={m.sidebar_tags_input_placeholder()}
 					aria-label={m.sidebar_tags_input_placeholder()}
 					bind:value={inputValue}
-					disabled={isSaving}
+					disabled={editsDisabled}
 					onkeydown={handleInputKeydown}
 					class="text-base sm:pointer-fine:text-sm"
 				/>
@@ -178,7 +223,7 @@
 							<button
 								type="button"
 								class="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors first:rounded-t-md last:rounded-b-md"
-								disabled={isSaving}
+								disabled={editsDisabled}
 								onclick={() => addTag(suggestion)}
 							>
 								{suggestion}
@@ -188,7 +233,7 @@
 				{/if}
 			</div>
 
-			{#if unassignedTags.length > 0 && !inputValue.trim()}
+			{#if unassignedTags.length > 0 && !inputValue.trim() && !editsDisabled}
 				<div class="space-y-1.5">
 					<span class="text-xs font-medium text-muted-foreground"
 						>{m.sidebar_tags_quick_assign()}</span
@@ -210,20 +255,29 @@
 				<p class="text-sm text-muted-foreground italic">{m.sidebar_tags_no_tags()}</p>
 			{/if}
 
+			<SidebarTagRecoveryNotice
+				{recoveryRequired}
+				{baselineOutdated}
+				recovering={isRecovering}
+				{recoveryError}
+				onRetry={() => void retryRecovery()}
+				onReviewLatest={reviewLatestTags}
+			/>
+
 			{#if saveError}
-				<p class="text-sm text-destructive">{saveError}</p>
+				<p class="text-sm text-destructive" role="alert">{saveError}</p>
 			{/if}
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={requestClose} disabled={isSaving}
+			<Button variant="outline" onclick={requestClose} disabled={isSaving || isRecovering}
 				>{m.sidebar_actions_cancel()}</Button
 			>
 			<Button
 				onclick={() => {
 					void handleSave();
 				}}
-				disabled={isSaving}>{m.sidebar_actions_save()}</Button
+				disabled={editsDisabled}>{m.sidebar_actions_save()}</Button
 			>
 		</Dialog.Footer>
 	</Dialog.Content>
