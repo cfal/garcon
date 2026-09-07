@@ -27,6 +27,8 @@
 		onTransition,
 		onRecover,
 		onRegisterScroller,
+		initialScrollTop,
+		onScrollTopChange,
 	}: {
 		columnId: string;
 		boardId: string;
@@ -41,8 +43,12 @@
 		onTransition: (occurrence: ChatBoardOccurrence) => void;
 		onRecover: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
+		initialScrollTop: number;
+		onScrollTopChange: (boardId: string, columnId: string, scrollTop: number) => void;
 	} = $props();
 
+	const mountedBoardId = untrack(() => boardId);
+	const mountedColumnId = untrack(() => columnId);
 	const scrollRegion = nativeWorkspaceScrollRegion('contextual');
 	const virtual = new VirtualListController({
 		initialViewportSize: 720,
@@ -89,6 +95,12 @@
 	});
 
 	$effect(() => {
+		if (!viewportRef) return;
+		viewportRef.scrollTop = initialScrollTop;
+		virtual.refreshLayout();
+	});
+
+	$effect(() => {
 		if (!canDrag || !viewportRef) return;
 		let disposed = false;
 		let cleanup: (() => void) | undefined;
@@ -124,7 +136,16 @@
 		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
 	}
 
-	onDestroy(() => virtual.destroy());
+	function rememberScrollPosition(): void {
+		if (viewportRef) {
+			onScrollTopChange(mountedBoardId, mountedColumnId, viewportRef.scrollTop);
+		}
+	}
+
+	onDestroy(() => {
+		rememberScrollPosition();
+		virtual.destroy();
+	});
 </script>
 
 <div
@@ -134,6 +155,7 @@
 	class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2"
 	style:overflow-anchor="none"
 	data-chat-board-lane-list={columnId}
+	onscroll={rememberScrollPosition}
 >
 	{#if occurrences.length === 0}
 		<div class="grid min-h-40 place-items-center px-4 text-center">

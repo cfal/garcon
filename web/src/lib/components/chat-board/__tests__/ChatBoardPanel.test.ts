@@ -7,6 +7,8 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte';
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub';
 import { ApiError } from '$lib/api/client';
+import { tick } from 'svelte';
+import { SvelteMap } from 'svelte/reactivity';
 import ChatBoardPanelTestHost from './ChatBoardPanelTestHost.svelte';
 
 const column = {
@@ -58,7 +60,7 @@ function chat(): ChatSessionRecord {
 function createController(initial: ChatBoardCatalog) {
 	let selectedBoardId: string | null = null;
 	let itemLayout = null as 'compact' | 'detailed' | 'single-line' | null;
-	let activeColumnId: string | null = null;
+	const activeColumnIds = new SvelteMap<string, string>();
 	const api = {
 		load: vi.fn(async () => initial),
 		create: vi.fn(async (_revision: number, name: string) => ({
@@ -86,11 +88,12 @@ function createController(initial: ChatBoardCatalog) {
 			setItemLayout(value) {
 				itemLayout = value;
 			},
-			getActiveColumnId() {
-				return activeColumnId;
+			getActiveColumnId(boardId) {
+				return activeColumnIds.get(boardId) ?? null;
 			},
-			setActiveColumnId(_boardId, value) {
-				activeColumnId = value;
+			setActiveColumnId(boardId, value) {
+				if (value) activeColumnIds.set(boardId, value);
+				else activeColumnIds.delete(boardId);
 			},
 		},
 		sidebarLayout: () => 'compact',
@@ -139,19 +142,23 @@ describe('ChatBoardPanel', () => {
 	});
 
 	it('offers an inline retry when saved tags could not be confirmed', async () => {
-		const recoverChatTags = vi.fn()
+		const recoverChatTags = vi
+			.fn()
 			.mockRejectedValueOnce(new TypeError('Offline'))
 			.mockResolvedValueOnce({ success: true as const, chatId: 'chat-1', tags: ['ready'] });
-		const applyChatTagDelta = vi.fn().mockRejectedValue(
-			new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN'),
-		);
+		const applyChatTagDelta = vi
+			.fn()
+			.mockRejectedValue(new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN'));
 		const sessions = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
 		sessions.byId = { 'chat-1': chat() };
 		sessions.order = ['chat-1'];
 		sessions.chatListStatus = 'ready';
-		await expect(sessions.applyChatTagDelta({
-			chatId: 'chat-1', addTags: ['review'],
-		})).rejects.toMatchObject({ errorCode: 'CHAT_TAG_SAVE_UNKNOWN' });
+		await expect(
+			sessions.applyChatTagDelta({
+				chatId: 'chat-1',
+				addTags: ['review'],
+			}),
+		).rejects.toMatchObject({ errorCode: 'CHAT_TAG_SAVE_UNKNOWN' });
 		await waitFor(() => expect(recoverChatTags).toHaveBeenCalledTimes(1));
 
 		const { controller } = createController({ revision: 1, boards: [board] });
@@ -224,5 +231,79 @@ describe('ChatBoardPanel', () => {
 		expect(container.querySelector('[data-chat-board-occurrence]')).toBe(card);
 		expect(document.activeElement).toBe(open);
 		expect(lane.scrollTop).toBe(24);
+	});
+
+	it('restores focus to the source lane when a dialog invoker disappears', async () => {
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
+		await fireEvent.click(screen.getByRole('button', { name: 'Transition…' }));
+
+		sessions.byId = { 'chat-1': { ...chat(), tags: ['elsewhere'] } };
+		await tick();
+		expect(screen.queryByRole('button', { name: 'Open Polish onboarding' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Ready' })),
+		);
+	});
+
+	it('keeps independent lane scroll positions across lane and presentation changes', async () => {
+		class TestResizeObserver {
+			static emit: (width: number) => void = () => {};
+			readonly #callback: (entries: readonly { contentRect: { width: number } }[]) => void;
+
+			constructor(callback: (entries: readonly { contentRect: { width: number } }[]) => void) {
+				this.#callback = callback;
+			}
+
+			observe(element: Element) {
+				if (element.matches('[data-chat-board-panel]')) {
+					TestResizeObserver.emit = (width) => this.#callback([{ contentRect: { width } }]);
+				}
+			}
+			unobserve() {}
+			disconnect() {}
+		}
+		vi.stubGlobal('ResizeObserver', TestResizeObserver);
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		const { container } = render(ChatBoardPanelTestHost, {
+			controller,
+			sessions,
+			onOpenChat: vi.fn(),
+		});
+		const readySelector = `[data-chat-board-lane-list="${column.id}"]`;
+		const reviewSelector = `[data-chat-board-lane-list="${reviewColumn.id}"]`;
+		const ready = container.querySelector<HTMLElement>(readySelector)!;
+		const review = container.querySelector<HTMLElement>(reviewSelector)!;
+		ready.scrollTop = 37;
+		review.scrollTop = 83;
+		await fireEvent.scroll(ready);
+		await fireEvent.scroll(review);
+
+		TestResizeObserver.emit(420);
+		await waitFor(() =>
+			expect(container.querySelector<HTMLElement>(readySelector)?.scrollTop).toBe(37),
+		);
+		await fireEvent.click(screen.getByRole('tab', { name: 'Review 0' }));
+		await waitFor(() =>
+			expect(container.querySelector<HTMLElement>(reviewSelector)?.scrollTop).toBe(83),
+		);
+
+		TestResizeObserver.emit(700);
+		await waitFor(() => {
+			expect(container.querySelector<HTMLElement>(readySelector)?.scrollTop).toBe(37);
+			expect(container.querySelector<HTMLElement>(reviewSelector)?.scrollTop).toBe(83);
+		});
 	});
 });

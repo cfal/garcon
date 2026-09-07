@@ -26,6 +26,8 @@
 		onTransition,
 		onRecover,
 		onRegisterScroller,
+		initialScrollTop,
+		onScrollTopChange,
 	}: {
 		lane: ChatBoardLaneProjection;
 		boardId: string;
@@ -41,6 +43,8 @@
 		onTransition: (occurrence: ChatBoardOccurrence) => void;
 		onRecover: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
+		initialScrollTop: number;
+		onScrollTopChange: (boardId: string, columnId: string, scrollTop: number) => void;
 	} = $props();
 
 	let laneRef = $state<HTMLElement | null>(null);
@@ -68,7 +72,7 @@
 					source.data.sourceColumnId !== lane.column.id
 				);
 			},
-			getIsSticky: () => true,
+			getIsSticky: () => false,
 		});
 	});
 </script>
@@ -139,5 +143,7 @@
 		{onTransition}
 		{onRecover}
 		{onRegisterScroller}
+		{initialScrollTop}
+		{onScrollTopChange}
 	/>
 </section>

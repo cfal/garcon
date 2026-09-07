@@ -29,6 +29,52 @@ describe('ChatBoardFocusController', () => {
 		expect(document.activeElement).toBe(root.querySelector('[data-chat-board-lane-heading="a"]'));
 	});
 
+	it.each([
+		['wide', 'narrow'],
+		['narrow', 'medium'],
+	] as const)(
+		'restores the focused occurrence control across a %s to %s remount',
+		(_, nextBand) => {
+			const root = document.createElement('section');
+			const lane = () => `
+			<section data-chat-board-column-id="a">
+				<h2 tabindex="-1" data-chat-board-lane-heading="a">Ready</h2>
+				<article data-chat-board-occurrence="a:chat-1">
+					<button type="button" data-chat-board-focus-target="transition">Transition</button>
+				</article>
+			</section>
+		`;
+			root.innerHTML = lane();
+			document.body.append(root);
+			const controller = new ChatBoardFocusController();
+			controller.setRoot(root);
+			root.querySelector<HTMLButtonElement>('[data-chat-board-focus-target="transition"]')!.focus();
+
+			controller.preparePresentationChange(nextBand, 'a');
+			root.innerHTML = lane();
+			controller.completePresentationChange();
+
+			expect(document.activeElement).toBe(
+				root.querySelector('[data-chat-board-focus-target="transition"]'),
+			);
+		},
+	);
+
+	it('moves focus from a disappearing narrow tab to its wide lane heading', () => {
+		const root = document.createElement('section');
+		root.innerHTML = '<button data-chat-board-tab="a">Ready</button>';
+		document.body.append(root);
+		const controller = new ChatBoardFocusController();
+		controller.setRoot(root);
+		root.querySelector<HTMLButtonElement>('button')!.focus();
+
+		controller.preparePresentationChange('medium', 'a');
+		root.innerHTML = '<h2 tabindex="-1" data-chat-board-lane-heading="a">Ready</h2>';
+		controller.completePresentationChange();
+
+		expect(document.activeElement).toBe(root.querySelector('[data-chat-board-lane-heading="a"]'));
+	});
+
 	it('does not steal focus owned outside the board', () => {
 		const outside = document.createElement('button');
 		const root = document.createElement('section');

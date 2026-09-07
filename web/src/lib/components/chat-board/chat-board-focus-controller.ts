@@ -1,8 +1,17 @@
 export type ChatBoardPresentationBand = 'narrow' | 'medium' | 'wide';
 
+type PendingFocusTarget =
+	| { readonly kind: 'lane'; readonly columnId: string }
+	| {
+			readonly kind: 'occurrence';
+			readonly columnId: string;
+			readonly occurrenceKey: string;
+			readonly control: string;
+	  };
+
 export class ChatBoardFocusController {
 	#root: HTMLElement | null = null;
-	#handoffColumnId: string | null = null;
+	#pendingFocus: PendingFocusTarget | null = null;
 
 	setRoot(root: HTMLElement | null): void {
 		this.#root = root;
@@ -12,20 +21,47 @@ export class ChatBoardFocusController {
 		nextBand: ChatBoardPresentationBand,
 		activeColumnId: string | null,
 	): void {
-		if (nextBand !== 'narrow' || !activeColumnId || !this.#root) return;
+		this.#pendingFocus = null;
+		if (!this.#root) return;
 		const active = document.activeElement;
 		if (!(active instanceof HTMLElement) || !this.#root.contains(active)) return;
-		const lane = active.closest<HTMLElement>('[data-chat-board-column-id]');
-		if (lane && lane.dataset.chatBoardColumnId !== activeColumnId) {
-			this.#handoffColumnId = activeColumnId;
+		const tab = active.closest<HTMLElement>('[data-chat-board-tab]');
+		if (tab?.dataset.chatBoardTab) {
+			this.#pendingFocus = { kind: 'lane', columnId: tab.dataset.chatBoardTab };
+			return;
 		}
+		const lane = active.closest<HTMLElement>('[data-chat-board-column-id]');
+		const columnId = lane?.dataset.chatBoardColumnId;
+		if (!columnId) return;
+		if (nextBand === 'narrow' && activeColumnId && columnId !== activeColumnId) {
+			this.#pendingFocus = { kind: 'lane', columnId: activeColumnId };
+			return;
+		}
+		const occurrence = active.closest<HTMLElement>('[data-chat-board-occurrence]');
+		const control = active.closest<HTMLElement>('[data-chat-board-focus-target]');
+		const occurrenceKey = occurrence?.dataset.chatBoardOccurrence;
+		const controlName = control?.dataset.chatBoardFocusTarget;
+		this.#pendingFocus =
+			occurrenceKey && controlName
+				? { kind: 'occurrence', columnId, occurrenceKey, control: controlName }
+				: { kind: 'lane', columnId };
 	}
 
 	completePresentationChange(): void {
-		if (!this.#handoffColumnId) return;
-		const columnId = this.#handoffColumnId;
-		this.#handoffColumnId = null;
-		this.focusLane(columnId);
+		const target = this.#pendingFocus;
+		this.#pendingFocus = null;
+		if (!target) return;
+		if (target.kind === 'occurrence' && this.#focusOccurrenceControl(target)) return;
+		this.focusLane(target.columnId);
+	}
+
+	#focusOccurrenceControl(target: Extract<PendingFocusTarget, { kind: 'occurrence' }>): boolean {
+		const control = this.#root?.querySelector<HTMLElement>(
+			`[data-chat-board-occurrence="${CSS.escape(target.occurrenceKey)}"] [data-chat-board-focus-target="${CSS.escape(target.control)}"]`,
+		);
+		if (!control || control.matches(':disabled')) return false;
+		control.focus({ preventScroll: true });
+		return true;
 	}
 
 	focusOccurrence(columnId: string, chatId: string): boolean {

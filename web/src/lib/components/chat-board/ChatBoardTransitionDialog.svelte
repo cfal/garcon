@@ -100,9 +100,7 @@
 			: null,
 	);
 	let sourceMatches = $derived(Boolean(source && chatMatchesBoardColumn(baseTags, source)));
-	let recoveryRequired = $derived(
-		sessions.tagRecoveryRequiredChatIds.has(occurrence.chat.id),
-	);
+	let recoveryRequired = $derived(sessions.tagRecoveryRequiredChatIds.has(occurrence.chat.id));
 	let canSubmit = $derived(
 		Boolean(
 			preview &&
@@ -220,11 +218,16 @@
 	function tagGroup(tags: readonly string[]): readonly string[] {
 		return tags.length > 0 ? tags : ['—'];
 	}
+
+	function preventAutomaticFocusRestore(event: Event): void {
+		event.preventDefault();
+	}
 </script>
 
 <Dialog.Root {open} requestClose={() => !submitting && onClose()}>
 	<Dialog.Content
 		class="flex max-h-[min(46rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+		onCloseAutoFocus={preventAutomaticFocusRestore}
 	>
 		<Dialog.Header class="shrink-0 border-b border-border px-5 py-4 sm:px-6">
 			<Dialog.Title>{m.chat_board_transition_title()}</Dialog.Title>
@@ -381,11 +384,7 @@
 							{recovering ? m.chat_board_confirming_tags() : m.chat_tags_retry_confirmation()}
 						</Button>
 					{:else if outdated}
-						<Button
-							variant="outline"
-							disabled={submitting || recovering}
-							onclick={reviewLatest}
-						>
+						<Button variant="outline" disabled={submitting || recovering} onclick={reviewLatest}>
 							{m.chat_board_review_latest()}
 						</Button>
 					{/if}

@@ -5,6 +5,7 @@ import {
 	getChatBoardCardDragData,
 	isChatBoardCardDragData,
 	isChatBoardColumnDropData,
+	resolveChatBoardColumnDropData,
 } from '../chat-board-dnd';
 
 describe('Chat Board drag data', () => {
@@ -30,5 +31,23 @@ describe('Chat Board drag data', () => {
 			}),
 		).toBe(true);
 		expect(isChatBoardColumnDropData({ type: CHAT_BOARD_COLUMN_DROP_TYPE })).toBe(false);
+	});
+
+	it('cancels drops outside a destination or back on the source column', () => {
+		const source = {
+			instanceId: 'instance',
+			boardId: 'board',
+			sourceColumnId: 'source',
+		};
+		const target = (columnId: string) => ({
+			type: CHAT_BOARD_COLUMN_DROP_TYPE,
+			instanceId: 'instance',
+			boardId: 'board',
+			columnId,
+		});
+
+		expect(resolveChatBoardColumnDropData([], source)).toBeUndefined();
+		expect(resolveChatBoardColumnDropData([target('source')], source)).toBeUndefined();
+		expect(resolveChatBoardColumnDropData([target('review')], source)).toEqual(target('review'));
 	});
 });

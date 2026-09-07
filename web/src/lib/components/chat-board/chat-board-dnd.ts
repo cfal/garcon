@@ -44,3 +44,16 @@ export function isChatBoardColumnDropData(value: unknown): value is ChatBoardCol
 		typeof data.columnId === 'string'
 	);
 }
+
+export function resolveChatBoardColumnDropData(
+	values: readonly unknown[],
+	source: Pick<ChatBoardCardDragData, 'instanceId' | 'boardId' | 'sourceColumnId'>,
+): ChatBoardColumnDropData | undefined {
+	return values.find(
+		(value): value is ChatBoardColumnDropData =>
+			isChatBoardColumnDropData(value) &&
+			value.instanceId === source.instanceId &&
+			value.boardId === source.boardId &&
+			value.columnId !== source.sourceColumnId,
+	);
+}

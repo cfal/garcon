@@ -24,11 +24,7 @@
 		ChatBoardFocusController,
 		type ChatBoardPresentationBand,
 	} from './chat-board-focus-controller.js';
-	import {
-		isChatBoardCardDragData,
-		isChatBoardColumnDropData,
-		type ChatBoardColumnDropData,
-	} from './chat-board-dnd.js';
+	import { isChatBoardCardDragData, resolveChatBoardColumnDropData } from './chat-board-dnd.js';
 
 	let {
 		controller,
@@ -46,6 +42,7 @@
 	const instanceId = crypto.randomUUID();
 	const focusController = new ChatBoardFocusController();
 	const laneScrollers = new Map<string, (key: string) => void>();
+	const laneScrollOffsets = new Map<string, number>();
 	let rootRef = $state<HTMLElement | null>(null);
 	let boardViewportRef = $state<HTMLDivElement | null>(null);
 	let presentationBand = $state<ChatBoardPresentationBand>('medium');
@@ -82,6 +79,19 @@
 	});
 
 	$effect(() => {
+		const validKeys = new Set(
+			controller.catalog.boards.flatMap((board) =>
+				board.columns.map((column) => laneScrollKey(board.id, column.id)),
+			),
+		);
+		untrack(() => {
+			for (const key of laneScrollOffsets.keys()) {
+				if (!validKeys.has(key)) laneScrollOffsets.delete(key);
+			}
+		});
+	});
+
+	$effect(() => {
 		if (!rootRef || typeof ResizeObserver === 'undefined') return;
 		const observer = new ResizeObserver(([entry]) => {
 			const width = entry?.contentRect.width ?? rootRef?.clientWidth ?? 0;
@@ -107,9 +117,13 @@
 			onDrag: updateDropTarget,
 			onDropTargetChange: updateDropTarget,
 			onDrop: ({ source, location }) => {
-				const target = resolveDropTarget(location.current.dropTargets.map((item) => item.data));
 				dropTargetColumnId = null;
-				if (!isChatBoardCardDragData(source.data) || !target) return;
+				if (!isChatBoardCardDragData(source.data)) return;
+				const target = resolveChatBoardColumnDropData(
+					location.current.dropTargets.map((item) => item.data),
+					source.data,
+				);
+				if (!target) return;
 				const lane = lanes.find((candidate) => candidate.column.id === source.data.sourceColumnId);
 				const occurrence = lane?.occurrences.find(
 					(candidate) => candidate.chat.id === source.data.chatId,
@@ -165,28 +179,34 @@
 
 	function updateDropTarget({
 		location,
+		source,
 	}: {
 		location: { current: { dropTargets: readonly { data: Record<string, unknown> }[] } };
+		source: { data: Record<string, unknown> };
 	}): void {
-		dropTargetColumnId =
-			resolveDropTarget(location.current.dropTargets.map((item) => item.data))?.columnId ?? null;
-	}
-
-	function resolveDropTarget(values: readonly unknown[]): ChatBoardColumnDropData | undefined {
-		for (const value of values) {
-			if (
-				isChatBoardColumnDropData(value) &&
-				value.instanceId === instanceId &&
-				value.boardId === selectedBoard?.id
-			)
-				return value;
-		}
-		return undefined;
+		dropTargetColumnId = isChatBoardCardDragData(source.data)
+			? (resolveChatBoardColumnDropData(
+					location.current.dropTargets.map((item) => item.data),
+					source.data,
+				)?.columnId ?? null)
+			: null;
 	}
 
 	function registerScroller(columnId: string, scroll: ((key: string) => void) | null): void {
 		if (scroll) laneScrollers.set(columnId, scroll);
 		else laneScrollers.delete(columnId);
+	}
+
+	function laneScrollKey(boardId: string, columnId: string): string {
+		return `${boardId}:${columnId}`;
+	}
+
+	function laneScrollTop(boardId: string, columnId: string): number {
+		return laneScrollOffsets.get(laneScrollKey(boardId, columnId)) ?? 0;
+	}
+
+	function rememberLaneScroll(boardId: string, columnId: string, scrollTop: number): void {
+		laneScrollOffsets.set(laneScrollKey(boardId, columnId), scrollTop);
 	}
 
 	function openTransition(
@@ -207,6 +227,18 @@
 		if (!focusController.focusOccurrence(targetColumnId, chatId))
 			focusController.focusLane(targetColumnId);
 		announcement = m.chat_board_transition_applied();
+	}
+
+	async function closeTransition(): Promise<void> {
+		const occurrence = transitionOccurrence;
+		transitionOccurrence = null;
+		transitionTargetColumnId = null;
+		await tick();
+		if (occurrence && focusController.focusOccurrence(occurrence.columnId, occurrence.chat.id))
+			return;
+		if (occurrence && focusController.focusLane(occurrence.columnId)) return;
+		if (activeColumnId && focusController.focusLane(activeColumnId)) return;
+		focusController.focusToolbar();
 	}
 
 	async function retryTagRecovery(chatId: string): Promise<void> {
@@ -390,28 +422,32 @@
 				</div>
 			</div>
 			{#if narrowLane}
-				<div
-					id={`chat-board-panel-${narrowLane.column.id}`}
-					role="tabpanel"
-					class="min-h-0 flex-1 p-2"
-				>
-					<ChatBoardLane
-						lane={narrowLane}
-						boardId={selectedBoard.id}
-						{instanceId}
-						layout={controller.itemLayout}
-						canDrag={false}
-						narrow
-						isDropTarget={false}
-						pendingChatIds={sessions.pendingTagMutationChatIds}
-						recoveryChatIds={sessions.tagRecoveryRequiredChatIds}
-						canTransition={selectedBoard.columns.length > 1}
-						onOpen={onOpenChat}
-						onTransition={(occurrence) => openTransition(occurrence)}
-						onRecover={(chatId) => void retryTagRecovery(chatId)}
-						onRegisterScroller={registerScroller}
-					/>
-				</div>
+				{#key `${selectedBoard.id}:${narrowLane.column.id}`}
+					<div
+						id={`chat-board-panel-${narrowLane.column.id}`}
+						role="tabpanel"
+						class="min-h-0 flex-1 p-2"
+					>
+						<ChatBoardLane
+							lane={narrowLane}
+							boardId={selectedBoard.id}
+							{instanceId}
+							layout={controller.itemLayout}
+							canDrag={false}
+							narrow
+							isDropTarget={false}
+							pendingChatIds={sessions.pendingTagMutationChatIds}
+							recoveryChatIds={sessions.tagRecoveryRequiredChatIds}
+							canTransition={selectedBoard.columns.length > 1}
+							onOpen={onOpenChat}
+							onTransition={(occurrence) => openTransition(occurrence)}
+							onRecover={(chatId) => void retryTagRecovery(chatId)}
+							onRegisterScroller={registerScroller}
+							initialScrollTop={laneScrollTop(selectedBoard.id, narrowLane.column.id)}
+							onScrollTopChange={rememberLaneScroll}
+						/>
+					</div>
+				{/key}
 			{/if}
 		</div>
 	{:else}
@@ -437,6 +473,8 @@
 						onTransition={(occurrence) => openTransition(occurrence)}
 						onRecover={(chatId) => void retryTagRecovery(chatId)}
 						onRegisterScroller={registerScroller}
+						initialScrollTop={laneScrollTop(selectedBoard.id, lane.column.id)}
+						onScrollTopChange={rememberLaneScroll}
 					/>
 				{/each}
 			</div>
@@ -464,10 +502,7 @@
 			board={selectedBoard}
 			occurrence={transitionOccurrence}
 			initialTargetColumnId={transitionTargetColumnId}
-			onClose={() => {
-				transitionOccurrence = null;
-				transitionTargetColumnId = null;
-			}}
+			onClose={() => void closeTransition()}
 			onApplied={(chatId: string, targetColumnId: string) =>
 				void handleTransitionApplied(chatId, targetColumnId)}
 		/>
