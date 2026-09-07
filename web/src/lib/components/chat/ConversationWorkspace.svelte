@@ -28,6 +28,7 @@
 	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 	import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
+	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { requiresQueuedSubmission } from '$lib/chat/conversation/submission-classifier.js';
 	import { CurrentConversationPanelTranscript } from '$lib/chat/conversation/current-conversation-panel-transcript.js';
 	import { CurrentConversationLifecycle } from '$lib/chat/conversation/current-conversation-lifecycle.js';
@@ -62,7 +63,7 @@
 		getConversationLifecycles,
 		getConversationPanels,
 	} from '$lib/context';
-	import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+	import type { ChatViewSurfaceId, FocusOwner } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		executionDefaultsForAgent,
@@ -170,6 +171,7 @@
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
 	const projectResolution = getProjectResolution();
+	let branchCommandGeneration = 0;
 	const startupCoordinator = new StartupCoordinator();
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
@@ -402,7 +404,7 @@
 		},
 		closeBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
-			quickGitBranches.closeBranchDropdown();
+			closeCommitBranchDropdown();
 		},
 		createBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -652,17 +654,19 @@
 		surfaceId: ChatViewSurfaceId,
 		chatId: string,
 	): Promise<void> {
+		const command = beginBranchCommand(surfaceId, chatId);
+		if (!command) return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath) return;
 		if (
 			quickGitBranches.currentProjectPath === projectPath &&
 			quickGitBranches.showBranchDropdown
 		) {
-			quickGitBranches.closeBranchDropdown();
+			closeCommitBranchDropdown();
 			return;
 		}
 		const project = await resolveChatProject(chatId);
-		if (!project || !ownsConversationCommand(surfaceId, chatId)) return;
+		if (!project || !ownsBranchCommand(command)) return;
 		quickGitBranches.setProject(
 			project.projectPath,
 			quickGit.summaryFor(project.projectPath)?.branch,
@@ -672,23 +676,59 @@
 			project.projectPath,
 			project.effectiveProjectKey,
 		);
+		if (command.generation === branchCommandGeneration && !ownsBranchCommand(command)) {
+			quickGitBranches.closeBranchDropdown();
+		}
 	}
 
-	function ownsConversationCommand(surfaceId: ChatViewSurfaceId, chatId: string): boolean {
+	type BranchCommand = {
+		readonly generation: number;
+		readonly surfaceId: ChatViewSurfaceId;
+		readonly chatId: string;
+		readonly focusOwner: FocusOwner;
+		readonly panel: ConversationPanelRegistration;
+	};
+
+	function beginBranchCommand(
+		surfaceId: ChatViewSurfaceId,
+		chatId: string,
+	): BranchCommand | null {
+		const panel = conversationPanels.panel(surfaceId);
 		const owner = workspace.focusOwner;
+		if (!panel || panel.chatId !== chatId || owner.kind === 'chat-list' || owner.surfaceId !== surfaceId) {
+			return null;
+		}
+		return {
+			generation: ++branchCommandGeneration,
+			surfaceId,
+			chatId,
+			focusOwner: owner,
+			panel,
+		};
+	}
+
+	function ownsBranchCommand(command: BranchCommand): boolean {
 		return (
-			conversationPanels.panel(surfaceId)?.chatId === chatId &&
-			owner.kind !== 'chat-list' &&
-			owner.surfaceId === surfaceId
+			command.generation === branchCommandGeneration &&
+			workspace.focusOwner === command.focusOwner &&
+			conversationPanels.panel(command.surfaceId) === command.panel &&
+			command.panel.chatId === command.chatId
 		);
+	}
+
+	function closeCommitBranchDropdown(): void {
+		branchCommandGeneration += 1;
+		quickGitBranches.closeBranchDropdown();
 	}
 
 	async function openNewBranchDialog(
 		surfaceId: ChatViewSurfaceId,
 		chatId: string,
 	): Promise<void> {
+		const command = beginBranchCommand(surfaceId, chatId);
+		if (!command) return;
 		const project = await resolveChatProject(chatId);
-		if (!project || !ownsConversationCommand(surfaceId, chatId)) return;
+		if (!project || !ownsBranchCommand(command)) return;
 		quickGitBranches.openNewBranchDialog(
 			project.projectPath,
 			surfaceId,
@@ -701,8 +741,10 @@
 		chatId: string,
 		branch: string,
 	): Promise<void> {
+		const command = beginBranchCommand(surfaceId, chatId);
+		if (!command) return;
 		const project = await resolveChatProject(chatId);
-		if (!project || !ownsConversationCommand(surfaceId, chatId)) return;
+		if (!project || !ownsBranchCommand(command)) return;
 		await quickGitBranches.switchBranch(
 			project.projectPath,
 			branch,

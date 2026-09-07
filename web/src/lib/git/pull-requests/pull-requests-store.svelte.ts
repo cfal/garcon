@@ -105,10 +105,21 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind !== 'available' && projectState.kind !== 'absent') {
+		if (projectState.kind === 'unchecked' || projectState.kind === 'resolving') {
+			this.#projectIdentityPending = true;
+			return;
+		}
+		if (projectState.kind === 'unavailable' || projectState.kind === 'request-failed') {
 			this.#projectIdentityPending = true;
 			this.#listController?.abort();
 			this.#detailController?.abort();
+			this.#listController = null;
+			this.#detailController = null;
+			this.#listGeneration += 1;
+			this.#detailGeneration += 1;
+			this.isLoading = false;
+			this.isDetailLoading = false;
+			this.#needsRefresh = Boolean(this.#projectPath);
 			return;
 		}
 		this.#projectIdentityPending = false;
@@ -280,7 +291,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.capabilityState !== 'available'
 		)
 			return;
-		if (!this.hasLoaded || this.#needsRefresh) void this.refresh();
+		if (!this.#listController && (!this.hasLoaded || this.#needsRefresh)) void this.refresh();
 		if (
 			this.selectedNumber !== null &&
 			this.detail?.number !== this.selectedNumber &&

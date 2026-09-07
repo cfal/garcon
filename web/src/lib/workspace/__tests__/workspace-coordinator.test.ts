@@ -27,6 +27,12 @@ import type {
 } from '../window-geometry-policy';
 import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
+import type { ProjectTarget } from '$shared/project-resolution';
+import type {
+	ProjectResolutionLease,
+	ProjectResolutionSnapshot,
+} from '../project-resolution-store.svelte';
+import type { ProjectResolver } from '../workspace-project-path-resolution';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -79,6 +85,8 @@ function createHarness(
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
+		currentProjectTarget?: ProjectTarget | null;
+		projectResolution?: ProjectResolver;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -175,8 +183,12 @@ function createHarness(
 	const coordinator = new WorkspaceCoordinator({
 		arbiter: new WorkspaceTransitionArbiter(layout, commitPort),
 		terminals: terminals as never,
-		workspaceContext: { current: null } as never,
-		projectResolution: { retain: vi.fn() } as never,
+		workspaceContext: {
+			get currentTarget() {
+				return options.currentProjectTarget ?? null;
+			},
+		} as never,
+		projectResolution: options.projectResolution ?? ({ retain: vi.fn() } as never),
 		appShell: appShell as never,
 		workspaceInteractionGate,
 		transientLayers,
@@ -2264,6 +2276,52 @@ describe('WorkspaceCoordinator', () => {
 		);
 		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
 			terminalSurfaceId('terminal-2'),
+		);
+	});
+
+	it('coalesces a keyed terminal create while project resolution is pending', async () => {
+		const target = {
+			kind: 'chat' as const,
+			chatId: 'chat-1',
+			projectPath: '/workspace',
+		};
+		const projectReady = deferred<void>();
+		let snapshot: ProjectResolutionSnapshot = { kind: 'resolving' };
+		const lease = {
+			target,
+			get snapshot() {
+				return snapshot;
+			},
+			resolve: vi.fn(async () => {
+				await projectReady.promise;
+				snapshot = { kind: 'available', effectiveProjectKey: '/workspace' };
+			}),
+			retry: vi.fn(),
+			release: vi.fn(),
+		} satisfies ProjectResolutionLease;
+		const projectResolution = { retain: vi.fn(() => lease) } satisfies ProjectResolver;
+		const { coordinator, terminals, layout } = createHarness({
+			currentProjectTarget: target,
+			projectResolution,
+		});
+		terminals.create.mockResolvedValue('terminal-coalesced');
+
+		const first = coordinator.createTerminal('window-main', 'workspace-window:window-main');
+		const second = coordinator.createTerminal('window-main', 'workspace-window:window-main');
+		await vi.waitFor(() => expect(lease.resolve).toHaveBeenCalledOnce());
+		expect(projectResolution.retain).toHaveBeenCalledOnce();
+		expect(terminals.create).not.toHaveBeenCalled();
+
+		projectReady.resolve();
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			'terminal-coalesced',
+			'terminal-coalesced',
+		]);
+
+		expect(terminals.create).toHaveBeenCalledOnce();
+		expect(lease.release).toHaveBeenCalledOnce();
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
+			terminalSurfaceId('terminal-coalesced'),
 		);
 	});
 

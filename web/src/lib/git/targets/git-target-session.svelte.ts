@@ -117,7 +117,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind !== 'available' && projectState.kind !== 'absent') {
+		if (projectState.kind === 'unchecked' || projectState.kind === 'resolving') {
+			this.projectIdentityPending = true;
+			return;
+		}
+		if (projectState.kind === 'unavailable' || projectState.kind === 'request-failed') {
 			this.projectIdentityPending = true;
 			this.closeDialogs();
 			this.#cancelTargetRequest();
@@ -291,16 +295,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 			this.activeTarget = fallback;
 			return previousIdentity !== this.identity;
 		} finally {
-			if (
-				this.#isCurrentTargetRequest(
-					generation,
-					contextGeneration,
-					projectKey,
-					controller.signal,
-				)
-			) {
+			if (this.#ownsTargetRequest(generation, contextGeneration, projectKey, controller.signal)) {
 				this.isLoadingTargets = false;
 				this.#requestAbort = null;
+				if (this.projectIdentityPending) this.#lastTargetFetchKey = null;
 			}
 		}
 	}
@@ -572,12 +570,23 @@ export class GitTargetSessionController implements PortableSingletonController {
 		signal: AbortSignal,
 	): boolean {
 		return (
+			this.#ownsTargetRequest(generation, contextGeneration, projectKey, signal) &&
+			!this.projectIdentityPending &&
+			this.presentationVisible
+		);
+	}
+
+	#ownsTargetRequest(
+		generation: number,
+		contextGeneration: number,
+		projectKey: string,
+		signal: AbortSignal,
+	): boolean {
+		return (
 			!signal.aborted &&
 			generation === this.#requestGeneration &&
 			contextGeneration === this.#contextGeneration &&
-			projectKey === this.effectiveProjectKey &&
-			!this.projectIdentityPending &&
-			this.presentationVisible
+			projectKey === this.effectiveProjectKey
 		);
 	}
 }

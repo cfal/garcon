@@ -191,6 +191,30 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		expect(mockGetGitRefs).not.toHaveBeenCalled();
 	});
 
+	it('does not resurrect a branch action after command ownership leaves and returns', async () => {
+		let resolveProject!: (value: ProjectResolutionResponse) => void;
+		let target!: ProjectTarget;
+		const fetchProjectResolution = vi.fn((requestedTarget: ProjectTarget) => {
+			target = requestedTarget;
+			return new Promise<ProjectResolutionResponse>((resolve) => {
+				resolveProject = resolve;
+			});
+		});
+		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
+		await fireEvent.click(screen.getByRole('button', { name: 'Move command ownership' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Restore command ownership' }));
+		resolveProject({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		});
+		await waitFor(() => expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'));
+
+		expect(mockGetGitRefs).not.toHaveBeenCalled();
+	});
+
 	afterEach(() => {
 		cleanup();
 		document.body.innerHTML = '';

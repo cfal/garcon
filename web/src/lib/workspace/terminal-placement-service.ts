@@ -66,6 +66,7 @@ interface TerminalPlacementServiceDeps {
 
 export class TerminalPlacementService {
 	#terminalCreateRequestIds = new Map<string, string>();
+	#terminalCreatePromises = new Map<string, Promise<string>>();
 	#terminalTerminateRequestIds = new Map<string, string>();
 	#pendingTerminatedTerminalIds = new Set<string>();
 
@@ -612,11 +613,25 @@ export class TerminalPlacementService {
 	}
 
 	#hasPendingCreate(requestKey: string): boolean {
+		if (this.#terminalCreatePromises.has(requestKey)) return true;
 		const requestId = this.#terminalCreateRequestIds.get(requestKey);
 		return Boolean(requestId && this.deps.terminals.pendingCreates[requestId]);
 	}
 
-	async #retryCreate(requestKey: string): Promise<string> {
+	#retryCreate(requestKey: string): Promise<string> {
+		const pending = this.#terminalCreatePromises.get(requestKey);
+		if (pending) return pending;
+		const creating = this.#performRetriableCreate(requestKey);
+		const tracked = creating.finally(() => {
+			if (this.#terminalCreatePromises.get(requestKey) === tracked) {
+				this.#terminalCreatePromises.delete(requestKey);
+			}
+		});
+		this.#terminalCreatePromises.set(requestKey, tracked);
+		return tracked;
+	}
+
+	async #performRetriableCreate(requestKey: string): Promise<string> {
 		let requestId = this.#terminalCreateRequestIds.get(requestKey);
 		if (requestId && !this.deps.terminals.pendingCreates[requestId]) {
 			this.#terminalCreateRequestIds.delete(requestKey);

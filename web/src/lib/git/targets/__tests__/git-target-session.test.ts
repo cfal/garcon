@@ -123,11 +123,19 @@ describe('GitTargetSessionController', () => {
 
 	it('does not publish discovery that resolves while project identity is pending', async () => {
 		const load = deferred<{ targets: GitTargetCandidate[] }>();
-		api.getGitTargetCandidates.mockReturnValueOnce(load.promise);
+		let signal: AbortSignal | undefined;
+		api.getGitTargetCandidates
+			.mockImplementationOnce((_projectPath, options) => {
+				signal = options?.signal ?? undefined;
+				return load.promise;
+			})
+			.mockResolvedValueOnce({ targets: [candidate('/old/worktree')] });
 		const { session, changes } = createSession({});
 		setProject(session, '/old', 'chat-old');
 		session.setPresentationVisible(true);
 		const activation = session.activate();
+		session.showTargetDialog = true;
+		session.branches.showBranchDropdown = true;
 
 		session.setProjectState({
 			kind: 'resolving',
@@ -136,11 +144,48 @@ describe('GitTargetSessionController', () => {
 				projectPath: '/new',
 			},
 		});
+		expect(signal?.aborted).toBe(false);
+		expect(session.showTargetDialog).toBe(true);
+		expect(session.branches.showBranchDropdown).toBe(true);
 		load.resolve({ targets: [candidate('/old/worktree')] });
 		await activation;
 
 		expect(session.activeProjectPath).toBe('/old');
 		expect(changes).toEqual([]);
+
+		setProject(session, '/old', 'chat-old');
+		await session.activate();
+
+		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
+		expect(session.activeProjectPath).toBe('/old/worktree');
+		expect(session.isLoadingTargets).toBe(false);
+	});
+
+	it('aborts discovery and closes dialogs for a definitive unavailable project', async () => {
+		const load = deferred<{ targets: GitTargetCandidate[] }>();
+		let signal: AbortSignal | undefined;
+		api.getGitTargetCandidates.mockImplementationOnce((_projectPath, options) => {
+			signal = options?.signal ?? undefined;
+			return load.promise;
+		});
+		const { session } = createSession({});
+		setProject(session, '/project', 'chat-project');
+		session.setPresentationVisible(true);
+		void session.activate();
+		session.showTargetDialog = true;
+		session.branches.showBranchDropdown = true;
+
+		session.setProjectState({
+			kind: 'unavailable',
+			context: { chatId: 'chat-project', projectPath: '/project' },
+			reason: 'not-found',
+		});
+
+		expect(signal?.aborted).toBe(true);
+		expect(session.showTargetDialog).toBe(false);
+		expect(session.branches.showBranchDropdown).toBe(false);
+		expect(session.isLoadingTargets).toBe(false);
+		load.resolve({ targets: [candidate('/stale')] });
 	});
 
 	it('restores only its own cached target when switching chat projects', async () => {

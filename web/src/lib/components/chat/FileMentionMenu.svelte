@@ -40,22 +40,24 @@
 	let loadFailed = $state(false);
 
 	let fetchedForProject = '';
+	let activeLoad: AbortController | null = null;
 
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when projectPath changes.
 	$effect(() => {
 		if (!projectPath || !isVisible) return;
 		if (fetchedForProject === projectPath) return;
-		fetchedForProject = projectPath;
 		isLoading = true;
 		loadFailed = false;
 
 		const controller = new AbortController();
+		activeLoad = controller;
 
 		getFileList({ projectPath }, { signal: controller.signal })
 			.then((files) => {
 				if (!controller.signal.aborted) {
 					allFiles = files;
+					fetchedForProject = projectPath;
 				}
 			})
 			.catch((err) => {
@@ -66,12 +68,17 @@
 				}
 			})
 			.finally(() => {
-				if (!controller.signal.aborted) {
-					isLoading = false;
-				}
+				if (activeLoad !== controller) return;
+				activeLoad = null;
+				isLoading = false;
 			});
 
-		return () => controller.abort();
+		return () => {
+			controller.abort();
+			if (activeLoad !== controller) return;
+			activeLoad = null;
+			isLoading = false;
+		};
 	});
 
 	function normalizeSlashes(value: string): string {
@@ -103,6 +110,7 @@
 
 	// Filters files by query (case-insensitive), capped at 10 results.
 	let filteredFiles = $derived.by(() => {
+		if (!projectPath || projectPending || projectUnavailable || isLoading || loadFailed) return [];
 		if (!query) return selectableFiles.slice(0, 10);
 
 		const lowerQuery = query.toLowerCase();

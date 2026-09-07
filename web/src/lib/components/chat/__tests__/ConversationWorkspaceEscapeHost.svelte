@@ -315,6 +315,12 @@
 <button type="button" onclick={() => (workspace.focusOwner = { kind: 'chat-list' })}
 	>Move command ownership</button
 >
+<button
+	type="button"
+	onclick={() =>
+		(workspace.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID })}
+	>Restore command ownership</button
+>
 <div data-testid="branch-dropdown-open">{quickGitBranches.showBranchDropdown}</div>
 {#if showTestLayer}
 	<div
