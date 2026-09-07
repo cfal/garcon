@@ -10,9 +10,9 @@ import {
   askUserQuestionDecisionValidationError,
   normalizeAskUserQuestionDecisionResponse,
 } from '../../common/ask-user-question-response.js';
-import type { CommandTagMutationOutcome } from '../../common/chat-tag-mutations.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
+import { applyPostAdmissionChatTags } from '../chats/post-admission-chat-tags.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
 import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
@@ -101,7 +101,7 @@ export class SessionCommands {
     };
     const replay = await this.support.replayHttpRun(normalizedInput);
     if (replay) {
-      return this.#withPostAdmissionTags(replay, input.chatId, input.tagsToAdd);
+      return applyPostAdmissionChatTags(replay, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
@@ -139,7 +139,7 @@ export class SessionCommands {
         normalizedInput,
         handoffCommand.preparation,
       );
-      return this.#withPostAdmissionTags(result, input.chatId, input.tagsToAdd);
+      return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
@@ -190,36 +190,7 @@ export class SessionCommands {
     }
 
     const result = await this.support.submitHttpRun(normalizedInput);
-    return this.#withPostAdmissionTags(result, input.chatId, input.tagsToAdd);
-  }
-
-  async #withPostAdmissionTags<T extends CommandAcceptedResponse>(
-    accepted: T,
-    chatId: string,
-    tagsToAdd: readonly string[] | undefined,
-  ): Promise<T> {
-    if (!tagsToAdd?.length) return accepted;
-    let tagMutation: CommandTagMutationOutcome;
-    try {
-      const result = await this.deps.chatTags.applyDeltaWhileChatLocked({ chatId, addTags: tagsToAdd });
-      tagMutation = { status: 'applied', addedTags: result.addedTags };
-    } catch (error) {
-      const code = error instanceof Error && 'code' in error
-        ? (error as Error & { code?: unknown }).code
-        : undefined;
-      tagMutation = code === 'CHAT_TAG_SAVE_UNKNOWN'
-        ? {
-            status: 'unknown',
-            errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
-            recoveryRequired: true,
-          }
-        : {
-            status: 'not-applied',
-            errorCode: 'CHAT_TAG_SAVE_FAILED',
-            retryable: true,
-          };
-    }
-    return { ...accepted, tagMutation };
+    return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {

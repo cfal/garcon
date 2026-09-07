@@ -107,8 +107,7 @@ import {
   SnippetService,
 } from './snippets/service.js';
 import { initializeChatPreambleSelectionService, initializePreambleService } from './preambles/setup.js';
-import { initializeChatBoardService } from './chat-boards/setup.js';
-import { ChatTagMutationService } from './chats/chat-tag-mutation-service.js';
+import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
@@ -396,13 +395,7 @@ export async function startServer(): Promise<void> {
       transcriptAdoption,
     );
     const preambles = await initializePreambleService(workspaceDir);
-    const chatBoards = await initializeChatBoardService(workspaceDir);
-    const chatTags = new ChatTagMutationService({
-      registry: chatRegistry,
-      chatMutationLock,
-      boards: chatBoards,
-      archiveState: settings,
-    });
+    const chatBoardRuntime = await initializeChatBoardRuntime({ workspaceDir, registry: chatRegistry, chatMutationLock, archiveState: settings });
     const chatPreambleSelection = initializeChatPreambleSelectionService({
       preambles,
       registry: chatRegistry,
@@ -621,7 +614,7 @@ export async function startServer(): Promise<void> {
       handoffs,
       transientFeeds,
       preambles,
-      chatTags,
+      chatTags: chatBoardRuntime.chatTags,
       chatMutationLock,
     });
     const scheduledPrompts = new ScheduledPromptScheduler({
@@ -705,7 +698,7 @@ export async function startServer(): Promise<void> {
         scheduledPrompts,
         snippets,
         preambles,
-        chatBoards,
+        chatBoards: chatBoardRuntime.chatBoards,
         searchIndex: chatSearch,
       }),
       startScheduledPrompts: () => scheduledPrompts.start(),
@@ -737,9 +730,7 @@ export async function startServer(): Promise<void> {
       snippets,
       preambles,
       chatPreambleSelection,
-      chatBoards,
-      chatTags,
-      chatMutationLock,
+      ...chatBoardRuntime,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,
