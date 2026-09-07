@@ -9,6 +9,7 @@ import {
 	type WorkspaceWindowId,
 } from './surface-types.js';
 import { windowIdOfSurface, windowNodeById } from './window-tree.js';
+import { findWorkspaceChatPlacement } from './workspace-chat-placement.js';
 import type {
 	WorkspaceSplitAdmissionResolver,
 	WorkspaceSplitBlockReason,
@@ -79,6 +80,10 @@ export class WorkspaceWindowDndController {
 		return this.payload !== null;
 	}
 
+	hasChatPlacement(chatId: string): boolean {
+		return findWorkspaceChatPlacement(this.layout.snapshot, chatId) !== null;
+	}
+
 	beginSurfaceTabDrag(
 		surfaceId: string,
 		sourceWindowId: WorkspaceWindowId,
@@ -144,16 +149,17 @@ export class WorkspaceWindowDndController {
 				: fallbackZone
 					? this.#windowTarget(windowId, fallbackZone)
 					: null;
+		const currentTarget = target ? this.#windowTarget(windowId, target.zone) : null;
 		this.endDrag();
-		if (!target || target.blockedReason) return null;
+		if (!currentTarget || currentTarget.blockedReason) return null;
 		if (
 			payload.kind === 'surface-tab' &&
-			target.zone === 'center' &&
+			currentTarget.zone === 'center' &&
 			payload.sourceWindowId === windowId
 		) {
 			return null;
 		}
-		return { payload, target };
+		return { payload, target: currentTarget };
 	}
 
 	handleTabDragOver(
@@ -215,6 +221,7 @@ export class WorkspaceWindowDndController {
 	): WorkspaceSplitBlockReason | 'same-window' | null | undefined {
 		const payload = this.payload;
 		if (!payload) return undefined;
+		if (payload.kind === 'chat' && this.hasChatPlacement(payload.chatId)) return undefined;
 		if (zone === 'center') return undefined;
 		if (payload.kind === 'surface-tab') {
 			const sourceWindow = windowNodeById(this.layout.snapshot.desktopRoot, payload.sourceWindowId);

@@ -152,6 +152,9 @@
 			case 'fullscreen':
 				return m.workspace_drop_zone_exit_fullscreen();
 		}
+		if (dnd.payload?.kind === 'chat' && dnd.hasChatPlacement(dnd.payload.chatId)) {
+			return m.workspace_show_existing_chat();
+		}
 		if (
 			activeDropTarget.zone === 'center' &&
 			resolveWorkspaceWindowCenterDropResult(snapshot, dnd.payload, workspaceWindow.id) ===

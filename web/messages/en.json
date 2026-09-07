@@ -2026,6 +2026,7 @@
 	"workspace_open_failed": "Failed to open view",
 	"workspace_drop_zone_add_tab": "Add as tab",
 	"workspace_drop_zone_replace_chat": "Replace existing chat",
+	"workspace_show_existing_chat": "Show existing chat",
 	"workspace_drop_zone_too_small": "Too small to split.",
 	"workspace_drop_zone_exit_fullscreen": "Exit fullscreen to split.",
 	"workspace_drop_zone_window_limit": "Window limit reached.",
