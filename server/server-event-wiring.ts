@@ -21,6 +21,7 @@ import type { TelegramSettingsStore } from './notifications/telegram-settings-st
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import type { SnippetService } from './snippets/service.js';
 import type { PreambleService } from './preambles/service.js';
+import type { ChatBoardService } from './chat-boards/service.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
@@ -44,6 +45,7 @@ import {
   SnippetsInvalidatedMessage,
   PreamblesInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
+  ChatBoardsInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -80,6 +82,7 @@ export interface ServerEventWiringDeps {
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
   preambles: PreambleService;
+  chatBoards: ChatBoardService;
   searchIndex?: ChatSearchEventIndex;
 }
 
@@ -116,6 +119,7 @@ export function wireServerEvents({
   scheduledPrompts,
   snippets,
   preambles,
+  chatBoards,
   searchIndex,
 }: ServerEventWiringDeps): ServerEventWiring {
   const broadcast = (payload: unknown) =>
@@ -127,6 +131,10 @@ export function wireServerEvents({
   let firstChatTaskError: unknown;
   let hasChatTaskError = false;
   const processFailureDedupeMs = 30_000;
+
+  chatBoards.on('invalidated', (revision, reason) => {
+    broadcast(new ChatBoardsInvalidatedMessage(revision, reason));
+  });
 
   // Serializes per-chat view work and lifecycle broadcasts so turn messages precede
   // terminal-driven processing, stop, and run-terminal events. Synchronous lifecycle

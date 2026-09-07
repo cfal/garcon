@@ -33,12 +33,19 @@ export interface ChatDetailsDialog {
 	error: string | null;
 }
 
+export interface ChatTagDialogState {
+	readonly chatId: string;
+	readonly chatTitle: string;
+	readonly baseTags: readonly string[];
+	readonly editingTags: readonly string[];
+}
+
 export class ChatActionDialogsState {
 	chatDeleteConfirmation = $state<ChatDeleteConfirmation | null>(null);
 	chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
 	chatProjectPathDialog = $state<ChatProjectPathDialog | null>(null);
 	chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
-	tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
+	tagDialog = $state<ChatTagDialogState | null>(null);
 	shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
 
 	requestDelete(chat: ChatSessionRecord, fallbackTitle: string): void {
@@ -126,10 +133,12 @@ export class ChatActionDialogsState {
 	}
 
 	requestTags(chat: ChatSessionRecord, fallbackTitle: string): void {
+		const baseTags = [...chat.tags];
 		this.tagDialog = {
 			chatId: chat.id,
 			chatTitle: chat.title || fallbackTitle,
-			tags: chat.tags,
+			baseTags,
+			editingTags: [...baseTags],
 		};
 	}
 

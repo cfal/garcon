@@ -100,6 +100,9 @@ const chatsRoutes = createChatRoutes({
   metadata,
   chatViews,
   agents,
+	chatMutationLock: {
+		runExclusive: mock((_key, work) => work()),
+	},
 	chatListProjector,
   commandService: createRouteCommandService({
     registry,

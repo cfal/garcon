@@ -10,6 +10,7 @@ import {
   askUserQuestionDecisionValidationError,
   normalizeAskUserQuestionDecisionResponse,
 } from '../../common/ask-user-question-response.js';
+import type { CommandTagMutationOutcome } from '../../common/chat-tag-mutations.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
@@ -100,8 +101,7 @@ export class SessionCommands {
     };
     const replay = await this.support.replayHttpRun(normalizedInput);
     if (replay) {
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return replay;
+      return this.#withPostAdmissionTags(replay, input.chatId, input.tagsToAdd);
     }
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
@@ -139,8 +139,7 @@ export class SessionCommands {
         normalizedInput,
         handoffCommand.preparation,
       );
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return result;
+      return this.#withPostAdmissionTags(result, input.chatId, input.tagsToAdd);
     }
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
@@ -191,8 +190,36 @@ export class SessionCommands {
     }
 
     const result = await this.support.submitHttpRun(normalizedInput);
-    if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-    return result;
+    return this.#withPostAdmissionTags(result, input.chatId, input.tagsToAdd);
+  }
+
+  async #withPostAdmissionTags<T extends CommandAcceptedResponse>(
+    accepted: T,
+    chatId: string,
+    tagsToAdd: readonly string[] | undefined,
+  ): Promise<T> {
+    if (!tagsToAdd?.length) return accepted;
+    let tagMutation: CommandTagMutationOutcome;
+    try {
+      const result = await this.deps.chatTags.applyDeltaWhileChatLocked({ chatId, addTags: tagsToAdd });
+      tagMutation = { status: 'applied', addedTags: result.addedTags };
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error
+        ? (error as Error & { code?: unknown }).code
+        : undefined;
+      tagMutation = code === 'CHAT_TAG_SAVE_UNKNOWN'
+        ? {
+            status: 'unknown',
+            errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+            recoveryRequired: true,
+          }
+        : {
+            status: 'not-applied',
+            errorCode: 'CHAT_TAG_SAVE_FAILED',
+            retryable: true,
+          };
+    }
+    return { ...accepted, tagMutation };
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {

@@ -50,7 +50,7 @@ import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ReorderChatResponse } from '$shared/chat-order-contracts';
-import { normalizeTags } from '$shared/tags';
+import type { ApplyChatTagDeltaRequest, ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
 
 interface SlashCommandSessions {
 	selectedChatId: string | null;
@@ -60,7 +60,7 @@ interface SlashCommandSessions {
 		chatId: string,
 		boundary: 'top' | 'bottom',
 	): Promise<ReorderChatResponse | null>;
-	setChatTags(chatId: string, tags: string[]): Promise<boolean>;
+	applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse>;
 	upsertServerChat(entry: ChatListEntry): void;
 	setSelectedChatId(chatId: string | null): void;
 }
@@ -441,19 +441,15 @@ export class ConversationSlashCommandService {
 			: null;
 
 		return this.#enqueueTagMutation(chatId, async () => {
-			const currentTags = normalizeTags(deps.sessions.byId[chatId]?.tags ?? chat.tags);
-			const requested = new Set(command.tags);
-			const nextTags =
-				command.action === 'add'
-					? normalizeTags([...currentTags, ...command.tags])
-					: currentTags.filter((tag) => !requested.has(tag));
-			const changedTags =
-				command.action === 'add'
-					? nextTags.filter((tag) => !currentTags.includes(tag))
-					: currentTags.filter((tag) => !nextTags.includes(tag));
-			const updated =
-				changedTags.length === 0 ? true : await deps.sessions.setChatTags(chatId, nextTags);
-			if (!updated) {
+			let mutation: ChatTagsMutationResponse;
+			try {
+				mutation = await deps.sessions.applyChatTagDelta({
+					chatId,
+					...(command.action === 'add'
+						? { addTags: command.tags }
+						: { removeTags: command.tags }),
+				});
+			} catch {
 				this.#restoreComposerIfUntouched({
 					chatId,
 					ownsComposer,
@@ -463,6 +459,9 @@ export class ConversationSlashCommandService {
 				});
 				return 'rejected';
 			}
+			const changedTags = command.action === 'add'
+				? mutation.addedTags
+				: mutation.removedTags;
 
 			if (deps.chatState.activeChatId === chatId) {
 				const content =

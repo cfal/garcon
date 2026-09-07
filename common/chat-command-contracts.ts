@@ -15,6 +15,7 @@ import { parseChatTransientControlAction, type ChatTransientControlAction } from
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
 import type { ParentChatRef } from './chat-parentage.js';
+import type { CommandTagMutationOutcome } from './chat-tag-mutations.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
@@ -138,6 +139,7 @@ export interface CommandAcceptedResponse {
   turnId?: string;
   status: CommandStatus;
   acceptedAt: string;
+  tagMutation?: CommandTagMutationOutcome;
 }
 
 export interface AgentTurnCommandResponse extends CommandAcceptedResponse {

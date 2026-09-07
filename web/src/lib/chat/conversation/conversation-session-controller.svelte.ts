@@ -196,10 +196,12 @@ export interface SessionControllerDeps {
 		| 'applyProcessingEvent'
 		| 'processingPhase'
 		| 'upsertServerChat'
+		| 'reconcileAcceptedHandoffProjection'
+		| 'observeCommandTagMutation'
 		| 'setSelectedChatId'
 		| 'renameChat'
 		| 'moveChatToBoundary'
-		| 'setChatTags'
+		| 'applyChatTagDelta'
 	>;
 	chatState: SessionTranscriptState;
 	composerState: SessionComposerState;

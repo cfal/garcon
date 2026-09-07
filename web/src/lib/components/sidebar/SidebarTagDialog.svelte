@@ -10,14 +10,15 @@
 	interface TagDialogState {
 		chatId: string;
 		chatTitle: string;
-		tags: string[];
+		baseTags: readonly string[];
+		editingTags: readonly string[];
 	}
 
 	interface SidebarTagDialogProps {
 		tagDialog: TagDialogState | null;
 		allKnownTags: string[];
 		onClose: () => void;
-		onSave: (chatId: string, tags: string[]) => Promise<void> | void;
+		onSave: (chatId: string, baseTags: readonly string[], tags: string[]) => Promise<void> | void;
 	}
 
 	let { tagDialog, allKnownTags, onClose, onSave }: SidebarTagDialogProps = $props();
@@ -31,7 +32,7 @@
 
 	$effect(() => {
 		if (tagDialog) {
-			editingTags = [...tagDialog.tags];
+			editingTags = [...tagDialog.editingTags];
 			inputValue = '';
 			saveError = null;
 			isSaving = false;
@@ -106,7 +107,7 @@
 		isSaving = true;
 		saveError = null;
 		try {
-			await onSave(tagDialog.chatId, tagsForSave());
+			await onSave(tagDialog.chatId, tagDialog.baseTags, tagsForSave());
 		} catch (error) {
 			saveError = error instanceof Error ? error.message : String(error);
 		} finally {

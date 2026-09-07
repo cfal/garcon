@@ -48,6 +48,7 @@ import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { LedgerRowDraft, TranscriptWatermark } from '../ledger/contracts.js';
 import type { PreambleHistoryEvidence } from '../ledger/preamble-history.js';
@@ -173,6 +174,7 @@ export interface ChatCommandServiceDeps {
   transientFeeds: Pick<ChatTransientFeedStore, 'validateAction'>;
   preambles: Pick<PreambleService, 'snapshot'>;
   chatMutationLock?: KeyedPromiseLock;
+  chatTags: Pick<ChatTagMutationService, 'applyDeltaWhileChatLocked'>;
 }
 
 export type SubmitRunInput = AgentRunCommandRequest;

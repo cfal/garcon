@@ -147,9 +147,7 @@ export interface PhasedChatUpdateResult {
   readonly changed: boolean;
 }
 
-export type DurableChatUpdateResult = PhasedChatUpdateResult & {
-  readonly durability: 'durable';
-};
+export type ChatMutationDurability = 'confirmed' | 'unknown' | 'unavailable';
 
 export type NativeSessionLookupResult =
   | { readonly status: 'found'; readonly chatId: ChatId }
@@ -239,14 +237,13 @@ export interface IChatRegistry {
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
   updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
   updateChatPhased(id: string, patch: ChatRegistryPatch): Promise<PhasedChatUpdateResult | null>;
-  setTags(id: string, tags: readonly string[]): Promise<DurableChatUpdateResult | null>;
+  chatMutationDurability(id: string): ChatMutationDurability;
   reconcileUnknownDurability(id: string): Promise<'confirmed' | 'unavailable' | 'still-unknown'>;
   updateProjectPath(
     id: string,
     update: ChatRegistryProjectPathUpdate,
     options: { flush: true },
   ): Promise<ChatRegistryResolvedEntry | null>;
-  addTags(id: string, tags: readonly string[]): ChatRegistryResolvedEntry | null;
   removeChat(id: string, reason?: ChatRemovalReason): boolean;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
   lookupNativeSession(agentSessionId: string, agentId?: AgentName): NativeSessionLookupResult;
@@ -712,41 +709,10 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     });
   }
 
-  async setTags(id: string, tags: readonly string[]): Promise<DurableChatUpdateResult | null> {
-    let result: PhasedChatUpdateResult | null;
-    try {
-      result = await this.updateChatPhased(id, { tags: [...tags] });
-    } catch (error) {
-      if (!(error instanceof ChatRegistryDurabilityUnknownError)) throw error;
-      const reconciliation = await this.reconcileUnknownDurability(id);
-      if (reconciliation === 'unavailable') return null;
-      if (reconciliation === 'still-unknown') throw error;
-      result = await this.updateChatPhased(id, { tags: [...tags] });
-    }
-    if (!result) return null;
-    if (result.durability === 'durable') return { ...result, durability: 'durable' };
-    const reconciliation = await this.reconcileUnknownDurability(id);
-    if (reconciliation === 'unavailable') return null;
-    if (reconciliation === 'still-unknown') {
-      throw new ChatRegistryDurabilityUnknownError(
-        `The chat tag save for ${id} has unconfirmed durability.`,
-      );
-    }
-    return { ...result, durability: 'durable' };
-  }
-
-  addTags(id: string, tags: readonly string[]): ChatRegistryResolvedEntry | null {
-    const existing = this.getRegistry().sessions[id];
-    if (!existing) return null;
-    const nextTags = normalizeTags([...existing.tags, ...tags]);
-    if (isDeepStrictEqual(nextTags, existing.tags)) {
-      return { id, ...cloneRegistryEntry(existing) };
-    }
-    existing.tags = nextTags;
-    this.#advanceChatMutationRevision(id);
-    this.#emitChatTagsUpdated(id);
-    this.#scheduleRegistrySave();
-    return { id, ...cloneRegistryEntry(existing) };
+  chatMutationDurability(id: string): ChatMutationDurability {
+    const registry = this.getRegistry();
+    if (!registry.sessions[id]) return 'unavailable';
+    return this.#unknownDurabilityChats.has(id) ? 'unknown' : 'confirmed';
   }
 
   async updateProjectPath(

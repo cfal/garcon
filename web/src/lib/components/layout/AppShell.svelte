@@ -132,6 +132,7 @@
 		onRenameChat: handleChatRenamed,
 		onProjectPathUpdated: handleChatProjectPathUpdated,
 		onUpsertServerChat: (entry) => sessions.upsertServerChat(entry),
+		replaceChatTags: (input) => sessions.replaceChatTags(input),
 		onReloadChat: handleReloadChat,
 		notifyError(message) {
 			notifications.error(message);
@@ -525,8 +526,12 @@
 		chatActionDialogs.requestTags(chat, m.sidebar_chats_new_chat());
 	}
 
-	async function confirmChatTags(chatId: string, tags: string[]): Promise<void> {
-		await chatActionController.updateTags(chatId, tags);
+	async function confirmChatTags(
+		chatId: string,
+		baseTags: readonly string[],
+		tags: string[],
+	): Promise<void> {
+		await chatActionController.updateTags(chatId, baseTags, tags);
 		chatActionDialogs.closeTagDialog();
 	}
 

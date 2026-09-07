@@ -550,7 +550,19 @@ function createDeps(chat = createRunningChat()) {
 				orderGroup: 'normal',
 				changed: true,
 			}),
-			setChatTags: vi.fn().mockResolvedValue(true),
+			applyChatTagDelta: vi.fn(async (request: {
+				chatId: string;
+				addTags?: readonly string[];
+				removeTags?: readonly string[];
+			}) => ({
+				success: true as const,
+				chatId: request.chatId,
+				tags: request.addTags ? [...request.addTags] : [],
+				addedTags: request.addTags ? [...request.addTags] : [],
+				removedTags: request.removeTags ? [...request.removeTags] : [],
+			})),
+			observeCommandTagMutation: vi.fn().mockResolvedValue(undefined),
+			reconcileAcceptedHandoffProjection: vi.fn(),
 		},
 		chatState,
 		composerState: {
@@ -779,7 +791,10 @@ describe('ConversationSessionController', () => {
 
 		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
 
-		expect(deps.sessions.setChatTags).toHaveBeenCalledWith('chat-1', ['existing', 'urgent']);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			addTags: ['existing', 'urgent'],
+		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
@@ -792,7 +807,10 @@ describe('ConversationSessionController', () => {
 
 		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
 
-		expect(deps.sessions.setChatTags).toHaveBeenCalledWith('chat-1', ['urgent']);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			addTags: ['urgent'],
+		});
 		expect(mockStartChat).not.toHaveBeenCalled();
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
@@ -805,7 +823,7 @@ describe('ConversationSessionController', () => {
 
 		await expect(controller.submitForChat('chat-1')).resolves.toBe('no-op');
 
-		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(deps.sessions.applyChatTagDelta).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 		expect(mockStartChat).not.toHaveBeenCalled();
 	});
@@ -3931,7 +3949,7 @@ describe('ConversationSessionController', () => {
 			expect(request).not.toHaveProperty('permissionMode');
 			expect(request).not.toHaveProperty('thinkingMode');
 			expect(request).not.toHaveProperty('agentSettings');
-			expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(acceptedChat);
+			expect(deps.sessions.reconcileAcceptedHandoffProjection).toHaveBeenCalledWith(acceptedChat);
 			expect(deps.agentState.agentId).toBe('codex');
 		});
 

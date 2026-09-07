@@ -1,0 +1,112 @@
+import type { ChatBoardCatalog, ChatBoardColumnId, ChatBoardId } from './chat-boards.js';
+import { normalizeTags } from './tags.js';
+
+export interface ReplaceChatTagsRequest {
+  readonly chatId: string;
+  readonly expectedTags: readonly string[];
+  readonly tags: readonly string[];
+}
+
+export interface ApplyChatTagDeltaRequest {
+  readonly chatId: string;
+  readonly addTags?: readonly string[];
+  readonly removeTags?: readonly string[];
+}
+
+export interface TransitionChatTagsRequest {
+  readonly chatId: string;
+  readonly boardId: ChatBoardId;
+  readonly sourceColumnId: ChatBoardColumnId;
+  readonly targetColumnId: ChatBoardColumnId;
+  readonly expectedCatalogRevision: number;
+  readonly expectedTags: readonly string[];
+  readonly selectedTargetTags?: readonly string[];
+}
+
+export interface ChatTagsMutationResponse {
+  readonly success: true;
+  readonly chatId: string;
+  readonly tags: readonly string[];
+  readonly addedTags: readonly string[];
+  readonly removedTags: readonly string[];
+}
+
+export interface RecoverChatTagsResponse {
+  readonly success: true;
+  readonly chatId: string;
+  readonly tags: readonly string[];
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) return null;
+  const normalized = normalizeTags(value);
+  return normalized.length === value.length && normalized.every((tag, index) => tag === value[index])
+    ? normalized
+    : null;
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+export function normalizeChatTagsMutationResponse(value: unknown): ChatTagsMutationResponse | null {
+  const raw = record(value);
+  if (
+    !raw
+    || !hasOnlyKeys(raw, ['success', 'chatId', 'tags', 'addedTags', 'removedTags'])
+    || raw.success !== true
+    || typeof raw.chatId !== 'string'
+  ) return null;
+  const tags = stringArray(raw.tags);
+  const addedTags = stringArray(raw.addedTags);
+  const removedTags = stringArray(raw.removedTags);
+  return tags && addedTags && removedTags
+    ? { success: true, chatId: raw.chatId, tags, addedTags, removedTags }
+    : null;
+}
+
+export function normalizeRecoverChatTagsResponse(value: unknown): RecoverChatTagsResponse | null {
+  const raw = record(value);
+  if (
+    !raw
+    || !hasOnlyKeys(raw, ['success', 'chatId', 'tags'])
+    || raw.success !== true
+    || typeof raw.chatId !== 'string'
+  ) return null;
+  const tags = stringArray(raw.tags);
+  return tags ? { success: true, chatId: raw.chatId, tags } : null;
+}
+
+export interface ChatTagConflictResponse {
+  readonly success: false;
+  readonly errorCode: 'CHAT_TAG_REVISION_CONFLICT';
+  readonly retryable: true;
+  readonly currentTags: readonly string[];
+}
+
+export interface ChatBoardTransitionConflictResponse {
+  readonly success: false;
+  readonly errorCode: 'CHAT_TAG_REVISION_CONFLICT' | 'CHAT_BOARD_REVISION_CONFLICT';
+  readonly retryable: true;
+  readonly currentTags: readonly string[];
+  readonly catalog: ChatBoardCatalog;
+}
+
+export const CHAT_TAG_ERROR_CODES = {
+  validationFailed: 'CHAT_TAG_VALIDATION_FAILED',
+  revisionConflict: 'CHAT_TAG_REVISION_CONFLICT',
+  saveFailed: 'CHAT_TAG_SAVE_FAILED',
+  saveUnknown: 'CHAT_TAG_SAVE_UNKNOWN',
+} as const;
+
+export type CommandTagMutationOutcome =
+  | { readonly status: 'applied'; readonly addedTags: readonly string[] }
+  | { readonly status: 'not-applied'; readonly errorCode: 'CHAT_TAG_SAVE_FAILED'; readonly retryable: true }
+  | { readonly status: 'unknown'; readonly errorCode: 'CHAT_TAG_SAVE_UNKNOWN'; readonly recoveryRequired: true };

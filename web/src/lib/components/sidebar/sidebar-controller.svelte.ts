@@ -9,7 +9,6 @@ import {
 	sortChatOrder,
 	getChatDetails,
 	forkChat,
-	setChatTags,
 	updateChatProjectPath,
 } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
@@ -75,11 +74,6 @@ export class SidebarController {
 
 	async loadDetails(chatId: string) {
 		return getChatDetails(chatId);
-	}
-
-	async updateTags(chatId: string, tags: string[]): Promise<void> {
-		await setChatTags(chatId, tags);
-		await this.deps.onQuietRefresh();
 	}
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<ProjectPathPatchResponse> {

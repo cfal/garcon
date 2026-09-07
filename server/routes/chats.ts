@@ -1,10 +1,7 @@
 // /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
 import { withJsonBody } from '../lib/json-route.js';
-import {
-  ChatRegistryDurabilityUnknownError,
-  type IChatRegistry,
-} from '../chats/store.js';
+import type { IChatRegistry } from '../chats/store.js';
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
@@ -20,7 +17,6 @@ import {
   type ReorderChatResponse,
   type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
-import { parseSetChatTagsRequest } from '../../common/chat-tags-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
@@ -132,6 +128,7 @@ import {
   generateChatTitleFromMessage,
   TitleGenerationError,
 } from '../chats/title-generator.js';
+import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 
 const logger = createLogger('routes:chats');
 // Bun interprets zero as an unlimited idle window for provider-native forks.
@@ -329,6 +326,7 @@ interface ChatRouteDeps {
   transcriptSearchMaintenance?: TranscriptSearchMaintenanceDep;
   lastSelectedChat?: LastSelectedChatState;
   inspectProject?: typeof inspectProjectDirectory;
+  chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
 }
 
 export default function createChatRoutes({
@@ -346,6 +344,7 @@ export default function createChatRoutes({
   transcriptSearchMaintenance,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
   inspectProject = inspectProjectDirectory,
+  chatMutationLock,
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
   const searchRoutes = createChatSearchRoutes({
@@ -662,13 +661,15 @@ export default function createChatRoutes({
     if (!chatId) return jsonError('chatId is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
-      if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      }
+      return await chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+        const session = registry.getChat(chatId);
+        if (!session) {
+          return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        }
 
-      const result = await settings.togglePin(chatId);
-      return Response.json({ success: true, isPinned: result.isPinned });
+        const result = await settings.togglePin(chatId);
+        return Response.json({ success: true, isPinned: result.isPinned });
+      });
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
@@ -679,13 +680,15 @@ export default function createChatRoutes({
     if (!chatId) return jsonError('chatId is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
-      if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      }
+      return await chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+        const session = registry.getChat(chatId);
+        if (!session) {
+          return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        }
 
-      const result = await settings.toggleArchive(chatId);
-      return Response.json({ success: true, isArchived: result.isArchived });
+        const result = await settings.toggleArchive(chatId);
+        return Response.json({ success: true, isArchived: result.isArchived });
+      });
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
@@ -821,36 +824,6 @@ export default function createChatRoutes({
         changed: result.changed,
       } satisfies SortChatOrderResponse);
     } catch (error: unknown) {
-      return jsonErrorFromUnknown(error);
-    }
-  }
-
-  async function patchChatTags(body: unknown): Promise<Response> {
-    try {
-      const request = parseSetChatTagsRequest(body);
-      if (!request) {
-        return jsonError('Invalid chat tags request', 400, 'VALIDATION_FAILED', false);
-      }
-
-      const result = await registry.setTags(request.chatId, request.tags);
-      if (!result) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      }
-      return Response.json({
-        success: true,
-        chatId: request.chatId,
-        tags: result.entry.tags,
-        changed: result.changed,
-      });
-    } catch (error: unknown) {
-      if (error instanceof ChatRegistryDurabilityUnknownError) {
-        return jsonError(
-          'Chat tag save durability could not be confirmed. Retry after storage recovers.',
-          503,
-          'CHAT_TAGS_SAVE_UNKNOWN',
-          true,
-        );
-      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -1336,6 +1309,5 @@ export default function createChatRoutes({
     '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
     '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChat) },
     '/api/v1/chats/sort': { POST: withJsonBody(postSortChatOrder) },
-    '/api/v1/chats/tags': { PATCH: withJsonBody(patchChatTags) },
   };
 }

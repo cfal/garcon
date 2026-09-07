@@ -446,7 +446,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Folder bug hunt',
-				tags: ['existing'],
+				baseTags: ['existing'],
+				editingTags: ['existing'],
 			},
 			allKnownTags: [],
 			onClose: vi.fn(),
@@ -459,7 +460,11 @@ describe('Sidebar dialogs', () => {
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith('chat-1', ['existing', 'pending-tag']);
+				expect(onSave).toHaveBeenCalledWith(
+					'chat-1',
+					['existing'],
+					['existing', 'pending-tag'],
+				);
 			});
 		} finally {
 			await unmountDialog(rendered);
@@ -505,7 +510,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: [],
+				baseTags: [],
+				editingTags: [],
 			},
 			allKnownTags: [],
 			onClose: vi.fn(),
@@ -529,7 +535,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: [],
+				baseTags: [],
+				editingTags: [],
 			},
 			allKnownTags: ['ops', 'bugs'],
 			onClose: vi.fn(),
@@ -551,7 +558,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: [],
+				baseTags: [],
+				editingTags: [],
 			},
 			allKnownTags: ['ops'],
 			onClose: vi.fn(),
@@ -566,7 +574,7 @@ describe('Sidebar dialogs', () => {
 			// Save and verify 'ops' was included
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith('chat-1', ['ops']);
+				expect(onSave).toHaveBeenCalledWith('chat-1', [], ['ops']);
 			});
 		} finally {
 			await unmountDialog(rendered);
@@ -580,7 +588,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: ['ops'],
+				baseTags: ['ops'],
+				editingTags: ['ops'],
 			},
 			allKnownTags: [],
 			onClose: vi.fn(),
@@ -595,7 +604,7 @@ describe('Sidebar dialogs', () => {
 			// Save should still only have the original 'ops', no duplicate
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith('chat-1', ['ops']);
+				expect(onSave).toHaveBeenCalledWith('chat-1', ['ops'], ['ops']);
 			});
 		} finally {
 			await unmountDialog(rendered);

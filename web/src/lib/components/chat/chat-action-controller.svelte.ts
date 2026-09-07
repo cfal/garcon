@@ -5,6 +5,7 @@ import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelt
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatActionDialogsState } from './chat-action-dialogs-state.svelte';
 import type { ChatListEntry } from '$shared/chat-list';
+import type { ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
 
 export interface ChatActionControllerDeps {
 	get chats(): ChatSessionRecord[];
@@ -21,6 +22,11 @@ export interface ChatActionControllerDeps {
 	onRenameChat: (chatId: string, newTitle: string) => Promise<void> | void;
 	onProjectPathUpdated: (chatId: string, patch: { projectPath: string }) => void;
 	onUpsertServerChat: (entry: ChatListEntry) => void;
+	replaceChatTags: (input: {
+		chatId: string;
+		expectedTags: readonly string[];
+		tags: readonly string[];
+	}) => Promise<ChatTagsMutationResponse>;
 	onReloadChat?: (chatId: string) => Promise<void> | void;
 	notifyError: (message: string) => void;
 	requestComposerFocus: () => void;
@@ -126,8 +132,12 @@ export class ChatActionController {
 		}
 	}
 
-	async updateTags(chatId: string, tags: string[]): Promise<void> {
-		await this.#sidebarController.updateTags(chatId, tags);
+	async updateTags(
+		chatId: string,
+		baseTags: readonly string[],
+		tags: readonly string[],
+	): Promise<void> {
+		await this.deps.replaceChatTags({ chatId, expectedTags: baseTags, tags });
 	}
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<void> {

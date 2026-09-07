@@ -515,6 +515,10 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#chatOrder.getArchivedChatIds();
   }
 
+  isArchived(chatId: string): boolean {
+    return this.#chatOrder.getArchivedChatIds().includes(chatId);
+  }
+
   getRecentAgentSettings(): ProjectSettings['recentAgentSettings'] {
     return this.#startupDefaults.getRecentAgentSettings();
   }

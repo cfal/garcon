@@ -66,6 +66,15 @@ import type {
 	QueueResumeRequest,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
+import {
+	normalizeChatTagsMutationResponse,
+	normalizeRecoverChatTagsResponse,
+	type ApplyChatTagDeltaRequest,
+	type ChatTagsMutationResponse,
+	type RecoverChatTagsResponse,
+	type ReplaceChatTagsRequest,
+	type TransitionChatTagsRequest,
+} from '$shared/chat-tag-mutations';
 import type {
 	GenerateChatTitleRequest,
 	GenerateChatTitleResponse,
@@ -506,13 +515,36 @@ export async function sortChatOrder(
 	return parsed;
 }
 
-export interface SetChatTagsResponse {
-	success: boolean;
-	chatId: string;
-	tags: string[];
+export async function replaceChatTags(
+	request: ReplaceChatTagsRequest,
+): Promise<ChatTagsMutationResponse> {
+	const response = await apiPatch<unknown>('/api/v1/chats/tags', request);
+	const parsed = normalizeChatTagsMutationResponse(response);
+	if (!parsed) throw new Error('Invalid chat tag mutation response');
+	return parsed;
 }
 
-/** Updates the tags for a chat session. */
-export async function setChatTags(chatId: string, tags: string[]): Promise<SetChatTagsResponse> {
-	return apiPatch<SetChatTagsResponse>('/api/v1/chats/tags', { chatId, tags });
+export async function applyChatTagDelta(
+	request: ApplyChatTagDeltaRequest,
+): Promise<ChatTagsMutationResponse> {
+	const response = await apiPatch<unknown>('/api/v1/chats/tags/delta', request);
+	const parsed = normalizeChatTagsMutationResponse(response);
+	if (!parsed) throw new Error('Invalid chat tag mutation response');
+	return parsed;
+}
+
+export async function transitionChatTags(
+	request: TransitionChatTagsRequest,
+): Promise<ChatTagsMutationResponse> {
+	const response = await apiPost<unknown>('/api/v1/chats/tag-transition', request);
+	const parsed = normalizeChatTagsMutationResponse(response);
+	if (!parsed) throw new Error('Invalid chat tag transition response');
+	return parsed;
+}
+
+export async function recoverChatTags(chatId: string): Promise<RecoverChatTagsResponse> {
+	const response = await apiGet<unknown>(`/api/v1/chats/tags?chatId=${encodeURIComponent(chatId)}`);
+	const parsed = normalizeRecoverChatTagsResponse(response);
+	if (!parsed) throw new Error('Invalid chat tag recovery response');
+	return parsed;
 }
