@@ -923,6 +923,8 @@ describe('Chromium workspace windows', () => {
         'workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
       );
       const chatB = await createChat(fixture, 'workspace-window-chat-b');
+      const chatC = await createChat(fixture, 'workspace-window-chat-c');
+      const chatD = await createChat(fixture, 'workspace-window-chat-d');
       await openChat(fixture, chatA);
       await fixture.page.locator('.workspace-host-region').waitFor();
       expect(
@@ -1091,14 +1093,25 @@ describe('Chromium workspace windows', () => {
         .getByText('echo:workspace-window-chat-b', { exact: true })
         .waitFor();
 
-      markPhase('replacing an occupied Chat with a sidebar Chat center drop');
+      markPhase('reusing an existing Chat from an occupied center drop');
       await dragChatToWindow(fixture.page, {
         chatId: chatA,
         windowId: filesWindowId,
         target: 'center',
-        expectedLabel: 'Replace existing chat',
+        expectedLabel: 'Show existing chat',
       });
-      await conversationPanel(fixture.page, filesWindowId)
+      await fixture.page.waitForFunction(
+        ({ expectedWindowId, unchangedWindowId }) =>
+          document
+            .querySelector('[data-workspace-window-current="true"]')
+            ?.getAttribute('data-workspace-window-id') === expectedWindowId &&
+          document
+            .querySelector(`[data-workspace-window-id="${unchangedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-active-surface') ===
+            `chat-view:${unchangedWindowId}`,
+        { expectedWindowId: movedChatWindowId, unchangedWindowId: filesWindowId },
+      );
+      await conversationPanel(fixture.page, movedChatWindowId)
         .getByText(
           'echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
           { exact: true },
@@ -1163,9 +1176,9 @@ describe('Chromium workspace windows', () => {
           .getAttribute('data-workspace-window-active-surface'),
       ).toBe('singleton:files');
 
-      markPhase('opening a fourth window with a sidebar Chat copy');
+      markPhase('opening a fourth window with an unassigned sidebar Chat');
       await dragChatToWindow(fixture.page, {
-        chatId: chatA,
+        chatId: chatC,
         windowId: edgeChatWindowId,
         target: 'bottom',
       });
@@ -1216,7 +1229,7 @@ describe('Chromium workspace windows', () => {
 
       markPhase('blocking Chat edge drag when the target is too small');
       await dragChatToWindow(fixture.page, {
-        chatId: chatB,
+        chatId: chatD,
         windowId: filesWindowId,
         expectBlocked: true,
       });

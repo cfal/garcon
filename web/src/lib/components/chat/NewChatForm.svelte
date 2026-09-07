@@ -138,7 +138,16 @@
 	let preamblePickerOpen = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
-	let observedPreambleCatalogRevision = -1;
+	let observedPreambleCatalogRevision: number | null = null;
+	let refreshedPreambleCatalogRevision: number | null = null;
+	let observedPreambleInvalidationVersion = preamblesCatalog.invalidationVersion;
+	const initialContentReady = $derived(form.settingsLoaded);
+	const preambleSummaryLoading = $derived(
+		form.trimmedPath.length > 0 &&
+			(form.validationStatus === 'idle' ||
+				form.validationStatus === 'checking' ||
+				form.preambles.previewLoading),
+	);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
 	);
@@ -163,7 +172,7 @@
 			return textareaRef;
 		},
 		get startBlocked() {
-			return !form.settingsLoaded || snippetExpansion.pending;
+			return !initialContentReady || snippetExpansion.pending;
 		},
 		closePromptSurfaces: () => snippetPalette.dismiss(),
 		resizeTextarea: autoResizeTextarea,
@@ -191,7 +200,7 @@
 		pendingTextareaFocus = true;
 		textareaFocusTimer = setTimeout(() => {
 			textareaFocusTimer = null;
-			if (textareaRef && form.settingsLoaded) {
+			if (textareaRef && initialContentReady) {
 				if (prefill) {
 					textareaRef.setSelectionRange(0, 0);
 					textareaRef.scrollTop = 0;
@@ -205,7 +214,6 @@
 	onMount(() => {
 		reseed();
 		form.loadSettingsAndModels();
-		void preamblesCatalog.ensureLoaded().catch(() => undefined);
 		const removeSeedListener = appShell.onNewChatDialogSeed(() => reseed());
 		const mql = window.matchMedia('(max-width: 768px)');
 		isMobile = mql.matches;
@@ -231,16 +239,38 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
+	// Keeps the preview at or ahead of the loaded catalog without refetching its first match.
 	$effect(() => {
 		const revision = preamblesCatalog.snapshot?.revision;
-		if (revision === undefined || revision === observedPreambleCatalogRevision) return;
+		const previewRevision = form.preambles.preview?.catalogRevision;
+		if (revision === undefined) return;
+
+		const revisionChanged =
+			observedPreambleCatalogRevision !== null && revision !== observedPreambleCatalogRevision;
 		observedPreambleCatalogRevision = revision;
+		const previewIsStale = previewRevision !== undefined && previewRevision < revision;
+		if (!revisionChanged && !previewIsStale) return;
+		if (refreshedPreambleCatalogRevision === revision) return;
+		refreshedPreambleCatalogRevision = revision;
+		untrack(() => form.preambles.catalogChanged());
+	});
+
+	$effect(() => {
+		const invalidationVersion = preamblesCatalog.invalidationVersion;
+		if (invalidationVersion === observedPreambleInvalidationVersion) return;
+		observedPreambleInvalidationVersion = invalidationVersion;
+		if (preamblesCatalog.hasLoaded) return;
 		untrack(() => form.preambles.catalogChanged());
 	});
 
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
-		if (form.validationStatus === 'valid' && !form.showBrowser && canFocusTextarea()) {
+		if (
+			initialContentReady &&
+			form.validationStatus === 'valid' &&
+			!form.showBrowser &&
+			canFocusTextarea()
+		) {
 			textareaRef?.focus();
 		}
 	});
@@ -248,7 +278,7 @@
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
 	$effect(() => {
-		if (!pendingTextareaFocus || !form.settingsLoaded || form.showBrowser || !canFocusTextarea())
+		if (!pendingTextareaFocus || !initialContentReady || form.showBrowser || !canFocusTextarea())
 			return;
 		if (!textareaRef) return;
 		if (prefill) {
@@ -575,10 +605,11 @@
 >
 	<div class="relative">
 		<div
-			class="space-y-6"
-			class:invisible={!form.settingsLoaded}
-			class:pointer-events-none={!form.settingsLoaded}
-			aria-hidden={!form.settingsLoaded}
+			data-slot="new-chat-form-content"
+			class:invisible={!initialContentReady}
+			class:pointer-events-none={!initialContentReady}
+			inert={!initialContentReady}
+			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
 				<div class="relative">
@@ -712,7 +743,7 @@
 
 				<NewChatPreambleSummary
 					preview={form.preambles.preview}
-					loading={form.preambles.previewLoading}
+					loading={preambleSummaryLoading}
 					configurable={form.preambles.configurable}
 					retryable={form.validationStatus === 'valid'}
 					onEdit={() => (preamblePickerOpen = true)}
@@ -724,11 +755,13 @@
 					choice={form.preambles.choice}
 					defaultsIds={(form.preambles.preview?.eligiblePreambles ?? []).map((entry) => entry.id)}
 					previewLoading={form.preambles.previewLoading}
+					canLoadAutomaticPreview={form.preambles.canLoadAutomaticPreview}
 					canonicalProjectPath={form.preambles.canonicalProjectPath || form.trimmedPath}
 					projection={form.preambles.preview}
 					onClose={() => (preamblePickerOpen = false)}
 					onApplyExplicit={(ids) => form.preambles.setExplicit(ids)}
-					onResetToDefaults={() => form.preambles.resetToDefaults()}
+					onApplyDefaults={() => form.preambles.resetToDefaults()}
+					onLoadAutomaticPreview={() => form.preambles.loadAutomaticPreview()}
 					onRefreshPreview={() => form.preambles.refreshPreview()}
 				/>
 
@@ -738,7 +771,8 @@
 			</div>
 
 			<div
-				class="relative min-h-[120px] border border-border rounded-lg"
+				data-slot="new-chat-composer"
+				class="relative mt-3 min-h-[120px] border border-border rounded-lg"
 				aria-busy={promptTransformPending}
 			>
 				<input
@@ -841,7 +875,7 @@
 			</div>
 
 			{#if form.attachedImages.length > 0}
-				<div class="p-2 bg-muted/40 rounded-lg">
+				<div data-slot="new-chat-attachments" class="mt-6 p-2 bg-muted/40 rounded-lg">
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
 							<div class="relative group">
@@ -886,7 +920,7 @@
 			{/if}
 		</div>
 
-		{#if !form.settingsLoaded}
+		{#if !initialContentReady}
 			<div class="absolute inset-0 flex items-center justify-center">
 				<div
 					role="status"

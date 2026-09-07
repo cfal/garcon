@@ -23,8 +23,9 @@ export class WorkspacePresentationFrames {
 		return this.versions[surfaceId] ?? 0;
 	}
 
-	supersedePendingTransition(): void {
+	supersedePendingTransition(): number {
 		this.#presentationGeneration += 1;
+		return this.#presentationGeneration;
 	}
 
 	async retry(surfaceId: string, host: PresentationHostId): Promise<boolean> {

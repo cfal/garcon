@@ -755,6 +755,7 @@ export class WorkspacePresentationController {
 		}
 		const presentationTarget = resolveTarget?.() ?? null;
 		if (presentationTarget) {
+			presentationGeneration = this.#frames.supersedePendingTransition();
 			this.#adoptPublishedPresentationTarget(
 				this.layout.snapshot,
 				presentationTarget,

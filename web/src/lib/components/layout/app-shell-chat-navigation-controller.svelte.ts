@@ -7,6 +7,7 @@ interface AppShellChatNavigationControllerOptions {
 	readonly selectedChatId: string | null;
 	readonly isLoadingChats: boolean;
 	readonly currentWindowId: WorkspaceWindowId;
+	readonly focusedChatId: string | null;
 	hasChat(chatId: string): boolean;
 	showChatInCurrentWindow(chatId: string): Promise<unknown>;
 	setSelectedChatId(chatId: string | null): void;
@@ -58,6 +59,7 @@ export class AppShellChatNavigationController {
 		try {
 			await this.#options.showChatInCurrentWindow(chatId);
 			if (!this.#isCurrent(generation)) return;
+			if (this.#options.focusedChatId !== chatId) return;
 			if (!this.#options.isLoadingChats && !this.#options.hasChat(chatId)) return;
 			this.#options.setSelectedChatId(chatId);
 			if (options.navigate) await this.#queueChatRoute(chatId, generation);

@@ -58,7 +58,6 @@
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
-	import { windowNodeById } from '$lib/workspace/window-tree.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
@@ -215,6 +214,9 @@
 		get currentWindowId() {
 			return workspace.currentWindowId;
 		},
+		get focusedChatId() {
+			return workspace.focusedChatId;
+		},
 		hasChat: (chatId) => sessions.hasChat(chatId),
 		showChatInCurrentWindow: (chatId) => workspace.showChatInCurrentWindow(chatId),
 		setSelectedChatId: (chatId) => sessions.setSelectedChatId(chatId),
@@ -255,12 +257,7 @@
 
 	$effect(() => {
 		const currentWindowId = workspace.currentWindowId;
-		const currentSnapshot = workspace.layout.snapshot;
-		const resolvedActiveId = isMobile
-			? currentSnapshot.mobileActiveSurfaceId
-			: windowNodeById(currentSnapshot.desktopRoot, currentWindowId)?.tabs.activeId;
-		const surface = resolvedActiveId ? currentSnapshot.surfaces[resolvedActiveId] : null;
-		const chatId = surface?.type === 'chat' ? surface.chatId : null;
+		const chatId = workspace.focusedChatId;
 		if (
 			!chatId ||
 			!shouldSynchronizeFocusedChat({

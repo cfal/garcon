@@ -1202,9 +1202,35 @@ export class SpaDriver {
     }, text);
   }
 
+  async openSidebarChatActionsById(chatId: string): Promise<void> {
+    await this.#page.evaluate((expectedChatId) => {
+      const row = [...document.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]')].find(
+        (element) => element.dataset.sidebarVirtualRow === expectedChatId,
+      );
+      const trigger = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (button) => button.getAttribute('aria-label') === 'Chat actions',
+      );
+      if (!trigger) throw new Error(`Missing sidebar Chat actions for: ${expectedChatId}`);
+      trigger.click();
+    }, chatId);
+  }
+
   async openSidebarChatInNewWindow(text: string): Promise<string> {
+    return this.#openSidebarChatInNewWindow(text, () =>
+      this.openSidebarChatActionsContaining(text),
+    );
+  }
+
+  async openSidebarChatInNewWindowById(chatId: string): Promise<string> {
+    return this.#openSidebarChatInNewWindow(chatId, () => this.openSidebarChatActionsById(chatId));
+  }
+
+  async #openSidebarChatInNewWindow(
+    description: string,
+    openActions: () => Promise<void>,
+  ): Promise<string> {
     const existingWindowIds = new Set(await this.workspaceWindowIds());
-    await this.openSidebarChatActionsContaining(text);
+    await openActions();
     await this.waitForMenuItemEnabled('Open in new window');
     await this.clickMenuItem('Open in new window');
     const newWindowItem = await this.#waitForFirstEnabledMenuItem(
@@ -1215,7 +1241,7 @@ export class SpaDriver {
     const openedWindowId = (await this.workspaceWindowIds()).find(
       (windowId) => !existingWindowIds.has(windowId),
     );
-    if (!openedWindowId) throw new Error(`New workspace window did not open for ${text}.`);
+    if (!openedWindowId) throw new Error(`New workspace window did not open for ${description}.`);
     await this.focusWorkspaceWindow(openedWindowId);
     return openedWindowId;
   }

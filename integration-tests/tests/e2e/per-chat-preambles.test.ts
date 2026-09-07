@@ -76,16 +76,11 @@ describe('Lightpanda per-chat preambles', () => {
         },
         { timeout: 20_000 },
       );
-      // The defaults preview count covers both catalog entries.
+      // The defaults preview presents both catalog entries without opening the picker.
       await fixture.page.waitForFunction(
-        () => document.querySelector('[data-slot="new-chat-preambles-label"]') !== null,
+        () => [...document.querySelectorAll<HTMLElement>('[data-slot="new-chat-preamble-pill"]')]
+          .map((element) => element.textContent?.trim()).join('|') === 'Alpha rules|Beta rules',
         { timeout: 20_000 },
-      );
-      await fixture.page.waitForFunction(
-        (count) => document.querySelector('[data-slot="new-chat-preambles-label"]')?.textContent
-          ?.includes(count),
-        { timeout: 20_000 },
-        '2',
       );
 
       // Customize to an explicit reversed order through the picker.
@@ -115,20 +110,18 @@ describe('Lightpanda per-chat preambles', () => {
         button.click();
       }, 'Beta rules');
       await fixture.page.waitForFunction(
-        () => {
-          const rows = [...document.querySelectorAll<HTMLElement>(
+        (title) => {
+          const row = [...document.querySelectorAll<HTMLElement>(
             '[data-slot="chat-preamble-selection-row"]',
-          )];
-          return rows.length === 2 && rows.every((row) => {
-            const title = row.querySelector('[data-slot="chat-preamble-selection-row-title"]')
-              ?.textContent?.trim();
-            const position = row.querySelector('[data-slot="chat-preamble-selection-row-position"]')
-              ?.textContent?.trim();
-            return (title === 'Alpha rules' && position === '#2')
-              || (title === 'Beta rules' && position === '#1');
-          });
+          )].find((element) => element.querySelector(
+            '[data-slot="chat-preamble-selection-row-title"]',
+          )?.textContent?.trim() === title);
+          return row?.querySelector<HTMLButtonElement>(
+            '[data-slot="chat-preamble-selection-move-up"]',
+          )?.disabled === true;
         },
         { timeout: 20_000 },
+        'Beta rules',
       );
       await fixture.page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>(
@@ -236,11 +229,13 @@ describe('Lightpanda per-chat preambles', () => {
         )].find((element) => element.querySelector(
           '[data-slot="chat-preamble-selection-row-title"]',
         )?.textContent?.trim() === title);
-        const checkbox = row?.querySelector<HTMLInputElement>(
+        const selectionSwitch = row?.querySelector<HTMLButtonElement>(
           '[data-slot="chat-preamble-selection-checkbox"]',
         );
-        if (!checkbox || checkbox.disabled) throw new Error(`Missing enabled checkbox for ${title}`);
-        checkbox.click();
+        if (!selectionSwitch || selectionSwitch.disabled) {
+          throw new Error(`Missing enabled preamble switch for ${title}`);
+        }
+        selectionSwitch.click();
       }, 'Existing rules');
       const providerRequestCountBeforeSave = fixture.integration.fakeProviders.openAi.requests().length;
       await fixture.page.evaluate(() => {

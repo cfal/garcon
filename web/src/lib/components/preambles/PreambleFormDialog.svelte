@@ -12,7 +12,7 @@
 		restorePromptEditorSelection,
 		type PromptEditorSelection,
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
-	import { getAppShell, getModelCatalog, getSidebarSearch } from '$lib/context';
+	import { getAppShell, getLocalSettings, getModelCatalog, getSidebarSearch } from '$lib/context';
 	import {
 		PREAMBLE_CHAT_ID_TOKEN,
 		type Preamble,
@@ -35,6 +35,7 @@
 
 	let { open, preamble, isStale, onSave, onClose }: Props = $props();
 	const appShell = getAppShell();
+	const localSettings = getLocalSettings();
 	const modelCatalog = getModelCatalog();
 	const sidebarSearch = getSidebarSearch();
 	const form = new PreambleFormState();
@@ -282,6 +283,7 @@
 				tags={form.tagFilterTags}
 				tagMatchMode={form.tagFilterMode}
 				knownTags={sidebarSearch.allKnownTags}
+				allowDirectChats={localSettings.allowDirectChats}
 				disabled={form.saving}
 				onToggleAgent={(agentId) => form.toggleAgent(agentId)}
 				onAddTag={(tag) => form.addTag(tag)}

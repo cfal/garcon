@@ -36,6 +36,7 @@
 		onToggleArchive?: (chatId: string) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges?: WorkspaceSplitAdmissions;
+		hasChatPlacement?: boolean;
 		supportsFork?: boolean;
 		supportsForkWhileRunning?: boolean;
 	}
@@ -64,6 +65,7 @@
 		onToggleArchive = () => {},
 		onOpenInNewWindow,
 		newWindowEdges = workspaceSplitAdmissions(),
+		hasChatPlacement = false,
 		supportsFork = true,
 		supportsForkWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
@@ -92,7 +94,7 @@
 		},
 	} as never);
 
-	setWorkspaceWindowDndTestContext();
+	setWorkspaceWindowDndTestContext(hasChatPlacement ? session.id : undefined);
 </script>
 
 <SidebarChatItem

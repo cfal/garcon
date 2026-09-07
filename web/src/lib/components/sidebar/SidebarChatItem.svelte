@@ -163,6 +163,7 @@
 	const modelCatalog = getModelCatalog();
 	const windowDnd = getWorkspaceWindowDnd();
 	const canFork = $derived(modelCatalog.supportsFork(agentId));
+	const hasChatPlacement = $derived(windowDnd.hasChatPlacement(session.id));
 	const canForkNow = $derived(
 		canUseForkAction({
 			supportsFork: canFork,
@@ -405,6 +406,7 @@
 						{onSortChatOrder}
 						{onOpenInNewWindow}
 						{newWindowEdges}
+						{hasChatPlacement}
 						{onTogglePinned}
 						{onToggleArchive}
 						{isArchiveMutationPending}
