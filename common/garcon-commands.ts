@@ -208,7 +208,7 @@ function parseTrailingCommand(content: string, start: number, end: number): Pars
 
 function parseSendMessage(opener: string, rawBody: string): GarconEdgeCommand | null {
   const match = SEND_MESSAGE_OPEN.exec(opener);
-  if (!match) return null;
+  if (!match || rawBody.includes(GARCON_SEND_MESSAGE_CLOSE)) return null;
 
   const recipients = parseRecipients(match[1]);
   if (!recipients) return null;

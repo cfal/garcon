@@ -127,6 +127,30 @@ describe('composed assistant schedule pipeline', () => {
     });
   });
 
+  for (const family of ['start-agent', 'schedule', 'send-message']) {
+    for (const prefix of ['', 'Answer\n']) {
+      test(`nested closers cannot publish schedules inside an unclosed ${prefix ? 'trailing' : 'leading'} ${family}`, async () => {
+        await withPipeline(async ({ ledger, publisher, schedules, lock, cron }) => {
+          const contents = [
+            `${prefix}<garcon-${family}>\n<garcon-${family}>nested</garcon-${family}>\n<garcon-schedule in="1m" />`,
+            `${prefix}<garcon-${family} broken="</garcon-${family}>\n<garcon-schedule in="5m" />`,
+            `${prefix}<garcon-${family}>\n<example broken="</garcon-${family}>\n<garcon-schedule in="10m" />`,
+          ];
+          for (const content of contents) {
+            publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(NOW, content) }] });
+          }
+          await lock.runExclusive(`chat:${CHAT}`, async () => {});
+          expect(schedules.list()).toEqual([]);
+          expect(cron.jobs).toHaveLength(1);
+          const rows = ledger.currentRows(CHAT);
+          expect(rows.filter((row) => row.kind === 'provider-row').map((row) => row.message.content)).toEqual(contents);
+          expect(rows.some((row) => row.detail?.type === 'agent-schedule-request')).toBe(false);
+          expect(rows.some((row) => row.detail?.type === 'agent-schedule-outcome')).toBe(false);
+        });
+      });
+    }
+  }
+
   test('late provider commands cannot create schedules after controller shutdown', async () => {
     await withPipeline(async ({ ledger, publisher, schedules, controller, lock, cron }) => {
       controller.shutdown();

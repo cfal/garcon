@@ -31,13 +31,29 @@ export function garconEnvelopeCommandAt(content: string, start: number): GarconE
 export function garconEnvelopeSpanAt(content: string, start: number, end: number): GarconEnvelopeSpan | null {
   const command = garconEnvelopeCommandAt(content, start);
   if (!command) return null;
-  const openerEnd = garconEnvelopeOpenerEnd(content, start);
-  if (openerEnd > end) return { command, start, end: null };
-  if (openerEnd >= 0 && content[openerEnd - 2] === '/') return { command, start, end: openerEnd };
-  const closer = `</garcon-${command}>`;
-  const closerStart = content.indexOf(closer, openerEnd < 0 ? start + 1 : openerEnd);
-  const closerEnd = closerStart + closer.length;
-  return { command, start, end: closerStart < 0 || closerEnd > end ? null : closerEnd };
+  const opener = scanGarconEnvelopeOpener(content, start, end);
+  if (!opener) return { command, start, end: null };
+  if (opener.selfClosing) return { command, start, end: opener.end };
+
+  const nesting: GarconEnvelopeCommand[] = [command];
+  let cursor = opener.end;
+  while (cursor < end) {
+    const next = content.indexOf('<', cursor);
+    if (next < 0 || next >= end) break;
+    const closer = `</garcon-${nesting.at(-1)}>`;
+    if (next + closer.length <= end && content.startsWith(closer, next)) {
+      nesting.pop();
+      cursor = next + closer.length;
+      if (nesting.length === 0) return { command, start, end: cursor };
+      continue;
+    }
+    const nestedCommand = garconEnvelopeCommandAt(content, next);
+    const nestedOpener = scanGarconEnvelopeOpener(content, next, end);
+    if (!nestedOpener) break;
+    if (nestedCommand && !nestedOpener.selfClosing) nesting.push(nestedCommand);
+    cursor = nestedOpener.end;
+  }
+  return { command, start, end: null };
 }
 
 export function scanGarconEnvelopeSpans(content: string, start: number, end: number): {
@@ -85,14 +101,31 @@ export function escapeGarconXmlText(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-export function garconEnvelopeOpenerEnd(content: string, start = 0): number {
-  let quoted = false;
-  for (let index = start; index < content.length; index += 1) {
-    if (index > start && content[index] === '<') return -1;
-    if (content[index] === '"') quoted = !quoted;
-    if (content[index] === '>' && !quoted) return index + 1;
+interface GarconEnvelopeOpener {
+  readonly end: number;
+  readonly complete: boolean;
+  readonly selfClosing: boolean;
+}
+
+function scanGarconEnvelopeOpener(content: string, start: number, end: number): GarconEnvelopeOpener | null {
+  let quote: string | null = null;
+  for (let index = start + 1; index < end; index += 1) {
+    if (content[index] === '<') {
+      // A raw tag inside an attribute cannot provide a trustworthy recovery boundary.
+      return quote ? null : { end: index, complete: false, selfClosing: false };
+    }
+    if (content[index] === quote) quote = null;
+    else if (!quote && (content[index] === '"' || content[index] === "'")) quote = content[index];
+    if (content[index] === '>' && !quote) {
+      return { end: index + 1, complete: true, selfClosing: content[index - 1] === '/' };
+    }
   }
-  return -1;
+  return null;
+}
+
+export function garconEnvelopeOpenerEnd(content: string, start = 0): number {
+  const opener = scanGarconEnvelopeOpener(content, start, content.length);
+  return opener?.complete ? opener.end : -1;
 }
 
 export function parseGarconCommandEnvelope(

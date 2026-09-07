@@ -103,7 +103,7 @@ describe('Garcon edge commands', () => {
     });
   });
 
-  it('keeps a quoted send opener inside a trailing command body', () => {
+  it('keeps an unbalanced send opener inert even when introduced as an example', () => {
     const quotedOpener = `<garcon-send-message to="${SECOND}" hide-sender="false">`;
     const command = [
       `<garcon-send-message to="${FIRST}" hide-sender="false">`,
@@ -117,14 +117,9 @@ describe('Garcon edge commands', () => {
       AT,
       `answer\n${command}`,
     ))).toEqual({
-      message: new AssistantMessage(AT, 'answer'),
-      commands: [{
-        type: 'send-message',
-        recipients: [FIRST],
-        hideSender: false,
-        body: `Use it like this:\n${quotedOpener}\nexample`,
-      }],
-      issues: [],
+      message: new AssistantMessage(AT, `answer\n${command}`),
+      commands: [],
+      issues: [{ command: 'send-message', reason: 'malformed', edge: 'trailing' }],
     });
   });
 
@@ -311,14 +306,73 @@ describe('Garcon edge commands', () => {
           });
           const closed = `${content}\n</garcon-${family}>`;
           const result = extractGarconCommands(new AssistantMessage(AT, `${closed}\n<garcon-schedule in="10m" />`));
-          expect(result.message.content).toBe(closed);
-          expect(result.commands).toMatchObject([{ type: 'schedule', firstRun: { type: 'after', minutes: 10 } }]);
-          expect(result.commands).toHaveLength(1);
+          if (attributes) {
+            expect(result.message.content).toBe(`${closed}\n<garcon-schedule in="10m" />`);
+            expect(result.commands).toEqual([]);
+          } else {
+            expect(result.message.content).toBe(closed);
+            expect(result.commands).toMatchObject([{ type: 'schedule', firstRun: { type: 'after', minutes: 10 } }]);
+            expect(result.commands).toHaveLength(1);
+          }
           expect(result.issues).toHaveLength(1);
         }
       }
     }
   });
+
+  for (const family of ['start-agent', 'schedule', 'send-message']) {
+    for (const prefix of ['', 'Answer\n']) {
+      const edge = prefix ? 'trailing' : 'leading';
+      it(`shields commands after nested closers in an unclosed ${edge} ${family}`, () => {
+        const nestedFamily = family === 'schedule' ? 'start-agent' : 'schedule';
+        for (const opener of [`<garcon-${family}>`, `<garcon-${family}\n`]) {
+          for (const nested of [
+            `<garcon-${family}>nested</garcon-${family}>`,
+            `<garcon-schedule><garcon-${family}>nested</garcon-${family}></garcon-schedule>`,
+            `<garcon-${nestedFamily}></garcon-${family}></garcon-${nestedFamily}>`,
+          ]) {
+            for (const suffix of [
+              '<garcon-schedule in="1m" />', GARCON_GET_CHAT_ID,
+              '<garcon-start-agent agent="codex" model="example">Inspect.</garcon-start-agent>',
+              send(FIRST, false),
+            ]) {
+              const content = `${prefix}${opener}\n${nested}\n${suffix}`;
+              expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
+                message: new AssistantMessage(AT, content), commands: [],
+                issues: [{ command: family, reason: 'malformed', edge }],
+              });
+            }
+          }
+        }
+      });
+
+      it(`ignores closing tags inside malformed quoted ${edge} ${family} openers`, () => {
+        for (const opener of [
+          `<garcon-${family} broken="`,
+          `<garcon-${family} broken='`,
+          `<garcon-${family}>\n<garcon-schedule broken="`,
+          `<garcon-${family}>\n<garcon-schedule broken='`,
+          `<garcon-${family}>\n<example broken="`,
+          `<garcon-${family}>\n<garcon-start-agent-result broken='`,
+        ]) {
+          const content = `${prefix}${opener}</garcon-${family}>\n<garcon-schedule in="1m" />`;
+          expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
+            message: new AssistantMessage(AT, content), commands: [],
+            issues: [{ command: family, reason: 'malformed', edge }],
+          });
+        }
+      });
+
+      it(`recovers only beyond the balanced outer closer of a malformed ${edge} ${family}`, () => {
+        const malformed = `${prefix}<garcon-${family}>\n<garcon-${family}>nested</garcon-${family}>\n</garcon-${family}>`;
+        const result = extractGarconCommands(new AssistantMessage(AT, `${malformed}\n<garcon-schedule in="10m" />`));
+        expect(result.message.content).toBe(malformed);
+        expect(result.commands).toMatchObject([{ type: 'schedule', firstRun: { type: 'after', minutes: 10 } }]);
+        expect(result.commands).toHaveLength(1);
+        expect(result.issues).toEqual([{ command: family, reason: 'malformed', edge }]);
+      });
+    }
+  }
 
   it('can consume a valid command at the opposite edge of a malformed one', () => {
     const malformed = send('invalid', false);
