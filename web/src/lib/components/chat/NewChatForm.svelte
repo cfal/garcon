@@ -604,6 +604,7 @@
 			class="space-y-6"
 			class:invisible={!initialContentReady}
 			class:pointer-events-none={!initialContentReady}
+			inert={!initialContentReady}
 			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">

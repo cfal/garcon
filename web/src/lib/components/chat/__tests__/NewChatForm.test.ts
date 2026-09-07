@@ -216,6 +216,7 @@ describe('NewChatForm', () => {
 
 		const content = document.querySelector<HTMLElement>('[data-slot="new-chat-form-content"]')!;
 		expect(content.classList.contains('invisible')).toBe(true);
+		expect(content.hasAttribute('inert')).toBe(true);
 		expect(screen.getByRole('status', { name: 'Loading chat defaults...' })).toBeTruthy();
 		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce());
 
@@ -232,6 +233,7 @@ describe('NewChatForm', () => {
 		});
 		await waitFor(() => {
 			expect(content.classList.contains('invisible')).toBe(false);
+			expect(content.hasAttribute('inert')).toBe(false);
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
 	});

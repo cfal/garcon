@@ -115,20 +115,18 @@ describe('Lightpanda per-chat preambles', () => {
         button.click();
       }, 'Beta rules');
       await fixture.page.waitForFunction(
-        () => {
-          const rows = [...document.querySelectorAll<HTMLElement>(
+        (title) => {
+          const row = [...document.querySelectorAll<HTMLElement>(
             '[data-slot="chat-preamble-selection-row"]',
-          )];
-          return rows.length === 2 && rows.every((row) => {
-            const title = row.querySelector('[data-slot="chat-preamble-selection-row-title"]')
-              ?.textContent?.trim();
-            const position = row.querySelector('[data-slot="chat-preamble-selection-row-position"]')
-              ?.textContent?.trim();
-            return (title === 'Alpha rules' && position === '#2')
-              || (title === 'Beta rules' && position === '#1');
-          });
+          )].find((element) => element.querySelector(
+            '[data-slot="chat-preamble-selection-row-title"]',
+          )?.textContent?.trim() === title);
+          return row?.querySelector<HTMLButtonElement>(
+            '[data-slot="chat-preamble-selection-move-up"]',
+          )?.disabled === true;
         },
         { timeout: 20_000 },
+        'Beta rules',
       );
       await fixture.page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>(
