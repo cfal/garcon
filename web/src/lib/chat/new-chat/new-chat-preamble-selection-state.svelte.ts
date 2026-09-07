@@ -39,13 +39,15 @@ export class NewChatPreambleSelectionState {
 	}
 
 	get orderedIds(): readonly PreambleId[] | undefined {
-		return this.choice.mode === 'explicit' ? this.choice.orderedPreambleIds : undefined;
+		if (this.choice.mode === 'explicit') return this.choice.orderedPreambleIds;
+		return undefined;
 	}
 
 	get creationFields(): { orderedPreambleIds?: PreambleId[] } {
-		return this.choice.mode === 'explicit'
-			? { orderedPreambleIds: [...this.choice.orderedPreambleIds] }
-			: {};
+		if (this.choice.mode === 'explicit') {
+			return { orderedPreambleIds: [...this.choice.orderedPreambleIds] };
+		}
+		return {};
 	}
 
 	setExplicit(orderedPreambleIds: readonly PreambleId[]): void {
@@ -145,10 +147,10 @@ export class NewChatPreambleSelectionState {
 		const projectPath = this.options.trimmedPath;
 		const agentId = this.options.agentId;
 		const tags = normalizeTags(this.options.chatTags);
-		const key =
-			this.choice.mode === 'defaults'
-				? `${projectPath}\u0000${agentId}\u0000${tags.join('\u0000')}`
-				: `${projectPath}\u0000explicit`;
+		let key = `${projectPath}\u0000explicit`;
+		if (this.choice.mode === 'defaults') {
+			key = `${projectPath}\u0000${agentId}\u0000${tags.join('\u0000')}`;
+		}
 		return {
 			projectPath,
 			agentId,

@@ -14,7 +14,7 @@ import {
 import { DomainError } from '../lib/domain-error.js';
 import {
   preambleMatchesNewChatDefaults,
-  preambleRuleMatches,
+  preambleScopeMatches,
   type NewChatPreambleContext,
 } from './matching.js';
 
@@ -22,11 +22,6 @@ const CHAT_ID_VALIDATION_SAMPLE = '1'.repeat(CHAT_ID_LENGTH);
 
 export const PREAMBLE_SELECTION_COMPOSITION_INVALID_MESSAGE =
   'Selected preambles can\u2019t be applied in this order. Reconfigure this chat\u2019s preambles and try again.';
-
-function preambleScopeMatches(preamble: Preamble, canonicalProjectPath: string): boolean {
-  return preamble.scope.type === 'global'
-    || preamble.scope.rules.some((rule) => preambleRuleMatches(rule, canonicalProjectPath));
-}
 
 // Iterates the saved ID order against one catalog snapshot; filtering the
 // catalog through the selection would preserve the wrong order.

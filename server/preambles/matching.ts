@@ -32,14 +32,19 @@ export function applicablePreambles(
     .map((preamble) => structuredClone(preamble));
 }
 
+export function preambleScopeMatches(
+  preamble: Preamble,
+  canonicalProjectPath: string,
+): boolean {
+  return preamble.scope.type === 'global'
+    || preamble.scope.rules.some((rule) => preambleRuleMatches(rule, canonicalProjectPath));
+}
+
 export function preambleMatchesProjectPath(
   preamble: Preamble,
   canonicalProjectPath: string,
 ): boolean {
-  return preamble.enabled && (
-    preamble.scope.type === 'global'
-    || preamble.scope.rules.some((rule) => preambleRuleMatches(rule, canonicalProjectPath))
-  );
+  return preamble.enabled && preambleScopeMatches(preamble, canonicalProjectPath);
 }
 
 export function preambleMatchesNewChatDefaults(

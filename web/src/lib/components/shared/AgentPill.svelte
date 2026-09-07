@@ -1,10 +1,29 @@
-<script lang="ts">
+<script module lang="ts">
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-		type AgentId,
 	} from '$shared/agents';
+
+	const DEFAULT_VARIANT = 'border-border bg-muted text-foreground';
+	const VARIANTS: Readonly<Record<string, string>> = {
+		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
+		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
+		cursor: 'border-provider-cursor-border bg-provider-cursor-bg text-provider-cursor-foreground',
+		opencode:
+			'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
+		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
+		factory:
+			'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
+		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: DEFAULT_VARIANT,
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: DEFAULT_VARIANT,
+		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: DEFAULT_VARIANT,
+	};
+</script>
+
+<script lang="ts">
+	import type { AgentId } from '$shared/agents';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import { cn } from '$lib/utils/cn';
 
@@ -30,27 +49,8 @@
 		class: className,
 	}: Props = $props();
 
-	const variants: Record<string, string> = {
-		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
-		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
-		cursor: 'border-provider-cursor-border bg-provider-cursor-bg text-provider-cursor-foreground',
-		opencode:
-			'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
-		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
-		factory:
-			'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
-		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
-	};
-
 	const resolvedLabel = $derived(agentLabelFor(agentId, label ?? agentId));
-	const variant = $derived(
-		variants[agentId] ??
-			variants[fallbackAgentId ?? ''] ??
-			'border-border bg-muted text-foreground',
-	);
+	const variant = $derived(VARIANTS[agentId] ?? VARIANTS[fallbackAgentId ?? ''] ?? DEFAULT_VARIANT);
 	const classes = $derived(
 		cn(
 			'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none',

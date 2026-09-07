@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell } from '$lib/context';
+	import type { NewChatPreambleChoice } from '$lib/chat/new-chat/new-chat-preamble-selection-state.svelte.js';
 	import ChatPreambleSelectionPanel from './ChatPreambleSelectionPanel.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { PreambleId, PreambleSelectionProjection } from '$shared/preambles';
@@ -9,7 +10,7 @@
 
 	interface Props {
 		open: boolean;
-		choice: { mode: 'defaults' } | { mode: 'explicit'; orderedPreambleIds: readonly PreambleId[] };
+		choice: NewChatPreambleChoice;
 		defaultsIds: readonly PreambleId[];
 		previewLoading: boolean;
 		canonicalProjectPath: string;
@@ -38,6 +39,14 @@
 	let touched = $state(false);
 	let wasOpen = false;
 
+	function initialDraftIds(
+		currentChoice: NewChatPreambleChoice,
+		currentDefaults: readonly PreambleId[],
+	): PreambleId[] {
+		if (currentChoice.mode === 'explicit') return [...currentChoice.orderedPreambleIds];
+		return [...currentDefaults];
+	}
+
 	// Catalog updates follow automatic defaults until the user changes the draft.
 	// Explicit and touched drafts retain their exact membership and order.
 	$effect(() => {
@@ -46,7 +55,7 @@
 			return;
 		}
 		if (!wasOpen) {
-			draftIds = choice.mode === 'explicit' ? [...choice.orderedPreambleIds] : [...defaultsIds];
+			draftIds = initialDraftIds(choice, defaultsIds);
 			touched = false;
 			wasOpen = true;
 			return;

@@ -52,7 +52,11 @@
 	});
 
 	function handleAgentToggle(agentId: AgentId): void {
-		agentError = onToggleAgent(agentId) ? null : m.preambles_filter_limit_reached();
+		if (onToggleAgent(agentId)) {
+			agentError = null;
+			return;
+		}
+		agentError = m.preambles_filter_limit_reached();
 	}
 
 	function handleAddTag(): void {
@@ -92,7 +96,7 @@
 						selected={selectedAgentIds.includes(agent.id)}
 						{disabled}
 						ariaLabel={m.preambles_agent_filter_toggle({ agent: agent.label })}
-					onclick={() => handleAgentToggle(agent.id)}
+						onclick={() => handleAgentToggle(agent.id)}
 						class="min-h-9 px-3 text-sm transition-opacity hover:opacity-80 disabled:opacity-50"
 					/>
 					{#snippet failed()}

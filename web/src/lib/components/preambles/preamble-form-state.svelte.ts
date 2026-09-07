@@ -66,9 +66,10 @@ export class PreambleFormState {
 	get scopeGroupError(): string | null {
 		if (this.scopeType === 'global') return null;
 		if (this.pathRules.length === 0) return m.preambles_path_required();
-		return this.pathRules.length > PREAMBLE_PATH_RULE_MAX_COUNT
-			? m.preambles_too_many_paths()
-			: null;
+		if (this.pathRules.length > PREAMBLE_PATH_RULE_MAX_COUNT) {
+			return m.preambles_too_many_paths();
+		}
+		return null;
 	}
 
 	get canSave(): boolean {
@@ -84,10 +85,11 @@ export class PreambleFormState {
 		const rule = this.pathRules.find((candidate) => candidate.key === key);
 		const projectPath = rule?.projectPath.trim() ?? '';
 		if (!projectPath) return m.preambles_path_required();
-		return this.pathRules.filter((candidate) => candidate.projectPath.trim() === projectPath)
-			.length > 1
-			? m.preambles_duplicate_path()
-			: null;
+		const matchingPathCount = this.pathRules.filter(
+			(candidate) => candidate.projectPath.trim() === projectPath,
+		).length;
+		if (matchingPathCount > 1) return m.preambles_duplicate_path();
+		return null;
 	}
 
 	reset(preamble: Preamble | null): void {

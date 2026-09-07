@@ -10,6 +10,7 @@
 	} from '$lib/preambles/selection-projection.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import type {
+		Preamble,
 		PreambleId,
 		PreambleSelectionProjection,
 		PreambleSelectionUnavailableReason,
@@ -50,17 +51,19 @@
 		}),
 	);
 	const draftRowsById = $derived(new Map(draftProjection.rows.map((row) => [row.id, row])));
+	const selectionIndexes = $derived(new Map(draftIds.map((id, index) => [id, index] as const)));
 	const catalogIds = $derived(new Set(catalog.preambles.map((preamble) => preamble.id)));
 	const missingRows = $derived(draftProjection.rows.filter((row) => !catalogIds.has(row.id)));
 
 	function reasonLabel(reason: PreambleSelectionUnavailableReason): string {
-		if (reason === 'disabled') return m.preamble_selection_status_disabled();
-		if (reason === 'out-of-scope') return m.preamble_selection_status_out_of_scope();
-		return m.preamble_selection_status_missing();
-	}
-
-	function selectionIndex(id: PreambleId): number {
-		return draftIds.indexOf(id);
+		switch (reason) {
+			case 'disabled':
+				return m.preamble_selection_status_disabled();
+			case 'out-of-scope':
+				return m.preamble_selection_status_out_of_scope();
+			case 'missing':
+				return m.preamble_selection_status_missing();
+		}
 	}
 
 	function toggleSelection(id: PreambleId, checked: boolean): void {
@@ -68,11 +71,10 @@
 		else onRemove(id);
 	}
 
-	function unavailableReason(preamble: (typeof catalog.preambles)[number]) {
-		if (!draftIds.includes(preamble.id)) {
-			return candidateUnavailableReason(preamble, canonicalProjectPath);
-		}
-		return draftRowsById.get(preamble.id)?.reason ?? null;
+	function unavailableReason(preamble: Preamble): PreambleSelectionUnavailableReason | null {
+		const selectedRow = draftRowsById.get(preamble.id);
+		if (selectedRow) return selectedRow.reason;
+		return candidateUnavailableReason(preamble, canonicalProjectPath);
 	}
 </script>
 
@@ -112,7 +114,7 @@
 
 		<div class="flex min-w-0 flex-col gap-2" data-slot="chat-preamble-selection-catalog-rows">
 			{#each catalog.preambles as preamble (preamble.id)}
-				{@const selectedIndex = selectionIndex(preamble.id)}
+				{@const selectedIndex = selectionIndexes.get(preamble.id) ?? -1}
 				{@const selected = selectedIndex >= 0}
 				{@const reason = unavailableReason(preamble)}
 				<svelte:boundary>
@@ -129,8 +131,7 @@
 							aria-label={selected
 								? m.preamble_selection_remove({ title: preamble.title })
 								: m.preamble_selection_add_candidate({ title: preamble.title })}
-							onchange={(event) =>
-								toggleSelection(preamble.id, event.currentTarget.checked)}
+							onchange={(event) => toggleSelection(preamble.id, event.currentTarget.checked)}
 						/>
 						<div class="min-w-0 flex-1 space-y-1">
 							<span class="block break-words" data-slot="chat-preamble-selection-row-title">
@@ -196,7 +197,7 @@
 				</p>
 				{#each missingRows as row (row.id)}
 					<svelte:boundary>
-						{@const selectedIndex = selectionIndex(row.id)}
+						{@const selectedIndex = selectionIndexes.get(row.id) ?? -1}
 						<div
 							class="flex min-w-0 items-start gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm"
 							data-slot="chat-preamble-selection-missing-row"
