@@ -168,11 +168,11 @@
 	--markdown-code-deletion-bg: 353 100% 97%;
 	--markdown-code-deletion-fg: 355 72% 41%;
 	--diff-modified: 48 88% 93%;
-	--diff-modified-foreground: 33 78% 38%;
+	--diff-modified-foreground: 33 78% 32%;
 	--diff-modified-border: 48 50% 78%;
 	--diff-addition: 142 71% 26%;
 	--diff-deletion: 0 72% 45%;
-	--diff-hunk: 190 88% 38%;
+	--diff-hunk: 190 88% 25%;
 	--interactive-accent: 190 88% 25%;
 	--interactive-accent-foreground: 150 40% 98%;
 	--file-icon-code: 142 71% 38%;

@@ -164,7 +164,7 @@
 	--markdown-code-deletion-bg: 353 100% 97%;
 	--markdown-code-deletion-fg: 355 72% 41%;
 	--diff-modified: 48 88% 93%;
-	--diff-modified-foreground: 33 78% 38%;
+	--diff-modified-foreground: 33 78% 34%;
 	--diff-modified-border: 48 50% 78%;
 	--diff-addition: 142 71% 28%;
 	--diff-deletion: 0 72% 45%;
@@ -197,7 +197,7 @@
 	--diff-del-bg: 5.5 100% 95.7%;
 	--diff-del-fg: 213 13% 14%;
 	--diff-del-line-num: 213 13% 14%;
-	--diff-hunk-header-bg: 214 60% 95%;
+	--diff-hunk-header-bg: 214 60% 97%;
 	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235c6470' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 	--elevation-menu: var(--shadow-md);
 	--elevation-dialog: var(--shadow-lg);

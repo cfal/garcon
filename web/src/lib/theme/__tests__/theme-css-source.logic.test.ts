@@ -80,16 +80,36 @@ function contrastRatio(background: string, foreground: string): number {
 	);
 }
 
-function contrastRatioOnSelfTint(surface: string, foreground: string, opacity: number): number {
-	const surfaceChannels = hslToSrgbChannels(surface);
-	const foregroundChannels = hslToSrgbChannels(foreground);
-	const tintedChannels: ColorChannels = [
-		foregroundChannels[0] * opacity + surfaceChannels[0] * (1 - opacity),
-		foregroundChannels[1] * opacity + surfaceChannels[1] * (1 - opacity),
-		foregroundChannels[2] * opacity + surfaceChannels[2] * (1 - opacity),
+function blendChannels(
+	backdrop: ColorChannels,
+	paint: ColorChannels,
+	opacity: number,
+): ColorChannels {
+	return [
+		paint[0] * opacity + backdrop[0] * (1 - opacity),
+		paint[1] * opacity + backdrop[1] * (1 - opacity),
+		paint[2] * opacity + backdrop[2] * (1 - opacity),
 	];
+}
+
+function contrastRatioOnTint(
+	surface: string,
+	tint: string,
+	foreground: string,
+	tintOpacity: number,
+	foregroundOpacity = 1,
+): number {
+	const surfaceChannels = hslToSrgbChannels(surface);
+	const tintChannels = hslToSrgbChannels(tint);
+	const foregroundChannels = hslToSrgbChannels(foreground);
+	const tintedChannels = blendChannels(surfaceChannels, tintChannels, tintOpacity);
+	const renderedForegroundChannels = blendChannels(
+		tintedChannels,
+		foregroundChannels,
+		foregroundOpacity,
+	);
 	const surfaceLuminance = relativeLuminanceFromChannels(tintedChannels);
-	const foregroundLuminance = relativeLuminanceFromChannels(foregroundChannels);
+	const foregroundLuminance = relativeLuminanceFromChannels(renderedForegroundChannels);
 	return (
 		(Math.max(surfaceLuminance, foregroundLuminance) + 0.05) /
 		(Math.min(surfaceLuminance, foregroundLuminance) + 0.05)
@@ -185,10 +205,18 @@ describe('theme profile CSS sources', () => {
 			['git-action-push-hover', 'git-action-foreground'],
 			['git-action-publish', 'git-action-foreground'],
 			['git-action-publish-hover', 'git-action-foreground'],
+			['diff-modified', 'diff-modified-foreground'],
+			['diff-add-bg', 'diff-add-fg'],
+			['diff-add-bg', 'diff-add-line-num'],
+			['diff-del-bg', 'diff-del-fg'],
+			['diff-del-bg', 'diff-del-line-num'],
+			['diff-hunk-header-bg', 'muted-foreground'],
 		] as const;
 		const foregrounds = [
 			'diff-addition',
 			'diff-deletion',
+			'diff-hunk',
+			'diff-modified-foreground',
 			'git-added',
 			'git-deleted',
 			'git-modified',
@@ -197,6 +225,12 @@ describe('theme profile CSS sources', () => {
 			'interactive-accent',
 		] as const;
 		const selfTintedForegrounds = ['git-added', 'git-deleted'] as const;
+		const selectedDiffForegrounds = [
+			'diff-add-fg',
+			'diff-add-line-num',
+			'diff-del-fg',
+			'diff-del-line-num',
+		] as const;
 		const surfaces = ['background', 'sidebar-background', 'muted'] as const;
 
 		for (const profile of THEME_PROFILES) {
@@ -218,10 +252,52 @@ describe('theme profile CSS sources', () => {
 			for (const foreground of selfTintedForegrounds) {
 				for (const opacity of [0.2, 0.3]) {
 					expect(
-						contrastRatioOnSelfTint(values.background, values[foreground], opacity),
+						contrastRatioOnTint(values.background, values[foreground], values[foreground], opacity),
 						`${profile.id}: ${foreground} on ${opacity * 100}% self tint`,
 					).toBeGreaterThanOrEqual(4.5);
 				}
+			}
+			for (const foreground of selectedDiffForegrounds) {
+				for (const opacity of [0.1, 0.2]) {
+					expect(
+						contrastRatioOnTint(
+							values.background,
+							values['interactive-accent'],
+							values[foreground],
+							opacity,
+						),
+						`${profile.id}: ${foreground} on ${opacity * 100}% selected diff`,
+					).toBeGreaterThanOrEqual(4.5);
+				}
+			}
+			for (const opacity of [0, 0.1, 0.2]) {
+				expect(
+					contrastRatioOnTint(
+						values.background,
+						values['interactive-accent'],
+						values.foreground,
+						opacity,
+						0.7,
+					),
+					`${profile.id}: context line number on ${opacity * 100}% selected diff`,
+				).toBeGreaterThanOrEqual(4.5);
+			}
+			for (const background of ['diff-add-bg', 'diff-del-bg'] as const) {
+				expect(
+					contrastRatio(values[background], values['muted-foreground']),
+					`${profile.id}: line action on ${background}`,
+				).toBeGreaterThanOrEqual(3);
+			}
+			for (const opacity of [0.1, 0.2]) {
+				expect(
+					contrastRatioOnTint(
+						values.background,
+						values['interactive-accent'],
+						values['muted-foreground'],
+						opacity,
+					),
+					`${profile.id}: line action on ${opacity * 100}% selected diff`,
+				).toBeGreaterThanOrEqual(3);
 			}
 		}
 	});

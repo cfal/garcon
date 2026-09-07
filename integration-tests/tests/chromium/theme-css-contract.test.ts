@@ -42,13 +42,17 @@ async function readRenderedColors(
       if (!backgroundElement) throw new Error("Missing background fixture");
       backgroundStyle = getComputedStyle(backgroundElement);
     }
-    const composite = (paint: string, filter: string): string => {
+    const composite = (
+      paint: string,
+      backdrop: string,
+      filter: string,
+    ): string => {
       const canvas = document.createElement("canvas");
       canvas.width = 1;
       canvas.height = 1;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Missing canvas context");
-      context.fillStyle = surface;
+      context.fillStyle = backdrop;
       context.fillRect(0, 0, 1, 1);
       context.filter = filter;
       context.fillStyle = paint;
@@ -58,12 +62,14 @@ async function readRenderedColors(
         .data.slice(0, 3);
       return `rgb(${red}, ${green}, ${blue})`;
     };
+    const background = composite(
+      backgroundStyle.backgroundColor,
+      surface,
+      backgroundStyle.filter,
+    );
     return {
-      foreground: composite(style.color, style.filter),
-      background: composite(
-        backgroundStyle.backgroundColor,
-        backgroundStyle.filter,
-      ),
+      foreground: composite(style.color, background, style.filter),
+      background,
       surface,
     };
   }, options);
@@ -137,7 +143,17 @@ describe("compiled theme CSS", () => {
           <button id="filled-interactive-accent" class="bg-interactive-accent text-interactive-accent-foreground hover:brightness-110">Save</button>
           <button id="stage-action" class="bg-git-added/20 text-git-added hover:bg-git-added/30">Stage</button>
           <button id="unstage-action" class="bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30">Unstage</button>
-          <pre id="inline-diff" class="bg-muted/50"><span id="inline-diff-addition" class="text-diff-addition">+added</span><span id="inline-diff-deletion" class="text-diff-deletion">-deleted</span></pre>
+          <pre id="inline-diff" class="bg-muted/50"><span id="inline-diff-addition" class="text-diff-addition">+added</span><span id="inline-diff-deletion" class="text-diff-deletion">-deleted</span><span id="inline-diff-hunk" class="text-diff-hunk">@@ hunk</span></pre>
+          <div id="virtual-add-normal" class="bg-diff-add"><span id="virtual-add-normal-content" class="text-diff-add-fg">+added</span><span id="virtual-add-normal-line" class="text-diff-add-line-num">1</span><button id="virtual-add-normal-action" class="text-muted-foreground">+</button></div>
+          <div id="virtual-add-composer" class="bg-interactive-accent/10"><span id="virtual-add-composer-content" class="text-diff-add-fg">+added</span><span id="virtual-add-composer-line" class="text-diff-add-line-num">1</span><button id="virtual-add-composer-action" class="text-muted-foreground">+</button></div>
+          <div id="virtual-add-selected" class="bg-interactive-accent/20"><span id="virtual-add-selected-content" class="text-diff-add-fg">+added</span><span id="virtual-add-selected-line" class="text-diff-add-line-num">1</span><button id="virtual-add-selected-action" class="text-muted-foreground">+</button></div>
+          <div id="virtual-del-normal" class="bg-diff-del"><span id="virtual-del-normal-content" class="text-diff-del-fg">-deleted</span><span id="virtual-del-normal-line" class="text-diff-del-line-num">1</span><button id="virtual-del-normal-action" class="text-muted-foreground">-</button></div>
+          <div id="virtual-del-composer" class="bg-interactive-accent/10"><span id="virtual-del-composer-content" class="text-diff-del-fg">-deleted</span><span id="virtual-del-composer-line" class="text-diff-del-line-num">1</span><button id="virtual-del-composer-action" class="text-muted-foreground">-</button></div>
+          <div id="virtual-del-selected" class="bg-interactive-accent/20"><span id="virtual-del-selected-content" class="text-diff-del-fg">-deleted</span><span id="virtual-del-selected-line" class="text-diff-del-line-num">1</span><button id="virtual-del-selected-action" class="text-muted-foreground">-</button></div>
+          <div id="virtual-context-normal"><span id="virtual-context-normal-line" class="text-foreground/70">1</span></div>
+          <div id="virtual-context-composer" class="bg-interactive-accent/10"><span id="virtual-context-composer-line" class="text-foreground/70">1</span></div>
+          <div id="virtual-context-selected" class="bg-interactive-accent/20"><span id="virtual-context-selected-line" class="text-foreground/70">1</span></div>
+          <div id="virtual-hunk-header" class="bg-diff-hunk-header"><span id="virtual-hunk-header-text" class="text-muted-foreground">@@ hunk</span></div>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
           <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
@@ -301,7 +317,7 @@ describe("compiled theme CSS", () => {
           }
         }
 
-        for (const kind of ["addition", "deletion"] as const) {
+        for (const kind of ["addition", "deletion", "hunk"] as const) {
           const colors = await readRenderedColors(
             page,
             `#inline-diff-${kind}`,
@@ -312,6 +328,50 @@ describe("compiled theme CSS", () => {
             `${profile.id} inline diff ${kind}`,
           ).toBeGreaterThanOrEqual(4.5);
         }
+
+        for (const kind of ["add", "del"] as const) {
+          for (const rowState of ["normal", "composer", "selected"] as const) {
+            const row = `virtual-${kind}-${rowState}`;
+            for (const role of ["content", "line"] as const) {
+              const colors = await readRenderedColors(page, `#${row}-${role}`, {
+                backgroundSelector: `#${row}`,
+              });
+              expect(
+                contrastRatio(colors.foreground, colors.background),
+                `${profile.id} ${kind} ${rowState} ${role}`,
+              ).toBeGreaterThanOrEqual(4.5);
+            }
+
+            const action = await readRenderedColors(page, `#${row}-action`, {
+              backgroundSelector: `#${row}`,
+            });
+            expect(
+              contrastRatio(action.foreground, action.background),
+              `${profile.id} ${kind} ${rowState} line action`,
+            ).toBeGreaterThanOrEqual(3);
+          }
+        }
+
+        for (const rowState of ["normal", "composer", "selected"] as const) {
+          const row = `virtual-context-${rowState}`;
+          const colors = await readRenderedColors(page, `#${row}-line`, {
+            backgroundSelector: `#${row}`,
+          });
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile.id} context ${rowState} line number`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+
+        const hunkHeader = await readRenderedColors(
+          page,
+          "#virtual-hunk-header-text",
+          { backgroundSelector: "#virtual-hunk-header" },
+        );
+        expect(
+          contrastRatio(hunkHeader.foreground, hunkHeader.background),
+          `${profile.id} virtual hunk header`,
+        ).toBeGreaterThanOrEqual(4.5);
 
         const scrollAreaThumb = await readNormalAndHoveredColors(
           page,

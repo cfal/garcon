@@ -164,7 +164,7 @@
 	--markdown-code-deletion-bg: 30 80% 93%;
 	--markdown-code-deletion-fg: 30 90% 32%;
 	--diff-modified: 180 50% 90%;
-	--diff-modified-foreground: 180 60% 30%;
+	--diff-modified-foreground: 180 60% 28%;
 	--diff-modified-border: 180 40% 65%;
 	--diff-addition: 210 80% 43%;
 	--diff-deletion: 30 90% 34%;
@@ -193,11 +193,11 @@
 	--git-renamed: 310 50% 46%;
 	--diff-add-bg: 210 70% 93%;
 	--diff-add-fg: 210 80% 30%;
-	--diff-add-line-num: 210 50% 50%;
+	--diff-add-line-num: 210 50% 38%;
 	--diff-del-bg: 30 80% 93%;
-	--diff-del-fg: 30 90% 32%;
-	--diff-del-line-num: 30 50% 50%;
-	--diff-hunk-header-bg: 214 60% 95%;
+	--diff-del-fg: 30 90% 30%;
+	--diff-del-line-num: 30 50% 33%;
+	--diff-hunk-header-bg: 214 60% 97%;
 	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235c6470' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 	--elevation-menu: var(--shadow-md);
 	--elevation-dialog: var(--shadow-lg);
