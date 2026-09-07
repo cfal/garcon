@@ -668,26 +668,42 @@ describe('LocalSettingsStore', () => {
 	it('ignores unrelated and session-storage events, including session clear', () => {
 		const store = createLocalSettingsStore();
 		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+		const externalSnapshot = JSON.stringify({
+			themePreference: { mode: 'fixed', themeId: 'classic-light' },
+		});
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, externalSnapshot);
 
 		window.dispatchEvent(
 			new StorageEvent('storage', {
 				key: LOCAL_STORAGE_KEYS.localSettings,
-				newValue: JSON.stringify({}),
+				newValue: externalSnapshot,
 				storageArea: sessionStorage,
 			}),
 		);
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+
 		window.dispatchEvent(
 			new StorageEvent('storage', { key: null, newValue: null, storageArea: sessionStorage }),
 		);
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+
 		window.dispatchEvent(
 			new StorageEvent('storage', {
 				key: 'unrelated',
-				newValue: null,
+				newValue: externalSnapshot,
 				storageArea: localStorage,
 			}),
 		);
-
 		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: externalSnapshot,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-light' });
 		store.destroy();
 	});
 

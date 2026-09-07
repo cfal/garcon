@@ -35,7 +35,7 @@ export async function buildWebBrowserEntry(
     if (exitCode !== 0) {
       throw new Error(stderr);
     }
-    return readFile(outputPath, "utf8");
+    return await readFile(outputPath, "utf8");
   } finally {
     await rm(outputDirectory, { recursive: true, force: true });
   }
