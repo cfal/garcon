@@ -23,6 +23,7 @@ export interface AgentCommandContext {
 
 export class AgentCommandReplies {
   readonly #attempts = new Map<string, Set<AbortController>>();
+  #stopped = false;
 
   constructor(private readonly context: AgentCommandContext) {}
 
@@ -30,6 +31,7 @@ export class AgentCommandReplies {
     source: AgentCommandSource,
     operation: (signal: AbortSignal) => Promise<AgentCommandOutcomeNoticeDetail | null>,
   ): void {
+    if (this.#stopped) return;
     const abort = new AbortController();
     const attempts = this.#attempts.get(source.chatId) ?? new Set<AbortController>();
     attempts.add(abort);
@@ -91,6 +93,7 @@ export class AgentCommandReplies {
   }
 
   shutdown(): void {
+    this.#stopped = true;
     for (const chatId of this.#attempts.keys()) this.discardSource(chatId);
   }
 }

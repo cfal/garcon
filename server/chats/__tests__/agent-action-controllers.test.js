@@ -159,6 +159,19 @@ describe('assistant action controllers', () => {
   });
 
   for (const [name, command, action] of [['start', START, 'commands'], ['schedule', SCHEDULING, 'scheduler']]) {
+    it(`${name}: rejects new requests permanently after shutdown`, async () => {
+      const f = fixture();
+      f[name].shutdown();
+      f[name].request(SOURCE, command);
+      await drain();
+      f[name].shutdown();
+      f[name].request({ ...SOURCE, requestOrdinal: 4 }, command);
+      await drain();
+      expect(Object.values(f[action])[0]).not.toHaveBeenCalled();
+      expect(f.notices).toEqual([]);
+      expect(f.replies).toEqual([]);
+    });
+
     it(`${name}: disabled, stale, deleted, discarded and shutdown sources never mutate`, async () => {
       for (const condition of ['disabled', 'stale', 'deleted', 'discarded', 'shutdown']) {
         const f = fixture();

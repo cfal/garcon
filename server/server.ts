@@ -904,6 +904,7 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
+      agentCommands.shutdown();
       carryOverGarbageCollector.shutdown();
       logger.info('server: shutting down...');
       const reservedChatIds = queue.beginShutdown();
@@ -913,7 +914,6 @@ export async function startServer(): Promise<void> {
       try {
         await server.stop(true);
         scheduledPrompts.stop();
-        agentCommands.shutdown();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
           additionalChatIds: reservedChatIds,
