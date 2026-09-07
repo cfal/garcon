@@ -311,6 +311,47 @@ describe('FileTreeStore', () => {
 		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
 	});
 
+	it.each([
+		{
+			label: 'unchecked',
+			projectState: {
+				kind: 'unchecked' as const,
+				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+			},
+		},
+		{
+			label: 'unavailable',
+			projectState: {
+				kind: 'unavailable' as const,
+				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+				reason: 'not-found' as const,
+			},
+		},
+	])('blocks file requests while project identity is $label', async ({ projectState }) => {
+		vi.mocked(filesApi.getTree)
+			.mockImplementationOnce(
+				(_request, options) =>
+					new Promise((_resolve, reject) => {
+						options?.signal?.addEventListener('abort', () =>
+							reject(new DOMException('aborted', 'AbortError')),
+						);
+					}),
+			)
+			.mockResolvedValueOnce(response('/workspace/project'));
+		store.setProjectState(availableProject());
+		store.activate();
+		expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+		store.setProjectState(projectState);
+		store.deactivate();
+		store.activate();
+		expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+		store.setProjectState(availableProject());
+		await tick();
+		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+	});
+
 	it('resets when the chat project path changes within the same effective project', async () => {
 		vi.mocked(filesApi.getTree)
 			.mockResolvedValueOnce(response('/workspace/project', [entry('old.ts', 'file')]))

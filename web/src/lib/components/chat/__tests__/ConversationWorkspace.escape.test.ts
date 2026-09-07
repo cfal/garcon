@@ -186,7 +186,9 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			target,
 			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
 		});
-		await waitFor(() => expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'));
+		await waitFor(() =>
+			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'),
+		);
 
 		expect(mockGetGitRefs).not.toHaveBeenCalled();
 	});
@@ -210,9 +212,55 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			target,
 			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
 		});
-		await waitFor(() => expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'));
+		await waitFor(() =>
+			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'),
+		);
 
 		expect(mockGetGitRefs).not.toHaveBeenCalled();
+	});
+
+	it('keeps a branch action owned when focus repeats within the same surface', async () => {
+		let resolveProject!: (value: ProjectResolutionResponse) => void;
+		let target!: ProjectTarget;
+		const fetchProjectResolution = vi.fn((requestedTarget: ProjectTarget) => {
+			target = requestedTarget;
+			return new Promise<ProjectResolutionResponse>((resolve) => {
+				resolveProject = resolve;
+			});
+		});
+		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
+		await fireEvent.click(screen.getByRole('button', { name: 'Refocus command surface' }));
+		resolveProject({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		});
+
+		await waitFor(() =>
+			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('true'),
+		);
+		expect(mockGetGitRefs).toHaveBeenCalledOnce();
+	});
+
+	it('opens create branch after the selector closes its branch dropdown', async () => {
+		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+		}));
+		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() =>
+			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('true'),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('new-branch-dialog-open').textContent).toBe('true'),
+		);
+		expect(fetchProjectResolution).toHaveBeenCalledTimes(2);
 	});
 
 	afterEach(() => {

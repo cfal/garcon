@@ -213,6 +213,7 @@ export class FileTreeStore {
 	#chatProjectBreadcrumbs = $state.raw<FileTreeBreadcrumb[]>([]);
 	#effectiveProjectKey = $state('');
 	#active = false;
+	#projectRequestsAllowed = false;
 	#navigationController: AbortController | null = null;
 	#refreshController: AbortController | null = null;
 	#navigationToken = 0;
@@ -323,6 +324,7 @@ export class FileTreeStore {
 
 	setProjectState(projectState: WorkspaceProjectState): void {
 		if (projectState.kind === 'absent') {
+			this.#projectRequestsAllowed = false;
 			this.#projectPath = null;
 			this.#effectiveProjectKey = '';
 			this.#canonicalChatProjectPath = null;
@@ -331,11 +333,13 @@ export class FileTreeStore {
 			return;
 		}
 		if (projectState.kind !== 'available') {
+			this.#projectRequestsAllowed = false;
 			this.#abortRequests();
 			return;
 		}
 
 		const { project } = projectState;
+		this.#projectRequestsAllowed = true;
 		const projectPathChanged = project.projectPath !== this.#projectPath;
 		this.#projectPath = project.projectPath;
 		if (!projectPathChanged && project.effectiveProjectKey === this.#effectiveProjectKey) {
@@ -364,6 +368,7 @@ export class FileTreeStore {
 
 	reset(): void {
 		this.#active = false;
+		this.#projectRequestsAllowed = false;
 		this.#projectPath = null;
 		this.#effectiveProjectKey = '';
 		this.#canonicalChatProjectPath = null;
@@ -376,7 +381,7 @@ export class FileTreeStore {
 		this.#clearFilter();
 		this.#clearDirectoryCaches();
 		this.navigation = { kind: 'loading', target, previous };
-		if (!this.#active) return;
+		if (!this.#active || !this.#projectRequestsAllowed) return;
 		await this.#performNavigation(target, previous);
 	}
 
@@ -451,7 +456,7 @@ export class FileTreeStore {
 		if (this.navigation.kind !== 'error') return;
 		const { target, previous } = this.navigation;
 		this.navigation = { kind: 'loading', target, previous };
-		if (!this.#active) return;
+		if (!this.#active || !this.#projectRequestsAllowed) return;
 		await this.#performNavigation(target, previous);
 	}
 
@@ -465,7 +470,7 @@ export class FileTreeStore {
 
 	async refresh(): Promise<void> {
 		const response = this.readyResponse;
-		if (!response || this.isRefreshing || !this.#active) return;
+		if (!response || this.isRefreshing || !this.#active || !this.#projectRequestsAllowed) return;
 		this.#refreshController?.abort();
 		const controller = new AbortController();
 		const token = ++this.#refreshToken;
@@ -516,7 +521,12 @@ export class FileTreeStore {
 	}
 
 	async fetchChildren(path: string): Promise<void> {
-		if (!this.#active || this.childrenCache.has(path) || this.loadingDirs.has(path)) {
+		if (
+			!this.#active ||
+			!this.#projectRequestsAllowed ||
+			this.childrenCache.has(path) ||
+			this.loadingDirs.has(path)
+		) {
 			return;
 		}
 		const controller = new AbortController();
@@ -677,7 +687,13 @@ export class FileTreeStore {
 	}
 
 	#resumePendingWork(): void {
-		if (!this.#active || !this.#effectiveProjectKey || !this.#projectPath) return;
+		if (
+			!this.#active ||
+			!this.#projectRequestsAllowed ||
+			!this.#effectiveProjectKey ||
+			!this.#projectPath
+		)
+			return;
 		if (this.navigation.kind === 'idle') {
 			void this.navigateTo(this.#initialTarget());
 			return;
@@ -699,6 +715,7 @@ export class FileTreeStore {
 		target: FileTreeDirectoryTarget,
 		previous: FileTreeResponse | null,
 	): Promise<void> {
+		if (!this.#active || !this.#projectRequestsAllowed) return;
 		this.#navigationController?.abort();
 		this.#abortRefresh();
 		this.#abortChildren();

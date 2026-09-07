@@ -47,6 +47,8 @@
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
+	import GitBranchSelector from '$lib/components/git/GitBranchSelector.svelte';
+	import type { FocusOwner } from '$lib/workspace/surface-types.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
 		onPatchActivity?: (chatId: string, timestamp: string) => void;
@@ -192,9 +194,37 @@
 			| 'focusChat'
 			| 'focusMobileSingleton'
 			| 'openSingletonAsTab'
+			| 'focusOwnerRevision'
 		>;
+	let workspaceFocusOwner = $state<FocusOwner>({
+		kind: 'surface',
+		surfaceId: CANONICAL_CHAT_SURFACE_ID,
+	});
+	let workspaceFocusOwnerRevision = $state(0);
 	const workspace: WorkspaceTestPort = {
-		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
+		get focusOwner() {
+			return workspaceFocusOwner;
+		},
+		set focusOwner(owner: FocusOwner) {
+			if (
+				owner.kind === workspaceFocusOwner.kind &&
+				(owner.kind === 'chat-list' ||
+					(owner.kind === 'surface' &&
+						workspaceFocusOwner.kind === 'surface' &&
+						owner.surfaceId === workspaceFocusOwner.surfaceId) ||
+					(owner.kind === 'window-chrome' &&
+						workspaceFocusOwner.kind === 'window-chrome' &&
+						owner.windowId === workspaceFocusOwner.windowId &&
+						owner.surfaceId === workspaceFocusOwner.surfaceId))
+			) {
+				return;
+			}
+			workspaceFocusOwner = owner;
+			workspaceFocusOwnerRevision += 1;
+		},
+		get focusOwnerRevision() {
+			return workspaceFocusOwnerRevision;
+		},
 		isSurfacePresented: (surfaceId: string) => surfaceId === CANONICAL_CHAT_SURFACE_ID,
 		focusPreviousTabInFocusedWindow: () => false,
 		focusNextTabInFocusedWindow: () => false,
@@ -317,11 +347,30 @@
 >
 <button
 	type="button"
-	onclick={() =>
-		(workspace.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID })}
+	onclick={() => (workspace.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID })}
 	>Restore command ownership</button
 >
+<button
+	type="button"
+	onclick={() => (workspace.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID })}
+	>Refocus command surface</button
+>
 <div data-testid="branch-dropdown-open">{quickGitBranches.showBranchDropdown}</div>
+<div data-testid="new-branch-dialog-open">{quickGitBranches.showNewBranchModal}</div>
+<GitBranchSelector
+	currentBranch={quickGitBranches.currentBranch}
+	refs={quickGitBranches.refs}
+	sort={quickGitBranches.branchSort}
+	isOpen={quickGitBranches.showBranchDropdown}
+	isLoading={quickGitBranches.isLoadingBranches}
+	onToggle={() => panelActions?.toggleBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
+	onClose={() => panelActions?.closeBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
+	onCreateBranch={() => panelActions?.createBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
+	onSwitchBranch={(branch) =>
+		panelActions?.switchBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id, branch)}
+	onSortRefs={(key, query) =>
+		panelActions?.sortBranches(CANONICAL_CHAT_SURFACE_ID, selectedChat.id, key, query)}
+/>
 {#if showTestLayer}
 	<div
 		bind:this={testLayerElement}

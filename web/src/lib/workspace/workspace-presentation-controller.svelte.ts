@@ -75,10 +75,26 @@ function removeTransientMobileGitViews(
 	}));
 }
 
+function sameFocusOwner(left: FocusOwner, right: FocusOwner): boolean {
+	if (left.kind !== right.kind) return false;
+	if (left.kind === 'chat-list') return true;
+	if (right.kind === 'chat-list') return false;
+	if (left.kind === 'surface' && right.kind === 'surface') {
+		return left.surfaceId === right.surfaceId;
+	}
+	return (
+		left.kind === 'window-chrome' &&
+		right.kind === 'window-chrome' &&
+		left.windowId === right.windowId &&
+		left.surfaceId === right.surfaceId
+	);
+}
+
 export class WorkspacePresentationController {
 	lastFocusedSurfaceId = $state('');
 	lastFocusedWindowId = $state<WorkspaceWindowId | null>(null);
-	focusOwner = $state<FocusOwner>({ kind: 'chat-list' });
+	#focusOwner = $state<FocusOwner>({ kind: 'chat-list' });
+	#focusOwnerRevision = $state(0);
 	composerAnchorSurfaceId = $state<ChatViewSurfaceId | null>(null);
 	#inFlightCommitCount = 0;
 	#presentationMode = $state<PresentationMode>('desktop');
@@ -296,6 +312,20 @@ export class WorkspacePresentationController {
 			if (currentWindow?.tabs.activeId !== surfaceId) return;
 			this.focusPresentedSurface(surfaceId);
 		});
+	}
+
+	get focusOwner(): FocusOwner {
+		return this.#focusOwner;
+	}
+
+	set focusOwner(owner: FocusOwner) {
+		if (sameFocusOwner(this.#focusOwner, owner)) return;
+		this.#focusOwner = owner;
+		this.#focusOwnerRevision += 1;
+	}
+
+	get focusOwnerRevision(): number {
+		return this.#focusOwnerRevision;
 	}
 
 	#beginWindowActivation(

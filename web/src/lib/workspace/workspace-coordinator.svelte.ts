@@ -207,6 +207,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#presentation.focusOwner = owner;
 	}
 
+	get focusOwnerRevision(): number {
+		return this.#presentation.focusOwnerRevision;
+	}
+
 	get isMobile(): boolean {
 		return this.#presentation.isMobile;
 	}

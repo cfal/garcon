@@ -63,7 +63,7 @@
 		getConversationLifecycles,
 		getConversationPanels,
 	} from '$lib/context';
-	import type { ChatViewSurfaceId, FocusOwner } from '$lib/workspace/surface-types.js';
+	import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		executionDefaultsForAgent,
@@ -172,6 +172,7 @@
 	const quickGitBranches = getGitBranchActions();
 	const projectResolution = getProjectResolution();
 	let branchCommandGeneration = 0;
+	let branchDropdownGeneration: number | null = null;
 	const startupCoordinator = new StartupCoordinator();
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
@@ -654,7 +655,7 @@
 		surfaceId: ChatViewSurfaceId,
 		chatId: string,
 	): Promise<void> {
-		const command = beginBranchCommand(surfaceId, chatId);
+		const command = beginBranchCommand(surfaceId, chatId, true);
 		if (!command) return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath) return;
@@ -672,10 +673,7 @@
 			quickGit.summaryFor(project.projectPath)?.branch,
 			project.effectiveProjectKey,
 		);
-		await quickGitBranches.openBranchDropdown(
-			project.projectPath,
-			project.effectiveProjectKey,
-		);
+		await quickGitBranches.openBranchDropdown(project.projectPath, project.effectiveProjectKey);
 		if (command.generation === branchCommandGeneration && !ownsBranchCommand(command)) {
 			quickGitBranches.closeBranchDropdown();
 		}
@@ -685,24 +683,32 @@
 		readonly generation: number;
 		readonly surfaceId: ChatViewSurfaceId;
 		readonly chatId: string;
-		readonly focusOwner: FocusOwner;
+		readonly focusOwnerRevision: number;
 		readonly panel: ConversationPanelRegistration;
 	};
 
 	function beginBranchCommand(
 		surfaceId: ChatViewSurfaceId,
 		chatId: string,
+		opensDropdown = false,
 	): BranchCommand | null {
 		const panel = conversationPanels.panel(surfaceId);
 		const owner = workspace.focusOwner;
-		if (!panel || panel.chatId !== chatId || owner.kind === 'chat-list' || owner.surfaceId !== surfaceId) {
+		if (
+			!panel ||
+			panel.chatId !== chatId ||
+			owner.kind === 'chat-list' ||
+			owner.surfaceId !== surfaceId
+		) {
 			return null;
 		}
+		const generation = ++branchCommandGeneration;
+		if (opensDropdown) branchDropdownGeneration = generation;
 		return {
-			generation: ++branchCommandGeneration,
+			generation,
 			surfaceId,
 			chatId,
-			focusOwner: owner,
+			focusOwnerRevision: workspace.focusOwnerRevision,
 			panel,
 		};
 	}
@@ -710,21 +716,21 @@
 	function ownsBranchCommand(command: BranchCommand): boolean {
 		return (
 			command.generation === branchCommandGeneration &&
-			workspace.focusOwner === command.focusOwner &&
+			workspace.focusOwnerRevision === command.focusOwnerRevision &&
+			workspace.focusOwner.kind !== 'chat-list' &&
+			workspace.focusOwner.surfaceId === command.surfaceId &&
 			conversationPanels.panel(command.surfaceId) === command.panel &&
 			command.panel.chatId === command.chatId
 		);
 	}
 
 	function closeCommitBranchDropdown(): void {
-		branchCommandGeneration += 1;
+		if (branchDropdownGeneration === branchCommandGeneration) branchCommandGeneration += 1;
+		branchDropdownGeneration = null;
 		quickGitBranches.closeBranchDropdown();
 	}
 
-	async function openNewBranchDialog(
-		surfaceId: ChatViewSurfaceId,
-		chatId: string,
-	): Promise<void> {
+	async function openNewBranchDialog(surfaceId: ChatViewSurfaceId, chatId: string): Promise<void> {
 		const command = beginBranchCommand(surfaceId, chatId);
 		if (!command) return;
 		const project = await resolveChatProject(chatId);
@@ -760,9 +766,10 @@
 	} | null> {
 		const chat = sessions.byId[chatId];
 		if (!chat?.projectPath) return null;
-		const target = chat.status === 'draft'
-			? { kind: 'path' as const, projectPath: chat.projectPath }
-			: { kind: 'chat' as const, chatId, projectPath: chat.projectPath };
+		const target =
+			chat.status === 'draft'
+				? { kind: 'path' as const, projectPath: chat.projectPath }
+				: { kind: 'chat' as const, chatId, projectPath: chat.projectPath };
 		const lease = projectResolution.retain(target);
 		try {
 			await lease.resolve();

@@ -133,9 +133,6 @@ export class ProjectResolutionStore {
 	retain(target: ProjectTarget): ProjectResolutionLease {
 		if (this.#destroyed) throw new Error('Project resolution store has been destroyed');
 		const key = projectTargetKey(target);
-		if (target.kind === 'chat' && !this.#chatBindings.has(target.chatId)) {
-			this.#chatBindings.set(target.chatId, { projectPath: target.projectPath, revision: 0 });
-		}
 		let retained = this.#records.get(key);
 		if (!retained) {
 			const record = new ProjectResolutionRecord(

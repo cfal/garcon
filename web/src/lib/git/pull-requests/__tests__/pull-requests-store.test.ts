@@ -309,6 +309,25 @@ describe('PullRequestsStore', () => {
 		expect(store.detail?.number).toBe(4);
 	});
 
+	it('restarts a hidden list request when the surface reopens before abort settles', async () => {
+		let firstSignal: AbortSignal | undefined;
+		getPullRequestsMock
+			.mockImplementationOnce((_projectPath, options) => {
+				firstSignal = options?.signal ?? undefined;
+				return new Promise(() => undefined);
+			})
+			.mockResolvedValueOnce({ pulls: [summary(6)], repo: null });
+		const store = createVisibleStore();
+		store.setProject('/proj');
+		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
+
+		store.setPresentationVisible(false);
+		expect(firstSignal?.aborted).toBe(true);
+		store.setPresentationVisible(true);
+		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(store.pulls.map((pull) => pull.number)).toEqual([6]));
+	});
+
 	it('aborts reads when capability disappears and retries in place after recovery', async () => {
 		let firstSignal: AbortSignal | undefined;
 		getPullRequestsMock

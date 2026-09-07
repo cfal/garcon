@@ -633,13 +633,20 @@ export class TerminalPlacementService {
 
 	async #performRetriableCreate(requestKey: string): Promise<string> {
 		let requestId = this.#terminalCreateRequestIds.get(requestKey);
-		if (requestId && !this.deps.terminals.pendingCreates[requestId]) {
+		const attempt = requestId ? this.deps.terminals.pendingCreates[requestId] : undefined;
+		if (requestId && !attempt) {
 			this.#terminalCreateRequestIds.delete(requestKey);
 			requestId = undefined;
 		}
 		requestId ??= createRandomId();
 		this.#terminalCreateRequestIds.set(requestKey, requestId);
 		try {
+			if (attempt) {
+				return await this.deps.terminals.create(
+					attempt.requestedInitialWorkingDirectory,
+					requestId,
+				);
+			}
 			return await this.#createWithRequestId(requestId);
 		} finally {
 			if (!this.deps.terminals.pendingCreates[requestId]) {

@@ -1613,6 +1613,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.composerAnchorSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
+	it('advances focus ownership only when the focused surface identity changes', () => {
+		const { coordinator } = createHarness();
+		const initialRevision = coordinator.focusOwnerRevision;
+
+		coordinator.noteSurfaceFocus(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusOwnerRevision).toBe(initialRevision);
+
+		coordinator.noteChatListFocus();
+		coordinator.noteSurfaceFocus(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusOwnerRevision).toBe(initialRevision + 2);
+	});
+
 	it('updates command ownership on pointerdown and defers Chat anchoring until click', () => {
 		const { coordinator, layout } = createHarness();
 		layout.publish(
@@ -2323,6 +2335,60 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
 			terminalSurfaceId('terminal-coalesced'),
 		);
+	});
+
+	it('retries an ambiguous terminal create with its captured project path', async () => {
+		const target = {
+			kind: 'chat' as const,
+			chatId: 'chat-1',
+			projectPath: '/workspace/project-a',
+		};
+		const lease = {
+			target,
+			snapshot: {
+				kind: 'available' as const,
+				effectiveProjectKey: '/workspace/project-a',
+			},
+			resolve: vi
+				.fn()
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error('unavailable')),
+			retry: vi.fn(),
+			release: vi.fn(),
+		} satisfies ProjectResolutionLease;
+		const projectResolution = { retain: vi.fn(() => lease) } satisfies ProjectResolver;
+		const { coordinator, terminals } = createHarness({
+			currentProjectTarget: target,
+			projectResolution,
+		});
+		const requests: Array<{ projectPath: string | null; requestId: string }> = [];
+		terminals.create
+			.mockImplementationOnce(async (projectPath: string | null, requestId: string) => {
+				requests.push({ projectPath, requestId });
+				terminals.pendingCreates[requestId] = {
+					requestedInitialWorkingDirectory: projectPath,
+				};
+				throw new TypeError('Lost terminal response');
+			})
+			.mockImplementationOnce(async (projectPath: string | null, requestId: string) => {
+				requests.push({ projectPath, requestId });
+				delete terminals.pendingCreates[requestId];
+				return 'terminal-recovered';
+			});
+
+		await expect(
+			coordinator.createTerminal('window-main', 'workspace-window:window-main'),
+		).rejects.toThrow('Lost terminal response');
+		await expect(
+			coordinator.createTerminal('window-main', 'workspace-window:window-main'),
+		).resolves.toBe('terminal-recovered');
+
+		expect(requests).toEqual([
+			{ projectPath: '/workspace/project-a', requestId: requests[0]?.requestId },
+			{ projectPath: '/workspace/project-a', requestId: requests[0]?.requestId },
+		]);
+		expect(projectResolution.retain).toHaveBeenCalledOnce();
+		expect(lease.resolve).toHaveBeenCalledOnce();
 	});
 
 	it.each(['current window', 'new window'] as const)(
