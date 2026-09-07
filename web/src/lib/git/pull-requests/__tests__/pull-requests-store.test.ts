@@ -262,7 +262,7 @@ describe('PullRequestsStore', () => {
 		const store = createVisibleStore();
 		store.setProject('/project', '/canonical/project');
 		await tick();
-		void store.refresh();
+		const staleRefresh = store.refresh();
 		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledTimes(2));
 
 		store.setProjectState({
@@ -285,6 +285,8 @@ describe('PullRequestsStore', () => {
 		expect(getPullRequestsMock).toHaveBeenCalledTimes(3);
 		expect(store.pulls.map((pull) => pull.number)).toEqual([2]);
 		refresh.resolve({ pulls: [summary(99)], repo: null });
+		await staleRefresh;
+		expect(store.pulls.map((pull) => pull.number)).toEqual([2]);
 	});
 
 	it('resumes an aborted selected detail when the surface becomes visible again', async () => {

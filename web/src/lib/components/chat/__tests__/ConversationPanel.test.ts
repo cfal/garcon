@@ -188,7 +188,7 @@ function makeActions(): ConversationPanelActions {
 		deleteQueue: vi.fn().mockResolvedValue(undefined),
 		stop: vi.fn().mockResolvedValue(undefined),
 		openCommit: vi.fn(),
-		toggleBranch: vi.fn(),
+		toggleBranch: vi.fn().mockResolvedValue(undefined),
 		closeBranch: vi.fn(),
 		createBranch: vi.fn(),
 		switchBranch: vi.fn().mockResolvedValue(undefined),

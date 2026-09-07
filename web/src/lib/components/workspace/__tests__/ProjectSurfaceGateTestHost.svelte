@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import ProjectSurfaceGate from '../ProjectSurfaceGate.svelte';
 	import { setProjectResolution } from '$lib/context';
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
@@ -21,9 +22,13 @@
 		fetchResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 	} = $props();
 
-	setProjectResolution(new ProjectResolutionStore((target, signal) => (
-		fetchResolution?.(target, signal) ?? Promise.reject(new Error('No project resolver configured'))
-	)));
+	const projectResolution = new ProjectResolutionStore(
+		(target, signal) =>
+			fetchResolution?.(target, signal) ??
+			Promise.reject(new Error('No project resolver configured')),
+	);
+	setProjectResolution(projectResolution);
+	onDestroy(() => projectResolution.destroy());
 </script>
 
 <ProjectSurfaceGate

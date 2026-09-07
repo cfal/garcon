@@ -177,7 +177,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				resolveProject = resolve;
 			});
 		});
-		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+		const { component } = render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
 		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
@@ -186,10 +186,9 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			target,
 			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
 		});
-		await waitFor(() =>
-			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'),
-		);
+		await component.waitForBranchAction();
 
+		expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false');
 		expect(mockGetGitRefs).not.toHaveBeenCalled();
 	});
 
@@ -202,7 +201,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				resolveProject = resolve;
 			});
 		});
-		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+		const { component } = render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
 		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
@@ -212,10 +211,9 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			target,
 			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
 		});
-		await waitFor(() =>
-			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false'),
-		);
+		await component.waitForBranchAction();
 
+		expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false');
 		expect(mockGetGitRefs).not.toHaveBeenCalled();
 	});
 

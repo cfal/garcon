@@ -282,6 +282,41 @@ describe('createWorkspaceServices', () => {
 		expect(projectResolutionApiMocks.resolveProject).toHaveBeenCalledOnce();
 	});
 
+	it('disposes retained project resolution when its chat is removed', async () => {
+		let resolutionSignal: AbortSignal | undefined;
+		projectResolutionApiMocks.resolveProject.mockImplementation(
+			(_target: ProjectTarget, signal: AbortSignal) => {
+				resolutionSignal = signal;
+				return new Promise((_resolve, reject) => {
+					signal.addEventListener(
+						'abort',
+						() => reject(new DOMException('Aborted', 'AbortError')),
+						{ once: true },
+					);
+				});
+			},
+		);
+		rootLocalSettings = createLocalSettingsStore();
+		const assembled = assembleWorkspaceServices(rootLocalSettings);
+		services = assembled.services;
+		const entry = makeChatEntry();
+		assembled.chatSessions.upsertServerChat(entry);
+		const lease = services.projectResolution.retain({
+			kind: 'chat',
+			chatId: entry.id,
+			projectPath: entry.projectPath,
+		});
+		const resolution = lease.resolve();
+		await vi.waitFor(() => expect(resolutionSignal).toBeDefined());
+
+		assembled.chatSessions.removeChat(entry.id);
+		expect(resolutionSignal?.aborted).toBe(true);
+		await resolution;
+
+		expect(lease.snapshot).toEqual({ kind: 'unchecked' });
+		lease.release();
+	});
+
 	it('renews demanded resolution after an A/B/A binding change in one reactive flush', async () => {
 		projectResolutionApiMocks.resolveProject.mockImplementation(async (target: ProjectTarget) => ({
 			target,
@@ -299,9 +334,13 @@ describe('createWorkspaceServices', () => {
 		assembled.chatSessions.patchChat(entry.id, { projectPath: '/workspace/b' });
 		assembled.chatSessions.patchChat(entry.id, { projectPath: '/workspace/a' });
 
-		await vi.waitFor(() => expect(projectResolutionApiMocks.resolveProject).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() =>
+			expect(projectResolutionApiMocks.resolveProject).toHaveBeenCalledTimes(2),
+		);
 		expect(
-			projectResolutionApiMocks.resolveProject.mock.calls.map(([requested]) => requested.projectPath),
+			projectResolutionApiMocks.resolveProject.mock.calls.map(
+				([requested]) => requested.projectPath,
+			),
 		).toEqual(['/workspace/a', '/workspace/a']);
 	});
 
@@ -313,22 +352,22 @@ describe('createWorkspaceServices', () => {
 		} as const;
 		const destination = { ...oldTarget, projectPath: '/workspace/new-project' } as const;
 		const oldResult = Promise.withResolvers<never>();
-		projectResolutionApiMocks.resolveProject.mockImplementation(async (requested: ProjectTarget) => {
-			if (requested.projectPath === oldTarget.projectPath) return oldResult.promise;
-			return {
-				target: requested,
-				resolution: {
-					kind: 'available' as const,
-					effectiveProjectKey: '/real/new-project',
-				},
-			};
-		});
+		projectResolutionApiMocks.resolveProject.mockImplementation(
+			async (requested: ProjectTarget) => {
+				if (requested.projectPath === oldTarget.projectPath) return oldResult.promise;
+				return {
+					target: requested,
+					resolution: {
+						kind: 'available' as const,
+						effectiveProjectKey: '/real/new-project',
+					},
+				};
+			},
+		);
 		rootLocalSettings = createLocalSettingsStore();
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
-		assembled.chatSessions.upsertServerChat(
-			makeChatEntry({ projectPath: oldTarget.projectPath }),
-		);
+		assembled.chatSessions.upsertServerChat(makeChatEntry({ projectPath: oldTarget.projectPath }));
 		const refresh = vi
 			.spyOn(assembled.chatSessions, 'quietRefreshChats')
 			.mockResolvedValue(undefined);

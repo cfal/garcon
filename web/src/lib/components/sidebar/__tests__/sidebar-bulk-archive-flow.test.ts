@@ -18,7 +18,6 @@ function makeServerChat(
 	return {
 		id,
 		projectPath: '/workspace/repo',
-		effectiveProjectKey: '/workspace/repo',
 		orderGroup: archived ? 'archived' : 'normal',
 		title: id,
 		agentId: 'claude',

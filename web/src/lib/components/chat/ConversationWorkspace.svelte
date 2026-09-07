@@ -401,7 +401,7 @@
 		},
 		toggleBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
-			void toggleCommitBranchDropdown(surfaceId, chatId);
+			return toggleCommitBranchDropdown(surfaceId, chatId);
 		},
 		closeBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);

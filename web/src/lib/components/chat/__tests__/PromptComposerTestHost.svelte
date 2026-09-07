@@ -456,10 +456,10 @@
 	{isVisible}
 	{isPresented}
 	{composerEditorOpenRequestId}
-		{directAdmissionPending}
-		{requiresQueuedSubmission}
-		{onChooseProjectFolder}
-		resendCandidates={transcript.resendCandidates}
+	{directAdmissionPending}
+	{requiresQueuedSubmission}
+	{onChooseProjectFolder}
+	resendCandidates={transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />
 

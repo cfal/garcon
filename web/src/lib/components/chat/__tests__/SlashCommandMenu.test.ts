@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/api/commands.js', () => ({
@@ -448,6 +449,8 @@ describe('SlashCommandMenu', () => {
 		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledTimes(2));
 		expect(await screen.findByText('/recovered-command')).toBeTruthy();
 		first.resolve([]);
+		await tick();
+		expect(screen.getByText('/recovered-command')).toBeTruthy();
 	});
 
 	it('hides cached discovered commands while keeping built-ins available', async () => {

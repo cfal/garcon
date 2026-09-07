@@ -62,6 +62,41 @@ describe('ProjectResolutionStore', () => {
 		expect(store.snapshotFor(target)).toEqual({ kind: 'unchecked' });
 	});
 
+	it('fences a released record from a later lease for the same target', async () => {
+		const stale = deferred<{
+			target: typeof target;
+			resolution: { kind: 'available'; effectiveProjectKey: string };
+		}>();
+		const fetchResolution = vi
+			.fn()
+			.mockReturnValueOnce(stale.promise)
+			.mockResolvedValueOnce({
+				target,
+				resolution: { kind: 'available' as const, effectiveProjectKey: '/real/current' },
+			});
+		const store = new ProjectResolutionStore(fetchResolution);
+		const first = store.retain(target);
+		const firstResolution = first.resolve();
+		first.release();
+		const replacement = store.retain(target);
+
+		stale.resolve({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: '/real/stale' },
+		});
+		await firstResolution;
+
+		expect(first.snapshot).toEqual({ kind: 'unchecked' });
+		expect(replacement.snapshot).toEqual({ kind: 'unchecked' });
+		await replacement.resolve();
+		expect(fetchResolution).toHaveBeenCalledTimes(2);
+		expect(replacement.snapshot).toEqual({
+			kind: 'available',
+			effectiveProjectKey: '/real/current',
+		});
+		replacement.release();
+	});
+
 	it('preserves an available observation while a fresh resolution is pending', async () => {
 		const refresh = deferred<{
 			target: typeof target;
@@ -154,7 +189,10 @@ describe('ProjectResolutionStore', () => {
 		const destination = { ...target, projectPath: '/workspace/replacement' } as const;
 		const fetchResolution = vi.fn(async (requested: ProjectTarget) => ({
 			target: requested,
-			resolution: { kind: 'available' as const, effectiveProjectKey: `/real${requested.projectPath}` },
+			resolution: {
+				kind: 'available' as const,
+				effectiveProjectKey: `/real${requested.projectPath}`,
+			},
 		}));
 		const store = new ProjectResolutionStore(fetchResolution);
 		const oldLease = store.retain(target);
@@ -178,19 +216,16 @@ describe('ProjectResolutionStore', () => {
 		const destination = { ...target, projectPath: '/workspace/replacement' } as const;
 		const oldResult = deferred<never>();
 		const onBindingChanged = vi.fn();
-		const store = new ProjectResolutionStore(
-			async (requested) => {
-				if (requested.projectPath === target.projectPath) return oldResult.promise;
-				return {
-					target: requested,
-					resolution: {
-						kind: 'available',
-						effectiveProjectKey: '/real/replacement',
-					} as const,
-				};
-			},
-			onBindingChanged,
-		);
+		const store = new ProjectResolutionStore(async (requested) => {
+			if (requested.projectPath === target.projectPath) return oldResult.promise;
+			return {
+				target: requested,
+				resolution: {
+					kind: 'available',
+					effectiveProjectKey: '/real/replacement',
+				} as const,
+			};
+		}, onBindingChanged);
 		const oldLease = store.retain(target);
 		const destinationLease = store.retain(destination);
 		const oldPending = oldLease.resolve();
@@ -299,6 +334,30 @@ describe('ProjectResolutionStore', () => {
 		expect(fetchResolution).toHaveBeenCalledTimes(2);
 		firstA.release();
 		secondA.release();
+	});
+
+	it('removes retained targets and resets the chat lifecycle revision', async () => {
+		const fetchResolution = vi.fn(async (requested: ProjectTarget) => ({
+			target: requested,
+			resolution: { kind: 'available' as const, effectiveProjectKey: '/real/project' },
+		}));
+		const store = new ProjectResolutionStore(fetchResolution);
+		const initialLifecycleKey = store.lifecycleKey(target);
+		store.markObsoleteChatTargets(CHAT_ID, target.projectPath);
+		const boundLifecycleKey = store.lifecycleKey(target);
+		const lease = store.retain(target);
+		await lease.resolve();
+
+		store.removeChatTargets(CHAT_ID);
+
+		expect(boundLifecycleKey).not.toBe(initialLifecycleKey);
+		expect(store.lifecycleKey(target)).toBe(initialLifecycleKey);
+		expect(lease.snapshot).toEqual({ kind: 'unchecked' });
+		expect(store.snapshotFor(target)).toEqual({ kind: 'unchecked' });
+		const replacement = store.retain(target);
+		expect(replacement.snapshot).toEqual({ kind: 'unchecked' });
+		lease.release();
+		replacement.release();
 	});
 
 	it('does not let released leases start or supersede requests', async () => {

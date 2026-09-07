@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FileMentionMenuTestHost from './FileMentionMenuTestHost.svelte';
 import { getFileList } from '$lib/api/files.js';
@@ -92,6 +93,8 @@ describe('FileMentionMenu', () => {
 		await waitFor(() => expect(getFileList).toHaveBeenCalledTimes(2));
 		expect(await screen.findByText('recovered.ts')).toBeTruthy();
 		first.resolve([]);
+		await tick();
+		expect(screen.getByText('recovered.ts')).toBeTruthy();
 	});
 
 	it('blocks cached file selection while the project is unavailable', async () => {

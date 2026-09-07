@@ -53,7 +53,7 @@ export interface ConversationPanelActions {
 	deleteQueue(surfaceId: ChatViewSurfaceId, chatId: string, entryId: string): Promise<void>;
 	stop(surfaceId: ChatViewSurfaceId, chatId: string): Promise<void>;
 	openCommit(surfaceId: ChatViewSurfaceId, chatId: string): void;
-	toggleBranch(surfaceId: ChatViewSurfaceId, chatId: string): void;
+	toggleBranch(surfaceId: ChatViewSurfaceId, chatId: string): Promise<void>;
 	closeBranch(surfaceId: ChatViewSurfaceId, chatId: string): void;
 	createBranch(surfaceId: ChatViewSurfaceId, chatId: string): void;
 	switchBranch(surfaceId: ChatViewSurfaceId, chatId: string, branch: string): Promise<void>;

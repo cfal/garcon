@@ -170,10 +170,10 @@ describe('GitTargetSessionController', () => {
 			signal = options?.signal ?? undefined;
 			return load.promise;
 		});
-		const { session } = createSession({});
+		const { session, changes } = createSession({});
 		setProject(session, '/project', 'chat-project');
 		session.setPresentationVisible(true);
-		void session.activate();
+		const activation = session.activate();
 		session.showTargetDialog = true;
 		session.branches.showBranchDropdown = true;
 
@@ -188,6 +188,10 @@ describe('GitTargetSessionController', () => {
 		expect(session.branches.showBranchDropdown).toBe(false);
 		expect(session.isLoadingTargets).toBe(false);
 		load.resolve({ targets: [candidate('/stale')] });
+		await activation;
+		expect(changes).toEqual([]);
+		expect(session.activeProjectPath).toBe('/project');
+		expect(session.targets).toEqual([]);
 	});
 
 	it('starts a new activation when the same project recovers after a definitive failure', async () => {
@@ -261,6 +265,7 @@ describe('GitTargetSessionController', () => {
 	);
 
 	it('does not apply a manual target refresh after project identity fails', async () => {
+		const recovery = deferred<{ targets: GitTargetCandidate[] }>();
 		api.getGitTargetCandidates.mockResolvedValueOnce({ targets: [candidate('/project')] });
 		const { session, changes } = createSession({});
 		setProject(session, '/project', 'chat-project');
@@ -275,6 +280,7 @@ describe('GitTargetSessionController', () => {
 				);
 			});
 		});
+		api.getGitTargetCandidates.mockReturnValueOnce(recovery.promise);
 
 		const refreshing = session.refreshTargets();
 		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
@@ -284,11 +290,14 @@ describe('GitTargetSessionController', () => {
 			reason: 'not-found',
 		});
 		setProject(session, '/project', 'chat-project');
+		const recoveryActivation = session.activate();
 
 		await refreshing;
-		await vi.waitFor(() => {
-			expect(changes.filter((change) => change.reason === 'project')).toHaveLength(2);
-		});
+		expect(changes.map((change) => change.reason)).toEqual(['project']);
+		recovery.resolve({ targets: [candidate('/recovered')] });
+		await recoveryActivation;
+		expect(changes.map((change) => change.reason)).toEqual(['project', 'project']);
+		expect(session.activeProjectPath).toBe('/recovered');
 	});
 
 	it('restores only its own cached target when switching chat projects', async () => {
@@ -432,10 +441,7 @@ describe('GitTargetSessionController', () => {
 				const result = await execute();
 				if (result.success) {
 					invalidationVersion += 1;
-					await context.session?.refreshForInvalidation(
-						effectiveProjectKey,
-						invalidationVersion,
-					);
+					await context.session?.refreshForInvalidation(effectiveProjectKey, invalidationVersion);
 				}
 				return result;
 			},
@@ -452,18 +458,14 @@ describe('GitTargetSessionController', () => {
 		created.session.setPresentationVisible(true);
 		await created.session.activate();
 
-		await expect(
-			created.session.switchBranch('feature', 'local-branch'),
-		).resolves.toBe(true);
-		await expect(
-			created.session.refreshForInvalidation('chat', invalidationVersion),
-		).resolves.toBe(false);
+		await expect(created.session.switchBranch('feature', 'local-branch')).resolves.toBe(true);
+		await expect(created.session.refreshForInvalidation('chat', invalidationVersion)).resolves.toBe(
+			false,
+		);
 
 		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
 		expect(created.changes.filter((change) => change.reason === 'checkout')).toHaveLength(1);
-		expect(created.changes.filter((change) => change.reason === 'invalidation')).toHaveLength(
-			0,
-		);
+		expect(created.changes.filter((change) => change.reason === 'invalidation')).toHaveLength(0);
 	});
 
 	it('replays checkout invalidation after project availability interrupts reconciliation', async () => {
@@ -547,12 +549,8 @@ describe('GitTargetSessionController', () => {
 		second.setPresentationVisible(true);
 		await Promise.all([first.activate(), second.activate()]);
 
-		await first.selectTarget(
-			candidate('/repo/a', { isCurrent: false, source: 'worktree' }),
-		);
-		await second.selectTarget(
-			candidate('/repo/b', { isCurrent: false, source: 'worktree' }),
-		);
+		await first.selectTarget(candidate('/repo/a', { isCurrent: false, source: 'worktree' }));
+		await second.selectTarget(candidate('/repo/b', { isCurrent: false, source: 'worktree' }));
 
 		expect(first.activeProjectPath).toBe('/repo/a');
 		expect(second.activeProjectPath).toBe('/repo/b');

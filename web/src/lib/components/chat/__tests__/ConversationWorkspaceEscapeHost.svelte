@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import ConversationWorkspace from '../ConversationWorkspace.svelte';
 	import ConversationPanel from '../ConversationPanel.svelte';
@@ -49,6 +49,7 @@
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import GitBranchSelector from '$lib/components/git/GitBranchSelector.svelte';
 	import type { FocusOwner } from '$lib/workspace/surface-types.js';
+	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
 		onPatchActivity?: (chatId: string, timestamp: string) => void;
@@ -206,19 +207,7 @@
 			return workspaceFocusOwner;
 		},
 		set focusOwner(owner: FocusOwner) {
-			if (
-				owner.kind === workspaceFocusOwner.kind &&
-				(owner.kind === 'chat-list' ||
-					(owner.kind === 'surface' &&
-						workspaceFocusOwner.kind === 'surface' &&
-						owner.surfaceId === workspaceFocusOwner.surfaceId) ||
-					(owner.kind === 'window-chrome' &&
-						workspaceFocusOwner.kind === 'window-chrome' &&
-						owner.windowId === workspaceFocusOwner.windowId &&
-						owner.surfaceId === workspaceFocusOwner.surfaceId))
-			) {
-				return;
-			}
+			if (sameFocusOwner(workspaceFocusOwner, owner)) return;
 			workspaceFocusOwner = owner;
 			workspaceFocusOwnerRevision += 1;
 		},
@@ -289,6 +278,7 @@
 
 	const subagentToolbar = new SubagentToolbarState();
 	let panelActions = $state.raw<ConversationPanelActions | null>(null);
+	let branchAction = Promise.resolve();
 	let showTestLayer = $state(false);
 	let testLayerIsComposerEditor = $state(false);
 	let testLayerElement = $state<HTMLElement | null>(null);
@@ -307,6 +297,16 @@
 			restoreFocus: () => {},
 		});
 	});
+
+	function startBranchToggle(): void {
+		branchAction =
+			panelActions?.toggleBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id) ?? Promise.resolve();
+	}
+
+	export async function waitForBranchAction(): Promise<void> {
+		await branchAction;
+		await tick();
+	}
 </script>
 
 <KeyboardShortcuts />
@@ -337,11 +337,7 @@
 	}}>Toggle processing</button
 >
 <button type="button" onclick={() => (selectedChat.status = 'draft')}>Set draft status</button>
-<button
-	type="button"
-	onclick={() => panelActions?.toggleBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
-	>Open branch dropdown</button
->
+<button type="button" onclick={startBranchToggle}>Open branch dropdown</button>
 <button type="button" onclick={() => (workspace.focusOwner = { kind: 'chat-list' })}
 	>Move command ownership</button
 >
@@ -363,7 +359,7 @@
 	sort={quickGitBranches.branchSort}
 	isOpen={quickGitBranches.showBranchDropdown}
 	isLoading={quickGitBranches.isLoadingBranches}
-	onToggle={() => panelActions?.toggleBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
+	onToggle={startBranchToggle}
 	onClose={() => panelActions?.closeBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
 	onCreateBranch={() => panelActions?.createBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
 	onSwitchBranch={(branch) =>

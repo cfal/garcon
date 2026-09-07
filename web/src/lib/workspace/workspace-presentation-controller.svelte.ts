@@ -75,7 +75,7 @@ function removeTransientMobileGitViews(
 	}));
 }
 
-function sameFocusOwner(left: FocusOwner, right: FocusOwner): boolean {
+export function sameFocusOwner(left: FocusOwner, right: FocusOwner): boolean {
 	if (left.kind !== right.kind) return false;
 	if (left.kind === 'chat-list') return true;
 	if (right.kind === 'chat-list') return false;
