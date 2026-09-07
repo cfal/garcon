@@ -36,6 +36,45 @@ const chat: ChatSessionRecord = {
 };
 
 describe('Canvas forms', () => {
+	it('rejects selected edges and endpoints removed while connecting', async () => {
+		const connect = vi.fn();
+		const view = render(CanvasConnectionDialog, {
+			nodes: canvasContent().nodes,
+			chats: {},
+			initialSource: 'edge',
+			onconnect: connect,
+			onclose: vi.fn(),
+		});
+		await fireEvent.change(screen.getByLabelText('To'), { target: { value: 'box-b' } });
+		const form = screen.getByLabelText('From').closest('form')!;
+		await fireEvent.submit(form);
+		expect(connect).not.toHaveBeenCalled();
+		await fireEvent.change(screen.getByLabelText('From'), { target: { value: 'box-a' } });
+		await view.rerender({ nodes: canvasContent().nodes.filter((node) => node.id !== 'box-b') });
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Connect' }).disabled).toBe(true);
+		await fireEvent.submit(form);
+		expect(connect).not.toHaveBeenCalled();
+	});
+
+	it('requires a current box after its selected destination disappears', async () => {
+		const add = vi.fn();
+		const view = render(CanvasChatPicker, {
+			chats: [chat],
+			boxes: canvasContent().nodes.filter((node) => node.type === 'box'),
+			initialBox: 'box-a',
+			capacity: 1,
+			onadd: add,
+			onclose: vi.fn(),
+		});
+		await fireEvent.click(screen.getByRole('checkbox'));
+		await view.rerender({ boxes: [] });
+		await fireEvent.submit(screen.getByRole('searchbox').closest('form')!);
+		expect(add).not.toHaveBeenCalled();
+		await fireEvent.change(screen.getByLabelText('Move to box'), { target: { value: '' } });
+		await fireEvent.submit(screen.getByRole('searchbox').closest('form')!);
+		expect(add).toHaveBeenCalledExactlyOnceWith([chat.id], null);
+	});
+
 	it('gates name submission for empty names and in-flight saves, and keeps failures reviewable', async () => {
 		const response = deferred<boolean>();
 		const submit = vi.fn(() => response.promise);

@@ -22,6 +22,11 @@
 	let query = $state('');
 	let selected = $state<ReadonlySet<string>>(new Set());
 	let boxId = $state(untrack(() => initialBox));
+	const canAdd = $derived(
+		selected.size > 0 &&
+			selected.size <= capacity &&
+			(!boxId || boxes.some((box) => box.id === boxId)),
+	);
 	const matches = $derived(
 		chats
 			.filter((chat) =>
@@ -39,7 +44,7 @@
 	}
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
-		if (!selected.size || selected.size > capacity) return;
+		if (!canAdd) return;
 		onadd([...selected], boxId || null);
 		onclose();
 	}
@@ -102,9 +107,7 @@
 			<div class="flex items-center justify-between gap-2">
 				<span class="text-xs text-muted-foreground"
 					>{m.canvas_selection_count({ count: selected.size })}</span
-				><button class="canvas-button" disabled={!selected.size || selected.size > capacity}
-					>{m.canvas_add_selected()}</button
-				>
+				><button class="canvas-button" disabled={!canAdd}>{m.canvas_add_selected()}</button>
 			</div>
 		</form>
 	</Dialog.Content>

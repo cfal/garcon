@@ -20,6 +20,11 @@
 	let source = $state(untrack(() => initialSource));
 	let target = $state('');
 	let label = $state('');
+	const canConnect = $derived(
+		source !== target &&
+			nodes.some((node) => node.id === source) &&
+			nodes.some((node) => node.id === target),
+	);
 	function title(node: CanvasNode) {
 		return node.type === 'box'
 			? node.title
@@ -27,7 +32,7 @@
 	}
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
-		if (!source || !target || source === target) return;
+		if (!canConnect) return;
 		onconnect(source, target, label);
 		onclose();
 	}
@@ -75,9 +80,7 @@
 				/></label
 			>
 			<div class="flex justify-end">
-				<button class="canvas-button" disabled={!source || !target || source === target}
-					>{m.canvas_connect()}</button
-				>
+				<button class="canvas-button" disabled={!canConnect}>{m.canvas_connect()}</button>
 			</div>
 		</form>
 	</Dialog.Content>

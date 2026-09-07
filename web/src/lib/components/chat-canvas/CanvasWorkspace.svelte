@@ -286,7 +286,7 @@
 			<CanvasConnectionDialog
 				nodes={content.nodes}
 				chats={chatsById}
-				initialSource={[...ui.selectedIds][0] ?? ''}
+				initialSource={content.nodes.find((node) => ui.selectedIds.has(node.id))?.id ?? ''}
 				onclose={() => (ui.dialog = null)}
 				onconnect={(source, target, label) => {
 					if (disabled || content.connections.length >= CANVAS_MAX_CONNECTIONS) return;
