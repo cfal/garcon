@@ -22,36 +22,56 @@ export async function collapseCanonicalFilesWindow(page: Page): Promise<void> {
   );
 }
 
-async function workspaceWindowAddAction(page: Page, label: string, windowId?: string) {
-  const workspaceWindow = page.locator(
-    windowId
-      ? `[data-workspace-window-id="${windowId}"]`
-      : '[data-workspace-window-current="true"]',
-  );
-  await workspaceWindow.waitFor({ state: 'visible' });
-  const addControls = workspaceWindow.locator('[data-workspace-window-add-controls]');
-  const inlineAction = addControls.getByRole('button', {
-    name: label,
-    exact: true,
-  });
-  if ((await inlineAction.count()) > 0) return inlineAction;
-
-  await addControls.locator('[data-workspace-window-add-trigger]').click();
-  return page.getByRole('menuitem', { name: label, exact: true });
-}
-
 export async function clickWorkspaceWindowAddAction(
   page: Page,
   label: string,
   windowId?: string,
 ): Promise<void> {
-  await (await workspaceWindowAddAction(page, label, windowId)).click();
-}
+  await page.waitForFunction(
+    ({ expectedLabel, expectedWindowId }) => {
+      const workspaceWindow = expectedWindowId
+        ? [...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]')].find(
+            (element) => element.dataset.workspaceWindowId === expectedWindowId,
+          )
+        : document.querySelector<HTMLElement>('[data-workspace-window-current="true"]');
+      const addControls = workspaceWindow?.querySelector<HTMLElement>(
+        '[data-workspace-window-add-controls]',
+      );
+      const inlineAction = [
+        ...(addControls?.querySelectorAll<HTMLButtonElement>(
+          '[data-workspace-window-add-inline]',
+        ) ?? []),
+      ].find((button) => button.getAttribute('aria-label') === expectedLabel);
+      const menu = [
+        ...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]'),
+      ].find(
+        (element) =>
+          element.dataset.workspaceWindowAddMenu === workspaceWindow?.dataset.workspaceWindowId,
+      );
+      const menuAction = [...(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])].find(
+        (element) =>
+          (element.getAttribute('aria-label') || element.textContent?.trim()) === expectedLabel,
+      );
+      const action = inlineAction ?? menuAction;
 
-export async function waitForWorkspaceWindowAddActionEnabled(
-  page: Page,
-  label: string,
-  windowId?: string,
-): Promise<void> {
-  await (await workspaceWindowAddAction(page, label, windowId)).click({ trial: true });
+      if (action) {
+        if (
+          (action instanceof HTMLButtonElement && action.disabled) ||
+          action.getAttribute('aria-disabled') === 'true'
+        ) {
+          return false;
+        }
+        action.click();
+        return true;
+      }
+
+      const trigger = addControls?.querySelector<HTMLButtonElement>(
+        '[data-workspace-window-add-trigger]',
+      );
+      if (trigger?.getAttribute('aria-expanded') !== 'true') trigger?.click();
+      return false;
+    },
+    { expectedLabel: label, expectedWindowId: windowId },
+    { timeout: 20_000 },
+  );
 }

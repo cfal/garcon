@@ -844,55 +844,78 @@ export class SpaDriver {
 
   async clickWorkspaceWindowAddAction(name: string, windowId?: string): Promise<void> {
     const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
-    const inlineStatus = await this.#page.evaluate(
-      ({ expectedName, expectedWindowId }) => {
-        const workspaceWindow = document.querySelector<HTMLElement>(
-          `[data-workspace-window-id="${expectedWindowId}"]`,
-        );
-        const action = [
-          ...(workspaceWindow?.querySelectorAll<HTMLButtonElement>(
-            '[data-workspace-window-add-inline]',
-          ) ?? []),
-        ].find((button) => button.getAttribute('aria-label') === expectedName);
-        if (!action) return 'menu';
-        if (action.disabled || action.getAttribute('aria-disabled') === 'true') return 'disabled';
-        action.click();
-        return 'clicked';
-      },
-      { expectedName: name, expectedWindowId: targetWindowId },
-    );
-    if (inlineStatus === 'clicked') return;
-    if (inlineStatus === 'disabled') throw new Error(`Workspace add action is disabled: ${name}`);
-
-    await this.openWorkspaceWindowAddMenu(targetWindowId);
-    await this.waitForMenuItemEnabled(name);
-    await this.clickMenuItem(name);
+    await this.#waitForWorkspaceWindowAddAction(name, targetWindowId, 'activate');
   }
 
   async waitForWorkspaceWindowAddActionEnabled(name: string, windowId?: string): Promise<void> {
     const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
-    const inlineStatus = await this.#page.evaluate(
-      ({ expectedName, expectedWindowId }) => {
-        const workspaceWindow = document.querySelector<HTMLElement>(
-          `[data-workspace-window-id="${expectedWindowId}"]`,
-        );
-        const action = [
-          ...(workspaceWindow?.querySelectorAll<HTMLButtonElement>(
-            '[data-workspace-window-add-inline]',
-          ) ?? []),
-        ].find((button) => button.getAttribute('aria-label') === expectedName);
-        if (!action) return 'menu';
-        return action.disabled || action.getAttribute('aria-disabled') === 'true'
-          ? 'disabled'
-          : 'enabled';
-      },
-      { expectedName: name, expectedWindowId: targetWindowId },
-    );
-    if (inlineStatus === 'enabled') return;
-    if (inlineStatus === 'disabled') throw new Error(`Workspace add action is disabled: ${name}`);
+    await this.#waitForWorkspaceWindowAddAction(name, targetWindowId, 'observe');
+  }
 
-    await this.openWorkspaceWindowAddMenu(targetWindowId);
-    await this.waitForMenuItemEnabled(name);
+  async #waitForWorkspaceWindowAddAction(
+    name: string,
+    windowId: string,
+    intent: 'activate' | 'observe',
+  ): Promise<void> {
+    try {
+      await this.#page.waitForFunction(
+        ({ expectedName, expectedWindowId, expectedIntent }) => {
+          const workspaceWindow = document.querySelector<HTMLElement>(
+            `[data-workspace-window-id="${expectedWindowId}"]`,
+          );
+          const addControls = workspaceWindow?.querySelector<HTMLElement>(
+            '[data-workspace-window-add-controls]',
+          );
+          const inlineAction = [
+            ...(addControls?.querySelectorAll<HTMLButtonElement>(
+              '[data-workspace-window-add-inline]',
+            ) ?? []),
+          ].find((button) => button.getAttribute('aria-label') === expectedName);
+          const menu = [
+            ...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]'),
+          ].find((element) => element.dataset.workspaceWindowAddMenu === expectedWindowId);
+          const menuAction = [
+            ...(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []),
+          ].find(
+            (element) =>
+              (element.getAttribute('aria-label') || element.textContent?.trim()) === expectedName,
+          );
+          const action = inlineAction ?? menuAction;
+
+          if (action) {
+            if (
+              (action instanceof HTMLButtonElement && action.disabled) ||
+              action.getAttribute('aria-disabled') === 'true'
+            ) {
+              return false;
+            }
+            if (expectedIntent === 'activate') action.click();
+            return true;
+          }
+
+          const trigger = addControls?.querySelector<HTMLButtonElement>(
+            '[data-workspace-window-add-trigger]',
+          );
+          if (trigger?.getAttribute('aria-expanded') !== 'true') trigger?.click();
+          return false;
+        },
+        { timeout: 20_000 },
+        {
+          expectedName: name,
+          expectedWindowId: windowId,
+          expectedIntent: intent,
+        },
+      );
+    } catch (error) {
+      // Lightpanda can collect the CDP promise when activation unmounts the menu.
+      if (
+        intent !== 'activate' ||
+        !(error instanceof Error) ||
+        !error.message.includes('Promise was collected')
+      ) {
+        throw error;
+      }
+    }
   }
 
   async clickResponsiveAction(

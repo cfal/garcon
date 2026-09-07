@@ -907,6 +907,41 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
 	});
 
+	it('restores focus when adaptive add controls move between the toolbar and menu', async () => {
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		const addLabel = m.workspace_add_to_window();
+		const firstActionLabel = m.workspace_open_surface({
+			surface: m.workspace_surface_git_workbench(),
+		});
+		const trigger = screen.getByRole('button', { name: addLabel });
+
+		trigger.focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: firstActionLabel })),
+		);
+
+		const inlineAction = screen.getByRole('button', { name: firstActionLabel });
+		inlineAction.focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: addLabel })),
+		);
+	});
+
 	it('keeps saved terminals in plus without a leading separator', async () => {
 		runtime.terminalSessions = [
 			{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },

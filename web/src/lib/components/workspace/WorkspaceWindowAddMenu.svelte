@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import {
 		DropdownMenu,
@@ -55,6 +55,7 @@
 	const terminals = getTerminalRegistry();
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
+	let addControlsElement: HTMLElement;
 	let creatingTerminal = $state(false);
 	let inlineActionCount = $state(0);
 	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
@@ -97,7 +98,8 @@
 	const menuActions = $derived(eligibleActions.slice(inlineActionCount));
 	const showMenu = $derived(menuActions.length > 0 || unplacedTerminalSessions.length > 0);
 
-	$effect(() => {
+	$effect.pre(() => {
+		const focusedElement = focusedAddControl();
 		const currentInlineCount = Math.min(
 			eligibleActions.length,
 			Math.max(
@@ -114,7 +116,30 @@
 		if (nextInlineCount !== untrack(() => inlineActionCount)) {
 			inlineActionCount = nextInlineCount;
 		}
+		if (focusedElement) void restoreAddControlFocus(focusedElement);
 	});
+
+	function focusedAddControl(): HTMLElement | null {
+		const focusedElement = document.activeElement;
+		if (!(focusedElement instanceof HTMLElement)) return null;
+		if (addControlsElement?.contains(focusedElement)) return focusedElement;
+		const menu = [
+			...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]'),
+		].find((element) => element.dataset.workspaceWindowAddMenu === windowId);
+		return menu?.contains(focusedElement) ? focusedElement : null;
+	}
+
+	async function restoreAddControlFocus(previouslyFocused: HTMLElement): Promise<void> {
+		await tick();
+		if (previouslyFocused.isConnected || document.activeElement !== document.body) return;
+		const trigger = addControlsElement?.querySelector<HTMLButtonElement>(
+			'[data-workspace-window-add-trigger]',
+		);
+		const firstInlineAction = addControlsElement?.querySelector<HTMLButtonElement>(
+			'[data-workspace-window-add-inline]:not(:disabled)',
+		);
+		(trigger ?? firstInlineAction)?.focus();
+	}
 
 	function canOffer(kind: PortableSingletonKind): boolean {
 		return (
@@ -153,7 +178,11 @@
 	}
 </script>
 
-<div class="flex shrink-0 items-center gap-0.5" data-workspace-window-add-controls={windowId}>
+<div
+	bind:this={addControlsElement}
+	class="flex shrink-0 items-center gap-0.5"
+	data-workspace-window-add-controls={windowId}
+>
 	{#each inlineActions as action (action.id)}
 		<button
 			type="button"
