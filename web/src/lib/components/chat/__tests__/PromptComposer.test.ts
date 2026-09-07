@@ -1846,9 +1846,10 @@ describe('PromptComposer focus', () => {
 			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
 		}));
 		const onChooseProjectFolder = vi.fn();
-		render(PromptComposerTestHost, {
+		const { container } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-project-unavailable',
 			selectedStatus: 'running',
+			chatMaxWidth: 'small',
 			fetchProjectResolution,
 			onChooseProjectFolder,
 		});
@@ -1856,6 +1857,12 @@ describe('PromptComposer focus', () => {
 		await fireEvent.input(textarea, { target: { value: '/' } });
 
 		await screen.findByText('Project folder unavailable');
+		const notice = container.querySelector('[data-project-availability-notice]');
+		const noticeFrame = notice?.parentElement;
+		expect(noticeFrame?.querySelector('[data-composer]')).toBeTruthy();
+		expect(noticeFrame?.className).toContain('w-full');
+		expect(noticeFrame?.className).toContain('lg:mx-auto');
+		expect(noticeFrame?.className).toContain('lg:max-w-3xl');
 		await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
 		expect(onChooseProjectFolder).toHaveBeenCalledWith('chat-project-unavailable');
 		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

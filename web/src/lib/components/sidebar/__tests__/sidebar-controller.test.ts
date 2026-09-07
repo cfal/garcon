@@ -240,6 +240,7 @@ describe('SidebarController', () => {
 					makeChat({ id: 'c-2', isPinned: true }),
 				],
 				allChats: [],
+				displayedChatIds: [],
 				selectedChatId: null,
 			});
 
@@ -264,6 +265,7 @@ describe('SidebarController', () => {
 					makeChat({ id: 'c-1', isArchived: false }),
 					makeChat({ id: 'c-2', isArchived: false }),
 				],
+				displayedChatIds: ['c-1', 'c-2'],
 				selectedChatId: 'c-1',
 			});
 
@@ -281,6 +283,7 @@ describe('SidebarController', () => {
 			const operation = controller.startBulkOperation('archive', {
 				selectedChats: [makeChat({ id: 'c-1', isArchived: false })],
 				allChats: [makeChat({ id: 'c-1', isArchived: false })],
+				displayedChatIds: ['c-1'],
 				selectedChatId: 'c-1',
 			});
 
@@ -289,6 +292,23 @@ describe('SidebarController', () => {
 				nextSelectedChatId: null,
 				shouldCreateNewChat: true,
 			});
+		});
+
+		it('plans an adjacent survivor from the displayed recent-activity order', async () => {
+			mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
+			const operation = controller.startBulkOperation('archive', {
+				selectedChats: [makeChat({ id: 'selected', isArchived: false })],
+				allChats: [
+					makeChat({ id: 'selected', isArchived: false }),
+					makeChat({ id: 'manual-order-neighbor', isArchived: false }),
+					makeChat({ id: 'recent-order-neighbor', isArchived: false }),
+				],
+				displayedChatIds: ['manual-order-neighbor', 'selected', 'recent-order-neighbor'],
+				selectedChatId: 'selected',
+			});
+
+			expect(operation.nextSelectedChatId).toBe('recent-order-neighbor');
+			await operation.completion;
 		});
 	});
 });

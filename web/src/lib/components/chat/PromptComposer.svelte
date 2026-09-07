@@ -944,30 +944,27 @@
 {/snippet}
 
 <div class={composerShellClass} data-composer-shell>
-	{#if selectedProjectTarget && selectedProjectResolution.kind === 'unavailable'}
-		<div class="mb-2 rounded-lg border border-border bg-card px-4 py-3">
-			<ProjectAvailabilityNotice
-				projectPath={selectedProjectTarget.projectPath}
-				reason={selectedProjectResolution.reason}
-				onRetry={() => projectState.retry()}
-				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
-					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
-					: undefined}
-			/>
-		</div>
-	{:else if selectedProjectTarget && selectedProjectResolution.kind === 'request-failed'}
-		<div class="mb-2 rounded-lg border border-border bg-card px-4 py-3">
-			<ProjectAvailabilityNotice
-				projectPath={selectedProjectTarget.projectPath}
-				requestError={selectedProjectResolution.message}
-				onRetry={() => projectState.retry()}
-				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
-					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
-					: undefined}
-			/>
-		</div>
-	{/if}
 	<div class={composerFrameWrapperClass}>
+		{#if selectedProjectTarget && (selectedProjectResolution.kind === 'unavailable' || selectedProjectResolution.kind === 'request-failed')}
+			<div
+				class="mb-2 rounded-lg border border-border bg-card px-4 py-3"
+				data-project-availability-notice
+			>
+				<ProjectAvailabilityNotice
+					projectPath={selectedProjectTarget.projectPath}
+					reason={selectedProjectResolution.kind === 'unavailable'
+						? selectedProjectResolution.reason
+						: undefined}
+					requestError={selectedProjectResolution.kind === 'request-failed'
+						? selectedProjectResolution.message
+						: undefined}
+					onRetry={() => projectState.retry()}
+					onChooseFolder={canChooseProjectFolder && sessions.selectedChat
+						? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
+						: undefined}
+				/>
+			</div>
+		{/if}
 		{@render composerFrame()}
 	</div>
 </div>

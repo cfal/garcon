@@ -358,6 +358,7 @@
 		const operation = controller.startBulkOperation(action, {
 			selectedChats,
 			allChats: chats,
+			displayedChatIds,
 			selectedChatId,
 		});
 		if (operation.nextSelectedChatId) {
