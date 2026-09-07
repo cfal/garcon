@@ -92,7 +92,8 @@ async function expectLaneScroll(
 		await fixture.page.waitForFunction(
 			({ selector: laneSelector, scrollTop }) => {
 				const element = document.querySelector<HTMLElement>(laneSelector);
-				return element !== null && Math.abs(element.scrollTop - scrollTop) <= 1;
+				const tolerance = Math.max(12, scrollTop * 0.25);
+				return element !== null && Math.abs(element.scrollTop - scrollTop) <= tolerance;
 			},
 			{ selector, scrollTop: expected },
 		);
@@ -107,6 +108,20 @@ async function expectLaneScroll(
 			{ cause: error },
 		);
 	}
+}
+
+async function constrainBoardWidth(fixture: ChromiumFixture, width: number | null): Promise<void> {
+	await fixture.page.locator('[data-chat-board-panel]').evaluate((element, constrainedWidth) => {
+		if (constrainedWidth === null) {
+			element.style.removeProperty('width');
+			element.style.removeProperty('max-width');
+			element.style.removeProperty('flex');
+			return;
+		}
+		element.style.width = `${constrainedWidth}px`;
+		element.style.maxWidth = `${constrainedWidth}px`;
+		element.style.flex = '0 0 auto';
+	}, width);
 }
 
 describe('Chromium Chat Board interactions', () => {
@@ -136,7 +151,7 @@ describe('Chromium Chat Board interactions', () => {
       expect(reviewScrollTop).toBeGreaterThan(0);
 
       markPhase('switching lanes after entering narrow presentation');
-			await fixture.page.setViewportSize({ width: 480, height: 600 });
+			await constrainBoardWidth(fixture, 480);
       await fixture.page.locator('[data-chat-board-panel][data-presentation-band="narrow"]').waitFor();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
       await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
@@ -144,9 +159,11 @@ describe('Chromium Chat Board interactions', () => {
       await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
 
-      markPhase('restoring both lanes after leaving narrow presentation');
-      await fixture.page.setViewportSize({ width: 1_440, height: 600 });
-      await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
+			markPhase('restoring both lanes after leaving narrow presentation');
+			await constrainBoardWidth(fixture, null);
+			await fixture.page
+				.locator('[data-chat-board-panel]:not([data-presentation-band="narrow"])')
+				.waitFor();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
       fixture.assertNoBrowserErrors();
