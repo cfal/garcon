@@ -92,6 +92,7 @@ function deferred<T>() {
 function createHarness(
 	options: {
 		chats?: ChatSessionRecord[];
+		displayedChatIds?: readonly string[];
 		selectedChatId?: string | null;
 		onReloadChat?: (chatId: string) => Promise<void> | void;
 	} = {},
@@ -129,6 +130,9 @@ function createHarness(
 	const deps = {
 		get chats() {
 			return chats;
+		},
+		get displayedChatIds() {
+			return options.displayedChatIds ?? chats.map((chat) => chat.id);
 		},
 		get selectedChatId() {
 			return selectedChatId;
@@ -205,6 +209,23 @@ describe('ChatActionController', () => {
 
 		expect(callbacks.onQuietRefresh).toHaveBeenCalledOnce();
 		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+	});
+
+	it('selects an adjacent chat from the displayed recent-activity order', async () => {
+		const { controller, callbacks } = createHarness({
+			chats: [
+				makeChat({ id: 'selected' }),
+				makeChat({ id: 'manual-order-neighbor' }),
+				makeChat({ id: 'recent-order-neighbor' }),
+			],
+			displayedChatIds: ['manual-order-neighbor', 'selected', 'recent-order-neighbor'],
+			selectedChatId: 'selected',
+		});
+
+		await controller.toggleArchive('selected');
+
+		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+		expect(callbacks.onSelectChat).toHaveBeenCalledWith('recent-order-neighbor');
 	});
 
 	it('creates a new chat when archiving the only selected chat', async () => {

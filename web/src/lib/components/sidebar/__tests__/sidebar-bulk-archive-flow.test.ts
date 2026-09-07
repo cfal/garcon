@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
@@ -62,12 +62,13 @@ describe('sidebar bulk archive flow', () => {
 		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
 		const listChats = vi.fn(async () => ({
 			sessions: [
-				makeServerChat('next', false, '2026-01-01T00:00:00.000Z'),
+				makeServerChat('recent-order-neighbor', false, '2026-01-01T00:00:00.000Z'),
 				makeServerChat('selected', true, '2026-02-01T00:00:00.000Z'),
+				makeServerChat('manual-order-neighbor', false, '2026-03-01T00:00:00.000Z'),
 				makeServerChat('archived', true, '2026-03-01T00:00:00.000Z'),
 			],
-			total: 3,
-			lastSelectedChatId: 'next',
+			total: 4,
+			lastSelectedChatId: 'recent-order-neighbor',
 		}));
 		const chatSessions = new ChatSessionsStore({
 			toggleArchive: chatsApi.toggleArchive,
@@ -75,7 +76,8 @@ describe('sidebar bulk archive flow', () => {
 		});
 		chatSessions.upsertFromServer([
 			makeServerChat('selected', false, '2026-02-01T00:00:00.000Z'),
-			makeServerChat('next', false, '2026-01-01T00:00:00.000Z'),
+			makeServerChat('manual-order-neighbor', false, '2026-03-01T00:00:00.000Z'),
+			makeServerChat('recent-order-neighbor', false, '2026-01-01T00:00:00.000Z'),
 			makeServerChat('archived', true, '2026-03-01T00:00:00.000Z'),
 		]);
 		const onChatSelect = vi.fn();
@@ -87,13 +89,17 @@ describe('sidebar bulk archive flow', () => {
 			onChatSelect,
 		});
 
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Chat actions' })[0]);
+		const selectedRow = container.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-row="selected"]',
+		);
+		if (!selectedRow) throw new Error('Selected chat row was not rendered.');
+		await fireEvent.click(within(selectedRow).getByRole('button', { name: 'Chat actions' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Archive' }));
 
 		expect(chatsApi.toggleArchive).toHaveBeenCalledWith('selected');
 		expect(onChatSelect).toHaveBeenCalledOnce();
-		expect(onChatSelect).toHaveBeenCalledWith('next');
+		expect(onChatSelect).toHaveBeenCalledWith('recent-order-neighbor');
 		expect(
 			Array.from(container.querySelectorAll('[data-sidebar-virtual-list-row="archived"]')).map(
 				(row) => row.getAttribute('data-sidebar-virtual-row'),

@@ -12,6 +12,7 @@ import {
 	setChatTags,
 	updateChatProjectPath,
 } from '$lib/api/chats.js';
+import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import { createClientChatId } from '$shared/client-chat-id';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -35,6 +36,7 @@ export type SidebarBulkAction = 'pin' | 'unpin' | 'archive' | 'unarchive';
 export interface SidebarBulkOperationInput {
 	selectedChats: ChatSessionRecord[];
 	allChats: ChatSessionRecord[];
+	displayedChatIds: readonly string[];
 	selectedChatId: string | null;
 }
 
@@ -166,13 +168,21 @@ export class SidebarController {
 			return { affectedIds, nextSelectedChatId: null, shouldCreateNewChat: false };
 		}
 
-		const remaining = input.allChats.find(
-			(chat) => !affectedIds.includes(chat.id) && !chat.isArchived,
+		const affectedIdSet = new Set(affectedIds);
+		const selectableChatIds = new Set(
+			input.allChats
+				.filter((chat) => !affectedIdSet.has(chat.id) && !chat.isArchived)
+				.map((chat) => chat.id),
 		);
+		const nextSelectedChatId = resolveArchiveReplacementChatId({
+			archivingChatId: input.selectedChatId,
+			displayedChatIds: input.displayedChatIds,
+			isSelectableChat: (chatId) => selectableChatIds.has(chatId),
+		});
 		return {
 			affectedIds,
-			nextSelectedChatId: remaining?.id ?? null,
-			shouldCreateNewChat: !remaining,
+			nextSelectedChatId,
+			shouldCreateNewChat: nextSelectedChatId === null,
 		};
 	}
 }

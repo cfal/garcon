@@ -85,6 +85,20 @@
 		notifications,
 	});
 	const chatActionDialogs = new ChatActionDialogsState();
+	const displayedSidebarChatIds = $derived.by(() =>
+		buildSidebarDisplayChatIds({
+			displayedChats: sidebarSearch.filteredChats,
+			grouping: localSettings.sidebarGrouping,
+			currentTime: minuteClock.currentTime,
+			inactivityDuration: localSettings.sidebarInactivityDuration,
+			sortMode: localSettings.sidebarSortMode,
+			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
+			isChatOptimisticallyArchived: (chatId) => sessions.isChatOptimisticallyArchived(chatId),
+			optimisticArchiveOrder: sessions.orderedChats,
+			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
+			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+		}),
+	);
 	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
 	const mobileSidebarLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -100,6 +114,9 @@
 	const chatActionController = new ChatActionController({
 		get chats() {
 			return sessions.orderedChats;
+		},
+		get displayedChatIds() {
+			return displayedSidebarChatIds;
 		},
 		get selectedChatId() {
 			return sessions.selectedChatId;
@@ -185,20 +202,6 @@
 			: 16,
 	);
 	const sidebarMounted = $derived(!isMobile || appShell.sidebarOpen);
-	const displayedSidebarChatIds = $derived.by(() =>
-		buildSidebarDisplayChatIds({
-			displayedChats: sidebarSearch.filteredChats,
-			grouping: localSettings.sidebarGrouping,
-			currentTime: minuteClock.currentTime,
-			inactivityDuration: localSettings.sidebarInactivityDuration,
-			sortMode: localSettings.sidebarSortMode,
-			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
-			isChatOptimisticallyArchived: (chatId) => sessions.isChatOptimisticallyArchived(chatId),
-			optimisticArchiveOrder: sessions.orderedChats,
-			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
-			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
-		}),
-	);
 	const chatNavigation = new AppShellChatNavigationController({
 		get routeChatId() {
 			return page.params.id as string | undefined;
