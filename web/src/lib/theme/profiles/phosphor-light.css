@@ -117,7 +117,7 @@
 	--tag-orange-foreground: 24 82% 30%;
 	--tag-orange-border: 24 52% 74% / 0.5;
 	--indicator-attention: 0 78% 54%;
-	--status-processing: 186 90% 40%;
+	--status-processing: 186 90% 31%;
 	--status-processing-foreground: 186 85% 26%;
 	--status-processing-border: 186 65% 55%;
 	--status-info: 270 70% 96%;
@@ -225,8 +225,12 @@
 	--native-select-compact-radius: var(--radius);
 }
 
-:root:where([data-theme='phosphor-light']) {
-	scrollbar-color: hsl(var(--foreground) / 0.16) transparent;
+@supports not selector(::-webkit-scrollbar) {
+	:root:where([data-theme='phosphor-light']),
+	:root:where([data-theme='phosphor-light']) * {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--foreground) / 0.16) transparent;
+	}
 }
 
 :root:where([data-theme='phosphor-light']) ::selection {

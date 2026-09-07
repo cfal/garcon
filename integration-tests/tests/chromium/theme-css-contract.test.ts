@@ -41,8 +41,14 @@ describe("compiled theme CSS", () => {
     expect(appCss).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
     expect(compiledCss).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
 
-    const browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ colorScheme: "dark" });
+    const browser = await chromium.launch({
+      headless: true,
+      ignoreDefaultArgs: ["--hide-scrollbars"],
+    });
+    const context = await browser.newContext({
+      colorScheme: "dark",
+      reducedMotion: "reduce",
+    });
     const page = await context.newPage();
     await page.route(`${APP_URL}**`, async (route) => {
       const pathname = new URL(route.request().url()).pathname;
@@ -52,7 +58,21 @@ describe("compiled theme CSS", () => {
       }
       await route.fulfill({
         contentType: "text/html",
-        body: '<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background"><div id="dialog-surface" style="background:var(--dialog-surface)"><select class="select-native"><option>Theme</option></select><input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Input placeholder"><textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea></div><button id="git-action" class="bg-git-action-commit text-git-action-foreground">Commit</button><button id="git-action-hover" class="bg-git-action-commit-hover text-git-action-foreground">Commit</button><div id="dark-utility" class="bg-transparent dark:bg-input/30"></div></body></html>',
+        body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
+          <div id="dialog-surface" style="background:var(--dialog-surface)">
+            <select class="select-native"><option>Theme</option></select>
+            <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Input placeholder">
+            <textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+          </div>
+          <button id="git-action" class="bg-git-action-commit text-git-action-foreground">Commit</button>
+          <button id="git-action-hover" class="bg-git-action-commit-hover text-git-action-foreground">Commit</button>
+          <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
+          <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
+          <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
+          <div data-processing-surface="selected workspace tab" class="bg-workspace-window-tab-selected"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
+          <div data-processing-surface="inactive workspace tab" class="bg-workspace-window-tab-selected-inactive"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
+          <div id="scrollbar" style="width:100px;height:40px;overflow:scroll;scrollbar-gutter:stable"><div style="height:80px"></div></div>
+        </body></html>`,
       });
     });
 
@@ -131,6 +151,45 @@ describe("compiled theme CSS", () => {
         return { classic, phosphor };
       });
       expect(radii).toEqual({ classic: "6px", phosphor: "12px" });
+
+      for (const profile of THEME_PROFILES) {
+        const processingColors = await page.evaluate((theme) => {
+          const root = document.documentElement;
+          root.dataset.theme = theme.id;
+          root.classList.toggle("dark", theme.colorScheme === "dark");
+          return [
+            ...document.querySelectorAll<HTMLElement>(
+              "[data-processing-surface]",
+            ),
+          ].map((surface) => {
+            const indicator = surface.querySelector<HTMLElement>(
+              ".sidebar-processing-indicator, .workspace-chat-processing-indicator",
+            );
+            if (!indicator) throw new Error("Missing processing indicator");
+            return {
+              name: surface.dataset.processingSurface,
+              indicator: getComputedStyle(indicator).backgroundColor,
+              surface: getComputedStyle(surface).backgroundColor,
+            };
+          });
+        }, profile);
+        for (const colors of processingColors) {
+          expect(
+            contrastRatio(colors.indicator, colors.surface),
+            `${profile.id} processing indicator on ${colors.name}`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+      }
+
+      for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
+        const scrollbarWidth = await page.evaluate((themeId) => {
+          document.documentElement.dataset.theme = themeId;
+          const scrollbar = document.querySelector<HTMLElement>("#scrollbar");
+          if (!scrollbar) throw new Error("Missing scrollbar fixture");
+          return scrollbar.offsetWidth - scrollbar.clientWidth;
+        }, profile);
+        expect(scrollbarWidth, `${profile} scrollbar width`).toBe(10);
+      }
 
       for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
         const colors = await page.evaluate((themeId) => {

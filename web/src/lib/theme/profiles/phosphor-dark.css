@@ -224,8 +224,12 @@
 	--native-select-compact-radius: var(--radius);
 }
 
-:root:where([data-theme='phosphor-dark']) {
-	scrollbar-color: hsl(var(--foreground) / 0.16) transparent;
+@supports not selector(::-webkit-scrollbar) {
+	:root:where([data-theme='phosphor-dark']),
+	:root:where([data-theme='phosphor-dark']) * {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--foreground) / 0.16) transparent;
+	}
 }
 
 :root:where([data-theme='phosphor-dark']) ::selection {
