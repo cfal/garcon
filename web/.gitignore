@@ -7,7 +7,6 @@ node_modules
 .wrangler
 /.svelte-kit
 /build
-/.garcon-web-build.lock*
 
 # OS
 .DS_Store
