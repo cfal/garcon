@@ -1,5 +1,7 @@
-import { Database } from 'bun:sqlite';
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -16,6 +18,7 @@ import {
 
 const webRoot = path.join(repoRoot, 'web');
 export const webBuildLockPath = path.join(webRoot, '.garcon-web-build.lock');
+const webBuildSourcePath = path.join(webRoot, 'src');
 
 export class WebBuildProcessError extends Error {
   constructor(exitCode) {
@@ -25,30 +28,57 @@ export class WebBuildProcessError extends Error {
   }
 }
 
-// Keeps exclusion tied to the writer process, including across pauses and crashes.
+async function existingLockIsDirectory(lockPath) {
+  const stat = await fs.stat(lockPath).catch((error) => {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!stat) return false;
+  if (stat.isDirectory()) return true;
+  throw new Error(
+    `Web build lock path is not a directory: ${lockPath}. `
+      + 'Stop builders on the host and VM, remove the obsolete lock file, and retry.',
+  );
+}
+
+// Leaves crashed ownership in place because remote process liveness cannot be proven safely.
 export async function acquireWebBuildLock({
   lockPath = webBuildLockPath,
-  onContention = () => console.log('Another web build is running; waiting for it to finish.'),
+  onContention = () => console.log(
+    'Another web build is running; waiting for it to finish. '
+      + 'If the lock was abandoned, stop builders on the host and VM before removing it.',
+  ),
   retries = Infinity,
   retryDelay = 250,
 } = {}) {
-  const database = new Database(lockPath, { create: true });
-  database.run('PRAGMA busy_timeout = 0');
   let attempts = 0;
-  try {
-    while (true) {
-      try {
-        database.run('BEGIN EXCLUSIVE');
-        break;
-      } catch (error) {
-        if (error?.code !== 'SQLITE_BUSY' || attempts >= retries) throw error;
-        if (attempts === 0) await onContention();
-        attempts += 1;
-        await Bun.sleep(retryDelay);
-      }
+  while (true) {
+    try {
+      await fs.mkdir(lockPath);
+      break;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      if (!await existingLockIsDirectory(lockPath)) continue;
+      if (attempts >= retries) throw error;
+      if (attempts === 0) await onContention();
+      attempts += 1;
+      await Bun.sleep(retryDelay);
     }
+  }
+
+  const owner = {
+    version: 1,
+    token: randomUUID(),
+    hostname: os.hostname(),
+    pid: process.pid,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    await fs.writeFile(path.join(lockPath, 'owner.json'), `${JSON.stringify(owner)}\n`, {
+      flag: 'wx',
+    });
   } catch (error) {
-    database.close();
+    await fs.rm(lockPath, { recursive: true, force: true });
     throw error;
   }
 
@@ -56,12 +86,19 @@ export async function acquireWebBuildLock({
   return async () => {
     if (released) return;
     released = true;
-    try {
-      database.run('COMMIT');
-    } finally {
-      database.close();
-    }
+    await fs.rm(lockPath, { recursive: true, force: true });
   };
+}
+
+async function isSourceFreeBuildCurrent(cacheOptions) {
+  const sourcePath = cacheOptions.sourcePath ?? webBuildSourcePath;
+  try {
+    await fs.stat(sourcePath);
+    return false;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    return isWebBuildCurrent(cacheOptions);
+  }
 }
 
 function replaceProcessEnvironment(environment) {
@@ -101,7 +138,7 @@ export async function ensureWebBuild({
 } = {}) {
   const environment = cacheOptions.environment ?? productionWebBuildEnvironment();
   const currentOptions = { ...cacheOptions, environment };
-  if (await isWebBuildCurrent(currentOptions)) return 'current';
+  if (await isSourceFreeBuildCurrent(currentOptions)) return 'current';
 
   const release = await acquireWebBuildLock(lockOptions);
   try {

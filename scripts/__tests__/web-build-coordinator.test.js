@@ -110,6 +110,28 @@ describe('web build coordinator', () => {
     expect(await isWebBuildCurrent(fixture.cacheOptions)).toBe(true);
   });
 
+  it('waits for the lock before reusing a current mutable-source build', async () => {
+    const fixture = await createFixture();
+    await recordWebBuild(fixture.cacheOptions);
+    const release = await acquireWebBuildLock(fixture.lockOptions);
+    const waiting = deferred();
+
+    const result = ensureWebBuild({
+      cacheOptions: fixture.cacheOptions,
+      lockOptions: {
+        ...fixture.lockOptions,
+        onContention: waiting.resolve,
+      },
+    });
+    expect(await Promise.race([
+      waiting.promise.then(() => 'waiting'),
+      result.then(() => 'returned'),
+    ])).toBe('waiting');
+
+    await release();
+    expect(await result).toBe('current');
+  });
+
   it('removes the marker when compilation fails', async () => {
     const fixture = await createFixture();
     await recordWebBuild(fixture.cacheOptions);
@@ -162,7 +184,7 @@ describe('web build coordinator', () => {
       await expect(acquireWebBuildLock({
         ...fixture.lockOptions,
         retries: 0,
-      })).rejects.toMatchObject({ code: 'SQLITE_BUSY' });
+      })).rejects.toMatchObject({ code: 'EEXIST' });
     } finally {
       holder.stdin.end();
       await holder.exited;
@@ -193,7 +215,7 @@ describe('web build coordinator', () => {
     expect(await isWebBuildCurrent(fixture.cacheOptions)).toBe(true);
   });
 
-  it('releases the kernel lock only after a killed writer can no longer modify the build', async () => {
+  it('keeps a killed writer lock until explicit offline recovery', async () => {
     const fixture = await createFixture();
     const root = path.dirname(fixture.input);
     const first = spawnTransaction(fixture, 'first');
@@ -203,6 +225,10 @@ describe('web build coordinator', () => {
 
     await fs.writeFile(path.join(fixture.input, 'app.ts'), 'replacement');
     const second = spawnTransaction(fixture, 'second');
+    await waitForFile(path.join(root, 'waiting.second'));
+    await expect(fs.stat(path.join(root, 'ready.second'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    await fs.rm(fixture.lockOptions.lockPath, { recursive: true });
     await waitForFile(path.join(root, 'ready.second'));
     await fs.writeFile(path.join(root, 'publish.second'), '');
 
@@ -220,6 +246,6 @@ describe('web build coordinator', () => {
 
     await expect(acquireWebBuildLock({
       lockPath: path.join(invalidParent, 'lock'),
-    })).rejects.toMatchObject({ code: 'SQLITE_CANTOPEN' });
+    })).rejects.toMatchObject({ code: 'ENOTDIR' });
   });
 });
