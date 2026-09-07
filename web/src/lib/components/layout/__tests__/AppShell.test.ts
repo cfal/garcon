@@ -141,7 +141,9 @@ function installContext(): AppShellBreakpointWorkspace {
 			patchChat: vi.fn(),
 		},
 		appShell: {
-			sidebarOpen: false,
+			get sidebarOpen() {
+				return workspace.sidebarOpen;
+			},
 			keyboardHeight: 0,
 			showSettings: false,
 			showScheduledPrompts: false,
@@ -179,7 +181,7 @@ function installContext(): AppShellBreakpointWorkspace {
 			hasKey: vi.fn(() => false),
 			dismissKey: vi.fn(),
 		},
-		sidebarSearch: { filteredChats: [], allKnownTags: [] },
+		sidebarSearch: { filteredChats: [], allKnownTags: [], resetDialogs: vi.fn() },
 		projectCollapse: { collapsedProjectKeys: new Set<string>() },
 		ghCapability: { available: true },
 	};
@@ -236,10 +238,9 @@ describe('AppShell responsive workspace binding', () => {
 	it('uses the shared backdrop for the mobile drawer and preserves dismissal', async () => {
 		const workspace = installContext();
 		const appShell = testContext.current?.appShell as {
-			sidebarOpen: boolean;
 			setSidebarOpen: ReturnType<typeof vi.fn>;
 		};
-		appShell.sidebarOpen = true;
+		workspace.sidebarOpen = true;
 		mediaQuery.matches = true;
 		render(AppShell);
 
@@ -253,12 +254,41 @@ describe('AppShell responsive workspace binding', () => {
 
 	it('does not render the mobile drawer backdrop on desktop', async () => {
 		const workspace = installContext();
-		const appShell = testContext.current?.appShell as { sidebarOpen: boolean };
-		appShell.sidebarOpen = true;
+		workspace.sidebarOpen = true;
 		render(AppShell);
 
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
 		expect(screen.queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
+	});
+
+	it('resets the sidebar search dialog cluster when the mobile drawer closes', async () => {
+		const workspace = installContext();
+		const sidebarSearch = testContext.current?.sidebarSearch as {
+			resetDialogs: ReturnType<typeof vi.fn>;
+		};
+		workspace.sidebarOpen = true;
+		mediaQuery.matches = true;
+		render(AppShell);
+
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+		expect(sidebarSearch.resetDialogs).not.toHaveBeenCalled();
+
+		workspace.sidebarOpen = false;
+		await waitFor(() => expect(sidebarSearch.resetDialogs).toHaveBeenCalledOnce());
+	});
+
+	it('does not reset the sidebar search dialogs while on desktop', async () => {
+		const workspace = installContext();
+		const sidebarSearch = testContext.current?.sidebarSearch as {
+			resetDialogs: ReturnType<typeof vi.fn>;
+		};
+		render(AppShell);
+
+		await waitFor(() => expect(workspace.exitCalls).toBe(1));
+		workspace.sidebarOpen = true;
+		workspace.sidebarOpen = false;
+		await waitFor(() => expect(workspace.exitCalls).toBe(1));
+		expect(sidebarSearch.resetDialogs).not.toHaveBeenCalled();
 	});
 
 	it('keeps chat selection, routing, Chat presentation, and composer focus in AppShell', async () => {

@@ -68,6 +68,12 @@
 
 	let sidebarOpen = $state(initialSidebarOpen());
 
+	// Mirrors the AppShell drawer-close effect that resets the search
+	// dialog cluster whenever the mobile drawer is closed.
+	$effect(() => {
+		if (!sidebarOpen) sidebarSearchContext.resetDialogs();
+	});
+
 	setAppShell({
 		onSidebarRecenterRequested() {
 			return () => {};

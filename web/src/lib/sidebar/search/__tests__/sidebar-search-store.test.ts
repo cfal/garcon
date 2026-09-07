@@ -134,6 +134,35 @@ describe('SidebarSearchStore', () => {
 			expect(store.searchDialogOpen).toBe(false);
 			expect(store.draftQuery).toBe('status:unread');
 		});
+
+		it('resetDialogs closes the whole dialog cluster without resuming the search dialog', () => {
+			const { store } = createStore();
+			store.activeQuery = 'status:unread';
+			store.openSearchDialog();
+			store.updateDraftQuery('tag:ops');
+			store.highlightedResultIndex = 2;
+			store.openManagerFromSearchDialog();
+			store.openEditorForCreate();
+
+			store.resetDialogs();
+
+			expect(store.searchDialogOpen).toBe(false);
+			expect(store.managerOpen).toBe(false);
+			expect(store.editorState).toBeNull();
+			expect(store.deleteConfirmation).toBeNull();
+			expect(store.highlightedResultIndex).toBe(0);
+			expect(store.activeQuery).toBe('status:unread');
+			expect(store.draftQuery).toBe('status:unread');
+		});
+
+		it('resetDialogs clears a pending delete confirmation', () => {
+			const { store } = createStore();
+			store.requestDelete('search-1');
+
+			store.resetDialogs();
+
+			expect(store.deleteConfirmation).toBeNull();
+		});
 	});
 
 	describe('query filtering', () => {
@@ -273,12 +302,14 @@ describe('SidebarSearchStore', () => {
 				getTranscriptSearchEnabled: () => false,
 				searchChatTranscripts,
 			});
-			store.transcriptSearchResults = [{
-				chatId: 'c1',
-				score: 1,
-				matchedMessageCount: 1,
-				snippets: [],
-			}];
+			store.transcriptSearchResults = [
+				{
+					chatId: 'c1',
+					score: 1,
+					matchedMessageCount: 1,
+					snippets: [],
+				},
+			];
 
 			await store.refreshTranscriptSearch('needle');
 
@@ -288,13 +319,17 @@ describe('SidebarSearchStore', () => {
 		});
 
 		it('silently clears a disabled race response without retrying', async () => {
-			const searchChatTranscripts = vi.fn().mockRejectedValue(new ApiError(
-				409,
-				'Transcript search is disabled',
-				'TRANSCRIPT_SEARCH_DISABLED',
-				undefined,
-				false,
-			));
+			const searchChatTranscripts = vi
+				.fn()
+				.mockRejectedValue(
+					new ApiError(
+						409,
+						'Transcript search is disabled',
+						'TRANSCRIPT_SEARCH_DISABLED',
+						undefined,
+						false,
+					),
+				);
 			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
 				searchChatTranscripts,
 			});
@@ -309,13 +344,9 @@ describe('SidebarSearchStore', () => {
 		it('retries a busy search without surfacing an error', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
-				.mockRejectedValueOnce(new ApiError(
-					503,
-					'Transcript search is busy',
-					'SEARCH_INDEX_BUSY',
-					undefined,
-					true,
-				))
+				.mockRejectedValueOnce(
+					new ApiError(503, 'Transcript search is busy', 'SEARCH_INDEX_BUSY', undefined, true),
+				)
 				.mockResolvedValueOnce({
 					query: 'needle',
 					results: [],
@@ -344,13 +375,15 @@ describe('SidebarSearchStore', () => {
 		it('retries a temporarily unavailable index', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
-				.mockRejectedValueOnce(new ApiError(
-					503,
-					'Transcript search is restarting',
-					'SEARCH_INDEX_UNAVAILABLE',
-					undefined,
-					true,
-				))
+				.mockRejectedValueOnce(
+					new ApiError(
+						503,
+						'Transcript search is restarting',
+						'SEARCH_INDEX_UNAVAILABLE',
+						undefined,
+						true,
+					),
+				)
 				.mockResolvedValueOnce({
 					query: 'needle',
 					results: [],
@@ -379,13 +412,9 @@ describe('SidebarSearchStore', () => {
 		it('surfaces a busy index after bounded retries are exhausted', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
-				.mockRejectedValue(new ApiError(
-					503,
-					'Transcript search is busy',
-					'SEARCH_INDEX_BUSY',
-					undefined,
-					true,
-				));
+				.mockRejectedValue(
+					new ApiError(503, 'Transcript search is busy', 'SEARCH_INDEX_BUSY', undefined, true),
+				);
 			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
 				searchChatTranscripts,
 				waitForTranscriptIndexRetry: async () => undefined,

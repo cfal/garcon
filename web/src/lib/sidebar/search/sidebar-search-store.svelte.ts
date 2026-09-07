@@ -215,6 +215,20 @@ export class SidebarSearchStore {
 		this.highlightedResultIndex = 0;
 	}
 
+	// Clears every search dialog state without the suspend/resume origin
+	// paths, so a dialog cluster that outlived a mobile drawer remount can
+	// never reopen. Applied filters (activeQuery) survive.
+	resetDialogs(): void {
+		this.managerOrigin = null;
+		this.editorOrigin = null;
+		this.editorState = null;
+		this.managerOpen = false;
+		this.deleteConfirmation = null;
+		this.searchDialogOpen = false;
+		this.draftQuery = this.activeQuery;
+		this.highlightedResultIndex = 0;
+	}
+
 	resumeSearchDialog(): void {
 		this.searchDialogOpen = true;
 		this.highlightedResultIndex = this.initialHighlightedResultIndex;
@@ -399,10 +413,11 @@ export class SidebarSearchStore {
 						{ signal: options.signal },
 					);
 				} catch (error) {
-					const retryableIndexError = error instanceof ApiError
-						&& error.retryable
-						&& (error.errorCode === 'SEARCH_INDEX_BUSY'
-							|| error.errorCode === 'SEARCH_INDEX_UNAVAILABLE');
+					const retryableIndexError =
+						error instanceof ApiError &&
+						error.retryable &&
+						(error.errorCode === 'SEARCH_INDEX_BUSY' ||
+							error.errorCode === 'SEARCH_INDEX_UNAVAILABLE');
 					if (!retryableIndexError || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) throw error;
 					this.transcriptSearchLoading = false;
 					this.transcriptSearchIndexing = true;
@@ -410,8 +425,10 @@ export class SidebarSearchStore {
 					if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
 					continue;
 				}
-				if (!this.isCurrentTranscriptRequest(requestId, options.signal)
-					|| !this.deps.getTranscriptSearchEnabled()) {
+				if (
+					!this.isCurrentTranscriptRequest(requestId, options.signal) ||
+					!this.deps.getTranscriptSearchEnabled()
+				) {
 					this.clearTranscriptSearch();
 					return;
 				}

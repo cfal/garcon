@@ -121,4 +121,48 @@ describe('mobile sidebar lifecycle', () => {
 			expect(injectedGetSavedSearches).not.toHaveBeenCalled();
 		});
 	});
+
+	it('closes an open search dialog when the drawer closes and does not reopen it', async () => {
+		const chats = [createChat({ id: 'chat-1', title: 'Chat one' })];
+		const sidebarSearch = createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => false,
+			getChats: () => chats,
+			getSelectedChatId: () => null,
+			notifyError: vi.fn(),
+			getSavedSearches: vi.fn().mockResolvedValue({ savedSearches: [] }),
+		});
+		render(MobileSidebarLifecycleHost, { chats, sidebarSearch });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Search chats...' }));
+		expect(screen.getByRole('dialog')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Search chats...' })).toBeTruthy();
+	});
+
+	it('closes the saved-search manager opened from the search dialog on drawer close', async () => {
+		const chats = [createChat({ id: 'chat-1', title: 'Chat one' })];
+		const sidebarSearch = createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => false,
+			getChats: () => chats,
+			getSelectedChatId: () => null,
+			notifyError: vi.fn(),
+			getSavedSearches: vi.fn().mockResolvedValue({ savedSearches: [] }),
+		});
+		sidebarSearch.setSavedSearches([createSavedSearch('unread', 'Unread', 'status:unread')]);
+		render(MobileSidebarLifecycleHost, { chats, sidebarSearch });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Search chats...' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Manage searches' }));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+
+		expect(sidebarSearch.searchDialogOpen).toBe(false);
+		expect(sidebarSearch.managerOpen).toBe(false);
+		expect(screen.queryByRole('dialog')).toBeNull();
+	});
 });
