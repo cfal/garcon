@@ -71,7 +71,6 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       await app.clickSidebarChatContaining('multi-repo-chat-a');
       await app.waitForSelectedChat(chatA.id);
       await switchToGitSurface(fixture);
-      const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       await waitForPanelFiles(
         fixture,
         ['alpha-notes.txt', 'alpha-untracked.txt'],
@@ -123,6 +122,7 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       // current state, with the target selector reporting repo B.
       await app.clickSidebarChatContaining('multi-repo-chat-a');
       await app.waitForSelectedChat(chatA.id);
+      const chatAWindowId = await app.currentWorkspaceWindowId();
       await switchToGitSurface(fixture);
       await waitForPanelFiles(
         fixture,
@@ -190,7 +190,7 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       expect(storedDrafts.chatA).toContain('Git review comment');
       expect(storedDrafts.chatA).toContain('Cross-repo review comment.');
       expect(storedDrafts.chatB).toBeNull();
-      await app.selectWorkspaceWindowSurfaceById(`chat-view:${gitWindowId}`, gitWindowId);
+      await app.selectWorkspaceWindowSurfaceById(`chat-view:${chatAWindowId}`, chatAWindowId);
       await fixture.page.waitForFunction(
         () => {
           const textarea = document.querySelector<HTMLTextAreaElement>(
