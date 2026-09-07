@@ -171,19 +171,17 @@ export class WorkspaceChatPlacementService {
 	async #commitPlacement(
 		resolvePlan: (snapshot: WorkspaceLayoutSnapshot) => WorkspaceChatPlacementPlan,
 	): Promise<WorkspaceChatPlacement> {
-		const resolution: { plan: WorkspaceChatPlacementPlan } = {
-			plan: { destination: null, mutations: [] },
-		};
-		const current = await this.deps.commitWithPresentationTarget(
+		let plan: WorkspaceChatPlacementPlan = { destination: null, mutations: [] };
+		const stillCurrent = await this.deps.commitWithPresentationTarget(
 			(latest) => {
-				resolution.plan = resolvePlan(latest);
-				return resolution.plan.mutations;
+				plan = resolvePlan(latest);
+				return plan.mutations;
 			},
-			() => resolution.plan.destination?.surfaceId ?? null,
+			() => plan.destination?.surfaceId ?? null,
 		);
-		const destination = resolution.plan.destination;
+		const destination = plan.destination;
 		if (!destination) throw new Error(m.workspace_open_failed());
-		if (current) this.deps.present(destination.surfaceId);
+		if (stillCurrent) this.deps.present(destination.surfaceId);
 		return destination;
 	}
 

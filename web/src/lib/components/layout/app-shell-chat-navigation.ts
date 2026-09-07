@@ -20,12 +20,11 @@ export function shouldSynchronizeFocusedChat(input: {
 	pendingChatTarget: string | null;
 	pendingWindowId: string | null;
 }): boolean {
+	if (input.focusedChatId === null || !input.focusedChatExists) return false;
+	if (input.focusedChatId === input.selectedChatId) return false;
+	if (input.pendingChatTarget === null) return true;
 	return (
-		input.focusedChatId !== null &&
-		input.focusedChatExists &&
-		input.focusedChatId !== input.selectedChatId &&
-		(input.pendingChatTarget === null ||
-			(input.pendingWindowId !== input.focusedWindowId &&
-				input.pendingChatTarget !== input.focusedChatId))
+		input.pendingWindowId !== input.focusedWindowId &&
+		input.pendingChatTarget !== input.focusedChatId
 	);
 }

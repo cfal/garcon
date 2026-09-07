@@ -143,12 +143,12 @@ export class WorkspaceWindowDndController {
 		const fallbackZone = rect
 			? resolveWorkspaceWindowDropZone(rect, event.clientX, event.clientY)
 			: null;
-		const target =
-			this.activeTarget?.kind === 'window' && this.activeTarget.windowId === windowId
-				? this.activeTarget
-				: fallbackZone
-					? this.#windowTarget(windowId, fallbackZone)
-					: null;
+		let target: Extract<WorkspaceWindowDropTarget, { kind: 'window' }> | null = null;
+		if (this.activeTarget?.kind === 'window' && this.activeTarget.windowId === windowId) {
+			target = this.activeTarget;
+		} else if (fallbackZone) {
+			target = this.#windowTarget(windowId, fallbackZone);
+		}
 		const currentTarget = target ? this.#windowTarget(windowId, target.zone) : null;
 		this.endDrag();
 		if (!currentTarget || currentTarget.blockedReason) return null;
@@ -195,12 +195,14 @@ export class WorkspaceWindowDndController {
 		if (payload?.kind !== 'surface-tab') return null;
 		event.preventDefault();
 		event.stopPropagation();
-		const target =
-			this.activeTarget?.kind === 'tab' && this.activeTarget.windowId === windowId
-				? this.activeTarget
-				: referenceSurfaceId
-					? this.#tabTarget(windowId, referenceSurfaceId, event)
-					: this.#tabListEndTarget(windowId);
+		let target: Extract<WorkspaceWindowDropTarget, { kind: 'tab' }> | null;
+		if (this.activeTarget?.kind === 'tab' && this.activeTarget.windowId === windowId) {
+			target = this.activeTarget;
+		} else if (referenceSurfaceId) {
+			target = this.#tabTarget(windowId, referenceSurfaceId, event);
+		} else {
+			target = this.#tabListEndTarget(windowId);
+		}
 		this.endDrag();
 		if (!target || this.#isTabDropNoOp(payload.surfaceId, target)) return null;
 		return { payload, target };
