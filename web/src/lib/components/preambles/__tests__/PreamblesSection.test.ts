@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
+import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import PreamblesSectionTestHost from './PreamblesSectionTestHost.svelte';
 
 function globalPreamble(id: string, title: string, content: string): Preamble {
@@ -97,6 +98,52 @@ describe('PreamblesSection', () => {
 
 		expect(screen.getByText('1 project path')).toBeTruthy();
 		expect(screen.getByText('2 project paths')).toBeTruthy();
+	});
+
+	it('shows automatic agent and tag filters on catalog rows', () => {
+		const filtered: Preamble = {
+			...globalPreamble('filtered', 'Filtered conventions', 'Filtered body.'),
+			agentIds: ['codex'],
+			tagFilter: { mode: 'all', tags: ['review-needed', 'backend'] },
+		};
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [filtered] },
+		});
+
+		const row = document.querySelector<HTMLElement>('[data-slot="preamble-row"]')!;
+		expect(row.querySelectorAll('[data-slot="preamble-row-agent-filter"]')).toHaveLength(1);
+		expect(within(row).getByText('Codex')).toBeTruthy();
+		expect(within(row).getByText('review-needed')).toBeTruthy();
+		expect(within(row).getByText('backend')).toBeTruthy();
+		expect(row.querySelector('[data-slot="preamble-row-filters"]')?.getAttribute('title')).toBe(
+			'All of these tags',
+		);
+	});
+
+	it('keeps selected Direct filters visible, hides other Direct agents, and places Direct last', async () => {
+		const filtered: Preamble = {
+			...globalPreamble('filtered', 'Filtered conventions', 'Filtered body.'),
+			agentIds: ['codex', DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID, 'legacy-agent'],
+		};
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [filtered] },
+			allowDirectChats: false,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Filtered conventions' }));
+		const filters = document.querySelector<HTMLElement>('[data-slot="preamble-agent-filters"]')!;
+		const buttons = within(filters).getAllByRole('button');
+		expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+			'Toggle Claude',
+			'Toggle Codex',
+			'Toggle legacy-agent',
+			'Toggle Direct Chat Completions',
+		]);
+		expect(screen.queryByRole('button', { name: 'Toggle Direct Responses' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Toggle Direct Anthropic' })).toBeNull();
+		const codex = screen.getByRole('button', { name: 'Toggle Codex' });
+		expect(codex.classList.contains('bg-muted')).toBe(true);
+		expect(codex.classList.contains('text-xs')).toBe(true);
 	});
 
 	it('filters by body and path and disables reordering while filtered', async () => {

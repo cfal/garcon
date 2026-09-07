@@ -22,6 +22,16 @@ function snapshot(revision: number, ids: string[]): PreamblesSnapshot {
 }
 
 describe('PreamblesStore', () => {
+	it('publishes invalidations without eagerly loading the catalog', async () => {
+		const get = vi.fn();
+		const store = new PreamblesStore({ get });
+
+		await store.refreshIfLoaded();
+
+		expect(store.invalidationVersion).toBe(1);
+		expect(get).not.toHaveBeenCalled();
+	});
+
 	it('loads lazily and applies canonical mutation snapshots', async () => {
 		const get = vi.fn().mockResolvedValue(snapshot(0, []));
 		const create = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(1, ['a']) });

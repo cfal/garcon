@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { Buffer } from 'node:buffer';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CDPSession, Locator, Page } from 'playwright';
@@ -173,6 +174,42 @@ async function createGlobalPreambles(fixture: ChromiumFixture): Promise<void> {
   }
 }
 
+async function newChatPreambleSummaryLayout(summary: Locator) {
+  return summary.evaluate((element) => {
+    const row = element as HTMLElement;
+    const content = row.querySelector<HTMLElement>('[data-slot="new-chat-preambles-content"]');
+    if (!content) throw new Error('Missing New Chat preamble summary content.');
+    const isVisible = (candidate: Element) => getComputedStyle(candidate).display !== 'none';
+    const visiblePills = [
+      ...row.querySelectorAll<HTMLElement>('[data-slot="new-chat-preamble-pill"]'),
+    ]
+      .filter(isVisible)
+      .map((pill) => pill.textContent?.trim());
+    const visibleOverflow = [
+      ...row.querySelectorAll<HTMLElement>(
+        '[data-slot="new-chat-preambles-overflow-narrow"], [data-slot="new-chat-preambles-overflow-wide"]',
+      ),
+    ]
+      .filter(isVisible)
+      .map((indicator) => indicator.textContent?.trim());
+    const rowRect = row.getBoundingClientRect();
+    const visibleChildrenContained = [...row.children].filter(isVisible).every((child) => {
+      const rect = child.getBoundingClientRect();
+      return rect.top >= rowRect.top - 1 && rect.bottom <= rowRect.bottom + 1;
+    });
+    return {
+      height: rowRect.height,
+      overflow: row.scrollWidth - row.clientWidth,
+      contentOverflow: content.scrollWidth - content.clientWidth,
+      flexWrap: getComputedStyle(content).flexWrap,
+      whiteSpace: getComputedStyle(content).whiteSpace,
+      visiblePills,
+      visibleOverflow,
+      visibleChildrenContained,
+    };
+  });
+}
+
 async function completeChat(
   fixture: ChromiumFixture,
   chatId: string,
@@ -190,6 +227,129 @@ async function completeChat(
 }
 
 describe('Chromium preambles', () => {
+  test('keeps the New Chat preamble summary on one stable row', async () => {
+    await withChromiumFixture('new-chat-preamble-summary-layout', async (fixture, markPhase) => {
+      await createGlobalPreambles(fixture);
+      const previewRequested = new Deferred<void>();
+      const releasePreview = new Deferred<void>();
+      await fixture.page.route('**/api/v1/preambles/selection-preview', async (route) => {
+        previewRequested.resolve(undefined);
+        await releasePreview.promise;
+        await route.continue();
+      });
+
+      try {
+        const cdp = await fixture.context.newCDPSession(fixture.page);
+        const desktop = viewportScenarios[0];
+        const narrow = viewportScenarios.at(-1);
+        if (!desktop || !narrow) throw new Error('Missing preamble summary viewport scenarios.');
+
+        markPhase('measuring the loading summary');
+        await setViewport(fixture.page, cdp, desktop);
+        const response = await fixture.page.goto(fixture.integration.garcon.baseUrl);
+        if (!response?.ok()) {
+          throw new Error(`SPA navigation failed with ${String(response?.status())}.`);
+        }
+        await fixture.page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+        const dialog = fixture.page.locator('[role="dialog"]').filter({
+          has: fixture.page.getByPlaceholder('How can I help you today?'),
+        });
+        const summary = dialog.locator('[data-slot="new-chat-preambles-row"]');
+        await summary.waitFor();
+        await withTimeout(
+          previewRequested.promise,
+          20_000,
+          () => 'Timed out waiting for the New Chat preamble preview request.',
+        );
+        await summary.getByText('Fetching preambles…', { exact: true }).waitFor();
+        const loadingLayout = await newChatPreambleSummaryLayout(summary);
+        expect(loadingLayout.height).toBe(44);
+        expect(loadingLayout.visibleChildrenContained).toBeTrue();
+
+        markPhase('measuring the resolved desktop summary');
+        releasePreview.resolve(undefined);
+        await summary.locator('[data-slot="new-chat-preamble-pill"]').first().waitFor();
+        const desktopLayout = await newChatPreambleSummaryLayout(summary);
+        expect(desktopLayout).toMatchObject({
+          height: loadingLayout.height,
+          flexWrap: 'nowrap',
+          whiteSpace: 'nowrap',
+          visiblePills: preambles.slice(0, 2).map((preamble) => preamble.title),
+          visibleOverflow: ['and 1 more'],
+          visibleChildrenContained: true,
+        });
+        expect(desktopLayout.overflow).toBeLessThanOrEqual(1);
+        expect(desktopLayout.contentOverflow).toBeLessThanOrEqual(1);
+
+        const summaryComposerGap = await dialog.evaluate((element) => {
+          const summary = element.querySelector<HTMLElement>(
+            '[data-slot="new-chat-preambles-row"]',
+          );
+          const composer = element.querySelector<HTMLElement>('[data-slot="new-chat-composer"]');
+          if (!summary || !composer) throw new Error('Missing New Chat spacing targets.');
+          return composer.getBoundingClientRect().top - summary.getBoundingClientRect().bottom;
+        });
+        expect(summaryComposerGap).toBe(12);
+
+        await dialog.locator('input[type="file"]').setInputFiles({
+          name: 'spacing.png',
+          mimeType: 'image/png',
+          buffer: Buffer.from('synthetic image'),
+        });
+        await dialog.getByRole('button', { name: 'Remove attachment spacing.png' }).waitFor();
+        const composerAttachmentGap = await dialog.evaluate((element) => {
+          const composer = element.querySelector<HTMLElement>('[data-slot="new-chat-composer"]');
+          const attachments = element.querySelector<HTMLElement>(
+            '[data-slot="new-chat-attachments"]',
+          );
+          if (!composer || !attachments)
+            throw new Error('Missing New Chat attachment spacing targets.');
+          return attachments.getBoundingClientRect().top - composer.getBoundingClientRect().bottom;
+        });
+        expect(composerAttachmentGap).toBe(24);
+
+        markPhase('measuring the resolved compact desktop summary');
+        const compactDesktop: ViewportScenario = {
+          name: 'compact desktop',
+          width: 641,
+          height: 800,
+          touch: false,
+        };
+        await setViewport(fixture.page, cdp, compactDesktop);
+        await fixture.page.waitForFunction(() => matchMedia('(min-width: 640px)').matches);
+        const compactLayout = await newChatPreambleSummaryLayout(summary);
+        expect(compactLayout).toMatchObject({
+          height: loadingLayout.height,
+          flexWrap: 'nowrap',
+          whiteSpace: 'nowrap',
+          visiblePills: preambles.slice(0, 2).map((preamble) => preamble.title),
+          visibleOverflow: ['and 1 more'],
+          visibleChildrenContained: true,
+        });
+        expect(compactLayout.overflow).toBeLessThanOrEqual(1);
+        expect(compactLayout.contentOverflow).toBeLessThanOrEqual(1);
+
+        markPhase('measuring the resolved narrow summary');
+        await setViewport(fixture.page, cdp, narrow);
+        await fixture.page.waitForFunction(() => matchMedia('(max-width: 639px)').matches);
+        const narrowLayout = await newChatPreambleSummaryLayout(summary);
+        expect(narrowLayout).toMatchObject({
+          height: loadingLayout.height,
+          flexWrap: 'nowrap',
+          whiteSpace: 'nowrap',
+          visiblePills: [preambles[0].title],
+          visibleOverflow: ['and 2 more'],
+          visibleChildrenContained: true,
+        });
+        expect(narrowLayout.overflow).toBeLessThanOrEqual(1);
+        expect(narrowLayout.contentOverflow).toBeLessThanOrEqual(1);
+        fixture.assertNoBrowserErrors();
+      } finally {
+        releasePreview.resolve(undefined);
+      }
+    });
+  });
+
   test('keeps nested catalog dialogs usable and restores focus across desktop and touch layouts', async () => {
     for (const scenario of viewportScenarios) {
       const fixtureName = `preambles-dialog-layout-focus-${scenario.name.replaceAll(' ', '-')}`;

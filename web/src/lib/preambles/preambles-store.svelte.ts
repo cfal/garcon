@@ -24,6 +24,7 @@ export class PreamblesStore {
 	snapshot = $state<PreamblesSnapshot | null>(null);
 	error = $state<string | null>(null);
 	isRefreshing = $state(false);
+	invalidationVersion = $state(0);
 	#loadPromise: Promise<PreamblesSnapshot> | null = null;
 	#refreshLoopPromise: Promise<void> | null = null;
 	#refreshRequested = false;
@@ -65,6 +66,7 @@ export class PreamblesStore {
 	}
 
 	async refreshIfLoaded(): Promise<void> {
+		this.invalidationVersion += 1;
 		if (!this.snapshot && this.status === 'idle') return;
 		this.#refreshRequested = true;
 		if (this.#refreshLoopPromise) return this.#refreshLoopPromise;

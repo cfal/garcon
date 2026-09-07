@@ -2,6 +2,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import AgentPill from '$lib/components/shared/AgentPill.svelte';
+	import { isDirectAgentId } from '$lib/agents/direct-agents.js';
 	import { getTagColorClasses } from '$lib/utils/tag-colors';
 	import type { AgentId } from '$shared/agents';
 	import type { PreambleTagMatchMode } from '$shared/preambles';
@@ -18,6 +19,7 @@
 		tags: readonly string[];
 		tagMatchMode: PreambleTagMatchMode;
 		knownTags: readonly string[];
+		allowDirectChats: boolean;
 		disabled?: boolean;
 		onToggleAgent: (agentId: AgentId) => boolean;
 		onAddTag: (tag: string) => boolean;
@@ -31,6 +33,7 @@
 		tags,
 		tagMatchMode,
 		knownTags,
+		allowDirectChats,
 		disabled = false,
 		onToggleAgent,
 		onAddTag,
@@ -48,7 +51,18 @@
 		for (const agentId of selectedAgentIds) {
 			if (!byId.has(agentId)) byId.set(agentId, { id: agentId, label: agentId });
 		}
-		return [...byId.values()];
+
+		const selected = new Set(selectedAgentIds);
+		const standardAgents: AgentOption[] = [];
+		const directAgents: AgentOption[] = [];
+		for (const agent of byId.values()) {
+			if (!isDirectAgentId(agent.id)) {
+				standardAgents.push(agent);
+				continue;
+			}
+			if (allowDirectChats || selected.has(agent.id)) directAgents.push(agent);
+		}
+		return [...standardAgents, ...directAgents];
 	});
 
 	function handleAgentToggle(agentId: AgentId): void {
@@ -76,7 +90,7 @@
 	}
 </script>
 
-<fieldset class="space-y-4 rounded-md border border-border p-3">
+<fieldset class="space-y-4">
 	<legend class="text-sm font-medium text-foreground">
 		{m.preambles_automatic_filters_label()}
 	</legend>
@@ -93,11 +107,12 @@
 					<AgentPill
 						agentId={agent.id}
 						label={agent.label}
+						appearance="neutral"
 						selected={selectedAgentIds.includes(agent.id)}
 						{disabled}
 						ariaLabel={m.preambles_agent_filter_toggle({ agent: agent.label })}
 						onclick={() => handleAgentToggle(agent.id)}
-						class="min-h-9 px-3 text-sm transition-opacity hover:opacity-80 disabled:opacity-50"
+						class="px-2 py-1 text-xs transition-opacity hover:opacity-80 disabled:opacity-50"
 					/>
 					{#snippet failed()}
 						<span class="text-xs text-muted-foreground">

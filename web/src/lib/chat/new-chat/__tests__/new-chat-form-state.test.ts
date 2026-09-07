@@ -1480,6 +1480,27 @@ describe('NewChatFormState preamble selection', () => {
 		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([ID_B]);
 	});
 
+	it('loads automatic defaults for a picker draft without changing the explicit choice', async () => {
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue(previewResponse([ID_A]));
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+		formState.preambles.setExplicit([ID_B]);
+
+		const automaticPreview = await formState.preambles.loadAutomaticPreview();
+
+		expect(automaticPreview.orderedPreambleIds).toEqual([ID_A]);
+		expect(formState.preambles.choice).toEqual({
+			mode: 'explicit',
+			orderedPreambleIds: [ID_B],
+		});
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
+			projectPath: '/repo',
+			agentId: 'claude',
+			tags: [],
+		});
+	});
+
 	it('restores automatic defaults when the form reopens with the same valid path', async () => {
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue(previewResponse([ID_A]));
 		const formState = createPreambleFormState();
