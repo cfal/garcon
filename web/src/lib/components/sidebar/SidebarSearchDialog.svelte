@@ -160,7 +160,11 @@
 {#if open}
 	<div
 		data-slot="search-dialog-overlay"
-		class={cn(overlayFrameClass, backdropTreatment === 'standard' && 'transient-backdrop', overlayClass)}
+		class={cn(
+			overlayFrameClass,
+			backdropTreatment === 'standard' && 'transient-backdrop',
+			overlayClass,
+		)}
 		role="presentation"
 		{@attach portalToBody && bodyPortal}
 	>
@@ -193,78 +197,89 @@
 				onkeydown={handleDialogKeydown}
 			>
 				<div class="shrink-0 border-b border-border">
-					<div class="flex min-w-0 items-center gap-2 px-4 py-3">
-						<div
-							data-slot="search-dialog-input-shell"
-							class="relative h-9 min-w-0 flex-1 rounded-lg border border-sidebar-border/70 bg-muted/50 text-sm text-foreground transition-colors focus-within:border-border focus-within:bg-background"
-						>
-							<Search
-								class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-							/>
-							<input
-								bind:this={inputRef}
-								type="text"
-								value={query}
-								oninput={handleQueryInput}
-								placeholder={m.sidebar_projects_search_placeholder()}
-								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-base leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm sm:pointer-fine:leading-5"
-							/>
-							{#if query.length > 0}
-								<button
-									type="button"
-									class="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-									onclick={clearQuery}
-									aria-label={m.filetree_clear_search()}
-									title={m.filetree_clear_search()}
+					<div
+						class="flex min-w-0 flex-col gap-2 px-4 pb-3 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] sm:flex-row sm:items-center sm:gap-2 sm:py-3"
+					>
+						<!-- Mobile keeps the query input on its own full-width row so
+							it is never starved by the action buttons. -->
+						<div class="flex min-w-0 items-center gap-2 sm:contents">
+							<div
+								data-slot="search-dialog-input-shell"
+								class="relative h-11 min-w-0 flex-1 rounded-lg border border-sidebar-border/70 bg-muted/50 text-sm text-foreground transition-colors focus-within:border-border focus-within:bg-background sm:h-9"
+							>
+								<Search
+									class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+								/>
+								<input
+									bind:this={inputRef}
+									type="text"
+									value={query}
+									oninput={handleQueryInput}
+									placeholder={m.sidebar_projects_search_placeholder()}
+									class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-base leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm sm:pointer-fine:leading-5"
+								/>
+								{#if query.length > 0}
+									<button
+										type="button"
+										class="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+										onclick={clearQuery}
+										aria-label={m.filetree_clear_search()}
+										title={m.filetree_clear_search()}
+									>
+										<X class="h-3 w-3" />
+									</button>
+								{/if}
+							</div>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								class="h-11 w-11 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:hidden"
+								onclick={onClose}
+								title={m.sidebar_search_close()}
+								aria-label={m.sidebar_search_close()}
+							>
+								<X class="h-4 w-4" />
+							</Button>
+						</div>
+
+						<div class="flex items-center gap-2">
+							<Button
+								variant="ghost"
+								class="h-11 min-w-0 flex-1 gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:h-9 sm:w-9 sm:flex-none sm:shrink-0"
+								onclick={() => (helpDialogOpen = true)}
+								title={m.sidebar_search_legend_help()}
+								aria-label={m.sidebar_search_legend_help()}
+							>
+								<CircleHelp class="h-4 w-4 shrink-0" />
+								<span class="truncate text-sm sm:hidden">{m.sidebar_search_legend_help()}</span>
+							</Button>
+
+							{#if showSavedSearchActions}
+								<Button
+									variant="ghost"
+									class="h-11 min-w-0 flex-1 gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:h-9 sm:w-9 sm:flex-none sm:shrink-0"
+									onclick={onCreateSavedSearch}
+									title={m.sidebar_saved_searches_add()}
+									aria-label={m.sidebar_saved_searches_add()}
+									disabled={!canCreateSavedSearch}
 								>
-									<X class="h-3 w-3" />
-								</button>
+									<Save class="h-4 w-4 shrink-0" />
+									<span class="truncate text-sm sm:hidden">{m.sidebar_saved_searches_add()}</span>
+								</Button>
+								<Button
+									variant="ghost"
+									class="h-11 min-w-0 flex-1 gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:h-9 sm:w-9 sm:flex-none sm:shrink-0"
+									onclick={onOpenManager}
+									title={m.sidebar_saved_searches_manage_menu_item()}
+									aria-label={m.sidebar_saved_searches_manage_menu_item()}
+								>
+									<Settings class="h-4 w-4 shrink-0" />
+									<span class="truncate text-sm sm:hidden"
+										>{m.sidebar_saved_searches_manage_menu_item()}</span
+									>
+								</Button>
 							{/if}
 						</div>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-							onclick={() => (helpDialogOpen = true)}
-							title={m.sidebar_search_legend_help()}
-							aria-label={m.sidebar_search_legend_help()}
-						>
-							<CircleHelp class="h-4 w-4" />
-						</Button>
-
-						{#if showSavedSearchActions}
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-								onclick={onCreateSavedSearch}
-								title={m.sidebar_saved_searches_add()}
-								aria-label={m.sidebar_saved_searches_add()}
-								disabled={!canCreateSavedSearch}
-							>
-								<Save class="h-4 w-4" />
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-								onclick={onOpenManager}
-								title={m.sidebar_saved_searches_manage_menu_item()}
-								aria-label={m.sidebar_saved_searches_manage_menu_item()}
-							>
-								<Settings class="h-4 w-4" />
-							</Button>
-						{/if}
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:hidden"
-							onclick={onClose}
-							title={m.sidebar_search_close()}
-							aria-label={m.sidebar_search_close()}
-						>
-							<X class="h-4 w-4" />
-						</Button>
 					</div>
 
 					{#if showSavedSearchActions && savedSearches.length > 0}

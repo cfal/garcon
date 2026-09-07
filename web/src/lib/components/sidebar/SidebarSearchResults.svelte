@@ -61,9 +61,7 @@
 			if (targetIndex <= 0 && viewportRef) {
 				viewportRef.scrollTop = 0;
 			}
-			const item = viewportRef?.querySelector<HTMLElement>(
-				`[data-search-index="${targetIndex}"]`,
-			);
+			const item = viewportRef?.querySelector<HTMLElement>(`[data-search-index="${targetIndex}"]`);
 			item?.scrollIntoView({ block: 'nearest' });
 			return;
 		}
@@ -99,7 +97,7 @@
 
 <div
 	bind:this={viewportRef}
-	class="min-h-0 flex-1 overflow-y-auto"
+	class="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] sm:pb-0"
 	data-slot="search-dialog-results"
 >
 	{#if filteredChats.length === 0}

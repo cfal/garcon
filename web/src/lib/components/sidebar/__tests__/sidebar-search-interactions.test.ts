@@ -95,9 +95,9 @@ describe('sidebar search interactions', () => {
 			onClose: vi.fn(),
 		});
 
-		const overlay = await screen.findByText('First chat').then((row) =>
-			row.closest('[data-slot="search-dialog-overlay"]'),
-		);
+		const overlay = await screen
+			.findByText('First chat')
+			.then((row) => row.closest('[data-slot="search-dialog-overlay"]'));
 		expect(overlay?.parentElement).not.toBe(document.body);
 	});
 
@@ -241,7 +241,7 @@ describe('sidebar search interactions', () => {
 		expect(onApplySavedSearch).not.toHaveBeenCalled();
 	});
 
-	it('closes from the compact header close button beside search settings', async () => {
+	it('closes from the header close button beside the query input', async () => {
 		const onClose = vi.fn();
 
 		render(SidebarSearchDialogHost, {
@@ -250,12 +250,12 @@ describe('sidebar search interactions', () => {
 		});
 
 		await screen.findByRole('textbox');
-		const settingsButton = screen.getByRole('button', { name: 'Manage searches' });
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
 		const closeButton = screen.getByRole('button', { name: 'Close search' });
 
-		expect(settingsButton.nextElementSibling).toBe(closeButton);
-		expect(closeButton.className).toContain('h-9');
-		expect(closeButton.className).toContain('w-9');
+		expect(inputShell?.nextElementSibling).toBe(closeButton);
+		expect(closeButton.className).toContain('h-11');
+		expect(closeButton.className).toContain('w-11');
 		expect(closeButton.className).toContain('sm:hidden');
 
 		await fireEvent.click(closeButton);
@@ -264,6 +264,23 @@ describe('sidebar search interactions', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('textbox')).toBeNull();
 		});
+	});
+
+	it('renders labeled full-width action buttons below the input row on mobile', () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+		});
+
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
+		expect(inputShell?.className).toContain('h-11');
+		expect(inputShell?.className).toContain('sm:h-9');
+
+		for (const name of ['Search help', 'Add saved search', 'Manage searches']) {
+			const button = screen.getByRole('button', { name });
+			expect(button.textContent).toContain(name);
+			expect(button.className).toContain('flex-1');
+			expect(button.className).toContain('h-11');
+		}
 	});
 
 	it('closes when clicking outside the dialog panel', async () => {
