@@ -3,6 +3,7 @@
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import { cn } from '$lib/utils/cn';
+	import { getMinuteClock } from '$lib/context';
 	import ChatSummary from '$lib/components/chat/ChatSummary.svelte';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
@@ -37,10 +38,19 @@
 		onRecover: (chatId: string) => void;
 	} = $props();
 
+	const minuteClock = getMinuteClock();
+	const componentId = $props.id();
+	const statusDescriptionId = `${componentId}-status`;
 	let cardRef = $state<HTMLElement | null>(null);
 	let handleRef = $state<HTMLButtonElement | null>(null);
 	let dragging = $state(false);
 	let title = $derived(occurrence.chat.title || m.sidebar_chats_unnamed());
+	let statusDescription = $derived.by(() => {
+		const descriptions: string[] = [];
+		if (occurrence.chat.isUnread) descriptions.push(m.sidebar_chat_unread());
+		if (occurrence.chat.isProcessing) descriptions.push(m.chat_window_processing());
+		return descriptions.join('. ');
+	});
 
 	$effect(() => {
 		if (!canDrag || !cardRef || !handleRef) return;
@@ -75,6 +85,9 @@
 	data-chat-board-occurrence-index={occurrenceIndex}
 	data-chat-board-dragging={dragging ? '' : undefined}
 >
+	{#if statusDescription}
+		<span id={statusDescriptionId} class="sr-only">{statusDescription}</span>
+	{/if}
 	<div class="flex min-w-0 items-stretch">
 		<button
 			type="button"
@@ -83,13 +96,16 @@
 				layout === 'single-line' ? 'px-3 py-2' : layout === 'compact' ? 'px-3 py-2.5' : 'px-3 py-3',
 			)}
 			aria-label={m.chat_board_open_chat({ title })}
+			aria-describedby={statusDescription ? statusDescriptionId : undefined}
 			onclick={() => onOpen(occurrence.chat.id)}
 			data-chat-board-open
+			data-chat-board-focus-target="open"
 		>
 			<ChatSummary
 				session={occurrence.chat}
 				variant="board"
 				chatItemLayout={layout}
+				currentTime={minuteClock.currentTime}
 				showTimestamp
 				showProjectPath={false}
 			/>
@@ -103,6 +119,7 @@
 				title={m.chat_board_transition()}
 				disabled={!canTransition || pending || recoveryRequired}
 				onclick={() => onTransition(occurrence)}
+				data-chat-board-focus-target="transition"
 			>
 				<ArrowRight class="size-3.5" aria-hidden="true" />
 			</button>
@@ -112,6 +129,7 @@
 					type="button"
 					class="grid min-h-8 place-items-center border-t border-border/70 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
 					aria-label={m.chat_board_drag({ title })}
+					data-chat-board-focus-target="drag"
 				>
 					<GripVertical class="size-3.5" aria-hidden="true" />
 				</button>
@@ -124,6 +142,7 @@
 			type="button"
 			class="flex w-full items-center gap-1.5 border-t border-status-warning-border bg-status-warning/10 px-3 py-1 text-left text-[11px] font-medium text-status-warning-muted-foreground outline-none hover:bg-status-warning/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
 			onclick={() => onRecover(occurrence.chat.id)}
+			data-chat-board-focus-target="recovery"
 		>
 			<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
 			<span class="flex-1">{m.chat_board_confirming_tags()}</span>
