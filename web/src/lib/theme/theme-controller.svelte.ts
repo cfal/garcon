@@ -8,7 +8,11 @@ import {
 	type ThemeProfile,
 	type ThemeRendererPresentation,
 } from './themes.js';
-import { applyThemeToDocument, readTerminalBackground } from './theme-dom.js';
+import {
+	applyThemeToDocument,
+	hasResolvedThemeStyles,
+	readTerminalBackground,
+} from './theme-dom.js';
 
 const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 
@@ -59,7 +63,10 @@ export class ThemeController {
 			untrack(() => {
 				if (terminalBackground) {
 					this.deps.setTerminalPresentation({ ...presentation, background: terminalBackground });
-				} else if (!this.#reportedMissingTerminalThemeIds.has(profile.id)) {
+				} else if (
+					hasResolvedThemeStyles(document.documentElement) &&
+					!this.#reportedMissingTerminalThemeIds.has(profile.id)
+				) {
 					this.#reportedMissingTerminalThemeIds.add(profile.id);
 					this.deps.reportError(`Theme ${profile.id} has an invalid --terminal-bg token`);
 				}

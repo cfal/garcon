@@ -62,7 +62,6 @@ describe('ThemeController', () => {
 		document.documentElement.removeAttribute('data-theme');
 		document.documentElement.className = '';
 		document.documentElement.style.cssText = '--terminal-bg: 0 0% 100%';
-		vi.stubGlobal('CSS', { supports: vi.fn(() => true) });
 	});
 
 	afterEach(() => {
@@ -89,7 +88,7 @@ describe('ThemeController', () => {
 		await waitFor(() => expect(media.listeners).toHaveLength(0));
 	});
 
-	it('projects root state and metadata before reading the terminal background', async () => {
+	it('projects root state and metadata before resolving the terminal background', async () => {
 		installMatchMedia();
 		const computedStyle = vi.spyOn(globalThis, 'getComputedStyle').mockImplementation(() => {
 			expect(document.documentElement.dataset.theme).toBe('phosphor-dark');
@@ -106,7 +105,7 @@ describe('ThemeController', () => {
 		expect(rendered.setTerminalPresentation).toHaveBeenCalledWith({
 			colorScheme: 'dark',
 			rendererPalette: 'standard',
-			background: 'hsl(222 35% 4%)',
+			background: 'rgb(7, 9, 14)',
 		});
 		expect(rendered.setEditorPresentation).toHaveBeenCalledWith({
 			colorScheme: 'dark',
@@ -118,7 +117,8 @@ describe('ThemeController', () => {
 	it('reports an invalid terminal token once while continuing editor updates', async () => {
 		installMatchMedia();
 		vi.spyOn(globalThis, 'getComputedStyle').mockReturnValue({
-			getPropertyValue: () => '',
+			getPropertyValue: (property: string) =>
+				property === '--background' ? '0 0% 100%' : 'invalid',
 		} as unknown as CSSStyleDeclaration);
 		const rendered = renderController({ mode: 'fixed', themeId: 'classic-light' });
 		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
@@ -130,5 +130,17 @@ describe('ThemeController', () => {
 		rendered.component.setPreference({ mode: 'fixed', themeId: 'classic-light' });
 		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledTimes(3));
 		expect(rendered.reportError).toHaveBeenCalledTimes(2);
+	});
+
+	it('skips terminal projection when the browser does not resolve theme styles', async () => {
+		installMatchMedia();
+		vi.spyOn(globalThis, 'getComputedStyle').mockReturnValue({
+			getPropertyValue: () => '',
+		} as unknown as CSSStyleDeclaration);
+		const rendered = renderController({ mode: 'fixed', themeId: 'phosphor-light' });
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+
+		expect(rendered.setTerminalPresentation).not.toHaveBeenCalled();
+		expect(rendered.reportError).not.toHaveBeenCalled();
 	});
 });
