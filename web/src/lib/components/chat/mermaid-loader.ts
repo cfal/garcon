@@ -8,13 +8,17 @@ import {
 type Mermaid = typeof import('mermaid').default;
 export type MermaidThemeId = RendererThemeId;
 
+const BASE_MERMAID_CONFIG = {
+	startOnLoad: false,
+	securityLevel: 'strict',
+	fontFamily: 'inherit',
+	suppressErrorRendering: true,
+} as const satisfies MermaidConfig;
+
 const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 	'standard-light': {
-		startOnLoad: false,
-		securityLevel: 'strict',
+		...BASE_MERMAID_CONFIG,
 		theme: 'default',
-		fontFamily: 'inherit',
-		suppressErrorRendering: true,
 		themeVariables: {
 			primaryTextColor: '#111827',
 			textColor: '#111827',
@@ -33,11 +37,8 @@ const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 		},
 	},
 	'standard-dark': {
-		startOnLoad: false,
-		securityLevel: 'strict',
+		...BASE_MERMAID_CONFIG,
 		theme: 'dark',
-		fontFamily: 'inherit',
-		suppressErrorRendering: true,
 		themeVariables: {
 			primaryTextColor: '#f3f4f6',
 			textColor: '#f3f4f6',
@@ -56,11 +57,8 @@ const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 		},
 	},
 	'colorblind-light': {
-		startOnLoad: false,
-		securityLevel: 'strict',
+		...BASE_MERMAID_CONFIG,
 		theme: 'base',
-		fontFamily: 'inherit',
-		suppressErrorRendering: true,
 		themeVariables: {
 			background: '#ffffff',
 			primaryColor: '#dbeafe',
@@ -88,11 +86,8 @@ const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 		},
 	},
 	'colorblind-dark': {
-		startOnLoad: false,
-		securityLevel: 'strict',
+		...BASE_MERMAID_CONFIG,
 		theme: 'base',
-		fontFamily: 'inherit',
-		suppressErrorRendering: true,
 		themeVariables: {
 			background: '#111827',
 			primaryColor: '#1e3a5f',

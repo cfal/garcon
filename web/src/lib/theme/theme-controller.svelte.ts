@@ -10,6 +10,8 @@ import {
 } from './themes.js';
 import { applyThemeToDocument, readTerminalBackground } from './theme-dom.js';
 
+const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
+
 export interface ThemeControllerDeps {
 	readonly getPreference: () => ThemePreference;
 	readonly setTerminalPresentation: (
@@ -19,8 +21,12 @@ export interface ThemeControllerDeps {
 	readonly reportError: (message: string) => void;
 }
 
+function colorSchemeFromMediaQuery(media: Pick<MediaQueryList, 'matches'>): ColorScheme {
+	return media.matches ? 'dark' : 'light';
+}
+
 function readSystemColorScheme(): ColorScheme {
-	return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+	return colorSchemeFromMediaQuery(window.matchMedia(SYSTEM_DARK_MODE_QUERY));
 }
 
 export class ThemeController {
@@ -33,8 +39,10 @@ export class ThemeController {
 	constructor(private readonly deps: ThemeControllerDeps) {
 		$effect(() => {
 			if (this.deps.getPreference().mode !== 'system') return;
-			const media = window.matchMedia('(prefers-color-scheme: dark)');
-			const update = () => (this.#systemColorScheme = media.matches ? 'dark' : 'light');
+			const media = window.matchMedia(SYSTEM_DARK_MODE_QUERY);
+			const update = () => {
+				this.#systemColorScheme = colorSchemeFromMediaQuery(media);
+			};
 			update();
 			media.addEventListener('change', update);
 			return () => media.removeEventListener('change', update);

@@ -3,31 +3,12 @@ import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
+import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
 
 function declaredProperties(source: string): string[] {
   return [...new Set(source.match(/--[a-z0-9-]+(?=\s*:)/g) ?? [])].sort();
-}
-
-function luminance(rgb: string): number {
-  const channels = rgb
-    .match(/[\d.]+/g)
-    ?.slice(0, 3)
-    .map(Number);
-  if (!channels || channels.length !== 3)
-    throw new Error(`Unsupported color: ${rgb}`);
-  const linear = channels.map((channel) => {
-    const value = channel / 255;
-    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
-}
-
-function contrastRatio(first: string, second: string): number {
-  const lighter = Math.max(luminance(first), luminance(second));
-  const darker = Math.min(luminance(first), luminance(second));
-  return (lighter + 0.05) / (darker + 0.05);
 }
 
 describe("compiled theme CSS", () => {

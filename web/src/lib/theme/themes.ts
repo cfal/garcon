@@ -95,12 +95,17 @@ export function isDarkThemeProfile(profile: ThemeProfile): profile is DarkThemeP
 	return profile.colorScheme === 'dark';
 }
 
+export const LIGHT_THEME_PROFILES: readonly LightThemeProfile[] =
+	THEME_PROFILES.filter(isLightThemeProfile);
+export const DARK_THEME_PROFILES: readonly DarkThemeProfile[] =
+	THEME_PROFILES.filter(isDarkThemeProfile);
+
 export function isLightThemeId(value: unknown): value is LightThemeId {
-	return isThemeId(value) && isLightThemeProfile(getThemeProfile(value));
+	return typeof value === 'string' && LIGHT_THEME_PROFILES.some((profile) => profile.id === value);
 }
 
 export function isDarkThemeId(value: unknown): value is DarkThemeId {
-	return isThemeId(value) && isDarkThemeProfile(getThemeProfile(value));
+	return typeof value === 'string' && DARK_THEME_PROFILES.some((profile) => profile.id === value);
 }
 
 export function parseThemePreference(value: unknown): ThemePreference {
@@ -135,8 +140,5 @@ export function resolveThemeId(
 }
 
 export function rendererThemeIdFor(presentation: ThemeRendererPresentation): RendererThemeId {
-	if (presentation.rendererPalette === 'colorblind') {
-		return presentation.colorScheme === 'dark' ? 'colorblind-dark' : 'colorblind-light';
-	}
-	return presentation.colorScheme === 'dark' ? 'standard-dark' : 'standard-light';
+	return `${presentation.rendererPalette}-${presentation.colorScheme}`;
 }

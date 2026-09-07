@@ -78,15 +78,17 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		renderError = '';
 
 		let active = true;
+		const isCurrentRender = () =>
+			active && currentText === text && currentThemeId === mermaidThemeId;
 		renderMermaid(currentText, currentThemeId).then(
 			(svg) => {
-				if (!active || currentText !== text || currentThemeId !== mermaidThemeId) return;
+				if (!isCurrentRender()) return;
 				renderedSvg = svg;
 				loading = false;
 			},
-			(err) => {
-				if (!active || currentText !== text || currentThemeId !== mermaidThemeId) return;
-				renderError = err instanceof Error ? err.message : m.chat_mermaid_render_failed();
+			(error) => {
+				if (!isCurrentRender()) return;
+				renderError = error instanceof Error ? error.message : m.chat_mermaid_render_failed();
 				loading = false;
 			},
 		);

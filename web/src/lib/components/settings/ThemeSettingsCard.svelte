@@ -2,7 +2,9 @@
 	import { getLocalSettings, getThemeRuntime } from '$lib/context';
 	import { THEME_PROFILE_LABELS } from '$lib/components/shared/theme-profile-labels.js';
 	import {
+		DARK_THEME_PROFILES,
 		DEFAULT_THEME_PREFERENCE,
+		LIGHT_THEME_PROFILES,
 		THEME_PROFILES,
 		isDarkThemeId,
 		isLightThemeId,
@@ -12,36 +14,37 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
-	const theme = getThemeRuntime();
-	const lightProfiles = THEME_PROFILES.filter((profile) => profile.colorScheme === 'light');
-	const darkProfiles = THEME_PROFILES.filter((profile) => profile.colorScheme === 'dark');
+	const themeRuntime = getThemeRuntime();
 
 	function setPreference(preference: ThemePreference): void {
 		localSettings.set('themePreference', preference);
 	}
 
 	function selectFixedMode(): void {
-		setPreference({ mode: 'fixed', themeId: theme.profile.id });
+		setPreference({ mode: 'fixed', themeId: themeRuntime.profile.id });
 	}
 
 	function selectSystemMode(): void {
 		setPreference(DEFAULT_THEME_PREFERENCE);
 	}
 
-	function selectFixedTheme(value: string): void {
-		if (isThemeId(value)) setPreference({ mode: 'fixed', themeId: value });
+	function selectFixedTheme(event: Event): void {
+		const themeId = (event.currentTarget as HTMLSelectElement).value;
+		if (isThemeId(themeId)) setPreference({ mode: 'fixed', themeId });
 	}
 
-	function selectSystemLightTheme(value: string): void {
+	function selectSystemLightTheme(event: Event): void {
+		const themeId = (event.currentTarget as HTMLSelectElement).value;
 		const current = localSettings.themePreference;
-		if (current.mode !== 'system' || !isLightThemeId(value)) return;
-		setPreference({ ...current, lightThemeId: value });
+		if (current.mode !== 'system' || !isLightThemeId(themeId)) return;
+		setPreference({ ...current, lightThemeId: themeId });
 	}
 
-	function selectSystemDarkTheme(value: string): void {
+	function selectSystemDarkTheme(event: Event): void {
+		const themeId = (event.currentTarget as HTMLSelectElement).value;
 		const current = localSettings.themePreference;
-		if (current.mode !== 'system' || !isDarkThemeId(value)) return;
-		setPreference({ ...current, darkThemeId: value });
+		if (current.mode !== 'system' || !isDarkThemeId(themeId)) return;
+		setPreference({ ...current, darkThemeId: themeId });
 	}
 </script>
 
@@ -78,7 +81,7 @@
 			<select
 				class="select-native w-48 max-w-[60%] shrink-0"
 				value={localSettings.themePreference.themeId}
-				onchange={(event) => selectFixedTheme((event.currentTarget as HTMLSelectElement).value)}
+				onchange={selectFixedTheme}
 			>
 				{#each THEME_PROFILES as profile (profile.id)}
 					<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
@@ -92,10 +95,9 @@
 				<select
 					class="select-native w-full"
 					value={localSettings.themePreference.lightThemeId}
-					onchange={(event) =>
-						selectSystemLightTheme((event.currentTarget as HTMLSelectElement).value)}
+					onchange={selectSystemLightTheme}
 				>
-					{#each lightProfiles as profile (profile.id)}
+					{#each LIGHT_THEME_PROFILES as profile (profile.id)}
 						<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
 					{/each}
 				</select>
@@ -105,10 +107,9 @@
 				<select
 					class="select-native w-full"
 					value={localSettings.themePreference.darkThemeId}
-					onchange={(event) =>
-						selectSystemDarkTheme((event.currentTarget as HTMLSelectElement).value)}
+					onchange={selectSystemDarkTheme}
 				>
-					{#each darkProfiles as profile (profile.id)}
+					{#each DARK_THEME_PROFILES as profile (profile.id)}
 						<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
 					{/each}
 				</select>
