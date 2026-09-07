@@ -2,11 +2,13 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 describe('Lightpanda on-demand project resolution', () => {
   test('keeps chat history and drafts quiet until a project surface is presented', async () => {
     await withE2eFixture('on-demand-project-resolution', async (fixture) => {
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { showQuickCommitTray: false });
       const projectPath = join(fixture.integration.dirs.project, 'missing-project');
       await mkdir(projectPath);
       const chatId = fixture.integration.newChatId();
