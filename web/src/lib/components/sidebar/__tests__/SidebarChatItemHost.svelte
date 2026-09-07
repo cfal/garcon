@@ -18,6 +18,7 @@
 		currentTime?: Date;
 		isPinned?: boolean;
 		isArchived?: boolean;
+		isArchiveMutationPending?: boolean;
 		isMobile?: boolean;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
@@ -31,6 +32,8 @@
 		onMoveToBottom?: () => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onForkChat?: (sourceChatId: string) => void;
+		onTogglePinned?: (chatId: string) => void;
+		onToggleArchive?: (chatId: string) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges?: WorkspaceSplitAdmissions;
 		supportsFork?: boolean;
@@ -43,6 +46,7 @@
 		currentTime = new Date('2025-01-01T03:00:00.000Z'),
 		isPinned = false,
 		isArchived = false,
+		isArchiveMutationPending = false,
 		isMobile = false,
 		isMultiSelectMode = false,
 		isMultiSelected = false,
@@ -56,6 +60,8 @@
 		onMoveToBottom,
 		onSortChatOrder,
 		onForkChat = () => {},
+		onTogglePinned = () => {},
+		onToggleArchive = () => {},
 		onOpenInNewWindow,
 		newWindowEdges = workspaceSplitAdmissions(),
 		supportsFork = true,
@@ -95,6 +101,7 @@
 	{currentTime}
 	{isPinned}
 	{isArchived}
+	{isArchiveMutationPending}
 	{isMobile}
 	{isMultiSelectMode}
 	{isMultiSelected}
@@ -103,8 +110,8 @@
 	onChatSelect={() => {}}
 	onDeleteChat={() => {}}
 	onStartRenameChat={() => {}}
-	onTogglePinned={() => {}}
-	onToggleArchive={() => {}}
+	{onTogglePinned}
+	{onToggleArchive}
 	onShowDetails={() => {}}
 	{onForkChat}
 	onShareChat={() => {}}

@@ -104,6 +104,9 @@
 			return sessions.selectedChatId;
 		},
 		onQuietRefresh: quietRefresh,
+		isArchiveMutationPending: (chatId) => sessions.isArchiveMutationPending(chatId),
+		startArchivingChats: (chatIds) => sessions.startArchivingChats(chatIds),
+		startUnarchivingChats: (chatIds) => sessions.startUnarchivingChats(chatIds),
 		onSelectChat: handleChatSelect,
 		onNewChat: handleNewChat,
 		onDeleteChat: handleChatDelete,
@@ -184,6 +187,8 @@
 			inactivityDuration: localSettings.sidebarInactivityDuration,
 			sortMode: localSettings.sidebarSortMode,
 			pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
+			isChatOptimisticallyArchived: (chatId) => sessions.isChatOptimisticallyArchived(chatId),
+			optimisticArchiveOrder: sessions.orderedChats,
 			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
@@ -612,6 +617,10 @@
 		onRequestRenameChat={requestRenameChat}
 		onTogglePinned={(id) => chatActionController.togglePinned(id)}
 		onToggleArchive={(id) => chatActionController.toggleArchive(id)}
+		isArchiveMutationPending={(id) => sessions.isArchiveMutationPending(id)}
+		isChatOptimisticallyArchived={(id) => sessions.isChatOptimisticallyArchived(id)}
+		startArchivingChats={(chatIds) => sessions.startArchivingChats(chatIds)}
+		startUnarchivingChats={(chatIds) => sessions.startUnarchivingChats(chatIds)}
 		onShowDetails={requestDetailsChat}
 		onForkChat={(id) => chatActionController.forkChat(id)}
 		onShareChat={requestShareChat}

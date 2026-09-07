@@ -112,6 +112,20 @@ function createHarness(
 		requestComposerFocus: vi.fn(),
 		requestSidebarRecenter: vi.fn(),
 	};
+	const pendingArchiveIds = new Set<string>();
+	function startArchiveMutation(chatIds: readonly string[]) {
+		const admittedIds = chatIds.filter((chatId) => !pendingArchiveIds.has(chatId));
+		for (const chatId of admittedIds) pendingArchiveIds.add(chatId);
+		const completion = (async () => {
+			try {
+				await Promise.all(admittedIds.map((chatId) => chatsApi.toggleArchive(chatId)));
+				await callbacks.onQuietRefresh();
+			} finally {
+				for (const chatId of admittedIds) pendingArchiveIds.delete(chatId);
+			}
+		})();
+		return { chatIds: admittedIds, completion };
+	}
 	const deps = {
 		get chats() {
 			return chats;
@@ -119,6 +133,9 @@ function createHarness(
 		get selectedChatId() {
 			return selectedChatId;
 		},
+		isArchiveMutationPending: (chatId: string) => pendingArchiveIds.has(chatId),
+		startArchivingChats: startArchiveMutation,
+		startUnarchivingChats: startArchiveMutation,
 		...callbacks,
 		onReloadChat: options.onReloadChat,
 	} satisfies ChatActionControllerDeps;
@@ -202,6 +219,23 @@ describe('ChatActionController', () => {
 		archive.resolve({ success: true, isArchived: true });
 		await completion;
 		expect(callbacks.onNewChat).toHaveBeenCalledOnce();
+	});
+
+	it('ignores a duplicate archive while the first mutation is pending', async () => {
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
+		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const { controller, callbacks } = createHarness({
+			chats: [makeChat({ id: 'selected' }), makeChat({ id: 'next' })],
+			selectedChatId: 'selected',
+		});
+
+		const firstCompletion = controller.toggleArchive('selected');
+		await controller.toggleArchive('selected');
+
+		expect(chatsApi.toggleArchive).toHaveBeenCalledOnce();
+		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+		archive.resolve({ success: true, isArchived: true });
+		await firstCompletion;
 	});
 
 	it('recenters an archived selected chat after restoring it', async () => {

@@ -17,7 +17,7 @@
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
-	import { sortSidebarChatsByRecency } from './chat-recency-sort';
+	import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-recency-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -49,6 +49,8 @@
 		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: (chatId: string) => boolean;
+		isChatOptimisticallyArchived?: (chatId: string) => boolean;
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
 		onShareChat: (chat: ChatSessionRecord) => void;
@@ -88,6 +90,8 @@
 		onStartRenameChat,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = () => false,
+		isChatOptimisticallyArchived = () => false,
 		onShowDetails,
 		onForkChat,
 		onShareChat,
@@ -105,9 +109,10 @@
 	// the pinned placement policy.
 	let displayedChats = $derived.by(() => {
 		const source = isFiltered ? filteredChats : chats;
-		return sortByRecent
+		const sorted = sortByRecent
 			? sortSidebarChatsByRecency(source, displayOptions.pinnedInsertPosition)
 			: source;
+		return prioritizeOptimisticArchives(sorted, chats, isChatOptimisticallyArchived);
 	});
 	let showChats = $derived(!isLoading && chats.length > 0 && displayedChats.length > 0);
 	let hasPinnedChats = $derived(partitionSidebarChats(chats).hasPinned);
@@ -225,6 +230,7 @@
 		{onStartRenameChat}
 		{onTogglePinned}
 		{onToggleArchive}
+		{isArchiveMutationPending}
 		{onShowDetails}
 		{onForkChat}
 		{onShareChat}

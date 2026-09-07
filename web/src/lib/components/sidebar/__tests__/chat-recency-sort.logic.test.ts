@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { isSidebarChatInactive } from '../chat-inactivity';
-import { sortChatsByRecencyDesc, sortSidebarChatsByRecency } from '../chat-recency-sort';
+import {
+	prioritizeOptimisticArchives,
+	sortChatsByRecencyDesc,
+	sortSidebarChatsByRecency,
+} from '../chat-recency-sort';
 
 // 16-digit Unix-microsecond chat ids as minted by the browser clock.
 function chatIdAt(epochMs: number): string {
@@ -195,6 +199,33 @@ describe('sortSidebarChatsByRecency', () => {
 			'pinned-b',
 			'pinned-draft',
 		]);
+	});
+});
+
+describe('prioritizeOptimisticArchives', () => {
+	it('uses optimistic operation order ahead of newer archived chats without moving other groups', () => {
+		const normal = makeChat('normal', {});
+		const archivedNew = makeChat('archived-new', { isArchived: true });
+		const pendingFirst = makeChat('pending-first', { isArchived: true });
+		const pendingSecond = makeChat('pending-second', { isArchived: true });
+		const archivedOld = makeChat('archived-old', { isArchived: true });
+		const chats = [normal, archivedNew, pendingFirst, pendingSecond, archivedOld];
+		const optimisticArchiveOrder = [normal, pendingSecond, pendingFirst, archivedNew, archivedOld];
+
+		expect(
+			prioritizeOptimisticArchives(chats, optimisticArchiveOrder, (chatId) =>
+				chatId.startsWith('pending-'),
+			).map((chat) => chat.id),
+		).toEqual(['normal', 'pending-second', 'pending-first', 'archived-new', 'archived-old']);
+	});
+
+	it('leaves pending unarchives in place', () => {
+		const chats = [
+			makeChat('archived-new', { isArchived: true }),
+			makeChat('pending-unarchive', { isArchived: true }),
+		];
+
+		expect(prioritizeOptimisticArchives(chats, chats, () => false)).toEqual(chats);
 	});
 });
 

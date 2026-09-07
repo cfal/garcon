@@ -36,3 +36,27 @@ export function sortSidebarChatsByRecency(
 		chat.isPinned ? (pinnedOldestFirst[pinnedIndex++] ?? chat) : chat,
 	);
 }
+
+/** Keeps optimistic archives ahead of established rows within the archived list. */
+export function prioritizeOptimisticArchives(
+	chats: ChatSessionRecord[],
+	optimisticArchiveOrder: readonly ChatSessionRecord[],
+	isChatOptimisticallyArchived: (chatId: string) => boolean,
+): ChatSessionRecord[] {
+	const archived = chats.filter((chat) => chat.isArchived && !chat.isPinned);
+	const archivedById = new Map(archived.map((chat) => [chat.id, chat]));
+	const optimistic = optimisticArchiveOrder
+		.filter((chat) => isChatOptimisticallyArchived(chat.id))
+		.map((chat) => archivedById.get(chat.id))
+		.filter((chat): chat is ChatSessionRecord => Boolean(chat));
+	if (optimistic.length === 0) return chats;
+
+	const optimisticIds = new Set(optimistic.map((chat) => chat.id));
+	const prioritized = [...optimistic, ...archived.filter((chat) => !optimisticIds.has(chat.id))];
+
+	let archivedIndex = 0;
+	return chats.map((chat) => {
+		if (!chat.isArchived || chat.isPinned) return chat;
+		return prioritized[archivedIndex++] ?? chat;
+	});
+}

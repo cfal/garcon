@@ -4,7 +4,6 @@
 
 import {
 	togglePinned,
-	toggleArchive,
 	deleteChat,
 	reorderChat,
 	sortChatOrder,
@@ -22,9 +21,13 @@ import type {
 	SortChatOrderResponse,
 } from '$shared/chat-order-contracts';
 import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;
+	get isArchiveMutationPending(): (chatId: string) => boolean;
+	get startArchivingChats(): (chatIds: readonly string[]) => ChatArchiveMutation;
+	get startUnarchivingChats(): (chatIds: readonly string[]) => ChatArchiveMutation;
 }
 
 export type SidebarBulkAction = 'pin' | 'unpin' | 'archive' | 'unarchive';
@@ -41,6 +44,10 @@ export interface SidebarBulkOperationPlan {
 	shouldCreateNewChat: boolean;
 }
 
+export interface SidebarBulkOperation extends SidebarBulkOperationPlan {
+	completion: Promise<void>;
+}
+
 export class SidebarController {
 	private deps: SidebarControllerDeps;
 
@@ -50,11 +57,6 @@ export class SidebarController {
 
 	async togglePinned(chatId: string): Promise<void> {
 		await togglePinned(chatId);
-		await this.deps.onQuietRefresh();
-	}
-
-	async toggleArchive(chatId: string): Promise<void> {
-		await toggleArchive(chatId);
 		await this.deps.onQuietRefresh();
 	}
 
@@ -88,10 +90,6 @@ export class SidebarController {
 		return result.chat;
 	}
 
-	// Bulk operations. Calls individual toggle APIs in parallel then
-	// refreshes once. Callers must pre-filter to only include chats
-	// that need toggling (e.g. only unpinned chats for a "pin" action).
-
 	async bulkDelete(chatIds: string[]): Promise<void> {
 		await Promise.all(chatIds.map((id) => deleteChat(id)));
 		await this.deps.onQuietRefresh();
@@ -102,42 +100,55 @@ export class SidebarController {
 		await this.deps.onQuietRefresh();
 	}
 
-	async bulkToggleArchive(chatIds: string[]): Promise<void> {
-		await Promise.all(chatIds.map((id) => toggleArchive(id)));
-		await this.deps.onQuietRefresh();
-	}
-
-	planBulkOperation(
+	startBulkOperation(
 		action: SidebarBulkAction,
 		input: SidebarBulkOperationInput,
-	): SidebarBulkOperationPlan {
-		const affectedIds = this.resolveBulkAffectedIds(action, input.selectedChats);
-		return this.resolveArchiveSelection(action, affectedIds, input);
-	}
+	): SidebarBulkOperation {
+		const requestedIds = this.resolveBulkAffectedIds(action, input.selectedChats);
+		let affectedIds = requestedIds;
+		let completion: Promise<void>;
 
-	async executeBulkOperation(action: SidebarBulkAction, affectedIds: string[]): Promise<void> {
-		if (affectedIds.length === 0) return;
-
-		if (action === 'pin' || action === 'unpin') {
-			await this.bulkTogglePin(affectedIds);
-		} else {
-			await this.bulkToggleArchive(affectedIds);
+		switch (action) {
+			case 'pin':
+			case 'unpin':
+				completion = affectedIds.length > 0 ? this.bulkTogglePin(affectedIds) : Promise.resolve();
+				break;
+			case 'archive': {
+				const mutation = this.deps.startArchivingChats(requestedIds);
+				affectedIds = mutation.chatIds;
+				completion = mutation.completion;
+				break;
+			}
+			case 'unarchive': {
+				const mutation = this.deps.startUnarchivingChats(requestedIds);
+				affectedIds = mutation.chatIds;
+				completion = mutation.completion;
+				break;
+			}
 		}
+
+		return {
+			...this.resolveArchiveSelection(action, affectedIds, input),
+			completion,
+		};
 	}
 
 	private resolveBulkAffectedIds(
 		action: SidebarBulkAction,
 		selectedChats: ChatSessionRecord[],
 	): string[] {
+		const availableChats = selectedChats.filter(
+			(chat) => !this.deps.isArchiveMutationPending(chat.id),
+		);
 		switch (action) {
 			case 'pin':
-				return selectedChats.filter((chat) => !chat.isPinned).map((chat) => chat.id);
+				return availableChats.filter((chat) => !chat.isPinned).map((chat) => chat.id);
 			case 'unpin':
-				return selectedChats.filter((chat) => chat.isPinned).map((chat) => chat.id);
+				return availableChats.filter((chat) => chat.isPinned).map((chat) => chat.id);
 			case 'archive':
-				return selectedChats.filter((chat) => !chat.isArchived).map((chat) => chat.id);
+				return availableChats.filter((chat) => !chat.isArchived).map((chat) => chat.id);
 			case 'unarchive':
-				return selectedChats.filter((chat) => chat.isArchived).map((chat) => chat.id);
+				return availableChats.filter((chat) => chat.isArchived).map((chat) => chat.id);
 		}
 		return [];
 	}

@@ -50,6 +50,7 @@
 		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: boolean;
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
 		onShareChat: (chat: ChatSessionRecord) => void;
@@ -88,6 +89,7 @@
 		onStartRenameChat,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = false,
 		onShowDetails,
 		onForkChat,
 		onShareChat,
@@ -226,6 +228,7 @@
 				{onStartRenameChat}
 				{onTogglePinned}
 				{onToggleArchive}
+				{isArchiveMutationPending}
 				{onShowDetails}
 				{onForkChat}
 				{onShareChat}

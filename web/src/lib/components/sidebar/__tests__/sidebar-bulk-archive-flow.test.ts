@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
+import type { ChatSession } from '$lib/types/session';
 import SidebarHost from './SidebarHost.svelte';
 
 vi.mock('$lib/api/chats', async () => {
@@ -9,32 +10,34 @@ vi.mock('$lib/api/chats', async () => {
 	return { ...actual, toggleArchive: vi.fn() };
 });
 
-function makeChat(id: string): ChatSessionRecord {
+function makeServerChat(
+	id: string,
+	archived = false,
+	lastActivityAt: string | null = null,
+): ChatSession {
 	return {
 		id,
 		projectPath: '/workspace/repo',
 		effectiveProjectKey: '/workspace/repo',
-		projectIdentityState: 'available',
-		orderGroup: 'normal',
+		orderGroup: archived ? 'archived' : 'normal',
 		title: id,
 		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
-		createdAt: null,
-		lastActivityAt: null,
-		lastReadAt: null,
+		activity: { createdAt: null, lastActivityAt, lastReadAt: null },
+		preview: { lastMessage: '' },
 		isPinned: false,
-		isArchived: false,
+		isArchived: archived,
+		isActive: false,
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
 		canReloadFromNativeHistory: false,
-		status: 'draft',
 		tags: [],
 		parentChat: null,
-		agentOwnershipEpoch: null,
+		agentOwnershipEpoch: 'epoch-1',
 	};
 }
 
@@ -55,17 +58,34 @@ afterEach(() => {
 });
 
 describe('sidebar bulk archive flow', () => {
-	it('selects a replacement before the archive request completes', async () => {
+	it('moves selected chats ahead of archived rows before the requests complete', async () => {
 		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
 		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const listChats = vi.fn(async () => ({
+			sessions: [
+				makeServerChat('next', false, '2026-01-01T00:00:00.000Z'),
+				makeServerChat('selected', true, '2026-02-01T00:00:00.000Z'),
+				makeServerChat('archived', true, '2026-03-01T00:00:00.000Z'),
+			],
+			total: 3,
+			lastSelectedChatId: 'next',
+		}));
+		const chatSessions = new ChatSessionsStore({
+			toggleArchive: chatsApi.toggleArchive,
+			listChats,
+		});
+		chatSessions.upsertFromServer([
+			makeServerChat('selected', false, '2026-02-01T00:00:00.000Z'),
+			makeServerChat('next', false, '2026-01-01T00:00:00.000Z'),
+			makeServerChat('archived', true, '2026-03-01T00:00:00.000Z'),
+		]);
 		const onChatSelect = vi.fn();
-		const onQuietRefresh = vi.fn(async () => undefined);
-		render(SidebarHost, {
-			chats: [makeChat('selected'), makeChat('next')],
+		const { container } = render(SidebarHost, {
+			chatSessions,
 			selectedChatId: 'selected',
 			autoLoadSavedSearches: false,
+			sidebarSortMode: 'recent',
 			onChatSelect,
-			onQuietRefresh,
 		});
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Chat actions' })[0]);
@@ -75,10 +95,18 @@ describe('sidebar bulk archive flow', () => {
 		expect(chatsApi.toggleArchive).toHaveBeenCalledWith('selected');
 		expect(onChatSelect).toHaveBeenCalledOnce();
 		expect(onChatSelect).toHaveBeenCalledWith('next');
-		expect(screen.getByText('selected')).toBeTruthy();
+		expect(
+			Array.from(container.querySelectorAll('[data-sidebar-virtual-list-row="archived"]')).map(
+				(row) => row.getAttribute('data-sidebar-virtual-row'),
+			),
+		).toEqual(['selected', 'archived']);
+
+		expect(screen.getByRole('button', { name: 'Unarchive' }).hasAttribute('disabled')).toBe(true);
+		expect(chatsApi.toggleArchive).toHaveBeenCalledOnce();
 
 		archive.resolve({ success: true, isArchived: true });
-		await waitFor(() => expect(onQuietRefresh).toHaveBeenCalledOnce());
+		await waitFor(() => expect(listChats).toHaveBeenCalledOnce());
 		expect(onChatSelect).toHaveBeenCalledOnce();
+		expect(chatSessions.isArchiveMutationPending('selected')).toBe(false);
 	});
 });
