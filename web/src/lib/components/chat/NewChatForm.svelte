@@ -138,11 +138,13 @@
 	let preamblePickerOpen = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
-	let observedPreambleCatalogRevision = -1;
-	let preambleCatalogLoadVersion = 0;
-	let initialPreambleCatalogSettled = $state(preamblesCatalog.hasLoaded);
-	const initialContentReady = $derived(
-		form.settingsLoaded && initialPreambleCatalogSettled && form.preambles.initialPreviewSettled,
+	let observedPreambleCatalogRevision: number | null = null;
+	const initialContentReady = $derived(form.settingsLoaded);
+	const preambleSummaryLoading = $derived(
+		form.trimmedPath.length > 0 &&
+			(form.validationStatus === 'idle' ||
+				form.validationStatus === 'checking' ||
+				form.preambles.previewLoading),
 	);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
@@ -193,7 +195,6 @@
 		snippetInteractionGeneration += 1;
 		snippetPalette.reset();
 		form.reseed(prefill);
-		loadPreambleCatalog();
 		pendingTextareaFocus = true;
 		textareaFocusTimer = setTimeout(() => {
 			textareaFocusTimer = null;
@@ -206,21 +207,6 @@
 				pendingTextareaFocus = false;
 			}
 		}, 50);
-	}
-
-	function loadPreambleCatalog(): void {
-		const version = ++preambleCatalogLoadVersion;
-		if (preamblesCatalog.hasLoaded) {
-			initialPreambleCatalogSettled = true;
-			return;
-		}
-		initialPreambleCatalogSettled = false;
-		void preamblesCatalog
-			.ensureLoaded()
-			.catch(() => undefined)
-			.finally(() => {
-				if (version === preambleCatalogLoadVersion) initialPreambleCatalogSettled = true;
-			});
 	}
 
 	onMount(() => {
@@ -253,7 +239,12 @@
 
 	$effect(() => {
 		const revision = preamblesCatalog.snapshot?.revision;
-		if (revision === undefined || revision === observedPreambleCatalogRevision) return;
+		if (revision === undefined) return;
+		if (observedPreambleCatalogRevision === null) {
+			observedPreambleCatalogRevision = revision;
+			return;
+		}
+		if (revision === observedPreambleCatalogRevision) return;
 		observedPreambleCatalogRevision = revision;
 		untrack(() => form.preambles.catalogChanged());
 	});
@@ -601,7 +592,6 @@
 	<div class="relative">
 		<div
 			data-slot="new-chat-form-content"
-			class="space-y-6"
 			class:invisible={!initialContentReady}
 			class:pointer-events-none={!initialContentReady}
 			inert={!initialContentReady}
@@ -739,7 +729,7 @@
 
 				<NewChatPreambleSummary
 					preview={form.preambles.preview}
-					loading={form.preambles.previewLoading}
+					loading={preambleSummaryLoading}
 					configurable={form.preambles.configurable}
 					retryable={form.validationStatus === 'valid'}
 					onEdit={() => (preamblePickerOpen = true)}
@@ -766,7 +756,7 @@
 			</div>
 
 			<div
-				class="relative min-h-[120px] border border-border rounded-lg"
+				class="relative mt-3 min-h-[120px] border border-border rounded-lg"
 				aria-busy={promptTransformPending}
 			>
 				<input
@@ -869,7 +859,7 @@
 			</div>
 
 			{#if form.attachedImages.length > 0}
-				<div class="p-2 bg-muted/40 rounded-lg">
+				<div class="mt-6 p-2 bg-muted/40 rounded-lg">
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
 							<div class="relative group">

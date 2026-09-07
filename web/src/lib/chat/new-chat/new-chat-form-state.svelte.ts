@@ -540,14 +540,14 @@ export class NewChatFormState {
 					this.validationStatus = 'invalid';
 					this.validationError = this.#validationErrorMessage(data.errorCode);
 					this.gitRepoStatus = 'non-git';
-					this.preambles.pathValidationSettledWithoutPreview();
+					this.preambles.invalidatePreview();
 				}
 			} catch (err) {
 				if (requestVersion !== this.#validationRequestVersion) return;
 				this.validationStatus = 'invalid';
 				this.validationError = m.chat_new_chat_errors_invalid_directory();
 				this.gitRepoStatus = 'non-git';
-				this.preambles.pathValidationSettledWithoutPreview();
+				this.preambles.invalidatePreview();
 				console.warn('[NewChatFormState] Path validation request failed', err);
 			}
 		}, 300);
@@ -570,8 +570,7 @@ export class NewChatFormState {
 		this.validationStatus = 'idle';
 		this.validationError = null;
 		this.gitRepoStatus = 'unknown';
-		if (this.settingsLoaded) this.preambles.pathValidationSettledWithoutPreview();
-		else this.preambles.invalidatePreview();
+		this.preambles.invalidatePreview();
 	}
 
 	// Pinned paths
@@ -690,13 +689,6 @@ export class NewChatFormState {
 		this.showTagInput = false;
 		this.#modesTouched = false;
 		this.preambles.reset();
-		if (
-			this.settingsLoaded &&
-			this.validationStatus !== 'valid' &&
-			this.validationStatus !== 'checking'
-		) {
-			this.preambles.pathValidationSettledWithoutPreview();
-		}
 	}
 
 	// Initialization

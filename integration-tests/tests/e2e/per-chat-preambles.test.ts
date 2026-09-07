@@ -76,16 +76,11 @@ describe('Lightpanda per-chat preambles', () => {
         },
         { timeout: 20_000 },
       );
-      // The defaults preview count covers both catalog entries.
+      // The defaults preview presents both catalog entries without opening the picker.
       await fixture.page.waitForFunction(
-        () => document.querySelector('[data-slot="new-chat-preambles-label"]') !== null,
+        () => [...document.querySelectorAll<HTMLElement>('[data-slot="new-chat-preamble-pill"]')]
+          .map((element) => element.textContent?.trim()).join('|') === 'Alpha rules|Beta rules',
         { timeout: 20_000 },
-      );
-      await fixture.page.waitForFunction(
-        (count) => document.querySelector('[data-slot="new-chat-preambles-label"]')?.textContent
-          ?.includes(count),
-        { timeout: 20_000 },
-        '2',
       );
 
       // Customize to an explicit reversed order through the picker.

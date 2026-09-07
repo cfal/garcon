@@ -22,7 +22,6 @@ export class NewChatPreambleSelectionState {
 	choice = $state<NewChatPreambleChoice>({ mode: 'defaults' });
 	preview = $state<PreambleSelectionProjection | null>(null);
 	previewLoading = $state(false);
-	initialPreviewSettled = $state(false);
 	canonicalProjectPath = $state('');
 
 	#previewVersion = 0;
@@ -76,11 +75,6 @@ export class NewChatPreambleSelectionState {
 		}
 	}
 
-	pathValidationSettledWithoutPreview(): void {
-		this.invalidatePreview();
-		this.initialPreviewSettled = true;
-	}
-
 	automaticFiltersChanged(): void {
 		if (this.choice.mode === 'explicit') return;
 		this.#refreshForCurrentContext();
@@ -99,7 +93,7 @@ export class NewChatPreambleSelectionState {
 		const context = this.#previewContext();
 		const projectPath = context.projectPath;
 		if (!projectPath || this.options.validationStatus === 'invalid') {
-			this.pathValidationSettledWithoutPreview();
+			this.invalidatePreview();
 			return;
 		}
 
@@ -124,7 +118,6 @@ export class NewChatPreambleSelectionState {
 		} finally {
 			if (this.#isCurrentPreview(version, choiceVersion, context.key)) {
 				this.previewLoading = false;
-				this.initialPreviewSettled = true;
 			}
 		}
 	}
@@ -144,7 +137,6 @@ export class NewChatPreambleSelectionState {
 	reset(): void {
 		this.choice = { mode: 'defaults' };
 		this.#choiceVersion += 1;
-		this.initialPreviewSettled = false;
 		this.#refreshForCurrentContext();
 	}
 
