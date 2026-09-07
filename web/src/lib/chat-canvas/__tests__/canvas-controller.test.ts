@@ -11,7 +11,13 @@ import { ApiError } from '$lib/api/client';
 import { CanvasController, type CanvasApiPort } from '../canvas-controller.svelte';
 import { canvas, deferred, recoveryMemory } from './canvas-fixtures';
 
-afterEach(() => vi.useRealTimers());
+const controllers = new Set<CanvasController>();
+afterEach(() => {
+	for (const controller of controllers) controller.dispose();
+	controllers.clear();
+	vi.restoreAllMocks();
+	vi.useRealTimers();
+});
 
 function setup() {
 	vi.useFakeTimers();
@@ -41,6 +47,7 @@ function setup() {
 	} satisfies CanvasApiPort;
 	const memory = recoveryMemory();
 	const controller = new CanvasController(api, memory.port);
+	controllers.add(controller);
 	return { controller, api, memory, boards };
 }
 
@@ -122,6 +129,86 @@ describe('CanvasController', () => {
 		await controller.open('other');
 		expect(controller.session?.saved.id).toBe('board');
 		expect(controller.session?.error).toBe('Offline');
+		controller.dispose();
+	});
+
+	it.each([
+		new ApiError(409, 'Changed elsewhere'),
+		new ApiError(404, 'Deleted'),
+		new ApiError(500, 'Corrupt', 'CANVAS_CORRUPT'),
+	])(
+		'preserves conflicted work across board switches and protects inactive drafts: %s',
+		async (error) => {
+			const { controller, api, boards, memory } = setup();
+			await controller.activate();
+			controller.session!.document.rename('Local work');
+			api.update.mockRejectedValue(error);
+			await controller.session!.flush();
+			api.get.mockImplementation(async (id) => {
+				if (id !== 'board') return boards.get(id)!;
+				if (error.status !== 409) throw error;
+				return canvas({ ...canvas().content, title: 'Remote work' }, 2);
+			});
+			api.create.mockRejectedValueOnce(new ApiError(409, 'Catalog full', 'CANVAS_LIMIT'));
+			expect(await controller.saveCopy('Recovered')).toBe(false);
+			await controller.open('other');
+			expect(controller.session?.saved.id).toBe('other');
+			expect(memory.drafts.get('board')?.content.title).toBe('Local work');
+			const exitWithInactiveDraft = new Event('beforeunload', { cancelable: true });
+			window.dispatchEvent(exitWithInactiveDraft);
+			expect(exitWithInactiveDraft.defaultPrevented).toBe(true);
+			await controller.session!.flush();
+			await controller.open('board');
+			expect(controller.session?.document.content.title).toBe('Local work');
+			expect(controller.session?.conflict).toBe(true);
+			await vi.runAllTimersAsync();
+			expect(api.update).toHaveBeenCalledTimes(1);
+			expect(await controller.saveCopy('Recovered')).toBe(true);
+			expect(memory.drafts.has('board')).toBe(false);
+			const savedExit = new Event('beforeunload', { cancelable: true });
+			window.dispatchEvent(savedExit);
+			expect(savedExit.defaultPrevented).toBe(false);
+			controller.dispose();
+		},
+	);
+
+	it('blocks a switch when edits made during the destination load cannot be backed up', async () => {
+		const { controller, api, boards, memory } = setup();
+		await controller.activate();
+		controller.session!.document.rename('Local work');
+		api.update.mockRejectedValue(new ApiError(409, 'Changed elsewhere'));
+		await controller.session!.flush();
+		const response = deferred<ChatCanvas>();
+		api.get.mockReturnValueOnce(response.promise);
+		const opening = controller.open('other');
+		expect(api.get).toHaveBeenLastCalledWith('other');
+		const write = vi.spyOn(memory.port, 'write').mockImplementation(() => {
+			throw new Error('Storage full');
+		});
+		controller.session!.document.rename('Latest local work');
+		response.resolve(boards.get('other')!);
+		await opening;
+		expect(controller.session?.saved.id).toBe('board');
+		expect(controller.session?.recoveryError).toBe(true);
+		expect(controller.session?.document.content.title).toBe('Latest local work');
+		write.mockRestore();
+		await controller.open('other');
+		expect(controller.session?.saved.id).toBe('other');
+		expect(memory.drafts.get('board')?.content.title).toBe('Latest local work');
+		controller.dispose();
+	});
+
+	it('backs up a clean canvas that became unreadable before switching away', async () => {
+		const { controller, api, memory } = setup();
+		await controller.activate();
+		api.get.mockRejectedValueOnce(new ApiError(500, 'Corrupt', 'CANVAS_CORRUPT'));
+		await controller.session!.refresh();
+		expect(controller.session?.dirty).toBe(false);
+		expect(controller.session?.conflict).toBe(true);
+		expect(memory.drafts.size).toBe(0);
+		await controller.open('other');
+		expect(controller.session?.saved.id).toBe('other');
+		expect(memory.drafts.get('board')?.content).toEqual(canvas().content);
 		controller.dispose();
 	});
 

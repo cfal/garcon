@@ -58,6 +58,11 @@ export class CanvasSession {
 		}
 	}
 
+	async preserveBeforeSwitch(): Promise<boolean> {
+		if (await this.flush()) return true;
+		return this.conflict && this.#writeRecovery(this.document.content);
+	}
+
 	async refresh(): Promise<void> {
 		if (this.dirty || this.saving || this.conflict || this.#disposed) return;
 		const before = this.saved;
@@ -112,13 +117,19 @@ export class CanvasSession {
 	}
 
 	#changed(content: CanvasContent): void {
+		this.#writeRecovery(content);
+		if (!this.conflict) this.#schedule();
+	}
+
+	#writeRecovery(content: CanvasContent): boolean {
 		try {
 			this.recovery.write({ ...this.saved, content });
 			this.recoveryError = false;
+			return true;
 		} catch {
 			this.recoveryError = true;
+			return false;
 		}
-		if (!this.conflict) this.#schedule();
 	}
 
 	#schedule(): void {
@@ -146,13 +157,7 @@ export class CanvasSession {
 				});
 				this.saved = saved;
 				this.onSaved(saved);
-				if (this.dirty) {
-					try {
-						this.recovery.write({ ...saved, content: this.document.content });
-					} catch {
-						this.recoveryError = true;
-					}
-				}
+				if (this.dirty) this.#writeRecovery(this.document.content);
 			}
 			this.#removeRecovery();
 			return true;

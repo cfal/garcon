@@ -77,7 +77,6 @@ export class CanvasController {
 		if (this.loading || this.#disposed || this.session?.saved.id === id) return;
 		this.loading = true;
 		try {
-			if (this.session && !(await this.session.flush())) return;
 			await this.#load(id);
 			this.error = null;
 		} catch (error) {
@@ -180,7 +179,7 @@ export class CanvasController {
 			void this.session?.flush();
 		};
 		const beforeUnload = (event: BeforeUnloadEvent) => {
-			if (!this.session?.dirty && !this.session?.conflict) return;
+			if (!this.#hasUnsavedWork()) return;
 			flush();
 			event.preventDefault();
 			event.returnValue = '';
@@ -191,6 +190,15 @@ export class CanvasController {
 			window.removeEventListener('pagehide', flush);
 			window.removeEventListener('beforeunload', beforeUnload);
 		};
+	}
+
+	#hasUnsavedWork(): boolean {
+		if (this.session?.dirty || this.session?.conflict) return true;
+		try {
+			return this.recovery.list().length > 0;
+		} catch {
+			return true;
+		}
 	}
 
 	async #create(content: CanvasContent): Promise<void> {
@@ -210,9 +218,10 @@ export class CanvasController {
 	}
 
 	async #load(id: string): Promise<void> {
+		let canvas: ChatCanvas;
+		let recovered = false;
 		try {
-			this.#use(await this.api.get(id));
-			if (this.session && !this.session.dirty) this.session.discardRecovery();
+			canvas = await this.api.get(id);
 		} catch (error) {
 			if (
 				!(error instanceof ApiError) ||
@@ -221,8 +230,16 @@ export class CanvasController {
 				throw error;
 			const draft = this.recovery.read(id);
 			if (!draft) throw error;
-			this.#use(draft);
-			if (this.session) this.session.conflict = true;
+			canvas = draft;
+			recovered = true;
+		}
+		if (this.#disposed) return;
+		if (this.session && !(await this.session.preserveBeforeSwitch())) return;
+		if (this.#disposed) return;
+		this.#use(canvas);
+		if (this.session) {
+			if (recovered) this.session.conflict = true;
+			else if (!this.session.dirty) this.session.discardRecovery();
 		}
 	}
 
