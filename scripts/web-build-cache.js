@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 export const repoRoot = path.resolve(scriptsDir, '..');
 export const webBuildDir = path.join(repoRoot, 'web', 'build');
 export const webBuildMarker = path.join(webBuildDir, '.garcon-build-input-hash');
-const webBuildMarkerVersion = 1;
+const webBuildMarkerVersion = 2;
 const webBuildEnvironmentPrefixes = ['PUBLIC_', 'VITE_'];
 // Excludes Paraglide output that Vite rewrites from the canonical messages and settings inputs.
 const webBuildIgnoredInputPaths = new Set([
@@ -108,7 +108,11 @@ async function collectBuildAssets(directory, buildDir, markerPath, assets) {
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       await collectBuildAssets(absolutePath, buildDir, markerPath, assets);
-    } else if (entry.isFile() && absolutePath !== markerPath) {
+    } else if (
+      entry.isFile()
+      && absolutePath !== markerPath
+      && !absolutePath.startsWith(`${markerPath}.`)
+    ) {
       const stat = await fs.stat(absolutePath);
       assets.push({
         path: path.relative(buildDir, absolutePath).split(path.sep).join('/'),
@@ -162,6 +166,21 @@ async function hasRecordedBuildAssets(buildDir, assets) {
   return stats.every((stat, index) => stat?.isFile() && stat.size === assets[index].size);
 }
 
+async function readRecordedWebBuild(buildDir, markerPath) {
+  const markerContents = await fs.readFile(markerPath, 'utf8').catch(() => '');
+  const marker = parseBuildMarker(markerContents);
+  if (!marker || !await hasRecordedBuildAssets(buildDir, marker.assets)) return null;
+  return marker;
+}
+
+export async function isWebBuildRecordedForHash(hash, {
+  buildDir = webBuildDir,
+  markerPath = webBuildMarker,
+} = {}) {
+  const marker = await readRecordedWebBuild(buildDir, markerPath);
+  return marker?.hash === hash;
+}
+
 export async function isWebBuildCurrent({
   buildDir = webBuildDir,
   environment = productionWebBuildEnvironment(),
@@ -169,12 +188,11 @@ export async function isWebBuildCurrent({
   inputs = webBuildInputs,
   sourcePath = path.join(repoRoot, 'web', 'src'),
 } = {}) {
-  const [sourceStat, markerContents] = await Promise.all([
+  const [sourceStat, marker] = await Promise.all([
     fs.stat(sourcePath).catch(() => null),
-    fs.readFile(markerPath, 'utf8').catch(() => ''),
+    readRecordedWebBuild(buildDir, markerPath),
   ]);
-  const marker = parseBuildMarker(markerContents);
-  if (!marker || !await hasRecordedBuildAssets(buildDir, marker.assets)) return false;
+  if (!marker) return false;
   // Published packages contain the compiled client but not its source tree.
   if (!sourceStat) return true;
   return marker.hash === await computeWebBuildHash(inputs, environment);
@@ -193,7 +211,17 @@ export async function recordWebBuild({
     hash: hash ?? await computeWebBuildHash(inputs, environment),
     assets: await listBuildAssets(buildDir, markerPath),
   };
-  await fs.writeFile(markerPath, `${JSON.stringify(marker)}\n`);
+  const temporaryMarkerPath = `${markerPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporaryMarkerPath, `${JSON.stringify(marker)}\n`, { flag: 'wx' });
+    await fs.rename(temporaryMarkerPath, markerPath);
+  } finally {
+    await fs.rm(temporaryMarkerPath, { force: true });
+  }
+}
+
+export async function invalidateWebBuild({ markerPath = webBuildMarker } = {}) {
+  await fs.rm(markerPath, { force: true });
 }
 
 export async function assertWebBuildCurrent(options = {}) {
@@ -201,7 +229,7 @@ export async function assertWebBuildCurrent(options = {}) {
   throw new Error(
     'web/build is missing or stale for the current client sources, dependencies, patches, or build environment. ' +
       'Run `bun run build` from the repository root before browser tests. ' +
-      'Do not use `bun run --cwd web build`; it does not record the Garcon build marker.',
+      'The root and web workspace build commands both use the Garcon build coordinator.',
   );
 }
 

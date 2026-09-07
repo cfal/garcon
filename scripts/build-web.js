@@ -1,24 +1,26 @@
 #!/usr/bin/env bun
 
-import {
-  assertWebBuildInputsUnchanged,
-  computeWebBuildHash,
-  productionWebBuildEnvironment,
-  recordWebBuild,
-  repoRoot,
-} from './web-build-cache.js';
+import { ensureWebBuild, WebBuildProcessError } from './web-build-coordinator.js';
 
-const environment = productionWebBuildEnvironment();
-const inputHash = await computeWebBuildHash(undefined, environment);
-const build = Bun.spawn(['bun', 'run', '--cwd', 'web', 'build'], {
-  cwd: repoRoot,
-  env: environment,
-  stdin: 'inherit',
-  stdout: 'inherit',
-  stderr: 'inherit',
-});
-const exitCode = await build.exited;
-if (exitCode !== 0) process.exit(exitCode);
-const completedInputHash = await computeWebBuildHash(undefined, environment);
-assertWebBuildInputsUnchanged(inputHash, completedInputHash);
-await recordWebBuild({ hash: inputHash, environment });
+export function assertWebBuildArguments(args) {
+  if (args.length === 0) return;
+  throw new Error(
+    `Web builds use the production coordinator and do not accept Vite CLI arguments: ${args.join(' ')}`,
+  );
+}
+
+async function main(args = process.argv.slice(2)) {
+  assertWebBuildArguments(args);
+  const result = await ensureWebBuild();
+  if (result === 'current') console.log('Web build is current; skipping rebuild.');
+}
+
+if (import.meta.main) {
+  main().catch((error) => {
+    if (error instanceof WebBuildProcessError) {
+      process.exit(error.exitCode);
+    }
+    console.error(error);
+    process.exit(1);
+  });
+}
