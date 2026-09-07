@@ -16,6 +16,15 @@ vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
 }));
 
+vi.mock('$lib/api/chat-preambles', () => ({
+	preambleSelectionPreview: vi.fn(async (request: { projectPath: string }) => ({
+		success: true,
+		canonicalProjectPath: request.projectPath,
+		orderedPreambleIds: [],
+		projection: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
+	})),
+}));
+
 vi.mock('$lib/api/git', () => ({
 	getGitWorktrees: vi.fn(),
 }));

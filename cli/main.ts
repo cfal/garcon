@@ -179,6 +179,15 @@ export async function main(
       await runChatHandoff(command, client, output, options.signal);
       return 0;
     }
+    if (command.kind === 'lookup-native-session') {
+      const client = await connectedClient(command, options);
+      const chatId = await client.lookupNativeSession({
+        nativeSessionId: command.nativeSessionId,
+        ...(command.agentId === undefined ? {} : { agent: command.agentId }),
+      }, options.signal);
+      output.result(chatId);
+      return 0;
+    }
     if (command.kind === 'stop') {
       const client = await connectedClient(command, options);
       await stopChat(command.chatId, client, output, options.signal);

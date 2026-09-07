@@ -14,6 +14,7 @@ import type { TranscriptMessage } from '../../common/chat-view.js';
 import { isLedgerPrivateGarconCommandRow } from './garcon-command-request.js';
 import {
   isLedgerCliRowNoticeDetail,
+  isLedgerPreambleSelectionChangedNoticeDetail,
   type LedgerRow,
 } from './contracts.js';
 
@@ -58,6 +59,19 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
           row.detail.format,
           row.detail.title ?? undefined,
           row.detail.disclosure,
+        );
+      }
+      // Presentation converts the private identity-carrying detail to the exact
+      // public selection-changed detail; the submission identity never renders.
+      if (isLedgerPreambleSelectionChangedNoticeDetail(row.detail)) {
+        return new TranscriptNoticeMessage(
+          row.at,
+          row.message,
+          {
+            type: 'preamble-selection-changed',
+            preambles: row.detail.preambles.map((preamble) => ({ ...preamble })),
+          },
+          undefined,
         );
       }
       return new TranscriptNoticeMessage(

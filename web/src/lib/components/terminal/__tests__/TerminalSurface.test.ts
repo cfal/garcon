@@ -26,7 +26,7 @@ describe('TerminalSurface', () => {
 		expect(screen.getByRole('option', { name: 'Build logs - running' })).toBeTruthy();
 	});
 
-	it('shows input helpers on a coarse-pointer desktop', () => {
+	it('shows input helpers on a coarse-pointer desktop', async () => {
 		const originalMatchMedia = window.matchMedia;
 		Object.defineProperty(window, 'matchMedia', {
 			configurable: true,
@@ -43,7 +43,7 @@ describe('TerminalSurface', () => {
 		});
 		try {
 			render(TerminalSurfaceTestHost, { host: 'window-main' });
-			expect(screen.getByRole('button', { name: 'Ctrl' })).toBeTruthy();
+			expect(await screen.findByRole('button', { name: 'Ctrl' })).toBeTruthy();
 		} finally {
 			Object.defineProperty(window, 'matchMedia', {
 				configurable: true,
@@ -76,7 +76,7 @@ describe('TerminalSurface', () => {
 		expect(screen.queryByRole('button', { name: 'Close terminal tab' })).toBeNull();
 
 		await rerender({ host: 'mobile', onClose, onModifier, onToolbarKey });
-		await fireEvent.click(screen.getByRole('button', { name: 'Ctrl' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Ctrl' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Esc' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Close terminal tab' }));
 
@@ -165,15 +165,83 @@ describe('TerminalSurface', () => {
 
 	it('delegates primary focus to the terminal runtime', async () => {
 		const onFocus = vi.fn();
+		const onFontSize = vi.fn();
 		const { rerender } = render(TerminalSurfaceTestHost, {
 			host: 'window-main',
 			onFocus,
+			onFontSize,
 			focusRequestToken: 0,
 		});
+		await waitFor(() => expect(onFontSize).toHaveBeenCalled());
 
-		await rerender({ host: 'window-main', onFocus, focusRequestToken: 1 });
+		await rerender({ host: 'window-main', onFocus, onFontSize, focusRequestToken: 1 });
 
-		expect(onFocus).toHaveBeenCalledOnce();
+		await waitFor(() => expect(onFocus).toHaveBeenCalledOnce());
+	});
+
+	it('ignores runtime completion after the surface unmounts', async () => {
+		let releaseRuntime!: () => void;
+		const runtimeDelay = new Promise<void>((resolve) => {
+			releaseRuntime = resolve;
+		});
+		const onFontSize = vi.fn();
+		const view = render(TerminalSurfaceTestHost, {
+			host: 'window-main',
+			runtimeDelay,
+			onFontSize,
+		});
+
+		view.unmount();
+		releaseRuntime();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(onFontSize).not.toHaveBeenCalled();
+	});
+
+	it('ignores runtime completion after switching terminal sessions', async () => {
+		let releaseFirstRuntime!: () => void;
+		const firstRuntimeDelay = new Promise<void>((resolve) => {
+			releaseFirstRuntime = resolve;
+		});
+		const onFontSize = vi.fn();
+		const runtimeDelays = {
+			'terminal-1': firstRuntimeDelay,
+			'terminal-2': Promise.resolve(),
+		};
+		const { rerender } = render(TerminalSurfaceTestHost, {
+			host: 'window-main',
+			terminalId: 'terminal-1',
+			runtimeDelays,
+			onFontSize,
+		});
+
+		await rerender({
+			host: 'window-main',
+			terminalId: 'terminal-2',
+			runtimeDelays,
+			onFontSize,
+		});
+		await waitFor(() => expect(onFontSize).toHaveBeenCalledOnce());
+		releaseFirstRuntime();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(onFontSize).toHaveBeenCalledOnce();
+	});
+
+	it('shows a retry action for runtime loading failures', async () => {
+		const onReattach = vi.fn();
+		render(TerminalSurfaceTestHost, {
+			host: 'window-main',
+			runtimeError: 'Terminal chunk unavailable',
+			onReattach,
+		});
+
+		expect(screen.getByText('Terminal chunk unavailable')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+		expect(onReattach).toHaveBeenCalledWith('terminal-1');
 	});
 
 	it('changes and persists the terminal font size from the toolbar settings', async () => {

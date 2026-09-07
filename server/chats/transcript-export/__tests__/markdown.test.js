@@ -174,20 +174,41 @@ describe('Markdown transcript export', () => {
     expect(document).not.toContain('structured-base64-secret');
   });
 
+  it('renders preamble selection changes with titles and None enabled', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(6, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles updated', {
+        type: 'preamble-selection-changed',
+        preambles: [
+          { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' },
+        ],
+      })),
+      entry(7, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles updated', {
+        type: 'preamble-selection-changed',
+        preambles: [],
+      })),
+    ]));
+
+    expect(document).toContain('## [6] Preambles updated');
+    expect(document).toContain('Preambles updated: Repository conventions');
+    expect(document).toContain('## [7] Preambles updated');
+    expect(document).toContain('Preambles updated: None enabled');
+    expect(document).not.toContain('private body sentinel');
+  });
+
   it('renders preamble applications by title without exposing ids or private data', () => {
     const document = renderTranscriptExportMarkdown(model([
       entry(5, 'diagnostics', new TranscriptNoticeMessage(AT, 'Preambles applied', {
         type: 'preamble-application',
         preambles: [
-          { id: 'preamble-1', title: 'Repository conventions' },
-          { id: 'preamble-2', title: 'Security constraints' },
+          { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' },
+          { id: '80becfa6-c9c7-4b31-9190-fd23c0bedf9c', title: 'Security constraints' },
         ],
       })),
     ]));
 
     expect(document).toContain('## [5] Preambles applied');
     expect(document).toContain('Preambles applied: Repository conventions; Security constraints');
-    expect(document).not.toContain('preamble-1');
+    expect(document).not.toContain('3502b645-222b-49d2-ac39-1c91f9fb1174');
     expect(document).not.toContain('private body sentinel');
     expect(document).not.toContain('/private/project/path');
   });

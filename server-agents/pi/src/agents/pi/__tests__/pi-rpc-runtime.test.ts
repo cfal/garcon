@@ -752,6 +752,92 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
+  it('publishes successful live compactions through the active turn', async () => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    const runtime = createRuntime();
+    const published = collectOperation('run-compaction');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
+    await waitForActive(runtime);
+    const fake = fakes[0];
+
+    fake.pushEvent({
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      result: {
+        summary: 'Threshold summary',
+        tokensBefore: 96_000,
+        estimatedTokensAfter: 18_000,
+      },
+    });
+    fake.pushEvent({
+      type: 'compaction_end',
+      reason: 'overflow',
+      aborted: false,
+      result: { summary: 'Overflow summary', tokensBefore: 101_000 },
+    });
+    fake.pushEvent({
+      type: 'compaction_end',
+      reason: 'manual',
+      aborted: false,
+      result: { summary: 'Manual summary', tokensBefore: 42_000 },
+    });
+    fake.pushEvent({
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: true,
+      result: { summary: 'Aborted', tokensBefore: 50_000 },
+    });
+    fake.pushEvent({
+      type: 'compaction_end',
+      reason: 'overflow',
+      aborted: false,
+    });
+    fake.pushEvent({
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      result: { summary: 'Malformed', tokensBefore: 'many' },
+    });
+    await settleIo();
+
+    const compactions = published.events
+      .flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : [])
+      .filter((message) => message.type === 'compaction');
+    expect(compactions).toEqual([
+      expect.objectContaining({
+        trigger: 'auto',
+        summary: 'Threshold summary',
+        preTokens: 96_000,
+        postTokens: 18_000,
+      }),
+      expect.objectContaining({
+        trigger: 'auto',
+        summary: 'Overflow summary',
+        preTokens: 101_000,
+      }),
+      expect.objectContaining({
+        trigger: 'manual',
+        summary: 'Manual summary',
+        preTokens: 42_000,
+      }),
+    ]);
+
+    fake.pushEvent({ type: 'agent_settled' });
+    await turn;
+    fake.pushEvent({
+      type: 'compaction_end',
+      reason: 'threshold',
+      aborted: false,
+      result: { summary: 'Unowned', tokensBefore: 60_000 },
+    });
+    await settleIo();
+    expect(published.events
+      .flatMap((event) => event.type === 'rows' ? event.rows : []))
+      .toHaveLength(3);
+    await runtime.shutdown();
+  });
+
   it('[TLV5-L07.03-PI-UNIT-01] publishes sequential turns through the concrete operation that started each turn', async () => {
     const runtime = createRuntime();
     const first = collectOperation('run-a');

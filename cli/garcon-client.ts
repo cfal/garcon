@@ -31,6 +31,10 @@ import type {
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import {
+  parseNativeSessionLookupResponse,
+  type NativeSessionLookupRequest,
+} from '@garcon/common/native-session-lookup';
+import {
   parseTranscriptExportResponse,
   type TranscriptExportCategory,
   type TranscriptExportFormat,
@@ -70,6 +74,8 @@ export class GarconHttpError extends CliError {
       phase,
       message,
       errorCode === 'SESSION_NOT_FOUND'
+        || errorCode === 'NATIVE_SESSION_NOT_FOUND'
+        || errorCode === 'NATIVE_SESSION_AMBIGUOUS'
         || errorCode === 'UNSUPPORTED_AGENT'
         || errorCode === 'EXPECTED_AGENT_MISMATCH'
         || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
@@ -371,6 +377,29 @@ export class GarconClient {
       );
     }
     return response;
+  }
+
+  async lookupNativeSession(
+    request: NativeSessionLookupRequest,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const value = await this.#request(
+      'native session lookup',
+      'POST',
+      '/api/v1/chats/lookup-native-session',
+      request,
+      signal,
+    );
+    try {
+      return parseNativeSessionLookupResponse(value).chatId;
+    } catch (error) {
+      throw new CliError(
+        'native session lookup',
+        'server returned an invalid native session lookup response',
+        3,
+        { cause: error },
+      );
+    }
   }
 
   startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {

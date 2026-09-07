@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 import { ClaudeCliRuntime } from '../claude-cli.js';
 
@@ -259,6 +260,67 @@ function startOptions(overrides = {}) {
 }
 
 describe('ClaudeCliRuntime stdout protocol handling', () => {
+  it('publishes live automatic compaction metadata without exposing the synthetic user message', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const published = collectOperation('run-auto-compaction');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
+      const input = await enqueueInputStarted(fake);
+      enqueueCliMessage(fake, {
+        type: 'system',
+        subtype: 'compact_boundary',
+        compact_metadata: {
+          trigger: 'auto',
+          pre_tokens: 81_000,
+          post_tokens: 12_000,
+        },
+      });
+      enqueueCliMessage(fake, {
+        type: 'user',
+        uuid: 'compaction-summary-uuid',
+        message: {
+          role: 'user',
+          content: 'This session is being continued from a previous conversation.\n\nSummary:\nKept context.',
+        },
+      });
+      enqueueCliMessage(fake, {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'done',
+        user_message_uuid: input.uuid,
+      });
+      enqueueProviderState(fake, 'idle');
+
+      await expect(start).resolves.toBe('expected-session');
+      const messages = publishedMessages(published.events);
+      const compactionMessages = messages.filter((message) => message.type === 'compaction');
+      expect(compactionMessages).toEqual([
+        expect.objectContaining({
+          type: 'compaction',
+          trigger: 'auto',
+          summary: 'Kept context.',
+          preTokens: 81_000,
+          postTokens: 12_000,
+        }),
+      ]);
+      expect(getNativeMessageRevisionSource(compactionMessages[0])).toEqual({
+        entryId: 'compaction-summary-uuid',
+        withinSourceOrdinal: 0,
+      });
+      expect(messages.some((message) => message.type === 'user-message')).toBe(false);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('[TLV5-L07.03-CLAUDE-UNIT-01] publishes two turns on one native session through their concrete operations', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();

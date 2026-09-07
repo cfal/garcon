@@ -135,8 +135,9 @@
 		},
 	});
 
-	let virtualRowModel = $derived.by(() =>
-		buildSidebarRowModel({
+	let virtualRowModel = $derived.by(() => {
+		if (!reorder.hasOverrides) return baseRowModel;
+		return buildSidebarRowModel({
 			displayedChats,
 			orders: {
 				pinned: reorder.orderFor('pinned'),
@@ -148,8 +149,8 @@
 			inactivityDuration: displayOptions.inactivityDuration,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys,
-		}),
-	);
+		});
+	});
 
 	$effect(() => {
 		reorder.reconcile();

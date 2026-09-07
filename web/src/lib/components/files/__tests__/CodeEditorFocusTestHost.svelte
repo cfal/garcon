@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { setLocalSettings } from '$lib/context';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 	import CodeEditor from '../CodeEditor.svelte';
@@ -13,6 +14,7 @@
 	} = $props();
 
 	const frameBridge = new SurfaceFrameBridge();
+	void frameBridge.activate(false);
 	const session = {
 		readOnly: false,
 		showDiff: false,
@@ -36,6 +38,8 @@
 		codeEditorFontSize: '12',
 		codeEditorTheme: 'default',
 	} as never);
+
+	onDestroy(() => frameBridge.deactivate());
 </script>
 
 <CodeEditor {session} />

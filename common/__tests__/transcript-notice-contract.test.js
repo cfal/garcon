@@ -10,18 +10,53 @@ import {
   isHandoffSummaryNoticeDetail,
   isInterAgentMessageOutcomeNoticeDetail,
   isInterAgentMessageReceivedNoticeDetail,
+  isPreambleSelectionChangedNoticeDetail,
   parseTranscriptNoticeDetail,
 } from '../transcript-notice-details.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
+
+describe('preamble selection-changed notice contracts', () => {
+  it('[PREAMBLE-SELECTION.01-CONTRACT-01] round-trips the update notice and permits zero entries', () => {
+    const empty = { type: 'preamble-selection-changed', preambles: [] };
+    const populated = {
+      type: 'preamble-selection-changed',
+      preambles: [{ id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' }],
+    };
+    expect(parseTranscriptNoticeDetail(empty)).toEqual(empty);
+    expect(parseTranscriptNoticeDetail(populated)).toEqual(populated);
+    expect(isPreambleSelectionChangedNoticeDetail(empty)).toBe(true);
+    expect(isPreambleSelectionChangedNoticeDetail(populated)).toBe(true);
+    // Zero entries remain invalid for the application notice.
+    expect(isPreambleSelectionChangedNoticeDetail({
+      type: 'preamble-application',
+      preambles: [],
+    })).toBe(false);
+    expect(parseTranscriptNoticeDetail({
+      type: 'preamble-selection-changed',
+      preambles: [{ id: 'a', title: '' }],
+    })).toBeNull();
+  });
+
+  it('[PREAMBLE-SELECTION.01-CONTRACT-02] round-trips through a notice message', () => {
+    const detail = {
+      type: 'preamble-selection-changed',
+      preambles: [
+        { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' },
+      ],
+    };
+    const message = new TranscriptNoticeMessage(AT, 'Preambles updated', detail);
+    expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+  });
+});
 
 describe('transcript notice contracts', () => {
   it('[TLV5-PREAMBLE.01-CONTRACT-01] round-trips immutable preamble title snapshots without accepting private fields', () => {
     const detail = {
       type: 'preamble-application',
       preambles: [
-        { id: 'preamble-a', title: 'Repository conventions' },
-        { id: 'preamble-b', title: 'Security constraints' },
+        { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' },
+        { id: '80becfa6-c9c7-4b31-9190-fd23c0bedf9c', title: 'Security constraints' },
       ],
     };
     const message = new TranscriptNoticeMessage(AT, 'Preambles applied', detail);

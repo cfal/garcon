@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { adoptOpenCodeCompactionPartRoute } from '../compaction-routing.js';
 import { OpenCodeOperationRoutes } from '../operation-routes.js';
 import {
   isOpenCodeCompactionContinuationPart,
@@ -547,7 +548,7 @@ describe('OpenCodeOperationRoutes', () => {
     }))).toBe(true);
   });
 
-  it('adopts an automatic compaction control part and resolves the invisible summary chain', () => {
+  it('adopts an automatic compaction control part and resolves its internal summary chain', () => {
     const { logger, routes } = createFixture();
     const operation = register(routes, {
       sessionId: 'session-1',
@@ -557,10 +558,25 @@ describe('OpenCodeOperationRoutes', () => {
     routes.observe(operation.route, promptEvent(operation.turn, 'user-a', 'event-a'));
     operation.turn.providerMessageId = 'user-a';
 
-    expect(routes.adoptCompactionPart(operation.turn, compactionPartEvent())).toEqual({
-      kind: 'adopted',
-      route: operation.route,
-    });
+    expect(adoptOpenCodeCompactionPartRoute({
+      event: compactionPartEvent(),
+      logger,
+      operationRoutes: routes,
+      session: {
+        status: 'running',
+        chatId: 'chat-1',
+        permissionMode: 'default',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        lastActivityAt: 0,
+        providerWorkRequiresQuiescence: false,
+        activeSteeringDeliveries: 0,
+        deferredTerminal: null,
+        pendingSteeringRevertMessageId: null,
+        turn: operation.turn,
+      },
+      sessionId: 'session-1',
+    })).toBe(operation.route);
+    expect(operation.turn.automaticCompactionMessageIds).toContain('user-compaction');
     const summary = {
       id: 'event-summary',
       type: 'message.updated',
@@ -577,7 +593,7 @@ describe('OpenCodeOperationRoutes', () => {
       },
     };
     expect(routes.resolveNamed('session-1', summary)).toBe(operation.route);
-    expect(openCodeEventBelongsToTurn(operation.turn, summary)).toBe(false);
+    expect(openCodeEventBelongsToTurn(operation.turn, summary)).toBe(true);
     routes.observe(operation.route, summary);
 
     const summaryPart = {
@@ -600,9 +616,10 @@ describe('OpenCodeOperationRoutes', () => {
     };
     expect(routes.resolveNamed('session-1', summaryPart)).toBe(operation.route);
     expect(routes.resolveNamed('session-1', summaryDelta)).toBe(operation.route);
-    expect(openCodeEventBelongsToTurn(operation.turn, summaryPart)).toBe(false);
-    expect(openCodeEventBelongsToTurn(operation.turn, summaryDelta)).toBe(false);
-    expect(operation.turn.assistantMessageIds).not.toContain('assistant-summary');
+    expect(openCodeEventBelongsToTurn(operation.turn, summaryPart)).toBe(true);
+    expect(openCodeEventBelongsToTurn(operation.turn, summaryDelta)).toBe(true);
+    expect(operation.turn.automaticCompactionMessageIds).toContain('assistant-summary');
+    expect(operation.turn.assistantMessageIds).toContain('assistant-summary');
     expect(operation.turn.assistantTerminals).toHaveLength(0);
     expect(logger.warn).not.toHaveBeenCalled();
   });

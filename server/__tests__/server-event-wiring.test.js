@@ -211,6 +211,42 @@ describe('server event wiring', () => {
     expect(fixture.published).toEqual([{ type: 'transcript-search-status', status }]);
   });
 
+  it('broadcasts the selection-change notice before its per-chat invalidation', async () => {
+    const fixture = createFixture();
+    const selectionChangeRow = {
+      kind: 'notice',
+      ordinal: 4,
+      at,
+      providerMeta: null,
+      message: 'Preambles updated',
+      detail: {
+        type: 'preamble-selection-change',
+        clientMessageId: 'selection-msg-1',
+        requestFingerprint: 'fingerprint-1',
+        selectionRevision: 2,
+        preambles: [{ id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' }],
+      },
+    };
+
+    fixture.agent.transcript({
+      type: 'rows',
+      chatId: 'chat-1',
+      viewId: 'view-1',
+      rows: [selectionChangeRow],
+    });
+    await fixture.wiring.waitForIdle();
+
+    const types = fixture.published.map((message) => message.type);
+    expect(types).toContain('chat-messages');
+    expect(types).toContain('chat-preambles-invalidated');
+    expect(types.indexOf('chat-messages')).toBeLessThan(types.indexOf('chat-preambles-invalidated'));
+    expect(fixture.published.at(-1)).toMatchObject({
+      type: 'chat-preambles-invalidated',
+      chatId: 'chat-1',
+      revision: 2,
+    });
+  });
+
   it('[TLV5-L03.02-CORE-UNIT-01] broadcasts committed rows before terminal-driven lifecycle state', async () => {
     const fixture = createFixture();
 

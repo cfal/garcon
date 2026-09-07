@@ -21,6 +21,8 @@ function chat(agentId = 'source-agent', overrides = {}) {
     nativeSeedReceipt: null,
     carryOverSegments: [],
     carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
+    preambleSelection: { revision: 0, orderedPreambleIds: [] },
     agentOwnershipEpoch: `${agentId}-epoch`,
     agentSettingsById: { [agentId]: envelope(agentId) },
     projectPath: '/workspace/project',
@@ -191,6 +193,34 @@ describe('AgentOwnershipJournal', () => {
     });
     expect(release).not.toHaveBeenCalled();
     expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
+  });
+
+  it('preserves the chat preamble selection and revision across the roll-forward', async () => {
+    const selectedId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+    const registry = createRegistry({
+      chat: chat('source-agent', {
+        preambleSelection: { revision: 3, orderedPreambleIds: [selectedId] },
+      }),
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(mock(async () => {})),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+    await journal.initialize();
+    const intent = await journal.decideHandoff(decisionInput(registry));
+
+    const updated = await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
+
+    expect(updated).toMatchObject({
+      preambleSelection: { revision: 3, orderedPreambleIds: [selectedId] },
+      pendingPreambleBoundary: {
+        kind: 'agent-switch',
+        ownershipEpoch: 'target-epoch',
+      },
+    });
   });
 
   it('keeps durable handoffs pending at startup for ledger-aware recovery', async () => {

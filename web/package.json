@@ -24,6 +24,8 @@
 		"format:check": "prettier --check .",
 		"lint": "svelte-kit sync && eslint . --max-warnings=0",
 		"profile:chat-ingestion": "bun scripts/benchmark-transcript-ingestion.ts",
+		"profile:eager-assets": "bun run build && bun scripts/report-eager-assets.ts",
+		"profile:sidebar-projection": "bun scripts/benchmark-sidebar-projection.ts",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},

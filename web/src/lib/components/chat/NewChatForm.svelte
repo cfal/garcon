@@ -33,6 +33,7 @@
 	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
+	import NewChatPreamblePicker from '../preambles/NewChatPreamblePicker.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';
 	import {
@@ -57,6 +58,7 @@
 	import FileVideo from '@lucide/svelte/icons/file-video';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
+	import { Button } from '$lib/components/ui/button';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type {
 		ModelSelectorChange,
@@ -131,6 +133,7 @@
 	});
 
 	let isMobile = $state(false);
+	let preamblePickerOpen = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
 	const allKnownTags = $derived(
@@ -258,7 +261,7 @@
 			expansionProjectPath = projectPath;
 			snippetExpansion.cancel();
 		}
-		form.validatePath();
+		untrack(() => form.validatePath());
 	});
 
 	onDestroy(() => {
@@ -694,6 +697,42 @@
 					onAdd={(raw) => form.addTag(raw)}
 					onRemove={(tag) => form.removeTag(tag)}
 					onClose={() => (form.showTagInput = false)}
+				/>
+
+				<div class="flex flex-wrap items-center gap-2" data-slot="new-chat-preambles-row">
+					<span class="text-xs text-muted-foreground" data-slot="new-chat-preambles-label">
+						{m.preambles_label_with_count({ count: form.preambles.previewCount })}
+					</span>
+					<Button
+						variant="ghost"
+						size="sm"
+						data-slot="new-chat-preambles-configure"
+						disabled={!form.preambles.configurable}
+						onclick={() => (preamblePickerOpen = true)}
+					>
+						{m.preamble_selection_configure()}
+					</Button>
+					{#if form.preambles.choice.mode === 'explicit'}
+						<Button
+							variant="ghost"
+							size="sm"
+							data-slot="new-chat-preambles-reset"
+							onclick={() => form.preambles.resetToDefaults()}
+						>
+							{m.preamble_selection_reset_defaults()}
+						</Button>
+					{/if}
+				</div>
+
+				<NewChatPreamblePicker
+					open={preamblePickerOpen}
+					choice={form.preambles.choice}
+					defaultsIds={(form.preambles.preview?.eligiblePreambles ?? []).map((entry) => entry.id)}
+					canonicalProjectPath={form.preambles.canonicalProjectPath || form.trimmedPath}
+					projection={form.preambles.preview}
+					onClose={() => (preamblePickerOpen = false)}
+					onApplyExplicit={(ids) => form.preambles.setExplicit(ids)}
+					onResetToDefaults={() => form.preambles.resetToDefaults()}
 				/>
 
 				{#if displayedFormError}

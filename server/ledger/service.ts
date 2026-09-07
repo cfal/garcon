@@ -20,10 +20,12 @@ import type { JsonObject } from '../../common/json.js';
 import type { TranscriptNoticeDetail } from '../../common/transcript-notice-details.js';
 import type {
   AppendChatRowResult,
+  AppendSelectionChangeNoticeResult,
   InputComposition,
   LedgerAgentSwitchRow,
   LedgerConversationRow,
   LedgerNoticeRow,
+  LedgerPreambleSelectionChangedNoticeDetail,
   LedgerPermissionRow,
   LedgerRow,
   LedgerRowDraft,
@@ -47,6 +49,7 @@ import {
   type InterAgentMessageRequestSink,
 } from './garcon-command-publication.js';
 import { PermissionNotActionableError } from './errors.js';
+import { ProducerLease } from './producer-lease.js';
 import { TranscriptLedgerStore } from './store.js';
 
 export class TranscriptSinkClosedError extends Error {
@@ -458,6 +461,31 @@ export class TranscriptLedgerService {
     input: TranscriptNoticeInput,
   ): LedgerNoticeRow {
     return this.#appendInternalNotice(chatId, viewId, normalizeNotice(input));
+  }
+
+  appendSelectionChangeNotice(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly at: string;
+    readonly detail: LedgerPreambleSelectionChangedNoticeDetail;
+  }): AppendSelectionChangeNoticeResult {
+    const result = this.#store.appendSelectionChangeNotice(input.chatId, {
+      viewId: input.viewId,
+      at: input.at,
+      detail: input.detail,
+    });
+    if (result.inserted) {
+      this.#notify({ type: 'rows', chatId: input.chatId, viewId: input.viewId, rows: [result.row] });
+    }
+    return result;
+  }
+
+  findSubmissionRow(
+    chatId: string,
+    viewId: TranscriptViewId,
+    clientMessageId: string,
+  ): LedgerRow | null {
+    return this.#store.findSubmissionRow(chatId, viewId, clientMessageId);
   }
 
   appendCarryoverNotice(
@@ -944,33 +972,6 @@ function validatePermissionDecision(
   return capability;
 }
 
-class ProducerLease implements TranscriptProducerLease {
-  #closed = false;
-
-  readonly sink: AgentProducerSink;
-
-  constructor(
-    publish: (event: AgentProducerEvent) => void,
-    private readonly onClose: () => void,
-  ) {
-    this.sink = Object.freeze({
-      publish: (event: AgentProducerEvent) => {
-        if (this.#closed) throw new TranscriptSinkClosedError();
-        publish(event);
-      },
-    });
-  }
-
-  get closed(): boolean {
-    return this.#closed;
-  }
-
-  close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.onClose();
-  }
-}
 
 function permissionRowKind(
   lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,

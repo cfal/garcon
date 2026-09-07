@@ -385,6 +385,7 @@
 {#snippet surfaceMenuItems(surfaceId: string, menu: MenuPrimitives)}
 	{@const surface = snapshot.surfaces[surfaceId]}
 	{@const chat = surface?.type === 'chat' && surface.chatId ? sessions.byId[surface.chatId] : null}
+	{@const panel = surface?.type === 'chat' ? conversationPanels.panel(surface.id) : null}
 	{#if chat}
 		{@const supportsFork = modelCatalog.supportsFork(chat.agentId)}
 		<CurrentChatMenuItems
@@ -405,6 +406,9 @@
 			onDetails={() => chatActions.requestDetails(chat)}
 			onReload={() => chatActions.reload(chat)}
 			onShare={() => chatActions.requestShare(chat)}
+			onConfigurePreambles={panel?.transcript.transcriptViewId
+				? () => chatActions.configurePreambles(chat, panel.transcript.transcriptViewId)
+				: undefined}
 			onProjectPath={() => chatActions.requestProjectPath(chat)}
 			onFork={() => chatActions.fork(chat)}
 			onDelete={() => chatActions.requestDelete(chat)}

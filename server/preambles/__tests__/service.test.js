@@ -10,6 +10,11 @@ import { PreambleStore } from '../store.ts';
 
 const createdDirectories = [];
 
+// Deterministic canonical UUID v4 fixtures.
+function uuidFor(index) {
+  return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
 async function service(overrides = {}) {
   const directory = path.join(os.tmpdir(), `garcon-preamble-service-${randomUUID()}`);
   await fs.mkdir(directory, { recursive: true });
@@ -26,7 +31,7 @@ async function service(overrides = {}) {
     preambles: new PreambleService({
       store,
       projectPaths,
-      newId: overrides.newId ?? (() => `preamble-${++nextId}`),
+      newId: overrides.newId ?? (() => uuidFor(++nextId)),
       now: () => new Date('2026-09-03T10:00:00.000Z'),
     }),
   };
@@ -151,7 +156,7 @@ describe('PreambleService', () => {
   });
 
   it('reports duplicate generated IDs before composition violations', async () => {
-    const { preambles } = await service({ newId: () => 'same-id' });
+    const { preambles } = await service({ newId: () => uuidFor(1) });
     await preambles.create({
       expectedRevision: 0,
       preamble: globalDefinition('First', 'a'.repeat(32_000)),
@@ -161,8 +166,8 @@ describe('PreambleService', () => {
       expectedRevision: 1,
       preamble: globalDefinition('Second', 'b'.repeat(32_000)),
     })).rejects.toMatchObject({
-      code: 'PREAMBLE_VALIDATION_FAILED',
-      status: 400,
+      code: 'PREAMBLE_ID_COLLISION',
+      status: 409,
     });
     expect(preambles.snapshot()).toMatchObject({ revision: 1 });
   });
@@ -184,7 +189,7 @@ describe('PreambleService', () => {
     })).rejects.toMatchObject({ code: 'PREAMBLE_REVISION_CONFLICT', status: 409 });
     await expect(preambles.update({
       expectedRevision: 1,
-      id: 'preamble-2',
+      id: uuidFor(2),
       preamble: globalDefinition('Stale update', 'b'.repeat(32_000)),
     })).rejects.toMatchObject({ code: 'PREAMBLE_REVISION_CONFLICT', status: 409 });
     expect(preambles.snapshot()).toMatchObject({ revision: 2 });
@@ -198,7 +203,7 @@ describe('PreambleService', () => {
     });
 
     const createResults = await Promise.allSettled([
-      preambles.remove({ expectedRevision: 1, id: 'preamble-1' }),
+      preambles.remove({ expectedRevision: 1, id: uuidFor(1) }),
       preambles.create({
         expectedRevision: 2,
         preamble: globalDefinition('Second', 'b'.repeat(32_000)),
@@ -211,10 +216,10 @@ describe('PreambleService', () => {
       preamble: { ...globalDefinition('Third', 'c'.repeat(32_000)), enabled: false },
     });
     const updateResults = await Promise.allSettled([
-      preambles.remove({ expectedRevision: 4, id: 'preamble-2' }),
+      preambles.remove({ expectedRevision: 4, id: uuidFor(2) }),
       preambles.update({
         expectedRevision: 5,
-        id: 'preamble-3',
+        id: uuidFor(3),
         preamble: globalDefinition('Third', 'c'.repeat(32_000)),
       }),
     ]);
@@ -222,7 +227,7 @@ describe('PreambleService', () => {
     expect(updateResults.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
     expect(preambles.snapshot()).toMatchObject({
       revision: 6,
-      preambles: [{ id: 'preamble-3', enabled: true }],
+      preambles: [{ id: uuidFor(3), enabled: true }],
     });
   });
 
@@ -314,7 +319,7 @@ describe('PreambleService', () => {
     expect(preambles.resolve('/workspace')[0]?.title).toBe('Second');
     await expect(preambles.update({
       expectedRevision: 2,
-      id: 'preamble-1',
+      id: uuidFor(1),
       preamble: globalDefinition('First', 'a'.repeat(32_000)),
     })).rejects.toMatchObject({ code: 'PREAMBLE_COMBINED_LIMIT_EXCEEDED' });
     expect(preambles.snapshot().preambles[0]?.enabled).toBe(false);
@@ -326,15 +331,15 @@ describe('PreambleService', () => {
     preambles.onInvalidated((reason) => reasons.push(reason));
 
     await preambles.create({ expectedRevision: 0, preamble: globalDefinition('First') });
-    await expect(preambles.remove({ expectedRevision: 0, id: 'preamble-1' })).rejects.toMatchObject({
+    await expect(preambles.remove({ expectedRevision: 0, id: uuidFor(1) })).rejects.toMatchObject({
       code: 'PREAMBLE_REVISION_CONFLICT',
     });
     await preambles.update({
       expectedRevision: 1,
-      id: 'preamble-1',
+      id: uuidFor(1),
       preamble: globalDefinition('Updated'),
     });
-    await preambles.remove({ expectedRevision: 2, id: 'preamble-1' });
+    await preambles.remove({ expectedRevision: 2, id: uuidFor(1) });
 
     expect(reasons).toEqual(['created', 'updated', 'removed']);
   });
@@ -352,7 +357,7 @@ describe('PreambleService', () => {
 
     await expect(preambles.reorder({
       expectedRevision: 2,
-      orderedPreambleIds: ['preamble-1', 'preamble-1'],
+      orderedPreambleIds: [uuidFor(1), uuidFor(1)],
     })).rejects.toMatchObject({ code: 'PREAMBLE_VALIDATION_FAILED', status: 400 });
     expect(preambles.snapshot()).toMatchObject({ revision: 2 });
   });
@@ -361,18 +366,18 @@ describe('PreambleService', () => {
     const { preambles } = await service();
     await preambles.create({ expectedRevision: 0, preamble: globalDefinition('First') });
     await preambles.create({ expectedRevision: 1, preamble: globalDefinition('Second') });
-    await preambles.remove({ expectedRevision: 2, id: 'preamble-2' });
+    await preambles.remove({ expectedRevision: 2, id: uuidFor(2) });
 
     await expect(preambles.reorder({
       expectedRevision: 2,
-      orderedPreambleIds: ['preamble-2', 'preamble-1'],
+      orderedPreambleIds: [uuidFor(2), uuidFor(1)],
     })).rejects.toMatchObject({ code: 'PREAMBLE_REVISION_CONFLICT', status: 409 });
     expect(preambles.snapshot()).toMatchObject({ revision: 3 });
   });
 
   it('validates the maximum rule shape without quadratic path matching', () => {
     const preambles = Array.from({ length: 100 }, (_, preambleIndex) => ({
-      id: `preamble-${preambleIndex}`,
+      id: `00000000-0000-4000-8000-${String(preambleIndex).padStart(12, '0')}`,
       enabled: true,
       title: `Preamble ${preambleIndex}`,
       content: 'x',

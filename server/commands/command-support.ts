@@ -23,7 +23,12 @@ import { InvalidChatIdError, parseChatId, type ChatId } from '../../common/chat-
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { UserMessagePresentation } from '../../common/chat-types.js';
 import type { JsonObject } from '../../common/json.js';
-import { PREAMBLE_ERROR_CODES } from '../../common/preambles.js';
+import {
+  PREAMBLE_ERROR_CODES,
+  type ChatPreambleSelection,
+  type PreambleId,
+} from '../../common/preambles.js';
+import type { PreambleService } from '../preambles/service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatStartupPreferences } from '../settings/types.js';
 import type {
@@ -168,6 +173,7 @@ export interface ChatCommandServiceDeps {
     | 'deleteContinuationLedger'
   >;
   transientFeeds: Pick<ChatTransientFeedStore, 'validateAction'>;
+  preambles: Pick<PreambleService, 'snapshot'>;
   chatMutationLock?: KeyedPromiseLock;
 }
 
@@ -233,6 +239,11 @@ export interface NormalizedChatStart {
   agentSettings: AgentSettingsEnvelope;
   tags: string[];
   userMessagePresentation?: UserMessagePresentation;
+  // Request intent only; a resolved default list is deliberately excluded so a
+  // permitted pre-schedule retry resolves newer defaults at the later creation.
+  orderedPreambleIds?: readonly PreambleId[];
+  // The resolved selection actually written by addChat().
+  preambleSelection: ChatPreambleSelection;
 }
 
 export interface ScheduledExistingChatInput {
@@ -394,11 +405,17 @@ export class CommandSupport {
 
   throwRecordedExecutionFailure(record: CommandLedgerRecord): void {
     if (record.status !== 'failed' && record.status !== 'rejected') return;
-    const preambleSlashBlocked = record.errorCode === PREAMBLE_ERROR_CODES.slashCommandBlocked;
+    // Both recoverable preamble admission failures keep their actionable typed
+    // contract on replay; everything else replays as an opaque conflict.
+    const recoverablePreambleCodes = [
+      PREAMBLE_ERROR_CODES.slashCommandBlocked,
+      PREAMBLE_ERROR_CODES.selectionCompositionInvalid,
+    ] as const;
+    const replayCode = recoverablePreambleCodes.find((code) => code === record.errorCode);
     throw new CommandValidationError(
-      preambleSlashBlocked ? PREAMBLE_ERROR_CODES.slashCommandBlocked : 'INTERNAL_ERROR',
+      replayCode ?? 'INTERNAL_ERROR',
       record.error ?? 'The previous execution did not complete',
-      preambleSlashBlocked ? 422 : 409,
+      replayCode !== undefined ? 422 : 409,
     );
   }
 

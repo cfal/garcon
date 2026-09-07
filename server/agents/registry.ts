@@ -51,6 +51,14 @@ import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
 import type { PreambleService } from '../preambles/service.js';
+import {
+  assertPreambleSelectionComposition,
+  resolvePreambleSelection,
+} from '../preambles/selection.js';
+import {
+  PendingPreambleBoundary,
+  samePreambleBoundary,
+} from '../../common/preambles.js';
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
@@ -176,7 +184,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
-  readonly #preambles: Pick<PreambleService, 'resolve'>;
+  readonly #preambles: Pick<PreambleService, 'snapshot'>;
+  readonly #selectionAdmissionLock: KeyedPromiseLock;
   readonly #transcriptListeners = new Set<(
     event: TranscriptCommitEvent,
   ) => void | Promise<void>>();
@@ -196,7 +205,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
-    preambles: Pick<PreambleService, 'resolve'>;
+    preambles: Pick<PreambleService, 'snapshot'>;
+    selectionAdmissionLock: KeyedPromiseLock;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
@@ -221,6 +231,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     });
     this.#hasPendingOwnershipTransfer = args.hasPendingOwnershipTransfer;
     this.#preambles = args.preambles;
+    this.#selectionAdmissionLock = args.selectionAdmissionLock;
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
       directory: this.#directory,
@@ -516,11 +527,16 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     message: UserMessage,
     options: UserInputAdmissionOptions & { readonly clientRequestId: string },
   ): Promise<{ readonly inserted: boolean }> {
-    const session = this.#registry.getChat(chatId);
-    if (!session) throw new Error(`Session not initialized: ${chatId}`);
-    const view = await this.#adoption.ensure(chatId);
-    this.#validateInputAdmission(chatId, session, options);
-    return this.#commitInput(chatId, message, options, view.viewId);
+    // Direct admission shares the narrow selection/admission lock with Save so
+    // an input can never observe a new selection before its update-notice
+    // attempt, and Save can never interleave inside this commit.
+    return this.#selectionAdmissionLock.runExclusive(`chat:${chatId}`, async () => {
+      const session = this.#registry.getChat(chatId);
+      if (!session) throw new Error(`Session not initialized: ${chatId}`);
+      const view = await this.#adoption.ensure(chatId);
+      this.#validateInputAdmission(chatId, session, options);
+      return this.#commitInput(chatId, message, options, view.viewId);
+    });
   }
 
   admitQueuedInput(
@@ -561,7 +577,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const slashLeading = message.content.trimStart().startsWith('/');
     let composition;
     try {
-      if (boundary && slashLeading && this.#ledger.hasMatchingInputSubmission({
+      // Same-ID retries must return the original committed outcome without
+      // resolving newer selection or catalog state, so the duplicate check
+      // runs ahead of catalog resolution for every pending-boundary input,
+      // not only slash commands. A later catalog change that makes the
+      // current selection unsafe cannot turn an identical retry into a new
+      // rejection (ledger L4).
+      if (pending && this.#ledger.hasMatchingInputSubmission({
         chatId,
         viewId,
         message,
@@ -569,9 +591,21 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         clientMessageId: options.clientMessageId ?? null,
         steer: options.commandType === 'steer',
       })) {
+        // The early return must not leave a proven-consumed stale boundary
+        // armed; repair the registry the same way the ordinary path would.
+        if (alreadyConsumed) this.#clearProvenPendingBoundary(chatId, pending);
         return { inserted: false };
       }
-      const preambles = boundary ? this.#preambles.resolve(session.projectPath) : [];
+      // Application resolves the chat's saved order against one catalog
+      // snapshot; unavailable entries are skipped, and the exact eligible
+      // composition is proven safe immediately before the input commits.
+      const preambles = boundary
+        ? resolvePreambleSelection(
+          session.preambleSelection,
+          this.#preambles.snapshot(),
+          session.projectPath,
+        ).eligible
+        : [];
       if (boundary && preambles.length > 0 && slashLeading) {
         throw new DomainError(
           'PREAMBLE_SLASH_COMMAND_BLOCKED',
@@ -579,6 +613,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
           422,
         );
       }
+      if (boundary) assertPreambleSelectionComposition(chatId, preambles);
       composition = this.#ledger.appendInputAndCompose({
         chatId,
         viewId,
@@ -602,12 +637,22 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       throw error;
     }
     if (pending && (alreadyConsumed || composition.inserted)) {
-      const current = this.#registry.getChat(chatId);
-      if (current?.pendingPreambleBoundary?.ownershipEpoch === pending.ownershipEpoch) {
-        this.#registry.updateChat(chatId, { pendingPreambleBoundary: null });
-      }
+      this.#clearProvenPendingBoundary(chatId, pending);
     }
     return { inserted: composition.inserted };
+  }
+
+  // Compare-and-clear: never clears a boundary a newer ownership epoch or
+  // selection revision replaced.
+  #clearProvenPendingBoundary(
+    chatId: string,
+    consumed: PendingPreambleBoundary,
+  ): void {
+    const current = this.#registry.getChat(chatId);
+    const currentBoundary = current?.pendingPreambleBoundary ?? null;
+    if (currentBoundary && samePreambleBoundary(currentBoundary, consumed)) {
+      this.#registry.updateChat(chatId, { pendingPreambleBoundary: null });
+    }
   }
 
   async #onTranscriptCommit(event: TranscriptCommitEvent): Promise<void> {

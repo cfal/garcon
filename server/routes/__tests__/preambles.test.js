@@ -12,6 +12,8 @@ import { PreambleDomainError } from '../../preambles/errors.ts';
 import createPreambleRoutes from '../preambles.ts';
 
 const emptySnapshot = { revision: 0, preambles: [] };
+const PREAMBLE_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+const PREAMBLE_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
 
 async function call(handler, body, method) {
   parseJsonBody.mockResolvedValueOnce(body);
@@ -77,30 +79,30 @@ describe('preamble routes', () => {
 
     await call(routes['/api/v1/preambles'].PUT, {
       expectedRevision: 1,
-      id: 'preamble-a',
+      id: PREAMBLE_A,
       preamble: definition,
     }, 'PUT');
     await call(routes['/api/v1/preambles'].DELETE, {
       expectedRevision: 2,
-      id: 'preamble-a',
+      id: PREAMBLE_A,
     }, 'DELETE');
     await call(routes['/api/v1/preambles/reorder'].PUT, {
       expectedRevision: 3,
-      orderedPreambleIds: ['preamble-b', 'preamble-a'],
+      orderedPreambleIds: [PREAMBLE_B, PREAMBLE_A],
     }, 'PUT');
 
     expect(preambles.update).toHaveBeenCalledWith({
       expectedRevision: 1,
-      id: 'preamble-a',
+      id: PREAMBLE_A,
       preamble: definition,
     });
     expect(preambles.remove).toHaveBeenCalledWith({
       expectedRevision: 2,
-      id: 'preamble-a',
+      id: PREAMBLE_A,
     });
     expect(preambles.reorder).toHaveBeenCalledWith({
       expectedRevision: 3,
-      orderedPreambleIds: ['preamble-b', 'preamble-a'],
+      orderedPreambleIds: [PREAMBLE_B, PREAMBLE_A],
     });
   });
 
@@ -135,7 +137,7 @@ describe('preamble routes', () => {
     const routes = createPreambleRoutes(preambles);
     const result = await call(routes['/api/v1/preambles'].PUT, {
       expectedRevision: 2,
-      id: 'preamble-a',
+      id: PREAMBLE_A,
       preamble: { invalid: true },
     }, 'PUT');
 

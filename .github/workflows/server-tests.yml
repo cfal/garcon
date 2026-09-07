@@ -30,6 +30,9 @@ jobs:
         working-directory: server
         run: bun install --frozen-lockfile
 
+      - name: Type-check server and provider agents
+        run: bun run typecheck:server
+
       - name: Run server tests
         run: bun run test:server
 

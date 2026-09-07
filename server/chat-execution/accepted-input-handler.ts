@@ -41,6 +41,7 @@ import {
   type StoredChatExecutionControlState,
 } from './control-state.ts';
 import { DuplicateGoalControlInputError } from './goal-control-delivery.ts';
+import { isRecoverablePreambleAdmissionError } from '../preambles/selection.js';
 
 const logger = createLogger('accepted-input');
 
@@ -582,9 +583,10 @@ export class AcceptedInputHandler {
       return reservation;
     } catch (error) {
       let failure: unknown = error;
+      // A recoverable preamble rejection retains a prepared new-chat, fork, or
+      // continuation target so the user can reconfigure and retry.
       const retainPreparedTarget = Boolean(input.preparation)
-        && error instanceof DomainError
-        && error.code === 'PREAMBLE_SLASH_COMMAND_BLOCKED';
+        && isRecoverablePreambleAdmissionError(error);
       let retryable = !retainPreparedTarget;
       let preserveForkPreparation = false;
       if (input.preparation && !retainPreparedTarget) {

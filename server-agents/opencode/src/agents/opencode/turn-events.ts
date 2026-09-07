@@ -13,9 +13,9 @@ export interface OpenCodeTurnContext {
   // A manual compaction turn: the provider's summary assistant settles the turn
   // and its internals stay out of the transcript.
   compaction?: boolean;
-  // One boundary row per manual compaction turn; completed timestamps persist
-  // across later message updates.
-  compactionBoundaryPublished?: boolean;
+  // Later message updates retain the completed timestamp, so a manual turn
+  // would otherwise republish its boundary.
+  manualCompactionBoundaryPublished?: boolean;
   // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
   providerMessageId: string | null;
   providerPromptPartId: string;
@@ -25,6 +25,9 @@ export interface OpenCodeTurnContext {
   // status frames for the same scheduled attempt append one row, not many.
   lastRetryNoticeKey: string | null;
   providerContinuationMessageIds: Set<string>;
+  // Tracks automatic control messages and linked summary assistants so prompt
+  // failures exclude internal compaction work.
+  automaticCompactionMessageIds: Set<string>;
   recentEventIds: Set<string>;
   providerSteeringPartIds: Set<string>;
   pendingSteeringMessageIds: Set<string>;
@@ -110,6 +113,7 @@ export function createOpenCodeTurnContext(
     providerSteeringDeliveryUnconfirmed: false,
     lastRetryNoticeKey: null,
     providerContinuationMessageIds: new Set(),
+    automaticCompactionMessageIds: new Set(),
     recentEventIds: new Set(),
     providerSteeringPartIds: new Set(),
     pendingSteeringMessageIds: new Set(),
@@ -206,9 +210,13 @@ export function openCodeEventBelongsToTurn(
       return false;
     }
     if (isOpenCodeCompactionAssistant(info)) {
-      // The summary assistant is internal to ordinary turns; a compaction turn
-      // owns it as its terminal message.
-      if (!turn.compaction) return false;
+      if (!turn.compaction) {
+        if (!turn.automaticCompactionMessageIds.has(info.parentID)) return false;
+        // A recorded terminal means this automatic boundary already dispatched;
+        // terminal recording follows dispatch in the global event handler.
+        if (turn.assistantTerminals.has(messageId)) return false;
+        turn.automaticCompactionMessageIds.add(messageId);
+      }
       turn.assistantMessageIds.add(messageId);
       return true;
     }

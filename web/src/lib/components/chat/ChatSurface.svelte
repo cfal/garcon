@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import {
 		getChatSessions,
+		getConversationPanels,
 		getGitViewLauncher,
 		getModelCatalog,
 		type WorkspaceChatActions,
@@ -27,6 +28,7 @@
 		requestDetails() {},
 		requestShare() {},
 		requestProjectPath() {},
+		configurePreambles() {},
 		fork() {},
 		reload() {},
 	};
@@ -60,6 +62,7 @@
 	} = $props();
 
 	const sessions = getChatSessions();
+	const conversationPanels = getConversationPanels();
 	const modelCatalog = getModelCatalog();
 	const gitViews = getGitViewLauncher();
 	const transcriptCache =
@@ -102,6 +105,10 @@
 			: false,
 	);
 	const canReloadSelectedChat = $derived(selectedChat?.canReloadFromNativeHistory ?? false);
+	const selectedTranscriptViewId = $derived.by(() => {
+		const panel = conversationPanels.composerPanel;
+		return panel && panel.chatId === selectedChat?.id ? panel.transcript.transcriptViewId : '';
+	});
 
 	$effect.pre(() => {
 		if (conversationWorkspaceVisible) return;
@@ -136,6 +143,9 @@
 			onDetails={() => chatActions.requestDetails(selectedChat)}
 			onReload={() => chatActions.reload(selectedChat)}
 			onShare={() => chatActions.requestShare(selectedChat)}
+			onConfigurePreambles={selectedTranscriptViewId
+				? () => chatActions.configurePreambles(selectedChat, selectedTranscriptViewId)
+				: undefined}
 			onProjectPath={() => chatActions.requestProjectPath(selectedChat)}
 			onFork={() => chatActions.fork(selectedChat)}
 			onDelete={() => chatActions.requestDelete(selectedChat)}

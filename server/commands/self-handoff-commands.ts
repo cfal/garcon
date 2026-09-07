@@ -203,6 +203,12 @@ export class SelfHandoffCommands {
         carryOverSegments: [],
         nativeSeedReceipt: null,
         carryOverMigrationQuarantine: null,
+        // Continuation copies the source's current selection and starts at
+        // revision zero.
+        preambleSelection: {
+          revision: 0,
+          orderedPreambleIds: [...source.preambleSelection.orderedPreambleIds],
+        },
         parentChat: {
           chatId: input.sourceChatId,
           relation: 'handoff',

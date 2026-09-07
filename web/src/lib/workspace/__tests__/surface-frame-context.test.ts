@@ -70,6 +70,21 @@ describe('SurfaceFrameBridge', () => {
 		await vi.waitFor(() => expect(renderer.attach).toHaveBeenCalledOnce());
 	});
 
+	it('applies retained focus only after renderer attachment completes', async () => {
+		const bridge = new SurfaceFrameBridge();
+		const attachment = deferred<void>();
+		const renderer = provider();
+		renderer.attach.mockReturnValueOnce(attachment.promise);
+		bridge.provideRenderer(renderer);
+		await bridge.activate(false);
+
+		expect(bridge.focusPrimary()).toBe(false);
+		expect(renderer.focusPrimary).not.toHaveBeenCalled();
+		attachment.resolve();
+
+		await vi.waitFor(() => expect(renderer.focusPrimary).toHaveBeenCalledOnce());
+	});
+
 	it('rejects activation when a late renderer fails to attach', async () => {
 		const bridge = new SurfaceFrameBridge();
 		const activation = bridge.activate();
@@ -115,11 +130,12 @@ describe('SurfaceFrameBridge', () => {
 		expect(second.detach).not.toHaveBeenCalled();
 	});
 
-	it('delegates focus only while a provider is registered', () => {
+	it('delegates focus only while an attached provider is registered', async () => {
 		const bridge = new SurfaceFrameBridge();
 		const renderer = provider();
 		expect(bridge.focusPrimary()).toBe(false);
 		const unregister = bridge.provideRenderer(renderer);
+		await bridge.activate();
 
 		expect(bridge.focusPrimary()).toBe(true);
 		expect(renderer.focusPrimary).toHaveBeenCalledOnce();

@@ -13,6 +13,7 @@ import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
 import createPreambleRoutes from './preambles.js';
+import { createChatPreambleRoutes } from './chat-preambles.js';
 import createTerminalRoutes from './terminals.js';
 import createPromptRefinementRoutes from './prompt-refinement.js';
 import { createRuntimeRoutes } from './runtime.js';
@@ -21,6 +22,7 @@ import { createChatSnapshotRoutes } from './chat-snapshot.js';
 import { createChatRowRoutes } from './chat-rows.js';
 import { createChatExportRoutes } from './chat-export.js';
 import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
+import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -52,6 +54,7 @@ import type { ChatRowService } from '../chats/chat-row-service.js';
 import type { TranscriptExportService } from '../chats/transcript-export/service.js';
 import type { HandoffArtifactService } from '../chats/handoff-artifact/service.js';
 import type { PreambleService } from '../preambles/service.js';
+import type { ChatPreambleSelectionService } from '../preambles/chat-selection-service.js';
 
 export default function createAllRoutes({
   registry,
@@ -75,6 +78,7 @@ export default function createAllRoutes({
   scheduledPrompts,
   snippets,
   preambles,
+  chatPreambleSelection,
   terminals,
   searchIndex,
   transcriptSearchSettings,
@@ -106,6 +110,7 @@ export default function createAllRoutes({
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
   preambles: PreambleService;
+  chatPreambleSelection: ChatPreambleSelectionService;
   terminals: TerminalManager;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
@@ -128,6 +133,7 @@ export default function createAllRoutes({
     ...createChatRowRoutes(chatRows),
     ...createChatExportRoutes(transcriptExport),
     ...createChatHandoffArtifactRoutes(handoffArtifact),
+    ...createNativeSessionLookupRoutes(registry, agents),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
@@ -167,6 +173,10 @@ export default function createAllRoutes({
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),
     ...createPreambleRoutes(preambles),
+    ...createChatPreambleRoutes({
+      selection: chatPreambleSelection,
+      preambles,
+    }),
     ...createPromptRefinementRoutes({ settings, agents }),
     ...createTerminalRoutes(terminals),
   };

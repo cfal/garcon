@@ -1,4 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
+import { CompactionMessage } from '@garcon/common/chat-types';
+import { isRecord } from '@garcon/common/json';
 import { parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import {
@@ -66,6 +68,30 @@ export function piUserMessageText(value: unknown): string | null {
     && typeof (part as Record<string, unknown>).text === 'string'
   )) as Record<string, unknown> | undefined;
   return typeof text?.text === 'string' ? text.text : null;
+}
+
+export function piCompactionMessage(
+  event: Record<string, unknown>,
+  timestamp: string,
+): CompactionMessage | null {
+  if (event.type !== 'compaction_end' || event.aborted !== false) return null;
+  if (!isRecord(event.result)) return null;
+  const { summary, tokensBefore, estimatedTokensAfter } = event.result;
+  if (typeof summary !== 'string' || !isPiTokenCount(tokensBefore)) return null;
+  if (estimatedTokensAfter !== undefined && !isPiTokenCount(estimatedTokensAfter)) return null;
+  const reason = event.reason;
+  if (reason !== 'manual' && reason !== 'threshold' && reason !== 'overflow') return null;
+  return new CompactionMessage(
+    timestamp,
+    reason === 'manual' ? 'manual' : 'auto',
+    summary,
+    tokensBefore,
+    estimatedTokensAfter,
+  );
+}
+
+function isPiTokenCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 export function occurrenceCounts(values: readonly string[]): Map<string, number> {

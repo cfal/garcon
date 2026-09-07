@@ -46,7 +46,7 @@
 	async function paste(): Promise<void> {
 		if (!session) return;
 		try {
-			const terminalRuntime = terminals.ensureRuntime(terminalId);
+			const terminalRuntime = await terminals.ensureRuntime(terminalId);
 			if (!(await terminalRuntime.pasteFromClipboard())) {
 				notifications.error(terminalRuntime.clipboardMessage || m.shell_errors_clipboard_failed());
 			}

@@ -21,4 +21,5 @@ export interface NewChatConfig {
 	firstMessage: string;
 	initialImages?: File[];
 	tags?: string[];
+	orderedPreambleIds?: readonly string[];
 }

@@ -36,6 +36,7 @@ export class FileSession {
 	dirty = $state(false);
 	loading = $state(false);
 	loadError = $state<string | null>(null);
+	loadErrorRequiresPageReload = $state(false);
 	saving = $state(false);
 	saveError = $state<string | null>(null);
 	isExternallyStale = $state(false);
@@ -59,7 +60,7 @@ export class FileSession {
 	textScrollTop = 0;
 	markdownScrollLeft = 0;
 	markdownScrollTop = 0;
-	editor: CodeEditorController | null = null;
+	editor = $state.raw<CodeEditorController | null>(null);
 	loadController: AbortController | null = null;
 	saveController: AbortController | null = null;
 	freshnessController: AbortController | null = null;

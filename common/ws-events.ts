@@ -42,6 +42,7 @@ import {
   isTranscriptSearchStatusV1,
   type TranscriptSearchStatusV1,
 } from './chat-search';
+import { InvalidChatIdError, parseChatId } from './chat-id';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -315,6 +316,15 @@ export class PreamblesInvalidatedMessage {
   constructor(public reason: PreamblesInvalidationReason) {}
 }
 
+// Body-free per-chat invalidation; distinct from workspace catalog invalidation.
+export class ChatPreamblesInvalidatedMessage {
+  readonly type = 'chat-preambles-invalidated' as const;
+  constructor(
+    public chatId: string,
+    public revision: number,
+  ) {}
+}
+
 export type ClientRequestErrorCode = Extract<
   ErrorCode,
   | 'MISSING_CHAT_ID'
@@ -383,6 +393,7 @@ export type ServerWsMessage =
   | ScheduledPromptsInvalidatedMessage
   | SnippetsInvalidatedMessage
   | PreamblesInvalidatedMessage
+  | ChatPreamblesInvalidatedMessage
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
@@ -807,6 +818,13 @@ export function parseServerWsMessage(
         ? new PreamblesInvalidatedMessage(data.reason)
         : null;
     }
+    case 'chat-preambles-invalidated': {
+      const chatId = canonicalChatId(data.chatId);
+      const revision = nonNegativeInt(data.revision);
+      return chatId && revision !== null
+        ? new ChatPreamblesInvalidatedMessage(chatId, revision)
+        : null;
+    }
     case 'client-request-error': {
       const clientRequestId = requiredStr(data.clientRequestId);
       const requestType = requiredStr(data.requestType);
@@ -833,5 +851,14 @@ export function parseServerWsMessage(
     }
     default:
       return null;
+  }
+}
+
+function canonicalChatId(value: unknown): string | null {
+  try {
+    return parseChatId(value);
+  } catch (error) {
+    if (error instanceof InvalidChatIdError) return null;
+    throw error;
   }
 }

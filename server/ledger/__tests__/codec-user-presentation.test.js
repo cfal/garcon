@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.ts';
-import { submissionFingerprint } from '../codec.ts';
+import {
+  parseLedgerPreambleSelectionChangedNoticeDetail,
+  submissionFingerprint,
+} from '../codec.ts';
 
 describe('transcript submission presentation fingerprint', () => {
   const detail = (presentation) => ({
@@ -28,5 +31,24 @@ describe('transcript submission presentation fingerprint', () => {
       style: 'custom',
       customStyle: { lightAccent: '#0ea5e9', darkAccent: '#c4b5fd' },
     })));
+  });
+});
+
+describe('persisted preamble selection notice identity', () => {
+  const detail = (clientMessageId) => ({
+    type: 'preamble-selection-change',
+    clientMessageId,
+    requestFingerprint: 'fingerprint',
+    selectionRevision: 1,
+    preambles: [],
+  });
+
+  it('requires the shared canonical command-correlation bounds', () => {
+    expect(parseLedgerPreambleSelectionChangedNoticeDetail(detail('message-1')))
+      .toMatchObject({ clientMessageId: 'message-1' });
+    expect(() => parseLedgerPreambleSelectionChangedNoticeDetail(detail(' message-1')))
+      .toThrow('Stored preamble selection notice detail is invalid');
+    expect(() => parseLedgerPreambleSelectionChangedNoticeDetail(detail('x'.repeat(257))))
+      .toThrow('Stored preamble selection notice detail is invalid');
   });
 });

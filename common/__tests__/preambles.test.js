@@ -21,6 +21,15 @@ import {
 
 const CREATED_AT = '2026-09-03T10:00:00.000Z';
 
+// Deterministic canonical UUID v4 fixtures.
+const TEST_ID_ONE = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+const TEST_ID_TWO = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
+
+function testIdForIndex(index) {
+  const suffix = `a${(index % 4096).toString(16).padStart(3, '0')}`;
+  return `${TEST_ID_ONE.slice(0, 19)}${suffix}${TEST_ID_ONE.slice(23)}`;
+}
+
 function definition(overrides = {}) {
   return {
     enabled: true,
@@ -111,14 +120,19 @@ describe('preamble contracts', () => {
   });
 
   it('normalizes snapshots defensively and rejects duplicate IDs or excess entries', () => {
-    const snapshot = normalizePreamblesSnapshot({ revision: 2, preambles: [preamble('a')] });
-    expect(snapshot).toEqual({ revision: 2, preambles: [preamble('a')] });
-    expect(normalizePreamblesSnapshot({ revision: 2, preambles: [preamble('a'), preamble('a')] })).toBeNull();
+    const snapshot = normalizePreamblesSnapshot({ revision: 2, preambles: [preamble(TEST_ID_ONE)] });
+    expect(snapshot).toEqual({ revision: 2, preambles: [preamble(TEST_ID_ONE)] });
+    expect(normalizePreamblesSnapshot({ revision: 2, preambles: [preamble(TEST_ID_ONE), preamble(TEST_ID_ONE)] })).toBeNull();
     expect(normalizePreamblesSnapshot({
       revision: 2,
-      preambles: Array.from({ length: PREAMBLE_MAX_COUNT + 1 }, (_, index) => preamble(String(index))),
+      preambles: Array.from(
+        { length: PREAMBLE_MAX_COUNT + 1 },
+        (_, index) => preamble(testIdForIndex(index)),
+      ),
     })).toBeNull();
     expect(normalizePreamblesSnapshot({ revision: 2, preambles: [], extra: true })).toBeNull();
+    expect(normalizePreamblesSnapshot({ revision: 2, preambles: [preamble('not-a-uuid')] })).toBeNull();
+    expect(normalizePreamblesSnapshot({ revision: 2, preambles: [preamble(TEST_ID_ONE.toUpperCase())] })).toBeNull();
   });
 
   it('parses only complete mutation responses and pending boundaries', () => {

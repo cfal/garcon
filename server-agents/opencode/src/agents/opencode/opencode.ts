@@ -27,7 +27,7 @@ import {
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
-import { CompactionMessage } from '@garcon/common/chat-types';
+import type { CompactionTrigger } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   runtimeRows,
@@ -88,10 +88,11 @@ import {
   modelsFromProviders,
   type OpenCodeModelOption,
 } from './model-catalog.js';
-import { adoptOpenCodeCompactionPartRoute, manualCompactionBoundaryRow } from './compaction-routing.js';
+import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow, compactionEventTrigger } from './compaction-routing.js';
 import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
 import {
   OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
+  latestOpenCodePromptTerminal,
   openCodeProviderFailureRow,
 } from './turn-failure.js';
 
@@ -679,7 +680,7 @@ export class OpenCodeRuntime {
     session.lastActivityAt = Date.now();
     this.#decisions.cancelForSession(agentSessionId, 'cancelled');
     this.#rejectTurnWaiter(agentSessionId, new Error(message));
-    const row = openCodeProviderFailureRow(message, entryId, session.turn.assistantMessageIds);
+    const row = openCodeProviderFailureRow(message, entryId, session.turn);
     this.#publishRows(agentSessionId, session.turn.operation, [row]);
     this.#publishFailed(agentSessionId, session.turn.operation, message);
   }
@@ -695,7 +696,7 @@ export class OpenCodeRuntime {
       if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
       return;
     }
-    const providerTerminal = Array.from(route.turn.assistantTerminals.values()).at(-1);
+    const providerTerminal = latestOpenCodePromptTerminal(route.turn);
     if (providerTerminal?.outcome === 'failed') {
       this.#failTurnForProviderError(
         route.sessionId, session, providerTerminal.error, providerTerminal.messageId,
@@ -917,25 +918,26 @@ export class OpenCodeRuntime {
   }
 
   #dispatchOpenCodeEvent(event: SSEEvent, route: OpenCodeOperationRoute): void {
-    if (route.turn.compaction) {
-      this.#dispatchCompactionBoundary(event, route);
+    const compactionTrigger = compactionEventTrigger(event, route.turn);
+    if (compactionTrigger) {
+      this.#dispatchCompactionBoundary(event, route, compactionTrigger);
       return;
     }
     const chatMessages = convertOpenCodeEventToChatMessages(event, route.turn, this.#logger);
-    if (!chatMessages || !chatMessages.length) {
-      return;
-    }
+    if (!chatMessages?.length) return;
 
     this.#publishRows(route.sessionId, route.turn.operation, chatMessages);
   }
 
-  // A manual compaction turn surfaces only the boundary marker; the provider's
-  // summary text and control parts stay internal to the native session.
-  #dispatchCompactionBoundary(event: SSEEvent, route: OpenCodeOperationRoute): void {
-    if (route.turn.compactionBoundaryPublished) return;
-    const boundary = manualCompactionBoundaryRow(event);
+  #dispatchCompactionBoundary(
+    event: SSEEvent,
+    route: OpenCodeOperationRoute,
+    trigger: CompactionTrigger,
+  ): void {
+    if (trigger === 'manual' && route.turn.manualCompactionBoundaryPublished) return;
+    const boundary = compactionBoundaryRow(event, trigger);
     if (!boundary) return;
-    route.turn.compactionBoundaryPublished = true;
+    if (trigger === 'manual') route.turn.manualCompactionBoundaryPublished = true;
     this.#publishRows(route.sessionId, route.turn.operation, [
       attachNativeMessageSource(boundary.row, { entryId: boundary.summaryMessageId }),
     ]);

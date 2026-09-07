@@ -94,12 +94,40 @@ describe('shared transcript chat rows', () => {
     expect(rendered).not.toContain('CLI Undefined');
   });
 
+  it('formats preamble selection changes from title snapshots including None enabled', () => {
+    const updated = new TranscriptNoticeMessage(AT, 'Preambles updated', {
+      type: 'preamble-selection-changed',
+      preambles: [
+        { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' },
+      ],
+    });
+    const empty = new TranscriptNoticeMessage(AT, 'Preambles updated', {
+      type: 'preamble-selection-changed',
+      preambles: [],
+    });
+    const rendered = renderSharedChatText({
+      shareToken: 'synthetic-share-token',
+      chatId: 'synthetic-chat',
+      title: 'Synthetic selection change',
+      agentId: 'codex',
+      model: 'synthetic-model',
+      projectPath: '/synthetic/workspace',
+      sharedAt: AT,
+      messages: [updated, empty],
+    });
+
+    expect(rendered).toContain('Preambles updated: Repository conventions');
+    expect(rendered).toContain('Preambles updated: None enabled');
+    expect(JSON.stringify(rendered)).not.toContain('clientMessageId');
+    expect(JSON.stringify(rendered)).not.toContain('fingerprint');
+  });
+
   it('formats preamble applications from title snapshots without private catalog data', () => {
     const notice = new TranscriptNoticeMessage(AT, 'Preambles applied', {
       type: 'preamble-application',
       preambles: [
-        { id: 'preamble-1', title: 'Repository conventions' },
-        { id: 'preamble-2', title: 'Security constraints' },
+        { id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' },
+        { id: '80becfa6-c9c7-4b31-9190-fd23c0bedf9c', title: 'Security constraints' },
       ],
     });
     const rendered = renderSharedChatText({
@@ -116,7 +144,7 @@ describe('shared transcript chat rows', () => {
     expect(rendered).toContain(
       `[Notice] ${AT}\nPreambles applied: Repository conventions; Security constraints`,
     );
-    expect(JSON.stringify(notice)).toContain('preamble-1');
+    expect(JSON.stringify(notice)).toContain('3502b645-222b-49d2-ac39-1c91f9fb1174');
     expect(JSON.stringify(notice)).not.toContain('private body sentinel');
     expect(JSON.stringify(notice)).not.toContain('/private/project/path');
   });

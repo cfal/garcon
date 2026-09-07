@@ -16,6 +16,13 @@ import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
+import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
+
+export {
+  parseDeleteChatCommandRequest,
+  parseForkChatCommandRequest,
+} from './chat-fork-command-parsing.js';
+import { isPreambleId, PREAMBLE_MAX_COUNT, type PreambleId } from './preambles.js';
 import {
   parseUserMessagePresentation,
   type ChatStopOutcome,
@@ -83,6 +90,7 @@ export type CommandErrorCode = Extract<
   | 'CARRYOVER_HISTORY_UNAVAILABLE'
   | 'CONTEXT_ENVELOPE_MISMATCH'
   | 'PREAMBLE_SLASH_COMMAND_BLOCKED'
+  | 'PREAMBLE_SELECTION_COMPOSITION_INVALID'
   | 'CHAT_DELETED'
   | 'OPERATION_UNSUPPORTED'
   | 'SOURCE_REVISION_CHANGED'
@@ -183,6 +191,9 @@ export interface StartChatCommandRequest {
   images?: AgentCommandImage[];
   tags?: string[];
   userMessagePresentation?: UserMessagePresentation;
+  // Omitted means the server resolves current defaults at actual creation; an
+  // explicit list, including empty, is stored exactly as supplied.
+  orderedPreambleIds?: readonly PreambleId[];
 }
 
 export interface AgentRunCommandRequest {
@@ -486,6 +497,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
   const command = contentOrImages(body, 'command', images).trim();
   const agentSettings = requiredAgentSettings(body.agentSettings, 'agentSettings');
   const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
+  const orderedPreambleIds = optionalOrderedPreambleIds(body.orderedPreambleIds);
   if (agentSettings.ownerId !== agentId) {
     throw new CommandRequestValidationError('agentSettings must be owned by agentId');
   }
@@ -508,7 +520,29 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
     ...(images === undefined ? {} : { images }),
     tags: normalizeTags(Array.isArray(body.tags) ? body.tags : []),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
+    ...(orderedPreambleIds === undefined ? {} : { orderedPreambleIds }),
   };
+}
+
+function optionalOrderedPreambleIds(value: unknown): readonly PreambleId[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new CommandRequestValidationError('orderedPreambleIds must be an array');
+  }
+  if (value.length > PREAMBLE_MAX_COUNT) {
+    throw new CommandRequestValidationError('orderedPreambleIds is too long');
+  }
+  const ids: PreambleId[] = [];
+  for (const item of value) {
+    if (!isPreambleId(item)) {
+      throw new CommandRequestValidationError('orderedPreambleIds contains an invalid preamble ID');
+    }
+    if (ids.includes(item)) {
+      throw new CommandRequestValidationError('orderedPreambleIds contains a duplicate ID');
+    }
+    ids.push(item);
+  }
+  return ids;
 }
 
 function clientChatStartOrigin(value: unknown): ClientChatStartOrigin {
@@ -660,43 +694,8 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
   };
 }
 
-export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequest {
-  const body = requestRecord(value);
-  const upToOrdinal = body.upToOrdinal;
-  const transcriptViewId = optionalNonEmptyString(body, 'transcriptViewId');
-  if (
-    upToOrdinal !== undefined
-    && (!Number.isSafeInteger(upToOrdinal) || Number(upToOrdinal) <= 0)
-  ) {
-    throw new CommandRequestValidationError('upToOrdinal must be a positive integer');
-  }
-  if (transcriptViewId !== undefined && upToOrdinal === undefined) {
-    throw new CommandRequestValidationError('transcriptViewId requires upToOrdinal');
-  }
-  if (upToOrdinal !== undefined && transcriptViewId === undefined) {
-    throw new CommandRequestValidationError('upToOrdinal requires transcriptViewId');
-  }
-  const allowHandoffFork = parseHandoffForkConsent(body);
-  return {
-    sourceChatId: requiredChatId(body, 'sourceChatId'),
-    chatId: requiredChatId(body, 'chatId'),
-    ...(upToOrdinal === undefined ? {} : { upToOrdinal: Number(upToOrdinal) }),
-    ...(allowHandoffFork ? { allowHandoffFork: true } : {}),
-    ...(transcriptViewId === undefined ? {} : { transcriptViewId }),
-  };
-}
 
-function parseHandoffForkConsent(body: Record<string, unknown>): true | undefined {
-  const consent = body.allowHandoffFork;
-  if (consent !== undefined && typeof consent !== 'boolean') {
-    throw new CommandRequestValidationError('allowHandoffFork must be a boolean');
-  }
-  return consent === true ? true : undefined;
-}
 
-export function parseDeleteChatCommandRequest(value: unknown): DeleteChatCommandRequest {
-  return { chatId: requiredChatId(requestRecord(value), 'chatId') };
-}
 
 export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryCreateCommandRequest {
   const body = requestRecord(value);

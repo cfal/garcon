@@ -300,8 +300,8 @@ function insertServerEntry(
 }
 
 export class ChatSessionsStore implements ChatSessionsPort {
-	#baseById = $state<Record<string, ChatSessionRecord>>({});
-	#baseOrder = $state<string[]>([]);
+	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
+	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	lastSelectedChatId = $state<string | null>(null);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});

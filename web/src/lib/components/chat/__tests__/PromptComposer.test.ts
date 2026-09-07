@@ -10,6 +10,7 @@ import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { ImageAttachmentState } from '$lib/chat/composer/image-attachment.svelte.js';
 import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
+import { PromptComposerHeightState } from '../prompt-composer-height-state.svelte.js';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -86,6 +87,22 @@ describe('PromptComposer focus', () => {
 
 		expect(composer?.className).toContain('shadow-none');
 		expect(composer?.className).not.toContain('shadow-sm');
+	});
+
+	it('measures content once after an input update', async () => {
+		const fitToContent = vi.spyOn(PromptComposerHeightState.prototype, 'fitToContent');
+		try {
+			render(PromptComposerTestHost, { selectedChatId: 'chat-single-input-measurement' });
+			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+			await waitFor(() => expect(fitToContent).toHaveBeenCalled());
+			fitToContent.mockClear();
+
+			await fireEvent.input(textarea, { target: { value: 'First line\nSecond line' } });
+
+			await waitFor(() => expect(fitToContent).toHaveBeenCalledOnce());
+		} finally {
+			fitToContent.mockRestore();
+		}
 	});
 
 	it('keeps manual resizing live after content auto-expands while the selected chat is processing', async () => {

@@ -10,12 +10,16 @@ import {
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { ChatRegistry } from '../../chats/store.ts';
+import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRegistry } from '../registry.ts';
 
 const CHAT_ID = '1783725900000200';
 const AT = '2026-08-15T00:00:00.000Z';
+const PREAMBLE_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+const PREAMBLE_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
+const PREAMBLE_MISSING = '936903ad-8b98-43eb-a7d4-c17ce0dc18d8';
 
 describe('AgentRegistry session cache', () => {
   let root;
@@ -34,6 +38,7 @@ describe('AgentRegistry session cache', () => {
       agentSettingsById: {
         test: { ownerId: 'test', schemaVersion: 1, values: {} },
       },
+      preambleSelection: { revision: 0, orderedPreambleIds: [] },
       parentChat: null,
     });
     ledger = new TranscriptLedgerService(
@@ -51,7 +56,7 @@ describe('AgentRegistry session cache', () => {
 
   function createRegistry(
     adoption = { ensure: () => Promise.reject(new Error('unused')) },
-    preambles = { resolve: () => [] },
+    preambles = { snapshot: () => ({ revision: 0, preambles: [] }) },
     integrations = {
       has: () => false,
       get: () => null,
@@ -68,17 +73,26 @@ describe('AgentRegistry session cache', () => {
       adoption,
       hasPendingOwnershipTransfer: () => false,
       preambles,
+      selectionAdmissionLock: new KeyedPromiseLock(),
     });
   }
 
-  function armBoundary(ownershipEpoch, kind = 'new-chat') {
+  function armBoundary(ownershipEpoch, kind = 'new-chat', selectionRevision) {
     chats.updateChat(CHAT_ID, {
       agentOwnershipEpoch: ownershipEpoch,
-      pendingPreambleBoundary: { kind, ownershipEpoch },
+      pendingPreambleBoundary: selectionRevision === undefined
+        ? { kind, ownershipEpoch }
+        : { kind, ownershipEpoch, selectionRevision },
     });
   }
 
-  function definition(id, title, content) {
+  function setSelection(orderedPreambleIds, revision = 1) {
+    chats.updateChat(CHAT_ID, {
+      preambleSelection: { revision, orderedPreambleIds },
+    });
+  }
+
+  function definition(id, title, content, overrides = {}) {
     return {
       id,
       enabled: true,
@@ -87,7 +101,12 @@ describe('AgentRegistry session cache', () => {
       scope: { type: 'global' },
       createdAt: AT,
       updatedAt: AT,
+      ...overrides,
     };
+  }
+
+  function catalog(...preambles) {
+    return { snapshot: () => ({ revision: preambles.length, preambles }) };
   }
 
   function admit(
@@ -111,28 +130,32 @@ describe('AgentRegistry session cache', () => {
     );
   }
 
-  it('consumes a pending boundary with the current ordered preambles', async () => {
+  it('applies the saved selection order, not catalog order', async () => {
     armBoundary('epoch-current');
-    const resolve = mock(() => [
-      definition('preamble-a', 'First', 'first body'),
-      definition('preamble-b', 'Second', 'second body'),
-    ]);
+    setSelection([PREAMBLE_B, PREAMBLE_A]);
+    const snapshot = mock(() => ({
+      revision: 2,
+      preambles: [
+        definition(PREAMBLE_A, 'First', 'first body'),
+        definition(PREAMBLE_B, 'Second', 'second body'),
+      ],
+    }));
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve },
+      { snapshot },
     );
 
     await expect(admit(registry, 'boundary-current')).resolves.toEqual({ inserted: true });
 
-    expect(resolve).toHaveBeenCalledWith('/repo');
+    expect(snapshot).toHaveBeenCalledTimes(1);
     expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
     const rows = ledger.currentRows(CHAT_ID);
     expect(rows.map((row) => row.kind)).toEqual(['notice', 'user-input']);
     expect(rows[0].detail).toEqual({
       type: 'preamble-application',
       preambles: [
-        { id: 'preamble-a', title: 'First' },
-        { id: 'preamble-b', title: 'Second' },
+        { id: PREAMBLE_B, title: 'Second' },
+        { id: PREAMBLE_A, title: 'First' },
       ],
     });
     expect(rows[1].detail.preambleBoundary).toEqual({
@@ -140,20 +163,44 @@ describe('AgentRegistry session cache', () => {
       ownershipEpoch: 'epoch-current',
     });
     expect(ledger.takePreparedInput(CHAT_ID, 'boundary-current').providerPrefix).toContain(
-      'first body\n\nsecond body',
+      'second body\n\nfirst body',
     );
+  });
+
+  it('skips missing, disabled, and out-of-scope selected entries without failing', async () => {
+    armBoundary('epoch-filtered');
+    setSelection([
+      PREAMBLE_MISSING,
+      PREAMBLE_A,
+      PREAMBLE_B,
+    ]);
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      catalog(
+        definition(PREAMBLE_A, 'Enabled', 'enabled body'),
+        definition(PREAMBLE_B, 'Disabled', 'disabled body', { enabled: false }),
+      ),
+    );
+
+    await expect(admit(registry, 'filtered')).resolves.toEqual({ inserted: true });
+
+    const rows = ledger.currentRows(CHAT_ID);
+    expect(rows[0].detail).toEqual({
+      type: 'preamble-application',
+      preambles: [{ id: PREAMBLE_A, title: 'Enabled' }],
+    });
   });
 
   it('consumes a zero-match boundary and does not apply later catalog changes', async () => {
     armBoundary('epoch-empty');
-    let resolved = [];
+    let preambles = [];
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve: () => resolved },
+      { snapshot: () => ({ revision: 0, preambles }) },
     );
 
     await admit(registry, 'empty-first');
-    resolved = [definition('preamble-later', 'Later', 'later body')];
+    preambles = [definition(PREAMBLE_A, 'Later', 'later body')];
     await admit(registry, 'empty-second');
 
     const rows = ledger.currentRows(CHAT_ID);
@@ -179,15 +226,18 @@ describe('AgentRegistry session cache', () => {
       preambles: [],
     });
     armBoundary('epoch-stale', 'fork');
-    const resolve = mock(() => [definition('preamble-stale', 'Stale', 'must not apply')]);
+    const snapshot = mock(() => ({
+      revision: 1,
+      preambles: [definition(PREAMBLE_A, 'Stale', 'must not apply')],
+    }));
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve },
+      { snapshot },
     );
 
     await admit(registry, 'after-stale-proof');
 
-    expect(resolve).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
     expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
     expect(ledger.currentRows(CHAT_ID).at(-1).detail.preambleBoundary).toBeNull();
   });
@@ -204,9 +254,10 @@ describe('AgentRegistry session cache', () => {
       preambles: [],
     });
     armBoundary('epoch-new', 'agent-switch');
+    setSelection([PREAMBLE_A]);
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve: () => [definition('preamble-new', 'New', 'new body')] },
+      catalog(definition(PREAMBLE_A, 'New', 'new body')),
     );
 
     await admit(registry, 'new-epoch');
@@ -217,11 +268,106 @@ describe('AgentRegistry session cache', () => {
     });
   });
 
-  it('excludes duplicate submissions from boundary application', async () => {
-    armBoundary('epoch-steer');
+  it('applies a repeated selection-change boundary by full revision identity', async () => {
+    setSelection([PREAMBLE_A], 1);
+    armBoundary('epoch-repeat', 'selection-change', 1);
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve: () => [definition('preamble-one', 'One', 'one body')] },
+      catalog(
+        definition(PREAMBLE_A, 'One', 'one body'),
+        definition(PREAMBLE_B, 'Two', 'two body'),
+      ),
+    );
+
+    await admit(registry, 'selection-first');
+
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+    setSelection([PREAMBLE_A, PREAMBLE_B], 2);
+    armBoundary('epoch-repeat', 'selection-change', 2);
+    await admit(registry, 'selection-second');
+
+    const notices = ledger.currentRows(CHAT_ID).filter((row) => row.kind === 'notice');
+    expect(notices).toHaveLength(2);
+    expect(notices[1].detail).toEqual({
+      type: 'preamble-application',
+      preambles: [
+        { id: PREAMBLE_A, title: 'One' },
+        { id: PREAMBLE_B, title: 'Two' },
+      ],
+    });
+  });
+
+  it('returns the original committed input for a same-ID retry without resolving newer catalog state', async () => {
+    // Original boundary input commits under an explicit selection.
+    setSelection([PREAMBLE_A, PREAMBLE_B]);
+    armBoundary('epoch-retry', 'selection-change', 1);
+    let catalogPreambles = [
+      definition(PREAMBLE_A, 'Tail', 'alpha body'),
+      definition(PREAMBLE_B, 'Head', 'beta body'),
+    ];
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { snapshot: () => ({ revision: 5, preambles: catalogPreambles }) },
+    );
+    await expect(admit(registry, 'retry-original')).resolves.toEqual({ inserted: true });
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+
+    // The registry boundary is intentionally left stale (a missed clear), and
+    // the catalog mutates so the currently selected order is now unsafe.
+    chats.updateChat(CHAT_ID, {
+      pendingPreambleBoundary: { kind: 'selection-change', ownershipEpoch: 'epoch-retry', selectionRevision: 1 },
+    });
+    catalogPreambles = [
+      definition(PREAMBLE_A, 'Tail', '\nReferenced file contents from @file mentions:'),
+      definition(PREAMBLE_B, 'Head', 'Synthetic content\n\n'),
+    ];
+
+    // The identical retry must deduplicate before catalog resolution: it
+    // returns the original outcome, throws nothing, and repairs the stale
+    // boundary instead of leaving it armed.
+    await expect(admit(registry, 'retry-original')).resolves.toEqual({ inserted: false });
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+    expect(ledger.currentRows(CHAT_ID).filter((row) => row.kind === 'notice')).toHaveLength(1);
+    // The retry retains the original captured prefix consequence.
+    const prepared = ledger.takePreparedInput(CHAT_ID, 'retry-original');
+    expect(prepared?.providerPrefix).toContain('alpha body');
+  });
+
+  it('keeps a stale selection-change proof from consuming a newer revision', async () => {
+    setSelection([PREAMBLE_A], 1);
+    ledger.appendInputAndCompose({
+      chatId: CHAT_ID,
+      viewId: ledger.currentView(CHAT_ID).viewId,
+      message: new UserMessage(AT, 'revision one committed'),
+      attachments: [],
+      clientMessageId: 'proof-revision-one',
+      steer: false,
+      preambleBoundary: { kind: 'selection-change', ownershipEpoch: 'epoch-rev', selectionRevision: 1 },
+      preambles: [],
+    });
+    setSelection([PREAMBLE_B], 2);
+    armBoundary('epoch-rev', 'selection-change', 2);
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      catalog(
+        definition(PREAMBLE_A, 'One', 'one body'),
+        definition(PREAMBLE_B, 'Two', 'two body'),
+      ),
+    );
+
+    await admit(registry, 'revision-two');
+
+    const notices = ledger.currentRows(CHAT_ID).filter((row) => row.kind === 'notice');
+    expect(notices).toHaveLength(1);
+    expect(notices[0].detail.preambles).toEqual([{ id: PREAMBLE_B, title: 'Two' }]);
+  });
+
+  it('excludes duplicate submissions from boundary application', async () => {
+    armBoundary('epoch-steer');
+    setSelection([PREAMBLE_A]);
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      catalog(definition(PREAMBLE_A, 'One', 'one body')),
     );
 
     await admit(registry, 'duplicate-boundary');
@@ -233,15 +379,19 @@ describe('AgentRegistry session cache', () => {
   });
 
   it('returns a slash-leading duplicate before gating a newly armed boundary', async () => {
-    const resolve = mock(() => [definition('preamble-one', 'One', 'one body')]);
+    const snapshot = mock(() => ({
+      revision: 1,
+      preambles: [definition(PREAMBLE_A, 'One', 'one body')],
+    }));
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve },
+      { snapshot },
     );
 
     await admit(registry, 'slash-retry', 'agent-run', '/provider-command');
     ledger.takePreparedInput(CHAT_ID, 'slash-retry');
     armBoundary('epoch-switch', 'agent-switch');
+    setSelection([PREAMBLE_A]);
 
     await expect(registry.admitInput(
       CHAT_ID,
@@ -255,7 +405,7 @@ describe('AgentRegistry session cache', () => {
       },
     )).resolves.toEqual({ inserted: false });
 
-    expect(resolve).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
     expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
       kind: 'agent-switch',
       ownershipEpoch: 'epoch-switch',
@@ -285,10 +435,14 @@ describe('AgentRegistry session cache', () => {
   for (const queued of [false, true]) {
     it(`rejects a ${queued ? 'queued' : 'direct'} provider slash command until matching preambles are sent`, async () => {
       armBoundary('epoch-slash', 'fork');
-      const resolve = mock(() => [definition('preamble-one', 'One', 'one body')]);
+      setSelection([PREAMBLE_A]);
+      const snapshot = mock(() => ({
+        revision: 1,
+        preambles: [definition(PREAMBLE_A, 'One', 'one body')],
+      }));
       const registry = createRegistry(
         { ensure: async () => ledger.currentView(CHAT_ID) },
-        { resolve },
+        { snapshot },
       );
 
       await expect(Promise.resolve().then(() => (
@@ -306,17 +460,18 @@ describe('AgentRegistry session cache', () => {
 
       await admit(registry, 'provider-prompt', 'agent-run', 'continue', queued);
 
-      expect(resolve).toHaveBeenCalledWith('/repo');
+      expect(snapshot).toHaveBeenCalledTimes(2);
       expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
       expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual(['notice', 'user-input']);
     });
   }
 
-  it('allows a provider slash command when no enabled preamble matches and consumes the boundary', async () => {
+  it('allows a provider slash command when no selected preamble is eligible', async () => {
     armBoundary('epoch-empty-slash');
+    setSelection([PREAMBLE_B]);
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve: () => [] },
+      catalog(definition(PREAMBLE_B, 'Disabled', 'disabled body', { enabled: false })),
     );
 
     await expect(admit(registry, 'empty-slash', 'agent-run', '/provider-command')).resolves.toEqual({
@@ -337,17 +492,47 @@ describe('AgentRegistry session cache', () => {
     ]);
   });
 
-  it('keeps Garcon-owned goal control outside preamble boundary handling', async () => {
-    armBoundary('epoch-goal-control', 'fork');
-    const resolve = mock(() => [definition('preamble-one', 'One', 'one body')]);
+  it('rejects an unsafe selected-order composition before the ledger commits', async () => {
+    armBoundary('epoch-unsafe');
+    setSelection([
+      PREAMBLE_A,
+      PREAMBLE_B,
+    ]);
     const registry = createRegistry(
       { ensure: async () => ledger.currentView(CHAT_ID) },
-      { resolve },
+      catalog(
+        definition(PREAMBLE_A, 'Tail', '\nReferenced file contents from @file mentions:'),
+        definition(PREAMBLE_B, 'Head', 'Synthetic content\n\n'),
+      ),
+    );
+
+    await expect(admit(registry, 'unsafe-order')).rejects.toMatchObject({
+      code: 'PREAMBLE_SELECTION_COMPOSITION_INVALID',
+      status: 422,
+    });
+
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
+      kind: 'new-chat',
+      ownershipEpoch: 'epoch-unsafe',
+    });
+    expect(ledger.currentRows(CHAT_ID)).toEqual([]);
+  });
+
+  it('keeps Garcon-owned goal control outside preamble boundary handling', async () => {
+    armBoundary('epoch-goal-control', 'fork');
+    setSelection([PREAMBLE_A]);
+    const snapshot = mock(() => ({
+      revision: 1,
+      preambles: [definition(PREAMBLE_A, 'One', 'one body')],
+    }));
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { snapshot },
     );
 
     await admit(registry, 'goal-control', 'goal-control', '/goal');
 
-    expect(resolve).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
     expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
       kind: 'fork',
       ownershipEpoch: 'epoch-goal-control',
@@ -417,113 +602,5 @@ describe('AgentRegistry session cache', () => {
       },
     });
     expect(chats.getChatByAgentSessionId('native-late')?.[0]).toBe(CHAT_ID);
-  });
-
-  it('continues transcript listener delivery after a listener fails', async () => {
-    const registry = createRegistry();
-    const delivered = mock(() => undefined);
-    registry.onTranscriptCommitted(() => { throw new Error('listener failed'); });
-    registry.onTranscriptCommitted(delivered);
-    const viewId = ledger.currentView(CHAT_ID).viewId;
-
-    ledger.appendChatRow({
-      chatId: CHAT_ID,
-      viewId,
-      clientMessageId: 'listener-notice',
-      type: 'notice',
-      content: 'listener isolation',
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(delivered).toHaveBeenCalledWith(expect.objectContaining({
-      chatId: CHAT_ID,
-      type: 'rows',
-    }));
-  });
-
-  it('keeps chat rows and provider errors out of the conversational preview fold', async () => {
-    const viewId = ledger.currentView(CHAT_ID).viewId;
-    ledger.appendInputAndCompose({
-      chatId: CHAT_ID,
-      viewId,
-      message: new UserMessage(AT, 'preview-first-user'),
-      attachments: [],
-      clientMessageId: 'preview-message-1',
-      steer: false,
-    });
-    const producer = ledger.openProducer(CHAT_ID, 'test');
-    producer.sink.publish({
-      type: 'session',
-      session: { agentSessionId: 'native-preview', nativeSession: null, nativeSeedReceipt: null },
-    });
-    producer.sink.publish({
-      type: 'rows',
-      rows: [{ message: new AssistantMessage(AT, 'preview-initial-answer') }],
-    });
-    ledger.beginRun(CHAT_ID, 'preview-run');
-    producer.sink.publish({
-      type: 'permission',
-      runId: 'preview-run',
-      lifecycle: {
-        kind: 'requested',
-        permissionOccurrenceId: 'preview-incarnation',
-        requestedTool: new BashToolUseMessage(AT, 'preview-tool', 'pwd'),
-        options: [],
-      },
-      decision: {
-        permissionOccurrenceId: 'preview-incarnation',
-        respond: async () => {},
-      },
-    });
-    producer.sink.publish({
-      type: 'run-ended',
-      runId: 'preview-run',
-      outcome: 'finished',
-    });
-    producer.sink.publish({
-      type: 'rows',
-      rows: [{ message: new AssistantMessage(AT, 'preview-late-answer') }],
-    });
-    producer.sink.publish({
-      type: 'rows',
-      rows: [{ message: new ErrorMessage('2099-01-01T00:00:00.000Z', 'provider error') }],
-    });
-    producer.sink.publish({
-      type: 'permission',
-      runId: 'preview-run',
-      lifecycle: {
-        kind: 'cancelled',
-        permissionOccurrenceId: 'preview-incarnation',
-        reason: 'already ended',
-      },
-    });
-    ledger.appendChatRow({
-      chatId: CHAT_ID,
-      viewId,
-      clientMessageId: 'preview-notice-row',
-      type: 'notice',
-      content: 'preview-hidden-notice',
-    });
-    ledger.appendChatRow({
-      chatId: CHAT_ID,
-      viewId,
-      clientMessageId: 'preview-error-row',
-      type: 'error',
-      content: 'preview-hidden-error',
-    });
-    await Promise.resolve();
-    const registry = createRegistry({
-      ensure: async () => ledger.currentView(CHAT_ID),
-    });
-
-    await expect(registry.getPreview(chats.getChat(CHAT_ID), CHAT_ID)).resolves.toEqual({
-      preview: {
-        firstMessage: 'preview-first-user',
-        lastMessage: 'preview-late-answer',
-        createdAt: AT,
-        lastActivity: AT,
-      },
-    });
   });
 });

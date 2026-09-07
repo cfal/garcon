@@ -1,5 +1,6 @@
 import { parseChatId } from './chat-id.js';
 import {
+  isPreambleId,
   PREAMBLE_MAX_COUNT,
   normalizePreambleTitle,
 } from './preambles.js';
@@ -11,6 +12,13 @@ export type AppliedPreambleReference = {
 
 export interface PreambleApplicationNoticeDetail {
   readonly type: 'preamble-application';
+  readonly preambles: readonly AppliedPreambleReference[];
+}
+
+// Configuration-change fact, distinct from application: it may list zero entries
+// and is never fed into native sanitation evidence.
+export interface PreambleSelectionChangedNoticeDetail {
+  readonly type: 'preamble-selection-changed';
   readonly preambles: readonly AppliedPreambleReference[];
 }
 
@@ -75,6 +83,7 @@ export type ServerControlReceiptDetail = InterAgentMessageReceivedNoticeDetail;
 
 export type TranscriptNoticeDetail =
   | PreambleApplicationNoticeDetail
+  | PreambleSelectionChangedNoticeDetail
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail
   | ChatIdDisclosureNoticeDetail
@@ -94,25 +103,47 @@ export function isCarryoverMigrationQuarantineNoticeDetail(
     && detail.errorCode.length > 0;
 }
 
+function appliedPreambleReferences(
+  value: unknown,
+  minCount: number,
+): readonly AppliedPreambleReference[] | null {
+  const preambles = (value as Record<string, unknown>).preambles;
+  if (!Array.isArray(preambles) || preambles.length < minCount || preambles.length > PREAMBLE_MAX_COUNT) {
+    return null;
+  }
+  const ids = new Set<string>();
+  const references: AppliedPreambleReference[] = [];
+  for (const entry of preambles) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const raw = entry as Record<string, unknown>;
+    if (typeof raw.id !== 'string' || !isPreambleId(raw.id) || ids.has(raw.id)) return null;
+    const title = normalizePreambleTitle(raw.title);
+    // Canonical equality: the stored title must already be its normalized
+    // form, so edge whitespace never survives validation.
+    if (title === null || title !== raw.title) return null;
+    if (!Object.keys(raw).every((key) => key === 'id' || key === 'title')) return null;
+    ids.add(raw.id);
+    references.push({ id: raw.id, title });
+  }
+  return references;
+}
+
 export function isPreambleApplicationNoticeDetail(
   value: unknown,
 ): value is PreambleApplicationNoticeDetail {
   if (!hasType(value, 'preamble-application')) return false;
   const detail = value as Record<string, unknown>;
   if (Object.keys(detail).some((key) => key !== 'type' && key !== 'preambles')) return false;
-  const preambles = detail.preambles;
-  if (!Array.isArray(preambles) || preambles.length < 1 || preambles.length > PREAMBLE_MAX_COUNT) {
-    return false;
-  }
-  const ids = new Set<string>();
-  return preambles.every((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-    const raw = entry as Record<string, unknown>;
-    const id = typeof raw.id === 'string' ? raw.id.trim() : '';
-    if (!id || ids.has(id) || normalizePreambleTitle(raw.title) === null) return false;
-    ids.add(id);
-    return Object.keys(raw).every((key) => key === 'id' || key === 'title');
-  });
+  return appliedPreambleReferences(detail, 1) !== null;
+}
+
+export function isPreambleSelectionChangedNoticeDetail(
+  value: unknown,
+): value is PreambleSelectionChangedNoticeDetail {
+  if (!hasType(value, 'preamble-selection-changed')) return false;
+  const detail = value as Record<string, unknown>;
+  if (Object.keys(detail).some((key) => key !== 'type' && key !== 'preambles')) return false;
+  return appliedPreambleReferences(detail, 0) !== null;
 }
 
 export function isHandoffSummaryNoticeDetail(
@@ -187,7 +218,16 @@ export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDet
     return {
       type: value.type,
       preambles: value.preambles.map((preamble) => ({
-        id: preamble.id.trim(),
+        id: preamble.id,
+        title: normalizePreambleTitle(preamble.title)!,
+      })),
+    };
+  }
+  if (isPreambleSelectionChangedNoticeDetail(value)) {
+    return {
+      type: value.type,
+      preambles: value.preambles.map((preamble) => ({
+        id: preamble.id,
         title: normalizePreambleTitle(preamble.title)!,
       })),
     };

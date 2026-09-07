@@ -15,6 +15,7 @@ import { TranscriptLedgerService, TranscriptSinkClosedError } from '../service.t
 import { TranscriptLedgerStore } from '../store.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptLedgerService', () => {
   describe('chat ID discovery requests', () => {
@@ -854,7 +855,7 @@ describe('TranscriptLedgerService', () => {
         steer: false,
         preambleBoundary: boundary,
         preambles: [{
-          id: 'preamble-a',
+          id: PREAMBLE_ID,
           enabled: true,
           title: 'Repository conventions',
           content: 'PRIVATE-PREAMBLE-BODY',
@@ -913,7 +914,7 @@ describe('TranscriptLedgerService', () => {
         steer: false,
         preambleBoundary: boundary,
         preambles: [{
-          id: 'preamble-a',
+          id: PREAMBLE_ID,
           enabled: true,
           title: 'Repository conventions',
           content: 'PRIVATE-PREAMBLE-BODY',

@@ -10,7 +10,7 @@ import {
   transcriptExportEntryToolId,
   transcriptExportEntryType,
   transcriptExportEntryCliPresentation,
-  transcriptExportEntryPreambles,
+  transcriptExportEntryPreambleSnapshot,
 } from './values.js';
 
 export function renderTranscriptExportXml(model: TranscriptExportDocumentModel): string {
@@ -36,14 +36,15 @@ export function renderTranscriptExportXml(model: TranscriptExportDocumentModel):
 }
 
 function renderEntry(entry: TranscriptExportEntry): string[] {
-  const preambles = transcriptExportEntryPreambles(entry);
-  if (preambles) {
+  const snapshot = transcriptExportEntryPreambleSnapshot(entry);
+  if (snapshot) {
+    const tag = snapshot.kind === 'applied' ? 'preambles-applied' : 'preambles-updated';
     return [
-      `    <preambles-applied ordinal="${entry.ordinal}">`,
-      ...preambles.map((preamble) => (
+      `    <${tag} ordinal="${entry.ordinal}">`,
+      ...snapshot.preambles.map((preamble) => (
         `      <preamble id="${attribute(preamble.id)}" title="${attribute(preamble.title)}"/>`
       )),
-      '    </preambles-applied>',
+      '    </' + tag + '>',
     ];
   }
   const type = transcriptExportEntryType(entry);

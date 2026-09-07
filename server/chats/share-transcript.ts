@@ -17,7 +17,10 @@ import {
 } from '../../common/chat-types.ts';
 import type { CliPresentationStyle } from '../../common/cli-presentation.ts';
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
-import { isPreambleApplicationNoticeDetail } from '../../common/transcript-notice-details.ts';
+import {
+  isPreambleApplicationNoticeDetail,
+  isPreambleSelectionChangedNoticeDetail,
+} from '../../common/transcript-notice-details.ts';
 
 interface TranscriptEntry {
   role: string;
@@ -235,7 +238,11 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
   if (message instanceof TranscriptNoticeMessage) {
     const content = isPreambleApplicationNoticeDetail(message.detail)
       ? `Preambles applied: ${message.detail.preambles.map((preamble) => preamble.title).join('; ')}`
-      : message.content || '';
+      : isPreambleSelectionChangedNoticeDetail(message.detail)
+        ? (message.detail.preambles.length === 0
+          ? 'Preambles updated: None enabled'
+          : `Preambles updated: ${message.detail.preambles.map((preamble) => preamble.title).join('; ')}`)
+        : message.content || '';
     return {
       role: `Notice${message.title === undefined ? '' : ` — ${message.title}`}`,
       timestamp: message.timestamp,

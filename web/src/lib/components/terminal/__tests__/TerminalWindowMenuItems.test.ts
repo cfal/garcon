@@ -57,6 +57,9 @@ function terminalSession(attachmentState: TerminalAttachmentState): TerminalClie
 			latestOutputSequence: 0,
 		},
 		attachmentState,
+		runtimeState: 'ready',
+		runtimeError: null,
+		runtimeErrorRequiresPageReload: false,
 		lastReceivedSequence: 0,
 		replayTruncatedAt: null,
 	};
@@ -74,7 +77,7 @@ describe('TerminalWindowMenuItems', () => {
 		fakes.clipboardMessage = '';
 		fakes.closeBlocked = false;
 		fakes.pasteFromClipboard.mockResolvedValue(true);
-		fakes.ensureRuntime.mockImplementation(() => ({
+		fakes.ensureRuntime.mockImplementation(async () => ({
 			pasteFromClipboard: fakes.pasteFromClipboard,
 			get clipboardMessage() {
 				return fakes.clipboardMessage;
