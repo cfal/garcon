@@ -211,6 +211,7 @@
 	--app-height: 100dvh;
 	--app-viewport-offset-top: 0px;
 	--app-viewport-center-y: 50dvh;
+	--processing-pulse-duration: 2.4s;
 }
 
 .mobile-shell {
@@ -591,7 +592,8 @@
 
 @media (prefers-reduced-motion: no-preference) {
 	.composer-thinking-active:not(.composer-reduce-motion) {
-		--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;
+		--composer-thinking-animation: composer-thinking-border-pulse var(--processing-pulse-duration)
+			ease-in-out infinite;
 		--composer-thinking-composer-background: hsl(var(--card));
 		--composer-thinking-composer-border: hsl(var(--border));
 		--composer-thinking-status-border: hsl(var(--border));
@@ -612,7 +614,7 @@
 @media (prefers-reduced-motion: no-preference) {
 	.sidebar-processing-indicator,
 	.workspace-chat-processing-indicator {
-		animation: sidebar-processing-pulse 1.6s ease-in-out infinite;
+		animation: sidebar-processing-pulse var(--processing-pulse-duration) ease-in-out infinite;
 	}
 
 	.sidebar-reduce-motion .sidebar-processing-indicator {
