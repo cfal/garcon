@@ -14,6 +14,7 @@
 		OnboardingWizardState,
 		type OnboardingPageId,
 	} from './onboarding-wizard-state.svelte.js';
+	import { ONBOARDING_OPTION_CARD_CLASS } from './onboarding-option-card.js';
 	import OnboardingChatLayoutPreview from './OnboardingChatLayoutPreview.svelte';
 	import OnboardingThemePage from './OnboardingThemePage.svelte';
 
@@ -88,9 +89,6 @@
 		{ value: 'medium', label: m.settings_chat_max_width_medium, previewClass: 'w-3/5' },
 		{ value: 'small', label: m.settings_chat_max_width_small, previewClass: 'w-2/5' },
 	];
-
-	const optionCardClass =
-		'flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-border bg-card p-3 text-center transition-colors hover:border-primary/50 has-checked:border-primary has-checked:bg-accent/50 has-checked:shadow-xs has-focus-visible:ring-2 has-focus-visible:ring-ring has-focus-visible:ring-offset-1 has-focus-visible:ring-offset-background';
 </script>
 
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
@@ -120,7 +118,7 @@
 				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 					<legend class="sr-only">{m.onboarding_layout_title()}</legend>
 					{#each layoutOptions as option (option.value)}
-						<label class={optionCardClass}>
+						<label class={ONBOARDING_OPTION_CARD_CLASS}>
 							<input
 								type="radio"
 								class="sr-only"
@@ -149,7 +147,7 @@
 					</legend>
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 						{#each chatMaxWidthOptions as option (option.value)}
-							<label class={cn(optionCardClass, 'gap-1.5 p-2')}>
+							<label class={cn(ONBOARDING_OPTION_CARD_CLASS, 'gap-1.5 p-2')}>
 								<input
 									type="radio"
 									class="sr-only"

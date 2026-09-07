@@ -3,14 +3,11 @@
 	import { THEME_PROFILE_LABELS } from '$lib/components/shared/theme-profile-labels.js';
 	import {
 		DARK_THEME_PROFILES,
-		DEFAULT_THEME_PREFERENCE,
 		LIGHT_THEME_PROFILES,
 		THEME_PROFILES,
-		isDarkThemeId,
-		isLightThemeId,
-		isThemeId,
 		type ThemePreference,
 	} from '$lib/theme/themes.js';
+	import { createThemePreferenceSelection } from '$lib/theme/theme-preference-selection.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
@@ -20,32 +17,11 @@
 		localSettings.set('themePreference', preference);
 	}
 
-	function selectFixedMode(): void {
-		setPreference({ mode: 'fixed', themeId: themeRuntime.profile.id });
-	}
-
-	function selectSystemMode(): void {
-		setPreference(DEFAULT_THEME_PREFERENCE);
-	}
-
-	function selectFixedTheme(event: Event): void {
-		const themeId = (event.currentTarget as HTMLSelectElement).value;
-		if (isThemeId(themeId)) setPreference({ mode: 'fixed', themeId });
-	}
-
-	function selectSystemLightTheme(event: Event): void {
-		const themeId = (event.currentTarget as HTMLSelectElement).value;
-		const current = localSettings.themePreference;
-		if (current.mode !== 'system' || !isLightThemeId(themeId)) return;
-		setPreference({ ...current, lightThemeId: themeId });
-	}
-
-	function selectSystemDarkTheme(event: Event): void {
-		const themeId = (event.currentTarget as HTMLSelectElement).value;
-		const current = localSettings.themePreference;
-		if (current.mode !== 'system' || !isDarkThemeId(themeId)) return;
-		setPreference({ ...current, darkThemeId: themeId });
-	}
+	const selection = createThemePreferenceSelection({
+		getPreference: () => localSettings.themePreference,
+		getResolvedThemeId: () => themeRuntime.profile.id,
+		onSelect: setPreference,
+	});
 </script>
 
 <div class="px-4 py-3">
@@ -58,7 +34,7 @@
 					name="settings-theme-mode"
 					value="system"
 					checked={localSettings.themePreference.mode === 'system'}
-					onchange={selectSystemMode}
+					onchange={selection.selectSystemMode}
 				/>
 				{m.settings_theme_mode_system()}
 			</label>
@@ -68,7 +44,7 @@
 					name="settings-theme-mode"
 					value="fixed"
 					checked={localSettings.themePreference.mode === 'fixed'}
-					onchange={selectFixedMode}
+					onchange={selection.selectFixedMode}
 				/>
 				{m.settings_theme_mode_fixed()}
 			</label>
@@ -81,7 +57,7 @@
 			<select
 				class="select-native w-48 max-w-[60%] shrink-0"
 				value={localSettings.themePreference.themeId}
-				onchange={selectFixedTheme}
+				onchange={(event) => selection.selectFixedTheme(event.currentTarget.value)}
 			>
 				{#each THEME_PROFILES as profile (profile.id)}
 					<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
@@ -95,7 +71,7 @@
 				<select
 					class="select-native w-full"
 					value={localSettings.themePreference.lightThemeId}
-					onchange={selectSystemLightTheme}
+					onchange={(event) => selection.selectSystemLightTheme(event.currentTarget.value)}
 				>
 					{#each LIGHT_THEME_PROFILES as profile (profile.id)}
 						<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
@@ -107,7 +83,7 @@
 				<select
 					class="select-native w-full"
 					value={localSettings.themePreference.darkThemeId}
-					onchange={selectSystemDarkTheme}
+					onchange={(event) => selection.selectSystemDarkTheme(event.currentTarget.value)}
 				>
 					{#each DARK_THEME_PROFILES as profile (profile.id)}
 						<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
