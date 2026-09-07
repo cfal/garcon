@@ -5,23 +5,17 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import SunIcon from '@lucide/svelte/icons/sun';
-	import MoonIcon from '@lucide/svelte/icons/moon';
-	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import { getAppShell, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
-	import type {
-		ChatMaxWidth,
-		SidebarChatItemLayout,
-		ThemeMode,
-	} from '$lib/stores/local-settings.svelte.js';
+	import type { ChatMaxWidth, SidebarChatItemLayout } from '$lib/stores/local-settings.svelte.js';
 	import {
 		OnboardingWizardState,
 		type OnboardingPageId,
 	} from './onboarding-wizard-state.svelte.js';
 	import OnboardingChatLayoutPreview from './OnboardingChatLayoutPreview.svelte';
+	import OnboardingThemePage from './OnboardingThemePage.svelte';
 
 	const appShell = getAppShell();
 	const ls = getLocalSettings();
@@ -61,32 +55,6 @@
 		'chat-display': m.onboarding_chat_display_description,
 		done: m.onboarding_done_description,
 	};
-
-	const themeOptions: Array<{
-		value: ThemeMode;
-		label: () => string;
-		hint: () => string;
-		icon: typeof SunIcon;
-	}> = [
-		{
-			value: 'system',
-			label: m.settings_theme_system,
-			hint: m.onboarding_theme_system_hint,
-			icon: MonitorIcon,
-		},
-		{
-			value: 'light',
-			label: m.settings_theme_light,
-			hint: m.onboarding_theme_light_hint,
-			icon: SunIcon,
-		},
-		{
-			value: 'dark',
-			label: m.settings_theme_dark,
-			hint: m.onboarding_theme_dark_hint,
-			icon: MoonIcon,
-		},
-	];
 
 	const layoutOptions: Array<{
 		value: SidebarChatItemLayout;
@@ -147,24 +115,7 @@
 
 		<div class="min-h-40">
 			{#if wizard.pageId === 'theme'}
-				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-					<legend class="sr-only">{m.onboarding_theme_title()}</legend>
-					{#each themeOptions as option (option.value)}
-						<label class={optionCardClass}>
-							<input
-								type="radio"
-								class="sr-only"
-								name="onboarding-theme"
-								value={option.value}
-								checked={ls.theme === option.value}
-								onchange={() => wizard.selectTheme(option.value)}
-							/>
-							<option.icon class="size-6 text-muted-foreground" />
-							<span class="text-sm font-medium text-foreground">{option.label()}</span>
-							<span class="text-xs text-muted-foreground">{option.hint()}</span>
-						</label>
-					{/each}
-				</fieldset>
+				<OnboardingThemePage onSelect={(preference) => wizard.selectTheme(preference)} />
 			{:else if wizard.pageId === 'chat-layout'}
 				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 					<legend class="sr-only">{m.onboarding_layout_title()}</legend>

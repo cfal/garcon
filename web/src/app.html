@@ -7,8 +7,7 @@
 			content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
 		/>
 		<meta name="color-scheme" content="light dark" />
-		<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-		<meta name="theme-color" content="#0c1117" media="(prefers-color-scheme: dark)" />
+		<meta name="theme-color" content="#f4f6f9" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-title" content="Garcon" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -22,19 +21,68 @@
 		<title>Garcon</title>
 		<script>
 			(() => {
-				let theme = 'system';
+				const profiles = {
+					'classic-light': { colorScheme: 'light', themeColor: '#ffffff' },
+					'classic-dark': { colorScheme: 'dark', themeColor: '#0c1117' },
+					'phosphor-light': { colorScheme: 'light', themeColor: '#f4f6f9' },
+					'phosphor-dark': { colorScheme: 'dark', themeColor: '#090b11' },
+					'colorblind-light': { colorScheme: 'light', themeColor: '#ffffff' },
+					'colorblind-dark': { colorScheme: 'dark', themeColor: '#0c1117' },
+				};
+				const defaultPreference = {
+					mode: 'system',
+					lightThemeId: 'phosphor-light',
+					darkThemeId: 'phosphor-dark',
+				};
+				const isRecord = (value) =>
+					value !== null && typeof value === 'object' && !Array.isArray(value);
+				const isThemeId = (value) =>
+					typeof value === 'string' && Object.prototype.hasOwnProperty.call(profiles, value);
+				let preference = defaultPreference;
 				try {
 					const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-					if (stored?.theme === 'dark' || stored?.theme === 'light') theme = stored.theme;
+					const candidate = isRecord(stored) ? stored.themePreference : undefined;
+					if (isRecord(candidate) && candidate.mode === 'fixed' && isThemeId(candidate.themeId)) {
+						preference = { mode: 'fixed', themeId: candidate.themeId };
+					} else if (
+						isRecord(candidate) &&
+						candidate.mode === 'system' &&
+						isThemeId(candidate.lightThemeId) &&
+						isThemeId(candidate.darkThemeId) &&
+						profiles[candidate.lightThemeId].colorScheme === 'light' &&
+						profiles[candidate.darkThemeId].colorScheme === 'dark'
+					) {
+						preference = {
+							mode: 'system',
+							lightThemeId: candidate.lightThemeId,
+							darkThemeId: candidate.darkThemeId,
+						};
+					}
 				} catch {
-					// Falls back to the system preference when persisted settings are unavailable.
+					// Falls back when persisted settings are unavailable.
 				}
 
-				const isDark =
-					theme === 'dark' ||
-					(theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
-				document.documentElement.classList.toggle('dark', isDark);
-				document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+				const systemScheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+				const themeId =
+					preference.mode === 'fixed'
+						? preference.themeId
+						: systemScheme === 'dark'
+							? preference.darkThemeId
+							: preference.lightThemeId;
+				const profile = profiles[themeId];
+				const root = document.documentElement;
+				root.dataset.theme = themeId;
+				root.classList.toggle('dark', profile.colorScheme === 'dark');
+				root.style.colorScheme = profile.colorScheme;
+				document
+					.querySelector('meta[name="theme-color"]')
+					?.setAttribute('content', profile.themeColor);
+				document
+					.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+					?.setAttribute(
+						'content',
+						profile.colorScheme === 'dark' ? 'black-translucent' : 'default',
+					);
 			})();
 		</script>
 		%sveltekit.head%

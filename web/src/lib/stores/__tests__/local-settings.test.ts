@@ -5,6 +5,7 @@ import {
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
 } from '../local-settings.svelte';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import { DEFAULT_THEME_PREFERENCE } from '$lib/theme/themes.js';
 
 describe('LocalSettingsStore', () => {
 	beforeEach(() => {
@@ -14,6 +15,7 @@ describe('LocalSettingsStore', () => {
 	it('defaults max chat width and file opening preferences', () => {
 		const store = createLocalSettingsStore();
 
+		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.chatListDock).toBe('left');
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.chatMaxWidth).toBe('none');
@@ -36,6 +38,51 @@ describe('LocalSettingsStore', () => {
 		expect(store.steerWithCtrlEnter).toBe(true);
 
 		store.destroy();
+	});
+
+	it('persists fixed and System theme preferences atomically', () => {
+		const store = createLocalSettingsStore();
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+
+		let restored = createLocalSettingsStore();
+		expect(restored.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+		restored.destroy();
+
+		store.set('themePreference', {
+			mode: 'system',
+			lightThemeId: 'colorblind-light',
+			darkThemeId: 'phosphor-dark',
+		});
+		restored = createLocalSettingsStore();
+		expect(restored.themePreference).toEqual({
+			mode: 'system',
+			lightThemeId: 'colorblind-light',
+			darkThemeId: 'phosphor-dark',
+		});
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('cleanly cuts legacy and malformed theme settings over to the default', () => {
+		for (const value of [
+			{ theme: 'dark', colorblindMode: true },
+			{ themePreference: { mode: 'fixed', themeId: 'unknown' } },
+			{
+				themePreference: {
+					mode: 'system',
+					lightThemeId: 'classic-dark',
+					darkThemeId: 'classic-light',
+				},
+			},
+		]) {
+			localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify(value));
+			const store = createLocalSettingsStore();
+			expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+			expect(store.snapshot()).not.toHaveProperty('theme');
+			expect(store.snapshot()).not.toHaveProperty('colorblindMode');
+			store.destroy();
+		}
 	});
 
 	it('persists the CLI message expansion preference', () => {
@@ -562,12 +609,14 @@ describe('LocalSettingsStore', () => {
 				textEditorOpenPlacement: 'same-window',
 				imageViewerOpenPlacement: 'new-window',
 				markdownViewerOpenPlacement: 'same-window',
+				themePreference: { mode: 'fixed', themeId: 'colorblind-dark' },
 			}),
 		);
 		window.dispatchEvent(
 			new StorageEvent('storage', {
 				key: LOCAL_STORAGE_KEYS.localSettings,
 				newValue: localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings),
+				storageArea: localStorage,
 			}),
 		);
 
@@ -585,8 +634,61 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.textEditorOpenPlacement).toBe('same-window');
 		expect(secondStore.imageViewerOpenPlacement).toBe('new-window');
 		expect(secondStore.markdownViewerOpenPlacement).toBe('same-window');
+		expect(secondStore.themePreference).toEqual({
+			mode: 'fixed',
+			themeId: 'colorblind-dark',
+		});
 		firstStore.destroy();
 		secondStore.destroy();
+	});
+
+	it('restores defaults when the settings key is removed or local storage is cleared', () => {
+		const store = createLocalSettingsStore();
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: null,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+		localStorage.clear();
+		window.dispatchEvent(
+			new StorageEvent('storage', { key: null, newValue: null, storageArea: localStorage }),
+		);
+		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		store.destroy();
+	});
+
+	it('ignores unrelated and session-storage events, including session clear', () => {
+		const store = createLocalSettingsStore();
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: JSON.stringify({}),
+				storageArea: sessionStorage,
+			}),
+		);
+		window.dispatchEvent(
+			new StorageEvent('storage', { key: null, newValue: null, storageArea: sessionStorage }),
+		);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: 'unrelated',
+				newValue: null,
+				storageArea: localStorage,
+			}),
+		);
+
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+		store.destroy();
 	});
 
 	it('falls back to default for invalid nested project grouping setting', () => {

@@ -281,10 +281,16 @@ describe('FileSessionRegistry', () => {
 		if (!editor) throw new Error('Expected a CodeMirror editor');
 		try {
 			const lightClasses = editor.className;
-			harness.registry.setDarkTheme(true);
+			harness.registry.setThemePresentation({
+				colorScheme: 'dark',
+				rendererPalette: 'standard',
+			});
 			const darkClasses = editor.className;
 			expect(darkClasses).not.toBe(lightClasses);
-			harness.registry.setDarkTheme(false);
+			harness.registry.setThemePresentation({
+				colorScheme: 'light',
+				rendererPalette: 'standard',
+			});
 			expect(editor.className).not.toBe(darkClasses);
 		} finally {
 			session.editor.detach(lease);

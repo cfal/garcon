@@ -225,7 +225,7 @@
 								<select
 									aria-label={m.scheduled_prompts_interval_unit()}
 									bind:value={form.intervalUnit}
-									class="select-native select-native-surface h-10 pl-3"
+									class="select-native select-native-surface h-10 pl-3 text-base sm:pointer-fine:text-sm"
 								>
 									<option value="hours">{m.scheduled_prompts_hours()}</option>
 									<option value="days">{m.scheduled_prompts_days()}</option>

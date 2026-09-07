@@ -6,6 +6,7 @@
 		setLocalSettings,
 		setModelCatalog,
 		setRemoteSettings,
+		setThemeRuntime,
 	} from '$lib/context';
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
@@ -14,6 +15,7 @@
 		type LocalSettingsSnapshot,
 	} from '$lib/stores/local-settings.svelte.js';
 	import { onDestroy, untrack } from 'svelte';
+	import { getThemeProfile, resolveThemeId } from '$lib/theme/themes.js';
 
 	interface SettingsTestHostProps {
 		appShell: AppShellStore;
@@ -187,6 +189,11 @@
 	setAppShell(untrack(() => appShell));
 	setRemoteSettings(untrack(() => remoteSettings));
 	setLocalSettings(localSettings);
+	setThemeRuntime({
+		get profile() {
+			return getThemeProfile(resolveThemeId(localSettings.themePreference, 'light'));
+		},
+	});
 	setModelCatalog({
 		version: 0,
 		apiProviderCatalog: [],

@@ -48,12 +48,22 @@ describe('OnboardingWizard', () => {
 		await screen.findByRole('heading', { name: 'Choose your theme' });
 	});
 
-	it('writes radio selections to local settings', async () => {
+	it('writes theme and display selections to local settings', async () => {
 		const { localSettings } = renderWizard();
 		await screen.findByRole('heading', { name: 'Choose your theme' });
 
-		await fireEvent.click(screen.getByRole('radio', { name: /Dark/ }));
-		expect(localSettings.theme).toBe('dark');
+		await fireEvent.click(screen.getByRole('radio', { name: /Use one theme/ }));
+		expect(localSettings.themePreference).toEqual({
+			mode: 'fixed',
+			themeId: 'phosphor-light',
+		});
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), {
+			target: { value: 'colorblind-dark' },
+		});
+		expect(localSettings.themePreference).toEqual({
+			mode: 'fixed',
+			themeId: 'colorblind-dark',
+		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Chat list layout' });
@@ -64,6 +74,25 @@ describe('OnboardingWizard', () => {
 		await screen.findByRole('heading', { name: 'Chat display' });
 		await fireEvent.click(screen.getByRole('radio', { name: /Medium/ }));
 		expect(localSettings.chatMaxWidth).toBe('medium');
+	});
+
+	it('limits System slots to compatible concrete themes', async () => {
+		const { localSettings } = renderWizard();
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+
+		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
+		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
+		expect(lightSelect.querySelectorAll('option')).toHaveLength(3);
+		expect(darkSelect.querySelectorAll('option')).toHaveLength(3);
+
+		await fireEvent.change(lightSelect, { target: { value: 'classic-light' } });
+		await fireEvent.change(darkSelect, { target: { value: 'colorblind-dark' } });
+
+		expect(localSettings.themePreference).toEqual({
+			mode: 'system',
+			lightThemeId: 'classic-light',
+			darkThemeId: 'colorblind-dark',
+		});
 	});
 
 	it('renders real sidebar previews for each layout option and tracks the selection', async () => {

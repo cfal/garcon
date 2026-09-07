@@ -386,12 +386,12 @@ async function verifyWorkspaceChromeThemes(
 ): Promise<void> {
   const originalClasses = await page.evaluate(() => ({
     dark: document.documentElement.classList.contains('dark'),
-    colorblind: document.documentElement.classList.contains('colorblind'),
+    themeId: document.documentElement.dataset.theme,
   }));
   const scenarios = [
     {
+      themeId: 'classic-light',
       dark: false,
-      colorblind: false,
       titlebar: '0 0% 93%',
       active: '0 0% 84%',
       selectedTab: '0 0% 96%',
@@ -402,8 +402,8 @@ async function verifyWorkspaceChromeThemes(
       inactiveSelectedTabColor: 'rgb(224, 224, 224)',
     },
     {
+      themeId: 'colorblind-light',
       dark: false,
-      colorblind: true,
       titlebar: '0 0% 93%',
       active: '0 0% 84%',
       selectedTab: '0 0% 96%',
@@ -414,8 +414,8 @@ async function verifyWorkspaceChromeThemes(
       inactiveSelectedTabColor: 'rgb(224, 224, 224)',
     },
     {
+      themeId: 'classic-dark',
       dark: true,
-      colorblind: false,
       titlebar: '0 0% 7%',
       active: '0 0% 1%',
       selectedTab: '0 0% 18%',
@@ -426,8 +426,8 @@ async function verifyWorkspaceChromeThemes(
       inactiveSelectedTabColor: 'rgb(31, 31, 31)',
     },
     {
+      themeId: 'colorblind-dark',
       dark: true,
-      colorblind: true,
       titlebar: '0 0% 7%',
       active: '0 0% 1%',
       selectedTab: '0 0% 18%',
@@ -441,9 +441,9 @@ async function verifyWorkspaceChromeThemes(
 
   try {
     for (const scenario of scenarios) {
-      await page.evaluate(({ dark, colorblind }) => {
+      await page.evaluate(({ dark, themeId }) => {
+        document.documentElement.dataset.theme = themeId;
         document.documentElement.classList.toggle('dark', dark);
-        document.documentElement.classList.toggle('colorblind', colorblind);
       }, scenario);
       await page.waitForFunction(
         ({
@@ -536,9 +536,10 @@ async function verifyWorkspaceChromeThemes(
       });
     }
   } finally {
-    await page.evaluate(({ dark, colorblind }) => {
+    await page.evaluate(({ dark, themeId }) => {
+      if (themeId) document.documentElement.dataset.theme = themeId;
+      else delete document.documentElement.dataset.theme;
       document.documentElement.classList.toggle('dark', dark);
-      document.documentElement.classList.toggle('colorblind', colorblind);
     }, originalClasses);
   }
 }

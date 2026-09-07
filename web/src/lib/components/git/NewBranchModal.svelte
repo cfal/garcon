@@ -142,7 +142,7 @@
 						value={selectedBaseRef}
 						onchange={(event) => onBaseRefChange?.(event.currentTarget.value)}
 						disabled={isCreatingBranch}
-						class="select-native select-native-surface h-10 w-full pl-3 disabled:cursor-not-allowed disabled:opacity-60"
+						class="select-native select-native-surface h-10 w-full pl-3 text-base disabled:cursor-not-allowed disabled:opacity-60 sm:pointer-fine:text-sm"
 					>
 						<option value="">{m.git_new_branch_current_head({ branch: currentBranch })}</option>
 						{#if selectedBaseRef && !selectedBaseRefIsVisible}

@@ -3,17 +3,21 @@ import { describe, expect, it } from 'vitest';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
-function cssBlock(selector: string): string {
-	const start = appCss.indexOf(`${selector} {`);
+function profileCss(themeId: string): string {
+	return readFileSync(`src/lib/theme/profiles/${themeId}.css`, 'utf8');
+}
+
+function cssBlock(source: string, selector: string): string {
+	const start = source.indexOf(`${selector} {`);
 	if (start < 0) throw new Error(`Missing CSS selector: ${selector}`);
-	const end = appCss.indexOf('\n}', start);
+	const end = source.indexOf('\n}', start);
 	if (end < 0) throw new Error(`Unterminated CSS selector: ${selector}`);
-	return appCss.slice(start, end);
+	return source.slice(start, end);
 }
 
 describe('workspace window theme tokens', () => {
 	it('exports dedicated title-bar tokens to Tailwind', () => {
-		const theme = cssBlock('@theme inline');
+		const theme = cssBlock(appCss, '@theme inline');
 
 		expect(theme).toContain(
 			'--color-workspace-window-titlebar: hsl(var(--workspace-window-titlebar));',
@@ -29,7 +33,7 @@ describe('workspace window theme tokens', () => {
 	});
 
 	it('uses distinct light chrome and muted inactive-window tab selection', () => {
-		const root = cssBlock(':root');
+		const root = profileCss('classic-light');
 
 		expect(root).toContain('--workspace-window-titlebar: 0 0% 93%;');
 		expect(root).toContain('--workspace-window-titlebar-active: 0 0% 84%;');
@@ -39,7 +43,7 @@ describe('workspace window theme tokens', () => {
 	});
 
 	it('uses distinct dark chrome and muted inactive-window tab selection', () => {
-		const dark = cssBlock('.dark');
+		const dark = profileCss('classic-dark');
 
 		expect(dark).toContain('--workspace-window-titlebar: 0 0% 7%;');
 		expect(dark).toContain('--workspace-window-titlebar-active: 0 0% 1%;');

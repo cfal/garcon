@@ -396,14 +396,6 @@ export class TerminalRegistry {
 		this.runtimeIfPresent(terminalId)?.prepareRendererTransfer();
 	}
 
-	setDarkTheme(isDark: boolean): void {
-		this.#theme.setPresentation({
-			colorScheme: isDark ? 'dark' : 'light',
-			rendererPalette: 'standard',
-			background: isDark ? '#1e1e1e' : '#ffffff',
-		});
-	}
-
 	setThemePresentation(presentation: TerminalThemePresentation): void {
 		this.#theme.setPresentation(presentation);
 	}

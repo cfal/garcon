@@ -10,8 +10,11 @@ import type {
 	CodeEditorController,
 	EditorPresentationSettings,
 } from '$lib/files/editor/code-editor-controller.svelte.js';
-import { resolveEditorThemeId, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
-import type { ThemeRendererPresentation } from '$lib/theme/themes.js';
+import {
+	rendererThemeIdFor,
+	type RendererThemeId,
+	type ThemeRendererPresentation,
+} from '$lib/theme/themes.js';
 import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
 import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
@@ -134,7 +137,7 @@ export class FileSessionRegistry {
 	#creationQueue = new SerialQueue();
 	#decisionQueue = new SerialQueue();
 	#editorRuntimePromise: Promise<FileEditorRuntimeModule> | null = null;
-	#editorThemeId: EditorThemeId = 'standard-light';
+	#editorThemeId: RendererThemeId = 'standard-light';
 
 	constructor(private readonly deps: FileSessionsDeps) {}
 
@@ -154,15 +157,8 @@ export class FileSessionRegistry {
 		return this.sessions[sessionId] ?? null;
 	}
 
-	setDarkTheme(isDark: boolean): void {
-		this.setThemePresentation({
-			colorScheme: isDark ? 'dark' : 'light',
-			rendererPalette: 'standard',
-		});
-	}
-
 	setThemePresentation(presentation: ThemeRendererPresentation): void {
-		const editorThemeId = resolveEditorThemeId(presentation);
+		const editorThemeId = rendererThemeIdFor(presentation);
 		if (this.#editorThemeId === editorThemeId) return;
 		this.#editorThemeId = editorThemeId;
 		for (const session of this.all) session.editor?.reconfigure();

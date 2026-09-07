@@ -1,4 +1,5 @@
-:root:where([data-theme='phosphor-light']) {
+:root:where([data-theme='phosphor-light']),
+:root:where(:not([data-theme])) {
 	--background: 220 25% 97%;
 	--foreground: 222 32% 11%;
 	--card: 0 0% 100%;
@@ -22,7 +23,7 @@
 	--workspace-window-tab-selected-inactive: 220 16% 88%;
 	--composer-thinking-static-start: 220 14% 80%;
 	--composer-thinking-pulse-emphasis: 160 45% 55%;
-	--input: 220 14% 80%;
+	--input: 220 14% 54%;
 	--ring: 160 84% 28%;
 	--radius: 0.75rem;
 	--transient-backdrop-color: 222 45% 8%;
@@ -178,8 +179,8 @@
 	--file-icon-image: 271 76% 53%;
 	--file-icon-folder: 190 88% 36%;
 	--terminal-bg: 220 25% 98%;
-	--git-action-commit: 190 88% 38%;
-	--git-action-commit-hover: 190 88% 32%;
+	--git-action-commit: 190 88% 30%;
+	--git-action-commit-hover: 190 88% 26%;
 	--git-action-pull: 146 60% 40%;
 	--git-action-pull-hover: 146 60% 34%;
 	--git-action-push: 30 90% 48%;
@@ -219,7 +220,7 @@
 	--switch-thumb-unchecked: hsl(var(--foreground));
 	--native-select-muted-background: hsl(var(--muted));
 	--native-select-surface-background: hsl(var(--muted));
-	--native-select-border: hsl(var(--border));
+	--native-select-border: hsl(var(--input));
 	--native-select-radius: var(--radius);
 	--native-select-compact-radius: var(--radius);
 }

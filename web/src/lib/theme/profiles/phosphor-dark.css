@@ -10,7 +10,7 @@
 	--secondary: 222 20% 13%;
 	--secondary-foreground: 150 12% 90%;
 	--muted: 222 18% 12%;
-	--muted-foreground: 218 10% 58%;
+	--muted-foreground: 218 10% 60%;
 	--accent: 160 32% 13%;
 	--accent-foreground: 152 30% 90%;
 	--destructive: 0 72% 50%;
@@ -22,7 +22,7 @@
 	--workspace-window-tab-selected-inactive: 223 24% 8%;
 	--composer-thinking-static-start: 220 14% 24%;
 	--composer-thinking-pulse-emphasis: 158 60% 40%;
-	--input: 220 14% 22%;
+	--input: 220 14% 44%;
 	--ring: 158 84% 48%;
 	--radius: 0.75rem;
 	--transient-backdrop-color: 222 50% 3%;
@@ -178,8 +178,8 @@
 	--file-icon-image: 271 81% 72%;
 	--file-icon-folder: 187 92% 62%;
 	--terminal-bg: 222 35% 4%;
-	--git-action-commit: 190 88% 52%;
-	--git-action-commit-hover: 190 88% 44%;
+	--git-action-commit: 190 88% 30%;
+	--git-action-commit-hover: 190 88% 26%;
 	--git-action-pull: 146 56% 46%;
 	--git-action-pull-hover: 146 56% 38%;
 	--git-action-push: 30 85% 52%;
@@ -219,7 +219,7 @@
 	--switch-thumb-unchecked: hsl(var(--foreground));
 	--native-select-muted-background: hsl(var(--muted));
 	--native-select-surface-background: hsl(var(--muted));
-	--native-select-border: hsl(var(--border));
+	--native-select-border: hsl(var(--input));
 	--native-select-radius: var(--radius);
 	--native-select-compact-radius: var(--radius);
 }
