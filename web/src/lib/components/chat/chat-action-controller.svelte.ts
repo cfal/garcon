@@ -1,4 +1,5 @@
 import * as m from '$lib/paraglide/messages.js';
+import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
 import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -7,6 +8,7 @@ import type { ChatListEntry } from '$shared/chat-list';
 
 export interface ChatActionControllerDeps {
 	get chats(): ChatSessionRecord[];
+	get displayedChatIds(): readonly string[];
 	get selectedChatId(): string | null;
 	projectPathRevision: (chatId: string) => number;
 	onQuietRefresh: () => Promise<void> | void;
@@ -59,16 +61,17 @@ export class ChatActionController {
 	}
 
 	async toggleArchive(chatId: string): Promise<void> {
-		const chats = this.deps.chats;
-		const chatIndex = chats.findIndex((entry) => entry.id === chatId);
-		const chat = chats[chatIndex];
+		const chat = this.deps.chats.find((entry) => entry.id === chatId);
 		if (!chat || this.deps.isArchiveMutationPending(chatId)) return;
 		const wasArchived = chat.isArchived;
-		const isSelectedChat = this.deps.selectedChatId === chatId;
-		const isArchivingSelectedChat = !wasArchived && isSelectedChat;
+		const isArchivingSelectedChat = !wasArchived && this.deps.selectedChatId === chatId;
 		let replacementChatId: string | null = null;
 		if (isArchivingSelectedChat) {
-			replacementChatId = this.#findArchiveReplacementChatId(chats, chatIndex);
+			replacementChatId = resolveArchiveReplacementChatId({
+				archivingChatId: chatId,
+				displayedChatIds: this.deps.displayedChatIds,
+				isSelectableChat: (candidateId) => !this.deps.isArchiveMutationPending(candidateId),
+			});
 		}
 
 		const mutation = wasArchived
@@ -87,21 +90,6 @@ export class ChatActionController {
 				this.deps.requestSidebarRecenter();
 			}
 		});
-	}
-
-	#findArchiveReplacementChatId(
-		chats: readonly ChatSessionRecord[],
-		chatIndex: number,
-	): string | null {
-		for (let index = chatIndex + 1; index < chats.length; index += 1) {
-			const chat = chats[index];
-			if (chat && !this.deps.isArchiveMutationPending(chat.id)) return chat.id;
-		}
-		for (let index = chatIndex - 1; index >= 0; index -= 1) {
-			const chat = chats[index];
-			if (chat && !this.deps.isArchiveMutationPending(chat.id)) return chat.id;
-		}
-		return null;
 	}
 
 	async confirmDelete(dialogs: ChatActionDialogsState): Promise<void> {
