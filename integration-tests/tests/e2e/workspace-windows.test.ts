@@ -216,8 +216,8 @@ describe('Lightpanda workspace windows', () => {
         [secondChatWindowId]: chatBId,
       });
 
-      await app.selectWorkspaceWindowSurface('Open Git Workbench', originalWindowId);
-      await waitForWindowActiveSurface(fixture.page, originalWindowId, 'singleton:git');
+      await app.selectWorkspaceWindowSurface('New Terminal', originalWindowId);
+      await waitForWindowActiveSurfacePrefix(fixture.page, originalWindowId, 'terminal:');
       await app.focusWorkspaceWindow(secondChatWindowId);
       await app.waitForSelectedChat(chatBId);
 
