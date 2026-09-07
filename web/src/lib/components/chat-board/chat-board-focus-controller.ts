@@ -12,6 +12,8 @@ type PendingFocusTarget =
 export class ChatBoardFocusController {
 	#root: HTMLElement | null = null;
 	#pendingFocus: PendingFocusTarget | null = null;
+	#pendingBand: ChatBoardPresentationBand | null = null;
+	#pendingActiveColumnId: string | null = null;
 
 	setRoot(root: HTMLElement | null): void {
 		this.#root = root;
@@ -21,9 +23,20 @@ export class ChatBoardFocusController {
 		nextBand: ChatBoardPresentationBand,
 		activeColumnId: string | null,
 	): void {
-		this.#pendingFocus = null;
+		this.#pendingBand = nextBand;
+		this.#pendingActiveColumnId = activeColumnId;
 		if (!this.#root) return;
 		const active = document.activeElement;
+		if (this.#pendingFocus) {
+			if (
+				active instanceof HTMLElement &&
+				active !== document.body &&
+				!this.#root.contains(active)
+			) {
+				this.#clearPendingFocus();
+			}
+			return;
+		}
 		if (!(active instanceof HTMLElement) || !this.#root.contains(active)) return;
 		const tab = active.closest<HTMLElement>('[data-chat-board-tab]');
 		if (tab?.dataset.chatBoardTab) {
@@ -33,10 +46,6 @@ export class ChatBoardFocusController {
 		const lane = active.closest<HTMLElement>('[data-chat-board-column-id]');
 		const columnId = lane?.dataset.chatBoardColumnId;
 		if (!columnId) return;
-		if (nextBand === 'narrow' && activeColumnId && columnId !== activeColumnId) {
-			this.#pendingFocus = { kind: 'lane', columnId: activeColumnId };
-			return;
-		}
 		const occurrence = active.closest<HTMLElement>('[data-chat-board-occurrence]');
 		const control = active.closest<HTMLElement>('[data-chat-board-focus-target]');
 		const occurrenceKey = occurrence?.dataset.chatBoardOccurrence;
@@ -49,10 +58,22 @@ export class ChatBoardFocusController {
 
 	completePresentationChange(): void {
 		const target = this.#pendingFocus;
-		this.#pendingFocus = null;
+		const pendingBand = this.#pendingBand;
+		const activeColumnId = this.#pendingActiveColumnId;
+		this.#clearPendingFocus();
 		if (!target) return;
+		if (pendingBand === 'narrow' && activeColumnId && target.columnId !== activeColumnId) {
+			this.focusLane(activeColumnId);
+			return;
+		}
 		if (target.kind === 'occurrence' && this.#focusOccurrenceControl(target)) return;
 		this.focusLane(target.columnId);
+	}
+
+	#clearPendingFocus(): void {
+		this.#pendingFocus = null;
+		this.#pendingBand = null;
+		this.#pendingActiveColumnId = null;
 	}
 
 	#focusOccurrenceControl(target: Extract<PendingFocusTarget, { kind: 'occurrence' }>): boolean {

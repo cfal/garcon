@@ -44,6 +44,11 @@
 	const focusController = new ChatBoardFocusController();
 	const laneScrollers = new Map<string, (key: string) => void>();
 	const laneScrollOffsets = new SvelteMap<string, number>();
+	let laneRemountGeneration = 0;
+	let pendingLaneScrollRestore: {
+		readonly generation: number;
+		readonly targets: ReadonlyMap<string, number>;
+	} | null = null;
 	let rootRef = $state<HTMLElement | null>(null);
 	let boardViewportRef = $state<HTMLDivElement | null>(null);
 	let presentationBand = $state<ChatBoardPresentationBand>('medium');
@@ -100,10 +105,10 @@
 			const nextBand: ChatBoardPresentationBand =
 				width < 560 ? 'narrow' : width < 900 ? 'medium' : 'wide';
 			if (nextBand === presentationBand) return;
-			rememberMountedLaneScrollPositions();
+			const generation = beginLaneRemount();
 			focusController.preparePresentationChange(nextBand, activeColumnId);
 			presentationBand = nextBand;
-			void restoreAfterLaneRemount(() => focusController.completePresentationChange());
+			void restoreAfterLaneRemount(generation);
 		});
 		observer.observe(rootRef);
 		return () => observer.disconnect();
@@ -209,7 +214,9 @@
 	}
 
 	function rememberLaneScroll(boardId: string, columnId: string, scrollTop: number): void {
-		laneScrollOffsets.set(laneScrollKey(boardId, columnId), scrollTop);
+		const key = laneScrollKey(boardId, columnId);
+		if (pendingLaneScrollRestore?.targets.has(key)) return;
+		laneScrollOffsets.set(key, scrollTop);
 	}
 
 	function rememberMountedLaneScrollPositions(): void {
@@ -221,10 +228,24 @@
 		}
 	}
 
-	async function restoreAfterLaneRemount(afterRestore?: () => void): Promise<void> {
+	function beginLaneRemount(): number {
+		if (!pendingLaneScrollRestore) rememberMountedLaneScrollPositions();
+		const generation = ++laneRemountGeneration;
+		pendingLaneScrollRestore = {
+			generation,
+			targets: new Map(pendingLaneScrollRestore?.targets ?? laneScrollOffsets),
+		};
+		return generation;
+	}
+
+	async function restoreAfterLaneRemount(generation: number): Promise<void> {
 		await tick();
+		if (pendingLaneScrollRestore?.generation !== generation) return;
 		requestAnimationFrame(() => {
+			if (pendingLaneScrollRestore?.generation !== generation) return;
 			requestAnimationFrame(() => {
+				const pending = pendingLaneScrollRestore;
+				if (pending?.generation !== generation) return;
 				const boardId = selectedBoard?.id;
 				if (boardId && rootRef) {
 					for (const viewport of rootRef.querySelectorAll<HTMLElement>(
@@ -232,12 +253,30 @@
 					)) {
 						const columnId = viewport.dataset.chatBoardLaneList;
 						const scrollTop = columnId
-							? laneScrollOffsets.get(laneScrollKey(boardId, columnId))
+							? pending.targets.get(laneScrollKey(boardId, columnId))
 							: undefined;
 						if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
 					}
 				}
-				afterRestore?.();
+				requestAnimationFrame(() => {
+					if (pendingLaneScrollRestore?.generation !== generation) return;
+					const restoredBoardId = selectedBoard?.id;
+					if (restoredBoardId && rootRef) {
+						for (const viewport of rootRef.querySelectorAll<HTMLElement>(
+							'[data-chat-board-lane-list]',
+						)) {
+							const columnId = viewport.dataset.chatBoardLaneList;
+							if (columnId) {
+								laneScrollOffsets.set(
+									laneScrollKey(restoredBoardId, columnId),
+									viewport.scrollTop,
+								);
+							}
+						}
+					}
+					pendingLaneScrollRestore = null;
+					focusController.completePresentationChange();
+				});
 			});
 		});
 	}
@@ -299,10 +338,10 @@
 	}
 
 	function selectTab(columnId: string): void {
-		rememberMountedLaneScrollPositions();
+		const generation = beginLaneRemount();
 		controller.selectColumn(columnId);
 		focusedTabId = columnId;
-		void restoreAfterLaneRemount();
+		void restoreAfterLaneRemount(generation);
 	}
 
 	function handleTabKeydown(event: KeyboardEvent, columnId: string): void {

@@ -75,6 +75,36 @@ describe('ChatBoardFocusController', () => {
 		expect(document.activeElement).toBe(root.querySelector('[data-chat-board-lane-heading="a"]'));
 	});
 
+	it('retains the original occurrence through consecutive presentation changes', () => {
+		const root = document.createElement('section');
+		const lanes = () => `
+			<section data-chat-board-column-id="a">
+				<h2 tabindex="-1" data-chat-board-lane-heading="a">Ready</h2>
+			</section>
+			<section data-chat-board-column-id="b">
+				<h2 tabindex="-1" data-chat-board-lane-heading="b">Review</h2>
+				<article data-chat-board-occurrence="b:chat-1">
+					<button type="button" data-chat-board-focus-target="transition">Transition</button>
+				</article>
+			</section>
+		`;
+		root.innerHTML = lanes();
+		document.body.append(root);
+		const controller = new ChatBoardFocusController();
+		controller.setRoot(root);
+		root.querySelector<HTMLButtonElement>('[data-chat-board-focus-target="transition"]')!.focus();
+
+		controller.preparePresentationChange('narrow', 'a');
+		root.innerHTML = '<h2 tabindex="-1" data-chat-board-lane-heading="a">Ready</h2>';
+		controller.preparePresentationChange('wide', 'a');
+		root.innerHTML = lanes();
+		controller.completePresentationChange();
+
+		expect(document.activeElement).toBe(
+			root.querySelector('[data-chat-board-focus-target="transition"]'),
+		);
+	});
+
 	it('does not steal focus owned outside the board', () => {
 		const outside = document.createElement('button');
 		const root = document.createElement('section');
