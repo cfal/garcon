@@ -299,6 +299,27 @@ describe('Garcon edge commands', () => {
     expect(extractGarconCommands(new UserMessage(AT, '<garcon-schedule in="1m" />'))).toBeNull();
   });
 
+  it('never uses a nested self-closing command to close a malformed outer opener', () => {
+    for (const family of ['start-agent', 'schedule', 'send-message']) {
+      for (const attributes of ['', ' broken="']) {
+        for (const prefix of ['', 'Answer\n']) {
+          const malformed = `<garcon-${family}${attributes}\n<garcon-schedule in="1m" />\n<garcon-schedule in="5m" />`;
+          const content = `${prefix}${malformed}`;
+          expect(extractGarconCommands(new AssistantMessage(AT, content))).toMatchObject({
+            message: new AssistantMessage(AT, content), commands: [],
+            issues: [{ command: family, reason: 'malformed' }],
+          });
+          const closed = `${content}\n</garcon-${family}>`;
+          const result = extractGarconCommands(new AssistantMessage(AT, `${closed}\n<garcon-schedule in="10m" />`));
+          expect(result.message.content).toBe(closed);
+          expect(result.commands).toMatchObject([{ type: 'schedule', firstRun: { type: 'after', minutes: 10 } }]);
+          expect(result.commands).toHaveLength(1);
+          expect(result.issues).toHaveLength(1);
+        }
+      }
+    }
+  });
+
   it('can consume a valid command at the opposite edge of a malformed one', () => {
     const malformed = send('invalid', false);
     expect(extractGarconCommands(new AssistantMessage(

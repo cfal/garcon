@@ -32,10 +32,10 @@ export function garconEnvelopeSpanAt(content: string, start: number, end: number
   const command = garconEnvelopeCommandAt(content, start);
   if (!command) return null;
   const openerEnd = garconEnvelopeOpenerEnd(content, start);
-  if (openerEnd < 0 || openerEnd > end) return { command, start, end: null };
-  if (content[openerEnd - 2] === '/') return { command, start, end: openerEnd };
+  if (openerEnd > end) return { command, start, end: null };
+  if (openerEnd >= 0 && content[openerEnd - 2] === '/') return { command, start, end: openerEnd };
   const closer = `</garcon-${command}>`;
-  const closerStart = content.indexOf(closer, openerEnd);
+  const closerStart = content.indexOf(closer, openerEnd < 0 ? start + 1 : openerEnd);
   const closerEnd = closerStart + closer.length;
   return { command, start, end: closerStart < 0 || closerEnd > end ? null : closerEnd };
 }
@@ -88,6 +88,7 @@ export function escapeGarconXmlText(value: string): string {
 export function garconEnvelopeOpenerEnd(content: string, start = 0): number {
   let quoted = false;
   for (let index = start; index < content.length; index += 1) {
+    if (index > start && content[index] === '<') return -1;
     if (content[index] === '"') quoted = !quoted;
     if (content[index] === '>' && !quoted) return index + 1;
   }
