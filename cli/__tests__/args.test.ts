@@ -9,6 +9,7 @@ const ENV = { HOME: '/home/test' };
 describe('parseCliArgs', () => {
   test('parses a write-capable new chat without forcing plan mode', () => {
     expect(parseCliArgs([
+      'start',
       '--workspace', 'work',
       '--cwd', './project',
       '--parent', PARENT_CHAT_ID,
@@ -35,7 +36,7 @@ describe('parseCliArgs', () => {
   });
 
   test('parses a minimal resume and stdin prompt', () => {
-    expect(parseCliArgs(['--resume', CHAT_ID, '-'], ENV, '/repo')).toEqual({
+    expect(parseCliArgs(['resume', CHAT_ID, '-'], ENV, '/repo')).toEqual({
       kind: 'resume',
       workspace: 'default',
       configDir: '/home/test/.garcon',
@@ -47,6 +48,7 @@ describe('parseCliArgs', () => {
 
   test('canonicalizes conversational message presentation independently of chat title', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
       '--title', 'Chat title',
@@ -63,7 +65,7 @@ describe('parseCliArgs', () => {
     });
 
     expect(parseCliArgs([
-      '--resume', CHAT_ID,
+      'resume', CHAT_ID,
       '--message-style', 'error',
       '--collapsible',
       'prompt',
@@ -79,7 +81,7 @@ describe('parseCliArgs', () => {
 
   test('normalizes custom presentation accents for new and resumed messages', () => {
     expect(parseCliArgs([
-      '--agent', 'codex', '--model', 'gpt', '--color', '7C3AED', 'prompt',
+      'start', '--agent', 'codex', '--model', 'gpt', '--color', '7C3AED', 'prompt',
     ], ENV)).toMatchObject({
       kind: 'start',
       userMessagePresentation: {
@@ -89,7 +91,7 @@ describe('parseCliArgs', () => {
       },
     });
     expect(parseCliArgs([
-      '--resume', CHAT_ID,
+      'resume', CHAT_ID,
       '--message-style', 'custom',
       '--color', '#0EA5E9,c4b5fd',
       'prompt',
@@ -132,6 +134,7 @@ describe('parseCliArgs', () => {
 
   test('normalizes and deduplicates repeatable additional tags', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
       '--tag', 'Review Needed',
@@ -146,6 +149,7 @@ describe('parseCliArgs', () => {
 
   test('uses the server environment precedence for workspace discovery', () => {
     const result = parseCliArgs([
+      'start',
       '--config-dir', '/ignored',
       '--workspace', 'ignored',
       '--agent', 'claude',
@@ -164,6 +168,7 @@ describe('parseCliArgs', () => {
 
   test('preserves quoted prompt whitespace', () => {
     const result = parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
       '  preserve this spacing  ',
@@ -172,11 +177,12 @@ describe('parseCliArgs', () => {
     expect(result).toMatchObject({ prompt: '  preserve this spacing  ' });
   });
 
-  test('accepts a positional prompt beginning with list after the option terminator', () => {
+  test('accepts prompt text beginning with a command after start', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
-      '--', 'list', 'the', 'open', 'issues',
+      'list', 'the', 'open', 'issues',
     ], ENV)).toMatchObject({
       kind: 'start',
       prompt: 'list the open issues',
@@ -184,28 +190,28 @@ describe('parseCliArgs', () => {
   });
 
   test.each([
-    { args: ['--agent', 'codex', 'prompt'], message: '--model is required' },
-    { args: ['--model', 'gpt', 'prompt'], message: '--agent is required' },
-    { args: ['--resume', CHAT_ID, '--cwd', '.', 'prompt'], message: '--cwd cannot' },
-    { args: ['--resume', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot' },
-    { args: ['--parent', 'invalid', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--parent must be a valid' },
-    { args: ['--parent', PARENT_CHAT_ID, '--parent', CHAT_ID, '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'only once' },
+    { args: ['start', '--agent', 'codex', 'prompt'], message: '--model is required' },
+    { args: ['start', '--model', 'gpt', 'prompt'], message: '--agent is required' },
+    { args: ['resume', CHAT_ID, '--cwd', '.', 'prompt'], message: '--cwd cannot' },
+    { args: ['resume', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot' },
+    { args: ['start', '--parent', 'invalid', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--parent must be a valid' },
+    { args: ['start', '--parent', PARENT_CHAT_ID, '--parent', CHAT_ID, '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'only once' },
     { args: ['send-async', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot be used' },
-    { args: ['--resume', CHAT_ID, '--provider', 'p', 'prompt'], message: 'require --model' },
-    { args: ['--endpoint', 'e', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'requires --provider' },
-    { args: ['--workspace', '../other', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'without path separators' },
-    { args: ['--permissions', 'dangerous', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--permissions must be' },
-    { args: ['--resume', '123', 'prompt'], message: 'valid Garcon chat ID' },
-    { args: ['--agent', 'codex', '--agent', 'claude', '--model', 'gpt', 'prompt'], message: 'only once' },
-    { args: ['--agent', 'codex', '--model', 'gpt', 'prompt', '-'], message: 'must be the only prompt argument' },
+    { args: ['resume', CHAT_ID, '--provider', 'p', 'prompt'], message: 'require --model' },
+    { args: ['start', '--endpoint', 'e', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'requires --provider' },
+    { args: ['start', '--workspace', '../other', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'without path separators' },
+    { args: ['start', '--permissions', 'dangerous', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--permissions must be' },
+    { args: ['resume', '123', 'prompt'], message: 'valid Garcon chat ID' },
+    { args: ['start', '--agent', 'codex', '--agent', 'claude', '--model', 'gpt', 'prompt'], message: 'only once' },
+    { args: ['start', '--agent', 'codex', '--model', 'gpt', 'prompt', '-'], message: 'must be the only prompt argument' },
     { args: ['list', 'models'], message: 'requires --agent' },
     { args: ['list', 'endpoints'], message: 'requires --provider' },
     { args: ['list', 'models', '--agent', 'codex', '--endpoint', 'east'], message: 'requires --provider' },
     { args: ['list', 'agents', '--agent', 'codex'], message: '--agent cannot be used' },
-    { args: ['--json', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'only be used with list' },
+    { args: ['start', '--json', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--json cannot be used with start' },
     { args: ['list', 'agents', '--title', 'Review'], message: '--title cannot be used' },
-    { args: ['--title', '  ', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--title must not be empty' },
-    { args: ['--tag', '!!!', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'letters or numbers' },
+    { args: ['start', '--title', '  ', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--title must not be empty' },
+    { args: ['start', '--tag', '!!!', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'letters or numbers' },
   ])('rejects invalid arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
     try {
@@ -220,12 +226,36 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['--help'], ENV)).toEqual({ kind: 'help' });
   });
 
+  test('requires a known explicit command', () => {
+    expect(() => parseCliArgs([], ENV)).toThrow('a command is required');
+    expect(() => parseCliArgs(['Review', 'this'], ENV)).toThrow('unknown command: Review');
+  });
+
+  test('parses start-async with the new-chat options', () => {
+    expect(parseCliArgs([
+      'start-async',
+      '--cwd', './project',
+      '--parent', PARENT_CHAT_ID,
+      '--agent', 'codex',
+      '--model', 'gpt-5.4',
+      'Review', 'this',
+    ], ENV, '/repo')).toMatchObject({
+      kind: 'start-async',
+      cwd: '/repo/project',
+      parentChatId: PARENT_CHAT_ID,
+      agentId: 'codex',
+      model: 'gpt-5.4',
+      prompt: 'Review this',
+      readsPromptFromStdin: false,
+    });
+  });
+
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
+      'garcon-cli [options] start [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
-      '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
+      'resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
@@ -279,8 +309,9 @@ describe('parseCliArgs', () => {
     });
   });
 
-  test('treats -- wait as a new-chat prompt', () => {
+  test('accepts a prompt beginning with wait after start and the option terminator', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
       '--', 'wait', 'for', 'the', 'review',
@@ -290,8 +321,9 @@ describe('parseCliArgs', () => {
     });
   });
 
-  test('treats -- status as a new-chat prompt', () => {
+  test('accepts a prompt beginning with status after start and the option terminator', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
       '--', 'status', 'the', 'current', 'work',
@@ -320,14 +352,14 @@ describe('parseCliArgs', () => {
     { args: ['status', CHAT_ID, '--reasoning-effort', 'high'], message: '--reasoning-effort cannot be used with status' },
     { args: ['status', CHAT_ID, '--title', 'T'], message: '--title cannot be used with status' },
     { args: ['status', CHAT_ID, '--tag', 'review'], message: '--tag cannot be used with status' },
-    { args: ['status', CHAT_ID, '--resume', CHAT_ID], message: '--resume cannot be used with status' },
+    { args: ['status', CHAT_ID, '--resume', CHAT_ID], message: 'Unknown option' },
     { args: ['status', CHAT_ID, '--allow-steer'], message: '--allow-steer cannot be used with status' },
     { args: ['status', CHAT_ID, '--collapsible'], message: '--collapsible cannot be used with status' },
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--messages', '1'], message: '--messages cannot be used with wait' },
     { args: ['list', 'agents', '--messages', '1'], message: '--messages cannot be used with list' },
     { args: ['stop', CHAT_ID, '--messages', '1'], message: '--messages cannot be used with stop' },
     { args: ['send-async', CHAT_ID, '--messages', '1', 'message'], message: '--messages cannot be used with send-async' },
-    { args: ['--agent', 'codex', '--model', 'gpt', '--messages', '1', 'prompt'], message: '--messages can only be used with status' },
+    { args: ['start', '--agent', 'codex', '--model', 'gpt', '--messages', '1', 'prompt'], message: '--messages cannot be used with start' },
   ])('rejects invalid status arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
@@ -346,7 +378,7 @@ describe('parseCliArgs', () => {
     { args: ['list', 'agents', '--turn', 'turn-1'], message: '--turn cannot be used with list' },
     { args: ['stop', CHAT_ID, '--turn', 'turn-1'], message: '--turn cannot be used with stop' },
     { args: ['send-async', CHAT_ID, '--turn', 'turn-1', 'message'], message: '--turn cannot be used with send-async' },
-    { args: ['--agent', 'codex', '--model', 'gpt', '--turn', 'turn-1', 'prompt'], message: '--turn can only be used with wait' },
+    { args: ['start', '--agent', 'codex', '--model', 'gpt', '--turn', 'turn-1', 'prompt'], message: '--turn cannot be used with start' },
   ])('rejects invalid wait arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
@@ -438,8 +470,9 @@ describe('parseCliArgs', () => {
     });
   });
 
-  test('treats -- send-async and -- stop as new-chat prompts', () => {
+  test('accepts prompts beginning with control commands after start', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
       '--', 'send-async', 'is', 'the', 'command', 'to', 'review',
@@ -448,6 +481,7 @@ describe('parseCliArgs', () => {
       prompt: 'send-async is the command to review',
     });
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt',
       '--', 'stop', 'the', 'agent',
@@ -475,7 +509,7 @@ describe('parseCliArgs', () => {
     { args: ['send-async', CHAT_ID, '--reasoning-effort', 'high', 'message'], message: '--reasoning-effort cannot be used with send-async' },
     { args: ['send-async', CHAT_ID, '--title', 'T', 'message'], message: '--title cannot be used with send-async' },
     { args: ['send-async', CHAT_ID, '--tag', 'review', 'message'], message: '--tag cannot be used with send-async' },
-    { args: ['send-async', CHAT_ID, '--resume', CHAT_ID, 'message'], message: '--resume cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--resume', CHAT_ID, 'message'], message: 'Unknown option' },
     { args: ['send-async', CHAT_ID, '--json', 'message'], message: '--json cannot be used with send-async' },
     { args: ['stop', CHAT_ID, '--cwd', '.'], message: '--cwd cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--agent', 'codex'], message: '--agent cannot be used with stop' },
@@ -484,24 +518,24 @@ describe('parseCliArgs', () => {
     { args: ['stop', CHAT_ID, '--permissions', 'acceptEdits'], message: '--permissions cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--reasoning-effort', 'high'], message: '--reasoning-effort cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--title', 'T'], message: '--title cannot be used with stop' },
-    { args: ['stop', CHAT_ID, '--resume', CHAT_ID], message: '--resume cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--resume', CHAT_ID], message: 'Unknown option' },
     { args: ['stop', CHAT_ID, '--model', 'gpt'], message: '--model cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--tag', 'review'], message: '--tag cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--json'], message: '--json cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--allow-steer'], message: '--allow-steer cannot be used with stop' },
     { args: ['stop', CHAT_ID, '-'], message: 'exactly one chat ID' },
     { args: ['list', 'agents', '--allow-steer'], message: '--allow-steer cannot be used with list' },
-    { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
-    { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
-    { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
+    { args: ['start', '--agent', 'codex', '--model', 'gpt', '--allow-steer', 'prompt'], message: '--allow-steer cannot be used with start' },
+    { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: 'Unknown option' },
+    { args: ['start', '--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer cannot be used with start' },
     { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
     { args: ['send-async', CHAT_ID, '--message-style', 'INFO', 'message'], message: 'must be one of: info, notice, error, custom' },
     { args: ['send-async', CHAT_ID, '--message-style', 'custom', 'message'], message: 'requires --color' },
     { args: ['send-async', CHAT_ID, '--message-style', 'error', '--color', '7c3aed', 'message'], message: 'preset --message-style' },
     { args: ['send-async', CHAT_ID, '--color', 'red', 'message'], message: 'six-digit hex colors' },
     { args: ['send-async', CHAT_ID, '--markdown', 'message'], message: '--markdown cannot be used with send-async' },
-    { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
-    { args: ['stop', CHAT_ID, '--collapsible'], message: 'message presentation cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: '--message-title cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--collapsible'], message: '--collapsible cannot be used with stop' },
     { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
     { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },
     { args: ['list', 'agents', '--collapsible'], message: '--collapsible cannot be used with list' },
@@ -513,6 +547,119 @@ describe('parseCliArgs', () => {
       expect(error).toBeInstanceOf(CliError);
       expect((error as CliError).exitCode).toBe(2);
     }
+  });
+});
+
+describe('chat research arguments', () => {
+  test('parses chat catalog filters and paging', () => {
+    expect(parseCliArgs([
+      'chats',
+      '--filter', 'project:/garcon tag:cli',
+      '--limit', '25',
+      '--offset', '50',
+      '--json',
+    ], ENV)).toEqual({
+      kind: 'chats',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      filter: 'project:/garcon tag:cli',
+      limit: 25,
+      offset: 50,
+      json: true,
+    });
+    expect(parseCliArgs(['chats'], ENV)).toMatchObject({
+      filter: '',
+      limit: 50,
+      offset: 0,
+      json: false,
+    });
+  });
+
+  test('parses transcript search paging and preserves the query', () => {
+    expect(parseCliArgs([
+      'search', '"version bump"',
+      '--filter', 'agent:codex',
+      '--sort', 'created',
+      '--limit', '100',
+      '--offset', '12',
+      '--snippets', '2',
+      '--json',
+    ], ENV)).toMatchObject({
+      kind: 'search',
+      query: '"version bump"',
+      filter: 'agent:codex',
+      sort: 'created',
+      limit: 100,
+      offset: 12,
+      snippetLimit: 2,
+      json: true,
+    });
+    expect(parseCliArgs(['search', 'root', 'cause'], ENV)).toMatchObject({
+      query: 'root cause',
+      sort: 'relevance',
+      limit: 20,
+      offset: 0,
+      snippetLimit: 3,
+    });
+  });
+
+  test('parses grep-style read context and canonical include categories', () => {
+    expect(parseCliArgs([
+      'read', CHAT_ID, '84',
+      '-B', '3',
+      '--after-context', '8',
+      '--include', 'tools,reasoning',
+      '--include', 'permissions,tool-calls',
+      '--transcript-view-id', 'view-1',
+      '--json',
+    ], ENV)).toEqual({
+      kind: 'read',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      anchorOrdinal: 84,
+      beforeContext: 3,
+      afterContext: 8,
+      includedCategories: ['tool-calls', 'tool-results', 'reasoning', 'permissions'],
+      transcriptViewId: 'view-1',
+      json: true,
+    });
+    expect(parseCliArgs(['read', CHAT_ID, '1'], ENV)).toMatchObject({
+      beforeContext: 5,
+      afterContext: 5,
+      includedCategories: [],
+      json: false,
+    });
+  });
+
+  test('rejects extra chat catalog positionals', () => {
+    expect(() => parseCliArgs(['chats', 'extra'], ENV)).toThrow(
+      'chats accepts no positional arguments',
+    );
+  });
+
+  test.each([
+    [['search'], 'search requires a query'],
+    [['search', 'term', '--limit', '0'], '--limit must be an integer from 1 through 100'],
+    [['search', 'term', '--limit', '101'], '--limit must be an integer from 1 through 100'],
+    [['search', 'term', '--offset', '10000'], '--offset must be an integer from 0 through 9999'],
+    [['search', 'term', '--snippets', '4'], '--snippets must be an integer from 1 through 3'],
+    [['search', 'term', '--sort', 'latest'], '--sort must be one of'],
+    [['chats', '--limit', '1.5'], '--limit must be an integer from 1 through 100'],
+    [['chats', '--filter', ''], '--filter must not be empty'],
+    [['search', 'term', '--filter', ''], '--filter must not be empty'],
+    [['read', CHAT_ID], 'read requires one chat ID and one anchor ordinal'],
+    [['read', CHAT_ID, '0'], 'positive integer anchor ordinal'],
+    [['read', CHAT_ID, '1', '-A', '101'], '--after-context must be an integer from 0 through 100'],
+    [['read', CHAT_ID, '1', '-B=-1'], '--before-context must be an integer from 0 through 100'],
+    [['read', CHAT_ID, '1', '--include', 'unknown'], '--include must be one of'],
+    [['read', CHAT_ID, '1', '--include', 'tools,,reasoning'], 'empty category'],
+    [['read', CHAT_ID, '1', '--transcript-view-id', ''], '--transcript-view-id must not be empty'],
+    [['chats', '--snippets', '1'], '--snippets cannot be used with chats'],
+    [['search', 'term', '-A', '1'], '--after-context cannot be used with search'],
+    [['read', CHAT_ID, '1', '--sort', 'created'], '--sort cannot be used with read'],
+  ])('rejects invalid research arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 });
 
@@ -590,13 +737,14 @@ describe('add-row arguments', () => {
     [['stop', CHAT_ID, '--type', 'notice'], '--type cannot be used with stop'],
     [['status', CHAT_ID, '--type', 'notice'], '--type cannot be used with status'],
     [['list', 'agents', '--type', 'notice'], '--type cannot be used with list'],
-    [['--agent', 'codex', '--model', 'gpt', '--type', 'notice', 'prompt'], '--type can only be used with add-row'],
+    [['start', '--agent', 'codex', '--model', 'gpt', '--type', 'notice', 'prompt'], '--type cannot be used with start'],
   ])('rejects invalid add-row arguments: %s', (args, message) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 
-  test('treats an option-terminated add-row token as a new-chat prompt', () => {
+  test('accepts an option-terminated add-row prompt after start', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex', '--model', 'gpt', '--', 'add-row', 'is', 'documented',
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'add-row is documented' });
   });
@@ -646,13 +794,14 @@ describe('export arguments', () => {
     [['wait', CHAT_ID, '--turn', 'turn-1', '--exclude', 'tools'], '--exclude cannot be used with wait'],
     [['list', 'agents', '--output', 'file'], '--output cannot be used with list'],
     [['send-async', CHAT_ID, '--force', 'message'], '--force cannot be used with send-async'],
-    [['--agent', 'codex', '--model', 'gpt', '--format', 'xml', 'prompt'], '--format can only be used with export'],
+    [['start', '--agent', 'codex', '--model', 'gpt', '--format', 'xml', 'prompt'], '--format cannot be used with start'],
   ])('rejects invalid export arguments: %s', (args, message) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 
-  test('treats an option-terminated export token as a new-chat prompt', () => {
+  test('accepts an option-terminated export prompt after start', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex', '--model', 'gpt', '--', 'export', 'the', 'results',
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'export the results' });
   });
@@ -718,13 +867,14 @@ describe('handoff artifact arguments', () => {
     [['status', CHAT_ID, '--context-window-size', '500000'], '--context-window-size cannot be used with status'],
     [['list', 'agents', '--context-window-size', '500000'], '--context-window-size cannot be used with list'],
     [['send-async', CHAT_ID, '--context-window-size', '500000', 'message'], '--context-window-size cannot be used with send-async'],
-    [['--agent', 'codex', '--model', 'gpt', '--context-window-size', '500000', 'prompt'], '--context-window-size can only be used with handoff'],
+    [['start', '--agent', 'codex', '--model', 'gpt', '--context-window-size', '500000', 'prompt'], '--context-window-size cannot be used with start'],
   ])('rejects invalid handoff arguments: %s', (args, message) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 
-  test('treats an option-terminated handoff token as a new-chat prompt', () => {
+  test('accepts an option-terminated handoff prompt after start', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex', '--model', 'gpt', '--', 'handoff', 'the', 'review',
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'handoff the review' });
   });
@@ -777,8 +927,9 @@ describe('native session lookup arguments', () => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 
-  test('treats an option-terminated lookup token as a new-chat prompt', () => {
+  test('accepts an option-terminated lookup prompt after start', () => {
     expect(parseCliArgs([
+      'start',
       '--agent', 'codex', '--model', 'gpt', '--',
       'lookup-native-session', 'session-123',
     ], ENV)).toMatchObject({

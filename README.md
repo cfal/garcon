@@ -105,11 +105,11 @@ Use an existing agent login or subscription where its CLI supports one, or confi
 
 ## Automate And Delegate
 
-Garcon's CLI starts or resumes ordinary visible chats through an already-running server. It also records delegated parentage, queries the live agent and model catalog, observes exact turns, exports transcripts, builds bounded handoff artifacts, appends presentation-only rows, delivers asynchronous work, steers active turns, and stops execution.
+Garcon's CLI starts or resumes ordinary visible chats through an already-running server. It also starts detached work, lists and searches chat history, reads bounded transcript context, records delegated parentage, queries the live agent and model catalog, observes exact turns, exports transcripts, builds bounded handoff artifacts, appends presentation-only rows, delivers asynchronous work, steers active turns, and stops execution.
 
 ```bash
 # Start a visible delegated chat and record its lineage in Chat Map.
-bun cli/main.ts --workspace default --cwd /path/to/project \
+bun cli/main.ts --workspace default start --cwd /path/to/project \
   --parent 1785337200123456 \
   --agent codex --model gpt-5.4 --permissions acceptEdits \
   "Implement the validation and run its focused tests."
@@ -118,13 +118,17 @@ bun cli/main.ts --workspace default --cwd /path/to/project \
 bun cli/main.ts --workspace default send-async 1785337200123456 \
   --allow-steer "Address the review finding and rerun the tests."
 
+# Find prior work and inspect bounded context around a search result.
+bun cli/main.ts --workspace default search '"version bump"' --json
+bun cli/main.ts --workspace default read 1785337200123456 84 -B 5 -A 5
+
 # Observe the chat or export its complete authoritative transcript.
 bun cli/main.ts --workspace default status 1785337200123456 --messages 20
 bun cli/main.ts --workspace default export 1785337200123456 \
   --format xml --output transcript.xml
 ```
 
-See the [CLI and server guide](docs/cli.md) for server configuration, catalog discovery, message presentation, reattachment, status, export, handoff, queue behavior, and connection rules. `bun run build-exe` produces `garcon-cli-linux-x64` and `garcon-cli-darwin-arm64` when a repository checkout is not the desired invocation path.
+See the [CLI and server guide](docs/cli.md) for server configuration, chat discovery and search, bounded reads, catalog discovery, message presentation, reattachment, status, export, handoff, queue behavior, and connection rules. `bun run build-exe` produces `garcon-cli-linux-x64` and `garcon-cli-darwin-arm64` when a repository checkout is not the desired invocation path.
 
 The companion [cfal/garcon-skills](https://github.com/cfal/garcon-skills) repository exposes this control plane to Claude, Codex, Pi, and other skill-aware agents:
 
