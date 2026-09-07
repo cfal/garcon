@@ -53,6 +53,7 @@
 	let automaticPreview = $state<AutomaticPreviewState>({ status: 'parent' });
 	let automaticPreviewVersion = 0;
 	let observedPreambleCatalogRevision: number | null = null;
+	let refreshedAutomaticDraftCatalogRevision: number | null = null;
 	let wasOpen = false;
 
 	function initialDraftIds(
@@ -92,14 +93,21 @@
 
 	$effect(() => {
 		const revision = preamblesCatalog.snapshot?.revision;
+		const automaticPreviewRevision =
+			automaticPreview.status === 'ready'
+				? automaticPreview.preview.projection.catalogRevision
+				: undefined;
 		if (revision === undefined) return;
-		if (observedPreambleCatalogRevision === null) {
-			observedPreambleCatalogRevision = revision;
-			return;
-		}
-		if (revision === observedPreambleCatalogRevision) return;
+
+		const revisionChanged =
+			observedPreambleCatalogRevision !== null && revision !== observedPreambleCatalogRevision;
 		observedPreambleCatalogRevision = revision;
+		const previewIsStale =
+			automaticPreviewRevision !== undefined && automaticPreviewRevision < revision;
+		if (!revisionChanged && !previewIsStale) return;
 		if (!open || draftMode !== 'defaults' || choice.mode !== 'explicit') return;
+		if (refreshedAutomaticDraftCatalogRevision === revision) return;
+		refreshedAutomaticDraftCatalogRevision = revision;
 		untrack(() => void loadAutomaticDraft());
 	});
 

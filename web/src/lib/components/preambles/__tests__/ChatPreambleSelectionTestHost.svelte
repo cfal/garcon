@@ -17,6 +17,7 @@
 		mode = 'panel',
 		pickerOpen = true,
 		snapshot,
+		loadPreambles,
 		draftIds,
 		projection = null,
 		canonicalProjectPath = '/workspace/project',
@@ -39,7 +40,8 @@
 	}: {
 		mode?: 'panel' | 'new-chat';
 		pickerOpen?: boolean;
-		snapshot: PreamblesSnapshot;
+		snapshot: PreamblesSnapshot | null;
+		loadPreambles?: () => Promise<PreamblesSnapshot>;
 		draftIds: readonly PreambleId[];
 		projection?: PreambleSelectionProjection | null;
 		canonicalProjectPath?: string;
@@ -60,8 +62,10 @@
 	} = $props();
 
 	const appShell = createAppShellStore();
-	const preambles = new PreamblesStore();
-	preambles.applySnapshot(untrack(() => snapshot));
+	const initialLoadPreambles = untrack(() => loadPreambles);
+	const initialSnapshot = untrack(() => snapshot);
+	const preambles = new PreamblesStore(initialLoadPreambles ? { get: initialLoadPreambles } : {});
+	if (initialSnapshot !== null) preambles.applySnapshot(initialSnapshot);
 	untrack(() => onAppShell?.(appShell));
 	untrack(() => onPreambles?.(preambles));
 	setAppShell(appShell);

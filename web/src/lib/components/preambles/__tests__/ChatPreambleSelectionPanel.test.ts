@@ -84,12 +84,16 @@ function resolvedProjection(ids: readonly PreambleId[]): PreambleSelectionProjec
 	};
 }
 
-function automaticPreviewResponse(ids: readonly PreambleId[]): PreambleSelectionPreviewResponse {
+function automaticPreviewResponse(
+	ids: readonly PreambleId[],
+	catalogRevision = 4,
+): PreambleSelectionPreviewResponse {
+	const projection = resolvedProjection(ids);
 	return {
 		success: true,
 		canonicalProjectPath: '/workspace/project',
 		orderedPreambleIds: [...ids],
-		projection: resolvedProjection(ids),
+		projection: { ...projection, catalogRevision },
 	};
 }
 
@@ -665,6 +669,51 @@ describe('NewChatPreamblePicker', () => {
 			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));
 		});
 		resolveRefresh(automaticPreviewResponse([]));
+		await waitFor(() => {
+			const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect(within(eligibleRow).getByRole('switch').getAttribute('aria-checked')).toBe('false');
+		});
+	});
+
+	it('refreshes a stale defaults draft when the first catalog snapshot arrives', async () => {
+		let resolveCatalog!: (snapshot: PreamblesSnapshot) => void;
+		const loadPreambles = vi.fn(
+			() =>
+				new Promise<PreamblesSnapshot>((resolve) => {
+					resolveCatalog = resolve;
+				}),
+		);
+		let resolveInitialPreview!: (preview: PreambleSelectionPreviewResponse) => void;
+		const loadAutomaticPreview = vi
+			.fn()
+			.mockReturnValueOnce(
+				new Promise<PreambleSelectionPreviewResponse>((resolve) => {
+					resolveInitialPreview = resolve;
+				}),
+			)
+			.mockResolvedValueOnce(automaticPreviewResponse([], 5));
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: null,
+			loadPreambles,
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledOnce());
+		resolveInitialPreview(automaticPreviewResponse([ID_ELIGIBLE], 4));
+		await waitFor(() => {
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+		});
+
+		resolveCatalog({ ...snapshot(), revision: 5 });
+		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledTimes(2));
+		expect(loadPreambles).toHaveBeenCalledOnce();
 		await waitFor(() => {
 			const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
 				row.textContent?.includes('Eligible conventions'),

@@ -229,11 +229,13 @@ describe('Lightpanda per-chat preambles', () => {
         )].find((element) => element.querySelector(
           '[data-slot="chat-preamble-selection-row-title"]',
         )?.textContent?.trim() === title);
-        const checkbox = row?.querySelector<HTMLInputElement>(
+        const selectionSwitch = row?.querySelector<HTMLButtonElement>(
           '[data-slot="chat-preamble-selection-checkbox"]',
         );
-        if (!checkbox || checkbox.disabled) throw new Error(`Missing enabled checkbox for ${title}`);
-        checkbox.click();
+        if (!selectionSwitch || selectionSwitch.disabled) {
+          throw new Error(`Missing enabled preamble switch for ${title}`);
+        }
+        selectionSwitch.click();
       }, 'Existing rules');
       const providerRequestCountBeforeSave = fixture.integration.fakeProviders.openAi.requests().length;
       await fixture.page.evaluate(() => {
