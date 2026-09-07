@@ -15,6 +15,33 @@ describe('ChatAgentTags', () => {
 		restoreResizeObserver();
 	});
 
+	it('preserves the flowing default layout for narrow sidebar summaries', () => {
+		const { container } = render(ChatAgentTags, {
+			agentId: 'claude',
+			tags: ['frontend-platform', 'production-support', 'urgent'],
+			onManageTags: vi.fn(),
+		});
+		const root = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags"]');
+		if (!root) throw new Error('Expected Chat Agent Tags root');
+
+		expect(root.classList.contains('overflow-hidden')).toBe(false);
+		expect(root.classList.contains('whitespace-nowrap')).toBe(false);
+		expect(within(root).getByRole('button', { name: '+1' })).toBeTruthy();
+	});
+
+	it('keeps explicit single-line board tags clipped to their row', () => {
+		const { container } = render(ChatAgentTags, {
+			agentId: 'claude',
+			tags: ['frontend-platform', 'production-support', 'urgent'],
+			wrap: 'none',
+		});
+		const root = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags"]');
+		if (!root) throw new Error('Expected Chat Agent Tags root');
+
+		expect(root.classList.contains('overflow-hidden')).toBe(true);
+		expect(root.classList.contains('whitespace-nowrap')).toBe(true);
+	});
+
 	it('keeps the measured overflow control visible for long tags in a narrow card', async () => {
 		const tags = Array.from({ length: 7 }, (_, index) => `long-tag-${index + 1}`);
 		const { container } = render(ChatAgentTags, {

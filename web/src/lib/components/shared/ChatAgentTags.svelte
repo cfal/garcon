@@ -12,7 +12,7 @@
 		agentId: string;
 		tags: string[];
 		tagLimit?: number;
-		wrap?: 'none' | 'two-lines';
+		wrap?: 'flow' | 'none' | 'two-lines';
 		onTagClick?: (tag: string) => void;
 		onManageTags?: () => void;
 		class?: string;
@@ -22,7 +22,7 @@
 		agentId,
 		tags,
 		tagLimit = 2,
-		wrap = 'none',
+		wrap = 'flow',
 		onTagClick,
 		onManageTags,
 		class: className,
@@ -49,6 +49,11 @@
 		),
 	);
 	let measurementKey = $derived(`${agentId}:${tagLimit}:${tags.join('\u0000')}`);
+	let rootLayoutClass = $derived.by(() => {
+		if (wrap === 'two-lines') return 'max-h-10 flex-wrap overflow-hidden';
+		if (wrap === 'none') return 'overflow-hidden whitespace-nowrap';
+		return undefined;
+	});
 
 	function recomputeVisibleTags(availableWidth = root?.clientWidth ?? 0): void {
 		const rail = measurementRail;
@@ -122,7 +127,7 @@
 	data-slot="chat-agent-tags"
 	class={cn(
 		'flex items-center gap-1',
-		wrap === 'two-lines' ? 'max-h-10 flex-wrap overflow-hidden' : 'overflow-hidden whitespace-nowrap',
+		rootLayoutClass,
 		className,
 	)}
 >

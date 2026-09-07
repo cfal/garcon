@@ -63,6 +63,15 @@
 	let boardMetadata = $derived(
 		[session.model, formattedTimestamp?.label].filter((value): value is string => Boolean(value)),
 	);
+	let agentTagsWrap = $derived.by<'flow' | 'none' | 'two-lines'>(() => {
+		if (isSidebar) return 'flow';
+		if (isDetailed) return 'two-lines';
+		return 'none';
+	});
+	let agentTagLimit = $derived.by(() => {
+		if (isSidebar || !isDetailed) return 2;
+		return 6;
+	});
 </script>
 
 <div
@@ -196,8 +205,8 @@
 			<ChatAgentTags
 				{agentId}
 				tags={session.tags}
-				tagLimit={isSidebar ? 2 : isDetailed ? 6 : 2}
-				wrap={!isSidebar && isDetailed ? 'two-lines' : 'none'}
+				tagLimit={agentTagLimit}
+				wrap={agentTagsWrap}
 				class="mt-1"
 				{onTagClick}
 				{onManageTags}
