@@ -17,6 +17,8 @@ describe('generation settings contracts', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: true,
+        startAgent: true,
+        schedule: true,
       },
     });
     expect(normalizeRemoteFeatureSettings({
@@ -25,6 +27,8 @@ describe('generation settings contracts', () => {
       enabled: false,
       chatIdDiscovery: true,
       sendMessage: false,
+      startAgent: true,
+      schedule: true,
     });
   });
 
@@ -35,6 +39,8 @@ describe('generation settings contracts', () => {
       enabled: true,
       chatIdDiscovery: false,
       sendMessage: true,
+      startAgent: true,
+      schedule: true,
     });
     expect(normalizeRemoteFeatureSettings({
       agentCommands: { enabled: true },

@@ -12,9 +12,9 @@ const MAX_LINES = 1000;
 // provider-neutral control routes include one-shot discovery delivery and one
 // bounded private lane sharing the existing queue drainer. Fresh project
 // admission also gates direct work, queue creation, and pre-dequeue dispatch.
-// Includes receipt-independent view validation for queued server controls.
-// Action orchestration stays outside the execution subsystem.
-const EXECUTION_FOOTPRINT_BUDGET = 8421;
+// Includes the narrow assistant-start admission and receipt-independent control
+// view fence; action orchestration stays outside the execution subsystem.
+const EXECUTION_FOOTPRINT_BUDGET = 8432;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

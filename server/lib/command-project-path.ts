@@ -2,13 +2,22 @@ import { CommandValidationError } from './command-validation-error.js';
 import type { ProjectUnavailableReason } from '../../common/project-resolution.js';
 import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 
+export class StartProjectUnavailableError extends CommandValidationError {
+  constructor(readonly reason: ProjectUnavailableReason, error: CommandValidationError) {
+    super(error.code, error.message, error.status, error.retryable);
+    this.name = 'StartProjectUnavailableError';
+  }
+}
+
 export async function resolveStartProjectPath(
   projectPath: string | undefined,
   inspect = inspectProjectDirectory,
 ): Promise<string> {
   const requestedPath = requiredProjectPath(projectPath);
   const resolution = await inspect(requestedPath);
-  if (resolution.kind === 'unavailable') throw startPathError(requestedPath, resolution.reason);
+  if (resolution.kind === 'unavailable') {
+    throw new StartProjectUnavailableError(resolution.reason, startPathError(requestedPath, resolution.reason));
+  }
   return resolution.effectiveProjectKey;
 }
 

@@ -22,6 +22,8 @@ export function makeRemoteSettingsSnapshot(
 				enabled: true,
 				chatIdDiscovery: true,
 				sendMessage: true,
+				startAgent: true,
+				schedule: true,
 			},
 		},
 		ui: {},

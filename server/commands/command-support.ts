@@ -200,6 +200,10 @@ export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
 
 export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & { origin: ChatStartOrigin };
 
+export type AgentCommandStartInput = Omit<ChatStartInput,
+  'origin' | 'images' | 'tags' | 'orderedPreambleIds' | 'userMessagePresentation' | 'parentChatId'
+> & { parentChatId: string };
+
 export interface ScheduledChatStartInput {
   chatId: ChatId;
   clientRequestId: string;

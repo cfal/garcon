@@ -134,6 +134,7 @@ export interface StartChatCommandResponse extends AgentTurnCommandResponse {
 }
 
 export const CHAT_START_ORIGINS = [
+  'agent-command',
   'interactive',
   'cli',
   'scheduled',

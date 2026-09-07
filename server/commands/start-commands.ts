@@ -14,6 +14,7 @@ import {
   CommandValidationError,
   agentTurnResultFromRecord,
   type ChatStartInput,
+  type AgentCommandStartInput,
   type NormalizedChatStart,
   type ScheduledChatStartInput,
 } from './command-support.js';
@@ -52,6 +53,10 @@ export class StartCommands {
       images: [],
       agentSettings: input.agentSettingsById[input.agentId],
     });
+  }
+
+  submitAgentCommandStart(input: AgentCommandStartInput): Promise<StartChatCommandResponse> {
+    return this.submitStart({ ...input, origin: 'agent-command', images: [] });
   }
 
   private async normalizeStart(

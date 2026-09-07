@@ -59,6 +59,8 @@ function createMockCtx() {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          schedule: true,
         },
       })),
       getFeatureSettings: mock(() => ({
@@ -67,6 +69,8 @@ function createMockCtx() {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          schedule: true,
         },
       })),
       getPathSettings: mock(() => ({})),
@@ -109,6 +113,8 @@ beforeEach(() => {
       enabled: true,
       chatIdDiscovery: true,
       sendMessage: true,
+      startAgent: true,
+      schedule: true,
     },
   }));
 });
@@ -831,6 +837,8 @@ describe('PUT /api/app/settings', () => {
           enabled: true,
           chatIdDiscovery: false,
           sendMessage: false,
+          startAgent: true,
+          schedule: true,
         },
       },
     }));
@@ -840,6 +848,8 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
+        startAgent: true,
+        schedule: true,
       },
     }));
 
@@ -853,6 +863,8 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: false,
         sendMessage: false,
+        startAgent: true,
+        schedule: true,
       },
     });
   });
@@ -875,6 +887,8 @@ describe('PUT /api/app/settings', () => {
         enabled: false,
         chatIdDiscovery: true,
         sendMessage: true,
+        startAgent: true,
+        schedule: true,
       },
     });
   });
@@ -906,6 +920,8 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
+        startAgent: true,
+        schedule: true,
       },
     });
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();

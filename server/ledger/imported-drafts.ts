@@ -18,9 +18,11 @@ import {
 import type { JsonObject } from '../../common/json.js';
 import {
   chatIdRequestNoticeDraft,
+  agentActionRequestNoticeDraft,
   interAgentSendRequestNoticeDraft,
 } from './garcon-command-request.js';
-import type { LedgerRowDraft } from './contracts.js';
+import type { LedgerRowDraft, LedgerAgentCommandOutcomeDetail } from './contracts.js';
+import { agentCommandOutcomeContent, parseGarconCommandResult } from '../../common/garcon-command-results.js';
 import type { PreambleHistoryEvidence } from './preamble-history.js';
 
 export interface ImportedRow {
@@ -68,6 +70,9 @@ function importedDraftFor(
         : []),
       ...commandTransform.commands.map((command) => {
         switch (command.type) {
+          case 'start-agent':
+          case 'schedule':
+            return agentActionRequestNoticeDraft(at, command);
           case 'get-chat-id':
             return chatIdRequestNoticeDraft(at);
           case 'send-message':
@@ -81,6 +86,11 @@ function importedDraftFor(
     ];
   }
   if (original.type === 'user-message') {
+    const result = parseGarconCommandResult(original.content);
+    if (result) {
+      return [{ kind: 'notice', at, message: agentCommandOutcomeContent(result),
+        detail: { ...result, nativeResultInput: true } satisfies LedgerAgentCommandOutcomeDetail, providerMeta: null }];
+    }
     const received = parseGarconMessage(original.content);
     if (received) {
       return [{

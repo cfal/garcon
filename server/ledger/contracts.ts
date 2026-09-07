@@ -28,6 +28,19 @@ import {
   type Preamble,
 } from '../../common/preambles.js';
 import type { PreamblePrefixReceipt } from '../../common/preamble-prefix.js';
+import { parseAgentCommandOutcome, type AgentCommandOutcomeNoticeDetail } from '../../common/garcon-command-results.js';
+
+export type LedgerAgentCommandOutcomeDetail = AgentCommandOutcomeNoticeDetail & {
+  readonly nativeResultInput?: true;
+  readonly title?: string;
+};
+
+export function projectLedgerAgentCommandOutcome(detail: JsonObject): AgentCommandOutcomeNoticeDetail | null {
+  const publicFields = ['type', 'requestViewId', 'requestOrdinal', 'status', 'chatId', 'reason',
+    'scheduleId', 'nextRunAt', 'intervalMinutes', 'endAtUtc', 'busyBehavior'];
+  return parseAgentCommandOutcome(Object.fromEntries(publicFields
+    .filter((key) => Object.hasOwn(detail, key)).map((key) => [key, detail[key]])));
+}
 
 declare const transcriptViewIdBrand: unique symbol;
 

@@ -246,13 +246,57 @@ describe('Garcon edge commands', () => {
     expect(extractGarconCommands(new UserMessage(AT, GARCON_GET_CHAT_ID))).toBeNull();
   });
 
-  it('treats removed start-agent envelopes as inert assistant text', () => {
+  it('rejects the removed start-agent batch grammar', () => {
     for (const content of [
       '<garcon-start-agent>\n{"prompt":"test"}\n</garcon-start-agent>',
       '<garcon-start-agent>\n{"prompt":"test"}',
     ]) {
-      expect(extractGarconCommands(new AssistantMessage(AT, content))).toBeNull();
+      expect(extractGarconCommands(new AssistantMessage(AT, content))).toMatchObject({
+        message: new AssistantMessage(AT, content), commands: [],
+        issues: [{ command: 'start-agent', reason: 'malformed', edge: 'leading' }],
+      });
     }
+  });
+
+  it('extracts single starts and schedules across mixed edge chains without changing prose', () => {
+    const start = '<garcon-start-agent agent="codex" model="example">Inspect.</garcon-start-agent>';
+    const schedule = '<garcon-schedule every="5m" />';
+    const result = extractGarconCommands(new AssistantMessage(AT,
+      `${start}\n${schedule}\nAnswer  \n${send(FIRST, false)}\n${start}\n${GARCON_GET_CHAT_ID}\n`));
+    expect(result.message.content).toBe('Answer');
+    expect(result.commands.map((command) => command.type)).toEqual(['start-agent', 'schedule', 'send-message', 'start-agent', 'get-chat-id']);
+    expect(result.issues).toEqual([]);
+    expect(extractGarconCommands(new AssistantMessage(AT, `${schedule}\nAnswer  `)).message.content).toBe('Answer  ');
+  });
+
+  it('keeps mixed command envelopes opaque, including malformed and unclosed bodies', () => {
+    const start = '<garcon-start-agent agent="codex" model="example">';
+    const schedule = '<garcon-schedule every="5m">';
+    for (const opener of [start, schedule, `<garcon-send-message to="${FIRST}" hide-sender="false">`]) {
+      for (const nested of [GARCON_GET_CHAT_ID, '<garcon-schedule in="1m" />', `${start}Inspect.</garcon-start-agent>`]) {
+        for (const prefix of ['', 'Answer\n']) {
+          const result = extractGarconCommands(new AssistantMessage(AT, `${prefix}${opener}\n${nested}`));
+          expect(result.commands).toEqual([]);
+          expect(result.issues).toHaveLength(1);
+        }
+      }
+    }
+    const malformed = `${start}\n<garcon-schedule in="1m" />\n</garcon-start-agent>`;
+    const result = extractGarconCommands(new AssistantMessage(AT, `${malformed}\n${GARCON_GET_CHAT_ID}`));
+    expect(result.commands).toEqual([{ type: 'get-chat-id' }]);
+    expect(result.issues).toHaveLength(1);
+  });
+
+  it('never executes code-fenced examples or result/action lookalikes', () => {
+    for (const content of [
+      '<garcon-schedule-action />', '<garcon-schedule-result status="created" />',
+      '<garcon-start-agent-result status="created" />',
+      '```xml\n<garcon-schedule in="1m" />\n```',
+      '~~~xml\n<garcon-schedule in="1m" />',
+      `Example:\n\`\`\`xml\n${GARCON_GET_CHAT_ID}`,
+      'Example <garcon-schedule in="1m" />',
+    ]) expect(extractGarconCommands(new AssistantMessage(AT, content))).toBeNull();
+    expect(extractGarconCommands(new UserMessage(AT, '<garcon-schedule in="1m" />'))).toBeNull();
   });
 
   it('can consume a valid command at the opposite edge of a malformed one', () => {
