@@ -96,6 +96,12 @@ export class PromptComposerProjectState {
 			if (signal?.aborted) releaseOnAbort();
 			await (signal ? Promise.race([lease.resolve(), aborted]) : lease.resolve());
 			signal?.throwIfAborted();
+			if (
+				this.deps.selectedChat?.id !== chat.id ||
+				this.deps.selectedChat.projectPath.trim() !== projectPath
+			) {
+				throw new Error(m.workspace_project_changed());
+			}
 			if (lease.snapshot.kind !== 'available') {
 				throw new Error(
 					lease.snapshot.kind === 'request-failed'
@@ -106,12 +112,6 @@ export class PromptComposerProjectState {
 		} finally {
 			signal?.removeEventListener('abort', releaseOnAbort);
 			release();
-		}
-		if (
-			this.deps.selectedChat?.id !== chat.id ||
-			this.deps.selectedChat.projectPath.trim() !== projectPath
-		) {
-			throw new Error(m.workspace_project_changed());
 		}
 		return {
 			context:
