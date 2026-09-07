@@ -205,6 +205,7 @@
 
 {#if dialog === 'create' || dialog === 'rename' || dialog === 'copy'}
 	{#key dialog}<CanvasNameDialog
+			{visible}
 			errorMessage={controller.error || session?.error}
 			title={nameDialogTitle}
 			initial={dialog === 'create' ? m.canvas_new_name() : (session?.document.content.title ?? '')}
@@ -213,6 +214,7 @@
 		/>{/key}
 {:else if dialog === 'delete'}
 	<CanvasConfirmDialog
+		{visible}
 		errorMessage={controller.error || session?.error}
 		title={m.canvas_delete_confirm()}
 		description={m.canvas_delete_description()}
@@ -221,6 +223,7 @@
 	/>
 {:else if dialog === 'reload'}
 	<CanvasConfirmDialog
+		{visible}
 		errorMessage={controller.error || session?.error}
 		title={m.canvas_discard()}
 		description={m.canvas_reload_description()}

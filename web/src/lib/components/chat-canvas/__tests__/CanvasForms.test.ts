@@ -5,6 +5,7 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { CanvasDocumentState } from '$lib/chat-canvas/canvas-document.svelte';
 import { canvasContent, deferred } from '$lib/chat-canvas/__tests__/canvas-fixtures';
 import CanvasNameDialog from '../CanvasNameDialog.svelte';
+import CanvasConfirmDialog from '../CanvasConfirmDialog.svelte';
 import CanvasChatPicker from '../CanvasChatPicker.svelte';
 import CanvasConnectionDialog from '../CanvasConnectionDialog.svelte';
 import CanvasInspector from '../CanvasInspector.svelte';
@@ -37,7 +38,7 @@ const chat: ChatSessionRecord = {
 
 describe('Canvas forms', () => {
 	it('rejects selected edges and endpoints removed while connecting', async () => {
-		const connect = vi.fn();
+		const connect = vi.fn(() => true);
 		const view = render(CanvasConnectionDialog, {
 			nodes: canvasContent().nodes,
 			chats: {},
@@ -57,7 +58,7 @@ describe('Canvas forms', () => {
 	});
 
 	it('requires a current box after its selected destination disappears', async () => {
-		const add = vi.fn();
+		const add = vi.fn(() => true);
 		const view = render(CanvasChatPicker, {
 			chats: [chat],
 			boxes: canvasContent().nodes.filter((node) => node.type === 'box'),
@@ -95,7 +96,7 @@ describe('Canvas forms', () => {
 	});
 
 	it('filters chats and rejects submission after capacity shrinks', async () => {
-		const add = vi.fn();
+		const add = vi.fn(() => true);
 		const close = vi.fn();
 		const view = render(CanvasChatPicker, {
 			chats: [chat],
@@ -117,7 +118,7 @@ describe('Canvas forms', () => {
 	});
 
 	it('rejects self connections through keyboard submission', async () => {
-		const connect = vi.fn();
+		const connect = vi.fn(() => true);
 		render(CanvasConnectionDialog, {
 			nodes: canvasContent().nodes,
 			chats: {},
@@ -138,6 +139,130 @@ describe('Canvas forms', () => {
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Connect' }).disabled).toBe(false);
 		await fireEvent.submit(form);
 		expect(connect).toHaveBeenCalledExactlyOnceWith('box-a', 'box-b', 'informs');
+	});
+
+	it('rejects a selected chat removed from the live picker and keeps rejected additions open', async () => {
+		const add = vi.fn(() => false);
+		const close = vi.fn();
+		const view = render(CanvasChatPicker, {
+			chats: [chat],
+			boxes: [],
+			capacity: 1,
+			onadd: add,
+			onclose: close,
+		});
+		await fireEvent.click(screen.getByRole('checkbox'));
+		await view.rerender({ chats: [] });
+		expect(
+			screen.getByRole<HTMLButtonElement>('button', { name: 'Add selected chats' }).disabled,
+		).toBe(true);
+		await fireEvent.submit(screen.getByRole('searchbox').closest('form')!);
+		expect(add).not.toHaveBeenCalled();
+		await view.rerender({ chats: [chat] });
+		await fireEvent.submit(screen.getByRole('searchbox').closest('form')!);
+		expect(add).toHaveBeenCalledExactlyOnceWith([chat.id], null);
+		expect(close).not.toHaveBeenCalled();
+	});
+
+	it('preserves the connection label when capacity shrinks or submission is rejected', async () => {
+		const connect = vi.fn(() => false);
+		const close = vi.fn();
+		const view = render(CanvasConnectionDialog, {
+			nodes: canvasContent().nodes,
+			chats: {},
+			capacity: 1,
+			initialSource: 'box-a',
+			onconnect: connect,
+			onclose: close,
+		});
+		await fireEvent.change(screen.getByLabelText('To'), { target: { value: 'box-b' } });
+		await fireEvent.input(screen.getByLabelText('Connection label'), {
+			target: { value: 'informs' },
+		});
+		await view.rerender({ capacity: 0 });
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Connect' }).disabled).toBe(true);
+		await fireEvent.submit(screen.getByLabelText('From').closest('form')!);
+		expect(connect).not.toHaveBeenCalled();
+		await view.rerender({ capacity: 1 });
+		await fireEvent.submit(screen.getByLabelText('From').closest('form')!);
+		expect(connect).toHaveBeenCalledExactlyOnceWith('box-a', 'box-b', 'informs');
+		expect(close).not.toHaveBeenCalled();
+		expect(screen.getByLabelText<HTMLInputElement>('Connection label').value).toBe('informs');
+	});
+
+	it('suspends the name modal while hidden and restores its draft', async () => {
+		const close = vi.fn();
+		const view = render(CanvasNameDialog, {
+			title: 'Rename box',
+			onsubmit: () => true,
+			onclose: close,
+		});
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Unsubmitted title' } });
+		await view.rerender({ visible: false });
+		expect(screen.queryByRole('dialog')).toBeNull();
+		await view.rerender({ visible: true });
+		expect(screen.getByRole<HTMLInputElement>('textbox').value).toBe('Unsubmitted title');
+		expect(close).not.toHaveBeenCalled();
+	});
+
+	it('suspends the picker modal while retaining query and selection', async () => {
+		const close = vi.fn();
+		const view = render(CanvasChatPicker, {
+			chats: [chat],
+			boxes: [],
+			capacity: 1,
+			onadd: () => true,
+			onclose: close,
+		});
+		await fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'Research' } });
+		await fireEvent.click(screen.getByRole('checkbox'));
+		await view.rerender({ visible: false });
+		expect(screen.queryByRole('dialog')).toBeNull();
+		await view.rerender({ visible: true });
+		expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('Research');
+		expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(true);
+		expect(close).not.toHaveBeenCalled();
+	});
+
+	it('suspends the connection modal while retaining endpoints and label', async () => {
+		const close = vi.fn();
+		const view = render(CanvasConnectionDialog, {
+			nodes: canvasContent().nodes,
+			chats: {},
+			initialSource: 'box-a',
+			onconnect: () => true,
+			onclose: close,
+		});
+		await fireEvent.change(screen.getByLabelText('To'), { target: { value: 'box-b' } });
+		await fireEvent.input(screen.getByLabelText('Connection label'), {
+			target: { value: 'Unsubmitted label' },
+		});
+		await view.rerender({ visible: false });
+		expect(screen.queryByRole('dialog')).toBeNull();
+		await view.rerender({ visible: true });
+		expect(screen.getByLabelText<HTMLSelectElement>('From').value).toBe('box-a');
+		expect(screen.getByLabelText<HTMLSelectElement>('To').value).toBe('box-b');
+		expect(screen.getByLabelText<HTMLInputElement>('Connection label').value).toBe(
+			'Unsubmitted label',
+		);
+		expect(close).not.toHaveBeenCalled();
+	});
+
+	it('suspends the confirmation modal without interpreting it as cancellation', async () => {
+		const close = vi.fn();
+		const confirm = vi.fn(async () => true);
+		const view = render(CanvasConfirmDialog, {
+			title: 'Delete canvas',
+			description: 'Delete this board?',
+			onconfirm: confirm,
+			onclose: close,
+		});
+		await view.rerender({ visible: false });
+		expect(screen.queryByRole('dialog')).toBeNull();
+		await view.rerender({ visible: true });
+		expect(screen.getByRole('dialog')).toBeTruthy();
+		expect(close).not.toHaveBeenCalled();
+		expect(confirm).not.toHaveBeenCalled();
 	});
 
 	it('applies membership and protects label submission during reload', async () => {

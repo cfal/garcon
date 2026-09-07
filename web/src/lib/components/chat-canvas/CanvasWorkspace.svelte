@@ -257,6 +257,7 @@
 		{@const dialog = ui.dialog}
 		{#if dialog.kind === 'box' || dialog.kind === 'rename-box'}
 			<CanvasNameDialog
+				{visible}
 				title={dialog.kind === 'box' ? m.canvas_add_box() : m.canvas_rename_box()}
 				initial={dialog.kind === 'box' ? m.canvas_default_box() : dialog.title}
 				onclose={() => (ui.dialog = null)}
@@ -267,29 +268,38 @@
 						ui.select(new Set([id]));
 						await tick();
 						diagram?.focusNode(id);
-					} else session.document.renameBox(dialog.id, title);
+					} else {
+						if (!boxes.some((box) => box.id === dialog.id))
+							throw new Error(m.canvas_box_unavailable());
+						session.document.renameBox(dialog.id, title);
+					}
 					return true;
 				}}
 			/>
 		{:else if dialog.kind === 'chats'}
 			<CanvasChatPicker
+				{visible}
 				{chats}
 				{boxes}
 				initialBox={dialog.boxId}
 				capacity={CANVAS_MAX_NODES - content.nodes.length}
 				onclose={() => (ui.dialog = null)}
 				onadd={(ids, boxId) => {
-					if (!disabled) session.document.addChats(ids, boxId, position());
+					if (disabled) return false;
+					session.document.addChats(ids, boxId, position());
+					return true;
 				}}
 			/>
 		{:else}
 			<CanvasConnectionDialog
+				{visible}
 				nodes={content.nodes}
+				capacity={CANVAS_MAX_CONNECTIONS - content.connections.length}
 				chats={chatsById}
 				initialSource={content.nodes.find((node) => ui.selectedIds.has(node.id))?.id ?? ''}
 				onclose={() => (ui.dialog = null)}
 				onconnect={(source, target, label) => {
-					if (disabled || content.connections.length >= CANVAS_MAX_CONNECTIONS) return;
+					if (disabled || content.connections.length >= CANVAS_MAX_CONNECTIONS) return false;
 					session.document.connect({
 						source,
 						target,
@@ -297,6 +307,7 @@
 						sourceSide: 'right',
 						targetSide: 'left',
 					});
+					return true;
 				}}
 			/>
 		{/if}

@@ -3,6 +3,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as m from '$lib/paraglide/messages.js';
 	let {
+		visible = true,
 		title,
 		initial = '',
 		maxLength = 120,
@@ -10,6 +11,7 @@
 		onsubmit,
 		onclose,
 	}: {
+		visible?: boolean;
 		title: string;
 		initial?: string;
 		maxLength?: number;
@@ -34,34 +36,37 @@
 	}
 </script>
 
-<Dialog.Root
-	open
-	onOpenChange={(open) => {
-		if (!open && !busy) onclose();
-	}}
->
-	<Dialog.Content>
-		<Dialog.Header
-			><Dialog.Title>{title}</Dialog.Title><Dialog.Description
-				>{m.canvas_title_required()}</Dialog.Description
-			></Dialog.Header
-		>
-		<form onsubmit={submit} class="space-y-4">
-			<input
-				class="canvas-input text-base"
-				aria-label={title}
-				bind:value
-				maxlength={maxLength}
-				disabled={busy}
-			/>
-			{#if error || errorMessage}<p role="alert" class="text-sm text-destructive">
-					{error || errorMessage}
-				</p>{/if}
-			<div class="flex justify-end gap-2">
-				<button class="canvas-button" type="button" disabled={busy} onclick={onclose}
-					>{m.canvas_cancel()}</button
-				><button class="canvas-button" disabled={busy || !value.trim()}>{m.canvas_apply()}</button>
-			</div>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+{#if visible}
+	<Dialog.Root
+		open
+		onOpenChange={(open) => {
+			if (!open && !busy) onclose();
+		}}
+	>
+		<Dialog.Content>
+			<Dialog.Header
+				><Dialog.Title>{title}</Dialog.Title><Dialog.Description
+					>{m.canvas_title_required()}</Dialog.Description
+				></Dialog.Header
+			>
+			<form onsubmit={submit} class="space-y-4">
+				<input
+					class="canvas-input text-base"
+					aria-label={title}
+					bind:value
+					maxlength={maxLength}
+					disabled={busy}
+				/>
+				{#if error || errorMessage}<p role="alert" class="text-sm text-destructive">
+						{error || errorMessage}
+					</p>{/if}
+				<div class="flex justify-end gap-2">
+					<button class="canvas-button" type="button" disabled={busy} onclick={onclose}
+						>{m.canvas_cancel()}</button
+					><button class="canvas-button" disabled={busy || !value.trim()}>{m.canvas_apply()}</button
+					>
+				</div>
+			</form>
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}

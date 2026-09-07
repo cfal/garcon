@@ -2131,6 +2131,7 @@
 	"canvas_cancel": "Cancel",
 	"canvas_close": "Close",
 	"canvas_rename_box": "Rename box",
+	"canvas_box_unavailable": "This box was removed. Copy your title before closing this dialog.",
 	"canvas_title_required": "Enter a name to continue.",
 	"canvas_no_chats": "No matching chats",
 	"canvas_touch_help": "Pan and pinch to explore. Enable Edit layout to move cards and boxes.",
