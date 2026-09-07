@@ -166,12 +166,12 @@
 	}
 
 	async function restorePickerAfterCatalog(): Promise<void> {
-		await refreshAutomaticDraftAfterCatalogChange();
 		await tick();
 		const opener = document.querySelector<HTMLElement>(
 			'[data-slot="new-chat-preamble-manage-catalog"]',
 		);
 		opener?.focus({ preventScroll: true });
+		void refreshAutomaticDraftAfterCatalogChange();
 	}
 
 	async function loadAutomaticDraft(): Promise<void> {

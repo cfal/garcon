@@ -520,4 +520,41 @@ describe('NewChatPreamblePicker', () => {
 			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));
 		});
 	});
+
+	it('restores focus before refreshing a local defaults draft', async () => {
+		let appShell!: AppShellStore;
+		let resolveRefresh!: (preview: PreambleSelectionPreviewResponse) => void;
+		const loadAutomaticPreview = vi
+			.fn()
+			.mockResolvedValueOnce(automaticPreviewResponse([ID_ELIGIBLE]))
+			.mockReturnValueOnce(
+				new Promise<PreambleSelectionPreviewResponse>((resolve) => {
+					resolveRefresh = resolve;
+				}),
+			);
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+			onAppShell: (value) => {
+				appShell = value;
+			},
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+		});
+		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
+		appShell.closePreambles();
+
+		await waitFor(() => {
+			expect(loadAutomaticPreview).toHaveBeenCalledTimes(2);
+			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));
+		});
+		resolveRefresh(automaticPreviewResponse([ID_ELIGIBLE]));
+	});
 });
