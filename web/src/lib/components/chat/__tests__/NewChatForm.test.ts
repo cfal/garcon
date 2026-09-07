@@ -7,8 +7,10 @@ import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
 import * as clientChatId from '$shared/client-chat-id';
 import * as preamblesApi from '$lib/api/chat-preambles';
+import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
+import type { PreamblesSnapshot } from '$shared/preambles';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -194,6 +196,78 @@ describe('NewChatForm', () => {
 		}));
 	});
 
+	it('keeps the laid-out form hidden until the preamble catalog and initial preview settle', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const catalog = deferred<PreamblesSnapshot>();
+		const preview = deferred<PreambleSelectionPreviewResponse>();
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockReturnValueOnce(preview.promise);
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				loadPreambles: () => catalog.promise,
+			},
+		});
+
+		const content = document.querySelector<HTMLElement>('[data-slot="new-chat-form-content"]')!;
+		expect(content.classList.contains('invisible')).toBe(true);
+		expect(screen.getByRole('status', { name: 'Loading chat defaults...' })).toBeTruthy();
+		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce());
+
+		catalog.resolve({ revision: 1, preambles: [] });
+		await Promise.resolve();
+		expect(content.classList.contains('invisible')).toBe(true);
+		expect(screen.getByRole('status', { name: 'Loading chat defaults...' })).toBeTruthy();
+
+		preview.resolve({
+			success: true,
+			canonicalProjectPath: '/workspace/project',
+			orderedPreambleIds: [],
+			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
+		});
+		await waitFor(() => {
+			expect(content.classList.contains('invisible')).toBe(false);
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+	});
+
+	it('reveals the form after reseeding while the current path is invalid', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart)
+			.mockResolvedValue({
+				valid: false,
+				error: 'Path does not exist',
+				errorCode: 'path_not_found',
+			})
+			.mockResolvedValueOnce({ valid: true, isGitRepo: false });
+
+		render(NewChatFormTestHost);
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const pathInput = screen.getByRole('textbox', { name: 'Project Path' });
+		await fireEvent.input(pathInput, { target: { value: '/workspace/missing' } });
+		await screen.findByText('Path does not exist.');
+
+		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+			const content = document.querySelector<HTMLElement>('[data-slot="new-chat-form-content"]')!;
+			expect(content.classList.contains('invisible')).toBe(false);
+		});
+	});
+
 	it('presents automatic preambles as pills in a composer-aligned editable surface', async () => {
 		stubMatchMedia(false);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
@@ -237,6 +311,9 @@ describe('NewChatForm', () => {
 		expect(await screen.findByText('Repository conventions')).toBeTruthy();
 		const surface = document.querySelector<HTMLElement>('[data-slot="new-chat-preambles-row"]');
 		expect(surface?.classList.contains('border')).toBe(true);
+		expect(surface?.classList.contains('px-4')).toBe(true);
+		expect(surface?.classList.contains('py-1.5')).toBe(true);
+		expect(surface?.classList.contains('sm:py-3')).toBe(true);
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
 		expect(document.querySelector('[data-slot="new-chat-preamble-selection-dialog"]')).toBeTruthy();
 	});

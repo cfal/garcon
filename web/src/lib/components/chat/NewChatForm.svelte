@@ -139,6 +139,11 @@
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
 	let observedPreambleCatalogRevision = -1;
+	let preambleCatalogLoadVersion = 0;
+	let initialPreambleCatalogSettled = $state(preamblesCatalog.hasLoaded);
+	const initialContentReady = $derived(
+		form.settingsLoaded && initialPreambleCatalogSettled && form.preambles.initialPreviewSettled,
+	);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
 	);
@@ -163,7 +168,7 @@
 			return textareaRef;
 		},
 		get startBlocked() {
-			return !form.settingsLoaded || snippetExpansion.pending;
+			return !initialContentReady || snippetExpansion.pending;
 		},
 		closePromptSurfaces: () => snippetPalette.dismiss(),
 		resizeTextarea: autoResizeTextarea,
@@ -188,10 +193,11 @@
 		snippetInteractionGeneration += 1;
 		snippetPalette.reset();
 		form.reseed(prefill);
+		loadPreambleCatalog();
 		pendingTextareaFocus = true;
 		textareaFocusTimer = setTimeout(() => {
 			textareaFocusTimer = null;
-			if (textareaRef && form.settingsLoaded) {
+			if (textareaRef && initialContentReady) {
 				if (prefill) {
 					textareaRef.setSelectionRange(0, 0);
 					textareaRef.scrollTop = 0;
@@ -202,10 +208,24 @@
 		}, 50);
 	}
 
+	function loadPreambleCatalog(): void {
+		const version = ++preambleCatalogLoadVersion;
+		if (preamblesCatalog.hasLoaded) {
+			initialPreambleCatalogSettled = true;
+			return;
+		}
+		initialPreambleCatalogSettled = false;
+		void preamblesCatalog
+			.ensureLoaded()
+			.catch(() => undefined)
+			.finally(() => {
+				if (version === preambleCatalogLoadVersion) initialPreambleCatalogSettled = true;
+			});
+	}
+
 	onMount(() => {
 		reseed();
 		form.loadSettingsAndModels();
-		void preamblesCatalog.ensureLoaded().catch(() => undefined);
 		const removeSeedListener = appShell.onNewChatDialogSeed(() => reseed());
 		const mql = window.matchMedia('(max-width: 768px)');
 		isMobile = mql.matches;
@@ -240,7 +260,12 @@
 
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
-		if (form.validationStatus === 'valid' && !form.showBrowser && canFocusTextarea()) {
+		if (
+			initialContentReady &&
+			form.validationStatus === 'valid' &&
+			!form.showBrowser &&
+			canFocusTextarea()
+		) {
 			textareaRef?.focus();
 		}
 	});
@@ -248,7 +273,7 @@
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
 	$effect(() => {
-		if (!pendingTextareaFocus || !form.settingsLoaded || form.showBrowser || !canFocusTextarea())
+		if (!pendingTextareaFocus || !initialContentReady || form.showBrowser || !canFocusTextarea())
 			return;
 		if (!textareaRef) return;
 		if (prefill) {
@@ -575,10 +600,11 @@
 >
 	<div class="relative">
 		<div
+			data-slot="new-chat-form-content"
 			class="space-y-6"
-			class:invisible={!form.settingsLoaded}
-			class:pointer-events-none={!form.settingsLoaded}
-			aria-hidden={!form.settingsLoaded}
+			class:invisible={!initialContentReady}
+			class:pointer-events-none={!initialContentReady}
+			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
 				<div class="relative">
@@ -728,7 +754,8 @@
 					projection={form.preambles.preview}
 					onClose={() => (preamblePickerOpen = false)}
 					onApplyExplicit={(ids) => form.preambles.setExplicit(ids)}
-					onResetToDefaults={() => form.preambles.resetToDefaults()}
+					onApplyDefaults={() => form.preambles.resetToDefaults()}
+					onLoadAutomaticPreview={() => form.preambles.loadAutomaticPreview()}
 					onRefreshPreview={() => form.preambles.refreshPreview()}
 				/>
 
@@ -886,7 +913,7 @@
 			{/if}
 		</div>
 
-		{#if !form.settingsLoaded}
+		{#if !initialContentReady}
 			<div class="absolute inset-0 flex items-center justify-center">
 				<div
 					role="status"

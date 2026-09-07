@@ -1,13 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import {
-		setAppShell,
-		setChatPreambleSelectionInvalidationHub,
-		setPreambles,
-	} from '$lib/context';
+	import { setAppShell, setChatPreambleSelectionInvalidationHub, setPreambles } from '$lib/context';
 	import { createAppShellStore, type AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
+	import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles.js';
 	import type {
 		PreambleId,
 		PreambleSelectionProjection,
@@ -18,6 +15,7 @@
 
 	let {
 		mode = 'panel',
+		pickerOpen = true,
 		snapshot,
 		draftIds,
 		projection = null,
@@ -30,18 +28,20 @@
 		onAdd = () => undefined,
 		onClose = () => undefined,
 		onApplyExplicit = () => undefined,
-		onResetToDefaults = () => undefined,
+		onApplyDefaults = () => undefined,
+		onLoadAutomaticPreview = async () => {
+			throw new Error('No automatic preview configured');
+		},
 		onRefreshPreview = () => undefined,
 		onAppShell,
 	}: {
 		mode?: 'panel' | 'new-chat';
+		pickerOpen?: boolean;
 		snapshot: PreamblesSnapshot;
 		draftIds: readonly PreambleId[];
 		projection?: PreambleSelectionProjection | null;
 		canonicalProjectPath?: string;
-		choice?:
-			| { mode: 'defaults' }
-			| { mode: 'explicit'; orderedPreambleIds: readonly PreambleId[] };
+		choice?: { mode: 'defaults' } | { mode: 'explicit'; orderedPreambleIds: readonly PreambleId[] };
 		defaultsIds?: readonly PreambleId[];
 		previewLoading?: boolean;
 		onMove?: (id: PreambleId, direction: 'up' | 'down') => void;
@@ -49,7 +49,8 @@
 		onAdd?: (id: PreambleId) => void;
 		onClose?: () => void;
 		onApplyExplicit?: (ids: readonly PreambleId[]) => void;
-		onResetToDefaults?: () => void;
+		onApplyDefaults?: () => void;
+		onLoadAutomaticPreview?: () => Promise<PreambleSelectionPreviewResponse>;
 		onRefreshPreview?: () => void | Promise<void>;
 		onAppShell?: (store: AppShellStore) => void;
 	} = $props();
@@ -74,7 +75,7 @@
 	/>
 {:else}
 	<NewChatPreamblePicker
-		open={true}
+		open={pickerOpen}
 		{choice}
 		{defaultsIds}
 		{previewLoading}
@@ -82,7 +83,8 @@
 		{canonicalProjectPath}
 		{onClose}
 		{onApplyExplicit}
-		{onResetToDefaults}
+		{onApplyDefaults}
+		{onLoadAutomaticPreview}
 		{onRefreshPreview}
 	/>
 {/if}

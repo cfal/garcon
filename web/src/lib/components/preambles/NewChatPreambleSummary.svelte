@@ -22,7 +22,7 @@
 </script>
 
 <div
-	class="flex min-w-0 items-start gap-2 rounded-lg border border-border bg-background px-3 py-2"
+	class="flex min-w-0 items-start gap-2 rounded-lg border border-border bg-background px-4 py-1.5 sm:py-3"
 	data-slot="new-chat-preambles-row"
 >
 	<div class="min-w-0 flex-1 space-y-1.5">

@@ -22,6 +22,7 @@ export class NewChatPreambleSelectionState {
 	choice = $state<NewChatPreambleChoice>({ mode: 'defaults' });
 	preview = $state<PreambleSelectionProjection | null>(null);
 	previewLoading = $state(false);
+	initialPreviewSettled = $state(false);
 	canonicalProjectPath = $state('');
 
 	#previewVersion = 0;
@@ -75,6 +76,11 @@ export class NewChatPreambleSelectionState {
 		}
 	}
 
+	pathValidationSettledWithoutPreview(): void {
+		this.invalidatePreview();
+		this.initialPreviewSettled = true;
+	}
+
 	automaticFiltersChanged(): void {
 		if (this.choice.mode === 'explicit') return;
 		this.#refreshForCurrentContext();
@@ -93,7 +99,7 @@ export class NewChatPreambleSelectionState {
 		const context = this.#previewContext();
 		const projectPath = context.projectPath;
 		if (!projectPath || this.options.validationStatus === 'invalid') {
-			this.invalidatePreview();
+			this.pathValidationSettledWithoutPreview();
 			return;
 		}
 
@@ -116,13 +122,29 @@ export class NewChatPreambleSelectionState {
 			if (!this.#isCurrentPreview(version, choiceVersion, context.key)) return;
 			this.#clearPreview();
 		} finally {
-			if (version === this.#previewVersion) this.previewLoading = false;
+			if (this.#isCurrentPreview(version, choiceVersion, context.key)) {
+				this.previewLoading = false;
+				this.initialPreviewSettled = true;
+			}
 		}
+	}
+
+	async loadAutomaticPreview(): Promise<PreambleSelectionPreviewResponse> {
+		const context = this.#previewContext();
+		if (!context.projectPath || this.options.validationStatus !== 'valid') {
+			throw new Error('Preamble defaults are unavailable for the current project path');
+		}
+		return preambleSelectionPreview({
+			projectPath: context.projectPath,
+			agentId: context.agentId,
+			tags: context.tags,
+		});
 	}
 
 	reset(): void {
 		this.choice = { mode: 'defaults' };
 		this.#choiceVersion += 1;
+		this.initialPreviewSettled = false;
 		this.#refreshForCurrentContext();
 	}
 
