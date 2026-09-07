@@ -43,6 +43,13 @@ export interface ChatListEntry {
 
 export type ChatOrderGroup = 'pinned' | 'orphan' | 'normal' | 'archived';
 
+const CHAT_ORDER_GROUPS: readonly ChatOrderGroup[] = [
+  'pinned',
+  'orphan',
+  'normal',
+  'archived',
+];
+
 export interface ChatListResponse {
   sessions: ChatListEntry[];
   total: number;
@@ -58,16 +65,16 @@ export class ChatListContractError extends Error {
 
 export function parseChatListResponse(value: unknown): ChatListResponse {
   if (!isRecord(value) || !Array.isArray(value.sessions)) fail('sessions');
-  if (!Number.isSafeInteger(value.total) || Number(value.total) < 0) fail('total');
+  const total = requireNonNegativeInteger(value.total, 'total');
   const sessions = value.sessions.map((entry, index) => parseChatListEntry(entry, index));
-  if (value.total !== sessions.length) fail('total does not match sessions');
+  if (total !== sessions.length) fail('total does not match sessions');
   const lastSelectedChatId = value.lastSelectedChatId;
   if (lastSelectedChatId !== null && !validChatId(lastSelectedChatId)) {
     fail('lastSelectedChatId');
   }
   return {
     sessions,
-    total: Number(value.total),
+    total,
     lastSelectedChatId,
   };
 }
@@ -94,14 +101,13 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   if (!isThinkingMode(value.thinkingMode)) fail(field('thinkingMode'));
   const agentSettings = parseAgentSettingsEnvelope(value.agentSettings);
   if (!agentSettings || agentSettings.ownerId !== agentId) fail(field('agentSettings'));
-  const title = string(value.title, field('title'));
-  const projectPath = string(value.projectPath, field('projectPath'));
-  if (!['pinned', 'orphan', 'normal', 'archived'].includes(String(value.orderGroup))) {
+  const title = requireString(value.title, field('title'));
+  const projectPath = requireString(value.projectPath, field('projectPath'));
+  if (!CHAT_ORDER_GROUPS.includes(String(value.orderGroup) as ChatOrderGroup)) {
     fail(field('orderGroup'));
   }
-  if (!Array.isArray(value.tags) || !value.tags.every((tag) => typeof tag === 'string')) {
-    fail(field('tags'));
-  }
+  const orderGroup = value.orderGroup as ChatOrderGroup;
+  const tags = requireStringArray(value.tags, field('tags'));
   if (!isRecord(value.activity)) fail(field('activity'));
   const createdAt = nullableTimestamp(value.activity.createdAt, `${field('activity')}.createdAt`);
   const lastActivityAt = nullableTimestamp(
@@ -110,31 +116,29 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   );
   const lastReadAt = nullableTimestamp(value.activity.lastReadAt, `${field('activity')}.lastReadAt`);
   if (!isRecord(value.preview)) fail(field('preview'));
-  const lastMessage = string(value.preview.lastMessage, `${field('preview')}.lastMessage`);
+  const lastMessage = requireString(value.preview.lastMessage, `${field('preview')}.lastMessage`);
   const firstMessage = value.preview.firstMessage === undefined
     ? undefined
-    : string(value.preview.firstMessage, `${field('preview')}.firstMessage`);
-  for (const name of [
-    'isPinned',
-    'isArchived',
-    'isActive',
-    'isProcessing',
-    'canReloadFromNativeHistory',
-    'isUnread',
-  ] as const) {
-    if (typeof value[name] !== 'boolean') fail(field(name));
-  }
+    : requireString(value.preview.firstMessage, `${field('preview')}.firstMessage`);
+  const isPinned = requireBoolean(value.isPinned, field('isPinned'));
+  const isArchived = requireBoolean(value.isArchived, field('isArchived'));
+  const isActive = requireBoolean(value.isActive, field('isActive'));
+  const isProcessing = requireBoolean(value.isProcessing, field('isProcessing'));
+  const canReloadFromNativeHistory = requireBoolean(
+    value.canReloadFromNativeHistory,
+    field('canReloadFromNativeHistory'),
+  );
+  const isUnread = requireBoolean(value.isUnread, field('isUnread'));
   const processingPhase = value.processingPhase;
-  if (
-    processingPhase !== null
-    && !CHAT_PROCESSING_PHASES.includes(processingPhase as ChatProcessingPhase)
-  ) fail(field('processingPhase'));
+  if (processingPhase !== null && !isChatProcessingPhase(processingPhase)) {
+    fail(field('processingPhase'));
+  }
   const processing = processingPhase !== null;
-  if (value.isProcessing !== processing || value.isActive !== processing) {
+  if (isProcessing !== processing || isActive !== processing) {
     fail(field('processing state'));
   }
-  if (value.isPinned !== (value.orderGroup === 'pinned')) fail(field('isPinned'));
-  if (value.isArchived !== (value.orderGroup === 'archived')) fail(field('isArchived'));
+  if (isPinned !== (orderGroup === 'pinned')) fail(field('isPinned'));
+  if (isArchived !== (orderGroup === 'archived')) fail(field('isArchived'));
 
   return {
     id: value.id,
@@ -150,17 +154,17 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
     agentSettings,
     title,
     projectPath,
-    orderGroup: value.orderGroup as ChatOrderGroup,
-    tags: [...value.tags] as string[],
+    orderGroup,
+    tags,
     activity: { createdAt, lastActivityAt, lastReadAt },
     preview: { lastMessage, ...(firstMessage === undefined ? {} : { firstMessage }) },
-    isPinned: value.isPinned,
-    isArchived: value.isArchived,
-    isActive: value.isActive,
-    isProcessing: value.isProcessing,
-    processingPhase: processingPhase as ChatProcessingPhase | null,
-    canReloadFromNativeHistory: value.canReloadFromNativeHistory as boolean,
-    isUnread: value.isUnread as boolean,
+    isPinned,
+    isArchived,
+    isActive,
+    isProcessing,
+    processingPhase,
+    canReloadFromNativeHistory,
+    isUnread,
   };
 }
 
@@ -174,13 +178,13 @@ function validChatId(value: unknown): value is string {
   }
 }
 
-function string(value: unknown, field: string): string {
+function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string') fail(field);
   return value;
 }
 
 function nonEmptyString(value: unknown, field: string): string {
-  const parsed = string(value, field);
+  const parsed = requireString(value, field);
   if (parsed.length === 0) fail(field);
   return parsed;
 }
@@ -202,7 +206,27 @@ function optionalProtocol(value: unknown, field: string): ApiProtocol | null | u
 
 function nullableTimestamp(value: unknown, field: string): string | null {
   if (value === null) return null;
-  return string(value, field);
+  return requireString(value, field);
+}
+
+function requireNonNegativeInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) fail(field);
+  return value;
+}
+
+function requireBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') fail(field);
+  return value;
+}
+
+function requireStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) fail(field);
+  return [...value];
+}
+
+function isChatProcessingPhase(value: unknown): value is ChatProcessingPhase {
+  return typeof value === 'string'
+    && (CHAT_PROCESSING_PHASES as readonly string[]).includes(value);
 }
 
 function fail(field: string): never {

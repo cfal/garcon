@@ -38,13 +38,13 @@ export async function readChatWindow(
   client: ChatReadClient,
   signal?: AbortSignal,
 ): Promise<CliChatReadResult> {
-  const newest = requireCompleteHistory(await client.getChatMessages({
+  const newest = await getCompleteHistory(client, {
     chatId: command.chatId,
     limit: 1,
     ...(command.transcriptViewId === undefined
       ? {}
       : { transcriptViewId: command.transcriptViewId }),
-  }, signal));
+  }, signal);
   if (command.anchorOrdinal > newest.lastOrdinal) {
     throw new CliError(
       'arguments',
@@ -55,16 +55,16 @@ export async function readChatWindow(
 
   const viewId = newest.transcriptViewId;
   const included = new Set(command.includedCategories);
-  const retained = (entry: TranscriptMessage) => {
+  const isRetained = (entry: TranscriptMessage) => {
     const category = transcriptEntryCategoryForMessage(entry.message);
     return category === 'conversation' || included.has(category);
   };
-  const firstPage = requireCompleteHistory(await client.getChatMessages({
+  const firstPage = await getCompleteHistory(client, {
     chatId: command.chatId,
     transcriptViewId: viewId,
     beforeOrdinal: command.anchorOrdinal + 1,
     limit: CHAT_MESSAGES_MAX_LIMIT,
-  }, signal));
+  }, signal);
   const anchor = firstPage.messages.find((entry) => entry.ordinal === command.anchorOrdinal);
   if (!anchor) {
     throw new CliError(
@@ -73,7 +73,7 @@ export async function readChatWindow(
       2,
     );
   }
-  if (!retained(anchor)) {
+  if (!isRetained(anchor)) {
     const category = transcriptEntryCategoryForMessage(anchor.message);
     throw new CliError(
       'arguments',
@@ -83,17 +83,17 @@ export async function readChatWindow(
   }
 
   let before = firstPage.messages.filter((entry) => (
-    entry.ordinal < command.anchorOrdinal && retained(entry)
+    entry.ordinal < command.anchorOrdinal && isRetained(entry)
   ));
   let beforeCursor = firstPage.nextBeforeOrdinal;
   while (before.length < command.beforeContext && beforeCursor !== null) {
-    const page = requireCompleteHistory(await client.getChatMessages({
+    const page = await getCompleteHistory(client, {
       chatId: command.chatId,
       transcriptViewId: viewId,
       beforeOrdinal: beforeCursor,
       limit: CHAT_MESSAGES_MAX_LIMIT,
-    }, signal));
-    before = [...page.messages.filter(retained), ...before];
+    }, signal);
+    before = [...page.messages.filter(isRetained), ...before];
     beforeCursor = page.nextBeforeOrdinal;
   }
   before = command.beforeContext === 0 ? [] : before.slice(-command.beforeContext);
@@ -105,14 +105,14 @@ export async function readChatWindow(
       newest.lastOrdinal + 1,
       lowerOrdinal + CHAT_MESSAGES_MAX_LIMIT,
     );
-    const page = requireCompleteHistory(await client.getChatMessages({
+    const page = await getCompleteHistory(client, {
       chatId: command.chatId,
       transcriptViewId: viewId,
       beforeOrdinal: upperOrdinal,
       limit: upperOrdinal - lowerOrdinal,
-    }, signal));
+    }, signal);
     after.push(...page.messages.filter((entry) => (
-      entry.ordinal >= lowerOrdinal && entry.ordinal < upperOrdinal && retained(entry)
+      entry.ordinal >= lowerOrdinal && entry.ordinal < upperOrdinal && isRetained(entry)
     )));
     lowerOrdinal = upperOrdinal;
   }
@@ -161,6 +161,14 @@ export async function runChatRead(
     }
     throw error;
   }
+}
+
+async function getCompleteHistory(
+  client: ChatReadClient,
+  request: ChatMessagesRequest,
+  signal?: AbortSignal,
+): Promise<CompleteChatHistoryResponse> {
+  return requireCompleteHistory(await client.getChatMessages(request, signal));
 }
 
 function requireCompleteHistory(response: ChatHistoryResponse): CompleteChatHistoryResponse {

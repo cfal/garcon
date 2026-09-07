@@ -28,11 +28,12 @@ export function formatTranscriptMessage(entry: TranscriptMessage): string {
       ? entry.message.title
       : undefined);
   const title = titleValue ? ` — ${titleValue}` : '';
-  const cliLabel = userPresentation
-    ? ` (CLI${userPresentation.style ? ` ${userPresentation.style}` : ''})`
-    : entry.message instanceof CliRowMessage
-      ? ` (CLI ${entry.message.presentation.style})`
-      : '';
+  let cliLabel = '';
+  if (userPresentation) {
+    cliLabel = ` (CLI${userPresentation.style ? ` ${userPresentation.style}` : ''})`;
+  } else if (entry.message instanceof CliRowMessage) {
+    cliLabel = ` (CLI ${entry.message.presentation.style})`;
+  }
   return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${title}\n`
     + truncateTranscriptText(content);
 }

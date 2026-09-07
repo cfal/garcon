@@ -1007,7 +1007,8 @@ function parseRead(
     throw argumentError('read requires one chat ID and one anchor ordinal');
   }
   const rawOrdinal = parsed.positionals[2]!;
-  if (!/^\d+$/.test(rawOrdinal) || Number(rawOrdinal) < 1 || !Number.isSafeInteger(Number(rawOrdinal))) {
+  const anchorOrdinal = Number(rawOrdinal);
+  if (!/^\d+$/.test(rawOrdinal) || anchorOrdinal < 1 || !Number.isSafeInteger(anchorOrdinal)) {
     throw argumentError('read requires a positive integer anchor ordinal');
   }
   const transcriptViewId = nonEmptyOption(
@@ -1018,7 +1019,7 @@ function parseRead(
     kind: 'read',
     ...connection,
     chatId: parseControlChatId(parsed.positionals[1]!, 'read'),
-    anchorOrdinal: Number(rawOrdinal),
+    anchorOrdinal,
     beforeContext: parseIntegerOption(
       values['before-context'],
       '--before-context',

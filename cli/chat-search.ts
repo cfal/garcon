@@ -48,10 +48,11 @@ export function buildChatSearchRequest(
   chats: ChatListResponse,
 ): { readonly request: ChatSearchRequest; readonly candidateChatCount: number } {
   const filter = parseCliChatFilter(command.filter);
-  const filtered = isEmptyFilter(filter)
-    ? chats.sessions
-    : filterAndSortChats(chats.sessions, filter);
-  if (!isEmptyFilter(filter) && filtered.length > CHAT_SEARCH_MAX_CHAT_IDS) {
+  const hasFilter = !isEmptyFilter(filter);
+  const filtered = hasFilter
+    ? filterAndSortChats(chats.sessions, filter)
+    : chats.sessions;
+  if (hasFilter && filtered.length > CHAT_SEARCH_MAX_CHAT_IDS) {
     throw new CliError(
       'arguments',
       `chat filter selected ${filtered.length} chats; narrow it to ${CHAT_SEARCH_MAX_CHAT_IDS} or fewer`,
@@ -66,7 +67,7 @@ export function buildChatSearchRequest(
       offset: command.offset,
       limit: command.limit,
       snippetLimit: command.snippetLimit,
-      ...(isEmptyFilter(filter) ? {} : { chatIds: filtered.map((chat) => chat.id) }),
+      ...(hasFilter ? { chatIds: filtered.map((chat) => chat.id) } : {}),
     },
     candidateChatCount: filtered.length,
   };
@@ -160,9 +161,15 @@ export function searchDiagnostics(result: CliChatSearchResult): string[] {
     diagnostics.push(`search page: more matches are available at --offset ${result.page.nextOffset}`);
   }
   if (result.results.length === 0 && result.page.total > 0) {
-    diagnostics.push(result.page.offset >= result.page.total
-      ? `search page: --offset ${result.page.offset} is beyond ${result.page.total} matching chats; retry with a lower offset`
-      : `search page: no current results were returned despite ${result.page.total} matching chats; rerun search because transcript views may have changed`);
+    if (result.page.offset >= result.page.total) {
+      diagnostics.push(
+        `search page: --offset ${result.page.offset} is beyond ${result.page.total} matching chats; retry with a lower offset`,
+      );
+    } else {
+      diagnostics.push(
+        `search page: no current results were returned despite ${result.page.total} matching chats; rerun search because transcript views may have changed`,
+      );
+    }
   } else if (result.page.total === 0 && diagnostics.length === 0) {
     diagnostics.push('search complete: no matching indexed transcript content');
   }
@@ -226,13 +233,7 @@ function searchReadCommandTokens(
 ): SearchReadCommandToken[] {
   const syntax = (value: string): SearchReadCommandToken => ({ value, syntax: true });
   const data = (value: string): SearchReadCommandToken => ({ value, syntax: false });
-  const includedCategories = anchor.role === 'assistant'
-    ? 'reasoning'
-    : anchor.role === 'tool'
-      ? 'tools,permissions'
-      : anchor.role === 'system'
-        ? 'handoffs'
-        : null;
+  const includedCategories = readIncludesForSearchRole(anchor.role);
   return [
     syntax('--workspace'),
     data(connection.workspace),
@@ -250,6 +251,19 @@ function searchReadCommandTokens(
       ? []
       : [syntax('--include'), data(includedCategories)]),
   ];
+}
+
+function readIncludesForSearchRole(role: ChatSearchSnippet['role']): string | null {
+  switch (role) {
+    case 'assistant':
+      return 'reasoning';
+    case 'tool':
+      return 'tools,permissions';
+    case 'system':
+      return 'handoffs';
+    case 'user':
+      return null;
+  }
 }
 
 function shellQuote(value: string): string {
