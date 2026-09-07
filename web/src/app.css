@@ -1,5 +1,13 @@
 @import 'tailwindcss';
+@import './lib/theme/profiles/classic-light.css';
+@import './lib/theme/profiles/classic-dark.css';
+@import './lib/theme/profiles/phosphor-light.css';
+@import './lib/theme/profiles/phosphor-dark.css';
+@import './lib/theme/profiles/colorblind-light.css';
+@import './lib/theme/profiles/colorblind-dark.css';
 @plugin '@tailwindcss/typography';
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
 	--color-background: hsl(var(--background));
@@ -154,6 +162,7 @@
 	--color-diff-deletion: hsl(var(--diff-deletion));
 	--color-diff-hunk: hsl(var(--diff-hunk));
 	--color-interactive-accent: hsl(var(--interactive-accent));
+	--color-interactive-accent-foreground: hsl(var(--interactive-accent-foreground));
 	--color-file-icon-code: hsl(var(--file-icon-code));
 	--color-file-icon-doc: hsl(var(--file-icon-doc));
 	--color-file-icon-image: hsl(var(--file-icon-image));
@@ -193,221 +202,16 @@
 }
 
 :root {
-	--background: 0 0% 100%;
-	--foreground: 0 0% 5%;
-	--card: 0 0% 100%;
-	--card-foreground: 0 0% 5%;
-	--popover: 0 0% 100%;
-	--popover-foreground: 0 0% 5%;
-	--primary: 0 0% 15%;
-	--primary-foreground: 0 0% 98%;
-	--secondary: 0 0% 96%;
-	--secondary-foreground: 0 0% 10%;
-	--muted: 0 0% 96%;
-	--muted-foreground: 0 0% 45%;
-	--accent: 0 0% 96%;
-	--accent-foreground: 0 0% 10%;
-	--destructive: 0 84.2% 60.2%;
-	--destructive-foreground: 0 0% 98%;
-	--border: 0 0% 90%;
-	--workspace-window-titlebar: 0 0% 93%;
-	--workspace-window-titlebar-active: 0 0% 84%;
-	--workspace-window-tab-selected: 0 0% 96%;
-	--workspace-window-tab-selected-inactive: 0 0% 88%;
-	--composer-thinking-static-start: 0 0% 85%;
-	--composer-thinking-pulse-emphasis: 0 0% 80%;
-	--input: 0 0% 90%;
-	--ring: 0 0% 40%;
-	--radius: 0.5rem;
-	--transient-backdrop-color: 0 0% 0%;
-	--transient-backdrop-opacity: 0.32;
-	--transient-backdrop-blur: 2px;
-	--chat-header-bg: 0 0% 97%;
-	--chat-header-border: 0 0% 88%;
-	--chat-thinking-bg: 0 0% 93%;
-	--chat-message-action-highlight: 214 82% 51%;
-	--chat-message-action-highlight-opacity: 0.12;
-	--chat-tabs-rail-bg: 0 0% 94%;
-	--chat-tabs-rail-border: 0 0% 86%;
-	--chat-tabs-active-bg: 0 0% 18%;
-	--chat-tabs-active-foreground: 0 0% 98%;
-	--chat-tabs-active-border: 0 0% 18%;
-	--chat-bash-row-bg: 0 0% 94%;
-
-	--sidebar-background: 0 0% 98%;
-	--sidebar-foreground: 0 0% 5%;
-	--sidebar-primary: 0 0% 15%;
-	--sidebar-primary-foreground: 0 0% 98%;
-	--sidebar-accent: 0 0% 96%;
-	--sidebar-accent-foreground: 0 0% 10%;
-	--sidebar-border: 0 0% 90%;
-	--sidebar-ring: 0 0% 40%;
-	--sidebar-chat-item-bg: 0 0% 100%;
-	--sidebar-chat-item-hover-bg: 0 0% 96%;
-	--sidebar-chat-item-selected-bg: 0 0% 94%;
-	--sidebar-chat-item-selected-foreground: 0 0% 12%;
-	--sidebar-badge-pinned-bg: 45 100% 94%;
-	--sidebar-badge-pinned-foreground: 40 90% 26%;
-	--sidebar-badge-pinned-border: 45 55% 76%;
-	--sidebar-badge-archived-bg: 215 20% 94%;
-	--sidebar-badge-archived-foreground: 215 18% 35%;
-	--sidebar-badge-archived-border: 215 16% 80%;
-	--sidebar-bulk-archive-bg: 146 60% 95%;
-	--sidebar-bulk-archive-foreground: 146 65% 24%;
-	--sidebar-bulk-unarchive-bg: 0 86% 96%;
-	--sidebar-bulk-unarchive-foreground: 0 74% 38%;
-	--provider-codex-bg: 146 48% 94%;
-	--provider-codex-foreground: 146 70% 22%;
-	--provider-codex-border: 146 35% 78%;
-	--provider-cursor-bg: 256 78% 96%;
-	--provider-cursor-foreground: 256 62% 30%;
-	--provider-cursor-border: 256 42% 78%;
-	--provider-claude-bg: 214 100% 95%;
-	--provider-claude-foreground: 214 80% 28%;
-	--provider-claude-border: 214 55% 78%;
-	--provider-opencode-bg: 270 65% 95%;
-	--provider-opencode-foreground: 270 60% 30%;
-	--provider-opencode-border: 270 40% 78%;
-	--provider-amp-bg: 28 90% 95%;
-	--provider-amp-foreground: 28 80% 28%;
-	--provider-amp-border: 28 50% 78%;
-	--provider-factory-bg: 192 84% 94%;
-	--provider-factory-foreground: 192 84% 24%;
-	--provider-factory-border: 192 44% 76%;
-	--provider-pi-bg: 322 78% 95%;
-	--provider-pi-foreground: 322 72% 28%;
-	--provider-pi-border: 322 42% 78%;
-	--provider-openrouter-bg: 152 68% 93%;
-	--provider-openrouter-foreground: 152 60% 26%;
-	--provider-openrouter-border: 152 40% 74%;
-	--provider-zai-bg: 8 92% 94%;
-	--provider-zai-foreground: 8 78% 28%;
-	--provider-zai-border: 8 52% 76%;
-	--tag-blue-bg: 214 95% 93% / 0.5;
-	--tag-blue-foreground: 214 78% 30%;
-	--tag-blue-border: 214 55% 78% / 0.5;
-	--tag-green-bg: 146 60% 92% / 0.5;
-	--tag-green-foreground: 146 65% 24%;
-	--tag-green-border: 146 35% 76% / 0.5;
-	--tag-amber-bg: 45 96% 90% / 0.5;
-	--tag-amber-foreground: 38 84% 28%;
-	--tag-amber-border: 42 55% 72% / 0.5;
-	--tag-purple-bg: 270 82% 94% / 0.5;
-	--tag-purple-foreground: 270 62% 30%;
-	--tag-purple-border: 270 42% 76% / 0.5;
-	--tag-rose-bg: 350 90% 94% / 0.5;
-	--tag-rose-foreground: 346 70% 32%;
-	--tag-rose-border: 346 45% 76% / 0.5;
-	--tag-teal-bg: 174 70% 90% / 0.5;
-	--tag-teal-foreground: 176 72% 24%;
-	--tag-teal-border: 176 42% 72% / 0.5;
-	--tag-indigo-bg: 235 90% 94% / 0.5;
-	--tag-indigo-foreground: 235 62% 32%;
-	--tag-indigo-border: 235 42% 76% / 0.5;
-	--tag-orange-bg: 28 92% 92% / 0.5;
-	--tag-orange-foreground: 24 82% 30%;
-	--tag-orange-border: 24 52% 74% / 0.5;
-	--indicator-attention: 0 78% 54%;
-	--status-processing: 214 90% 48%;
-	--status-processing-foreground: 214 85% 32%;
-	--status-processing-border: 214 70% 55%;
-	--status-info: 270 70% 96%;
-	--status-info-foreground: 270 70% 30%;
-	--status-info-border: 270 40% 78%;
-	--status-success: 146 60% 95%;
-	--status-success-foreground: 146 65% 24%;
-	--status-success-border: 146 35% 76%;
-	--composer-agent-setting: 214 95% 93%;
-	--composer-agent-setting-foreground: 214 78% 30%;
-	--composer-agent-setting-border: 214 55% 72%;
-	--status-error: 0 86% 96%;
-	--status-error-foreground: 0 72% 34%;
-	--status-error-border: 0 50% 78%;
-	--status-neutral: 220 16% 96%;
-	--status-neutral-foreground: 220 12% 35%;
-	--status-neutral-border: 220 12% 80%;
-	--status-warning: 34 93% 52%;
-	--status-warning-foreground: 0 0% 10%;
-	--status-warning-muted-foreground: 34 90% 28%;
-	--status-warning-border: 34 88% 42%;
-	--queue-surface: 34 93% 52% / 0.2;
-	--queue-border: 34 88% 42%;
-	--queue-entry-border: 34 88% 42%;
-	--queue-foreground: 0 0% 14%;
-	--queue-action-bg: 34 93% 52% / 0.3;
-	--queue-action-hover-bg: 34 93% 52% / 0.45;
-	--stop-button-bg: 0 72% 48%;
-	--stop-button-foreground: 0 0% 98%;
-	--stop-button-border: 0 66% 40%;
-	--user-bubble: 0 0% 15%;
-	--user-bubble-selected: 214 22% 30%;
-	--user-bubble-foreground: 0 0% 98%;
-	--user-bubble-timestamp: 0 0% 82%;
-	--markdown-code-background: 220 23% 97%;
-	--markdown-code-foreground: 217 19% 18%;
-	--markdown-code-border: 220 16% 84%;
-	--markdown-code-keyword: 343 72% 40%;
-	--markdown-code-title: 266 48% 44%;
-	--markdown-code-meta: 211 100% 35%;
-	--markdown-code-string: 210 94% 20%;
-	--markdown-code-symbol: 26 92% 42%;
-	--markdown-code-comment: 215 10% 45%;
-	--markdown-code-name: 134 60% 34%;
-	--markdown-code-section: 211 100% 35%;
-	--markdown-code-addition-bg: 138 76% 97%;
-	--markdown-code-addition-fg: 134 60% 34%;
-	--markdown-code-deletion-bg: 353 100% 97%;
-	--markdown-code-deletion-fg: 355 72% 41%;
-
-	--diff-modified: 48 88% 93%;
-	--diff-modified-foreground: 33 78% 38%;
-	--diff-modified-border: 48 50% 78%;
-	--diff-addition: 142 71% 38%;
-	--diff-deletion: 0 72% 45%;
-	--diff-hunk: 214 82% 45%;
-	--interactive-accent: 214 82% 51%;
-	--file-icon-code: 142 71% 38%;
-	--file-icon-doc: 214 82% 45%;
-	--file-icon-image: 271 76% 53%;
-	--file-icon-folder: 214 82% 45%;
-	--terminal-bg: 0 0% 100%;
-
-	--git-action-commit: 214 82% 51%;
-	--git-action-commit-hover: 214 82% 43%;
-	--git-action-pull: 146 60% 40%;
-	--git-action-pull-hover: 146 60% 34%;
-	--git-action-push: 30 90% 48%;
-	--git-action-push-hover: 30 90% 40%;
-	--git-action-publish: 271 60% 50%;
-	--git-action-publish-hover: 271 60% 42%;
-	--git-action-foreground: 0 0% 98%;
-
-	--git-modified: 33 78% 38%;
-	--git-added: 142 71% 38%;
-	--pr-merged: 271 76% 53%;
-	--git-deleted: 0 72% 45%;
-	--git-untracked: 214 82% 45%;
-	--git-renamed: 271 76% 53%;
-
-	--diff-add-bg: 133 80% 92%;
-	--diff-add-fg: 213 13% 14%;
-	--diff-add-line-num: 213 13% 14%;
-	--diff-del-bg: 5.5 100% 95.7%;
-	--diff-del-fg: 213 13% 14%;
-	--diff-del-line-num: 213 13% 14%;
-	--diff-hunk-header-bg: 214 60% 95%;
-
 	--safe-area-inset-top: env(safe-area-inset-top);
 	--safe-area-inset-right: env(safe-area-inset-right);
 	--safe-area-inset-bottom: env(safe-area-inset-bottom);
 	--safe-area-inset-left: env(safe-area-inset-left);
-
 	--mobile-nav-height: 60px;
 	--mobile-nav-total: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
-
 	--app-height: 100dvh;
 	--app-viewport-offset-top: 0px;
 	--app-viewport-center-y: 50dvh;
+	--processing-pulse-duration: 2.4s;
 }
 
 .mobile-shell {
@@ -423,279 +227,6 @@
 	translate: 0 -50%;
 }
 
-.dark {
-	--background: 0 0% 10%;
-	--foreground: 0 0% 95%;
-	--card: 0 0% 8%;
-	--card-foreground: 0 0% 95%;
-	--popover: 0 0% 8%;
-	--popover-foreground: 0 0% 95%;
-	--primary: 0 0% 85%;
-	--primary-foreground: 0 0% 5%;
-	--secondary: 0 0% 16%;
-	--secondary-foreground: 0 0% 95%;
-	--muted: 0 0% 16%;
-	--muted-foreground: 0 0% 60%;
-	--accent: 0 0% 18%;
-	--accent-foreground: 0 0% 95%;
-	--destructive: 0 62.8% 30.6%;
-	--destructive-foreground: 0 0% 95%;
-	--border: 0 0% 20%;
-	--workspace-window-titlebar: 0 0% 7%;
-	--workspace-window-titlebar-active: 0 0% 1%;
-	--workspace-window-tab-selected: 0 0% 18%;
-	--workspace-window-tab-selected-inactive: 0 0% 12%;
-	--composer-thinking-static-start: 0 0% 25%;
-	--composer-thinking-pulse-emphasis: 0 0% 30%;
-	--input: 0 0% 40%;
-	--ring: 0 0% 60%;
-	--transient-backdrop-color: 0 0% 0%;
-	--transient-backdrop-opacity: 0.36;
-	--chat-header-bg: 0 0% 12%;
-	--chat-header-border: 0 0% 24%;
-	--chat-thinking-bg: 0 0% 5%;
-	--chat-message-action-highlight: 213 94% 68%;
-	--chat-message-action-highlight-opacity: 0.2;
-	--chat-tabs-rail-bg: 0 0% 16%;
-	--chat-tabs-rail-border: 0 0% 24%;
-	--chat-tabs-active-bg: 0 0% 84%;
-	--chat-tabs-active-foreground: 0 0% 8%;
-	--chat-tabs-active-border: 0 0% 84%;
-	--chat-bash-row-bg: 0 0% 6%;
-
-	--sidebar-background: 0 0% 8%;
-	--sidebar-foreground: 0 0% 95%;
-	--sidebar-primary: 0 0% 85%;
-	--sidebar-primary-foreground: 0 0% 5%;
-	--sidebar-accent: 0 0% 18%;
-	--sidebar-accent-foreground: 0 0% 95%;
-	--sidebar-border: 0 0% 20%;
-	--sidebar-ring: 0 0% 60%;
-	--sidebar-chat-item-bg: 0 0% 8%;
-	--sidebar-chat-item-hover-bg: 0 0% 14%;
-	--sidebar-chat-item-selected-bg: 0 0% 18%;
-	--sidebar-chat-item-selected-foreground: 0 0% 98%;
-	--sidebar-badge-pinned-bg: 45 46% 26%;
-	--sidebar-badge-pinned-foreground: 45 90% 84%;
-	--sidebar-badge-pinned-border: 45 34% 38%;
-	--sidebar-badge-archived-bg: 215 18% 22%;
-	--sidebar-badge-archived-foreground: 215 22% 76%;
-	--sidebar-badge-archived-border: 215 14% 34%;
-	--sidebar-bulk-archive-bg: 146 36% 24%;
-	--sidebar-bulk-archive-foreground: 146 76% 86%;
-	--sidebar-bulk-unarchive-bg: 0 34% 24%;
-	--sidebar-bulk-unarchive-foreground: 0 82% 86%;
-	--provider-codex-bg: 146 38% 22%;
-	--provider-codex-foreground: 146 70% 85%;
-	--provider-codex-border: 146 32% 36%;
-	--provider-cursor-bg: 256 34% 24%;
-	--provider-cursor-foreground: 256 82% 88%;
-	--provider-cursor-border: 256 30% 36%;
-	--provider-claude-bg: 214 48% 24%;
-	--provider-claude-foreground: 214 95% 86%;
-	--provider-claude-border: 214 40% 36%;
-	--provider-opencode-bg: 270 34% 24%;
-	--provider-opencode-foreground: 270 82% 88%;
-	--provider-opencode-border: 270 30% 36%;
-	--provider-amp-bg: 28 46% 22%;
-	--provider-amp-foreground: 28 90% 86%;
-	--provider-amp-border: 28 36% 36%;
-	--provider-factory-bg: 192 44% 20%;
-	--provider-factory-foreground: 192 86% 86%;
-	--provider-factory-border: 192 34% 34%;
-	--provider-pi-bg: 322 34% 22%;
-	--provider-pi-foreground: 322 82% 88%;
-	--provider-pi-border: 322 28% 36%;
-	--provider-openrouter-bg: 152 36% 20%;
-	--provider-openrouter-foreground: 152 68% 84%;
-	--provider-openrouter-border: 152 28% 34%;
-	--provider-zai-bg: 8 34% 22%;
-	--provider-zai-foreground: 8 88% 86%;
-	--provider-zai-border: 8 28% 36%;
-	--tag-blue-bg: 214 48% 24% / 0.3;
-	--tag-blue-foreground: 214 95% 86%;
-	--tag-blue-border: 214 40% 42% / 0.4;
-	--tag-green-bg: 146 38% 22% / 0.3;
-	--tag-green-foreground: 146 72% 84%;
-	--tag-green-border: 146 32% 40% / 0.4;
-	--tag-amber-bg: 42 46% 22% / 0.3;
-	--tag-amber-foreground: 42 88% 84%;
-	--tag-amber-border: 42 34% 40% / 0.4;
-	--tag-purple-bg: 270 34% 24% / 0.3;
-	--tag-purple-foreground: 270 82% 88%;
-	--tag-purple-border: 270 30% 40% / 0.4;
-	--tag-rose-bg: 346 34% 22% / 0.3;
-	--tag-rose-foreground: 346 84% 86%;
-	--tag-rose-border: 346 28% 40% / 0.4;
-	--tag-teal-bg: 176 38% 20% / 0.3;
-	--tag-teal-foreground: 176 78% 84%;
-	--tag-teal-border: 176 30% 38% / 0.4;
-	--tag-indigo-bg: 235 34% 24% / 0.3;
-	--tag-indigo-foreground: 235 86% 88%;
-	--tag-indigo-border: 235 30% 40% / 0.4;
-	--tag-orange-bg: 24 42% 22% / 0.3;
-	--tag-orange-foreground: 24 88% 86%;
-	--tag-orange-border: 24 34% 40% / 0.4;
-	--indicator-attention: 0 82% 66%;
-	--status-processing: 214 95% 68%;
-	--status-processing-foreground: 214 95% 86%;
-	--status-processing-border: 214 74% 54%;
-	--status-info: 270 36% 26%;
-	--status-info-foreground: 270 85% 88%;
-	--status-info-border: 270 30% 38%;
-	--status-success: 146 36% 24%;
-	--status-success-foreground: 146 76% 86%;
-	--status-success-border: 146 30% 36%;
-	--composer-agent-setting: 214 48% 24%;
-	--composer-agent-setting-foreground: 214 88% 86%;
-	--composer-agent-setting-border: 214 42% 42%;
-	--status-error: 0 34% 24%;
-	--status-error-foreground: 0 82% 86%;
-	--status-error-border: 0 28% 36%;
-	--status-neutral: 220 14% 20%;
-	--status-neutral-foreground: 220 12% 78%;
-	--status-neutral-border: 220 10% 32%;
-	--status-warning: 34 92% 62%;
-	--status-warning-foreground: 0 0% 8%;
-	--status-warning-muted-foreground: 38 96% 86%;
-	--status-warning-border: 34 74% 44%;
-	--queue-surface: 34 92% 62% / 0.2;
-	--queue-border: 34 74% 44%;
-	--queue-entry-border: 34 74% 44%;
-	--queue-foreground: 34 90% 88%;
-	--queue-action-bg: 34 92% 62% / 0.32;
-	--queue-action-hover-bg: 34 92% 62% / 0.48;
-	--stop-button-bg: 0 78% 62%;
-	--stop-button-foreground: 0 0% 8%;
-	--stop-button-border: 0 62% 46%;
-	--user-bubble: 0 0% 74%;
-	--user-bubble-selected: 213 26% 62%;
-	--user-bubble-foreground: 0 0% 5%;
-	--user-bubble-timestamp: 0 0% 28%;
-	--diff-modified: 45 38% 22%;
-	--diff-modified-foreground: 48 85% 78%;
-	--diff-modified-border: 45 30% 34%;
-	--diff-addition: 142 66% 58%;
-	--diff-deletion: 0 78% 62%;
-	--diff-hunk: 214 92% 68%;
-	--interactive-accent: 213 94% 68%;
-	--file-icon-code: 142 66% 58%;
-	--file-icon-doc: 214 92% 68%;
-	--file-icon-image: 271 81% 72%;
-	--file-icon-folder: 214 92% 68%;
-	--terminal-bg: 0 0% 11.76%;
-
-	--git-action-commit: 214 82% 55%;
-	--git-action-commit-hover: 214 82% 48%;
-	--git-action-pull: 146 56% 46%;
-	--git-action-pull-hover: 146 56% 38%;
-	--git-action-push: 30 85% 52%;
-	--git-action-push-hover: 30 85% 44%;
-	--git-action-publish: 271 56% 56%;
-	--git-action-publish-hover: 271 56% 48%;
-	--git-action-foreground: 0 0% 98%;
-
-	--git-modified: 48 85% 78%;
-	--git-added: 142 66% 58%;
-	--pr-merged: 271 91% 71%;
-	--git-deleted: 0 78% 62%;
-	--git-untracked: 214 92% 68%;
-	--git-renamed: 271 81% 72%;
-
-	--diff-add-bg: 156 36% 11%;
-	--diff-add-fg: 210 66.7% 96.5%;
-	--diff-add-line-num: 210 66.7% 96.5%;
-	--diff-del-bg: 338.6 23.3% 11.8%;
-	--diff-del-fg: 210 66.7% 96.5%;
-	--diff-del-line-num: 210 66.7% 96.5%;
-	--diff-hunk-header-bg: 214 40% 18%;
-
-	--markdown-code-background: 0 0% 11%;
-	--markdown-code-foreground: 0 0% 84%;
-	--markdown-code-border: 0 0% 23%;
-	--markdown-code-keyword: 4 100% 72%;
-	--markdown-code-title: 273 79% 82%;
-	--markdown-code-meta: 209 97% 72%;
-	--markdown-code-string: 206 90% 80%;
-	--markdown-code-symbol: 28 100% 68%;
-	--markdown-code-comment: 215 9% 58%;
-	--markdown-code-name: 132 65% 71%;
-	--markdown-code-section: 216 84% 53%;
-	--markdown-code-addition-bg: 145 90% 12%;
-	--markdown-code-addition-fg: 132 68% 83%;
-	--markdown-code-deletion-bg: 356 89% 22%;
-	--markdown-code-deletion-fg: 9 100% 92%;
-}
-
-/* Colorblind-friendly overrides. Uses blue/orange/teal palette
-   distinguishable across protanopia and deuteranopia. The +/- symbols
-   in diffs provide a redundant non-color channel for tritanopia. */
-.colorblind {
-	--chat-message-action-highlight: 210 80% 45%;
-	--git-added: 210 80% 45%;
-	--git-deleted: 30 90% 50%;
-	--git-modified: 180 60% 38%;
-	--git-untracked: 260 60% 55%;
-	--git-renamed: 310 50% 50%;
-
-	--diff-addition: 210 80% 45%;
-	--diff-deletion: 30 90% 50%;
-	--diff-modified: 180 50% 90%;
-	--diff-modified-foreground: 180 60% 30%;
-	--diff-modified-border: 180 40% 65%;
-	--diff-add-bg: 210 70% 93%;
-	--diff-add-fg: 210 80% 30%;
-	--diff-add-line-num: 210 50% 50%;
-	--diff-del-bg: 30 80% 93%;
-	--diff-del-fg: 30 90% 32%;
-	--diff-del-line-num: 30 50% 50%;
-
-	--markdown-code-addition-bg: 210 70% 93%;
-	--markdown-code-addition-fg: 210 80% 30%;
-	--markdown-code-deletion-bg: 30 80% 93%;
-	--markdown-code-deletion-fg: 30 90% 32%;
-
-	--status-success: 210 60% 90%;
-	--status-success-foreground: 210 80% 30%;
-	--status-success-border: 210 60% 60%;
-	--status-error: 30 80% 92%;
-	--status-error-foreground: 30 90% 32%;
-	--status-error-border: 30 60% 58%;
-}
-
-.dark.colorblind {
-	--chat-message-action-highlight: 210 85% 65%;
-	--git-added: 210 85% 65%;
-	--git-deleted: 30 92% 65%;
-	--git-modified: 180 65% 60%;
-	--git-untracked: 260 70% 72%;
-	--git-renamed: 310 60% 72%;
-
-	--diff-addition: 210 85% 65%;
-	--diff-deletion: 30 92% 65%;
-	--diff-modified: 180 40% 22%;
-	--diff-modified-foreground: 180 65% 75%;
-	--diff-modified-border: 180 40% 40%;
-	--diff-add-bg: 210 60% 14%;
-	--diff-add-fg: 210 80% 82%;
-	--diff-add-line-num: 210 50% 55%;
-	--diff-del-bg: 30 60% 14%;
-	--diff-del-fg: 30 85% 82%;
-	--diff-del-line-num: 30 50% 55%;
-
-	--markdown-code-addition-bg: 210 60% 14%;
-	--markdown-code-addition-fg: 210 80% 82%;
-	--markdown-code-deletion-bg: 30 60% 14%;
-	--markdown-code-deletion-fg: 30 85% 82%;
-
-	--status-success: 210 50% 24%;
-	--status-success-foreground: 210 80% 86%;
-	--status-success-border: 210 50% 40%;
-	--status-error: 30 50% 24%;
-	--status-error-foreground: 30 85% 86%;
-	--status-error-border: 30 50% 40%;
-}
-
 /* Must stay unlayered so custom accents override card and user-bubble utilities. */
 .cli-presentation-custom {
 	--cli-presentation-accent: var(--cli-presentation-accent-light);
@@ -709,6 +240,44 @@
 }
 
 @layer components {
+	.select-native {
+		appearance: none;
+		min-height: 2rem;
+		border: 1px solid var(--native-select-border);
+		border-radius: var(--native-select-radius);
+		background-color: var(--native-select-muted-background);
+		background-image: var(--select-chevron-icon);
+		background-repeat: no-repeat;
+		background-position: right 0.625rem center;
+		padding: 0.25rem 2rem 0.25rem 0.5rem;
+		color: hsl(var(--foreground));
+		font-size: 1rem;
+		line-height: 1.5;
+		transition:
+			border-color 140ms ease,
+			box-shadow 140ms ease;
+	}
+
+	.select-native-surface {
+		background-color: var(--native-select-surface-background);
+	}
+
+	.select-native-compact {
+		border-radius: var(--native-select-compact-radius);
+	}
+
+	.select-native:focus-visible {
+		outline: none;
+		border-color: hsl(var(--ring));
+		box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5);
+	}
+
+	@media (min-width: 640px) and (pointer: fine) {
+		.select-native {
+			font-size: 0.875rem;
+		}
+	}
+
 	.transient-backdrop {
 		background-color: hsl(var(--transient-backdrop-color) / var(--transient-backdrop-opacity));
 		-webkit-backdrop-filter: blur(var(--transient-backdrop-blur));
@@ -954,6 +523,12 @@
 		box-sizing: border-box;
 	}
 
+	/* Pairs CodeMirror text with its separately painted selection layer. */
+	.cm-line::selection,
+	.cm-line ::selection {
+		color: hsl(var(--foreground));
+	}
+
 	html,
 	body {
 		height: 100%;
@@ -1012,18 +587,19 @@
 	--composer-thinking-composer-background:
 		linear-gradient(hsl(var(--card)) 0 0) padding-box,
 		linear-gradient(
-			to bottom,
-			hsl(var(--composer-thinking-static-start)) 0%,
-			hsl(var(--border)) 100%
-		)
-		border-box;
+				to bottom,
+				hsl(var(--composer-thinking-static-start)) 0%,
+				hsl(var(--border)) 100%
+			)
+			border-box;
 	--composer-thinking-composer-border: transparent;
 	--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));
 }
 
 @media (prefers-reduced-motion: no-preference) {
 	.composer-thinking-active:not(.composer-reduce-motion) {
-		--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;
+		--composer-thinking-animation: composer-thinking-border-pulse var(--processing-pulse-duration)
+			ease-in-out infinite;
 		--composer-thinking-composer-background: hsl(var(--card));
 		--composer-thinking-composer-border: hsl(var(--border));
 		--composer-thinking-status-border: hsl(var(--border));
@@ -1033,18 +609,18 @@
 @keyframes sidebar-processing-pulse {
 	0%,
 	100% {
-		opacity: 1;
+		opacity: 0.4;
 	}
 
 	50% {
-		opacity: 0.4;
+		opacity: 1;
 	}
 }
 
 @media (prefers-reduced-motion: no-preference) {
 	.sidebar-processing-indicator,
 	.workspace-chat-processing-indicator {
-		animation: sidebar-processing-pulse 1.6s ease-in-out infinite;
+		animation: sidebar-processing-pulse var(--processing-pulse-duration) ease-in-out infinite;
 	}
 
 	.sidebar-reduce-motion .sidebar-processing-indicator {

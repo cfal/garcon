@@ -11,7 +11,7 @@
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
-import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
+	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
@@ -67,6 +67,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		setGitReviewDisplay,
 		setGitViewLauncher,
 		setSingletonSurfaces,
+		setThemeRuntime,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
 	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.svelte.js';
@@ -92,6 +93,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		serializeTerminalLauncherDismissal,
 	} from '$lib/workspace/terminal-launcher-dismissal.js';
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
+	import { ThemeController } from '$lib/theme/theme-controller.svelte.js';
 
 	let { children } = $props();
 
@@ -156,6 +158,12 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	const workspaceShortcuts = workspaceServices.shortcuts;
 	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const minuteClock = createMinuteClockStore();
+	const themeController = new ThemeController({
+		getPreference: () => localSettings.themePreference,
+		setTerminalPresentation: (presentation) => terminals.setThemePresentation(presentation),
+		setEditorPresentation: (presentation) => fileSessions.setThemePresentation(presentation),
+		reportError: (message) => console.error(message),
+	});
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
@@ -205,6 +213,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	setSidebarSearch(sidebarSearch);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
 	setMinuteClock(minuteClock);
+	setThemeRuntime(themeController);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
@@ -212,47 +221,6 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	);
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
-	const DARK_THEME_COLOR = '#0c1117';
-	const LIGHT_THEME_COLOR = '#ffffff';
-
-	function applyThemeDom(isDark: boolean): void {
-		terminals.setDarkTheme(isDark);
-		document.documentElement.classList.toggle('dark', isDark);
-		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-		fileSessions.setDarkTheme(isDark);
-
-		const statusBarMeta = document.querySelector(
-			'meta[name="apple-mobile-web-app-status-bar-style"]',
-		);
-		statusBarMeta?.setAttribute('content', isDark ? 'black-translucent' : 'default');
-
-		const themeColor = isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
-		const themeColorMetas = document.querySelectorAll('meta[name="theme-color"]');
-		themeColorMetas.forEach((meta) => meta.setAttribute('content', themeColor));
-	}
-
-	// Applies theme class to document element. When 'system', listens for
-	// OS-level preference changes (e.g. Dark Reader or system toggle).
-	$effect(() => {
-		const theme = localSettings.theme;
-		if (theme !== 'system') {
-			applyThemeDom(theme === 'dark');
-			return;
-		}
-		const mql = window.matchMedia('(prefers-color-scheme: dark)');
-		applyThemeDom(mql.matches);
-		function onChange(e: MediaQueryListEvent) {
-			applyThemeDom(e.matches);
-		}
-		mql.addEventListener('change', onChange);
-		return () => mql.removeEventListener('change', onChange);
-	});
-
-	// Toggles colorblind-friendly color overrides on the root element.
-	$effect(() => {
-		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
-	});
-
 	// Projects the browser-local backdrop preference to portal-rendered overlays.
 	$effect(() => {
 		return projectOverlayBackdropEffects(

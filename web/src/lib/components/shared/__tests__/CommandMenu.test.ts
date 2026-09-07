@@ -28,10 +28,6 @@ const mocks = vi.hoisted(() => ({
 		openNewChatDialog: vi.fn(),
 		openSettings: vi.fn(),
 	},
-	localSettings: {
-		colorblindMode: false,
-		toggle: vi.fn(),
-	},
 	ghCapability: {
 		available: true,
 		hasChecked: true,
@@ -50,7 +46,6 @@ vi.mock('$lib/context', async (importOriginal) => ({
 	getWorkspaceCoordinator: () => mocks.workspace,
 	getTerminalRegistry: () => mocks.terminals,
 	getAppShell: () => mocks.appShell,
-	getLocalSettings: () => mocks.localSettings,
 	getGhCapability: () => mocks.ghCapability,
 	getNotifications: () => mocks.notifications,
 	getTransientLayers: () => mocks.transientLayers,

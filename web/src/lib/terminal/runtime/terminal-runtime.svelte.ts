@@ -87,6 +87,7 @@ export class TerminalRuntime {
 			fontFamily: TERMINAL_FALLBACK_FONT_FAMILY,
 			fontWeight: 400,
 			fontWeightBold: 700,
+			minimumContrastRatio: 4.5,
 			allowProposedApi: true,
 			allowTransparency: false,
 			tabStopWidth: 2,

@@ -109,7 +109,7 @@
 		</label>
 		<select
 			id="completion-sound-mode"
-			class="w-36 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+			class="select-native w-36 text-base sm:pointer-fine:text-sm"
 			value={ls.completionSoundMode}
 			onchange={(event) => setMode((event.currentTarget as HTMLSelectElement).value)}
 		>
@@ -178,7 +178,7 @@
 		</label>
 		<select
 			id="completion-sound-visibility"
-			class="w-48 max-w-[55%] rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+			class="select-native w-48 max-w-[55%] text-base sm:pointer-fine:text-sm"
 			value={ls.completionSoundVisibility}
 			disabled={ls.completionSoundMode === 'off'}
 			onchange={(event) => setVisibility((event.currentTarget as HTMLSelectElement).value)}
