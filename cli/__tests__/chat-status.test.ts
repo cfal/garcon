@@ -207,7 +207,9 @@ describe('chat status', () => {
     }));
 
     expect(value).toContain('older messages available');
-    expect(value).toContain('... [truncated; use export for the complete transcript]');
+    expect(value).toContain(
+      '... [truncated; use read --json for the complete bounded value or export for the complete transcript]',
+    );
     expect(value).not.toContain('x'.repeat(4_001));
   });
 

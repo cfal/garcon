@@ -10,8 +10,12 @@ import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
-import type { CliInvocation } from '../args.js';
-import { runConsultation, type ConsultationClient } from '../consultation.js';
+import type { CliInvocation, StartAsyncCliInvocation } from '../args.js';
+import {
+  runConsultation,
+  startConsultationAsync,
+  type ConsultationClient,
+} from '../consultation.js';
 import { CliError } from '../errors.js';
 import { GarconHttpError } from '../garcon-client.js';
 import type { CliOutput } from '../output.js';
@@ -151,6 +155,46 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
 }
 
 describe('runConsultation', () => {
+  test('starts asynchronously and returns after acceptance without reading a receipt', async () => {
+    const invocation: StartAsyncCliInvocation = {
+      kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
+      agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
+      title: 'Async review',
+    };
+    let receiptRead = false;
+    const testClient = client({
+      async getTurnReceipt() {
+        receiptRead = true;
+        return receipt;
+      },
+    });
+    const testOutput = output();
+
+    await startConsultationAsync(invocation, 'Implement it', testClient, testOutput, undefined, {
+      createId: () => 'request', createChatId: () => CHAT_ID,
+    });
+
+    expect(receiptRead).toBe(false);
+    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
+    expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Async review' }]);
+    expect(testOutput.messages).toEqual([]);
+  });
+
+  test('preserves the accepted async handle when title update fails', async () => {
+    const testOutput = output();
+    await expect(startConsultationAsync({
+      kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
+      agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
+      title: 'Async review',
+    }, 'Implement it', client({
+      async updateChatTitle() { throw new CliError('title update', 'rename failed', 3); },
+    }), testOutput, undefined, {
+      createId: () => 'request', createChatId: () => CHAT_ID,
+    })).rejects.toThrow('rename failed');
+
+    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
+  });
+
   test('starts a tagged write-capable chat and prints its result', async () => {
     const invocation: CliInvocation = {
       kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',

@@ -83,7 +83,7 @@ describe('workspace layout V2 schema', () => {
 			},
 			{
 				type: 'open-chat-in-new-window',
-				chatId: 'chat-a',
+				chatId: 'chat-b',
 				targetWindowId: CANONICAL_WINDOW_ID,
 				edge: 'right',
 				newWindowId: 'window-two',
@@ -109,7 +109,7 @@ describe('workspace layout V2 schema', () => {
 		expect(result.source).toBe('valid');
 		expect(serializeWorkspaceLayout(result.snapshot)).toEqual(persisted);
 		expect(result.snapshot.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: 'chat-a' });
-		expect(result.snapshot.surfaces['chat-view:window-two']).toMatchObject({ chatId: 'chat-a' });
+		expect(result.snapshot.surfaces['chat-view:window-two']).toMatchObject({ chatId: 'chat-b' });
 		expect(result.snapshot.unplacedTerminalIds).toEqual(['spare']);
 		expect(result.snapshot.fullscreenWindowId).toBeNull();
 	});
@@ -149,7 +149,43 @@ describe('workspace layout V2 schema', () => {
 		});
 	});
 
-	it('deduplicates portable singletons and terminals globally while allowing duplicate chat records', () => {
+	it('preserves multiple unassigned Chat views', () => {
+		const persisted = {
+			version: 2 as const,
+			root: {
+				type: 'partition' as const,
+				id: 'partition-root',
+				direction: 'horizontal' as const,
+				ratio: 0.5,
+				children: [
+					{
+						type: 'window' as const,
+						id: 'window-a',
+						order: [{ type: 'chat' as const, chatId: null }],
+						active: { type: 'chat' as const, chatId: null },
+						mru: [{ type: 'chat' as const, chatId: null }],
+					},
+					{
+						type: 'window' as const,
+						id: 'window-b',
+						order: [{ type: 'chat' as const, chatId: null }],
+						active: { type: 'chat' as const, chatId: null },
+						mru: [{ type: 'chat' as const, chatId: null }],
+					},
+				],
+			},
+			unplacedTerminalIds: [],
+		};
+
+		const result = parsePersistedWorkspaceLayout(JSON.stringify(persisted));
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: null });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: null });
+		expect(serializeWorkspaceLayout(result.snapshot)).toEqual(persisted);
+	});
+
+	it('deduplicates global surfaces and keeps the first active duplicate Chat assignment', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({
 				version: 2,
@@ -179,7 +215,7 @@ describe('workspace layout V2 schema', () => {
 								{ type: 'terminal', terminalId: 't1' },
 								{ type: 'singleton', kind: 'files' },
 							],
-							active: { type: 'singleton', kind: 'files' },
+							active: { type: 'chat', chatId: 'same' },
 							mru: [],
 						},
 					],
@@ -198,7 +234,111 @@ describe('workspace layout V2 schema', () => {
 			'chat-view:window-b',
 			'singleton:files',
 		]);
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: 'same' });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: null });
 		expect(result.snapshot.unplacedTerminalIds).toEqual(['t2']);
+		const repaired = serializeWorkspaceLayout(result.snapshot);
+		const reparsed = parsePersistedWorkspaceLayout(JSON.stringify(repaired));
+		expect(reparsed.source).toBe('valid');
+		expect(serializeWorkspaceLayout(reparsed.snapshot)).toEqual(repaired);
+	});
+
+	it('prefers a later active duplicate Chat assignment without changing window tab state', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 0.4,
+					children: [
+						{
+							type: 'window',
+							id: 'window-a',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'git' },
+							],
+							active: { type: 'singleton', kind: 'git' },
+							mru: [
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'chat', chatId: 'same' },
+							],
+						},
+						{
+							type: 'window',
+							id: 'window-b',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'files' },
+							],
+							active: { type: 'chat', chatId: 'same' },
+							mru: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'files' },
+							],
+						},
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: null });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: 'same' });
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs).toEqual({
+			order: ['chat-view:window-a', 'singleton:git'],
+			activeId: 'singleton:git',
+			mru: ['singleton:git', 'chat-view:window-a'],
+		});
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs).toEqual({
+			order: ['chat-view:window-b', 'singleton:files'],
+			activeId: 'chat-view:window-b',
+			mru: ['chat-view:window-b', 'singleton:files'],
+		});
+	});
+
+	it('keeps the first depth-first duplicate when neither Chat tab is active', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 0.5,
+					children: [
+						{
+							type: 'window',
+							id: 'window-a',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'git' },
+							],
+							active: { type: 'singleton', kind: 'git' },
+							mru: [],
+						},
+						{
+							type: 'window',
+							id: 'window-b',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'files' },
+							],
+							active: { type: 'singleton', kind: 'files' },
+							mru: [],
+						},
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: 'same' });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: null });
 	});
 
 	it('round-trips and globally deduplicates the Chat Map singleton', () => {
@@ -295,7 +435,7 @@ describe('workspace layout V2 schema', () => {
 		expect(root.tabs.mru).toEqual(['chat-view:window-main', 'singleton:git']);
 	});
 
-	it('caps malformed oversized topology without moving window-owned Chat views', () => {
+	it('caps malformed oversized topology before repairing duplicate Chat assignments', () => {
 		const windows: PersistedWorkspaceLayoutNode[] = [
 			{
 				type: 'window',
@@ -304,21 +444,31 @@ describe('workspace layout V2 schema', () => {
 				active: { type: 'singleton', kind: 'git' },
 				mru: [],
 			},
-			...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 1 }, (_, index) => ({
+			{
+				type: 'window',
+				id: 'window-2',
+				order: [
+					{ type: 'chat', chatId: 'chat-retained' },
+					{ type: 'singleton', kind: 'files' },
+				],
+				active: { type: 'singleton', kind: 'files' },
+				mru: [],
+			},
+			...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 2 }, (_, index) => ({
 				type: 'window' as const,
-				id: `window-${index + 2}`,
-				order: [{ type: 'chat' as const, chatId: `chat-${index + 2}` }],
-				active: { type: 'chat' as const, chatId: `chat-${index + 2}` },
+				id: `window-${index + 3}`,
+				order: [{ type: 'chat' as const, chatId: `chat-${index + 3}` }],
+				active: { type: 'chat' as const, chatId: `chat-${index + 3}` },
 				mru: [],
 			})),
 			{
 				type: 'window',
 				id: 'window-overflow',
 				order: [
-					{ type: 'chat', chatId: 'chat-overflow' },
+					{ type: 'chat', chatId: 'chat-retained' },
 					{ type: 'terminal', terminalId: 'terminal-overflow' },
 				],
-				active: { type: 'chat', chatId: 'chat-overflow' },
+				active: { type: 'chat', chatId: 'chat-retained' },
 				mru: [{ type: 'terminal', terminalId: 'terminal-overflow' }],
 			},
 		];
@@ -346,6 +496,9 @@ describe('workspace layout V2 schema', () => {
 		expect(
 			Object.values(result.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
 		).toHaveLength(WORKSPACE_WINDOW_RESOURCE_CEILING - 1);
+		expect(result.snapshot.surfaces['chat-view:window-2']).toMatchObject({
+			chatId: 'chat-retained',
+		});
 		expect(result.snapshot.surfaces['chat-view:window-overflow']).toBeUndefined();
 	});
 

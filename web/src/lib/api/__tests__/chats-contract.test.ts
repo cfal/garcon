@@ -147,10 +147,11 @@ describe('chats API contract', () => {
 	});
 
 	it('listChats calls GET /api/v1/chats', async () => {
+		const chatId = '1785337200123456';
 		const payload: ChatListResponse = {
 			sessions: [
 				{
-					id: 'chat-1',
+					id: chatId,
 					parentChat: null,
 					agentId: 'claude',
 					agentOwnershipEpoch: 'epoch-1',
@@ -174,7 +175,7 @@ describe('chats API contract', () => {
 				},
 			],
 			total: 1,
-			lastSelectedChatId: 'chat-1',
+			lastSelectedChatId: chatId,
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -194,16 +195,18 @@ describe('chats API contract', () => {
 	] as const)(
 		'round-trips the REST processing pair %s/%s',
 		async (isProcessing, processingPhase) => {
+			const chatId = '1785337200123456';
 			const payload = {
 				sessions: [
 					{
-						id: 'chat-1',
+						...chatEntry(chatId),
+						isActive: isProcessing,
 						isProcessing,
 						processingPhase,
 					},
 				],
 				total: 1,
-				lastSelectedChatId: 'chat-1',
+				lastSelectedChatId: chatId,
 			} as unknown as ChatListResponse;
 			fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -221,15 +224,21 @@ describe('chats API contract', () => {
 	])(
 		'rejects the contradictory REST processing pair %s/%s',
 		async (isProcessing, processingPhase) => {
+			const chatId = '1785337200123456';
 			fetchMock.mockResolvedValue(
 				jsonResponse({
-					sessions: [{ id: 'chat-1', isProcessing, processingPhase }],
+					sessions: [{
+						...chatEntry(chatId),
+						isActive: processingPhase !== null,
+						isProcessing,
+						processingPhase,
+					}],
 					total: 1,
-					lastSelectedChatId: 'chat-1',
+					lastSelectedChatId: chatId,
 				}),
 			);
 
-			await expect(listChats()).rejects.toThrow('Invalid chat list processing response');
+			await expect(listChats()).rejects.toThrow('Invalid chat list response');
 		},
 	);
 

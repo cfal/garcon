@@ -45,6 +45,7 @@ import type { ChatSurfaceTransferPort } from './chat-surface-transfer.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 import { WorkspaceTabMovementService } from './workspace-tab-movement-service.js';
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
+import { WorkspaceChatPlacementService } from './workspace-chat-placement.js';
 import {
 	clampWorkspacePartitionRatio,
 	mapWorkspaceSplitAdmissions,
@@ -56,7 +57,6 @@ import {
 	type WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
 import {
-	requireWorkspaceSplitAdmission,
 	requireWorkspaceNewWindowEdge,
 	WorkspaceSplitBlockedError,
 } from './workspace-split-blocked-error.js';
@@ -89,6 +89,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #terminalPlacement: TerminalPlacementService;
 	readonly #tabMovement: WorkspaceTabMovementService;
 	readonly #windowDestruction: WorkspaceWindowDestructionService;
+	readonly #chatPlacement: WorkspaceChatPlacementService;
 	closeGuardRequest = $state<{
 		surfaceId: string;
 		title: string;
@@ -127,6 +128,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget, options),
 			resolveSplitAdmission: deps.resolveSplitAdmission,
 			currentWindowId: () => this.currentWindowId,
+			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
+		});
+		this.#chatPlacement = new WorkspaceChatPlacementService({
+			surfaceReservations: this.#reservedSurfaceIds,
+			windowReservations: this.#reservedWindowIds,
+			isMobile: () => this.isMobile,
+			lastFocusedWindowId: () => this.#presentation.lastFocusedWindowId,
+			resolveWindowId: (snapshot, preferredWindowId) =>
+				this.#resolveWindowId(snapshot, preferredWindowId),
+			commitWithPresentationTarget: (mutations, resolveTarget) =>
+				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget),
+			resolveSplitAdmission: deps.resolveSplitAdmission,
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
 		this.#fileDialog = new FileDialogCoordinator({
@@ -225,6 +238,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	get currentWindowId(): WorkspaceWindowId {
 		return this.#presentation.currentWindowId;
+	}
+
+	get focusedChatId(): string | null {
+		const snapshot = this.layout.snapshot;
+		const activeSurfaceId = this.isMobile
+			? snapshot.mobileActiveSurfaceId
+			: windowNodeById(snapshot.desktopRoot, this.currentWindowId)?.tabs.activeId;
+		const surface = activeSurfaceId ? snapshot.surfaces[activeSurfaceId] : null;
+		return surface?.type === 'chat' ? surface.chatId : null;
 	}
 
 	get currentChatSurfaceId(): `chat-view:${WorkspaceWindowId}` {
@@ -390,51 +412,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async showChatInCurrentWindow(chatId: string): Promise<ChatViewSurfaceId> {
-		const intendedWindowId = this.currentWindowId;
-		return this.#showChat(chatId, (latest) =>
-			windowNodeById(latest.desktopRoot, intendedWindowId)
-				? intendedWindowId
-				: this.#resolveWindowId(latest, this.#presentation.lastFocusedWindowId),
-		);
+		return this.#chatPlacement.showInCurrentWindow(chatId, this.currentWindowId);
 	}
 
 	async showChatInWindow(chatId: string, windowId: WorkspaceWindowId): Promise<ChatViewSurfaceId> {
-		return this.#showChat(chatId, (latest) =>
-			windowNodeById(latest.desktopRoot, windowId) ? windowId : null,
-		);
-	}
-
-	async #showChat(
-		chatId: string,
-		resolveWindow: (snapshot: WorkspaceLayoutSnapshot) => WorkspaceWindowId | null,
-	): Promise<ChatViewSurfaceId> {
-		let surfaceId: ChatViewSurfaceId | null = null;
-		let applied = false;
-		const current = await this.#presentation.commitWithPresentationTarget(
-			(latest) => {
-				const destinationWindowId = resolveWindow(latest);
-				if (!destinationWindowId || this.#reservedWindowIds.has(destinationWindowId)) return [];
-				const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
-				if (this.#reservedSurfaceIds.has(destinationSurfaceId)) return [];
-				surfaceId = destinationSurfaceId;
-				applied = true;
-				const mutations: WorkspaceLayoutMutation[] = [
-					{ type: 'set-window-chat', windowId: destinationWindowId, chatId },
-				];
-				if (this.isMobile) {
-					mutations.push({
-						type: 'set-mobile-presentation',
-						activeId: destinationSurfaceId,
-						returnStack: [],
-					});
-				}
-				return mutations;
-			},
-			() => (applied ? surfaceId : null),
-		);
-		if (!applied || !surfaceId) throw new Error(m.workspace_open_failed());
-		if (current) this.#presentation.presentSurface(surfaceId);
-		return surfaceId;
+		return this.#chatPlacement.showInWindow(chatId, windowId);
 	}
 
 	async openChatInNewWindow(
@@ -442,44 +424,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		targetWindowId?: WorkspaceWindowId,
 		edge: WorkspaceWindowEdge = 'right',
 	): Promise<WorkspaceWindowId> {
-		if (this.isMobile) {
-			await this.showChatInCurrentWindow(chatId);
-			return this.currentWindowId;
-		}
-		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
-		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
-		let opened = false;
-		const current = await this.#presentation.commit((latest) => {
-			const anchor = this.#resolveWindowId(
-				latest,
-				targetWindowId ?? this.#presentation.lastFocusedWindowId,
-			);
-			if (this.#reservedWindowIds.has(anchor)) return [];
-			if (
-				!requireWorkspaceSplitAdmission(this.#deps.resolveSplitAdmission, latest, {
-					targetWindowId: anchor,
-					edge,
-				})
-			) {
-				return [];
-			}
-			opened = true;
-			return [
-				{
-					type: 'open-chat-in-new-window',
-					chatId,
-					targetWindowId: anchor,
-					edge,
-					newWindowId,
-					partitionId,
-				},
-			];
-		});
-		if (!opened || !this.layout.surface(chatViewSurfaceId(newWindowId))) {
-			throw new Error(m.workspace_open_failed());
-		}
-		if (current) this.#presentation.presentSurface(chatViewSurfaceId(newWindowId));
-		return newWindowId;
+		return this.#chatPlacement.openInNewWindow(chatId, targetWindowId, edge);
 	}
 
 	async clearDeletedChat(chatId: string): Promise<void> {

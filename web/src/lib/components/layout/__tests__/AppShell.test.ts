@@ -210,7 +210,7 @@ function installContext(): AppShellBreakpointWorkspace {
 			hasKey: vi.fn(() => false),
 			dismissKey: vi.fn(),
 		},
-		sidebarSearch: { filteredChats: [], allKnownTags: [] },
+		sidebarSearch: { filteredChats: [], allKnownTags: [], resetDialogs: vi.fn() },
 		projectCollapse: { collapsedProjectKeys: new Set<string>() },
 		ghCapability: { available: true },
 	};
@@ -295,9 +295,9 @@ describe('AppShell responsive workspace binding', () => {
 	it('retries one failed transition against the current breakpoint', async () => {
 		setViewportWidth(390, false);
 		const workspace = installContext();
-		const enter = vi.spyOn(workspace, 'enterMobilePresentation').mockRejectedValueOnce(
-			new Error('presentation failed'),
-		);
+		const enter = vi
+			.spyOn(workspace, 'enterMobilePresentation')
+			.mockRejectedValueOnce(new Error('presentation failed'));
 
 		render(AppShell);
 
@@ -407,6 +407,38 @@ describe('AppShell responsive workspace binding', () => {
 		expect(transientLayers.hasPendingMainInert).toBe(false);
 		expect(transientLayers.makesMainInert).toBe(true);
 		expect(transientLayers.ownsTopModalTarget(dialog)).toBe(true);
+	});
+
+	it('resets the sidebar search dialog cluster when the mobile drawer closes', async () => {
+		const workspace = installContext();
+		const appShell = testContext.current?.appShell as AppShellStore;
+		const sidebarSearch = testContext.current?.sidebarSearch as {
+			resetDialogs: ReturnType<typeof vi.fn>;
+		};
+		appShell.sidebarOpen = true;
+		setViewportWidth(390, false);
+		render(AppShell);
+
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+		expect(sidebarSearch.resetDialogs).not.toHaveBeenCalled();
+
+		appShell.sidebarOpen = false;
+		await waitFor(() => expect(sidebarSearch.resetDialogs).toHaveBeenCalledOnce());
+	});
+
+	it('does not reset the sidebar search dialogs while on desktop', async () => {
+		const workspace = installContext();
+		const appShell = testContext.current?.appShell as AppShellStore;
+		const sidebarSearch = testContext.current?.sidebarSearch as {
+			resetDialogs: ReturnType<typeof vi.fn>;
+		};
+		setViewportWidth(1_024, false);
+		render(AppShell);
+
+		await waitFor(() => expect(workspace.exitCalls).toBe(1));
+		appShell.sidebarOpen = true;
+		appShell.sidebarOpen = false;
+		expect(sidebarSearch.resetDialogs).not.toHaveBeenCalled();
 	});
 
 	it('contains mobile drawer focus, closes on registered Escape, and restores focus', async () => {

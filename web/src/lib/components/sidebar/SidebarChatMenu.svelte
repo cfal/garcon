@@ -45,6 +45,7 @@
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
+		hasChatPlacement?: boolean;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		isArchiveMutationPending?: boolean;
@@ -68,6 +69,7 @@
 		onSortChatOrder,
 		onOpenInNewWindow,
 		newWindowEdges,
+		hasChatPlacement = false,
 		onTogglePinned,
 		onToggleArchive,
 		isArchiveMutationPending = false,
@@ -151,37 +153,44 @@
 {/if}
 
 {#if onOpenInNewWindow}
-	<DropdownMenuSub>
-		<DropdownMenuSubTrigger disabled={!canOpenInNewWindow} title={newWindowBlockTitle}>
+	{#if hasChatPlacement}
+		<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id)}>
 			<PanelRight />
-			{m.sidebar_chat_open_new_window()}
-		</DropdownMenuSubTrigger>
-		<DropdownMenuSubContent class="w-56">
-			{#each WORKSPACE_WINDOW_EDGES as edge (edge)}
-				{@const admission = newWindowEdges[edge]}
-				<DropdownMenuItem
-					disabled={admission?.allowed !== true}
-					title={admission && !admission.allowed
-						? workspaceSplitBlockMessage(admission.reason)
-						: undefined}
-					onclick={() => {
-						if (admission?.allowed) onOpenInNewWindow?.(session.id, edge);
-					}}
-				>
-					{#if edge === 'left'}
-						<PanelRight class="rotate-180" />
-					{:else if edge === 'right'}
-						<PanelRight />
-					{:else if edge === 'top'}
-						<PanelTop />
-					{:else}
-						<PanelTop class="rotate-180" />
-					{/if}
-					{edgeLabel(edge)}
-				</DropdownMenuItem>
-			{/each}
-		</DropdownMenuSubContent>
-	</DropdownMenuSub>
+			{m.workspace_show_existing_chat()}
+		</DropdownMenuItem>
+	{:else}
+		<DropdownMenuSub>
+			<DropdownMenuSubTrigger disabled={!canOpenInNewWindow} title={newWindowBlockTitle}>
+				<PanelRight />
+				{m.sidebar_chat_open_new_window()}
+			</DropdownMenuSubTrigger>
+			<DropdownMenuSubContent class="w-56">
+				{#each WORKSPACE_WINDOW_EDGES as edge (edge)}
+					{@const admission = newWindowEdges[edge]}
+					<DropdownMenuItem
+						disabled={admission?.allowed !== true}
+						title={admission && !admission.allowed
+							? workspaceSplitBlockMessage(admission.reason)
+							: undefined}
+						onclick={() => {
+							if (admission?.allowed) onOpenInNewWindow?.(session.id, edge);
+						}}
+					>
+						{#if edge === 'left'}
+							<PanelRight class="rotate-180" />
+						{:else if edge === 'right'}
+							<PanelRight />
+						{:else if edge === 'top'}
+							<PanelTop />
+						{:else}
+							<PanelTop class="rotate-180" />
+						{/if}
+						{edgeLabel(edge)}
+					</DropdownMenuItem>
+				{/each}
+			</DropdownMenuSubContent>
+		</DropdownMenuSub>
+	{/if}
 	<DropdownMenuSeparator />
 {/if}
 

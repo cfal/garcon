@@ -231,6 +231,31 @@ describe('WorkspaceWindowDndController', () => {
 		});
 	});
 
+	it('rechecks Chat reuse before applying stale edge admission', () => {
+		const layout = createWorkspaceLayoutStore();
+		const resolveSplitAdmission = () => ({ allowed: false, reason: 'resource-ceiling' }) as const;
+		const dnd = new WorkspaceWindowDndController(layout, resolveSplitAdmission);
+		const target = windowElement('window-files');
+		dnd.beginChatDrag('chat-a');
+		dnd.handleWindowDragOver(
+			'window-files',
+			dragEvent('dragover', target, { clientX: 5, clientY: 50 }),
+		);
+		expect(dnd.activeTarget).toMatchObject({ zone: 'left', blockedReason: 'resource-ceiling' });
+
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
+			]),
+		);
+
+		expect(dnd.hasChatPlacement('chat-a')).toBe(true);
+		expect(
+			dnd.handleWindowDrop('window-files', dragEvent('drop', target, { clientX: 5, clientY: 50 })),
+		).toMatchObject({ payload: { kind: 'chat', chatId: 'chat-a' } });
+	});
+
 	it('preserves edge-specific admission while leaving center drops available', () => {
 		const layout = createWorkspaceLayoutStore();
 		const dnd = new WorkspaceWindowDndController(layout, (_snapshot, request) =>

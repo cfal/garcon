@@ -51,9 +51,9 @@ describe('shared sidebar chat row', () => {
 			isMobile,
 		});
 
-		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('aria-current')).toBe(
-			'page',
-		);
+		expect(
+			screen.getByText('Shared row chat').closest('button')?.getAttribute('aria-current'),
+		).toBe('page');
 	});
 
 	it('keeps standalone desktop rows natively draggable by default', () => {
@@ -588,9 +588,7 @@ describe('shared sidebar chat row', () => {
 		const openSubmenu = screen.getByRole('menuitem', { name: 'Open in new window' });
 		openSubmenu.focus();
 		await fireEvent.keyDown(openSubmenu, { key: 'ArrowRight' });
-		await fireEvent.click(
-			await screen.findByRole('menuitem', { name: 'Open new window right' }),
-		);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Open new window right' }));
 
 		expect(onOpenInNewWindow).toHaveBeenCalledWith('chat-1', 'right');
 		expect(screen.queryByRole('menuitem', { name: 'Open in new window at edge' })).toBeNull();
@@ -608,6 +606,24 @@ describe('shared sidebar chat row', () => {
 		expect(openItem.getAttribute('aria-disabled')).toBe('true');
 		expect(openItem.getAttribute('title')).toBe('Window limit reached (maximum 8)');
 		expect(screen.queryByRole('menuitem', { name: 'Open in new window at edge' })).toBeNull();
+	});
+
+	it('shows an existing Chat instead of applying new-window admission', async () => {
+		const onOpenInNewWindow = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onOpenInNewWindow,
+			newWindowEdges: deniedWorkspaceSplits('resource-ceiling'),
+			hasChatPlacement: true,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		const showItem = screen.getByRole('menuitem', { name: 'Show existing chat' });
+		expect(showItem.getAttribute('aria-disabled')).not.toBe('true');
+		expect(screen.queryByRole('menuitem', { name: 'Open in new window' })).toBeNull();
+
+		await fireEvent.click(showItem);
+		expect(onOpenInNewWindow).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('keeps the new-window submenu available when only one edge fits', async () => {

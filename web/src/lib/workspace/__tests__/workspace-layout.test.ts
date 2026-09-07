@@ -141,21 +141,31 @@ describe('workspace layout reducer', () => {
 		);
 	});
 
-	it('allows the same chat record in different window-owned Chat views', () => {
+	it('rejects the same non-null chat assignment in different workspace windows', () => {
+		expect(() =>
+			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+				{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'same-chat' },
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'same-chat',
+					targetWindowId: CANONICAL_WINDOW_ID,
+					edge: 'right',
+					newWindowId: 'window-two',
+					partitionId: 'partition-root',
+				},
+			]),
+		).toThrow('Chat is assigned to more than one workspace window');
+	});
+
+	it('allows several unassigned Chat views', () => {
 		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'same-chat' },
-			{
-				type: 'open-chat-in-new-window',
-				chatId: 'same-chat',
-				targetWindowId: CANONICAL_WINDOW_ID,
-				edge: 'right',
-				newWindowId: 'window-two',
-				partitionId: 'partition-root',
-			},
+			{ type: 'set-window-chat', windowId: CANONICAL_FILES_WINDOW_ID, chatId: null },
 		]);
 
-		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: 'same-chat' });
-		expect(next.surfaces[chatViewSurfaceId('window-two')]).toMatchObject({ chatId: 'same-chat' });
+		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: null });
+		expect(next.surfaces[chatViewSurfaceId(CANONICAL_FILES_WINDOW_ID)]).toMatchObject({
+			chatId: null,
+		});
 	});
 
 	it('registers, activates, reorders, and moves ordinary tabs window-locally', () => {
@@ -473,7 +483,7 @@ describe('workspace layout reducer', () => {
 			]),
 		).toThrow('At least one Chat view');
 
-		const duplicateChat = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+		const withSecondChat = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'open-chat-in-new-window',
 				chatId: 'chat-b',
@@ -483,7 +493,7 @@ describe('workspace layout reducer', () => {
 				partitionId: 'partition-chat-b',
 			},
 		]);
-		const next = reduceWorkspaceLayout(duplicateChat, [
+		const next = reduceWorkspaceLayout(withSecondChat, [
 			{ type: 'remove-surface', surfaceId: CANONICAL_CHAT_SURFACE_ID },
 		]);
 		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toBeUndefined();
