@@ -695,7 +695,7 @@ describe('shared sidebar chat row', () => {
 	it('pulses processing only when system and local motion preferences allow it', () => {
 		expect(appCss).toContain('@keyframes sidebar-processing-pulse');
 		expect(appCss).toMatch(
-			/@media \(prefers-reduced-motion: no-preference\)\s*\{[\s\S]*?\.sidebar-processing-indicator,\s*\.workspace-chat-processing-indicator\s*\{[\s\S]*?animation: sidebar-processing-pulse 1\.6s ease-in-out infinite;[\s\S]*?\}/,
+			/@media \(prefers-reduced-motion: no-preference\)\s*\{[\s\S]*?\.sidebar-processing-indicator,\s*\.workspace-chat-processing-indicator\s*\{[\s\S]*?animation: sidebar-processing-pulse var\(--processing-pulse-duration\) ease-in-out infinite;[\s\S]*?\}/,
 		);
 		expect(appCss).toMatch(
 			/\.sidebar-reduce-motion \.sidebar-processing-indicator\s*\{\s*animation: none;\s*\}/,

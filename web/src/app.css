@@ -603,11 +603,11 @@
 @keyframes sidebar-processing-pulse {
 	0%,
 	100% {
-		opacity: 1;
+		opacity: 0.4;
 	}
 
 	50% {
-		opacity: 0.4;
+		opacity: 1;
 	}
 }
 

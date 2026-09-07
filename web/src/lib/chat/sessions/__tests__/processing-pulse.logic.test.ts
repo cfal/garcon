@@ -13,6 +13,9 @@ describe('processing pulse', () => {
 		expect(appCss).toMatch(
 			/sidebar-processing-pulse var\(--processing-pulse-duration\) ease-in-out infinite/,
 		);
+		expect(appCss).toMatch(
+			/@keyframes sidebar-processing-pulse\s*\{\s*0%,\s*100%\s*\{\s*opacity: 0\.4;\s*\}\s*50%\s*\{\s*opacity: 1;\s*\}/,
+		);
 	});
 
 	it('maps timestamps onto a shared looping phase', () => {

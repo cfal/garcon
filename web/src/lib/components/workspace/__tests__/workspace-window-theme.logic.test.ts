@@ -54,7 +54,7 @@ describe('workspace window theme tokens', () => {
 
 	it('animates workspace activity only when reduced motion is not requested', () => {
 		expect(appCss).toMatch(
-			/@media \(prefers-reduced-motion: no-preference\) \{\s*\.sidebar-processing-indicator,\s*\.workspace-chat-processing-indicator \{\s*animation: sidebar-processing-pulse 1\.6s ease-in-out infinite;/,
+			/@media \(prefers-reduced-motion: no-preference\) \{\s*\.sidebar-processing-indicator,\s*\.workspace-chat-processing-indicator \{\s*animation: sidebar-processing-pulse var\(--processing-pulse-duration\) ease-in-out infinite;/,
 		);
 	});
 });
