@@ -30,8 +30,8 @@ describe('canvas HTTP contract', () => {
 			expectedRevision: 1,
 			content: canvas.content,
 		});
-		fetch.mockResolvedValueOnce(Response.json({ canvases: [] }));
-		expect(await listCanvases()).toEqual({ canvases: [] });
+		fetch.mockResolvedValueOnce(Response.json({ canvases: [], unavailableIds: ['damaged'] }));
+		expect(await listCanvases()).toEqual({ canvases: [], unavailableIds: ['damaged'] });
 		fetch.mockResolvedValueOnce(Response.json({ success: true }));
 		await deleteCanvas({ id: 'board', expectedRevision: 1 });
 		expect(fetch.mock.calls[4][1].method).toBe('DELETE');

@@ -58,7 +58,7 @@ export interface CanvasSummary {
   updatedAt: string;
 }
 
-export interface CanvasListResponse { canvases: CanvasSummary[] }
+export interface CanvasListResponse { canvases: CanvasSummary[]; unavailableIds: string[] }
 export interface CreateCanvasRequest { id: string; content: CanvasContent }
 export interface UpdateCanvasRequest extends CreateCanvasRequest { expectedRevision: number }
 export interface DeleteCanvasRequest { id: string; expectedRevision: number }
@@ -140,7 +140,8 @@ export function canvasSummary(canvas: ChatCanvas): CanvasSummary {
 }
 
 export function parseCanvasList(value: unknown): CanvasListResponse {
-  if (!isRecord(value) || !Array.isArray(value.canvases) || value.canvases.length > CANVAS_MAX_COUNT) {
+  if (!isRecord(value) || !Array.isArray(value.canvases) || !Array.isArray(value.unavailableIds)
+    || value.canvases.length + value.unavailableIds.length > CANVAS_MAX_COUNT) {
     throw new Error('Invalid canvas list');
   }
   const ids = new Set<string>();
@@ -153,5 +154,10 @@ export function parseCanvasList(value: unknown): CanvasListResponse {
     ids.add(entry.id);
     return { id: entry.id, title: entry.title, revision: entry.revision, updatedAt: entry.updatedAt };
   });
-  return { canvases };
+  const unavailableIds = value.unavailableIds.map((id: unknown): string => {
+    if (!isCanvasId(id) || ids.has(id)) throw new Error('Invalid unavailable canvas ID');
+    ids.add(id);
+    return id;
+  });
+  return { canvases, unavailableIds };
 }

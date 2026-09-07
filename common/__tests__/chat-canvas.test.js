@@ -7,10 +7,23 @@ const content = () => ({ title: 'Work', nodes: [
 ], connections: [{ id: 'connection', source: 'box', target: 'chat', sourceSide: 'right', targetSide: 'left', label: 'contains' }] });
 
 describe('canvas contracts', () => {
+  it('reports unavailable identities and rejects malformed or overlapping catalog entries', () => {
+    expect(parseCanvasList({ canvases: [], unavailableIds: ['damaged'] })).toEqual({
+      canvases: [], unavailableIds: ['damaged'],
+    });
+    for (const unavailableIds of [undefined, ['../outside'], ['duplicate', 'duplicate'], Array(101).fill('a')]) {
+      expect(() => parseCanvasList({ canvases: [], unavailableIds })).toThrow();
+    }
+    expect(() => parseCanvasList({
+      canvases: [{ id: 'a', title: 'Work', revision: 1, updatedAt: '2026-09-07T00:00:00Z' }],
+      unavailableIds: ['a'],
+    })).toThrow();
+  });
+
   it('round-trips references, order, coordinates, labels, and document revisions', () => {
     const document = { version: 1, id: 'canvas-a', revision: 3, updatedAt: '2026-09-07T00:00:00.000Z', content: content() };
     expect(parseChatCanvas(JSON.parse(JSON.stringify(document)))).toEqual(document);
-    expect(parseCanvasList({ canvases: [{ id: document.id, title: 'Work', revision: 3, updatedAt: document.updatedAt }] }).canvases).toHaveLength(1);
+    expect(parseCanvasList({ unavailableIds: [], canvases: [{ id: document.id, title: 'Work', revision: 3, updatedAt: document.updatedAt }] }).canvases).toHaveLength(1);
   });
 
   it('rejects dangling membership, duplicate identities, malformed positions, and unknown node types', () => {

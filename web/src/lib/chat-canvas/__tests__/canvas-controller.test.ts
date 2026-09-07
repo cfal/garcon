@@ -20,7 +20,10 @@ function setup() {
 		['other', { ...canvas(), id: 'other' }],
 	]);
 	const api = {
-		list: vi.fn(async () => ({ canvases: [...boards.values()].map(canvasSummary) })),
+		list: vi.fn<CanvasApiPort['list']>(async () => ({
+			canvases: [...boards.values()].map(canvasSummary),
+			unavailableIds: [],
+		})),
 		get: vi.fn(async (id: string) => boards.get(id)!),
 		create: vi.fn(async (request: CreateCanvasRequest) => {
 			const created = { ...canvas(request.content), id: request.id };
@@ -42,6 +45,59 @@ function setup() {
 }
 
 describe('CanvasController', () => {
+	it('keeps healthy canvases available and clears resolved catalog warnings on refresh', async () => {
+		const { controller, api } = setup();
+		api.list.mockResolvedValueOnce({
+			canvases: [canvasSummary(canvas())],
+			unavailableIds: ['damaged'],
+		});
+		await controller.activate();
+		expect(controller.unavailableIds).toEqual(['damaged']);
+		expect(controller.session!.saved.id).toBe('board');
+		await controller.refresh();
+		expect(controller.unavailableIds).toEqual([]);
+		controller.dispose();
+	});
+
+	it('saves debounce-pending edits to the original before making a copy', async () => {
+		const { controller, boards, memory } = setup();
+		await controller.activate();
+		controller.session!.document.rename('Edited original');
+		expect(await controller.saveCopy('Copy')).toBe(true);
+		expect(boards.get('board')?.content.title).toBe('Edited original');
+		expect(memory.drafts.has('board')).toBe(false);
+		await controller.open('board');
+		expect(controller.session!.document.content.title).toBe('Edited original');
+		controller.dispose();
+	});
+
+	it('keeps the original and its draft when saving before a copy fails', async () => {
+		const { controller, api, memory } = setup();
+		await controller.activate();
+		api.update.mockRejectedValue(new Error('Offline'));
+		controller.session!.document.rename('Pending original');
+		expect(await controller.saveCopy('Copy')).toBe(false);
+		expect(api.create).not.toHaveBeenCalled();
+		expect(controller.session!.saved.id).toBe('board');
+		expect(memory.drafts.get('board')?.content.title).toBe('Pending original');
+		controller.dispose();
+	});
+
+	it('does not publish catalog updates after disposal while completing a final save', async () => {
+		const { controller, api, memory } = setup();
+		await controller.activate();
+		const response = deferred<ChatCanvas>();
+		api.update.mockReturnValue(response.promise);
+		controller.session!.document.rename('Final edit');
+		const content = controller.session!.document.content;
+		const catalog = controller.canvases;
+		controller.dispose();
+		response.resolve(canvas(content, 2));
+		await controller.session!.flush();
+		expect(controller.canvases).toBe(catalog);
+		expect(memory.drafts.has('board')).toBe(false);
+	});
+
 	it('loads on demand and saves the current document before switching', async () => {
 		const { controller, api } = setup();
 		expect(api.list).not.toHaveBeenCalled();
@@ -105,7 +161,7 @@ describe('CanvasController', () => {
 		api.list.mockReturnValue(response.promise);
 		const refresh = controller.activate();
 		controller.dispose();
-		response.resolve({ canvases: [] });
+		response.resolve({ canvases: [], unavailableIds: [] });
 		await refresh;
 		expect(controller.canvases.length).toBe(1);
 	});
@@ -117,7 +173,7 @@ describe('CanvasController', () => {
 		const refresh = controller.refresh();
 		await controller.create('New board');
 		const id = controller.session!.saved.id;
-		response.resolve({ canvases: [] });
+		response.resolve({ canvases: [], unavailableIds: [] });
 		await refresh;
 		expect(controller.canvases.some((entry) => entry.id === id)).toBe(true);
 		controller.dispose();

@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatCanvas, CanvasListResponse, CanvasContent } from '../../../common/chat-canvas.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { writeFile, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 describe('chat canvas API', () => {
   test('persists boards across restart and rejects conflicting or invalid writes', async () => {
@@ -25,6 +27,15 @@ describe('chat canvas API', () => {
       await expect(fixture.client.delete(endpoint, { id: created.id, expectedRevision: 1 })).rejects.toMatchObject({ status: 409 });
       await fixture.client.delete(endpoint, { id: created.id, expectedRevision: 2 });
       expect((await fixture.client.get<CanvasListResponse>(endpoint)).canvases).toEqual([]);
+
+      const damaged = join(fixture.dirs.workspace, 'chat-canvases/damaged.json');
+      await writeFile(damaged, '{broken');
+      await writeFile(join(fixture.dirs.workspace, 'chat-canvases/backup copy.json'), '{unrelated');
+      expect(await fixture.client.get<CanvasListResponse>(endpoint)).toEqual({ canvases: [], unavailableIds: ['damaged'] });
+      const healthy = await fixture.client.post<ChatCanvas>(endpoint, { id: 'healthy', content });
+      expect((await fixture.client.get<CanvasListResponse>(endpoint)).canvases[0].id).toBe(healthy.id);
+      await expect(fixture.client.put(endpoint, { id: 'damaged', expectedRevision: 1, content })).rejects.toMatchObject({ status: 500 });
+      expect(await readFile(damaged, 'utf8')).toBe('{broken');
     });
   });
 });

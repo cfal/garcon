@@ -127,6 +127,11 @@
 			>
 		</div>
 	</header>
+	{#if controller.unavailableIds.length}
+		<p role="alert" class="border-b border-border bg-muted p-3 text-sm">
+			{m.canvas_catalog_warning()}
+		</p>
+	{/if}
 	{#if controller.error || navigationError}<div
 			role="alert"
 			class="flex flex-wrap items-center gap-2 border-b border-border bg-destructive/10 p-3 text-sm"

@@ -27,18 +27,26 @@ export class CanvasStore {
     let files: string[];
     try { files = await fs.readdir(this.#directory); }
     catch (error) {
-      if (hasNodeErrorCode(error, 'ENOENT')) return { canvases: [] };
+      if (hasNodeErrorCode(error, 'ENOENT')) return { canvases: [], unavailableIds: [] };
       throw error;
     }
     const canvases = [];
+    const unavailableIds: string[] = [];
     for (const file of files.filter((name) => name.endsWith('.json'))) {
-      try { canvases.push(canvasSummary(await this.get(file.slice(0, -5)))); }
+      const id = file.slice(0, -5);
+      if (!isCanvasId(id)) continue;
+      try { canvases.push(canvasSummary(await this.get(id))); }
       catch (error) {
         if (error instanceof CanvasError && error.status === 404) continue;
+        if (error instanceof CanvasError && error.code === 'CANVAS_CORRUPT') {
+          unavailableIds.push(id);
+          continue;
+        }
         throw error;
       }
     }
-    return { canvases: canvases.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)) };
+    return { canvases: canvases.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)),
+      unavailableIds: unavailableIds.sort() };
   }
 
   async get(id: string): Promise<ChatCanvas> {
@@ -68,7 +76,8 @@ export class CanvasStore {
       } catch (error) {
         if (!(error instanceof CanvasError && error.status === 404)) throw error;
       }
-      if ((await this.list()).canvases.length >= CANVAS_MAX_COUNT) {
+      const catalog = await this.list();
+      if (catalog.canvases.length + catalog.unavailableIds.length >= CANVAS_MAX_COUNT) {
         throw new CanvasError('CANVAS_LIMIT', `A maximum of ${CANVAS_MAX_COUNT} canvases is allowed`, 409);
       }
       const canvas: ChatCanvas = { version: 1, id, revision: 1, updatedAt: new Date().toISOString(), content };

@@ -21,6 +21,37 @@ function setup(overrides: Partial<CanvasSessionPort> = {}) {
 }
 
 describe('canvas autosave', () => {
+	it('retries a transient autosave failure when the user edits again', async () => {
+		const update = vi
+			.fn<CanvasSessionPort['update']>()
+			.mockRejectedValueOnce(new Error('Offline'))
+			.mockImplementation(async (request) => canvas(request.content, 2));
+		const { session } = setup({ update });
+		session.document.rename('First edit');
+		await vi.advanceTimersByTimeAsync(500);
+		expect(session.error).toBe('Offline');
+		session.document.rename('Later edit');
+		await vi.advanceTimersByTimeAsync(500);
+		expect(update).toHaveBeenCalledTimes(2);
+		expect(session.saved.content.title).toBe('Later edit');
+		expect(session.dirty).toBe(false);
+		session.dispose();
+	});
+
+	it('retries pending edits on disposal after a transient failure', async () => {
+		const update = vi
+			.fn<CanvasSessionPort['update']>()
+			.mockRejectedValueOnce(new Error('Offline'))
+			.mockImplementation(async (request) => canvas(request.content, 2));
+		const { session } = setup({ update });
+		session.document.rename('Pending edit');
+		await session.flush();
+		session.dispose();
+		await vi.runAllTimersAsync();
+		expect(update).toHaveBeenCalledTimes(2);
+		expect(session.dirty).toBe(false);
+	});
+
 	it('backs up edits immediately and clears the backup only after confirmation', async () => {
 		const response = deferred<ChatCanvas>();
 		const { session, memory } = setup({ update: () => response.promise });
@@ -71,6 +102,8 @@ describe('canvas autosave', () => {
 		session.document.rename('Local');
 		expect(await session.flush()).toBe(false);
 		expect(session.conflict).toBe(true);
+		session.document.rename('More conflicted work');
+		await vi.runAllTimersAsync();
 		expect(await session.flush()).toBe(false);
 		expect(update).toHaveBeenCalledTimes(3);
 		session.dispose();

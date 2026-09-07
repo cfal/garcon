@@ -108,7 +108,7 @@ export class CanvasSession {
 	dispose(): void {
 		if (this.#disposed) return;
 		this.abandon();
-		if (this.dirty && !this.conflict && !this.error) void this.flush();
+		if (this.dirty && !this.conflict) void this.flush();
 	}
 
 	#changed(content: CanvasContent): void {
@@ -118,7 +118,7 @@ export class CanvasSession {
 		} catch {
 			this.recoveryError = true;
 		}
-		if (!this.conflict && !this.error) this.#schedule();
+		if (!this.conflict) this.#schedule();
 	}
 
 	#schedule(): void {

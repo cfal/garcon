@@ -2108,6 +2108,7 @@
 	"canvas_retry": "Retry save",
 	"canvas_refresh": "Refresh",
 	"canvas_recovery_error": "Browser recovery is unavailable. Keep this page open until your canvas is saved.",
+	"canvas_catalog_warning": "Some saved canvases could not be read. Restore their data from a backup; other canvases are available.",
 	"canvas_conflict": "This canvas changed elsewhere or was deleted. Your local edits are preserved. Load the latest version or save your work as a copy.",
 	"canvas_reload": "Load latest",
 	"canvas_reload_description": "Discard your local edits and load the latest saved version?",

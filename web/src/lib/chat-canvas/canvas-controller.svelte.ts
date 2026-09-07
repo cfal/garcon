@@ -37,6 +37,7 @@ export interface CanvasViewport {
 
 export class CanvasController {
 	canvases = $state.raw<CanvasSummary[]>([]);
+	unavailableIds = $state.raw<string[]>([]);
 	session = $state.raw<CanvasSession | null>(null);
 	loading = $state(false);
 	loaded = $state(false);
@@ -59,9 +60,9 @@ export class CanvasController {
 		this.#guardUnsavedWork();
 		this.loading = true;
 		try {
-			const { canvases } = await this.api.list();
+			const catalog = await this.api.list();
 			if (this.#disposed) return;
-			this.#setCatalog(canvases);
+			this.#setCatalog(catalog);
 			this.loaded = true;
 			this.error = null;
 			if (!this.session && this.canvases[0]) await this.#load(this.canvases[0].id);
@@ -106,7 +107,7 @@ export class CanvasController {
 		this.loading = true;
 		try {
 			const previous = this.session;
-			if (previous.saving) await previous.flush();
+			if (!(await previous.flush()) && !previous.conflict) return false;
 			await this.#create({ ...previous.document.content, title: title.trim() });
 			previous.discardRecovery();
 			return true;
@@ -128,7 +129,10 @@ export class CanvasController {
 			current.discardRecovery();
 			current.abandon();
 			this.session = null;
-			this.#setCatalog(this.canvases.filter((entry) => entry.id !== current.saved.id));
+			this.#setCatalog({
+				canvases: this.canvases.filter((entry) => entry.id !== current.saved.id),
+				unavailableIds: this.unavailableIds,
+			});
 			this.error = null;
 			return true;
 		} catch (error) {
@@ -144,9 +148,9 @@ export class CanvasController {
 		this.#refreshing = true;
 		const generation = this.#catalogGeneration;
 		try {
-			const { canvases } = await this.api.list();
+			const catalog = await this.api.list();
 			if (this.#disposed || this.loading || generation !== this.#catalogGeneration) return;
-			this.#setCatalog(canvases);
+			this.#setCatalog(catalog);
 			await this.session?.refresh();
 		} catch (error) {
 			this.#failure(error);
@@ -227,6 +231,7 @@ export class CanvasController {
 	}
 
 	#saved(canvas: ChatCanvas): void {
+		if (this.#disposed) return;
 		this.#catalogGeneration += 1;
 		this.canvases = [
 			canvasSummary(canvas),
@@ -234,8 +239,9 @@ export class CanvasController {
 		];
 	}
 
-	#setCatalog(canvases: CanvasSummary[]): void {
+	#setCatalog({ canvases, unavailableIds }: CanvasListResponse): void {
 		this.#catalogGeneration += 1;
+		this.unavailableIds = unavailableIds;
 		const ids = new Set(canvases.map((entry) => entry.id));
 		this.canvases = canvases;
 		try {

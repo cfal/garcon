@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CanvasStore } from '../store.ts';
+import { CANVAS_MAX_COUNT } from '../../../common/chat-canvas.ts';
 
 const directories = [];
 afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -13,9 +14,30 @@ async function fixture() {
 }
 
 describe('CanvasStore', () => {
+  it('reports unreadable boards without blocking healthy boards or overwriting damaged data', async () => {
+    const { dir, store } = await fixture();
+    await store.create('healthy', content());
+    const damagedPath = join(dir, 'chat-canvases/damaged.json');
+    await writeFile(damagedPath, '{broken');
+    await writeFile(join(dir, 'chat-canvases/backup copy.json'), '{unrelated');
+    expect((await store.list()).unavailableIds).toEqual(['damaged']);
+    expect((await store.list()).canvases.map((canvas) => canvas.id)).toEqual(['healthy']);
+    await store.create('new', content('New'));
+    await expect(store.create('damaged', content())).rejects.toMatchObject({ code: 'CANVAS_CORRUPT' });
+    expect(await readFile(damagedPath, 'utf8')).toBe('{broken');
+  });
+
+  it('counts unreadable board identities toward the catalog limit', async () => {
+    const { dir, store } = await fixture();
+    await store.create('healthy', content());
+    await Promise.all(Array.from({ length: CANVAS_MAX_COUNT - 1 }, (_, index) =>
+      writeFile(join(dir, `chat-canvases/damaged-${index}.json`), '{broken')));
+    await expect(store.create('overflow', content())).rejects.toMatchObject({ code: 'CANVAS_LIMIT' });
+  });
+
   it('persists each board separately and survives new store instances', async () => {
     const { dir, store } = await fixture();
-    expect(await store.list()).toEqual({ canvases: [] });
+    expect(await store.list()).toEqual({ canvases: [], unavailableIds: [] });
     const created = await store.create('a', content());
     const other = await store.create('b', content('Other'));
     const updated = await store.update('a', 1, content('Renamed'));
