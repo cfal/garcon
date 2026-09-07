@@ -469,6 +469,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		chatId: string,
 		toggleRemoteArchive: typeof toggleArchiveApi,
 	): Promise<ArchiveMutationSettlement> {
+		// Lets the initiating handler navigate before archive I/O begins.
 		await Promise.resolve();
 		let result: PromiseSettledResult<ToggleArchiveResponse>;
 		try {
@@ -492,15 +493,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const archivedIds: string[] = [];
 		let nextById = this.#baseById;
 		for (const settlement of settlements) {
-			const { chatId, result } = settlement;
-			if (this.#latestSuccessfulFetchGeneration >= settlement.requiredRefreshGeneration) {
-				continue;
-			}
-			const serverEntryGeneration = this.#serverEntryGenerationByChatId.get(chatId) ?? 0;
-			if (serverEntryGeneration > settlement.serverEntryGenerationAtSettlement) continue;
-			if (result.status !== 'fulfilled' || !result.value.success || !result.value.isArchived) {
-				continue;
-			}
+			const { chatId } = settlement;
+			if (!this.#shouldApplyAcknowledgedArchive(settlement)) continue;
 			const chat = this.#baseById[chatId];
 			if (!chat) continue;
 			if (nextById === this.#baseById) nextById = { ...this.#baseById };
@@ -522,6 +516,17 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		nextOrder.splice(archivedIndex < 0 ? nextOrder.length : archivedIndex, 0, ...archivedIds);
 		this.#baseById = nextById;
 		this.#baseOrder = nextOrder;
+	}
+
+	#shouldApplyAcknowledgedArchive(settlement: ArchiveMutationSettlement): boolean {
+		if (this.#latestSuccessfulFetchGeneration >= settlement.requiredRefreshGeneration) {
+			return false;
+		}
+		const serverEntryGeneration = this.#serverEntryGenerationByChatId.get(settlement.chatId) ?? 0;
+		if (serverEntryGeneration > settlement.serverEntryGenerationAtSettlement) return false;
+
+		const { result } = settlement;
+		return result.status === 'fulfilled' && result.value.success && result.value.isArchived;
 	}
 
 	/** Deletes a chat server-side after callers apply any optimistic local removal. */

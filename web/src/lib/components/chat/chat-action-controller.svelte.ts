@@ -60,22 +60,16 @@ export class ChatActionController {
 	}
 
 	async toggleArchive(chatId: string): Promise<void> {
-		const chat = this.deps.chats.find((entry) => entry.id === chatId);
+		const chats = this.deps.chats;
+		const chatIndex = chats.findIndex((entry) => entry.id === chatId);
+		const chat = chats[chatIndex];
 		if (!chat || this.deps.isArchiveMutationPending(chatId)) return;
 		const wasArchived = chat.isArchived;
 		const isSelectedChat = this.deps.selectedChatId === chatId;
 		const isArchivingSelectedChat = !wasArchived && isSelectedChat;
-		const chatIndex = this.deps.chats.findIndex((entry) => entry.id === chatId);
-		let neighborId: string | null = null;
-		if (isArchivingSelectedChat && chatIndex >= 0) {
-			const nextChat = this.deps.chats
-				.slice(chatIndex + 1)
-				.find((entry) => !this.deps.isArchiveMutationPending(entry.id));
-			const previousChat = this.deps.chats
-				.slice(0, chatIndex)
-				.reverse()
-				.find((entry) => !this.deps.isArchiveMutationPending(entry.id));
-			neighborId = nextChat?.id ?? previousChat?.id ?? null;
+		let replacementChatId: string | null = null;
+		if (isArchivingSelectedChat) {
+			replacementChatId = this.#findArchiveReplacementChatId(chats, chatIndex);
 		}
 
 		const mutation = wasArchived
@@ -84,7 +78,7 @@ export class ChatActionController {
 		if (!mutation.chatIds.includes(chatId)) return;
 
 		if (isArchivingSelectedChat) {
-			if (neighborId) this.deps.onSelectChat(neighborId);
+			if (replacementChatId) this.deps.onSelectChat(replacementChatId);
 			else this.deps.onNewChat();
 		}
 
@@ -94,6 +88,21 @@ export class ChatActionController {
 				this.deps.requestSidebarRecenter();
 			}
 		});
+	}
+
+	#findArchiveReplacementChatId(
+		chats: readonly ChatSessionRecord[],
+		chatIndex: number,
+	): string | null {
+		for (let index = chatIndex + 1; index < chats.length; index += 1) {
+			const chat = chats[index];
+			if (chat && !this.deps.isArchiveMutationPending(chat.id)) return chat.id;
+		}
+		for (let index = chatIndex - 1; index >= 0; index -= 1) {
+			const chat = chats[index];
+			if (chat && !this.deps.isArchiveMutationPending(chat.id)) return chat.id;
+		}
+		return null;
 	}
 
 	async confirmDelete(dialogs: ChatActionDialogsState): Promise<void> {

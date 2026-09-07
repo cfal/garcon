@@ -2,7 +2,7 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 interface PendingArchiveChange {
 	operationId: number;
-	position: number;
+	batchPosition: number;
 	targetArchived: boolean;
 }
 
@@ -44,10 +44,10 @@ export class ChatArchiveProjectionState {
 
 		if (admittedIds.length > 0) {
 			const nextPending = { ...this.#pendingByChatId };
-			for (const [position, chatId] of admittedIds.entries()) {
+			for (const [batchPosition, chatId] of admittedIds.entries()) {
 				nextPending[chatId] = {
 					operationId,
-					position,
+					batchPosition,
 					targetArchived,
 				};
 			}
@@ -80,10 +80,12 @@ export class ChatArchiveProjectionState {
 	): string[] {
 		const optimisticArchives = Object.entries(this.#pendingByChatId)
 			.filter(([chatId, pending]) => pending.targetArchived && Boolean(records[chatId]))
-			.sort(
-				([, left], [, right]) =>
-					right.operationId - left.operationId || left.position - right.position,
-			)
+			.sort(([, left], [, right]) => {
+				if (left.operationId !== right.operationId) {
+					return right.operationId - left.operationId;
+				}
+				return left.batchPosition - right.batchPosition;
+			})
 			.map(([chatId]) => chatId);
 		if (optimisticArchives.length === 0) return order;
 
