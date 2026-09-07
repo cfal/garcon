@@ -20,9 +20,7 @@ interface SidebarContextMocks extends SidebarContext {
 	removeChat: Mock<(chatId: string) => void>;
 	navigateAwayFromChat: Mock<(chatId: string) => void>;
 	patchChatTitle: Mock<(chatId: string, title: string) => void>;
-	patchChatProjectPath: Mock<
-		(chatId: string, patch: { projectPath: string; effectiveProjectKey: string }) => void
-	>;
+	patchChatProjectPath: Mock<(chatId: string, patch: { projectPath: string }) => void>;
 	patchLastReadAt: Mock<(chatId: string, lastReadAt: string) => void>;
 	refreshChats: Mock<() => void>;
 	removeChatTranscript: Mock<(chatId: string) => void>;
@@ -34,10 +32,7 @@ function createSidebarContext(overrides: Partial<SidebarContextMocks> = {}): Sid
 		removeChat: vi.fn<(chatId: string) => void>(),
 		navigateAwayFromChat: vi.fn<(chatId: string) => void>(),
 		patchChatTitle: vi.fn<(chatId: string, title: string) => void>(),
-		patchChatProjectPath:
-			vi.fn<
-				(chatId: string, patch: { projectPath: string; effectiveProjectKey: string }) => void
-			>(),
+		patchChatProjectPath: vi.fn<(chatId: string, patch: { projectPath: string }) => void>(),
 		patchLastReadAt: vi.fn<(chatId: string, lastReadAt: string) => void>(),
 		refreshChats: vi.fn<() => void>(),
 		removeChatTranscript: vi.fn<(chatId: string) => void>(),
@@ -129,14 +124,12 @@ describe('handleChatProjectPathUpdated', () => {
 				'/workspace/worktree',
 				'/workspace/worktree',
 				'/workspace/repo',
-				'/workspace/repo',
 			),
 			ctx,
 		);
 
 		expect(ctx.patchChatProjectPath).toHaveBeenCalledWith('chat-1', {
 			projectPath: '/workspace/worktree',
-			effectiveProjectKey: '/workspace/worktree',
 		});
 	});
 
@@ -148,7 +141,6 @@ describe('handleChatProjectPathUpdated', () => {
 				'',
 				'/workspace/worktree',
 				'/workspace/worktree',
-				'/workspace/repo',
 				'/workspace/repo',
 			),
 			ctx,
@@ -162,7 +154,10 @@ describe('handleChatListInvalidated', () => {
 	it('calls refreshChats when chatId is present', () => {
 		const ctx = createSidebarContext();
 
-		handleChatListInvalidated(new ChatListRefreshRequestedMessage('chats-reordered', 'chat-1'), ctx);
+		handleChatListInvalidated(
+			new ChatListRefreshRequestedMessage('chats-reordered', 'chat-1'),
+			ctx,
+		);
 
 		expect(ctx.refreshChats).toHaveBeenCalledTimes(1);
 	});

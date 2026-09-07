@@ -31,6 +31,7 @@ import type { ChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-s
 import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte';
 import type { WorkspaceLayoutReader } from '$lib/workspace/surface-types';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte';
+import type { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 import type { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
@@ -71,6 +72,7 @@ export const [getChatPreambleSelectionInvalidationHub, setChatPreambleSelectionI
 export const [getSnippets, setSnippets] = createContext<SnippetsStore>();
 export const [getWorkspaceLayout, setWorkspaceLayout] = createContext<WorkspaceLayoutReader>();
 export const [getWorkspaceContext, setWorkspaceContext] = createContext<WorkspaceContextStore>();
+export const [getProjectResolution, setProjectResolution] = createContext<ProjectResolutionStore>();
 export const [getTerminalRegistry, setTerminalRegistry] = createContext<TerminalRegistry>();
 export const [getWorkspaceCoordinator, setWorkspaceCoordinator] =
 	createContext<WorkspaceCoordinator>();

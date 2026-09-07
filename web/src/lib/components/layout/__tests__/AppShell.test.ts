@@ -174,6 +174,7 @@ function installContext(): AppShellBreakpointWorkspace {
 		rememberSelectedChat: vi.fn(),
 		refreshChats: vi.fn(async () => undefined),
 		quietRefreshChats: vi.fn(async () => undefined),
+		projectPathRevision: vi.fn(() => 0),
 		upsertServerChat: vi.fn(),
 		hasChat: vi.fn((chatId: string) => chatId === 'chat-test'),
 		removeChat: vi.fn(),

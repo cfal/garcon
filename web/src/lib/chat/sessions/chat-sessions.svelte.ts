@@ -3,13 +3,6 @@
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
 
 import {
-	normalizePermissionMode,
-	normalizeThinkingMode,
-} from '$shared/chat-modes';
-import type { AgentSettingsEnvelope } from '$shared/agent-integration';
-import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-settings';
-import { stableJsonStringify } from '$shared/json';
-import {
 	deleteChat as deleteChatApi,
 	generateChatTitle,
 	listChats,
@@ -23,12 +16,9 @@ import { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
-import type { ChatListEntry, ChatOrderGroup } from '$shared/chat-list';
+import type { ChatListEntry } from '$shared/chat-list';
 import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
-import type {
-	ChatOrderBoundary,
-	ReorderChatResponse,
-} from '$shared/chat-order-contracts';
+import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
 import {
 	chatExecutionDraftStorageKey,
 	removeLocalStorageItem,
@@ -37,6 +27,17 @@ import {
 	ChatArchiveProjectionState,
 	type ChatArchiveProjectionOperation,
 } from './chat-archive-projection-state.svelte.js';
+import {
+	ChatProjectBindingState,
+	type ProjectPathChangedListener,
+} from './chat-project-binding-state.js';
+import {
+	insertServerEntry,
+	normalizeExecutionFields,
+	reconcileActivityProjection,
+	sameRecord,
+	toRecord,
+} from './chat-session-records.js';
 
 export interface ChatProcessingTransition {
 	chatId: string;
@@ -91,212 +92,13 @@ export interface ChatSessionsPort {
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
 	patchActivity(chatId: string, timestamp: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
+	projectPathRevision(chatId: string): number;
+	onProjectPathChanged(listener: (chatId: string, projectPath: string | null) => void): () => void;
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
 	isChatProcessing(chatId: string): boolean;
 	processingPhase(chatId: string): ChatProcessingPhase | null;
 	applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null): ChatProcessingTransition;
 	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[];
-}
-
-function normalizeExecutionFields<
-	T extends {
-		agentId: string;
-		permissionMode?: unknown;
-		thinkingMode?: unknown;
-		agentSettings?: AgentSettingsEnvelope;
-	},
->(
-	value: T,
-): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
-	return {
-		permissionMode: normalizePermissionMode(value.permissionMode),
-		thinkingMode: normalizeThinkingMode(value.thinkingMode),
-		agentSettings: normalizeAgentSettings(
-			value.agentId,
-			value.agentSettings,
-			createEmptyAgentSettings(value.agentId),
-		),
-	};
-}
-
-function toRecord(session: ChatSession): ChatSessionRecord {
-	if (session.isProcessing !== (session.processingPhase !== null)) {
-		throw new Error(`Invalid processing projection for chat ${session.id}`);
-	}
-	return {
-		id: session.id,
-		parentChat: session.parentChat,
-		projectPath: session.projectPath,
-		effectiveProjectKey: session.effectiveProjectKey,
-		projectIdentityState: 'available',
-		orderGroup: session.orderGroup,
-		title: session.title,
-		agentId: session.agentId,
-		model: session.model,
-		apiProviderId: session.apiProviderId ?? null,
-		modelEndpointId: session.modelEndpointId ?? null,
-		modelProtocol: session.modelProtocol ?? null,
-		...normalizeExecutionFields(session),
-		createdAt: session.activity?.createdAt ?? null,
-		lastActivityAt: session.activity?.lastActivityAt ?? null,
-		lastReadAt: session.activity?.lastReadAt ?? null,
-		isPinned: session.isPinned,
-		isArchived: session.isArchived ?? false,
-		isProcessing: session.processingPhase !== null,
-		processingPhase: session.processingPhase,
-		canReloadFromNativeHistory: session.canReloadFromNativeHistory === true,
-		isUnread: session.isUnread ?? false,
-		status: 'running',
-		agentOwnershipEpoch: session.agentOwnershipEpoch,
-		lastMessage: session.preview?.lastMessage || undefined,
-		tags: session.tags ?? [],
-		firstMessage: session.preview?.firstMessage || undefined,
-	};
-}
-
-function arraysEqual(a: string[], b: string[]): boolean {
-	if (a.length !== b.length) return false;
-	for (let i = 0; i < a.length; i++) {
-		if (a[i] !== b[i]) return false;
-	}
-	return true;
-}
-
-function sameParentChat(
-	left: ChatSessionRecord['parentChat'],
-	right: ChatSessionRecord['parentChat'],
-): boolean {
-	if (left === right) return true;
-	if (left === null || right === null) return false;
-	if (left.chatId !== right.chatId) return false;
-	if (left.relation === 'delegation') return right.relation === 'delegation';
-	if (right.relation === 'delegation') return false;
-	return left.relation === right.relation
-		&& left.transcriptViewId === right.transcriptViewId
-		&& left.ordinal === right.ordinal;
-}
-
-function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
-	return (
-		a.id === b.id &&
-		sameParentChat(a.parentChat, b.parentChat) &&
-		a.projectPath === b.projectPath &&
-		a.effectiveProjectKey === b.effectiveProjectKey &&
-		a.projectIdentityState === b.projectIdentityState &&
-		a.orderGroup === b.orderGroup &&
-		a.title === b.title &&
-		a.agentId === b.agentId &&
-		a.model === b.model &&
-		a.apiProviderId === b.apiProviderId &&
-		a.modelEndpointId === b.modelEndpointId &&
-		a.modelProtocol === b.modelProtocol &&
-		a.permissionMode === b.permissionMode &&
-		a.thinkingMode === b.thinkingMode &&
-		stableJsonStringify(a.agentSettings) === stableJsonStringify(b.agentSettings) &&
-		a.createdAt === b.createdAt &&
-		a.lastActivityAt === b.lastActivityAt &&
-		a.lastReadAt === b.lastReadAt &&
-		a.isPinned === b.isPinned &&
-		a.isArchived === b.isArchived &&
-		a.isProcessing === b.isProcessing &&
-		a.processingPhase === b.processingPhase &&
-		a.canReloadFromNativeHistory === b.canReloadFromNativeHistory &&
-		a.isUnread === b.isUnread &&
-		a.status === b.status &&
-		a.agentOwnershipEpoch === b.agentOwnershipEpoch &&
-		a.lastMessage === b.lastMessage &&
-		a.firstMessage === b.firstMessage &&
-		arraysEqual(a.tags, b.tags)
-	);
-}
-
-function reconcileActivityProjection(
-	previous: ChatSessionRecord | undefined,
-	next: ChatSessionRecord,
-): void {
-	if (!previous) return;
-	let preservedLocalTimestamp = false;
-
-	if (previous.lastActivityAt && (!next.lastActivityAt || previous.lastActivityAt > next.lastActivityAt)) {
-		next.lastActivityAt = previous.lastActivityAt;
-		next.lastMessage = previous.lastMessage;
-		preservedLocalTimestamp = true;
-	} else if (previous.lastMessage && !next.lastMessage) {
-		next.lastMessage = previous.lastMessage;
-	}
-
-	if (previous.lastReadAt && (!next.lastReadAt || previous.lastReadAt > next.lastReadAt)) {
-		next.lastReadAt = previous.lastReadAt;
-		preservedLocalTimestamp = true;
-	}
-
-	if (preservedLocalTimestamp) {
-		next.isUnread = Boolean(
-			next.lastActivityAt && (!next.lastReadAt || next.lastActivityAt > next.lastReadAt),
-		);
-	}
-}
-
-function insertServerEntry(
-	order: readonly string[],
-	records: Readonly<Record<string, ChatSessionRecord>>,
-	chatId: string,
-	group: ChatOrderGroup,
-	previous: ChatSessionRecord | undefined,
-): string[] {
-	const priorIndex = order.indexOf(chatId);
-	const without = order.filter((id) => id !== chatId && Boolean(records[id]));
-	if (previous?.status !== 'draft' && previous?.orderGroup === group && priorIndex >= 0) {
-		without.splice(Math.min(priorIndex, without.length), 0, chatId);
-		return without;
-	}
-
-	const groupRank: Record<ChatOrderGroup, number> = {
-		pinned: 0,
-		orphan: 1,
-		normal: 2,
-		archived: 3,
-	};
-	const draftCount = without.findIndex((id) => records[id]?.status !== 'draft');
-	const serverStart = draftCount === -1 ? without.length : draftCount;
-	let insertionIndex = serverStart;
-	while (insertionIndex < without.length) {
-		const record = records[without[insertionIndex]];
-		if (!record || record.status === 'draft') {
-			insertionIndex += 1;
-			continue;
-		}
-		const recordGroup = record.orderGroup ?? 'orphan';
-		if (groupRank[recordGroup] >= groupRank[group]) break;
-		insertionIndex += 1;
-	}
-	if (group === 'normal') {
-		without.splice(insertionIndex, 0, chatId);
-		return without;
-	}
-	if (group === 'archived') {
-		without.push(chatId);
-		return without;
-	}
-	while (
-		insertionIndex < without.length &&
-		records[without[insertionIndex]]?.orderGroup === group
-	) {
-		insertionIndex += 1;
-	}
-	without.splice(insertionIndex, 0, chatId);
-	if (group !== 'orphan') return without;
-
-	const orphanIds = without.filter((id) => records[id]?.orderGroup === 'orphan');
-	orphanIds.sort((a, b) => {
-		const aCreated = records[a]?.createdAt ?? '';
-		const bCreated = records[b]?.createdAt ?? '';
-		return bCreated.localeCompare(aCreated) || a.localeCompare(b);
-	});
-	let orphanIndex = 0;
-	return without.map((id) =>
-		records[id]?.orderGroup === 'orphan' ? orphanIds[orphanIndex++] : id,
-	);
 }
 
 export class ChatSessionsStore implements ChatSessionsPort {
@@ -320,6 +122,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
 	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
 	readonly #archiveProjection = new ChatArchiveProjectionState();
+	readonly #projectBindings = new ChatProjectBindingState();
 
 	#byId = $derived.by(() => this.#archiveProjection.projectRecords(this.#baseById));
 	#order = $derived.by(() => this.#archiveProjection.projectOrder(this.#baseOrder, this.#byId));
@@ -373,10 +176,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (showLoading) this.isLoadingChats = true;
 		try {
 			const fetchChats = this.#deps.listChats ?? listChats;
+			const projectPathRevisions = this.#projectBindings.captureRevisions();
 			const res = await fetchChats();
 			this.lastSelectedChatId =
 				typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
-			this.upsertFromServer(res.sessions ?? []);
+			this.#upsertFromServer(res.sessions ?? [], projectPathRevisions);
 			this.#latestSuccessfulFetchGeneration = fetchGeneration;
 		} catch (err) {
 			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
@@ -446,9 +250,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (operation.chatIds.length === 0) return;
 		const toggleRemoteArchive = this.#deps.toggleArchive ?? toggleArchiveApi;
 		const settlements = await Promise.all(
-			operation.chatIds.map((chatId) =>
-				this.#settleArchiveMutation(chatId, toggleRemoteArchive),
-			),
+			operation.chatIds.map((chatId) => this.#settleArchiveMutation(chatId, toggleRemoteArchive)),
 		);
 		await this.#refresh(false);
 
@@ -484,8 +286,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			result,
 			// Only a fetch started after this mutation settles can reconcile it.
 			requiredRefreshGeneration: this.#nextFetchGeneration + 1,
-			serverEntryGenerationAtSettlement:
-				this.#serverEntryGenerationByChatId.get(chatId) ?? 0,
+			serverEntryGenerationAtSettlement: this.#serverEntryGenerationByChatId.get(chatId) ?? 0,
 		};
 	}
 
@@ -659,6 +460,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	 *  for unchanged records to avoid unnecessary re-renders. Drafts that the
 	 *  server now owns get their startup config cleaned up. */
 	upsertFromServer(sessions: ChatSession[]): void {
+		this.#upsertFromServer(sessions);
+	}
+
+	#upsertFromServer(
+		sessions: ChatSession[],
+		requestProjectPathRevisions?: ReadonlyMap<string, number>,
+	): void {
 		const nextById: Record<string, ChatSessionRecord> = {};
 		const nextOrder: string[] = [];
 		const previousServerChatIds = new Set(
@@ -677,10 +485,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const startupIdsToRemove: string[] = [];
 
 		for (const session of sessions) {
-			const next = toRecord(session);
+			let next = toRecord(session);
 			next.processingPhase = this.#resolveProcessing(next.id, next.processingPhase);
 			next.isProcessing = next.processingPhase !== null;
 			const prev = this.#baseById[next.id];
+			next = this.#projectBindings.reconcileFetchedRecord(next, prev, requestProjectPathRevisions);
 			reconcileActivityProjection(prev, next);
 			if (prev && sameRecord(prev, next)) {
 				nextById[next.id] = prev;
@@ -707,6 +516,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const serverIdSet = new Set(nextOrder);
 		for (const chatId of previousServerChatIds) {
 			if (serverIdSet.has(chatId)) continue;
+			this.#projectBindings.publish(chatId, null);
 			this.#processingOverrides.delete(chatId);
 			this.#processingSnapshot?.delete(chatId);
 		}
@@ -736,8 +546,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			id,
 			parentChat: null,
 			projectPath,
-			effectiveProjectKey: null,
-			projectIdentityState: 'pending',
 			orderGroup: null,
 			title: normalizedStartup.firstMessage.trim() || m.chat_sessions_new_session(),
 			agentId: normalizedStartup.agentId,
@@ -795,6 +603,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
+		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath);
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
@@ -821,6 +630,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		this.#processingSnapshot?.delete(chatId);
 		removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
 		if (!this.#baseById[chatId]) return;
+		this.#projectBindings.publish(chatId, null);
 
 		const nextById = { ...this.#baseById };
 		delete nextById[chatId];
@@ -854,10 +664,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			? Boolean(lastActivityAt && (!chat.lastReadAt || lastActivityAt > chat.lastReadAt))
 			: chat.isUnread;
 		if (
-			(chat.lastMessage || '') === content
-			&& chat.lastActivityAt === lastActivityAt
-			&& chat.isUnread === isUnread
-		) return;
+			(chat.lastMessage || '') === content &&
+			chat.lastActivityAt === lastActivityAt &&
+			chat.isUnread === isUnread
+		)
+			return;
 		this.#baseById = {
 			...this.#baseById,
 			[chatId]: { ...chat, lastMessage: content, lastActivityAt, isUnread },
@@ -880,6 +691,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
+		if (typeof patch.projectPath === 'string' && patch.projectPath !== chat.projectPath) {
+			this.#projectBindings.publish(chatId, patch.projectPath);
+		}
 		const nextChat = {
 			...chat,
 			...patch,
@@ -891,18 +705,23 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		};
 	}
 
+	projectPathRevision(chatId: string): number {
+		return this.#projectBindings.revision(chatId);
+	}
+
+	onProjectPathChanged(listener: ProjectPathChangedListener): () => void {
+		return this.#projectBindings.subscribe(listener);
+	}
+
 	/** Applies a server-confirmed lastReadAt and recomputes isUnread locally.
 	 *  Avoids the race where the server computes isUnread from a lastActivity
 	 *  that advances during streaming, overwriting the client's optimistic false. */
 	patchLastReadAt(chatId: string, lastReadAt: string): void {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
-		const reconciledLastReadAt = chat.lastReadAt && chat.lastReadAt > lastReadAt
-			? chat.lastReadAt
-			: lastReadAt;
-		const isUnread = Boolean(
-			chat.lastActivityAt && chat.lastActivityAt > reconciledLastReadAt,
-		);
+		const reconciledLastReadAt =
+			chat.lastReadAt && chat.lastReadAt > lastReadAt ? chat.lastReadAt : lastReadAt;
+		const isUnread = Boolean(chat.lastActivityAt && chat.lastActivityAt > reconciledLastReadAt);
 		if (chat.lastReadAt === reconciledLastReadAt && chat.isUnread === isUnread) return;
 		this.#baseById = {
 			...this.#baseById,

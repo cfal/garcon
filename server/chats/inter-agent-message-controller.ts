@@ -326,6 +326,7 @@ function classifyDeliveryFailure(error: unknown): InterAgentMessageFailureReason
     case 'SERVER_SHUTTING_DOWN':
       return 'server-shutting-down';
     case 'SESSION_BUSY':
+    case 'PROJECT_UNAVAILABLE':
     case 'STALE_TRANSCRIPT_VIEW':
     case 'TRANSCRIPT_UNAVAILABLE':
     case 'TRANSCRIPT_DEFERRED':

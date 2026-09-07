@@ -63,9 +63,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 	#requestAbort: AbortController | null = null;
 	#requestGeneration = 0;
 	#contextGeneration = 0;
+	#targetApplicationGeneration = 0;
 	#activation:
 		| {
 				contextGeneration: number;
+				applicationGeneration: number;
 				promise: Promise<void>;
 		  }
 		| null = null;
@@ -117,8 +119,13 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind === 'resolving') {
+		if (projectState.kind === 'unchecked' || projectState.kind === 'resolving') {
 			this.projectIdentityPending = true;
+			return;
+		}
+		if (projectState.kind === 'unavailable' || projectState.kind === 'request-failed') {
+			this.projectIdentityPending = true;
+			this.#targetApplicationGeneration += 1;
 			this.closeDialogs();
 			this.#cancelTargetRequest();
 			return;
@@ -148,7 +155,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 	async activate(): Promise<void> {
 		if (!this.presentationVisible || this.projectIdentityPending) return;
 		const contextGeneration = this.#contextGeneration;
-		if (this.#activation?.contextGeneration === contextGeneration) {
+		const applicationGeneration = this.#targetApplicationGeneration;
+		if (
+			this.#activation?.contextGeneration === contextGeneration &&
+			this.#activation.applicationGeneration === applicationGeneration
+		) {
 			return this.#activation.promise;
 		}
 		const activation = (async () => {
@@ -156,7 +167,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 			if (
 				!this.presentationVisible ||
 				this.projectIdentityPending ||
-				contextGeneration !== this.#contextGeneration
+				contextGeneration !== this.#contextGeneration ||
+				applicationGeneration !== this.#targetApplicationGeneration
 			) {
 				return;
 			}
@@ -165,7 +177,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		const tracked = activation.finally(() => {
 			if (this.#activation?.promise === tracked) this.#activation = null;
 		});
-		this.#activation = { contextGeneration, promise: tracked };
+		this.#activation = { contextGeneration, applicationGeneration, promise: tracked };
 		return tracked;
 	}
 
@@ -291,16 +303,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 			this.activeTarget = fallback;
 			return previousIdentity !== this.identity;
 		} finally {
-			if (
-				this.#isCurrentTargetRequest(
-					generation,
-					contextGeneration,
-					projectKey,
-					controller.signal,
-				)
-			) {
+			if (this.#ownsTargetRequest(generation, contextGeneration, projectKey, controller.signal)) {
 				this.isLoadingTargets = false;
 				this.#requestAbort = null;
+				if (this.projectIdentityPending) this.#lastTargetFetchKey = null;
 			}
 		}
 	}
@@ -330,11 +336,16 @@ export class GitTargetSessionController implements PortableSingletonController {
 			return false;
 		}
 		storeMostRecent(this.#pendingInvalidationVersions, effectiveProjectKey, version);
+		const applicationGeneration = this.#targetApplicationGeneration;
+		const contextGeneration = this.#contextGeneration;
 		try {
 			await this.ensureTargets(true);
 			if (
 				!this.presentationVisible ||
+				this.projectIdentityPending ||
 				effectiveProjectKey !== this.effectiveProjectKey ||
+				contextGeneration !== this.#contextGeneration ||
+				applicationGeneration !== this.#targetApplicationGeneration ||
 				this.#pendingInvalidationVersions.get(effectiveProjectKey) !== version
 			) {
 				return false;
@@ -350,8 +361,17 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	async refreshTargets(): Promise<void> {
+		const applicationGeneration = this.#targetApplicationGeneration;
+		const contextGeneration = this.#contextGeneration;
 		await this.ensureTargets(true);
-		if (this.presentationVisible) await this.#applyTarget('project', true);
+		if (
+			this.presentationVisible &&
+			!this.projectIdentityPending &&
+			contextGeneration === this.#contextGeneration &&
+			applicationGeneration === this.#targetApplicationGeneration
+		) {
+			await this.#applyTarget('project', true);
+		}
 	}
 
 	closeDialogs(): void {
@@ -420,9 +440,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 			this.#updateActiveBranch(nextBranch);
 			await this.ensureTargets(true);
 			if (identity !== this.identity) return true;
-			await this.#applyTarget('checkout', true, nextBranch);
-			await this.deps.afterCheckout?.(projectPath);
-			reconciled = true;
+			reconciled = await this.#applyTarget('checkout', true, nextBranch);
+			if (reconciled) await this.deps.afterCheckout?.(projectPath);
 			return true;
 		};
 		try {
@@ -507,8 +526,16 @@ export class GitTargetSessionController implements PortableSingletonController {
 
 	async #reconcileSelectedTarget(): Promise<void> {
 		const previousIdentity = this.identity;
+		const applicationGeneration = this.#targetApplicationGeneration;
+		const contextGeneration = this.#contextGeneration;
 		const identityChanged = await this.ensureTargets(true);
-		if (identityChanged && previousIdentity !== this.identity) {
+		if (
+			identityChanged &&
+			previousIdentity !== this.identity &&
+			!this.projectIdentityPending &&
+			applicationGeneration === this.#targetApplicationGeneration &&
+			contextGeneration === this.#contextGeneration
+		) {
 			await this.#applyTarget('selection');
 		}
 	}
@@ -517,7 +544,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 		reason: GitTargetChangeReason,
 		force = false,
 		branchOverride?: string,
-	): Promise<void> {
+	): Promise<boolean> {
+		if (this.projectIdentityPending) return false;
 		const target = this.activeTarget ?? this.fallbackTarget;
 		const projectPath = target?.projectPath ?? null;
 		const effectiveProjectKey = this.effectiveProjectKey;
@@ -525,7 +553,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 			target && effectiveProjectKey
 				? gitTargetIdentity(effectiveProjectKey, target)
 				: null;
-		if (!force && identity === this.#appliedIdentity) return;
+		if (!force && identity === this.#appliedIdentity) return false;
 		const identityChanged = identity !== this.#appliedIdentity;
 		this.#appliedIdentity = identity;
 		if (identityChanged) {
@@ -542,6 +570,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 			);
 		}
 		await this.deps.onTargetChanged(target, identity, reason, identityChanged);
+		return true;
 	}
 
 	#rememberTarget(): void {
@@ -572,12 +601,23 @@ export class GitTargetSessionController implements PortableSingletonController {
 		signal: AbortSignal,
 	): boolean {
 		return (
+			this.#ownsTargetRequest(generation, contextGeneration, projectKey, signal) &&
+			!this.projectIdentityPending &&
+			this.presentationVisible
+		);
+	}
+
+	#ownsTargetRequest(
+		generation: number,
+		contextGeneration: number,
+		projectKey: string,
+		signal: AbortSignal,
+	): boolean {
+		return (
 			!signal.aborted &&
 			generation === this.#requestGeneration &&
 			contextGeneration === this.#contextGeneration &&
-			projectKey === this.effectiveProjectKey &&
-			!this.projectIdentityPending &&
-			this.presentationVisible
+			projectKey === this.effectiveProjectKey
 		);
 	}
 }

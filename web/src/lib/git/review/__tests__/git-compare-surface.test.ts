@@ -404,7 +404,6 @@ describe('GitCompareSurfaceController', () => {
 			context: {
 				chatId: 'chat-a',
 				projectPath: '/project',
-				effectiveProjectKey: null,
 			},
 		});
 

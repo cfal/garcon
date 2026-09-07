@@ -2,6 +2,7 @@ import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
+import { resolveProjectPath, type ProjectResolver } from './workspace-project-path-resolution.js';
 import {
 	chatViewSurfaceId,
 	fileSurfaceId,
@@ -64,6 +65,7 @@ interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
 	terminals: TerminalRegistry;
 	workspaceContext: WorkspaceContextStore;
+	projectResolution: ProjectResolver;
 	appShell: AppShellStore;
 	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
@@ -152,7 +154,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			commit,
 			commitDestroyedRemoval: (surfaceId, mutations) =>
 				this.#presentation.commitDestroyedRemovals([surfaceId], mutations),
-			currentProjectPath: () => deps.workspaceContext.current?.projectPath ?? null,
+			resolveCurrentProjectPath: () => resolveProjectPath(deps),
 			isMobile: () => this.isMobile,
 			cancelWorkspaceDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
 			windowOf: (surfaceId) => this.#presentation.windowOf(surfaceId),
@@ -203,6 +205,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	set focusOwner(owner: FocusOwner) {
 		this.#presentation.focusOwner = owner;
+	}
+
+	get focusOwnerRevision(): number {
+		return this.#presentation.focusOwnerRevision;
 	}
 
 	get isMobile(): boolean {

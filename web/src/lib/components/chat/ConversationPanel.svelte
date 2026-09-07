@@ -118,7 +118,7 @@
 			sort: quickGitBranches.branchSort,
 			isOpen: exposesCurrentBranchState && quickGitBranches.showBranchDropdown,
 			isLoading: exposesCurrentBranchState && quickGitBranches.isLoadingBranches,
-			onToggle: () => actions?.toggleBranch(surfaceId, chatId),
+			onToggle: () => void actions?.toggleBranch(surfaceId, chatId),
 			onClose: () => actions?.closeBranch(surfaceId, chatId),
 			onCreateBranch: () => actions?.createBranch(surfaceId, chatId),
 			onSwitchBranch: (branch) => actions?.switchBranch(surfaceId, chatId, branch),

@@ -11,7 +11,7 @@ mock.module('../../config.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -37,7 +37,6 @@ const settings = {
   })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -59,18 +58,17 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-validate-start');
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
-const routes = createChatRoutes({
+const routeDeps = {
   registry,
   settings,
   queue,
   processing: { phase: mock(() => null) },
-  pathCache,
   metadata,
   chatViews,
   agents,
-	chatListProjector,
+  chatListProjector,
   commandService: createRouteCommandService({
     registry,
     queue,
@@ -78,10 +76,10 @@ const routes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pathCache,
-		chatListProjector,
+    chatListProjector,
   }),
-});
+};
+const routes = createChatRoutes(routeDeps);
 const handler = routes['/api/v1/chats/validate-start'].GET;
 
 async function ensureCleanBase() {
@@ -134,6 +132,26 @@ describe('GET /api/v1/chats/validate-start', () => {
 
     expect(body.valid).toBe(false);
     expect(body.errorCode).toBe('not_directory');
+  });
+
+  it('returns permission_denied for inaccessible directories', async () => {
+    const deniedRoutes = createChatRoutes({
+      ...routeDeps,
+      inspectProject: mock(async () => ({
+        kind: 'unavailable',
+        reason: 'permission-denied',
+      })),
+    });
+    const deniedHandler = deniedRoutes['/api/v1/chats/validate-start'].GET;
+    const request = new Request(
+      `http://localhost/api/v1/chats/validate-start?path=${encodeURIComponent(testBasePath)}`,
+    );
+    const response = await deniedHandler(request, new URL(request.url));
+
+    await expect(response.json()).resolves.toMatchObject({
+      valid: false,
+      errorCode: 'permission_denied',
+    });
   });
 
   it('returns valid true and isGitRepo false for plain directories', async () => {

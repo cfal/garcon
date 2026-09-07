@@ -752,7 +752,6 @@ describe('ChatRegistry', () => {
       projectPath: '/next',
       effectiveProjectKey: '/real/next',
       previousProjectPath: '/repo',
-      previousEffectiveProjectKey: '/real/repo',
       nativeSession: callerSession,
     }, { flush: true });
 
@@ -770,7 +769,6 @@ describe('ChatRegistry', () => {
       projectPath: '/next',
       effectiveProjectKey: '/real/next',
       previousProjectPath: '/repo',
-      previousEffectiveProjectKey: '/real/repo',
     });
   });
 
@@ -789,6 +787,22 @@ describe('ChatRegistry', () => {
     });
   });
 
+  it('keeps a persisted project-path update when a listener throws', async () => {
+    registry.addChat(newChat({ nativeSession: nativeSession('test') }));
+    registry.onChatProjectPathUpdated(() => {
+      throw new Error('listener failed');
+    });
+
+    await expect(registry.updateProjectPath(CHAT_ID, {
+      chatId: CHAT_ID,
+      projectPath: '/next',
+      effectiveProjectKey: '/real/next',
+      previousProjectPath: '/repo',
+    }, { flush: true })).resolves.toMatchObject({ projectPath: '/next' });
+
+    expect(registry.getChat(CHAT_ID)?.projectPath).toBe('/next');
+  });
+
   it('restores project-path fields in memory when persistence fails', async () => {
     const originalNativeSession = nativeSession('test');
     registry.addChat(newChat({ nativeSession: originalNativeSession }));
@@ -800,7 +814,6 @@ describe('ChatRegistry', () => {
       projectPath: '/next',
       effectiveProjectKey: '/next',
       previousProjectPath: '/repo',
-      previousEffectiveProjectKey: '/repo',
       nativeSession: nativeSession('test', { path: '/tmp/next.jsonl' }),
     }, { flush: true })).rejects.toThrow('disk full');
 

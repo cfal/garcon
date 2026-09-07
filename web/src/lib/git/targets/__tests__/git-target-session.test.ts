@@ -48,6 +48,7 @@ function createSession(options: {
 	canChangeTarget?: () => boolean;
 	invalidationVersion?: (effectiveProjectKey: string) => number;
 	runMutation?: GitBranchSelectorStateOptions['runMutation'];
+	afterCheckout?: (projectPath: string) => void | Promise<void>;
 }) {
 	const changes: Array<{
 		path: string | null;
@@ -67,6 +68,7 @@ function createSession(options: {
 		},
 		invalidationVersion: options.invalidationVersion ?? (() => 0),
 		canChangeTarget: options.canChangeTarget ?? (() => true),
+		afterCheckout: options.afterCheckout,
 		onTargetChanged: (target, identity, reason, identityChanged) => {
 			changes.push({
 				path: target?.projectPath ?? null,
@@ -123,25 +125,179 @@ describe('GitTargetSessionController', () => {
 
 	it('does not publish discovery that resolves while project identity is pending', async () => {
 		const load = deferred<{ targets: GitTargetCandidate[] }>();
-		api.getGitTargetCandidates.mockReturnValueOnce(load.promise);
+		let signal: AbortSignal | undefined;
+		api.getGitTargetCandidates
+			.mockImplementationOnce((_projectPath, options) => {
+				signal = options?.signal ?? undefined;
+				return load.promise;
+			})
+			.mockResolvedValueOnce({ targets: [candidate('/old/worktree')] });
 		const { session, changes } = createSession({});
 		setProject(session, '/old', 'chat-old');
 		session.setPresentationVisible(true);
 		const activation = session.activate();
+		session.showTargetDialog = true;
+		session.branches.showBranchDropdown = true;
 
 		session.setProjectState({
 			kind: 'resolving',
 			context: {
 				chatId: 'draft',
 				projectPath: '/new',
-				effectiveProjectKey: null,
 			},
 		});
+		expect(signal?.aborted).toBe(false);
+		expect(session.showTargetDialog).toBe(true);
+		expect(session.branches.showBranchDropdown).toBe(true);
 		load.resolve({ targets: [candidate('/old/worktree')] });
 		await activation;
 
 		expect(session.activeProjectPath).toBe('/old');
 		expect(changes).toEqual([]);
+
+		setProject(session, '/old', 'chat-old');
+		await session.activate();
+
+		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
+		expect(session.activeProjectPath).toBe('/old/worktree');
+		expect(session.isLoadingTargets).toBe(false);
+	});
+
+	it('aborts discovery and closes dialogs for a definitive unavailable project', async () => {
+		const load = deferred<{ targets: GitTargetCandidate[] }>();
+		let signal: AbortSignal | undefined;
+		api.getGitTargetCandidates.mockImplementationOnce((_projectPath, options) => {
+			signal = options?.signal ?? undefined;
+			return load.promise;
+		});
+		const { session, changes } = createSession({});
+		setProject(session, '/project', 'chat-project');
+		session.setPresentationVisible(true);
+		const activation = session.activate();
+		session.showTargetDialog = true;
+		session.branches.showBranchDropdown = true;
+
+		session.setProjectState({
+			kind: 'unavailable',
+			context: { chatId: 'chat-project', projectPath: '/project' },
+			reason: 'not-found',
+		});
+
+		expect(signal?.aborted).toBe(true);
+		expect(session.showTargetDialog).toBe(false);
+		expect(session.branches.showBranchDropdown).toBe(false);
+		expect(session.isLoadingTargets).toBe(false);
+		load.resolve({ targets: [candidate('/stale')] });
+		await activation;
+		expect(changes).toEqual([]);
+		expect(session.activeProjectPath).toBe('/project');
+		expect(session.targets).toEqual([]);
+	});
+
+	it('starts a new activation when the same project recovers after a definitive failure', async () => {
+		api.getGitTargetCandidates
+			.mockImplementationOnce((_projectPath, options) => {
+				return new Promise((_resolve, reject) => {
+					options?.signal?.addEventListener(
+						'abort',
+						() => reject(new DOMException('Aborted', 'AbortError')),
+						{ once: true },
+					);
+				});
+			})
+			.mockResolvedValueOnce({ targets: [candidate('/project')] });
+		const { session, changes } = createSession({});
+		setProject(session, '/project', 'chat-project');
+		session.setPresentationVisible(true);
+		void session.activate();
+		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(1));
+
+		session.setProjectState({
+			kind: 'request-failed',
+			context: { chatId: 'chat-project', projectPath: '/project' },
+			message: 'Project check failed',
+		});
+		setProject(session, '/project', 'chat-project');
+		await session.activate();
+
+		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
+		expect(changes.filter((change) => change.reason === 'project')).toHaveLength(1);
+	});
+
+	it.each(['unavailable', 'request-failed'] as const)(
+		'does not apply an invalidation after project identity becomes %s',
+		async (kind) => {
+			api.getGitTargetCandidates.mockResolvedValueOnce({ targets: [candidate('/project')] });
+			const { session, changes } = createSession({});
+			setProject(session, '/project', 'chat-project');
+			session.setPresentationVisible(true);
+			await session.activate();
+			api.getGitTargetCandidates.mockImplementationOnce((_projectPath, options) => {
+				return new Promise((_resolve, reject) => {
+					options?.signal?.addEventListener(
+						'abort',
+						() => reject(new DOMException('Aborted', 'AbortError')),
+						{ once: true },
+					);
+				});
+			});
+
+			const refreshing = session.refreshForInvalidation('chat-project', 1);
+			await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
+			session.setProjectState(
+				kind === 'unavailable'
+					? {
+							kind,
+							context: { chatId: 'chat-project', projectPath: '/project' },
+							reason: 'not-found',
+						}
+					: {
+							kind,
+							context: { chatId: 'chat-project', projectPath: '/project' },
+							message: 'Project check failed',
+						},
+			);
+			setProject(session, '/project', 'chat-project');
+
+			await expect(refreshing).resolves.toBe(false);
+			expect(changes.filter((change) => change.reason === 'invalidation')).toEqual([]);
+		},
+	);
+
+	it('does not apply a manual target refresh after project identity fails', async () => {
+		const recovery = deferred<{ targets: GitTargetCandidate[] }>();
+		api.getGitTargetCandidates.mockResolvedValueOnce({ targets: [candidate('/project')] });
+		const { session, changes } = createSession({});
+		setProject(session, '/project', 'chat-project');
+		session.setPresentationVisible(true);
+		await session.activate();
+		api.getGitTargetCandidates.mockImplementationOnce((_projectPath, options) => {
+			return new Promise((_resolve, reject) => {
+				options?.signal?.addEventListener(
+					'abort',
+					() => reject(new DOMException('Aborted', 'AbortError')),
+					{ once: true },
+				);
+			});
+		});
+		api.getGitTargetCandidates.mockReturnValueOnce(recovery.promise);
+
+		const refreshing = session.refreshTargets();
+		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
+		session.setProjectState({
+			kind: 'unavailable',
+			context: { chatId: 'chat-project', projectPath: '/project' },
+			reason: 'not-found',
+		});
+		setProject(session, '/project', 'chat-project');
+		const recoveryActivation = session.activate();
+
+		await refreshing;
+		expect(changes.map((change) => change.reason)).toEqual(['project']);
+		recovery.resolve({ targets: [candidate('/recovered')] });
+		await recoveryActivation;
+		expect(changes.map((change) => change.reason)).toEqual(['project', 'project']);
+		expect(session.activeProjectPath).toBe('/recovered');
 	});
 
 	it('restores only its own cached target when switching chat projects', async () => {
@@ -285,10 +441,7 @@ describe('GitTargetSessionController', () => {
 				const result = await execute();
 				if (result.success) {
 					invalidationVersion += 1;
-					await context.session?.refreshForInvalidation(
-						effectiveProjectKey,
-						invalidationVersion,
-					);
+					await context.session?.refreshForInvalidation(effectiveProjectKey, invalidationVersion);
 				}
 				return result;
 			},
@@ -305,18 +458,68 @@ describe('GitTargetSessionController', () => {
 		created.session.setPresentationVisible(true);
 		await created.session.activate();
 
-		await expect(
-			created.session.switchBranch('feature', 'local-branch'),
-		).resolves.toBe(true);
-		await expect(
-			created.session.refreshForInvalidation('chat', invalidationVersion),
-		).resolves.toBe(false);
+		await expect(created.session.switchBranch('feature', 'local-branch')).resolves.toBe(true);
+		await expect(created.session.refreshForInvalidation('chat', invalidationVersion)).resolves.toBe(
+			false,
+		);
 
 		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
 		expect(created.changes.filter((change) => change.reason === 'checkout')).toHaveLength(1);
-		expect(created.changes.filter((change) => change.reason === 'invalidation')).toHaveLength(
-			0,
+		expect(created.changes.filter((change) => change.reason === 'invalidation')).toHaveLength(0);
+	});
+
+	it('replays checkout invalidation after project availability interrupts reconciliation', async () => {
+		let invalidationVersion = 0;
+		const afterCheckout = vi.fn();
+		api.getGitTargetCandidates
+			.mockResolvedValueOnce({ targets: [candidate('/chat')] })
+			.mockImplementationOnce((_projectPath, options) => {
+				return new Promise((_resolve, reject) => {
+					options?.signal?.addEventListener(
+						'abort',
+						() => reject(new DOMException('Aborted', 'AbortError')),
+						{ once: true },
+					);
+				});
+			})
+			.mockResolvedValue({ targets: [candidate('/chat', { branch: 'feature' })] });
+		const runMutation = vi.fn(
+			async (
+				_surfaceId: string,
+				_projectPath: string,
+				_effectiveProjectKey: string,
+				execute: () => Promise<{ success: boolean }>,
+			) => {
+				const result = await execute();
+				if (result.success) invalidationVersion += 1;
+				return result;
+			},
 		);
+		const { session, changes } = createSession({
+			runMutation,
+			invalidationVersion: () => invalidationVersion,
+			afterCheckout,
+		});
+		setProject(session, '/chat', 'chat');
+		session.setPresentationVisible(true);
+		await session.activate();
+
+		const switching = session.switchBranch('feature', 'local-branch');
+		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
+		session.setProjectState({
+			kind: 'unavailable',
+			context: { chatId: 'chat', projectPath: '/chat' },
+			reason: 'not-found',
+		});
+		await expect(switching).resolves.toBe(true);
+
+		expect(afterCheckout).not.toHaveBeenCalled();
+		expect(changes.filter((change) => change.reason === 'checkout')).toEqual([]);
+		setProject(session, '/chat', 'chat');
+		await session.activate();
+		await expect(session.refreshForInvalidation('chat', invalidationVersion)).resolves.toBe(true);
+
+		expect(changes.filter((change) => change.reason === 'invalidation')).toHaveLength(1);
 	});
 
 	it('rejects target and branch changes while the owner is busy', async () => {
@@ -346,12 +549,8 @@ describe('GitTargetSessionController', () => {
 		second.setPresentationVisible(true);
 		await Promise.all([first.activate(), second.activate()]);
 
-		await first.selectTarget(
-			candidate('/repo/a', { isCurrent: false, source: 'worktree' }),
-		);
-		await second.selectTarget(
-			candidate('/repo/b', { isCurrent: false, source: 'worktree' }),
-		);
+		await first.selectTarget(candidate('/repo/a', { isCurrent: false, source: 'worktree' }));
+		await second.selectTarget(candidate('/repo/b', { isCurrent: false, source: 'worktree' }));
 
 		expect(first.activeProjectPath).toBe('/repo/a');
 		expect(second.activeProjectPath).toBe('/repo/b');

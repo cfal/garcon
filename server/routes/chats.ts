@@ -1,6 +1,5 @@
 // /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
-import { promises as fs } from 'fs';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
 import {
@@ -39,7 +38,6 @@ import type {
   SetLastSelectedChatResponse,
 } from '../../common/chat-list.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../lib/pagination.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   GoalControlDeliveryError,
@@ -69,6 +67,7 @@ import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
+import { inspectProjectDirectory } from '../projects/project-directory-service.js';
 import type {
   CompleteChatHistoryResponse,
   TranscriptReadPurpose,
@@ -167,12 +166,6 @@ interface SettingsDep {
     compareChatIds: ChatOrderIdComparator,
     comparatorOverrides?: ChatOrderComparatorOverrides,
   ): Promise<{ changed: boolean }>;
-}
-
-interface PathCacheDep {
-  resolveProjectPaths(
-    projectPaths: readonly string[],
-  ): Promise<Map<string, import('../chats/path-cache.js').ProjectPathStatus>>;
 }
 
 interface MetadataDep {
@@ -300,7 +293,6 @@ interface ChatRouteDeps {
   recentTitleIcons: RecentTitleIconSource;
   queue: QueueDep;
   processing: Pick<ChatProcessingActivity, 'phase'>;
-  pathCache: PathCacheDep;
   metadata: MetadataDep;
   chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
@@ -308,6 +300,7 @@ interface ChatRouteDeps {
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   searchIndex?: ChatSearchDep;
   lastSelectedChat?: LastSelectedChatState;
+  inspectProject?: typeof inspectProjectDirectory;
 }
 
 export default function createChatRoutes({
@@ -316,7 +309,6 @@ export default function createChatRoutes({
   recentTitleIcons,
   queue,
   processing,
-  pathCache,
   metadata,
   chatViews,
   agents,
@@ -324,11 +316,11 @@ export default function createChatRoutes({
   chatListProjector,
   searchIndex,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
+  inspectProject = inspectProjectDirectory,
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
   const searchRoutes = createChatSearchRoutes({
     registry,
-    pathCache,
     chatListProjector,
     searchIndex,
   });
@@ -336,14 +328,13 @@ export default function createChatRoutes({
   function validatedLastSelectedChatId(
     rememberedChatId: string | null,
     allSessions: Record<string, unknown>,
-    visibleEntries: Map<string, ChatListEntry>,
   ): string | null {
     if (!rememberedChatId) return null;
     if (!(rememberedChatId in allSessions)) {
       lastSelectedChat.clearIf(rememberedChatId);
       return null;
     }
-    return visibleEntries.has(rememberedChatId) ? rememberedChatId : null;
+    return rememberedChatId;
   }
 
   async function validateStartPath(_request: Request, url: URL): Promise<Response> {
@@ -353,24 +344,25 @@ export default function createChatRoutes({
     }
 
     try {
-      const projectPath = await assertRealWithinProjectBase(dirPath);
-      const stat = await fs.stat(projectPath);
-      if (!stat.isDirectory()) {
-        return pathValidationError('Not a directory', 'not_directory');
+      const resolution = await inspectProject(dirPath);
+      if (resolution.kind === 'unavailable') {
+        switch (resolution.reason) {
+          case 'not-found':
+            return pathValidationError('Path does not exist', 'path_not_found');
+          case 'not-a-directory':
+            return pathValidationError('Not a directory', 'not_directory');
+          case 'outside-base':
+            return pathValidationError(
+              'Path is outside the allowed base directory',
+              'outside_base_dir',
+            );
+          case 'permission-denied':
+            return pathValidationError('Permission denied', 'permission_denied');
+        }
       }
-      const isGitRepo = await isGitRepository(projectPath);
+      const isGitRepo = await isGitRepository(resolution.effectiveProjectKey);
       return Response.json({ valid: true, isGitRepo });
     } catch (error: unknown) {
-      if (isProjectBoundaryError(error)) {
-        return pathValidationError('Path is outside the allowed base directory', 'outside_base_dir');
-      }
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') {
-        return pathValidationError('Path does not exist', 'path_not_found');
-      }
-      if (err.code === 'EACCES' || err.code === 'EPERM') {
-        return pathValidationError('Permission denied', 'permission_denied');
-      }
       return pathValidationError((error as Error).message, 'unknown');
     }
   }
@@ -382,8 +374,7 @@ export default function createChatRoutes({
       const normalList = settings.getNormalChatIds();
       const archivedList = settings.getArchivedChatIds();
       const sessionEntries = Object.entries(sessions);
-      const statuses = await pathCache.resolveProjectPaths(sessionEntries.map(([, session]) => session.projectPath));
-      const entryMap = await chatListProjector.buildMany(sessionEntries, statuses);
+      const entryMap = chatListProjector.buildMany(sessionEntries);
       const orderedFrom = (ids: string[], group: ChatOrderGroup): ChatListEntry[] =>
         ids.flatMap((id) => {
           const entry = entryMap.get(id);
@@ -403,7 +394,6 @@ export default function createChatRoutes({
       const lastSelectedChatId = validatedLastSelectedChatId(
         lastSelectedChat.getLastSelectedChatId(),
         sessions,
-        entryMap,
       );
       const body: ChatListResponse = {
         sessions: all,

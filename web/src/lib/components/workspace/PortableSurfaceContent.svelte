@@ -53,6 +53,7 @@
 		visible,
 		onSendToChat,
 		onAppendToChatDraft,
+		onChooseProjectFolder,
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
@@ -60,6 +61,7 @@
 		visible: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
+		onChooseProjectFolder?: () => void;
 		frameBridge: SurfaceFrameBridge;
 	} = $props();
 	setSurfaceFrameBridge(() => frameBridge);
@@ -117,8 +119,10 @@
 		{@const controller = singletonSurfaces.files()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.tree.projectPath}
 			retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await filesRenderer() then FilesPanel}
 				<FilesPanel {presentation} />
@@ -128,8 +132,10 @@
 		{@const controller = singletonSurfaces.gitWorkbench()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
 			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await gitWorkbenchRenderer() then GitWorkbenchPanel}
 				<GitWorkbenchPanel {controller} {presentation} {visible} {onAppendToChatDraft} />
@@ -139,8 +145,10 @@
 		{@const controller = singletonSurfaces.gitHistory()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
 			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await gitHistoryRenderer() then GitHistoryPanel}
 				<GitHistoryPanel {controller} {presentation} {visible} {onAppendToChatDraft} />
@@ -150,8 +158,10 @@
 		{@const controller = singletonSurfaces.gitCompare()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
 			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await gitCompareRenderer() then GitComparePanel}
 				<GitComparePanel {controller} {presentation} {visible} {onAppendToChatDraft} />
@@ -161,8 +171,10 @@
 		{@const controller = singletonSurfaces.pullRequests()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.projectPath}
 			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await pullRequestsRenderer() then PullRequestsPanel}
 				<PullRequestsPanel
@@ -178,8 +190,10 @@
 		{@const controller = singletonSurfaces.commit()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.target.baseProjectPath}
 			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await commitRenderer() then CommitSurface}
 				<CommitSurface {controller} {presentation} />

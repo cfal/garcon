@@ -13,6 +13,14 @@ const getPullRequestMock = vi.mocked(prApi.getPullRequest);
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
+
 function summary(number: number, over: Partial<PullRequestSummary> = {}): PullRequestSummary {
 	return {
 		number,
@@ -185,7 +193,7 @@ describe('PullRequestsStore', () => {
 
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/project', effectiveProjectKey: null },
+			context: { chatId: 'draft', projectPath: '/project' },
 		});
 		await store.refresh();
 		await store.select(4);
@@ -210,6 +218,77 @@ describe('PullRequestsStore', () => {
 		expect(getPullRequestsMock).toHaveBeenCalledOnce();
 	});
 
+	it('preserves an in-flight list across pending identity for the same project', async () => {
+		const list = deferred<Awaited<ReturnType<typeof prApi.getPullRequests>>>();
+		let signal: AbortSignal | undefined;
+		getPullRequestsMock.mockImplementationOnce((_projectPath, options) => {
+			signal = options?.signal ?? undefined;
+			return list.promise;
+		});
+		const store = createVisibleStore();
+		store.setProject('/project', '/canonical/project');
+		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
+
+		store.setProjectState({
+			kind: 'resolving',
+			context: { chatId: 'chat-2', projectPath: '/project' },
+		});
+		expect(signal?.aborted).toBe(false);
+		store.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat-2',
+				projectPath: '/project',
+				effectiveProjectKey: '/canonical/project',
+			},
+		});
+		list.resolve({ pulls: [summary(7)], repo: null });
+		await tick();
+
+		expect(store.pulls.map((pull) => pull.number)).toEqual([7]);
+		expect(getPullRequestsMock).toHaveBeenCalledOnce();
+	});
+
+	it('restarts an aborted refresh after definitive project recovery', async () => {
+		const refresh = deferred<Awaited<ReturnType<typeof prApi.getPullRequests>>>();
+		let refreshSignal: AbortSignal | undefined;
+		getPullRequestsMock
+			.mockResolvedValueOnce({ pulls: [summary(1)], repo: null })
+			.mockImplementationOnce((_projectPath, options) => {
+				refreshSignal = options?.signal ?? undefined;
+				return refresh.promise;
+			})
+			.mockResolvedValueOnce({ pulls: [summary(2)], repo: null });
+		const store = createVisibleStore();
+		store.setProject('/project', '/canonical/project');
+		await tick();
+		const staleRefresh = store.refresh();
+		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledTimes(2));
+
+		store.setProjectState({
+			kind: 'unavailable',
+			context: { chatId: 'chat-1', projectPath: '/project' },
+			reason: 'not-found',
+		});
+		expect(refreshSignal?.aborted).toBe(true);
+		expect(store.isLoading).toBe(false);
+		store.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat-1',
+				projectPath: '/project',
+				effectiveProjectKey: '/canonical/project',
+			},
+		});
+		await tick();
+
+		expect(getPullRequestsMock).toHaveBeenCalledTimes(3);
+		expect(store.pulls.map((pull) => pull.number)).toEqual([2]);
+		refresh.resolve({ pulls: [summary(99)], repo: null });
+		await staleRefresh;
+		expect(store.pulls.map((pull) => pull.number)).toEqual([2]);
+	});
+
 	it('resumes an aborted selected detail when the surface becomes visible again', async () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(4)], repo: null });
 		getPullRequestMock
@@ -230,6 +309,25 @@ describe('PullRequestsStore', () => {
 
 		expect(getPullRequestMock).toHaveBeenCalledTimes(2);
 		expect(store.detail?.number).toBe(4);
+	});
+
+	it('restarts a hidden list request when the surface reopens before abort settles', async () => {
+		let firstSignal: AbortSignal | undefined;
+		getPullRequestsMock
+			.mockImplementationOnce((_projectPath, options) => {
+				firstSignal = options?.signal ?? undefined;
+				return new Promise(() => undefined);
+			})
+			.mockResolvedValueOnce({ pulls: [summary(6)], repo: null });
+		const store = createVisibleStore();
+		store.setProject('/proj');
+		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
+
+		store.setPresentationVisible(false);
+		expect(firstSignal?.aborted).toBe(true);
+		store.setPresentationVisible(true);
+		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(store.pulls.map((pull) => pull.number)).toEqual([6]));
 	});
 
 	it('aborts reads when capability disappears and retries in place after recovery', async () => {

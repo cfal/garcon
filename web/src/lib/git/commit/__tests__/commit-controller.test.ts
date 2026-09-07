@@ -195,7 +195,7 @@ describe('CommitController', () => {
 
 		await controller.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/project', effectiveProjectKey: null },
+			context: { chatId: 'draft', projectPath: '/project' },
 		});
 		await controller.refreshTree();
 		controller.togglePath('unstaged.ts', true);

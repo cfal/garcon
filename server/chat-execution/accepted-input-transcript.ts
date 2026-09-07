@@ -12,6 +12,11 @@ export interface AcceptedInputTranscriptResult {
 }
 
 export interface AcceptedInputTranscriptPort {
+  hasMatchingInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions,
+  ): boolean;
   admitInput(
     chatId: string,
     message: UserMessage,
@@ -28,6 +33,19 @@ export interface AcceptedInputTranscriptPort {
 export class AcceptedInputTranscript {
   constructor(private readonly transcript: AcceptedInputTranscriptPort) {}
 
+  hasMatching(
+    chatId: string,
+    content: string,
+    options: UserInputAdmissionOptions,
+  ): boolean {
+    if (!content && !options.images?.length) return false;
+    return this.transcript.hasMatchingInput(
+      chatId,
+      inputMessage(content, options),
+      options,
+    );
+  }
+
   async register(
     chatId: string,
     content: string,
@@ -37,10 +55,9 @@ export class AcceptedInputTranscript {
     if (!options.clientRequestId) {
       throw new TypeError('Accepted input is missing a client request ID');
     }
-    const images = normalizeChatImages(options.images);
     const result = await this.transcript.admitInput(
       chatId,
-      new UserMessage(options.createdAt ?? new Date().toISOString(), content, images, undefined, options.userMessagePresentation),
+      inputMessage(content, options),
       { ...options, clientRequestId: options.clientRequestId },
     );
     return result.inserted !== false;
@@ -67,6 +84,16 @@ export class AcceptedInputTranscript {
   discard(chatId: string, clientMessageId: string | null | undefined): void {
     this.transcript.discardPreparedInput(chatId, clientMessageId);
   }
+}
+
+function inputMessage(content: string, options: UserInputAdmissionOptions): UserMessage {
+  return new UserMessage(
+    options.createdAt ?? new Date().toISOString(),
+    content,
+    normalizeChatImages(options.images),
+    undefined,
+    options.userMessagePresentation,
+  );
 }
 
 function normalizeChatImages(images: RunAgentTurnOptions['images']): ChatImage[] | undefined {

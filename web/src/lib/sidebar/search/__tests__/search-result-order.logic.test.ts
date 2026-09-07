@@ -17,8 +17,6 @@ function chat(
 		id,
 		parentChat: null,
 		projectPath: '/workspace',
-		effectiveProjectKey: '/workspace',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: id,
 		agentId: 'claude',

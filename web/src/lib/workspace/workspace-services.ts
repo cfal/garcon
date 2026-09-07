@@ -38,6 +38,7 @@ import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import { WorkspaceWindowDndController } from './window-dnd.svelte.js';
 import { WorkspaceHostGeometryState } from './workspace-host-geometry.svelte.js';
+import { ProjectResolutionStore } from './project-resolution-store.svelte.js';
 import {
 	floorWorkspacePixels,
 	resolveWorkspacePartitionRatioBounds,
@@ -100,6 +101,7 @@ export interface WorkspaceServices {
 	restore: ReturnType<typeof parsePersistedWorkspaceLayout>;
 	layout: WorkspaceLayoutReader;
 	context: ReturnType<typeof createWorkspaceContextStore>;
+	projectResolution: ProjectResolutionStore;
 	terminals: TerminalRegistry;
 	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
@@ -134,7 +136,40 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			});
 		},
 	});
-	const context = createWorkspaceContextStore(deps.chatSessions, deps.modelCatalog);
+	const bindingRefreshes = new Map<string, Promise<void>>();
+	const projectResolution = new ProjectResolutionStore(undefined, (target) => {
+		if (deps.chatSessions.byId[target.chatId]?.projectPath !== target.projectPath) return;
+		if (bindingRefreshes.has(target.chatId)) return;
+		const refresh = (async () => {
+			try {
+				await deps.chatSessions.quietRefreshChats();
+			} catch {
+				// Resolution feedback remains authoritative when metadata refresh fails.
+			}
+		})();
+		bindingRefreshes.set(target.chatId, refresh);
+		void refresh.then(() => {
+			if (bindingRefreshes.get(target.chatId) === refresh) {
+				bindingRefreshes.delete(target.chatId);
+			}
+		});
+	});
+	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged(
+		(chatId, projectPath) => {
+			if (projectPath === null) projectResolution.removeChatTargets(chatId);
+			else projectResolution.markObsoleteChatTargets(chatId, projectPath);
+		},
+	);
+	for (const chat of deps.chatSessions.orderedChats) {
+		if (chat.status !== 'draft') {
+			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath);
+		}
+	}
+	const context = createWorkspaceContextStore(
+		deps.chatSessions,
+		deps.modelCatalog,
+		projectResolution,
+	);
 	let placement: WorkspaceCoordinator | null = null;
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
@@ -262,6 +297,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 	const domainBindings = new WorkspaceDomainBindings({
 		workspaceContext: context,
+		projectResolution,
 		ghCapability: deps.ghCapability,
 		localSettings: deps.localSettings,
 		singletons: singletonSurfaces,
@@ -308,6 +344,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		arbiter: new WorkspaceTransitionArbiter(layout, layout),
 		terminals,
 		workspaceContext: context,
+		projectResolution,
 		appShell: deps.appShell,
 		workspaceInteractionGate,
 		transientLayers,
@@ -350,6 +387,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		restore,
 		layout,
 		context,
+		projectResolution,
 		terminals,
 		workspaceInteractionGate,
 		transientLayers,
@@ -375,6 +413,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			singletonSurfaces.destroy();
 			gitQuickSummary.destroy();
 			gitBranchActions.destroy();
+			stopProjectPathBinding();
+			projectResolution.destroy();
 			persistence.destroy();
 		},
 	};

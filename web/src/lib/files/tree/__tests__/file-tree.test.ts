@@ -301,13 +301,54 @@ describe('FileTreeStore', () => {
 		await tick();
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/workspace/project', effectiveProjectKey: null },
+			context: { chatId: 'draft', projectPath: '/workspace/project' },
 		});
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
 
 		store.setProjectState(availableProject('/workspace/other', '/workspace/other', 'chat-2'));
 		await tick();
 		expect(store.currentDirectoryPath).toBe('/workspace/other');
+		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([
+		{
+			label: 'unchecked',
+			projectState: {
+				kind: 'unchecked' as const,
+				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+			},
+		},
+		{
+			label: 'unavailable',
+			projectState: {
+				kind: 'unavailable' as const,
+				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+				reason: 'not-found' as const,
+			},
+		},
+	])('blocks file requests while project identity is $label', async ({ projectState }) => {
+		vi.mocked(filesApi.getTree)
+			.mockImplementationOnce(
+				(_request, options) =>
+					new Promise((_resolve, reject) => {
+						options?.signal?.addEventListener('abort', () =>
+							reject(new DOMException('aborted', 'AbortError')),
+						);
+					}),
+			)
+			.mockResolvedValueOnce(response('/workspace/project'));
+		store.setProjectState(availableProject());
+		store.activate();
+		expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+		store.setProjectState(projectState);
+		store.deactivate();
+		store.activate();
+		expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+		store.setProjectState(availableProject());
+		await tick();
 		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
 	});
 

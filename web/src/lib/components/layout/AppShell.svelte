@@ -104,6 +104,7 @@
 		get selectedChatId() {
 			return sessions.selectedChatId;
 		},
+		projectPathRevision: (chatId) => sessions.projectPathRevision(chatId),
 		onQuietRefresh: quietRefresh,
 		isArchiveMutationPending: (chatId) => sessions.isArchiveMutationPending(chatId),
 		startArchivingChats: (chatIds) => sessions.startArchivingChats(chatIds),
@@ -488,11 +489,8 @@
 		closeMobileSidebar();
 	}
 
-	function handleChatProjectPathUpdated(
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	): void {
-		sessions.patchChat(chatId, patch);
+	function handleChatProjectPathUpdated(chatId: string, patch: { projectPath: string }): void {
+		sessions.patchChat(chatId, { projectPath: patch.projectPath });
 	}
 
 	function requestDeleteChat(chat: ChatSessionRecord): void {

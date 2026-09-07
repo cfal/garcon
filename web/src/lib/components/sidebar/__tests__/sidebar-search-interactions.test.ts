@@ -18,8 +18,6 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		id,
 		parentChat: null,
 		projectPath: '/tmp/project',
-		effectiveProjectKey: '/tmp/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title,
 		agentId: 'claude',

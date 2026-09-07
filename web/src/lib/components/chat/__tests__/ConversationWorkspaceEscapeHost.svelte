@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy, tick } from 'svelte';
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import ConversationWorkspace from '../ConversationWorkspace.svelte';
 	import ConversationPanel from '../ConversationPanel.svelte';
@@ -21,10 +22,12 @@
 		setConversationUi,
 		setConversationLifecycles,
 		setConversationPanels,
+		setProjectResolution,
 	} from '$lib/context';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ConversationPanelActions } from '../conversation-panel-actions.js';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
 	import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -43,19 +46,22 @@
 	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
+	import GitBranchSelector from '$lib/components/git/GitBranchSelector.svelte';
+	import type { FocusOwner } from '$lib/workspace/surface-types.js';
+	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
 		onPatchActivity?: (chatId: string, timestamp: string) => void;
+		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 	}
 
-	let { onPatchActivity }: ConversationWorkspaceEscapeHostProps = $props();
+	let { onPatchActivity, fetchProjectResolution }: ConversationWorkspaceEscapeHostProps = $props();
 
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
 		parentChat: null,
 		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Running chat',
 		agentId: 'claude',
@@ -77,6 +83,18 @@
 		tags: [],
 	});
 	setChatDrafts(new ChatDraftStore());
+	function getInitialProjectResolver() {
+		return (
+			fetchProjectResolution ??
+			(async (target) => ({
+				target,
+				resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+			}))
+		);
+	}
+	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver());
+	setProjectResolution(projectResolution);
+	onDestroy(() => projectResolution.destroy());
 	const conversationUi = new ConversationUiState();
 	setConversationUi(conversationUi);
 
@@ -177,9 +195,25 @@
 			| 'focusChat'
 			| 'focusMobileSingleton'
 			| 'openSingletonAsTab'
+			| 'focusOwnerRevision'
 		>;
+	let workspaceFocusOwner = $state<FocusOwner>({
+		kind: 'surface',
+		surfaceId: CANONICAL_CHAT_SURFACE_ID,
+	});
+	let workspaceFocusOwnerRevision = $state(0);
 	const workspace: WorkspaceTestPort = {
-		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
+		get focusOwner() {
+			return workspaceFocusOwner;
+		},
+		set focusOwner(owner: FocusOwner) {
+			if (sameFocusOwner(workspaceFocusOwner, owner)) return;
+			workspaceFocusOwner = owner;
+			workspaceFocusOwnerRevision += 1;
+		},
+		get focusOwnerRevision() {
+			return workspaceFocusOwnerRevision;
+		},
 		isSurfacePresented: (surfaceId: string) => surfaceId === CANONICAL_CHAT_SURFACE_ID,
 		focusPreviousTabInFocusedWindow: () => false,
 		focusNextTabInFocusedWindow: () => false,
@@ -215,7 +249,8 @@
 	setWorkspaceShortcuts(workspaceShortcuts);
 	setTransientLayers(transientLayers);
 	setGitQuickSummary(new GitQuickSummaryStore());
-	setGitBranchActions(new GitBranchSelectorState());
+	const quickGitBranches = new GitBranchSelectorState();
+	setGitBranchActions(quickGitBranches);
 	const conversationLifecycles = new ConversationLifecycleRegistry({
 		sessions,
 		processing: processingReconciler,
@@ -242,6 +277,8 @@
 	const conversationPanel = conversationPanels.panel(CANONICAL_CHAT_SURFACE_ID)!;
 
 	const subagentToolbar = new SubagentToolbarState();
+	let panelActions = $state.raw<ConversationPanelActions | null>(null);
+	let branchAction = Promise.resolve();
 	let showTestLayer = $state(false);
 	let testLayerIsComposerEditor = $state(false);
 	let testLayerElement = $state<HTMLElement | null>(null);
@@ -260,6 +297,16 @@
 			restoreFocus: () => {},
 		});
 	});
+
+	function startBranchToggle(): void {
+		branchAction =
+			panelActions?.toggleBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id) ?? Promise.resolve();
+	}
+
+	export async function waitForBranchAction(): Promise<void> {
+		await branchAction;
+		await tick();
+	}
 </script>
 
 <KeyboardShortcuts />
@@ -290,6 +337,36 @@
 	}}>Toggle processing</button
 >
 <button type="button" onclick={() => (selectedChat.status = 'draft')}>Set draft status</button>
+<button type="button" onclick={startBranchToggle}>Open branch dropdown</button>
+<button type="button" onclick={() => (workspace.focusOwner = { kind: 'chat-list' })}
+	>Move command ownership</button
+>
+<button
+	type="button"
+	onclick={() => (workspace.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID })}
+	>Restore command ownership</button
+>
+<button
+	type="button"
+	onclick={() => (workspace.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID })}
+	>Refocus command surface</button
+>
+<div data-testid="branch-dropdown-open">{quickGitBranches.showBranchDropdown}</div>
+<div data-testid="new-branch-dialog-open">{quickGitBranches.showNewBranchModal}</div>
+<GitBranchSelector
+	currentBranch={quickGitBranches.currentBranch}
+	refs={quickGitBranches.refs}
+	sort={quickGitBranches.branchSort}
+	isOpen={quickGitBranches.showBranchDropdown}
+	isLoading={quickGitBranches.isLoadingBranches}
+	onToggle={startBranchToggle}
+	onClose={() => panelActions?.closeBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
+	onCreateBranch={() => panelActions?.createBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id)}
+	onSwitchBranch={(branch) =>
+		panelActions?.switchBranch(CANONICAL_CHAT_SURFACE_ID, selectedChat.id, branch)}
+	onSortRefs={(key, query) =>
+		panelActions?.sortBranches(CANONICAL_CHAT_SURFACE_ID, selectedChat.id, key, query)}
+/>
 {#if showTestLayer}
 	<div
 		bind:this={testLayerElement}
@@ -304,7 +381,12 @@
 		{/if}
 	</div>
 {/if}
-<ConversationWorkspace isVisible={!showTestLayer} isPresented={true} {subagentToolbar} />
+<ConversationWorkspace
+	isVisible={!showTestLayer}
+	isPresented={true}
+	{subagentToolbar}
+	onRegisterPanelActions={(actions) => (panelActions = actions)}
+/>
 <ConversationPanel
 	surfaceId={CANONICAL_CHAT_SURFACE_ID}
 	chat={selectedChat}

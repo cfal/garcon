@@ -11,7 +11,6 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		model: 'opus',
 		title: 'A',
 		projectPath: '/p',
-		effectiveProjectKey: '/p',
 		orderGroup: 'normal',
 		tags: [],
 		permissionMode: 'default',
@@ -33,6 +32,25 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 }
 
 describe('ChatSessionsStore', () => {
+	it('publishes each changed project binding through one ordered boundary', () => {
+		const store = new ChatSessionsStore();
+		const listener = vi.fn();
+		const unsubscribe = store.onProjectPathChanged(listener);
+
+		store.upsertFromServer([makeServerSession({ id: 'a', projectPath: '/workspace/a' })]);
+		store.patchChat('a', { projectPath: '/workspace/b' });
+		store.patchChat('a', { projectPath: '/workspace/b' });
+		store.removeChat('a');
+
+		expect(listener.mock.calls).toEqual([
+			['a', '/workspace/a'],
+			['a', '/workspace/b'],
+			['a', null],
+		]);
+		expect(store.projectPathRevision('a')).toBe(3);
+		unsubscribe();
+	});
+
 	it('preserves identity for unchanged records on upsert', () => {
 		const store = new ChatSessionsStore();
 

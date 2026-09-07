@@ -21,7 +21,6 @@ import {
   createRouteChatListProjector,
   createRouteCommandLedger,
   createRouteCommandService,
-  createRoutePathCache,
 } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000200';
@@ -86,7 +85,6 @@ function createRoutesFixture(overrides = {}) {
     ownsExecution: mock(() => false),
     deleteChatQueueFile: mock(async () => undefined),
   };
-  const pathCache = createRoutePathCache();
   const metadata = {
     listAllChatMetadata: mock(() => new Map()),
     getChatMetadata: mock(() => null),
@@ -124,14 +122,12 @@ function createRoutesFixture(overrides = {}) {
     settings,
     metadata,
     agents,
-    pathCache,
   });
   const routes = createChatRoutes({
     registry,
     settings,
     queue,
     processing: overrides.processing ?? { phase: mock(() => null) },
-    pathCache,
     metadata,
     chatViews,
     agents,
@@ -143,7 +139,6 @@ function createRoutesFixture(overrides = {}) {
       metadata,
       agents,
       commandLedger,
-      pathCache,
       chatListProjector,
       ownership: overrides.ownership,
     }),

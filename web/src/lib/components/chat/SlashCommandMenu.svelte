@@ -22,6 +22,8 @@
 		projectPath: string;
 		chatId?: string | null;
 		isVisible: boolean;
+		projectPending?: boolean;
+		projectUnavailable?: boolean;
 		query: string;
 		supportsFork: boolean;
 		supportsSteering: boolean;
@@ -37,6 +39,8 @@
 		projectPath,
 		chatId = null,
 		isVisible,
+		projectPending = false,
+		projectUnavailable = false,
 		query,
 		supportsFork,
 		supportsSteering,
@@ -56,6 +60,7 @@
 	let loadFailed = $state(false);
 
 	let fetchedKey = '';
+	let activeLoad: AbortController | null = null;
 
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when the agent/project identity changes.
@@ -63,16 +68,17 @@
 		const key = `${agent}::${chatId ?? ''}::${projectPath}`;
 		if (!projectPath || !isVisible) return;
 		if (fetchedKey === key) return;
-		fetchedKey = key;
 		isLoading = true;
 		loadFailed = false;
 
 		const controller = new AbortController();
+		activeLoad = controller;
 
 		getSlashCommands({ agent, chatId, projectPath }, { signal: controller.signal })
 			.then((commands) => {
 				if (!controller.signal.aborted) {
 					allCommands = commands;
+					fetchedKey = key;
 				}
 			})
 			.catch((err) => {
@@ -83,12 +89,17 @@
 				}
 			})
 			.finally(() => {
-				if (!controller.signal.aborted) {
-					isLoading = false;
-				}
+				if (activeLoad !== controller) return;
+				activeLoad = null;
+				isLoading = false;
 			});
 
-		return () => controller.abort();
+		return () => {
+			controller.abort();
+			if (activeLoad !== controller) return;
+			activeLoad = null;
+			isLoading = false;
+		};
 	});
 
 	// Agent-discovered commands are appended after visible client built-ins.
@@ -102,9 +113,18 @@
 			return true;
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));
-		const discovered = allCommands.filter(
-			(command) => command.name !== 'in' && !builtinNames.has(command.name),
-		);
+		const key = `${agent}::${chatId ?? ''}::${projectPath}`;
+		const discovered =
+			projectPath &&
+			!projectPending &&
+			!projectUnavailable &&
+			!isLoading &&
+			!loadFailed &&
+			fetchedKey === key
+				? allCommands.filter(
+						(command) => command.name !== 'in' && !builtinNames.has(command.name),
+					)
+				: [];
 		return [...builtins, ...discovered];
 	});
 
@@ -279,11 +299,11 @@
 					</li>
 				{/each}
 			</ul>
-			{#if isLoading}
+			{#if isLoading || projectPending}
 				<div class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_loading()}
 				</div>
-			{:else if loadFailed}
+			{:else if loadFailed || projectUnavailable}
 				<div class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_load_failed()}
 				</div>

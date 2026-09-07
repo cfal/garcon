@@ -149,6 +149,8 @@ export interface AcceptedDirectInput {
   dispatch?: (admission: AgentExecutionAdmission) => Promise<void>; userMessagePresentation?: UserMessagePresentation;
 }
 
+export type DirectInputScheduleOutcome = 'scheduled' | 'duplicate';
+
 export interface AcceptedDirectOperation {
   command: AcceptedExecutionCommand;
   settlement: CommandSettlementPort;
@@ -266,6 +268,10 @@ export interface AgentTurnRunnerPort {
   isChatRunning(chatId: string): boolean;
 }
 
+export interface ProjectAdmissionPort {
+  assertAvailable(chatId: string): Promise<void>;
+}
+
 export type ExecutionControlUpdatedCallback = (
   chatId: string,
   control: StoredChatExecutionControlState,
@@ -276,6 +282,10 @@ export type SessionStoppedCallback = (
   intent: ChatStopIntent,
 ) => void;
 export type ChatIdleCallback = (chatId: string) => void;
+export type ProjectUnavailableCallback = (
+  chatId: string,
+  error: import('../lib/domain-error.ts').ProjectUnavailableError,
+) => void;
 export type ProcessingInvalidatedCallback = (chatId: string) => void;
 export type TurnFailedCallback = (
   chatId: string,
@@ -290,6 +300,7 @@ export interface ChatExecutionCoordinatorEvents {
   'execution-control-updated': Parameters<ExecutionControlUpdatedCallback>;
   'session-stopped': Parameters<SessionStoppedCallback>;
   'chat-idle': Parameters<ChatIdleCallback>;
+  'project-unavailable': Parameters<ProjectUnavailableCallback>;
   'turn-failed': Parameters<TurnFailedCallback>;
   'turn-settled': Parameters<TurnSettledCallback>;
   'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
@@ -300,7 +311,7 @@ export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
 // Accepted-command surface consumed by the command service and route handlers.
 export interface ChatExecutionCommands {
   deleteChatQueueFile(chatId: string): Promise<void>;
-  scheduleDirectInput(input: AcceptedDirectInput): Promise<void>;
+  scheduleDirectInput(input: AcceptedDirectInput): Promise<DirectInputScheduleOutcome>;
   runInitialInput(input: AcceptedDirectInput): Promise<void>;
   scheduleDirectOperation(input: AcceptedDirectOperation): Promise<void>;
   enqueueAccepted(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult>;
@@ -328,6 +339,7 @@ export interface ChatExecutionCommands {
   ownsExecution(chatId: string): boolean;
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
   clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
+  discardPendingChatInput(chatId: string): Promise<StoredChatExecutionControlState>;
   pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
   resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
   resumeAndDrain(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;

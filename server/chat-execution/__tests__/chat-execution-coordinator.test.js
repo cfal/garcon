@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
-import { DomainError } from '../../lib/domain-error.ts';
+import { DomainError, ProjectUnavailableError } from '../../lib/domain-error.ts';
 
 function deferred() {
   let resolve;
@@ -46,6 +46,7 @@ function createFixture(overrides = {}) {
   const queuedAdmission = overrides.queuedAdmission ?? (() => ({ inserted: true }));
   const projection = {
     admitInput: mock(async () => ({ inserted: true })),
+    hasMatchingInput: mock(async () => false),
     admitQueuedInput: mock((...args) => {
       events.push('transcript');
       return queuedAdmission(...args);
@@ -62,6 +63,9 @@ function createFixture(overrides = {}) {
     ...overrides.turnRunner,
   };
   const appendControlReceipt = overrides.appendControlReceipt ?? mock(() => undefined);
+  const projectAdmission = overrides.projectAdmission ?? {
+    assertAvailable: mock(async () => undefined),
+  };
   const coordinator = new ChatExecutionCoordinator(
     '/unused',
     turnRunner,
@@ -74,10 +78,13 @@ function createFixture(overrides = {}) {
     overrides.chatExists ?? (() => true),
     overrides.controlRepository
       ?? new InMemoryChatExecutionControlRepository('server-instance-test'),
-    () => new Set(),
-    appendControlReceipt,
+    {
+      projectAdmission,
+      unsettledQueueReceiptKeys: () => new Set(),
+      appendControlReceipt,
+    },
   );
-  return { coordinator, events, projection, turnRunner, appendControlReceipt };
+  return { coordinator, events, projection, turnRunner, appendControlReceipt, projectAdmission };
 }
 
 describe('ChatExecutionCoordinator', () => {
@@ -343,6 +350,7 @@ describe('ChatExecutionCoordinator', () => {
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
     expect(fixture.projection.admitInput).not.toHaveBeenCalled();
     expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+    expect(fixture.projectAdmission.assertAvailable).not.toHaveBeenCalled();
     await coordinator.releaseDirectTurn(reservation);
   });
 
@@ -455,6 +463,7 @@ describe('ChatExecutionCoordinator', () => {
 
     expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
     expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(fixture.projectAdmission.assertAvailable).not.toHaveBeenCalled();
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
       .toHaveLength(1);
   });
@@ -478,10 +487,12 @@ describe('ChatExecutionCoordinator', () => {
 
     const release = coordinator.releaseTranscriptSnapshot(snapshot);
     await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    await release;
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
     const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
     await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
     provider.resolve();
-    await release;
+    await coordinator.waitForDispatches();
 
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
   });
@@ -499,10 +510,12 @@ describe('ChatExecutionCoordinator', () => {
       new AbortController().signal,
     );
 
-    await expect(coordinator.releaseTranscriptSnapshot(snapshot)).rejects.toBe(failure);
+    await coordinator.releaseTranscriptSnapshot(snapshot);
+    await waitFor(() => !coordinator.ownsExecution('chat-1'));
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
       .toHaveLength(1);
     expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
   it('continues the control lane after dispatch failure without pausing the user queue', async () => {
@@ -582,6 +595,30 @@ describe('ChatExecutionCoordinator', () => {
     await coordinator.onAgentTurnTerminal('chat-1', activeTarget.identity);
     provider.resolve();
     await coordinator.waitForDispatches();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('rejects a hidden control run when the project is unavailable and releases ownership', async () => {
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const fixture = createFixture({
+      projectAdmission: {
+        assertAvailable: mock(async () => { throw unavailable; }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const onControlRun = mock(() => undefined);
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      onControlRun,
+    )).rejects.toBe(unavailable);
+
+    expect(onControlRun).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 

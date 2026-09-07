@@ -59,7 +59,6 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		model: 'sonnet',
 		title: 'Chat 1',
 		projectPath: '/repo',
-		effectiveProjectKey: '/repo',
 		orderGroup: 'normal',
 		tags: [],
 		permissionMode: 'default',
@@ -134,6 +133,51 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.byId['fresh']?.title).toBe('Fresh');
 		expect(store.byId['stale']).toBeUndefined();
 		expect(store.lastSelectedChatId).toBe('fresh');
+	});
+
+	it('does not let an older list response overwrite a newer project binding', async () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ projectPath: '/workspace/a' })]);
+		const stale = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		mockListChats.mockReturnValueOnce(stale.promise);
+
+		const refresh = store.quietRefreshChats();
+		store.patchChat('chat-1', { projectPath: '/workspace/b' });
+		stale.resolve({
+			sessions: [makeServerSession({ projectPath: '/workspace/a' })],
+			total: 1,
+			lastSelectedChatId: 'chat-1',
+		});
+		await refresh;
+
+		expect(store.byId['chat-1']?.projectPath).toBe('/workspace/b');
+	});
+
+	it('fences an older list response across an observed A/B/A binding sequence', async () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ projectPath: '/workspace/a' })]);
+		const stale = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		mockListChats.mockReturnValueOnce(stale.promise);
+
+		const refresh = store.quietRefreshChats();
+		store.patchChat('chat-1', { projectPath: '/workspace/b' });
+		store.patchChat('chat-1', { projectPath: '/workspace/a' });
+		stale.resolve({
+			sessions: [makeServerSession({ projectPath: '/workspace/b' })],
+			total: 1,
+			lastSelectedChatId: 'chat-1',
+		});
+		await refresh;
+
+		expect(store.byId['chat-1']?.projectPath).toBe('/workspace/a');
 	});
 
 	it('projects an archive at the front of the archived list until refresh reconciles it', async () => {

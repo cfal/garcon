@@ -1,4 +1,5 @@
 import type { ErrorCode } from '../../common/error-codes.ts';
+import type { ProjectUnavailableReason } from '../../common/project-resolution.ts';
 import type {
   CommandErrorCode,
   SteerDeliveryOutcome,
@@ -26,6 +27,21 @@ export class ValidationDomainError extends DomainError {
   constructor(message: string) {
     super('VALIDATION_FAILED', message, 400);
     this.name = 'ValidationDomainError';
+  }
+}
+
+export class ProjectUnavailableError extends DomainError {
+  constructor(
+    readonly projectPath: string,
+    readonly reason: ProjectUnavailableReason,
+  ) {
+    super(
+      'PROJECT_UNAVAILABLE',
+      `Project folder unavailable (${reason}): ${projectPath}`,
+      409,
+      false,
+    );
+    this.name = 'ProjectUnavailableError';
   }
 }
 

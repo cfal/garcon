@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { DomainError } from '../../lib/domain-error.ts';
+import { DomainError, ProjectUnavailableError } from '../../lib/domain-error.ts';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 import { InterAgentMessageController } from '../inter-agent-message-controller.ts';
 
@@ -263,6 +263,23 @@ describe('InterAgentMessageController', () => {
       targetChatId: TARGET_CHAT_ID,
       phase: 'target-adoption',
     });
+  });
+
+  it('classifies project admission failure as target unavailable', async () => {
+    const fixture = createFixture({
+      execution: {
+        deliverInterAgentControlInput: mock(async () => {
+          throw new ProjectUnavailableError('/workspace/project', 'not-found');
+        }),
+      },
+    });
+
+    fixture.controller.request(request());
+    await waitFor(() => sourceNotices(fixture).length === 1);
+
+    expect(sourceNotices(fixture)[0][2].detail.results).toEqual([
+      { chatId: TARGET_CHAT_ID, status: 'failed', reason: 'target-unavailable' },
+    ]);
   });
 
   it('keeps an accepted delivery successful when its target receipt cannot be stored', async () => {

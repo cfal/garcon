@@ -83,15 +83,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		if (next === this.capabilityState) return;
 		this.capabilityState = next;
 		if (next !== 'available') {
-			this.#listController?.abort();
-			this.#detailController?.abort();
-			this.#listController = null;
-			this.#detailController = null;
-			this.#listGeneration += 1;
-			this.#detailGeneration += 1;
-			this.isLoading = false;
-			this.isDetailLoading = false;
-			this.#needsRefresh = Boolean(this.#projectPath);
+			this.#suspendRequests();
 			return;
 		}
 		if (
@@ -105,8 +97,13 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind === 'resolving') {
+		if (projectState.kind === 'unchecked' || projectState.kind === 'resolving') {
 			this.#projectIdentityPending = true;
+			return;
+		}
+		if (projectState.kind === 'unavailable' || projectState.kind === 'request-failed') {
+			this.#projectIdentityPending = true;
+			this.#suspendRequests();
 			return;
 		}
 		this.#projectIdentityPending = false;
@@ -145,11 +142,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		if (visible === this.#visible) return;
 		this.#visible = visible;
 		if (!visible) {
-			this.#listController?.abort();
-			this.#detailController?.abort();
-			this.isLoading = false;
-			this.isDetailLoading = false;
-			this.#needsRefresh = Boolean(this.#projectPath);
+			this.#suspendRequests();
 			return;
 		}
 		this.#activateIfNeeded();
@@ -278,7 +271,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.capabilityState !== 'available'
 		)
 			return;
-		if (!this.hasLoaded || this.#needsRefresh) void this.refresh();
+		if (!this.#listController && (!this.hasLoaded || this.#needsRefresh)) void this.refresh();
 		if (
 			this.selectedNumber !== null &&
 			this.detail?.number !== this.selectedNumber &&
@@ -286,6 +279,18 @@ export class PullRequestsStore implements PortableSingletonController {
 		) {
 			void this.loadDetail(this.selectedNumber);
 		}
+	}
+
+	#suspendRequests(): void {
+		this.#listController?.abort();
+		this.#detailController?.abort();
+		this.#listController = null;
+		this.#detailController = null;
+		this.#listGeneration += 1;
+		this.#detailGeneration += 1;
+		this.isLoading = false;
+		this.isDetailLoading = false;
+		this.#needsRefresh = Boolean(this.#projectPath);
 	}
 
 	#saveSnapshot(): void {

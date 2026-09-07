@@ -10,6 +10,7 @@
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
+		setProjectResolution,
 		setRemoteSettings,
 		setSnippets,
 		setTransientLayers,
@@ -44,6 +45,8 @@
 	} from '$lib/workspace/workspace-shortcuts.js';
 	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
+	import type { ProjectTarget } from '$shared/project-resolution';
 
 	interface Props {
 		selectedChatId?: string;
@@ -70,10 +73,12 @@
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		directAdmissionPending?: boolean;
 		requiresQueuedSubmission?: boolean;
+		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 		onsubmit?: () => void;
 		onSteerPreferredSubmit?: () => void;
 		onAbort?: () => void;
 		onQuickCommit?: () => void;
+		onChooseProjectFolder?: (chatId: string) => void;
 	}
 
 	let {
@@ -101,10 +106,12 @@
 		quickCommitSummary = null,
 		directAdmissionPending = false,
 		requiresQueuedSubmission: requiresQueuedSubmissionOverride,
+		fetchProjectResolution,
 		onsubmit = () => {},
 		onSteerPreferredSubmit = () => {},
 		onAbort = () => {},
 		onQuickCommit = () => {},
+		onChooseProjectFolder,
 	}: Props = $props();
 
 	const chatDrafts = new ChatDraftStore();
@@ -127,6 +134,23 @@
 	});
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
+	let projectResolutionRequestCount = 0;
+	export function getProjectResolutionRequestCount(): number {
+		return projectResolutionRequestCount;
+	}
+	function getInitialProjectResolver() {
+		return (
+			fetchProjectResolution ??
+			(async (target: ProjectTarget) => {
+				projectResolutionRequestCount += 1;
+				return {
+					target,
+					resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+				};
+			})
+		);
+	}
+	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver());
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
@@ -202,8 +226,6 @@
 		id: selectedChatId,
 		parentChat: null,
 		projectPath,
-		effectiveProjectKey: projectPath,
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: selectedChatId,
 		agentId: selectedAgentId,
@@ -325,6 +347,7 @@
 		supportsForkWhileRunning: () => true,
 		supportsSteering: (agentId: string) => agentId === 'codex',
 		supportsGoals: (agentId: string) => agentId === 'codex',
+		supportsUpdateProjectPath: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,
 			apiProviderId: null,
@@ -351,6 +374,7 @@
 		applyOptimisticSnapshot: () => () => {},
 	} as never);
 	setNotifications(notifications);
+	setProjectResolution(projectResolution);
 	setSnippets(
 		createSnippetsStore({
 			get: async () => {
@@ -377,6 +401,7 @@
 	onDestroy(() => {
 		unsubscribeSidebarRecenter();
 		chatDrafts.destroy();
+		projectResolution.destroy();
 	});
 	const shortcutWorkspace = {
 		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
@@ -433,6 +458,7 @@
 	{composerEditorOpenRequestId}
 	{directAdmissionPending}
 	{requiresQueuedSubmission}
+	{onChooseProjectFolder}
 	resendCandidates={transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />

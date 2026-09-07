@@ -45,7 +45,7 @@ interface TerminalPlacementServiceDeps {
 	isWindowReserved(windowId: WorkspaceWindowId): boolean;
 	commit: WorkspaceCommit;
 	commitDestroyedRemoval(surfaceId: string, mutations: WorkspaceMutationPlan): Promise<boolean>;
-	currentProjectPath(): string | null;
+	resolveCurrentProjectPath(): Promise<string | null>;
 	isMobile(): boolean;
 	cancelWorkspaceDrag(): void;
 	windowOf(surfaceId: string): WorkspaceWindowId | null;
@@ -66,6 +66,7 @@ interface TerminalPlacementServiceDeps {
 
 export class TerminalPlacementService {
 	#terminalCreateRequestIds = new Map<string, string>();
+	#terminalCreatePromises = new Map<string, Promise<string>>();
 	#terminalTerminateRequestIds = new Map<string, string>();
 	#pendingTerminatedTerminalIds = new Set<string>();
 
@@ -612,19 +613,40 @@ export class TerminalPlacementService {
 	}
 
 	#hasPendingCreate(requestKey: string): boolean {
+		if (this.#terminalCreatePromises.has(requestKey)) return true;
 		const requestId = this.#terminalCreateRequestIds.get(requestKey);
 		return Boolean(requestId && this.deps.terminals.pendingCreates[requestId]);
 	}
 
-	async #retryCreate(requestKey: string): Promise<string> {
+	#retryCreate(requestKey: string): Promise<string> {
+		const pending = this.#terminalCreatePromises.get(requestKey);
+		if (pending) return pending;
+		const creating = this.#performRetriableCreate(requestKey);
+		const tracked = creating.finally(() => {
+			if (this.#terminalCreatePromises.get(requestKey) === tracked) {
+				this.#terminalCreatePromises.delete(requestKey);
+			}
+		});
+		this.#terminalCreatePromises.set(requestKey, tracked);
+		return tracked;
+	}
+
+	async #performRetriableCreate(requestKey: string): Promise<string> {
 		let requestId = this.#terminalCreateRequestIds.get(requestKey);
-		if (requestId && !this.deps.terminals.pendingCreates[requestId]) {
+		const attempt = requestId ? this.deps.terminals.pendingCreates[requestId] : undefined;
+		if (requestId && !attempt) {
 			this.#terminalCreateRequestIds.delete(requestKey);
 			requestId = undefined;
 		}
 		requestId ??= createRandomId();
 		this.#terminalCreateRequestIds.set(requestKey, requestId);
 		try {
+			if (attempt) {
+				return await this.deps.terminals.create(
+					attempt.requestedInitialWorkingDirectory,
+					requestId,
+				);
+			}
 			return await this.#createWithRequestId(requestId);
 		} finally {
 			if (!this.deps.terminals.pendingCreates[requestId]) {
@@ -633,8 +655,9 @@ export class TerminalPlacementService {
 		}
 	}
 
-	#createWithRequestId(requestId: string): Promise<string> {
-		return this.deps.terminals.create(this.deps.currentProjectPath(), requestId);
+	async #createWithRequestId(requestId: string): Promise<string> {
+		const projectPath = await this.deps.resolveCurrentProjectPath();
+		return this.deps.terminals.create(projectPath, requestId);
 	}
 
 	#placementResolved(terminalId: string): boolean {

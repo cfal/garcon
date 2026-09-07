@@ -149,7 +149,6 @@ export class ChatProjectPathUpdatedMessage {
     public projectPath: string,
     public effectiveProjectKey: string,
     public previousProjectPath: string,
-    public previousEffectiveProjectKey: string | null,
   ) {}
 }
 
@@ -158,7 +157,6 @@ export interface ChatProjectPathUpdatedPayload {
   projectPath: string;
   effectiveProjectKey: string;
   previousProjectPath: string;
-  previousEffectiveProjectKey: string | null;
 }
 
 export class ChatSessionStoppedMessage {
@@ -673,19 +671,12 @@ export function parseServerWsMessage(
       const projectPath = requiredStr(data.projectPath);
       const effectiveProjectKey = requiredStr(data.effectiveProjectKey);
       const previousProjectPath = requiredStr(data.previousProjectPath);
-      const previousEffectiveProjectKey = data.previousEffectiveProjectKey;
-      if (
-        previousEffectiveProjectKey !== null &&
-        typeof previousEffectiveProjectKey !== 'string'
-      )
-        return null;
       return chatId && projectPath && effectiveProjectKey && previousProjectPath
         ? new ChatProjectPathUpdatedMessage(
             chatId,
             projectPath,
             effectiveProjectKey,
             previousProjectPath,
-            previousEffectiveProjectKey,
           )
         : null;
     }

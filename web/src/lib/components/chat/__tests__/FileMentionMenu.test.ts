@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FileMentionMenuTestHost from './FileMentionMenuTestHost.svelte';
 import { getFileList } from '$lib/api/files.js';
 
@@ -7,7 +8,19 @@ vi.mock('$lib/api/files.js', () => ({
 	getFileList: vi.fn(),
 }));
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
+
 describe('FileMentionMenu', () => {
+	beforeEach(() => {
+		vi.mocked(getFileList).mockReset();
+	});
+
 	it('shows project-relative files and excludes directory entries', async () => {
 		vi.mocked(getFileList).mockResolvedValue([
 			{ name: 'src', path: '/repo/src', type: 'directory' },
@@ -54,5 +67,54 @@ describe('FileMentionMenu', () => {
 		component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }));
 
 		expect(onSelect).toHaveBeenCalledWith('b.ts');
+	});
+
+	it('restarts a file request aborted by a pending project transition', async () => {
+		const first = deferred<Awaited<ReturnType<typeof getFileList>>>();
+		vi.mocked(getFileList)
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce([
+				{ name: 'recovered.ts', path: '/repo/recovered.ts', relativePath: 'recovered.ts' },
+			]);
+		const view = render(FileMentionMenuTestHost, {
+			projectPath: '/repo',
+			isVisible: true,
+			query: '',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		await waitFor(() => expect(getFileList).toHaveBeenCalledOnce());
+		const firstSignal = vi.mocked(getFileList).mock.calls[0]?.[1]?.signal;
+
+		await view.rerender({ projectPath: '', projectPending: true });
+		expect(firstSignal?.aborted).toBe(true);
+		await view.rerender({ projectPath: '/repo', projectPending: false });
+
+		await waitFor(() => expect(getFileList).toHaveBeenCalledTimes(2));
+		expect(await screen.findByText('recovered.ts')).toBeTruthy();
+		first.resolve([]);
+		await tick();
+		expect(screen.getByText('recovered.ts')).toBeTruthy();
+	});
+
+	it('blocks cached file selection while the project is unavailable', async () => {
+		vi.mocked(getFileList).mockResolvedValue([
+			{ name: 'cached.ts', path: '/repo/cached.ts', relativePath: 'cached.ts' },
+		]);
+		const onSelect = vi.fn();
+		const view = render(FileMentionMenuTestHost, {
+			projectPath: '/repo',
+			isVisible: true,
+			query: '',
+			onSelect,
+			onClose: vi.fn(),
+		});
+		await screen.findByText('cached.ts');
+
+		await view.rerender({ projectUnavailable: true });
+		view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+		expect(screen.queryByText('cached.ts')).toBeNull();
+		expect(onSelect).not.toHaveBeenCalled();
 	});
 });

@@ -19,6 +19,7 @@
 		getSnippets,
 		getTransientLayers,
 		getWorkspaceShortcuts,
+		getProjectResolution,
 	} from '$lib/context';
 	import {
 		chatAttachmentAccept,
@@ -73,22 +74,11 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import X from '@lucide/svelte/icons/x';
-	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-	import type { AgentSettingDescriptor } from '$shared/agent-integration';
-	import type { JsonValue } from '$shared/json';
-	import type { ResendCandidate } from '$shared/chat-view';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-	} from '$lib/components/model-selector/model-selector-types';
-	import {
-		snippetTemplateUsesArguments,
-		type Snippet,
-		type SnippetExpansionContext,
-	} from '$shared/snippets';
+	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -96,24 +86,9 @@
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
-	interface Props {
-		onsubmit: () => void;
-		onSteerPreferredSubmit: () => void;
-		onModelChange?: (selection: ModelSelectorChange) => void;
-		onPermissionModeChange?: (mode: PermissionMode) => void;
-		onThinkingModeChange?: (mode: ThinkingMode) => void;
-		onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
-		resendCandidates?: readonly ResendCandidate[];
-		onExcludeResendCandidate?: (ordinal: number) => void;
-		directAdmissionPending?: boolean;
-		requiresQueuedSubmission?: boolean;
-		// False when the composer is mounted but hidden (e.g. the Git tab is
-		// active). Focus requests must not be consumed while hidden, since
-		// focusing a display:none textarea is a silent no-op.
-		isVisible?: boolean;
-		isPresented?: boolean;
-		composerEditorOpenRequestId?: number;
-	}
+	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
+	import type { PromptComposerProps } from './prompt-composer-props.js';
+	import ProjectAvailabilityNotice from '$lib/components/workspace/ProjectAvailabilityNotice.svelte';
 
 	let {
 		onsubmit,
@@ -129,7 +104,8 @@
 		isVisible = true,
 		isPresented: isPresentedOverride,
 		composerEditorOpenRequestId = 0,
-	}: Props = $props();
+		onChooseProjectFolder,
+	}: PromptComposerProps = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 	const composerState = getComposerState();
 	const agentState = getAgentState();
@@ -142,6 +118,8 @@
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const workspaceShortcuts = getWorkspaceShortcuts();
+	const projectResolution = getProjectResolution();
+	const ui = new PromptComposerUiState();
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -165,12 +143,29 @@
 	const focusDelivery = new PromptComposerFocusDelivery();
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
-		return chat
-			? [chat.id, chat.status, chat.projectPath, chat.effectiveProjectKey].join('\u0000')
-			: '';
+		return chat ? [chat.id, chat.status, chat.projectPath].join('\u0000') : '';
 	});
 	const snippetContextHint = $derived(
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
+	);
+	const projectState = new PromptComposerProjectState({
+		get selectedChat() {
+			return sessions.selectedChat;
+		},
+		get completionDemand() {
+			return ui.showFileMenu || ui.showSlashMenu;
+		},
+		projectResolution,
+	});
+	const selectedProjectTarget = $derived(projectState.target);
+	const selectedProjectResolution = $derived(projectState.snapshot);
+	const completionProjectPath = $derived(projectState.completionProjectPath);
+	const canChooseProjectFolder = $derived(
+		Boolean(
+			onChooseProjectFolder &&
+			sessions.selectedChat &&
+			modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId),
+		),
 	);
 
 	function requestComposerFocusForChat(chatId: string | null): void {
@@ -185,8 +180,6 @@
 		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	// Ephemeral UI state extracted to companion class.
-	const ui = new PromptComposerUiState();
 	const promptRefinement = new PromptComposerRefinementController({
 		composer: composerState,
 		sessions,
@@ -286,6 +279,7 @@
 
 	onDestroy(() => {
 		destroyed = true;
+		projectState.destroy();
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
 		imageAttachments.revokeAll();
@@ -403,15 +397,6 @@
 		autoResize();
 	}
 
-	function snippetContext(): SnippetExpansionContext | null {
-		const chat = sessions.selectedChat;
-		const projectPath = chat?.projectPath.trim();
-		if (!chat || !projectPath) return null;
-		return chat.status === 'draft'
-			? { type: 'new-chat', chatId: chat.id, projectPath }
-			: { type: 'chat', chatId: chat.id };
-	}
-
 	function snippetErrorDetail(error: unknown): string {
 		if (error instanceof ApiError) return error.details || error.message;
 		return error instanceof Error ? error.message : String(error);
@@ -438,24 +423,23 @@
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
-		const context = snippetContext();
-		if (!context) {
-			notifications.error(m.chat_new_chat_errors_project_path_required());
-			await settleComposerAfterSnippet();
-			return 'cancelled';
-		}
-		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
 		const start = range?.start ?? textarea.selectionStart;
 		const end = range?.end ?? textarea.selectionEnd;
 		try {
-			const result = await snippetExpansion.run({
-				shortName: snippet.shortName,
-				arguments: { type: 'value', value: argumentsText },
-				context,
+			const result = await snippetExpansion.runPrepared(snippet.shortName, async (signal) => {
+				const operation = await projectState.resolveSnippetContext(signal);
+				return {
+					request: {
+						shortName: snippet.shortName,
+						arguments: { type: 'value', value: argumentsText },
+						context: operation.context,
+					},
+					prepared: operation,
+				};
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
+			const operation = result.prepared;
 			if (
 				result.response.snippetId !== snippet.id ||
 				result.response.snippetUpdatedAt !== snippet.updatedAt
@@ -466,9 +450,9 @@
 				return 'cancelled';
 			}
 			if (
-				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath.trim() !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
+				sessions.selectedChatId !== operation.chatId ||
+				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
+				result.response.contextProjectPath !== operation.projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return 'cancelled';
@@ -493,28 +477,28 @@
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
-		const context = snippetContext();
-		if (!context) {
-			notifications.error(m.chat_new_chat_errors_project_path_required());
-			return;
-		}
-		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		try {
-			const result = await snippetExpansion.run({
-				shortName: command.shortName,
-				arguments: command.arguments,
-				context,
+			const result = await snippetExpansion.runPrepared(command.shortName, async (signal) => {
+				const operation = await projectState.resolveSnippetContext(signal);
+				return {
+					request: {
+						shortName: command.shortName,
+						arguments: command.arguments,
+						context: operation.context,
+					},
+					prepared: operation,
+				};
 			});
 			if (result.kind !== 'expanded') return;
+			const operation = result.prepared;
 			if (
-				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath.trim() !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
+				sessions.selectedChatId !== operation.chatId ||
+				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
+				result.response.contextProjectPath !== operation.projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return;
@@ -612,9 +596,7 @@
 		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
 	);
 	const isQueueMode = $derived(requiresQueuedSubmission);
-	const hasQueuedAttachmentConflict = $derived(
-		isQueueMode && composerState.images.length > 0,
-	);
+	const hasQueuedAttachmentConflict = $derived(isQueueMode && composerState.images.length > 0);
 	const isDisabled = $derived(isDraftStartupSubmitting);
 
 	const canSubmit = $derived(
@@ -708,8 +690,15 @@
 	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
-			projectPath={sessions.selectedChat?.projectPath || ''}
+			projectPath={completionProjectPath}
 			isVisible={ui.showFileMenu}
+			projectPending={Boolean(
+				selectedProjectTarget &&
+				(selectedProjectResolution.kind === 'unchecked' ||
+					selectedProjectResolution.kind === 'resolving'),
+			)}
+			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
+				selectedProjectResolution.kind === 'request-failed'}
 			query={ui.fileQuery}
 			onSelect={insertFileMention}
 			onClose={() => ui.closeFileMenu()}
@@ -919,9 +908,16 @@
 		<SlashCommandMenu
 			bind:this={slashCommandMenu}
 			agent={agentState.agentId}
-			projectPath={sessions.selectedChat?.projectPath || ''}
+			projectPath={completionProjectPath}
 			chatId={sessions.selectedChatId}
 			isVisible={ui.showSlashMenu}
+			projectPending={Boolean(
+				selectedProjectTarget &&
+				(selectedProjectResolution.kind === 'unchecked' ||
+					selectedProjectResolution.kind === 'resolving'),
+			)}
+			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
+				selectedProjectResolution.kind === 'request-failed'}
 			query={ui.slashQuery}
 			supportsFork={modelCatalog.supportsFork(capabilityAgentId)}
 			supportsSteering={modelCatalog.supportsSteering(capabilityAgentId)}
@@ -948,6 +944,29 @@
 {/snippet}
 
 <div class={composerShellClass} data-composer-shell>
+	{#if selectedProjectTarget && selectedProjectResolution.kind === 'unavailable'}
+		<div class="mb-2 rounded-lg border border-border bg-card px-4 py-3">
+			<ProjectAvailabilityNotice
+				projectPath={selectedProjectTarget.projectPath}
+				reason={selectedProjectResolution.reason}
+				onRetry={() => projectState.retry()}
+				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
+					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
+					: undefined}
+			/>
+		</div>
+	{:else if selectedProjectTarget && selectedProjectResolution.kind === 'request-failed'}
+		<div class="mb-2 rounded-lg border border-border bg-card px-4 py-3">
+			<ProjectAvailabilityNotice
+				projectPath={selectedProjectTarget.projectPath}
+				requestError={selectedProjectResolution.message}
+				onRetry={() => projectState.retry()}
+				onChooseFolder={canChooseProjectFolder && sessions.selectedChat
+					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
+					: undefined}
+			/>
+		</div>
+	{/if}
 	<div class={composerFrameWrapperClass}>
 		{@render composerFrame()}
 	</div>

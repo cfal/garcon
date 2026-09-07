@@ -15,10 +15,7 @@ export interface SidebarContext {
 	removeChat: (chatId: string) => void;
 	navigateAwayFromChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
-	patchChatProjectPath: (
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	) => void;
+	patchChatProjectPath: (chatId: string, patch: { projectPath: string }) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	refreshChats: () => void;
 	removeChatTranscript: (chatId: string) => void;
@@ -47,10 +44,9 @@ export function handleChatProjectPathUpdated(
 	msg: ChatProjectPathUpdatedMessage,
 	ctx: SidebarContext,
 ) {
-	if (!msg.chatId || !msg.projectPath || !msg.effectiveProjectKey) return;
+	if (!msg.chatId || !msg.projectPath) return;
 	ctx.patchChatProjectPath(msg.chatId, {
 		projectPath: msg.projectPath,
-		effectiveProjectKey: msg.effectiveProjectKey,
 	});
 }
 

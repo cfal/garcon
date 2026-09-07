@@ -46,8 +46,6 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		id: 'chat-a',
 		parentChat: null,
 		projectPath: '/repo',
-		effectiveProjectKey: '/repo',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat A',
 		agentId: 'claude',
@@ -295,7 +293,6 @@ describe('event router integration', () => {
 					projectPath: '/workspace/worktree',
 					effectiveProjectKey: '/workspace/worktree',
 					previousProjectPath: '/workspace/repo',
-					previousEffectiveProjectKey: '/workspace/repo',
 				},
 			],
 			stores,
@@ -303,7 +300,6 @@ describe('event router integration', () => {
 
 		expect(stores.sessions.patchChat).toHaveBeenCalledWith('chat-b', {
 			projectPath: '/workspace/worktree',
-			effectiveProjectKey: '/workspace/worktree',
 		});
 	});
 

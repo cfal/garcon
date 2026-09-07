@@ -1,4 +1,7 @@
-import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
+import {
+	PORTABLE_SINGLETON_KINDS,
+	type PortableSingletonKind,
+} from '$lib/workspace/surface-types.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
@@ -74,6 +77,7 @@ export class SingletonSurfaceRegistry {
 		commit: false,
 		'chat-map': false,
 	};
+	#hasVisibleProjectSurface = $state(false);
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
 		this.#factories = {
@@ -143,11 +147,17 @@ export class SingletonSurfaceRegistry {
 	setPresentationVisible(kind: PortableSingletonKind, visible: boolean): void {
 		if (this.#visible[kind] === visible) return;
 		this.#visible[kind] = visible;
+		this.#updateVisibleProjectSurface();
 		this.#controllers.get(kind)?.controller.setPresentationVisible(visible);
+	}
+
+	get hasVisibleProjectSurface(): boolean {
+		return this.#hasVisibleProjectSurface;
 	}
 
 	disposeSurface(kind: PortableSingletonKind): void {
 		this.#visible[kind] = false;
+		this.#updateVisibleProjectSurface();
 		const owned = this.#controllers.get(kind);
 		if (!owned) return;
 		this.#controllers.delete(kind);
@@ -157,6 +167,12 @@ export class SingletonSurfaceRegistry {
 		} finally {
 			owned.destroyRoot();
 		}
+	}
+
+	#updateVisibleProjectSurface(): void {
+		this.#hasVisibleProjectSurface = PORTABLE_SINGLETON_KINDS.some(
+			(candidate) => candidate !== 'chat-map' && this.#visible[candidate],
+		);
 	}
 
 	destroy(): void {

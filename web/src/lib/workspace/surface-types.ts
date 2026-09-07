@@ -86,7 +86,7 @@ export interface MobileReturnTarget {
 	invokerSurfaceId: string;
 	invokerHost: WorkspaceWindowId | 'mobile';
 	chatId: string | null;
-	effectiveProjectKey: string | null;
+	projectPath: string | null;
 	routeIdentity: string;
 }
 

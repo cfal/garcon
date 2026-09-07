@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/api/commands.js', () => ({
@@ -19,6 +20,14 @@ const baseProps = {
 	canScheduleIn: true,
 };
 const mockedGetSlashCommands = vi.mocked(getSlashCommands);
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
 
 describe('SlashCommandMenu', () => {
 	beforeEach(() => {
@@ -415,5 +424,60 @@ describe('SlashCommandMenu', () => {
 
 		expect(screen.queryByRole('option')).toBeNull();
 		expect(screen.getByText('No matching commands')).toBeTruthy();
+	});
+
+	it('restarts discovery aborted by a pending project transition', async () => {
+		const first = deferred<Awaited<ReturnType<typeof getSlashCommands>>>();
+		mockedGetSlashCommands
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce([{ name: 'recovered-command', source: 'command' }]);
+		const view = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'recovered-command',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledOnce());
+		const firstSignal = mockedGetSlashCommands.mock.calls[0]?.[1]?.signal;
+
+		await view.rerender({ projectPath: '', projectPending: true });
+		expect(firstSignal?.aborted).toBe(true);
+		await view.rerender({ projectPath: '/repo', projectPending: false });
+
+		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledTimes(2));
+		expect(await screen.findByText('/recovered-command')).toBeTruthy();
+		first.resolve([]);
+		await tick();
+		expect(screen.getByText('/recovered-command')).toBeTruthy();
+	});
+
+	it('hides cached discovered commands while keeping built-ins available', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'agent-command', source: 'command', description: 'Agent command' },
+		]);
+		const onSelect = vi.fn();
+		const view = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'agent-command',
+			onSelect,
+			onClose: vi.fn(),
+		});
+		await screen.findByText('/agent-command');
+
+		await view.rerender({ projectUnavailable: true });
+		expect(view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(
+			false,
+		);
+		expect(screen.queryByText('/agent-command')).toBeNull();
+		expect(onSelect).not.toHaveBeenCalled();
+
+		await view.rerender({ query: 'compact' });
+		expect(screen.getByText('/compact')).toBeTruthy();
+		expect(view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true);
+		expect(onSelect).toHaveBeenCalledWith('compact');
 	});
 });

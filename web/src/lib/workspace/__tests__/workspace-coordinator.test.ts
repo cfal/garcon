@@ -27,6 +27,12 @@ import type {
 } from '../window-geometry-policy';
 import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
+import type { ProjectTarget } from '$shared/project-resolution';
+import type {
+	ProjectResolutionLease,
+	ProjectResolutionSnapshot,
+} from '../project-resolution-store.svelte';
+import type { ProjectResolver } from '../workspace-project-path-resolution';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -79,6 +85,8 @@ function createHarness(
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
+		currentProjectTarget?: ProjectTarget | null;
+		projectResolution?: ProjectResolver;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -175,7 +183,12 @@ function createHarness(
 	const coordinator = new WorkspaceCoordinator({
 		arbiter: new WorkspaceTransitionArbiter(layout, commitPort),
 		terminals: terminals as never,
-		workspaceContext: { current: null } as never,
+		workspaceContext: {
+			get currentTarget() {
+				return options.currentProjectTarget ?? null;
+			},
+		} as never,
+		projectResolution: options.projectResolution ?? ({ retain: vi.fn() } as never),
 		appShell: appShell as never,
 		workspaceInteractionGate,
 		transientLayers,
@@ -1600,6 +1613,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.composerAnchorSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
+	it('advances focus ownership only when the focused surface identity changes', () => {
+		const { coordinator } = createHarness();
+		const initialRevision = coordinator.focusOwnerRevision;
+
+		coordinator.noteSurfaceFocus(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusOwnerRevision).toBe(initialRevision);
+
+		coordinator.noteChatListFocus();
+		coordinator.noteSurfaceFocus(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusOwnerRevision).toBe(initialRevision + 2);
+	});
+
 	it('updates command ownership on pointerdown and defers Chat anchoring until click', () => {
 		const { coordinator, layout } = createHarness();
 		layout.publish(
@@ -2264,6 +2289,106 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
 			terminalSurfaceId('terminal-2'),
 		);
+	});
+
+	it('coalesces a keyed terminal create while project resolution is pending', async () => {
+		const target = {
+			kind: 'chat' as const,
+			chatId: 'chat-1',
+			projectPath: '/workspace',
+		};
+		const projectReady = deferred<void>();
+		let snapshot: ProjectResolutionSnapshot = { kind: 'resolving' };
+		const lease = {
+			target,
+			get snapshot() {
+				return snapshot;
+			},
+			resolve: vi.fn(async () => {
+				await projectReady.promise;
+				snapshot = { kind: 'available', effectiveProjectKey: '/workspace' };
+			}),
+			retry: vi.fn(),
+			release: vi.fn(),
+		} satisfies ProjectResolutionLease;
+		const projectResolution = { retain: vi.fn(() => lease) } satisfies ProjectResolver;
+		const { coordinator, terminals, layout } = createHarness({
+			currentProjectTarget: target,
+			projectResolution,
+		});
+		terminals.create.mockResolvedValue('terminal-coalesced');
+
+		const first = coordinator.createTerminal('window-main', 'workspace-window:window-main');
+		const second = coordinator.createTerminal('window-main', 'workspace-window:window-main');
+		await vi.waitFor(() => expect(lease.resolve).toHaveBeenCalledOnce());
+		expect(projectResolution.retain).toHaveBeenCalledOnce();
+		expect(terminals.create).not.toHaveBeenCalled();
+
+		projectReady.resolve();
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			'terminal-coalesced',
+			'terminal-coalesced',
+		]);
+
+		expect(terminals.create).toHaveBeenCalledOnce();
+		expect(lease.release).toHaveBeenCalledOnce();
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
+			terminalSurfaceId('terminal-coalesced'),
+		);
+	});
+
+	it('retries an ambiguous terminal create with its captured project path', async () => {
+		const target = {
+			kind: 'chat' as const,
+			chatId: 'chat-1',
+			projectPath: '/workspace/project-a',
+		};
+		const lease = {
+			target,
+			snapshot: {
+				kind: 'available' as const,
+				effectiveProjectKey: '/workspace/project-a',
+			},
+			resolve: vi
+				.fn()
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error('unavailable')),
+			retry: vi.fn(),
+			release: vi.fn(),
+		} satisfies ProjectResolutionLease;
+		const projectResolution = { retain: vi.fn(() => lease) } satisfies ProjectResolver;
+		const { coordinator, terminals } = createHarness({
+			currentProjectTarget: target,
+			projectResolution,
+		});
+		const requests: Array<{ projectPath: string | null; requestId: string }> = [];
+		terminals.create
+			.mockImplementationOnce(async (projectPath: string | null, requestId: string) => {
+				requests.push({ projectPath, requestId });
+				terminals.pendingCreates[requestId] = {
+					requestedInitialWorkingDirectory: projectPath,
+				};
+				throw new TypeError('Lost terminal response');
+			})
+			.mockImplementationOnce(async (projectPath: string | null, requestId: string) => {
+				requests.push({ projectPath, requestId });
+				delete terminals.pendingCreates[requestId];
+				return 'terminal-recovered';
+			});
+
+		await expect(
+			coordinator.createTerminal('window-main', 'workspace-window:window-main'),
+		).rejects.toThrow('Lost terminal response');
+		await expect(
+			coordinator.createTerminal('window-main', 'workspace-window:window-main'),
+		).resolves.toBe('terminal-recovered');
+
+		expect(requests).toEqual([
+			{ projectPath: '/workspace/project-a', requestId: requests[0]?.requestId },
+			{ projectPath: '/workspace/project-a', requestId: requests[0]?.requestId },
+		]);
+		expect(projectResolution.retain).toHaveBeenCalledOnce();
+		expect(lease.resolve).toHaveBeenCalledOnce();
 	});
 
 	it.each(['current window', 'new window'] as const)(

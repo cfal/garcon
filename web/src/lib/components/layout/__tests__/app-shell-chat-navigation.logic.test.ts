@@ -13,8 +13,6 @@ function chat(
 		id,
 		parentChat: null,
 		projectPath: '/repo',
-		effectiveProjectKey: '/repo',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: id,
 		agentId: 'claude',
