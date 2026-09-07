@@ -78,6 +78,52 @@ describe('sidebar search interactions', () => {
 		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
 	});
 
+	it('renders the overlay in place by default', async () => {
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [createChat('chat-1', 'First chat')],
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const overlay = await screen.findByText('First chat').then((row) =>
+			row.closest('[data-slot="search-dialog-overlay"]'),
+		);
+		expect(overlay?.parentElement).not.toBe(document.body);
+	});
+
+	it('mounts the overlay at document.body level when portaling is requested', async () => {
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [createChat('chat-1', 'First chat')],
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			portalToBody: true,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const row = await screen.findByText('First chat');
+		const overlay = row.closest('[data-slot="search-dialog-overlay"]');
+		expect(overlay?.parentElement).toBe(document.body);
+	});
+
 	it('opens a deep virtualized highlighted chat from the query input', async () => {
 		const onSelectChat = vi.fn();
 

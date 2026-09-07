@@ -135,6 +135,10 @@ describe('mobile sidebar lifecycle', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Search chats...' }));
 		expect(screen.getByRole('dialog')).toBeTruthy();
+		// The mobile overlay must escape the drawer subtree and mount at
+		// body level so it fills the whole screen.
+		const overlay = document.querySelector('[data-slot="search-dialog-overlay"]');
+		expect(overlay?.parentElement).toBe(document.body);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));

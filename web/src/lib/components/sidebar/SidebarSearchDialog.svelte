@@ -11,6 +11,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
+	import { bodyPortal } from './body-portal-attachment';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
@@ -40,6 +41,10 @@
 		overlayClass?: string;
 		backdropTreatment?: 'standard' | 'interaction-only';
 		contentRole?: 'dialog' | 'presentation';
+		// Renders the overlay at document.body level so it escapes the
+		// mobile drawer subtree and fills the visible viewport instead of
+		// the drawer box.
+		portalToBody?: boolean;
 	}
 
 	let {
@@ -67,6 +72,7 @@
 		overlayClass,
 		backdropTreatment = 'standard',
 		contentRole = 'dialog',
+		portalToBody = false,
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
@@ -74,6 +80,14 @@
 	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
 	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
+	// The portaled frame replicates the .mobile-shell keyboard geometry
+	// (--app-height + viewport offset are maintained on :root by AppShell)
+	// so the overlay fills the visible viewport, not the layout viewport.
+	let overlayFrameClass = $derived(
+		portalToBody
+			? 'fixed inset-x-0 top-0 z-50 h-(--app-height) translate-y-(--app-viewport-offset-top)'
+			: 'fixed inset-0 z-50',
+	);
 
 	function handleQueryInput(e: Event) {
 		const target = e.target as HTMLInputElement;
@@ -145,12 +159,10 @@
 
 {#if open}
 	<div
-		class={cn(
-			'fixed inset-0 z-50',
-			backdropTreatment === 'standard' && 'transient-backdrop',
-			overlayClass,
-		)}
+		data-slot="search-dialog-overlay"
+		class={cn(overlayFrameClass, backdropTreatment === 'standard' && 'transient-backdrop', overlayClass)}
 		role="presentation"
+		{@attach portalToBody && bodyPortal}
 	>
 		<button
 			class="absolute inset-0 h-full w-full cursor-default"
@@ -160,13 +172,20 @@
 		></button>
 
 		<div
-			class="fixed inset-0 flex items-stretch justify-center sm:items-start sm:p-4 sm:pt-[10vh]"
+			class={cn(
+				portalToBody ? 'absolute inset-0' : 'fixed inset-0',
+				'flex items-stretch justify-center sm:items-start sm:p-4 sm:pt-[10vh]',
+			)}
 			role="presentation"
 			onclick={handleContainerClick}
 		>
 			<div
 				data-slot="search-dialog-content"
-				class="flex h-dvh w-screen min-w-0 flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border"
+				class={cn(
+					'flex min-w-0 flex-col overflow-hidden bg-background shadow-2xl',
+					portalToBody ? 'h-full w-full' : 'h-dvh w-screen',
+					'sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border',
+				)}
 				role={contentRole}
 				aria-label={contentRole === 'dialog' ? m.sidebar_projects_search_placeholder() : undefined}
 				aria-modal={contentRole === 'dialog' ? 'true' : undefined}
