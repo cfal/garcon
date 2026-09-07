@@ -11,6 +11,7 @@ import type {
 } from '../../common/chat-search.js';
 import {
   CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_CHAT_IDS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_PREFIX_SIZE,
   CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
@@ -34,7 +35,6 @@ import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 const MAX_SEARCH_QUERY_CHARS = 4_096;
 const MAX_SEARCH_TEXT_TOKEN_CHARS = 1_024;
 const MAX_SEARCH_TEXT_CHARS = 8_192;
-const MAX_SEARCH_CHAT_IDS = 10_000;
 const MAX_SEARCH_CHAT_ID_CHARS = 512;
 
 export interface ChatSearchDep {
@@ -246,9 +246,9 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
     query: effectiveQuery,
     textTokens,
     chatIds: optionalBoundedStringArrayField(input, 'chatIds', {
-      maxItems: MAX_SEARCH_CHAT_IDS,
+      maxItems: CHAT_SEARCH_MAX_CHAT_IDS,
       maxItemChars: MAX_SEARCH_CHAT_ID_CHARS,
-      maxTotalChars: MAX_SEARCH_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
+      maxTotalChars: CHAT_SEARCH_MAX_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
     }),
     sort: optionalSearchSort(input.sort) ?? 'relevance',
     mode,
