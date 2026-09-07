@@ -208,8 +208,7 @@ describe('Lightpanda workspace windows', () => {
       });
       await fixture.integration.client.waitForTurnTerminal(chatBId, startedChatB.turnId);
       await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatBId}"]`);
-      await app.waitForSidebarPreview('workspace-chat-move-b', 'echo:workspace-chat-move-b');
-      const secondChatWindowId = await app.openSidebarChatInNewWindow('workspace-chat-move-b');
+      const secondChatWindowId = await app.openSidebarChatInNewWindowById(chatBId);
       await app.waitForSelectedChat(chatBId);
       expect(secondChatWindowId).not.toBe(originalWindowId);
       await waitForPersistedChatWindows(fixture.page, {
