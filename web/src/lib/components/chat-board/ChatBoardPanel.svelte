@@ -224,19 +224,21 @@
 	async function restoreAfterLaneRemount(afterRestore?: () => void): Promise<void> {
 		await tick();
 		requestAnimationFrame(() => {
-			const boardId = selectedBoard?.id;
-			if (boardId && rootRef) {
-				for (const viewport of rootRef.querySelectorAll<HTMLElement>(
-					'[data-chat-board-lane-list]',
-				)) {
-					const columnId = viewport.dataset.chatBoardLaneList;
-					const scrollTop = columnId
-						? laneScrollOffsets.get(laneScrollKey(boardId, columnId))
-						: undefined;
-					if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
+			requestAnimationFrame(() => {
+				const boardId = selectedBoard?.id;
+				if (boardId && rootRef) {
+					for (const viewport of rootRef.querySelectorAll<HTMLElement>(
+						'[data-chat-board-lane-list]',
+					)) {
+						const columnId = viewport.dataset.chatBoardLaneList;
+						const scrollTop = columnId
+							? laneScrollOffsets.get(laneScrollKey(boardId, columnId))
+							: undefined;
+						if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
+					}
 				}
-			}
-			afterRestore?.();
+				afterRestore?.();
+			});
 		});
 	}
 
