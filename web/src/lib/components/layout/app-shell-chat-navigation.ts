@@ -24,6 +24,8 @@ export function shouldSynchronizeFocusedChat(input: {
 		input.focusedChatId !== null &&
 		input.focusedChatExists &&
 		input.focusedChatId !== input.selectedChatId &&
-		(input.pendingChatTarget === null || input.pendingWindowId !== input.focusedWindowId)
+		(input.pendingChatTarget === null ||
+			(input.pendingWindowId !== input.focusedWindowId &&
+				input.pendingChatTarget !== input.focusedChatId))
 	);
 }

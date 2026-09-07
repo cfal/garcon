@@ -889,6 +889,14 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 	for (const id of buckets.keys()) {
 		if (!snapshot.surfaces[id]) throw new Error(`Placement references missing surface: ${id}`);
 	}
+	const assignedChatIds = new Set<string>();
+	for (const surface of Object.values(snapshot.surfaces)) {
+		if (surface.type !== 'chat' || surface.chatId === null) continue;
+		if (assignedChatIds.has(surface.chatId)) {
+			throw new Error(`Chat is assigned to more than one workspace window: ${surface.chatId}`);
+		}
+		assignedChatIds.add(surface.chatId);
+	}
 	if (workspaceChatViewCount(snapshot) === 0) {
 		throw new Error('At least one Chat view must remain');
 	}

@@ -5,9 +5,7 @@ import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from '../app-shel
 
 function chat(
 	id: string,
-	options: Partial<
-		Pick<ChatSessionRecord, 'isPinned' | 'isArchived' | 'lastActivityAt'>
-	> = {},
+	options: Partial<Pick<ChatSessionRecord, 'isPinned' | 'isArchived' | 'lastActivityAt'>> = {},
 ): ChatSessionRecord {
 	return {
 		id,
@@ -73,9 +71,12 @@ describe('resolveAdjacentChatId', () => {
 			pinnedInsertPosition: 'top',
 		} as const;
 
-		expect(
-			buildSidebarDisplayChatIds({ ...input, inactivityDuration: '2-weeks' }),
-		).toEqual(['pinned-c', 'active-b', 'inactive-a', 'archived-d']);
+		expect(buildSidebarDisplayChatIds({ ...input, inactivityDuration: '2-weeks' })).toEqual([
+			'pinned-c',
+			'active-b',
+			'inactive-a',
+			'archived-d',
+		]);
 		expect(buildSidebarDisplayChatIds({ ...input, inactivityDuration: '5-days' })).toEqual([
 			'pinned-c',
 			'inactive-a',
@@ -193,6 +194,19 @@ describe('shouldSynchronizeFocusedChat', () => {
 				pendingWindowId: 'window-main',
 			}),
 		).toBe(true);
+	});
+
+	it('keeps navigation pending when its Chat is reused in another window', () => {
+		expect(
+			shouldSynchronizeFocusedChat({
+				focusedWindowId: 'window-existing',
+				focusedChatId: 'chat-route',
+				focusedChatExists: true,
+				selectedChatId: 'chat-selected',
+				pendingChatTarget: 'chat-route',
+				pendingWindowId: 'window-main',
+			}),
+		).toBe(false);
 	});
 
 	it('synchronizes a changed focused Chat after explicit navigation settles', () => {

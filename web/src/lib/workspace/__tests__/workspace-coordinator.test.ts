@@ -33,6 +33,7 @@ import type {
 	ProjectResolutionSnapshot,
 } from '../project-resolution-store.svelte';
 import type { ProjectResolver } from '../workspace-project-path-resolution';
+import { AppShellChatNavigationController } from '$lib/components/layout/app-shell-chat-navigation-controller.svelte.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -419,6 +420,47 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.currentWindowId).toBe(destinationWindowId);
 	});
 
+	it('activates a hidden existing Chat in its owning window before layout observers run', async () => {
+		let coordinator: WorkspaceCoordinator | null = null;
+		let observeReuse = false;
+		let observed:
+			| {
+					currentWindowId: WorkspaceWindowId;
+					focusOwner: WorkspaceCoordinator['focusOwner'];
+					composerAnchorSurfaceId: string | null;
+			  }
+			| undefined;
+		const harness = createHarness({
+			onLayoutChanged: () => {
+				if (!observeReuse || !coordinator) return;
+				observed = {
+					currentWindowId: coordinator.currentWindowId,
+					focusOwner: coordinator.focusOwner,
+					composerAnchorSurfaceId: coordinator.composerAnchorSurfaceId,
+				};
+			},
+		});
+		coordinator = harness.coordinator;
+		const { layout } = harness;
+		const mainSurfaceId = chatViewSurfaceId('window-main');
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		await coordinator.focusSurface('singleton:git');
+		await coordinator.focusSurface(chatViewSurfaceId(otherWindowId));
+		observeReuse = true;
+
+		const resolvedSurfaceId = await coordinator.showChatInCurrentWindow('chat-a');
+
+		expect(resolvedSurfaceId).toBe(mainSurfaceId);
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(mainSurfaceId);
+		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+		expect(observed).toEqual({
+			currentWindowId: 'window-main',
+			focusOwner: { kind: 'surface', surfaceId: mainSurfaceId },
+			composerAnchorSurfaceId: mainSurfaceId,
+		});
+	});
+
 	it('does not redirect an exact Chat placement when its destination is missing', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.showChatInCurrentWindow('chat-a');
@@ -599,9 +641,47 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.lastFocusedSurfaceId).toBe(movedChat?.id);
 	});
 
-	it('keeps the explicit sidebar-style Chat new-window intent as a copy', async () => {
+	it('publishes a new Chat window as current before layout observers run', async () => {
+		let coordinator: WorkspaceCoordinator | null = null;
+		let observePlacement = false;
+		let observed:
+			| {
+					currentWindowId: WorkspaceWindowId;
+					focusOwner: WorkspaceCoordinator['focusOwner'];
+					composerAnchorSurfaceId: string | null;
+			  }
+			| undefined;
+		const harness = createHarness({
+			onLayoutChanged: () => {
+				if (!observePlacement || !coordinator) return;
+				observed = {
+					currentWindowId: coordinator.currentWindowId,
+					focusOwner: coordinator.focusOwner,
+					composerAnchorSurfaceId: coordinator.composerAnchorSurfaceId,
+				};
+			},
+		});
+		coordinator = harness.coordinator;
+		observePlacement = true;
+
+		const destinationWindowId = await coordinator.openChatInNewWindow(
+			'chat-a',
+			'window-main',
+			'right',
+		);
+		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+
+		expect(observed).toEqual({
+			currentWindowId: destinationWindowId,
+			focusOwner: { kind: 'surface', surfaceId: destinationSurfaceId },
+			composerAnchorSurfaceId: destinationSurfaceId,
+		});
+	});
+
+	it('reuses an existing Chat for a new-window request', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.showChatInCurrentWindow('chat-a');
+		const beforeWindowCount = windowCountOf(layout.snapshot);
 
 		const destinationWindowId = await coordinator.openChatInNewWindow(
 			'chat-a',
@@ -609,10 +689,169 @@ describe('WorkspaceCoordinator', () => {
 			'right',
 		);
 
+		expect(destinationWindowId).toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(beforeWindowCount);
 		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
-		expect(layout.surface(chatViewSurfaceId(destinationWindowId))).toMatchObject({
-			chatId: 'chat-a',
+		expect(
+			Object.values(layout.snapshot.surfaces).filter(
+				(surface) => surface.type === 'chat' && surface.chatId === 'chat-a',
+			),
+		).toHaveLength(1);
+	});
+
+	it('serializes concurrent Chat opens onto one assignment', async () => {
+		const { coordinator, layout } = createHarness();
+
+		const [firstWindowId, secondWindowId] = await Promise.all([
+			coordinator.openChatInNewWindow('chat-concurrent', 'window-main', 'right'),
+			coordinator.openChatInNewWindow('chat-concurrent', 'window-main', 'bottom'),
+		]);
+
+		expect(firstWindowId).toBe(secondWindowId);
+		expect(windowCountOf(layout.snapshot)).toBe(3);
+		expect(
+			Object.values(layout.snapshot.surfaces).filter(
+				(surface) => surface.type === 'chat' && surface.chatId === 'chat-concurrent',
+			),
+		).toHaveLength(1);
+	});
+
+	it('serializes concurrent show and new-window requests onto one assignment', async () => {
+		const { coordinator, layout } = createHarness();
+
+		const [windowId, surfaceId] = await Promise.all([
+			coordinator.openChatInNewWindow('chat-concurrent', 'window-main', 'right'),
+			coordinator.showChatInCurrentWindow('chat-concurrent'),
+		]);
+
+		expect(surfaceId).toBe(chatViewSurfaceId(windowId));
+		expect(windowCountOf(layout.snapshot)).toBe(3);
+		expect(
+			Object.values(layout.snapshot.surfaces).filter(
+				(surface) => surface.type === 'chat' && surface.chatId === 'chat-concurrent',
+			),
+		).toHaveLength(1);
+	});
+
+	it('reuses the latest Chat owner when it moves before queued placement', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		const opening = coordinator.openChatInNewWindow('chat-a', 'window-main', 'right');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'move-chat-to-window',
+					sourceWindowId: 'window-main',
+					destinationWindowId: 'window-files',
+				},
+			]),
+		);
+
+		await expect(opening).resolves.toBe('window-files');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toBeNull();
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({ chatId: 'chat-a' });
+	});
+
+	it('rejects reuse when the committed Chat owner becomes reserved before placement', async () => {
+		const confirmation = deferred<boolean>();
+		const confirmDestructive = vi.fn(() => confirmation.promise);
+		const { coordinator, layout } = createHarness({ confirmDestructive });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const otherWindowId = await coordinator.openChatInNewWindow(
+			'chat-b',
+			'window-main',
+			'right',
+		);
+		await coordinator.placeFileSession('reserved-file', {
+			type: 'window',
+			windowId: 'window-main',
 		});
+
+		const placement = coordinator.showChatInWindow('chat-a', otherWindowId);
+		const closing = coordinator.closeWindow('window-main');
+		expect(confirmDestructive).toHaveBeenCalledWith('reserved-file', 'close');
+
+		await expect(placement).rejects.toMatchObject({ message: 'Failed to open view' });
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+		confirmation.resolve(false);
+		await expect(closing).resolves.toBe(false);
+	});
+
+	it('reuses an existing Chat despite fullscreen new-window admission', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.enterWindowFullscreen('window-files');
+
+		const destinationWindowId = await coordinator.openChatInNewWindow(
+			'chat-a',
+			'window-files',
+			'right',
+		);
+
+		expect(destinationWindowId).toBe('window-main');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+	});
+
+	it('uses the planner-resolved Chat destination on mobile without adding a window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.enterMobilePresentation();
+
+		const destinationWindowId = await coordinator.openChatInNewWindow('chat-mobile');
+
+		expect(destinationWindowId).toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(chatViewSurfaceId('window-main'));
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({
+			chatId: 'chat-mobile',
+		});
+	});
+
+	it('does not add a desktop window when Chat placement queues behind mobile entry', async () => {
+		const { coordinator, layout } = createHarness();
+
+		const enterMobile = coordinator.enterMobilePresentation();
+		const placement = coordinator.openChatInNewWindow('chat-mobile', 'window-main', 'right');
+		const [, destinationWindowId] = await Promise.all([enterMobile, placement]);
+
+		expect(destinationWindowId).toBe('window-main');
+		expect(coordinator.isMobile).toBe(true);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(chatViewSurfaceId('window-main'));
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({
+			chatId: 'chat-mobile',
+		});
+	});
+
+	it('reuses the owning desktop Chat tab across mobile entry and return', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const otherWindowId = await coordinator.openChatInNewWindow(
+			'chat-b',
+			'window-main',
+			'right',
+		);
+		await coordinator.enterWindowFullscreen(otherWindowId);
+		await coordinator.enterMobilePresentation();
+
+		const destinationWindowId = await coordinator.openChatInNewWindow('chat-a');
+
+		expect(destinationWindowId).toBe('window-main');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(chatViewSurfaceId('window-main'));
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(
+			chatViewSurfaceId('window-main'),
+		);
+
+		await coordinator.exitMobilePresentation();
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(
+			chatViewSurfaceId('window-main'),
+		);
 	});
 
 	it('keeps a sole-tab directional Chat move as a no-op', async () => {
@@ -1506,6 +1745,76 @@ describe('WorkspaceCoordinator', () => {
 		await expect(placement).resolves.toBe('placed');
 		await focusGit;
 		expect(layout.surface(surfaceId)).not.toBeNull();
+	});
+
+	it('keeps newer Chat reuse and navigation when an older Chat presentation settles', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout, appShell } = createHarness({ surfaceFrames: frames });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const chatBWindowId = await coordinator.openChatInNewWindow(
+			'chat-b',
+			'window-main',
+			'right',
+		);
+		const chatBSurfaceId = chatViewSurfaceId(chatBWindowId);
+		await coordinator.enterWindowFullscreen(chatBWindowId);
+		appShell.requestComposerFocus.mockClear();
+		let selectedChatId: string | null = 'chat-b';
+		const navigateToChat = vi.fn(async () => undefined);
+		const navigationComposerFocus = vi.fn();
+		const requestSidebarRecenter = vi.fn();
+		const chatNavigation = new AppShellChatNavigationController({
+			routeChatId: 'chat-b',
+			get selectedChatId() {
+				return selectedChatId;
+			},
+			isLoadingChats: false,
+			get currentWindowId() {
+				return coordinator.currentWindowId;
+			},
+			get focusedChatId() {
+				return coordinator.focusedChatId;
+			},
+			hasChat: (chatId) => chatId === 'chat-a' || chatId === 'chat-b',
+			showChatInCurrentWindow: (chatId) => coordinator.showChatInCurrentWindow(chatId),
+			setSelectedChatId: (chatId) => {
+				selectedChatId = chatId;
+			},
+			navigateToChat,
+			navigateToBareRoute: vi.fn(async () => undefined),
+			requestComposerFocus: navigationComposerFocus,
+			requestSidebarRecenter,
+			reportOpenError: vi.fn(),
+			reportDeleteError: vi.fn(),
+		});
+
+		const focusChatA = chatNavigation.showChatInCurrentWindow('chat-a', { navigate: true });
+		await vi.waitFor(() => {
+			expect(layout.snapshot.fullscreenWindowId).toBeNull();
+			expect(coordinator.currentWindowId).toBe('window-main');
+			expect(coordinator.frameVersion('singleton:files')).toBe(1);
+		});
+
+		await coordinator.showChatInCurrentWindow('chat-b');
+		expect(coordinator.currentWindowId).toBe(chatBWindowId);
+
+		frames.register('singleton:files', 'window-files', {
+			element: document.createElement('div'),
+			attachRetainedRenderer: vi.fn(),
+			focusPrimary: vi.fn(),
+		});
+		await focusChatA;
+		await tick();
+
+		expect(coordinator.currentWindowId).toBe(chatBWindowId);
+		expect(coordinator.lastFocusedSurfaceId).toBe(chatBSurfaceId);
+		expect(coordinator.focusOwner).toEqual({ kind: 'surface', surfaceId: chatBSurfaceId });
+		expect(coordinator.composerAnchorSurfaceId).toBe(chatBSurfaceId);
+		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
+		expect(selectedChatId).toBe('chat-b');
+		expect(navigateToChat).not.toHaveBeenCalled();
+		expect(navigationComposerFocus).not.toHaveBeenCalled();
+		expect(requestSidebarRecenter).not.toHaveBeenCalled();
 	});
 
 	it('keeps a later Chat focus when an older file presentation settles', async () => {
