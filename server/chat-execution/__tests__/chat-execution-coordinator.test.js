@@ -82,6 +82,7 @@ function createFixture(overrides = {}) {
       projectAdmission,
       unsettledQueueReceiptKeys: () => new Set(),
       appendControlReceipt,
+      isControlInputViewCurrent: overrides.isControlInputViewCurrent ?? (() => true),
     },
   );
   return { coordinator, events, projection, turnRunner, appendControlReceipt, projectAdmission };
@@ -340,7 +341,7 @@ describe('ChatExecutionCoordinator', () => {
     coordinator = fixture.coordinator;
     const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
 
-    await expect(coordinator.deliverInterAgentControlInput(
+    await expect(coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput(),
       new AbortController().signal,
@@ -373,7 +374,7 @@ describe('ChatExecutionCoordinator', () => {
     const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
     providerRunning = true;
 
-    const delivery = coordinator.deliverInterAgentControlInput(
+    const delivery = coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput(),
       new AbortController().signal,
@@ -403,7 +404,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     coordinator = fixture.coordinator;
 
-    await expect(coordinator.deliverInterAgentControlInput(
+    await expect(coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput('queued message'),
       new AbortController().signal,
@@ -455,7 +456,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     coordinator = fixture.coordinator;
 
-    await expect(coordinator.deliverInterAgentControlInput(
+    await expect(coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput(),
       new AbortController().signal,
@@ -475,7 +476,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     coordinator = fixture.coordinator;
     const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
-    await coordinator.deliverInterAgentControlInput(
+    await coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput(),
       new AbortController().signal,
@@ -504,7 +505,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     coordinator = fixture.coordinator;
     const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
-    await coordinator.deliverInterAgentControlInput(
+    await coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput(),
       new AbortController().signal,
@@ -516,6 +517,40 @@ describe('ChatExecutionCoordinator', () => {
       .toHaveLength(1);
     expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  for (const receipt of [null, interAgentInput().receipt]) {
+    it(`drops stale-view controls before receipt admission (${receipt === null ? 'null' : 'received'} receipt)`, async () => {
+      const fixture = createFixture({ isControlInputViewCurrent: (_chatId, viewId) => viewId === 'view-2' });
+      coordinator = fixture.coordinator;
+      const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+      await coordinator.deliverServerControlInput('chat-1', { ...interAgentInput(), receipt }, new AbortController().signal);
+      await coordinator.deliverServerControlInput('chat-1', {
+        ...interAgentInput('current'), transcriptViewId: 'view-2', receipt: null,
+      }, new AbortController().signal);
+      await coordinator.releaseTranscriptSnapshot(snapshot);
+      await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+      const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+      await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
+      await coordinator.waitForDispatches();
+      expect(fixture.turnRunner.runAgentTurn.mock.calls[0][1]).toContain('current');
+      expect(fixture.appendControlReceipt).toHaveBeenCalledTimes(1);
+      expect(fixture.appendControlReceipt.mock.calls[0][1].receipt).toBeNull();
+      expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
+      expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+    });
+  }
+
+  it('preserves a control entry when view validation fails with a storage error', async () => {
+    const fixture = createFixture({ isControlInputViewCurrent: () => { throw new Error('storage unavailable'); } });
+    coordinator = fixture.coordinator;
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    await coordinator.deliverServerControlInput('chat-1', { ...interAgentInput(), receipt: null }, new AbortController().signal);
+    await coordinator.releaseTranscriptSnapshot(snapshot);
+    await waitFor(() => !coordinator.ownsExecution('chat-1'));
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toHaveLength(1);
+    expect(fixture.appendControlReceipt).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
   });
 
   it('continues the control lane after dispatch failure without pausing the user queue', async () => {
@@ -532,12 +567,12 @@ describe('ChatExecutionCoordinator', () => {
     });
     coordinator = fixture.coordinator;
     const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
-    await coordinator.deliverInterAgentControlInput(
+    await coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput('first'),
       new AbortController().signal,
     );
-    await coordinator.deliverInterAgentControlInput(
+    await coordinator.deliverServerControlInput(
       'chat-1',
       interAgentInput('second'),
       new AbortController().signal,

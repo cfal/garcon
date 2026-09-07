@@ -37,6 +37,7 @@ export class AgentCommandComposition {
   };
 
   readonly appendControlReceipt = (chatId: string, entry: StoredControlInputEntry): void => {
+    if (entry.receipt === null) return;
     if (!this.#notices) throw new Error('Agent command notices are not initialized');
     this.#notices.appendNotice(chatId, transcriptViewId(entry.transcriptViewId), {
       ...entry.receipt,

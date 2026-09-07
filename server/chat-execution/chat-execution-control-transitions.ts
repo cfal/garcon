@@ -221,7 +221,7 @@ export function enqueueControlInput(
   const entry: StoredControlInputEntry = {
     id: context.newId(),
     ...input,
-    receipt: {
+    receipt: input.receipt === null ? null : {
       ...input.receipt,
       detail: { ...input.receipt.detail },
     },
@@ -646,7 +646,7 @@ function cloneQueueEntry(entry: StoredQueueEntry): StoredQueueEntry {
 function cloneControlInputEntry(entry: StoredControlInputEntry): StoredControlInputEntry {
   return {
     ...entry,
-    receipt: {
+    receipt: entry.receipt === null ? null : {
       ...entry.receipt,
       detail: { ...entry.receipt.detail },
     },

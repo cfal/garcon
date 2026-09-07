@@ -537,6 +537,8 @@ export async function startServer(): Promise<void> {
         projectAdmission,
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
         appendControlReceipt: agentCommands.appendControlReceipt,
+        isControlInputViewCurrent: (chatId, viewId) => chatRegistry.getChat(chatId) !== null
+          && transcriptLedger.existingCurrentView(chatId)?.viewId === viewId,
         selectionAdmissionLock,
       },
     );

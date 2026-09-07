@@ -769,6 +769,7 @@ function makeRealQueue(
     new InMemoryChatExecutionControlRepository('server-instance-test'),
     {
       projectAdmission,
+      isControlInputViewCurrent: () => true,
     },
   );
 }
@@ -5688,7 +5689,7 @@ describe('ChatCommandService', () => {
     await queueService.createChatQueueEntry(SOURCE_CHAT_ID, 'queued work');
     await queueService.pauseChatQueue(SOURCE_CHAT_ID);
     const { id: _id, ...pendingControl } = controlEntry('control-pending');
-    await queueService.deliverInterAgentControlInput(
+    await queueService.deliverServerControlInput(
       SOURCE_CHAT_ID,
       pendingControl,
       new AbortController().signal,
