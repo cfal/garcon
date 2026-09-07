@@ -88,24 +88,47 @@ describe('canvas autosave', () => {
 		session.dispose();
 	});
 
-	it('retains failed edits, supports retry, and does not automatically retry conflicts', async () => {
+	it.each([new ApiError(409, 'Changed elsewhere'), new ApiError(500, 'Corrupt', 'CANVAS_CORRUPT')])(
+		'retains failed edits, supports retry, and does not automatically retry conflicts: %s',
+		async (error) => {
+			const update = vi
+				.fn<(request: UpdateCanvasRequest) => Promise<ChatCanvas>>()
+				.mockRejectedValueOnce(new Error('Offline'))
+				.mockImplementation(async (request) => canvas(request.content, 2));
+			const { session, memory } = setup({ update });
+			session.document.rename('Edited');
+			expect(await session.flush()).toBe(false);
+			expect(memory.drafts.has('board')).toBe(true);
+			expect(await session.flush()).toBe(true);
+			update.mockRejectedValue(error);
+			session.document.rename('Local');
+			expect(await session.flush()).toBe(false);
+			expect(session.conflict).toBe(true);
+			session.document.rename('More conflicted work');
+			await vi.runAllTimersAsync();
+			expect(await session.flush()).toBe(false);
+			expect(update).toHaveBeenCalledTimes(3);
+			session.dispose();
+		},
+	);
+
+	it('keeps conflicted work protected when a reload fails transiently', async () => {
 		const update = vi
-			.fn<(request: UpdateCanvasRequest) => Promise<ChatCanvas>>()
-			.mockRejectedValueOnce(new Error('Offline'))
-			.mockImplementation(async (request) => canvas(request.content, 2));
-		const { session, memory } = setup({ update });
-		session.document.rename('Edited');
-		expect(await session.flush()).toBe(false);
-		expect(memory.drafts.has('board')).toBe(true);
-		expect(await session.flush()).toBe(true);
-		update.mockRejectedValue(new ApiError(409, 'Changed elsewhere'));
-		session.document.rename('Local');
-		expect(await session.flush()).toBe(false);
+			.fn<CanvasSessionPort['update']>()
+			.mockRejectedValue(new ApiError(409, 'Changed elsewhere'));
+		const { session, memory } = setup({
+			update,
+			get: async () => {
+				throw new ApiError(503, 'Offline');
+			},
+		});
+		session.document.rename('Local work');
+		await session.flush();
+		expect(await session.discardAndReload()).toBe(false);
 		expect(session.conflict).toBe(true);
-		session.document.rename('More conflicted work');
-		await vi.runAllTimersAsync();
 		expect(await session.flush()).toBe(false);
-		expect(update).toHaveBeenCalledTimes(3);
+		expect(memory.drafts.get('board')?.content.title).toBe('Local work');
+		expect(update).toHaveBeenCalledTimes(1);
 		session.dispose();
 	});
 

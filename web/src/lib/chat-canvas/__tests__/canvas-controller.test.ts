@@ -179,21 +179,52 @@ describe('CanvasController', () => {
 		controller.dispose();
 	});
 
-	it('offers locally recovered work even after the original board was deleted elsewhere', async () => {
+	it.each([new ApiError(404, 'Deleted'), new ApiError(500, 'Corrupt', 'CANVAS_CORRUPT')])(
+		'offers local recovery when the original board is unavailable: %s',
+		async (error) => {
+			const { controller, api, boards, memory } = setup();
+			boards.clear();
+			memory.port.write(canvas({ ...canvas().content, title: 'Unsent draft' }));
+			api.list.mockResolvedValue({
+				canvases: [],
+				unavailableIds: error.errorCode === 'CANVAS_CORRUPT' ? ['board'] : [],
+			});
+			api.get.mockRejectedValue(error);
+			await controller.activate();
+			expect(controller.canvases[0].title).toBe('Unsent draft');
+			expect(controller.session?.conflict).toBe(true);
+			const deletedExit = new Event('beforeunload', { cancelable: true });
+			window.dispatchEvent(deletedExit);
+			expect(deletedExit.defaultPrevented).toBe(true);
+			expect(memory.drafts.has('board')).toBe(true);
+			expect(await controller.session!.discardAndReload()).toBe(false);
+			expect(controller.session?.conflict).toBe(true);
+			api.create.mockRejectedValueOnce(new Error('Offline'));
+			expect(await controller.saveCopy('Recovered work')).toBe(false);
+			expect(memory.drafts.has('board')).toBe(true);
+			expect(await controller.saveCopy('Recovered work')).toBe(true);
+			expect(controller.session?.document.content.title).toBe('Recovered work');
+			expect(memory.drafts.has('board')).toBe(false);
+			expect(api.update).not.toHaveBeenCalled();
+			expect(boards.has('board')).toBe(false);
+			controller.dispose();
+		},
+	);
+
+	it('reports an unreadable board without a draft and preserves drafts on unrelated load errors', async () => {
 		const { controller, api, boards, memory } = setup();
 		boards.clear();
+		api.list.mockResolvedValue({ canvases: [], unavailableIds: ['board'] });
+		api.get.mockRejectedValueOnce(new ApiError(500, 'Corrupt', 'CANVAS_CORRUPT'));
+		await controller.open('board');
+		expect(controller.session).toBeNull();
+		expect(controller.error).toBe('Corrupt');
 		memory.port.write(canvas({ ...canvas().content, title: 'Unsent draft' }));
-		api.get.mockRejectedValue(new ApiError(404, 'Deleted'));
+		api.get.mockRejectedValueOnce(new ApiError(500, 'Server unavailable'));
 		await controller.activate();
-		expect(controller.canvases[0].title).toBe('Unsent draft');
-		expect(controller.session?.conflict).toBe(true);
-		const deletedExit = new Event('beforeunload', { cancelable: true });
-		window.dispatchEvent(deletedExit);
-		expect(deletedExit.defaultPrevented).toBe(true);
+		expect(controller.session).toBeNull();
+		expect(controller.error).toBe('Server unavailable');
 		expect(memory.drafts.has('board')).toBe(true);
-		expect(await controller.saveCopy('Recovered work')).toBe(true);
-		expect(controller.session?.document.content.title).toBe('Recovered work');
-		expect(memory.drafts.has('board')).toBe(false);
 		controller.dispose();
 	});
 	it('guards unsaved work for the controller lifetime and removes browser listeners on disposal', async () => {

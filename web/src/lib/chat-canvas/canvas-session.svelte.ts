@@ -174,7 +174,10 @@ export class CanvasSession {
 	}
 
 	#failure(error: unknown): void {
-		this.conflict = error instanceof ApiError && (error.status === 409 || error.status === 404);
+		this.conflict =
+			this.conflict ||
+			(error instanceof ApiError &&
+				(error.status === 409 || error.status === 404 || error.errorCode === 'CANVAS_CORRUPT'));
 		this.error = error instanceof Error ? error.message : String(error);
 	}
 }

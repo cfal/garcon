@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import type { ChatCanvas, CanvasListResponse } from '../../../common/chat-canvas.js';
@@ -21,6 +21,65 @@ async function saved(page: Page): Promise<void> {
 }
 
 describe('Chromium canvas recovery', () => {
+  test('recovers a local draft as a copy when its server file is corrupt', async () => {
+    await withChromiumFixture('canvas-corrupt-draft-recovery', async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {
+      const original = await integration.client.post<ChatCanvas>(endpoint, {
+        id: 'damaged', content: { title: 'Original', nodes: [], connections: [] },
+      });
+      const draft = {
+        ...original,
+        content: {
+          title: 'Unsent draft',
+          nodes: [{ id: 'research', type: 'box' as const, title: 'Research', position: { x: 20, y: 30 } }],
+          connections: [],
+        },
+      } satisfies ChatCanvas;
+      await page.addInitScript((recovery) => {
+        sessionStorage.setItem(`chat-canvas-recovery-v1:${recovery.id}`, JSON.stringify(recovery));
+      }, draft);
+      const file = join(integration.dirs.workspace, 'chat-canvases/damaged.json');
+      await writeFile(file, '{broken');
+      await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
+      await collapseCanonicalFilesWindow(page);
+      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
+      await page.getByRole('menuitem', { name: 'Open chat map' }).click();
+      await page.getByRole('button', { name: 'Canvases', exact: true }).click();
+      await page.locator('.svelte-flow__node[data-id="research"]').waitFor();
+      await page.getByRole('button', { name: 'Load latest', exact: true }).waitFor();
+      expect(await page.getByLabel('Choose canvas').inputValue()).toBe('damaged');
+
+      markPhase('preserving the draft through a failed reload');
+      await page.getByRole('button', { name: 'Load latest', exact: true }).click();
+      await page.getByRole('dialog').getByRole('button', { name: 'Discard local edits', exact: true }).click();
+      await page.getByRole('dialog').getByText('Canvas data could not be read. Restore it from a backup.', { exact: true }).waitFor();
+      await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+      await page.getByRole('dialog').waitFor({ state: 'hidden' });
+      await page.getByRole('button', { name: 'Load latest', exact: true }).waitFor();
+      expect(await page.evaluate(() => sessionStorage.getItem('chat-canvas-recovery-v1:damaged'))).not.toBeNull();
+
+      markPhase('saving recovered content independently of the damaged file');
+      await page.locator('[data-canvas-panel] header').getByRole('button', { name: 'Save as copy', exact: true }).click();
+      await page.getByRole('dialog').getByRole('textbox').fill('Recovered copy');
+      await page.getByRole('dialog').getByRole('button', { name: 'Apply', exact: true }).click();
+      await page.getByRole('dialog').waitFor({ state: 'hidden' });
+      await saved(page);
+      const catalog = await integration.client.get<CanvasListResponse>(endpoint);
+      expect(catalog.unavailableIds).toEqual(['damaged']);
+      expect(catalog.canvases).toHaveLength(1);
+      const recovered = await integration.client.get<ChatCanvas>(`${endpoint}?id=${catalog.canvases[0]!.id}`);
+      expect(recovered.content).toEqual({ ...draft.content, title: 'Recovered copy' });
+      expect(await readFile(file, 'utf8')).toBe('{broken');
+      expect(await page.evaluate(() => sessionStorage.getItem('chat-canvas-recovery-v1:damaged'))).toBeNull();
+      const expectedFailure = 'console.error: Failed to load resource: the server responded with a status of 500 (Internal Server Error)';
+      expect(browserErrors.filter((error) => error === expectedFailure)).toHaveLength(2);
+      for (let index = browserErrors.length - 1; index >= 0; index -= 1) {
+        if (browserErrors[index] === expectedFailure) browserErrors.splice(index, 1);
+      }
+      assertNoBrowserErrors();
+    });
+  }, 120_000);
+
   test('recovers autosave after a transient failure and preserves the original when copying', async () => {
     await withChromiumFixture('canvas-save-recovery', async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {
       await integration.client.post(endpoint, {

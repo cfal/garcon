@@ -214,7 +214,11 @@ export class CanvasController {
 			this.#use(await this.api.get(id));
 			if (this.session && !this.session.dirty) this.session.discardRecovery();
 		} catch (error) {
-			if (!(error instanceof ApiError) || error.status !== 404) throw error;
+			if (
+				!(error instanceof ApiError) ||
+				(error.status !== 404 && error.errorCode !== 'CANVAS_CORRUPT')
+			)
+				throw error;
 			const draft = this.recovery.read(id);
 			if (!draft) throw error;
 			this.#use(draft);
