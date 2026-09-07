@@ -84,6 +84,14 @@ function responseAt(directoryPath: string, entries: FileTreeEntry[]): FileTreeRe
 
 function renderReady(entries: FileTreeEntry[]) {
 	const store = new FileTreeStore();
+	store.setProjectState({
+		kind: 'available',
+		project: {
+			chatId: 'chat-1',
+			projectPath: '/workspace/project',
+			effectiveProjectKey: '/workspace/project',
+		},
+	});
 	store.navigation = { kind: 'ready', response: response(entries) };
 	const onFileSelect = vi.fn();
 	const result = render(FileTree, {
