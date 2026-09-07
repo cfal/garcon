@@ -34,6 +34,10 @@ import {
 	isTranscriptSearchIndexPartial,
 	waitForTranscriptIndexRetry,
 } from '$lib/sidebar/search/transcript-search-request.js';
+import {
+	facetFilteredChats,
+	mergeTranscriptMatches,
+} from '$lib/sidebar/search/transcript-search-merge.js';
 import type {
 	ChatSearchIndexStatus,
 	ChatSearchPage,
@@ -160,7 +164,10 @@ export class SidebarSearchStore {
 		const metadataMatches = isEmptyFilter(this.#parsedQuery)
 			? chats
 			: chats.filter((chat) => matchesChatFilter(chat, this.#parsedQuery));
-		return this.mergeTranscriptMatches(this.activeQuery, metadataMatches);
+		return mergeTranscriptMatches(this.activeQuery, metadataMatches, chats, {
+			query: this.transcriptSearchQuery,
+			results: this.transcriptSearchResults,
+		});
 	});
 	#dialogFilteredChats = $derived.by(() => {
 		const chats = this.deps.getChats();
@@ -169,7 +176,15 @@ export class SidebarSearchStore {
 	});
 	#dialogDisplayChats = $derived.by(() => {
 		const sort = this.deps.getSearchResultSort();
-		const merged = this.mergeTranscriptMatches(this.draftQuery, this.#dialogFilteredChats);
+		const merged = mergeTranscriptMatches(
+			this.draftQuery,
+			this.#dialogFilteredChats,
+			this.deps.getChats(),
+			{
+				query: this.transcriptSearchQuery,
+				results: this.transcriptSearchResults,
+			},
+		);
 		const sorted = sortChatSearchResultsWithCommittedTimeOrder(
 			merged,
 			sort,
@@ -214,23 +229,27 @@ export class SidebarSearchStore {
 
 	get canLoadMoreTranscriptResults(): boolean {
 		const nextOffset = this.transcriptSearchPage?.nextOffset;
-		return this.transcriptSearchQuery === this.draftQuery
-			&& this.transcriptSearchPage?.hasMore === true
-			&& nextOffset !== null
-			&& nextOffset !== undefined
-			&& nextOffset < TRANSCRIPT_SEARCH_LOADED_LIMIT
-			&& !this.transcriptSearchLoading
-			&& !this.transcriptSearchLoadingMore
-			&& !this.transcriptSearchRevalidating
-			&& !this.transcriptSearchRevalidationError;
+		return (
+			this.transcriptSearchQuery === this.draftQuery &&
+			this.transcriptSearchPage?.hasMore === true &&
+			nextOffset !== null &&
+			nextOffset !== undefined &&
+			nextOffset < TRANSCRIPT_SEARCH_LOADED_LIMIT &&
+			!this.transcriptSearchLoading &&
+			!this.transcriptSearchLoadingMore &&
+			!this.transcriptSearchRevalidating &&
+			!this.transcriptSearchRevalidationError
+		);
 	}
 
 	get transcriptSearchLimitReached(): boolean {
 		const nextOffset = this.transcriptSearchPage?.nextOffset;
-		return this.transcriptSearchPage?.hasMore === true
-			&& nextOffset !== null
-			&& nextOffset !== undefined
-			&& nextOffset >= TRANSCRIPT_SEARCH_LOADED_LIMIT;
+		return (
+			this.transcriptSearchPage?.hasMore === true &&
+			nextOffset !== null &&
+			nextOffset !== undefined &&
+			nextOffset >= TRANSCRIPT_SEARCH_LOADED_LIMIT
+		);
 	}
 
 	// Revalidates the transcript view before scrolling to a durable row.
@@ -350,6 +369,20 @@ export class SidebarSearchStore {
 
 	suspendSearchDialog(): void {
 		this.searchDialogOpen = false;
+		this.highlightedResultIndex = 0;
+	}
+
+	// Clears every search dialog state without the suspend/resume origin
+	// paths, so a dialog cluster that outlived a mobile drawer remount can
+	// never reopen. Applied filters (activeQuery) survive.
+	resetDialogs(): void {
+		this.managerOrigin = null;
+		this.editorOrigin = null;
+		this.editorState = null;
+		this.managerOpen = false;
+		this.deleteConfirmation = null;
+		this.searchDialogOpen = false;
+		this.draftQuery = this.activeQuery;
 		this.highlightedResultIndex = 0;
 	}
 
@@ -513,8 +546,9 @@ export class SidebarSearchStore {
 		const previousStatus = this.transcriptSearchStatus;
 		this.transcriptSearchStatus = status;
 		if (!this.transcriptSearchQuery) return;
-		const searchIndexChanged = previousStatus?.phase !== status.phase
-			|| status.chats.indexed > (previousStatus?.chats.indexed ?? -1);
+		const searchIndexChanged =
+			previousStatus?.phase !== status.phase ||
+			status.chats.indexed > (previousStatus?.chats.indexed ?? -1);
 		if (!searchIndexChanged) return;
 		if (this.transcriptSearchOperation || this.transcriptSearchIndexing) {
 			this.scheduleTranscriptSearchRevalidation('index');
@@ -539,7 +573,7 @@ export class SidebarSearchStore {
 			return;
 		}
 
-		const candidateChats = this.facetFilteredChats(spec);
+		const candidateChats = facetFilteredChats(spec, this.deps.getChats());
 		const candidateIds = candidateChats.map((chat) => chat.id);
 		const sort = this.deps.getSearchResultSort();
 		const committedTimeOrder = captureChatSearchTimeOrder(candidateChats, sort);
@@ -609,11 +643,12 @@ export class SidebarSearchStore {
 						signal: abort.signal,
 					});
 				} catch (error) {
-					const retryableIndexError = error instanceof ApiError
-						&& error.retryable
-						&& (error.errorCode === 'SEARCH_INDEX_BUSY'
-							|| error.errorCode === 'SEARCH_INDEX_UNAVAILABLE'
-							|| error.errorCode === 'SEARCH_TIMEOUT');
+					const retryableIndexError =
+						error instanceof ApiError &&
+						error.retryable &&
+						(error.errorCode === 'SEARCH_INDEX_BUSY' ||
+							error.errorCode === 'SEARCH_INDEX_UNAVAILABLE' ||
+							error.errorCode === 'SEARCH_TIMEOUT');
 					if (!retryableIndexError || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) throw error;
 					this.transcriptSearchLoading = false;
 					this.transcriptSearchIndexing = true;
@@ -640,8 +675,7 @@ export class SidebarSearchStore {
 				return;
 			}
 		} catch (error) {
-			if (isAbortError(error) || !this.isCurrentTranscriptRequest(requestId, abort.signal))
-				return;
+			if (isAbortError(error) || !this.isCurrentTranscriptRequest(requestId, abort.signal)) return;
 			if (error instanceof ApiError && error.errorCode === 'TRANSCRIPT_SEARCH_DISABLED') {
 				this.clearTranscriptSearch();
 				return;
@@ -672,7 +706,7 @@ export class SidebarSearchStore {
 		const signal = this.transcriptSearchAbort?.signal;
 		const query = this.transcriptSearchQuery;
 		const spec = parseChatSearch(query);
-		const candidateIds = this.facetFilteredChats(spec).map((chat) => chat.id);
+		const candidateIds = facetFilteredChats(spec, this.deps.getChats()).map((chat) => chat.id);
 		this.transcriptSearchPageError = null;
 		this.transcriptSearchLoadingMore = true;
 		this.transcriptSearchOperation = 'append';
@@ -699,17 +733,18 @@ export class SidebarSearchStore {
 				]).slice(0, TRANSCRIPT_SEARCH_LOADED_LIMIT);
 				this.transcriptSearchPage = result.page;
 				this.transcriptSearchIndex = result.index;
-				this.transcriptSearchIndexing = this.transcriptSearchIndexing
-					|| isTranscriptSearchIndexPartial(result.index);
+				this.transcriptSearchIndexing =
+					this.transcriptSearchIndexing || isTranscriptSearchIndexPartial(result.index);
 				if (!this.transcriptSearchIndexing) {
 					this.transcriptSearchPendingIndexCatchUp = false;
 				}
 				this.restoreHighlightedChat(highlightedChatId);
 				const visibleCount = this.dialogDisplayChats.length;
 				const added = Math.max(0, visibleCount - previousVisibleCount);
-				this.transcriptSearchAnnouncement = added > 0
-					? m.sidebar_search_more_chats_shown({ added, total: visibleCount })
-					: m.sidebar_search_more_matches_loaded({ total: visibleCount });
+				this.transcriptSearchAnnouncement =
+					added > 0
+						? m.sidebar_search_more_chats_shown({ added, total: visibleCount })
+						: m.sidebar_search_more_matches_loaded({ total: visibleCount });
 				this.transcriptSearchAnnouncementVersion += 1;
 			})
 			.catch((error) => {
@@ -760,18 +795,15 @@ export class SidebarSearchStore {
 		const generationSignal = this.transcriptSearchAbort?.signal;
 		const query = this.transcriptSearchQuery;
 		const spec = parseChatSearch(query);
-		const candidateChats = this.facetFilteredChats(spec);
+		const candidateChats = facetFilteredChats(spec, this.deps.getChats());
 		const candidateIds = candidateChats.map((chat) => chat.id);
 		if (candidateIds.length === 0) return Promise.resolve();
 		const sort = this.deps.getSearchResultSort();
 		const committedTimeOrder = captureChatSearchTimeOrder(candidateChats, sort);
-		const currentFrontier = this.transcriptSearchPage.nextOffset
-			?? this.transcriptSearchPage.total;
+		const currentFrontier = this.transcriptSearchPage.nextOffset ?? this.transcriptSearchPage.total;
 		const targetOffset = Math.min(
 			TRANSCRIPT_SEARCH_LOADED_LIMIT,
-			this.transcriptSearchPage.total === 0
-				? this.transcriptSearchPage.limit
-				: currentFrontier,
+			this.transcriptSearchPage.total === 0 ? this.transcriptSearchPage.limit : currentFrontier,
 		);
 		const abort = new AbortController();
 		const unlinkAbort = forwardAbort(generationSignal, abort);
@@ -812,12 +844,13 @@ export class SidebarSearchStore {
 			})
 			.catch((error) => {
 				if (!this.isCurrentTranscriptRequest(requestId, generationSignal)) return;
-				this.transcriptSearchContentDirty = this.transcriptSearchContentDirty
-					|| consumedContentDirty;
-				this.transcriptSearchPendingIndexCatchUp = this.transcriptSearchPendingIndexCatchUp
-					|| consumedIndexCatchUp;
+				this.transcriptSearchContentDirty =
+					this.transcriptSearchContentDirty || consumedContentDirty;
+				this.transcriptSearchPendingIndexCatchUp =
+					this.transcriptSearchPendingIndexCatchUp || consumedIndexCatchUp;
 				this.transcriptSearchRevalidationError = m.sidebar_search_update_error();
-				if (!isAbortError(error)) this.deps.logError?.('Failed to update transcript search results:', error);
+				if (!isAbortError(error))
+					this.deps.logError?.('Failed to update transcript search results:', error);
 			})
 			.finally(() => {
 				clearTimeout(timeout);
@@ -839,28 +872,38 @@ export class SidebarSearchStore {
 
 	private searchTranscriptPage(options: TranscriptSearchPageRequest): Promise<ChatSearchResponse> {
 		const search = this.deps.searchChatTranscripts ?? searchChatTranscriptsApi;
-		return search({
-			query: options.query,
-			textTokens: options.textTokens,
-			chatIds: options.chatIds,
-			sort: options.sort ?? this.deps.getSearchResultSort(),
-			mode: options.mode,
-			offset: options.offset,
-			limit: options.limit,
-			snippetLimit: options.snippetLimit,
-		}, { signal: options.signal });
+		return search(
+			{
+				query: options.query,
+				textTokens: options.textTokens,
+				chatIds: options.chatIds,
+				sort: options.sort ?? this.deps.getSearchResultSort(),
+				mode: options.mode,
+				offset: options.offset,
+				limit: options.limit,
+				snippetLimit: options.snippetLimit,
+			},
+			{ signal: options.signal },
+		);
 	}
 
 	private scheduleDeferredTranscriptSearchRevalidation(): void {
-		if (this.transcriptSearchOperation || this.transcriptSearchRevalidationError
-			|| !this.transcriptSearchQuery || !this.transcriptSearchPage) return;
+		if (
+			this.transcriptSearchOperation ||
+			this.transcriptSearchRevalidationError ||
+			!this.transcriptSearchQuery ||
+			!this.transcriptSearchPage
+		)
+			return;
 		if (this.transcriptSearchPendingIndexCatchUp && !this.transcriptSearchIndexing) {
 			this.transcriptSearchPendingIndexCatchUp = false;
 		}
 		if (!this.transcriptSearchContentDirty && !this.transcriptSearchPendingIndexCatchUp) return;
 		if (this.transcriptSearchRevalidationTimer) return;
-		const cadenceDelay = this.lastTranscriptSearchRevalidationStartedAt
-			+ TRANSCRIPT_SEARCH_REVALIDATION_MIN_INTERVAL_MS - performance.now();
+		const cadenceDelay =
+			this.lastTranscriptSearchRevalidationStartedAt +
+			TRANSCRIPT_SEARCH_REVALIDATION_MIN_INTERVAL_MS -
+			performance.now();
 		const delay = Math.max(TRANSCRIPT_SEARCH_REVALIDATION_DELAY_MS, cadenceDelay);
 		this.transcriptSearchRevalidationTimer = setTimeout(() => {
 			this.transcriptSearchRevalidationTimer = null;
@@ -906,9 +949,10 @@ export class SidebarSearchStore {
 			return;
 		}
 		const index = this.dialogDisplayChats.findIndex((chat) => chat.id === chatId);
-		this.highlightedResultIndex = index >= 0
-			? index
-			: Math.min(this.highlightedResultIndex, Math.max(0, this.dialogDisplayChats.length - 1));
+		this.highlightedResultIndex =
+			index >= 0
+				? index
+				: Math.min(this.highlightedResultIndex, Math.max(0, this.dialogDisplayChats.length - 1));
 	}
 
 	private restoreEditorOrigin(): void {
@@ -921,34 +965,6 @@ export class SidebarSearchStore {
 		if (origin === 'search-dialog') {
 			this.resumeSearchDialog();
 		}
-	}
-
-	private facetFilteredChats(spec: ChatFilterSpec): ChatSessionRecord[] {
-		const facetSpec: ChatFilterSpec = { ...spec, textTokens: [] };
-		const chats = this.deps.getChats();
-		if (isEmptyFilter(facetSpec)) return chats;
-		return chats.filter((chat) => matchesChatFilter(chat, facetSpec));
-	}
-
-	private mergeTranscriptMatches(
-		query: string,
-		metadataMatches: ChatSessionRecord[],
-	): ChatSessionRecord[] {
-		if (this.transcriptSearchQuery !== query || this.transcriptSearchResults.length === 0) {
-			return metadataMatches;
-		}
-		const chatsById = new Map(this.deps.getChats().map((chat) => [chat.id, chat]));
-		const candidateIds = new Set(
-			this.facetFilteredChats(parseChatSearch(query)).map((chat) => chat.id),
-		);
-		const seen = new Set(metadataMatches.map((chat) => chat.id));
-		const transcriptOnly = this.transcriptSearchResults
-			.map((result) => chatsById.get(result.chatId))
-			.filter((chat): chat is ChatSessionRecord => {
-				if (!chat) return false;
-				return candidateIds.has(chat.id) && !seen.has(chat.id);
-			});
-		return [...metadataMatches, ...transcriptOnly];
 	}
 
 	private createEditorState(query: string): SavedSearchEditorState {

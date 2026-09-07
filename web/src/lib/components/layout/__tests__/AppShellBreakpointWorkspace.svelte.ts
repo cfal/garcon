@@ -32,6 +32,8 @@ export class AppShellLocalSettingsState {
 export class AppShellBreakpointWorkspace {
 	readonly layout = new WorkspaceLayoutStore(canonicalWorkspaceSnapshot());
 	isMobile = $state(false);
+	// Mirrors the app-shell drawer state reactively so tests can flip it.
+	sidebarOpen = $state(false);
 	enterCalls = 0;
 	exitCalls = 0;
 	showChatCalls = 0;
