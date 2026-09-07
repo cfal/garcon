@@ -23,7 +23,7 @@
 	);
 	const commitRenderer = lazyRenderer(() => import('$lib/components/git/CommitSurface.svelte'));
 	const chatMapRenderer = lazyRenderer(
-		() => import('$lib/components/chat-map/ChatMapPanel.svelte'),
+		() => import('$lib/components/chat-map/ChatMapSurface.svelte'),
 	);
 </script>
 

@@ -51,6 +51,7 @@ Garcon keeps the full loop together:
 - **Build the workspace around the task.** Tile up to four resizable windows, keep each window's chats, files, terminals, Git, history, pull requests, and Chat Map in local tabs, then drag tabs or chats between windows.
 - **Steer without waiting.** Queue the next instruction, interrupt or redirect the active turn, approve tool use, answer agent questions, pause the queue, or stop work in place.
 - **Review the real change.** Browse and edit files, use a terminal, inspect rendered reasoning, tool calls, edits, and diagrams, then stage individual lines, hunks, files, or folders.
+- **Organize chats visually.** Open Canvases from Chat Map to arrange live chat cards into named boxes, connect related work, and save multiple boards. Switch to the grouped list for touch and keyboard editing.
 - **Coordinate agents visibly.** Send provenance-labeled messages between chats, record delegated parents, and navigate fork, handoff, and delegation lineage in Chat Map.
 - **Find and organize the work.** Group chats by activity or project, search metadata and indexed transcripts, save filters, tag, pin, archive, share read-only snapshots, and schedule prompts.
 - **Move context deliberately.** Fork where the provider supports it, export complete Markdown or XML transcripts, create token-budgeted handoff artifacts, or delegate into a fresh chat.
