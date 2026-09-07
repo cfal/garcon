@@ -132,6 +132,27 @@ describe('ChatBoardFocusController', () => {
 		expect(document.activeElement).toBe(selector);
 	});
 
+	it('preserves a control focused before pending restoration completes', () => {
+		const root = document.createElement('section');
+		root.innerHTML = `
+			<button type="button" data-chat-board-selector>Board selector</button>
+			<section data-chat-board-column-id="a">
+				<h2 tabindex="-1" data-chat-board-lane-heading="a">Ready</h2>
+			</section>
+		`;
+		document.body.append(root);
+		const controller = new ChatBoardFocusController();
+		controller.setRoot(root);
+		root.querySelector<HTMLHeadingElement>('[data-chat-board-lane-heading]')!.focus();
+		controller.preparePresentationChange('wide', 'a');
+
+		const selector = root.querySelector<HTMLButtonElement>('[data-chat-board-selector]')!;
+		selector.focus();
+		controller.completePresentationChange();
+
+		expect(document.activeElement).toBe(selector);
+	});
+
 	it('does not steal focus owned outside the board', () => {
 		const outside = document.createElement('button');
 		const root = document.createElement('section');

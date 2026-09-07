@@ -72,6 +72,8 @@ export class ChatBoardFocusController {
 		const pending = this.#pending;
 		this.#pending = null;
 		if (!pending) return;
+		const active = document.activeElement;
+		if (active instanceof HTMLElement && active !== document.body) return;
 		const { target, band, activeColumnId } = pending;
 		if (
 			band === 'narrow' &&

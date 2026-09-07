@@ -177,6 +177,36 @@ async function resizeBoardDuringRemount(
   );
 }
 
+async function expectTransitionFocus(
+  fixture: ChromiumFixture,
+  columnId: string,
+): Promise<void> {
+  try {
+    await fixture.page.waitForFunction(
+      ({ expectedColumnId }) => {
+        const active = document.activeElement;
+        return (
+          active instanceof HTMLElement &&
+          active.matches(
+            `[data-chat-board-column-id="${expectedColumnId}"] [data-chat-board-occurrence] [data-chat-board-focus-target="transition"]`,
+          )
+        );
+      },
+      { expectedColumnId: columnId },
+    );
+  } catch (error) {
+    const actual = await fixture.page.evaluate(() => ({
+      active: document.activeElement?.outerHTML ?? null,
+      presentationBand: document.querySelector('[data-chat-board-panel]')?.getAttribute(
+        'data-presentation-band',
+      ),
+    }));
+    throw new Error(`Expected transition focus in column ${columnId}, received ${JSON.stringify(actual)}.`, {
+      cause: error,
+    });
+  }
+}
+
 describe('Chromium Chat Board interactions', () => {
   test('restores the invoking action and preserves lane scroll through responsive remounts', async () => {
     await withChromiumFixture('chat-board-responsive-interactions', async (fixture, markPhase) => {
@@ -233,22 +263,13 @@ describe('Chromium Chat Board interactions', () => {
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
 
       markPhase('coalescing consecutive presentation changes');
-      await invoker.focus();
-      await resizeBoardDuringRemount(fixture, 480, 1_000);
-      await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
-      await fixture.page.waitForFunction(
-        ({ columnId }) => {
-          const active = document.activeElement;
-          return (
-            active instanceof HTMLElement &&
-            active.matches(
-              `[data-chat-board-column-id="${columnId}"] [data-chat-board-occurrence] [data-chat-board-focus-target="transition"]`,
-            )
-          );
-        },
-        { columnId: READY_COLUMN_ID },
-      );
-      expect(await invoker.evaluate((element) => document.activeElement === element)).toBe(true);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await invoker.focus();
+        await resizeBoardDuringRemount(fixture, 480, 1_000);
+        await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
+        await expectTransitionFocus(fixture, READY_COLUMN_ID);
+        expect(await invoker.evaluate((element) => document.activeElement === element)).toBe(true);
+      }
       fixture.assertNoBrowserErrors();
     });
   });
