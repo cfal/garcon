@@ -46,7 +46,7 @@
 			</span>
 		{:else if preview === null}
 			<TriangleAlert
-				class="h-4 w-4 shrink-0 text-status-warning-foreground"
+				class="h-4 w-4 shrink-0 text-status-warning-muted-foreground"
 				data-slot="new-chat-preambles-unavailable-icon"
 				aria-hidden="true"
 			/>
@@ -114,7 +114,7 @@
 			{/if}
 			{#if unavailableCount > 0}
 				<span
-					class="inline-flex shrink-0 items-center text-status-warning-foreground"
+					class="inline-flex shrink-0 items-center text-status-warning-muted-foreground"
 					data-slot="new-chat-preambles-unavailable-count"
 					role="img"
 					aria-label={m.preamble_selection_unavailable_count({ count: unavailableCount })}

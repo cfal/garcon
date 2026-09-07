@@ -23,6 +23,7 @@
 		choice = { mode: 'defaults' },
 		defaultsIds = draftIds,
 		previewLoading = false,
+		canLoadAutomaticPreview = true,
 		onMove = () => undefined,
 		onRemove = () => undefined,
 		onAdd = () => undefined,
@@ -44,6 +45,7 @@
 		choice?: { mode: 'defaults' } | { mode: 'explicit'; orderedPreambleIds: readonly PreambleId[] };
 		defaultsIds?: readonly PreambleId[];
 		previewLoading?: boolean;
+		canLoadAutomaticPreview?: boolean;
 		onMove?: (id: PreambleId, direction: 'up' | 'down') => void;
 		onRemove?: (id: PreambleId) => void;
 		onAdd?: (id: PreambleId) => void;
@@ -79,6 +81,7 @@
 		{choice}
 		{defaultsIds}
 		{previewLoading}
+		{canLoadAutomaticPreview}
 		{projection}
 		{canonicalProjectPath}
 		{onClose}

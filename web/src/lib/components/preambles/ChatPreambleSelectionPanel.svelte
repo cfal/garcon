@@ -127,10 +127,13 @@
 					<div
 						data-slot="chat-preamble-selection-row"
 						class="flex min-w-0 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
-						title={reason ? reasonLabel(reason) : undefined}
 					>
 						<div class="min-w-0 flex-1">
-							<span class="block break-words" data-slot="chat-preamble-selection-row-title">
+							<span
+								class="block break-words"
+								data-slot="chat-preamble-selection-row-title"
+								title={reason ? reasonLabel(reason) : undefined}
+							>
 								{preamble.title}
 							</span>
 							{#if reason}

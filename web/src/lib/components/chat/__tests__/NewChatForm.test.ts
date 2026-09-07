@@ -11,6 +11,7 @@ import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import type { PreamblesSnapshot } from '$shared/preambles';
+import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -245,6 +246,50 @@ describe('NewChatForm', () => {
 		await waitFor(() => expect(screen.queryByText('Loading preambles...')).toBeNull());
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce();
 		expect(screen.getByText('No preambles will be applied')).toBeTruthy();
+	});
+
+	it('refreshes previews when the catalog is newer and after later revisions', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const previewResponse = (
+			catalogRevision: number,
+			id: string,
+			title: string,
+		): PreambleSelectionPreviewResponse => ({
+			success: true,
+			canonicalProjectPath: '/workspace/project',
+			orderedPreambleIds: [id],
+			projection: {
+				catalogRevision,
+				eligiblePreambles: [{ id, title }],
+				unavailable: [],
+			},
+		});
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockResolvedValueOnce(previewResponse(1, '3502b645-222b-49d2-ac39-1c91f9fb1174', 'First'))
+			.mockResolvedValueOnce(previewResponse(2, 'e767feba-8cbf-4ec4-9b16-f907bcb40836', 'Second'))
+			.mockResolvedValueOnce(previewResponse(3, 'fe5ff036-59fc-40ad-86ab-e069f96713c8', 'Third'));
+		let preambles!: PreamblesStore;
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: null,
+				onPreambles: (store) => (preambles = store),
+			},
+		});
+
+		expect(await screen.findByText('First')).toBeTruthy();
+		preambles.applySnapshot({ revision: 2, preambles: [] });
+		expect(await screen.findByText('Second')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2);
+
+		preambles.applySnapshot({ revision: 3, preambles: [] });
+		expect(await screen.findByText('Third')).toBeTruthy();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(3);
 	});
 
 	it('reveals the form after reseeding while the current path is invalid', async () => {

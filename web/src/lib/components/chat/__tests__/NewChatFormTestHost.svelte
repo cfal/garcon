@@ -47,6 +47,7 @@
 		onStartChat?: (config: NewChatConfig, chatId: ChatId) => void;
 		preambleSnapshot?: PreamblesSnapshot | null;
 		loadPreambles?: () => Promise<PreamblesSnapshot>;
+		onPreambles?: (store: PreamblesStore) => void;
 	}
 
 	let {
@@ -61,6 +62,7 @@
 		onStartChat = () => {},
 		preambleSnapshot = { revision: 0, preambles: [] },
 		loadPreambles,
+		onPreambles,
 	}: Props = $props();
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
@@ -87,6 +89,7 @@
 	const preambles = new PreamblesStore(preambleDeps);
 	const initialPreambleSnapshot = untrack(() => preambleSnapshot);
 	if (initialPreambleSnapshot) preambles.applySnapshot(initialPreambleSnapshot);
+	untrack(() => onPreambles?.(preambles));
 	setPreambles(preambles);
 	setCanonicalWorkspaceLayout();
 

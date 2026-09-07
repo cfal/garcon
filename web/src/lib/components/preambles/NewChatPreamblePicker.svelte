@@ -14,6 +14,7 @@
 		choice: NewChatPreambleChoice;
 		defaultsIds: readonly PreambleId[];
 		previewLoading: boolean;
+		canLoadAutomaticPreview: boolean;
 		canonicalProjectPath: string;
 		projection: PreambleSelectionProjection | null;
 		onClose: () => void;
@@ -34,6 +35,7 @@
 		choice,
 		defaultsIds,
 		previewLoading,
+		canLoadAutomaticPreview,
 		canonicalProjectPath,
 		projection,
 		onClose,
@@ -199,6 +201,7 @@
 	}
 
 	function handleReset(): void {
+		if (!canLoadAutomaticPreview) return;
 		if (choice.mode === 'defaults' && projection !== null) {
 			draftMode = 'defaults';
 			draftIds = [...defaultsIds];
@@ -211,6 +214,7 @@
 
 	function retryPreview(): void {
 		if (draftMode === 'defaults' && choice.mode === 'explicit') {
+			if (!canLoadAutomaticPreview) return;
 			void loadAutomaticDraft();
 			return;
 		}
@@ -291,7 +295,7 @@
 					variant="ghost"
 					size="sm"
 					data-slot="new-chat-preamble-reset-defaults"
-					disabled={draftMode === 'defaults' || automaticPreviewLoading}
+					disabled={draftMode === 'defaults' || automaticPreviewLoading || !canLoadAutomaticPreview}
 					onclick={handleReset}
 				>
 					{m.preamble_selection_reset_defaults()}

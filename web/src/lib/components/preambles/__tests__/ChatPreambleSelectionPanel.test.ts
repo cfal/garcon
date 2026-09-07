@@ -107,7 +107,10 @@ describe('ChatPreambleSelectionPanel', () => {
 		const rows = slots('chat-preamble-selection-row');
 		expect(rows).toHaveLength(3);
 		const disabledRow = rows.find((row) => row.textContent?.includes('Disabled conventions'))!;
-		expect(disabledRow.getAttribute('title')).toBe('Disabled globally');
+		expect(within(disabledRow).getByText('Disabled conventions').getAttribute('title')).toBe(
+			'Disabled globally',
+		);
+		expect(disabledRow.getAttribute('title')).toBeNull();
 		const missingRow = slot('chat-preamble-selection-missing-row');
 		expect(within(missingRow).getByText('Deleted or unavailable')).toBeTruthy();
 		await fireEvent.click(within(missingRow).getByRole('switch', { name: /Remove/ }));
@@ -128,8 +131,12 @@ describe('ChatPreambleSelectionPanel', () => {
 		const candidates = slots('chat-preamble-selection-row');
 		const disabled = candidates.find((row) => row.textContent?.includes('Disabled conventions'))!;
 		const scoped = candidates.find((row) => row.textContent?.includes('Scoped conventions'))!;
-		expect(disabled.getAttribute('title')).toBe('Disabled globally');
-		expect(scoped.getAttribute('title')).toBe('Outside this project');
+		expect(within(disabled).getByText('Disabled conventions').getAttribute('title')).toBe(
+			'Disabled globally',
+		);
+		expect(within(scoped).getByText('Scoped conventions').getAttribute('title')).toBe(
+			'Outside this project',
+		);
 		expect(document.querySelector('[data-slot="chat-preamble-selection-row-status"]')).toBeNull();
 		expect((within(disabled).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
 		expect((within(scoped).getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
@@ -257,6 +264,25 @@ describe('NewChatPreamblePicker', () => {
 		await fireEvent.click(slot('new-chat-preamble-apply'));
 		expect(applyDefaults).toHaveBeenCalledOnce();
 		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it('disables Reset to defaults when an automatic preview cannot be loaded', async () => {
+		const loadAutomaticPreview = vi.fn();
+		render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_DISABLED],
+			choice: { mode: 'explicit', orderedPreambleIds: [ID_DISABLED] },
+			projection: unavailableProjection,
+			canLoadAutomaticPreview: false,
+			onLoadAutomaticPreview: loadAutomaticPreview,
+		});
+
+		const reset = slot('new-chat-preamble-reset-defaults') as HTMLButtonElement;
+		expect(reset.disabled).toBe(true);
+		await fireEvent.click(reset);
+		expect(loadAutomaticPreview).not.toHaveBeenCalled();
+		expect(document.querySelector('[data-slot="new-chat-preamble-preview-retry"]')).toBeNull();
 	});
 
 	it('discards a local Reset to defaults on Cancel', async () => {

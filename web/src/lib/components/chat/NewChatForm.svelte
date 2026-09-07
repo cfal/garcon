@@ -242,6 +242,12 @@
 		if (revision === undefined) return;
 		if (observedPreambleCatalogRevision === null) {
 			observedPreambleCatalogRevision = revision;
+			untrack(() => {
+				const previewRevision = form.preambles.preview?.catalogRevision;
+				if (previewRevision !== undefined && previewRevision < revision) {
+					form.preambles.catalogChanged();
+				}
+			});
 			return;
 		}
 		if (revision === observedPreambleCatalogRevision) return;
@@ -741,6 +747,7 @@
 					choice={form.preambles.choice}
 					defaultsIds={(form.preambles.preview?.eligiblePreambles ?? []).map((entry) => entry.id)}
 					previewLoading={form.preambles.previewLoading}
+					canLoadAutomaticPreview={form.preambles.canLoadAutomaticPreview}
 					canonicalProjectPath={form.preambles.canonicalProjectPath || form.trimmedPath}
 					projection={form.preambles.preview}
 					onClose={() => (preamblePickerOpen = false)}
@@ -756,6 +763,7 @@
 			</div>
 
 			<div
+				data-slot="new-chat-composer"
 				class="relative mt-3 min-h-[120px] border border-border rounded-lg"
 				aria-busy={promptTransformPending}
 			>
@@ -859,7 +867,7 @@
 			</div>
 
 			{#if form.attachedImages.length > 0}
-				<div class="mt-6 p-2 bg-muted/40 rounded-lg">
+				<div data-slot="new-chat-attachments" class="mt-6 p-2 bg-muted/40 rounded-lg">
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
 							<div class="relative group">

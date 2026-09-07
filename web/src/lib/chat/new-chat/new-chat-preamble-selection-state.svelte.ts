@@ -38,6 +38,10 @@ export class NewChatPreambleSelectionState {
 		return this.choice.mode === 'explicit' || this.preview !== null;
 	}
 
+	get canLoadAutomaticPreview(): boolean {
+		return this.options.trimmedPath.length > 0 && this.options.validationStatus === 'valid';
+	}
+
 	get orderedIds(): readonly PreambleId[] | undefined {
 		if (this.choice.mode === 'explicit') return this.choice.orderedPreambleIds;
 		return undefined;
@@ -124,7 +128,7 @@ export class NewChatPreambleSelectionState {
 
 	async loadAutomaticPreview(): Promise<PreambleSelectionPreviewResponse> {
 		const context = this.#previewContext();
-		if (!context.projectPath || this.options.validationStatus !== 'valid') {
+		if (!this.canLoadAutomaticPreview) {
 			throw new Error('Preamble defaults are unavailable for the current project path');
 		}
 		return preambleSelectionPreview({

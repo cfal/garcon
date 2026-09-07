@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { Buffer } from 'node:buffer';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CDPSession, Locator, Page } from 'playwright';
@@ -279,6 +280,54 @@ describe('Chromium preambles', () => {
         });
         expect(desktopLayout.overflow).toBeLessThanOrEqual(1);
         expect(desktopLayout.contentOverflow).toBeLessThanOrEqual(1);
+
+        const summaryComposerGap = await dialog.evaluate((element) => {
+          const summary = element.querySelector<HTMLElement>(
+            '[data-slot="new-chat-preambles-row"]',
+          );
+          const composer = element.querySelector<HTMLElement>('[data-slot="new-chat-composer"]');
+          if (!summary || !composer) throw new Error('Missing New Chat spacing targets.');
+          return composer.getBoundingClientRect().top - summary.getBoundingClientRect().bottom;
+        });
+        expect(summaryComposerGap).toBe(12);
+
+        await dialog.locator('input[type="file"]').setInputFiles({
+          name: 'spacing.png',
+          mimeType: 'image/png',
+          buffer: Buffer.from('synthetic image'),
+        });
+        await dialog.getByRole('button', { name: 'Remove attachment spacing.png' }).waitFor();
+        const composerAttachmentGap = await dialog.evaluate((element) => {
+          const composer = element.querySelector<HTMLElement>('[data-slot="new-chat-composer"]');
+          const attachments = element.querySelector<HTMLElement>(
+            '[data-slot="new-chat-attachments"]',
+          );
+          if (!composer || !attachments)
+            throw new Error('Missing New Chat attachment spacing targets.');
+          return attachments.getBoundingClientRect().top - composer.getBoundingClientRect().bottom;
+        });
+        expect(composerAttachmentGap).toBe(24);
+
+        markPhase('measuring the resolved compact desktop summary');
+        const compactDesktop: ViewportScenario = {
+          name: 'compact desktop',
+          width: 641,
+          height: 800,
+          touch: false,
+        };
+        await setViewport(fixture.page, cdp, compactDesktop);
+        await fixture.page.waitForFunction(() => matchMedia('(min-width: 640px)').matches);
+        const compactLayout = await newChatPreambleSummaryLayout(summary);
+        expect(compactLayout).toMatchObject({
+          height: loadingLayout.height,
+          flexWrap: 'nowrap',
+          whiteSpace: 'nowrap',
+          visiblePills: preambles.slice(0, 2).map((preamble) => preamble.title),
+          visibleOverflow: ['and 1 more'],
+          visibleChildrenContained: true,
+        });
+        expect(compactLayout.overflow).toBeLessThanOrEqual(1);
+        expect(compactLayout.contentOverflow).toBeLessThanOrEqual(1);
 
         markPhase('measuring the resolved narrow summary');
         await setViewport(fixture.page, cdp, narrow);
