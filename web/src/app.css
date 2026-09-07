@@ -162,6 +162,7 @@
 	--color-diff-deletion: hsl(var(--diff-deletion));
 	--color-diff-hunk: hsl(var(--diff-hunk));
 	--color-interactive-accent: hsl(var(--interactive-accent));
+	--color-interactive-accent-foreground: hsl(var(--interactive-accent-foreground));
 	--color-file-icon-code: hsl(var(--file-icon-code));
 	--color-file-icon-doc: hsl(var(--file-icon-doc));
 	--color-file-icon-image: hsl(var(--file-icon-image));

@@ -1,11 +1,11 @@
 function relativeLuminance(rgb: string): number {
-  const channels = rgb
-    .match(/[\d.]+/g)
-    ?.slice(0, 3)
-    .map(Number);
-  if (!channels || channels.length !== 3) {
+  const values = rgb.match(/[\d.]+/g)?.map(Number);
+  if (!values || values.length < 3) {
     throw new Error(`Unsupported color: ${rgb}`);
   }
+  const alpha = values[3] ?? 1;
+  if (alpha !== 1) throw new Error(`Color must be opaque: ${rgb}`);
+  const channels = values.slice(0, 3);
 
   const linear = channels.map((channel) => {
     const value = channel / 255;

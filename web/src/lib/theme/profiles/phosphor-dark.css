@@ -173,6 +173,7 @@
 	--diff-deletion: 0 78% 62%;
 	--diff-hunk: 187 92% 62%;
 	--interactive-accent: 187 92% 60%;
+	--interactive-accent-foreground: 160 70% 5%;
 	--file-icon-code: 142 66% 58%;
 	--file-icon-doc: 187 92% 62%;
 	--file-icon-image: 271 81% 72%;
@@ -213,8 +214,8 @@
 	--dialog-shadow: var(--elevation-dialog);
 	--primary-hover-shadow: var(--glow-primary);
 	--dialog-surface: hsl(var(--popover));
-	--scroll-area-thumb: hsl(var(--foreground) / 0.2);
-	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.3);
+	--scroll-area-thumb: hsl(var(--foreground) / 0.42);
+	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.58);
 	--switch-thumb-checked: hsl(var(--primary-foreground));
 	--switch-thumb-unchecked: hsl(var(--foreground));
 	--native-select-muted-background: hsl(var(--muted));

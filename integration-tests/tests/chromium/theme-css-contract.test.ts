@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
 import { contrastRatio } from "../../support/color-contrast";
 
@@ -9,6 +9,58 @@ const APP_URL = "http://theme-css-contract.test/";
 
 function declaredProperties(source: string): string[] {
   return [...new Set(source.match(/--[a-z0-9-]+(?=\s*:)/g) ?? [])].sort();
+}
+
+async function applyProfile(
+  page: Page,
+  profile: (typeof THEME_PROFILES)[number],
+): Promise<void> {
+  await page.evaluate((theme) => {
+    const root = document.documentElement;
+    root.dataset.theme = theme.id;
+    root.classList.toggle("dark", theme.colorScheme === "dark");
+    root.style.colorScheme = theme.colorScheme;
+  }, profile);
+}
+
+async function readRenderedColors(
+  page: Page,
+  selector: string,
+  pseudoElement?: string,
+): Promise<{ foreground: string; background: string; surface: string }> {
+  return page.locator(selector).evaluate((element, pseudo) => {
+    const surface = getComputedStyle(document.body).backgroundColor;
+    const style = getComputedStyle(element, pseudo);
+    const composite = (paint: string): string => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Missing canvas context");
+      context.fillStyle = surface;
+      context.fillRect(0, 0, 1, 1);
+      context.filter = style.filter;
+      context.fillStyle = paint;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue] = context
+        .getImageData(0, 0, 1, 1)
+        .data.slice(0, 3);
+      return `rgb(${red}, ${green}, ${blue})`;
+    };
+    return {
+      foreground: composite(style.color),
+      background: composite(style.backgroundColor),
+      surface,
+    };
+  }, pseudoElement);
+}
+
+async function readNormalAndHoveredColors(page: Page, selector: string) {
+  await page.mouse.move(0, 0);
+  const normal = await readRenderedColors(page, selector);
+  await page.locator(selector).hover();
+  const hovered = await readRenderedColors(page, selector);
+  return { normal, hovered };
 }
 
 describe("compiled theme CSS", () => {
@@ -64,13 +116,13 @@ describe("compiled theme CSS", () => {
             <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Input placeholder">
             <textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
           </div>
-          <button data-git-action="commit" class="bg-git-action-commit text-git-action-foreground">Commit</button>
-          <button data-git-action="commit hover" class="bg-git-action-commit-hover text-git-action-foreground">Commit</button>
-          <button data-git-action="pull" class="bg-git-action-pull text-git-action-foreground">Pull</button>
-          <button data-git-action="pull hover" class="bg-git-action-pull-hover text-git-action-foreground">Pull</button>
-          <button data-git-action="push" class="bg-git-action-push text-git-action-foreground">Push</button>
-          <button data-git-action="push hover" class="bg-git-action-push-hover text-git-action-foreground">Push</button>
+          <button id="git-action-commit" class="bg-git-action-commit text-git-action-foreground hover:bg-git-action-commit-hover">Commit</button>
+          <button id="git-action-pull" class="bg-git-action-pull text-git-action-foreground hover:bg-git-action-pull-hover">Pull</button>
+          <button id="git-action-push" class="bg-git-action-push text-git-action-foreground hover:bg-git-action-push-hover">Push</button>
           <span id="interactive-accent-text" class="bg-interactive-accent/10 text-interactive-accent">Selected file</span>
+          <button id="filled-interactive-accent" class="bg-interactive-accent text-interactive-accent-foreground hover:brightness-110">Save</button>
+          <button id="stage-action" class="bg-git-added/20 text-git-added hover:bg-git-added/30">Stage</button>
+          <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
           <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
@@ -124,9 +176,9 @@ describe("compiled theme CSS", () => {
         };
       });
       expect(colorblindValues).toEqual({
-        lightAdded: "210 80% 43%",
-        lightDeleted: "30 90% 50%",
-        darkAdded: "210 85% 65%",
+        lightAdded: "210 80% 30%",
+        lightDeleted: "30 90% 35%",
+        darkAdded: "210 85% 77%",
         darkDeleted: "30 92% 65%",
       });
 
@@ -158,10 +210,8 @@ describe("compiled theme CSS", () => {
       expect(radii).toEqual({ classic: "6px", phosphor: "12px" });
 
       for (const profile of THEME_PROFILES) {
-        const processingColors = await page.evaluate((theme) => {
-          const root = document.documentElement;
-          root.dataset.theme = theme.id;
-          root.classList.toggle("dark", theme.colorScheme === "dark");
+        await applyProfile(page, profile);
+        const processingColors = await page.evaluate(() => {
           return [
             ...document.querySelectorAll<HTMLElement>(
               "[data-processing-surface]",
@@ -177,75 +227,103 @@ describe("compiled theme CSS", () => {
               surface: getComputedStyle(surface).backgroundColor,
             };
           });
-        }, profile);
+        });
         for (const colors of processingColors) {
           expect(
             contrastRatio(colors.indicator, colors.surface),
             `${profile.id} processing indicator on ${colors.name}`,
           ).toBeGreaterThanOrEqual(3);
         }
+
+        for (const action of ["commit", "pull", "push"] as const) {
+          const colors = await readNormalAndHoveredColors(
+            page,
+            `#git-action-${action}`,
+          );
+          expect(
+            contrastRatio(colors.normal.foreground, colors.normal.background),
+            `${profile.id} Git ${action} action`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            contrastRatio(colors.hovered.foreground, colors.hovered.background),
+            `${profile.id} Git ${action} action hover`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+
+        const selectedAccent = await readRenderedColors(
+          page,
+          "#interactive-accent-text",
+        );
+        expect(
+          contrastRatio(selectedAccent.foreground, selectedAccent.background),
+          `${profile.id} interactive accent text`,
+        ).toBeGreaterThanOrEqual(4.5);
+
+        const filledAccent = await readNormalAndHoveredColors(
+          page,
+          "#filled-interactive-accent",
+        );
+        for (const [interaction, colors] of Object.entries(filledAccent)) {
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile.id} filled interactive accent ${interaction}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+
+        const stageAction = await readNormalAndHoveredColors(
+          page,
+          "#stage-action",
+        );
+        for (const [interaction, colors] of Object.entries(stageAction)) {
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile.id} Stage action ${interaction}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+
+        const scrollAreaThumb = await readNormalAndHoveredColors(
+          page,
+          "#scroll-area-thumb",
+        );
+        for (const [interaction, colors] of Object.entries(scrollAreaThumb)) {
+          expect(
+            contrastRatio(colors.background, colors.surface),
+            `${profile.id} ScrollArea thumb ${interaction}`,
+          ).toBeGreaterThanOrEqual(3);
+        }
       }
 
       for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
-        const scrollbarMetrics = await page.evaluate((themeId) => {
-          const root = document.documentElement;
-          root.dataset.theme = themeId;
-          root.classList.toggle("dark", themeId === "phosphor-dark");
+        const descriptor = THEME_PROFILES.find(
+          (candidate) => candidate.id === profile,
+        );
+        if (!descriptor) throw new Error(`Missing profile ${profile}`);
+        await applyProfile(page, descriptor);
+        const scrollbarWidth = await page.evaluate(() => {
           const scrollbar = document.querySelector<HTMLElement>("#scrollbar");
           if (!scrollbar) throw new Error("Missing scrollbar fixture");
-          const surface = getComputedStyle(document.body).backgroundColor;
-          const thumb = getComputedStyle(
-            scrollbar,
-            "::-webkit-scrollbar-thumb",
-          ).backgroundColor;
-          const canvas = document.createElement("canvas");
-          canvas.width = 1;
-          canvas.height = 1;
-          const context = canvas.getContext("2d");
-          if (!context) throw new Error("Missing canvas context");
-          context.fillStyle = surface;
-          context.fillRect(0, 0, 1, 1);
-          context.fillStyle = thumb;
-          context.fillRect(0, 0, 1, 1);
-          const [red, green, blue] = context
-            .getImageData(0, 0, 1, 1)
-            .data.slice(0, 3);
-          return {
-            width: scrollbar.offsetWidth - scrollbar.clientWidth,
-            thumb: `rgb(${red}, ${green}, ${blue})`,
-            surface,
-          };
-        }, profile);
-        expect(scrollbarMetrics.width, `${profile} scrollbar width`).toBe(10);
+          return scrollbar.offsetWidth - scrollbar.clientWidth;
+        });
+        const scrollbarColors = await readRenderedColors(
+          page,
+          "#scrollbar",
+          "::-webkit-scrollbar-thumb",
+        );
+        expect(scrollbarWidth, `${profile} scrollbar width`).toBe(10);
         expect(
-          contrastRatio(scrollbarMetrics.thumb, scrollbarMetrics.surface),
+          contrastRatio(scrollbarColors.background, scrollbarColors.surface),
           `${profile} scrollbar thumb`,
         ).toBeGreaterThanOrEqual(3);
-      }
-
-      for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
-        const colors = await page.evaluate((themeId) => {
-          const root = document.documentElement;
+        const colors = await page.evaluate(() => {
           const select = document.querySelector<HTMLElement>(".select-native");
           const input = document.querySelector<HTMLElement>("#input-boundary");
           const textarea =
             document.querySelector<HTMLElement>("#textarea-boundary");
           const dialogSurface =
             document.querySelector<HTMLElement>("#dialog-surface");
-          const interactiveAccent = document.querySelector<HTMLElement>(
-            "#interactive-accent-text",
-          );
-          if (
-            !select ||
-            !input ||
-            !textarea ||
-            !dialogSurface ||
-            !interactiveAccent
-          ) {
+          if (!select || !input || !textarea || !dialogSurface) {
             throw new Error("Missing theme contrast fixtures");
           }
-          root.dataset.theme = themeId;
-          root.classList.toggle("dark", themeId === "phosphor-dark");
           const composite = (foreground: string, background: string) => {
             const canvas = document.createElement("canvas");
             canvas.width = 1;
@@ -265,17 +343,6 @@ describe("compiled theme CSS", () => {
           const selectStyle = getComputedStyle(select);
           const inputStyle = getComputedStyle(input);
           const textareaStyle = getComputedStyle(textarea);
-          const gitActions = [
-            ...document.querySelectorAll<HTMLElement>("[data-git-action]"),
-          ].map((action) => {
-            const style = getComputedStyle(action);
-            return {
-              name: action.dataset.gitAction,
-              foreground: style.color,
-              background: style.backgroundColor,
-            };
-          });
-          const interactiveAccentStyle = getComputedStyle(interactiveAccent);
           return {
             adjacentSurface: surfaceStyle.backgroundColor,
             inputBorder: inputStyle.borderColor,
@@ -292,14 +359,8 @@ describe("compiled theme CSS", () => {
               .color,
             selectBackground: selectStyle.backgroundColor,
             selectBorder: selectStyle.borderColor,
-            gitActions,
-            interactiveAccentForeground: interactiveAccentStyle.color,
-            interactiveAccentBackground: composite(
-              interactiveAccentStyle.backgroundColor,
-              getComputedStyle(document.body).backgroundColor,
-            ),
           };
-        }, profile);
+        });
         expect(
           contrastRatio(colors.inputBorder, colors.adjacentSurface),
           `${profile} input boundary`,
@@ -308,19 +369,6 @@ describe("compiled theme CSS", () => {
           contrastRatio(colors.selectBorder, colors.selectBackground),
           `${profile} native-select boundary`,
         ).toBeGreaterThanOrEqual(3);
-        for (const action of colors.gitActions) {
-          expect(
-            contrastRatio(action.foreground, action.background),
-            `${profile} Git ${action.name} action`,
-          ).toBeGreaterThanOrEqual(4.5);
-        }
-        expect(
-          contrastRatio(
-            colors.interactiveAccentForeground,
-            colors.interactiveAccentBackground,
-          ),
-          `${profile} interactive accent text`,
-        ).toBeGreaterThanOrEqual(4.5);
         expect(
           contrastRatio(colors.inputPlaceholder, colors.inputBackground),
           `${profile} input placeholder`,

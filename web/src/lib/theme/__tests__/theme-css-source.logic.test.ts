@@ -103,9 +103,9 @@ describe('theme profile CSS sources', () => {
 		const light = profileSource('colorblind-light');
 		const dark = profileSource('colorblind-dark');
 
-		expect(light).toContain('--git-added: 210 80% 43%;');
-		expect(light).toContain('--git-deleted: 30 90% 50%;');
-		expect(dark).toContain('--git-added: 210 85% 65%;');
+		expect(light).toContain('--git-added: 210 80% 30%;');
+		expect(light).toContain('--git-deleted: 30 90% 35%;');
+		expect(dark).toContain('--git-added: 210 85% 77%;');
 		expect(dark).toContain('--git-deleted: 30 92% 65%;');
 		expect(light).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
 		expect(dark).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
@@ -126,7 +126,7 @@ describe('theme profile CSS sources', () => {
 			const source = profileSource(themeId);
 			expect(
 				source.match(new RegExp(`hsl\\(var\\(--foreground\\) / ${opacity}\\)`, 'g')),
-			).toHaveLength(2);
+			).toHaveLength(3);
 		}
 	});
 
@@ -151,6 +151,7 @@ describe('theme profile CSS sources', () => {
 			['stop-button-bg', 'stop-button-foreground'],
 			['user-bubble', 'user-bubble-foreground'],
 			['markdown-code-background', 'markdown-code-foreground'],
+			['interactive-accent', 'interactive-accent-foreground'],
 			['git-action-commit', 'git-action-foreground'],
 			['git-action-commit-hover', 'git-action-foreground'],
 			['git-action-pull', 'git-action-foreground'],
@@ -162,7 +163,9 @@ describe('theme profile CSS sources', () => {
 		] as const;
 		const foregrounds = [
 			'git-added',
+			'git-deleted',
 			'git-modified',
+			'git-renamed',
 			'git-untracked',
 			'interactive-accent',
 		] as const;

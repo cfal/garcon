@@ -170,6 +170,7 @@
 	--diff-deletion: 0 78% 62%;
 	--diff-hunk: 214 92% 68%;
 	--interactive-accent: 213 94% 68%;
+	--interactive-accent-foreground: 0 0% 5%;
 	--file-icon-code: 142 66% 58%;
 	--file-icon-doc: 214 92% 68%;
 	--file-icon-image: 271 81% 72%;
@@ -187,7 +188,7 @@
 	--git-modified: 48 85% 78%;
 	--git-added: 142 66% 58%;
 	--pr-merged: 271 91% 71%;
-	--git-deleted: 0 78% 62%;
+	--git-deleted: 0 78% 68%;
 	--git-untracked: 214 92% 68%;
 	--git-renamed: 271 81% 72%;
 	--diff-add-bg: 156 36% 11%;
@@ -213,8 +214,8 @@
 	--dialog-shadow: var(--shadow-lg);
 	--primary-hover-shadow: var(--shadow-xs);
 	--dialog-surface: hsl(var(--background));
-	--scroll-area-thumb: hsl(var(--border));
-	--scroll-area-thumb-hover: hsl(var(--border));
+	--scroll-area-thumb: hsl(var(--foreground) / 0.4);
+	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.55);
 	--switch-thumb-checked: hsl(var(--background));
 	--switch-thumb-unchecked: hsl(var(--background));
 	--native-select-muted-background: hsl(var(--muted));
