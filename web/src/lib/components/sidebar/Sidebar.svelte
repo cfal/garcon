@@ -680,6 +680,7 @@
 
 <SidebarSearchDialog
 	open={sidebarSearch.searchDialogOpen}
+	portalToBody={isMobile}
 	query={sidebarSearch.draftQuery}
 	filteredChats={sidebarSearch.dialogDisplayChats}
 	savedSearches={sidebarSearch.searchDialogSavedSearches}
