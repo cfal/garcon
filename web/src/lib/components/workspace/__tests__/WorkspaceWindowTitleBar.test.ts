@@ -791,7 +791,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
 
-	it('keeps all available view commands in canonical order before open terminals', async () => {
+	it('keeps view commands canonical and terminal options at the bottom', async () => {
 		const kinds = [
 			'git',
 			'git-history',
@@ -814,7 +814,10 @@ describe('WorkspaceWindowTitleBar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
 
-		expect(screen.getByText(m.workspace_open_views())).toBeTruthy();
+		expect(screen.queryByText('Open views')).toBeNull();
+		const menu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-add-menu="window-main"]',
+		)!;
 		const items = screen.getAllByRole('menuitem');
 		const viewLabels = [
 			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
@@ -826,10 +829,15 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_chat_map(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
+		const newTerminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });
+		const separator = menu.querySelector<HTMLElement>('[data-slot="dropdown-menu-separator"]')!;
+		const openTerminals = screen.getByText(m.workspace_open_terminals());
 		const terminal = screen.getByRole('menuitem', { name: 'Build logs' });
 
-		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6, 7]);
-		expect(items.indexOf(viewItems.at(-1)!)).toBeLessThan(items.indexOf(terminal));
+		expect(items).toEqual([...viewItems, newTerminal, terminal]);
+		expect(separator.previousElementSibling).toBe(newTerminal);
+		expect(separator.nextElementSibling).toBe(openTerminals);
+		expect(openTerminals.nextElementSibling).toBe(terminal);
 	});
 
 	it('closes the plus menu when New Terminal enters its busy state', async () => {

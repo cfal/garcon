@@ -6,6 +6,7 @@
 		DropdownMenuContent,
 		DropdownMenuItem,
 		DropdownMenuLabel,
+		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import {
@@ -108,6 +109,14 @@
 		<Plus class="h-3.5 w-3.5" />
 	</DropdownMenuTrigger>
 	<DropdownMenuContent align="end" class="w-64" data-workspace-window-add-menu={windowId}>
+		{#if availableSingletonKinds.length > 0}
+			{#each availableSingletonKinds as kind (kind)}
+				<DropdownMenuItem onSelect={() => openSingleton(kind)}>
+					<WorkspaceSurfaceIcon {kind} />
+					{openSingletonLabel(kind)}
+				</DropdownMenuItem>
+			{/each}
+		{/if}
 		<DropdownMenuItem
 			disabled={creatingTerminal || terminalLimitReached}
 			title={terminalLimitReached ? m.terminal_limit_reached() : undefined}
@@ -116,16 +125,8 @@
 			<SquareTerminal />
 			{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
 		</DropdownMenuItem>
-		{#if availableSingletonKinds.length > 0}
-			<DropdownMenuLabel>{m.workspace_open_views()}</DropdownMenuLabel>
-			{#each availableSingletonKinds as kind (kind)}
-				<DropdownMenuItem onSelect={() => openSingleton(kind)}>
-					<WorkspaceSurfaceIcon {kind} />
-					{openSingletonLabel(kind)}
-				</DropdownMenuItem>
-			{/each}
-		{/if}
 		{#if unplacedTerminalSessions.length > 0}
+			<DropdownMenuSeparator />
 			<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
 			{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
 				<DropdownMenuItem
