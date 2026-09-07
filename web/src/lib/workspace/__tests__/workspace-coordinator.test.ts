@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
@@ -77,6 +78,7 @@ function createHarness(
 		fileEditor?: { prepareRendererTransfer(): void };
 		filePendingMutationCount?: number;
 		commitCanClose?: boolean;
+		canvas?: Pick<CanvasController, 'prepareClose'>;
 		pendingGitSurfaceIds?: readonly string[];
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialActiveSurfaceId?: string;
@@ -163,6 +165,7 @@ function createHarness(
 	const singletons = {
 		commit,
 		commitIfPresent: () => commit,
+		chatCanvasIfPresent: () => options.canvas ?? null,
 		setPresentationVisible: vi.fn(),
 		disposeSurface: vi.fn((kind: string) => {
 			if (kind === 'commit') commit.resetAfterClose();
@@ -219,6 +222,81 @@ function createHarness(
 }
 
 describe('WorkspaceCoordinator', () => {
+	it.each(['tab', 'window', 'other-windows'] as const)(
+		'awaits Canvas preservation before closing %s',
+		async (kind) => {
+			const admission = deferred<(() => void) | null>();
+			const release = vi.fn();
+			const canvas = { prepareClose: vi.fn(() => admission.promise) } satisfies Pick<
+				CanvasController,
+				'prepareClose'
+			>;
+			const { coordinator, layout, singletons } = createHarness({ canvas });
+			await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
+			let closing: Promise<boolean>;
+			if (kind === 'tab') closing = coordinator.closeSurface('singleton:chat-canvas');
+			else if (kind === 'window') closing = coordinator.closeWindow('window-files');
+			else closing = coordinator.closeOtherWindows('window-main');
+			expect(canvas.prepareClose).toHaveBeenCalledOnce();
+			expect(layout.surface('singleton:chat-canvas')).not.toBeNull();
+			expect(singletons.disposeSurface).not.toHaveBeenCalledWith('chat-canvas');
+			admission.resolve(release);
+			expect(await closing).toBe(true);
+			expect(layout.surface('singleton:chat-canvas')).toBeNull();
+			expect(singletons.disposeSurface).toHaveBeenCalledWith('chat-canvas');
+			expect(release).toHaveBeenCalledOnce();
+		},
+	);
+
+	it.each(['tab', 'window', 'other-windows'] as const)(
+		'retains Canvas when preservation denies closing %s',
+		async (kind) => {
+			const canvas = { prepareClose: vi.fn(async () => null) } satisfies Pick<
+				CanvasController,
+				'prepareClose'
+			>;
+			const { coordinator, layout, singletons } = createHarness({ canvas });
+			await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
+			let closed: boolean;
+			if (kind === 'tab') closed = await coordinator.closeSurface('singleton:chat-canvas');
+			else if (kind === 'window') closed = await coordinator.closeWindow('window-files');
+			else closed = await coordinator.closeOtherWindows('window-main');
+			expect(closed).toBe(false);
+			expect(layout.surface('singleton:chat-canvas')).not.toBeNull();
+			expect(singletons.disposeSurface).not.toHaveBeenCalledWith('chat-canvas');
+		},
+	);
+
+	it('releases Canvas close admission when another file cancels window destruction', async () => {
+		const release = vi.fn();
+		const canvas = { prepareClose: vi.fn(async () => release) } satisfies Pick<
+			CanvasController,
+			'prepareClose'
+		>;
+		const { coordinator, layout } = createHarness({
+			canvas,
+			confirmDestructive: async () => false,
+		});
+		await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
+		await coordinator.placeFileSession('edited', { type: 'window', windowId: 'window-files' });
+		expect(await coordinator.closeWindow('window-files')).toBe(false);
+		expect(release).toHaveBeenCalledOnce();
+		expect(layout.surface('singleton:chat-canvas')).not.toBeNull();
+	});
+
+	it('releases Canvas close admission after retrying failed layout publication', async () => {
+		const release = vi.fn();
+		const canvas = { prepareClose: vi.fn(async () => release) } satisfies Pick<
+			CanvasController,
+			'prepareClose'
+		>;
+		const { coordinator, layout } = createHarness({ canvas, failLayoutPublishAt: 2 });
+		await coordinator.openSingletonAsTab('chat-canvas', 'window-files');
+		await expect(coordinator.closeSurface('singleton:chat-canvas')).resolves.toBe(true);
+		expect(release).toHaveBeenCalledOnce();
+		expect(layout.surface('singleton:chat-canvas')).toBeNull();
+	});
+
 	it('places a file as a tab in the target window', async () => {
 		const { coordinator, layout } = createHarness();
 
@@ -444,11 +522,7 @@ describe('WorkspaceCoordinator', () => {
 		const { layout } = harness;
 		const mainSurfaceId = chatViewSurfaceId('window-main');
 		await coordinator.showChatInCurrentWindow('chat-a');
-		const otherWindowId = await coordinator.openChatInNewWindow(
-			'chat-b',
-			'window-main',
-			'right',
-		);
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
 		await coordinator.focusSurface('singleton:git');
 		await coordinator.focusSurface(chatViewSurfaceId(otherWindowId));
 		observeReuse = true;
@@ -794,11 +868,7 @@ describe('WorkspaceCoordinator', () => {
 		const confirmDestructive = vi.fn(() => confirmation.promise);
 		const { coordinator, layout } = createHarness({ confirmDestructive });
 		await coordinator.showChatInCurrentWindow('chat-a');
-		const otherWindowId = await coordinator.openChatInNewWindow(
-			'chat-b',
-			'window-main',
-			'right',
-		);
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
 		await coordinator.placeFileSession('reserved-file', {
 			type: 'window',
 			windowId: 'window-main',
@@ -1781,11 +1851,7 @@ describe('WorkspaceCoordinator', () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout, appShell } = createHarness({ surfaceFrames: frames });
 		await coordinator.showChatInCurrentWindow('chat-a');
-		const chatBWindowId = await coordinator.openChatInNewWindow(
-			'chat-b',
-			'window-main',
-			'right',
-		);
+		const chatBWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
 		const chatBSurfaceId = chatViewSurfaceId(chatBWindowId);
 		await coordinator.enterWindowFullscreen(chatBWindowId);
 		appShell.requestComposerFocus.mockClear();

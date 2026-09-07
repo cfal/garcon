@@ -113,7 +113,19 @@ export class WorkspaceWindowDestructionService {
 		let removedDescriptors = descriptorsForSurfaces(initial, affectedSurfaceIds);
 		let releasedTerminalIds: string[] = [];
 		let removalPlanned = false;
+		let releaseCanvasClose: (() => void) | null = null;
 		try {
+			if (
+				removedDescriptors.some(
+					(surface) => surface.type === 'singleton' && surface.kind === 'chat-canvas',
+				)
+			) {
+				const canvas = this.deps.singletons.chatCanvasIfPresent();
+				if (canvas) {
+					releaseCanvasClose = await canvas.prepareClose();
+					if (!releaseCanvasClose) return false;
+				}
+			}
 			if (!(await this.#confirmDestruction(removedDescriptors))) return false;
 			const plan: WorkspaceMutationPlan = (latest) => {
 				removalPlanned = false;
@@ -149,6 +161,7 @@ export class WorkspaceWindowDestructionService {
 			}
 			return true;
 		} finally {
+			releaseCanvasClose?.();
 			for (const windowId of reservedWindowIds) this.deps.windowReservations.delete(windowId);
 			for (const surfaceId of affectedSurfaceIds) this.deps.surfaceReservations.delete(surfaceId);
 			for (const terminalId of releasedTerminalIds) {

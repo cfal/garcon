@@ -571,7 +571,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const ownedFocus =
 			this.focusOwner.kind !== 'chat-list' && this.focusOwner.surfaceId === surfaceId;
 		this.#reservedSurfaceIds.add(surfaceId);
+		let releaseCanvasClose: (() => void) | null = null;
 		try {
+			if (surface.type === 'singleton' && surface.kind === 'chat-canvas') {
+				const canvas = this.#deps.singletons.chatCanvasIfPresent();
+				if (canvas) {
+					releaseCanvasClose = await canvas.prepareClose();
+					if (!releaseCanvasClose) return false;
+				}
+			}
 			if (surface.type === 'singleton' && surface.kind === 'commit') {
 				const commit = this.#deps.singletons.commitIfPresent();
 				if (commit && !commit.canClose) return false;
@@ -655,6 +663,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#presentation.focusPresentedSurface(fallbackSurfaceId);
 			return true;
 		} finally {
+			releaseCanvasClose?.();
 			this.#reservedSurfaceIds.delete(surfaceId);
 			if (surface.type === 'terminal') {
 				await this.#terminalPlacement.afterPlacementReleased(surface.terminalId);

@@ -25,7 +25,7 @@
 	let dialog = $state<'create' | 'rename' | 'copy' | 'delete' | 'reload' | null>(null);
 	let navigationError = $state<string | null>(null);
 	const session = $derived(controller.session);
-	const busy = $derived(controller.loading || session?.reloading === true);
+	const busy = $derived(controller.loading || controller.closing || session?.reloading === true);
 	const saveStatus = $derived.by(() => {
 		if (busy) return m.canvas_loading();
 		if (session?.saving) return m.canvas_saving();
@@ -87,6 +87,7 @@
 		}
 	}
 	async function submitName(value: string): Promise<boolean> {
+		if (busy) return false;
 		if (dialog === 'create') return controller.create(value);
 		if (dialog === 'copy') return controller.saveCopy(value);
 		if (dialog === 'rename' && session) {

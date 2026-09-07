@@ -38,18 +38,56 @@ describe('canvas autosave', () => {
 		session.dispose();
 	});
 
-	it('retries pending edits on disposal after a transient failure', async () => {
+	it('backs up pending edits on disposal without starting another save', async () => {
 		const update = vi
 			.fn<CanvasSessionPort['update']>()
 			.mockRejectedValueOnce(new Error('Offline'))
 			.mockImplementation(async (request) => canvas(request.content, 2));
-		const { session } = setup({ update });
+		const { session, memory } = setup({ update });
 		session.document.rename('Pending edit');
 		await session.flush();
 		session.dispose();
 		await vi.runAllTimersAsync();
-		expect(update).toHaveBeenCalledTimes(2);
-		expect(session.dirty).toBe(false);
+		expect(update).toHaveBeenCalledTimes(1);
+		expect(memory.drafts.get('board')?.content.title).toBe('Pending edit');
+	});
+
+	it.each(['save', 'reload'] as const)(
+		'fences a disposed %s completion from a reopened draft',
+		async (operation) => {
+			const response = deferred<ChatCanvas>();
+			const { session, memory, api } = setup({
+				update: () => response.promise,
+				get: () => response.promise,
+			});
+			session.document.rename('Old edit');
+			const completion = operation === 'save' ? session.flush() : session.discardAndReload();
+			session.dispose();
+			const reopened = new CanvasSession(canvas(), api, memory.port, vi.fn());
+			reopened.document.rename('New edit');
+			response.resolve(canvas({ ...canvas().content, title: 'Old edit' }, 2));
+			expect(await completion).toBe(false);
+			session.discardRecovery();
+			expect(memory.drafts.get('board')?.content.title).toBe('New edit');
+			reopened.dispose();
+		},
+	);
+
+	it('defers refresh during gestures and ignores responses spanning a gesture', async () => {
+		const response = deferred<ChatCanvas>();
+		const get = vi.fn(() => response.promise);
+		const { session } = setup({ get });
+		const refresh = session.refresh();
+		const end = session.beginInteraction();
+		await session.refresh();
+		expect(get).toHaveBeenCalledTimes(1);
+		end();
+		response.resolve(canvas({ ...canvas().content, title: 'Remote' }, 2));
+		await refresh;
+		expect(session.document.content.title).toBe('Work');
+		await session.refresh();
+		expect(session.document.content.title).toBe('Remote');
+		session.dispose();
 	});
 
 	it('backs up edits immediately and clears the backup only after confirmation', async () => {

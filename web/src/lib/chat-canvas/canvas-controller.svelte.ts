@@ -42,12 +42,12 @@ export class CanvasController implements PortableSingletonController {
 	unavailableIds = $state.raw<string[]>([]);
 	session = $state.raw<CanvasSession | null>(null);
 	loading = $state(false);
+	closing = $state(false);
 	loaded = $state(false);
 	error = $state<string | null>(null);
 	view = $state<'diagram' | 'list'>('diagram');
 	#viewports = new Map<string, CanvasViewport>();
 	#disposed = false;
-	#releaseExitGuard: (() => void) | null = null;
 	#refreshing = false;
 	#catalogGeneration = 0;
 	#pendingCreate: CreateCanvasRequest | null = null;
@@ -58,8 +58,7 @@ export class CanvasController implements PortableSingletonController {
 	) {}
 
 	async activate(): Promise<void> {
-		if (this.loading || this.#disposed) return;
-		this.#guardUnsavedWork();
+		if (this.loading || this.closing || this.#disposed) return;
 		this.loading = true;
 		try {
 			const catalog = await this.api.list();
@@ -76,7 +75,7 @@ export class CanvasController implements PortableSingletonController {
 	}
 
 	async open(id: string): Promise<void> {
-		if (this.loading || this.#disposed || this.session?.saved.id === id) return;
+		if (this.loading || this.closing || this.#disposed || this.session?.saved.id === id) return;
 		this.loading = true;
 		try {
 			await this.#load(id);
@@ -89,12 +88,11 @@ export class CanvasController implements PortableSingletonController {
 	}
 
 	async create(title: string): Promise<boolean> {
-		if (this.loading || this.#disposed) return false;
+		if (this.loading || this.closing || this.#disposed) return false;
 		this.loading = true;
 		try {
 			if (this.session && !(await this.session.flush())) return false;
-			await this.#create({ title: title.trim(), nodes: [], connections: [] });
-			return true;
+			return await this.#create({ title: title.trim(), nodes: [], connections: [] });
 		} catch (error) {
 			this.#failure(error);
 			return false;
@@ -104,14 +102,12 @@ export class CanvasController implements PortableSingletonController {
 	}
 
 	async saveCopy(title: string): Promise<boolean> {
-		if (this.loading || !this.session || this.#disposed) return false;
+		if (this.loading || this.closing || !this.session || this.#disposed) return false;
 		this.loading = true;
 		try {
 			const previous = this.session;
 			if (!(await previous.flush()) && !previous.conflict) return false;
-			await this.#create({ ...previous.document.content, title: title.trim() });
-			previous.discardRecovery();
-			return true;
+			return await this.#create({ ...previous.document.content, title: title.trim() });
 		} catch (error) {
 			this.#failure(error);
 			return false;
@@ -121,12 +117,17 @@ export class CanvasController implements PortableSingletonController {
 	}
 
 	async removeCurrent(): Promise<boolean> {
-		if (this.loading || !this.session || this.#disposed) return false;
+		if (this.loading || this.closing || !this.session || this.#disposed) return false;
 		this.loading = true;
 		try {
 			const current = this.session;
 			if (current.saving) await current.flush();
-			await this.api.remove({ id: current.saved.id, expectedRevision: current.saved.revision });
+			try {
+				await this.api.remove({ id: current.saved.id, expectedRevision: current.saved.revision });
+			} catch (error) {
+				if (!(error instanceof ApiError && error.status === 404)) throw error;
+			}
+			if (this.#disposed) return false;
 			current.discardRecovery();
 			current.abandon();
 			this.session = null;
@@ -145,12 +146,13 @@ export class CanvasController implements PortableSingletonController {
 	}
 
 	async refresh(): Promise<void> {
-		if (this.loading || this.#refreshing || this.#disposed) return;
+		if (this.loading || this.closing || this.#refreshing || this.#disposed) return;
 		this.#refreshing = true;
 		const generation = this.#catalogGeneration;
 		try {
 			const catalog = await this.api.list();
-			if (this.#disposed || this.loading || generation !== this.#catalogGeneration) return;
+			if (this.#disposed || this.loading || this.closing || generation !== this.#catalogGeneration)
+				return;
 			this.#setCatalog(catalog);
 			await this.session?.refresh();
 		} catch (error) {
@@ -177,41 +179,39 @@ export class CanvasController implements PortableSingletonController {
 
 	dispose(): void {
 		this.#disposed = true;
-		this.#releaseExitGuard?.();
-		this.#releaseExitGuard = null;
 		this.session?.dispose();
 		this.#viewports.clear();
 	}
 
-	#guardUnsavedWork(): void {
-		if (this.#releaseExitGuard || typeof window === 'undefined') return;
-		const flush = () => {
-			void this.session?.flush();
+	async prepareClose(): Promise<(() => void) | null> {
+		if (
+			this.loading ||
+			this.closing ||
+			this.#disposed ||
+			this.session?.reloading ||
+			this.session?.interacting
+		)
+			return null;
+		this.closing = true;
+		const releaseInteraction = this.session?.beginInteraction();
+		const release = () => {
+			releaseInteraction?.();
+			this.closing = false;
 		};
-		const beforeUnload = (event: BeforeUnloadEvent) => {
-			if (!this.#hasUnsavedWork()) return;
-			flush();
-			event.preventDefault();
-			event.returnValue = '';
-		};
-		window.addEventListener('pagehide', flush);
-		window.addEventListener('beforeunload', beforeUnload);
-		this.#releaseExitGuard = () => {
-			window.removeEventListener('pagehide', flush);
-			window.removeEventListener('beforeunload', beforeUnload);
-		};
-	}
-
-	#hasUnsavedWork(): boolean {
-		if (this.session?.dirty || this.session?.conflict) return true;
 		try {
-			return this.recovery.list().length > 0;
+			if (this.session && !(await this.session.flush()) && !this.session.backup()) {
+				release();
+				return null;
+			}
+			return release;
 		} catch {
-			return true;
+			release();
+			return null;
 		}
 	}
 
-	async #create(content: CanvasContent): Promise<void> {
+	async #create(content: CanvasContent): Promise<boolean> {
+		if (this.#disposed) return false;
 		if (
 			!this.#pendingCreate ||
 			JSON.stringify(this.#pendingCreate.content) !== JSON.stringify(content)
@@ -219,12 +219,15 @@ export class CanvasController implements PortableSingletonController {
 			this.#pendingCreate = { id: crypto.randomUUID(), content };
 		}
 		const canvas = await this.api.create(this.#pendingCreate);
+		if (this.#disposed) return false;
 		this.#pendingCreate = null;
+		this.session?.discardRecovery();
 		this.session?.abandon();
 		this.#use(canvas);
 		this.#saved(canvas);
 		this.loaded = true;
 		this.error = null;
+		return true;
 	}
 
 	async #load(id: string): Promise<void> {

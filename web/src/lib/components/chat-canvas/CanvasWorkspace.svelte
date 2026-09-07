@@ -34,7 +34,7 @@
 		onopen: (id: string) => void;
 		onbeside: ((id: string) => void) | undefined;
 	} = $props();
-	const disabled = $derived(controller.loading || session.reloading);
+	const disabled = $derived(controller.loading || controller.closing || session.reloading);
 	const ui = new CanvasEditorState({
 		get document() {
 			return session.document;
@@ -261,6 +261,7 @@
 				initial={dialog.kind === 'box' ? m.canvas_default_box() : dialog.title}
 				onclose={() => (ui.dialog = null)}
 				onsubmit={async (title) => {
+					if (disabled) return false;
 					if (dialog.kind === 'box') {
 						const id = session.document.addBox(title, position());
 						ui.select(new Set([id]));
@@ -277,7 +278,9 @@
 				initialBox={dialog.boxId}
 				capacity={CANVAS_MAX_NODES - content.nodes.length}
 				onclose={() => (ui.dialog = null)}
-				onadd={(ids, boxId) => session.document.addChats(ids, boxId, position())}
+				onadd={(ids, boxId) => {
+					if (!disabled) session.document.addChats(ids, boxId, position());
+				}}
 			/>
 		{:else}
 			<CanvasConnectionDialog
@@ -285,14 +288,16 @@
 				chats={chatsById}
 				initialSource={[...ui.selectedIds][0] ?? ''}
 				onclose={() => (ui.dialog = null)}
-				onconnect={(source, target, label) =>
+				onconnect={(source, target, label) => {
+					if (disabled || content.connections.length >= CANVAS_MAX_CONNECTIONS) return;
 					session.document.connect({
 						source,
 						target,
 						label,
 						sourceSide: 'right',
 						targetSide: 'left',
-					})}
+					});
+				}}
 			/>
 		{/if}
 	{/key}

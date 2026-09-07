@@ -9,12 +9,16 @@ import {
 } from '$shared/chat-canvas';
 import { ApiError } from '$lib/api/client';
 import { CanvasController, type CanvasApiPort } from '../canvas-controller.svelte';
+import { CanvasExitGuard } from '../canvas-exit-guard';
 import { canvas, deferred, recoveryMemory } from './canvas-fixtures';
 
 const controllers = new Set<CanvasController>();
+const guards = new Set<CanvasExitGuard>();
 afterEach(() => {
 	for (const controller of controllers) controller.dispose();
 	controllers.clear();
+	for (const guard of guards) guard.dispose();
+	guards.clear();
 	vi.restoreAllMocks();
 	vi.useRealTimers();
 });
@@ -48,10 +52,30 @@ function setup() {
 	const memory = recoveryMemory();
 	const controller = new CanvasController(api, memory.port);
 	controllers.add(controller);
-	return { controller, api, memory, boards };
+	const guard = new CanvasExitGuard(memory.port, () => controller.session);
+	guard.activate();
+	guards.add(guard);
+	return { controller, api, memory, boards, guard };
 }
 
 describe('CanvasController', () => {
+	it('finishes a deletion whose successful response was lost', async () => {
+		const { controller, api, boards, memory } = setup();
+		await controller.activate();
+		controller.session!.document.rename('Pending deletion');
+		api.remove
+			.mockImplementationOnce(async ({ id }) => {
+				boards.delete(id);
+				throw new Error('Response lost');
+			})
+			.mockRejectedValueOnce(new ApiError(404, 'Not found'));
+		expect(await controller.removeCurrent()).toBe(false);
+		expect(await controller.removeCurrent()).toBe(true);
+		expect(controller.session).toBeNull();
+		expect(controller.canvases.some((entry) => entry.id === 'board')).toBe(false);
+		expect(memory.drafts.has('board')).toBe(false);
+	});
+
 	it('keeps healthy canvases available and clears resolved catalog warnings on refresh', async () => {
 		const { controller, api } = setup();
 		api.list.mockResolvedValueOnce({
@@ -90,7 +114,7 @@ describe('CanvasController', () => {
 		controller.dispose();
 	});
 
-	it('does not publish catalog updates after disposal while completing a final save', async () => {
+	it('does not publish or clear recovery after disposal while completing a save', async () => {
 		const { controller, api, memory } = setup();
 		await controller.activate();
 		const response = deferred<ChatCanvas>();
@@ -98,11 +122,56 @@ describe('CanvasController', () => {
 		controller.session!.document.rename('Final edit');
 		const content = controller.session!.document.content;
 		const catalog = controller.canvases;
+		const saving = controller.session!.flush();
 		controller.dispose();
 		response.resolve(canvas(content, 2));
-		await controller.session!.flush();
+		await saving;
 		expect(controller.canvases).toBe(catalog);
-		expect(memory.drafts.has('board')).toBe(false);
+		expect(memory.drafts.has('board')).toBe(true);
+	});
+
+	it('holds close admission through a pending save and prevents new operations until released', async () => {
+		const { controller, api } = setup();
+		await controller.activate();
+		const response = deferred<ChatCanvas>();
+		api.update.mockReturnValue(response.promise);
+		controller.session!.document.rename('Pending');
+		const closing = controller.prepareClose();
+		expect(controller.closing).toBe(true);
+		await controller.open('other');
+		expect(await controller.create('New')).toBe(false);
+		expect(await controller.saveCopy('Copy')).toBe(false);
+		expect(await controller.removeCurrent()).toBe(false);
+		expect(await controller.prepareClose()).toBeNull();
+		response.resolve(canvas(controller.session!.document.content, 2));
+		const release = await closing;
+		expect(release).toBeTypeOf('function');
+		expect(controller.closing).toBe(true);
+		release!();
+		expect(controller.closing).toBe(false);
+	});
+
+	it('blocks close when neither saving nor recovery can preserve the document', async () => {
+		const { controller, api, memory } = setup();
+		await controller.activate();
+		api.update.mockRejectedValue(new Error('Offline'));
+		vi.spyOn(memory.port, 'write').mockImplementation(() => {
+			throw new Error('Full');
+		});
+		controller.session!.document.rename('Keep me');
+		expect(await controller.prepareClose()).toBeNull();
+		expect(controller.closing).toBe(false);
+		expect(controller.session!.document.content.title).toBe('Keep me');
+	});
+
+	it('backs up a clean conflicted document synchronously on browser exit', async () => {
+		const { controller, api, memory } = setup();
+		await controller.activate();
+		api.get.mockRejectedValue(new ApiError(404, 'Deleted'));
+		await controller.session!.refresh();
+		expect(controller.session!.dirty).toBe(false);
+		window.dispatchEvent(new Event('pagehide'));
+		expect(memory.drafts.get('board')?.content.title).toBe('Work');
 	});
 
 	it('loads on demand and saves the current document before switching', async () => {
@@ -314,8 +383,8 @@ describe('CanvasController', () => {
 		expect(memory.drafts.has('board')).toBe(true);
 		controller.dispose();
 	});
-	it('guards unsaved work for the controller lifetime and removes browser listeners on disposal', async () => {
-		const { controller, api } = setup();
+	it('guards recovery after controller disposal until the root guard is destroyed', async () => {
+		const { controller, api, guard } = setup();
 		await controller.activate();
 		const savedExit = new Event('beforeunload', { cancelable: true });
 		window.dispatchEvent(savedExit);
@@ -334,6 +403,10 @@ describe('CanvasController', () => {
 		controller.dispose();
 		const disposedExit = new Event('beforeunload', { cancelable: true });
 		window.dispatchEvent(disposedExit);
-		expect(disposedExit.defaultPrevented).toBe(false);
+		expect(disposedExit.defaultPrevented).toBe(true);
+		guard.dispose();
+		const rootExit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(rootExit);
+		expect(rootExit.defaultPrevented).toBe(false);
 	});
 });

@@ -2,6 +2,7 @@ import type { CanvasContent, ChatCanvas, UpdateCanvasRequest } from '$shared/cha
 import { ApiError } from '$lib/api/client.js';
 import { CanvasDocumentState } from './canvas-document.svelte.js';
 import type { CanvasRecoveryPort } from './canvas-recovery.js';
+import { claimCanvasRecovery } from './canvas-recovery-lease.js';
 
 export interface CanvasSessionPort {
 	update(request: UpdateCanvasRequest): Promise<ChatCanvas>;
@@ -19,6 +20,9 @@ export class CanvasSession {
 	#timer: ReturnType<typeof setTimeout> | null = null;
 	#pending: Promise<boolean> | null = null;
 	#disposed = false;
+	readonly #recoveryLease: ReturnType<typeof claimCanvasRecovery>;
+	#interactions = new Set<symbol>();
+	#interactionGeneration = 0;
 
 	constructor(
 		canvas: ChatCanvas,
@@ -26,6 +30,7 @@ export class CanvasSession {
 		private readonly recovery: CanvasRecoveryPort,
 		private readonly onSaved: (canvas: ChatCanvas) => void,
 	) {
+		this.#recoveryLease = claimCanvasRecovery(recovery, canvas.id);
 		this.saved = $state.raw(canvas);
 		let content = canvas.content;
 		try {
@@ -47,6 +52,7 @@ export class CanvasSession {
 
 	async flush(): Promise<boolean> {
 		this.#clearTimer();
+		if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
 		if (this.conflict) return false;
 		if (this.#pending) return this.#pending;
 		this.error = null;
@@ -63,12 +69,50 @@ export class CanvasSession {
 		return this.conflict && this.#writeRecovery(this.document.content);
 	}
 
+	get interacting(): boolean {
+		return this.#interactions.size > 0;
+	}
+
+	beginInteraction(): () => void {
+		const token = Symbol();
+		this.#interactions.add(token);
+		this.#interactionGeneration += 1;
+		return () => this.#interactions.delete(token);
+	}
+
+	backup(): boolean {
+		return this.#writeRecovery(this.document.content);
+	}
+
+	preserveForExit(): void {
+		if (this.dirty || this.conflict) this.backup();
+		if (!this.conflict) void this.flush();
+	}
+
 	async refresh(): Promise<void> {
-		if (this.dirty || this.saving || this.conflict || this.#disposed) return;
+		if (
+			this.dirty ||
+			this.saving ||
+			this.conflict ||
+			this.#disposed ||
+			!this.#recoveryLease.isCurrent() ||
+			this.interacting
+		)
+			return;
 		const before = this.saved;
+		const interactionGeneration = this.#interactionGeneration;
 		try {
 			const latest = await this.api.get(this.saved.id);
-			if (this.saved !== before || this.dirty || this.saving || this.#disposed) return;
+			if (
+				this.saved !== before ||
+				this.dirty ||
+				this.saving ||
+				this.#disposed ||
+				!this.#recoveryLease.isCurrent() ||
+				interactionGeneration !== this.#interactionGeneration ||
+				this.interacting
+			)
+				return;
 			if (latest.revision !== this.saved.revision) {
 				this.saved = latest;
 				this.document.replace(latest.content);
@@ -76,16 +120,20 @@ export class CanvasSession {
 			}
 			this.error = null;
 		} catch (error) {
-			this.#failure(error);
+			if (!this.#disposed && interactionGeneration === this.#interactionGeneration)
+				this.#failure(error);
 		}
 	}
 
 	async discardAndReload(): Promise<boolean> {
+		if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
 		this.#clearTimer();
 		this.reloading = true;
 		if (this.#pending) await this.#pending;
 		try {
+			if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
 			const latest = await this.api.get(this.saved.id);
+			if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
 			this.saved = latest;
 			this.document.replace(latest.content);
 			this.conflict = false;
@@ -108,20 +156,23 @@ export class CanvasSession {
 	abandon(): void {
 		this.#disposed = true;
 		this.#clearTimer();
+		this.#recoveryLease.release();
 	}
 
 	dispose(): void {
 		if (this.#disposed) return;
+		if (this.dirty || this.conflict) this.backup();
 		this.abandon();
-		if (this.dirty && !this.conflict) void this.flush();
 	}
 
 	#changed(content: CanvasContent): void {
+		if (this.#disposed || !this.#recoveryLease.isCurrent()) return;
 		this.#writeRecovery(content);
 		if (!this.conflict) this.#schedule();
 	}
 
 	#writeRecovery(content: CanvasContent): boolean {
+		if (!this.#recoveryLease.isCurrent()) return false;
 		try {
 			this.recovery.write({ ...this.saved, content });
 			this.recoveryError = false;
@@ -155,6 +206,7 @@ export class CanvasSession {
 					expectedRevision: this.saved.revision,
 					content,
 				});
+				if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
 				this.saved = saved;
 				this.onSaved(saved);
 				if (this.dirty) this.#writeRecovery(this.document.content);
@@ -170,6 +222,7 @@ export class CanvasSession {
 	}
 
 	#removeRecovery(): void {
+		if (!this.#recoveryLease.isCurrent()) return;
 		try {
 			this.recovery.remove(this.saved.id);
 			this.recoveryError = false;
@@ -179,6 +232,7 @@ export class CanvasSession {
 	}
 
 	#failure(error: unknown): void {
+		if (this.#disposed || !this.#recoveryLease.isCurrent()) return;
 		this.conflict =
 			this.conflict ||
 			(error instanceof ApiError &&

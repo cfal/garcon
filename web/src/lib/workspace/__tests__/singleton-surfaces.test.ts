@@ -1,6 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeResponse } from '$shared/file-contracts';
+import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery';
+import { canvas } from '$lib/chat-canvas/__tests__/canvas-fixtures';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
@@ -11,6 +13,7 @@ const registries: SingletonSurfaceRegistry[] = [];
 
 afterEach(() => {
 	cleanup();
+	sessionStorage.clear();
 	for (const registry of registries.splice(0)) registry.destroy();
 });
 
@@ -88,6 +91,30 @@ function createRegistry() {
 }
 
 describe('SingletonSurfaceRegistry', () => {
+	it('protects recovered drafts before opening Canvas', () => {
+		browserCanvasRecovery.write(canvas());
+		const { registry } = createRegistry();
+		expect(registry.chatCanvasIfPresent()).toBeNull();
+		const exit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(exit);
+		expect(exit.defaultPrevented).toBe(true);
+	});
+
+	it('keeps inactive Canvas drafts protected after closing the surface', () => {
+		const { registry } = createRegistry();
+		registry.chatCanvas();
+		browserCanvasRecovery.write(canvas());
+		registry.disposeSurface('chat-canvas');
+		expect(registry.chatCanvasIfPresent()).toBeNull();
+		const exit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(exit);
+		expect(exit.defaultPrevented).toBe(true);
+		registry.destroy();
+		const destroyedExit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(destroyedExit);
+		expect(destroyedExit.defaultPrevented).toBe(false);
+	});
+
 	it('retains singleton context while a selected draft resolves', () => {
 		const { registry, commits, pullRequestsStores } = createRegistry();
 		registry.setProjectState({

@@ -13,6 +13,8 @@ import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-sto
 import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
 import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
+import { CanvasExitGuard } from '$lib/chat-canvas/canvas-exit-guard.js';
+import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
@@ -81,8 +83,13 @@ export class SingletonSurfaceRegistry {
 		'chat-canvas': false,
 	};
 	#hasVisibleProjectSurface = $state(false);
+	readonly #canvasExitGuard = new CanvasExitGuard(
+		browserCanvasRecovery,
+		() => this.chatCanvasIfPresent()?.session ?? null,
+	);
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
+		this.#canvasExitGuard.activate();
 		this.#factories = {
 			git: () => new GitWorkbenchSurfaceController(this.deps),
 			'git-history': () => new GitHistorySurfaceController(this.deps),
@@ -124,6 +131,12 @@ export class SingletonSurfaceRegistry {
 
 	chatCanvas(): CanvasController {
 		return this.#controller('chat-canvas');
+	}
+
+	chatCanvasIfPresent(): CanvasController | null {
+		return (
+			(this.#controllers.get('chat-canvas')?.controller as CanvasController | undefined) ?? null
+		);
 	}
 
 	commit(): CommitController {
@@ -186,6 +199,7 @@ export class SingletonSurfaceRegistry {
 
 	destroy(): void {
 		for (const kind of [...this.#controllers.keys()]) this.disposeSurface(kind);
+		this.#canvasExitGuard.dispose();
 	}
 
 	#controller<K extends PortableSingletonKind>(kind: K): SingletonControllerByKind[K] {

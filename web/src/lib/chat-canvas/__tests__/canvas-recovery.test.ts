@@ -23,6 +23,16 @@ function storage(): Storage {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('canvas recovery ownership', () => {
+	it('isolates malformed drafts without removing them or hiding valid drafts', () => {
+		const tab = storage();
+		vi.stubGlobal('sessionStorage', tab);
+		tab.setItem('chat-canvas-recovery-v1:bad', '{');
+		browserCanvasRecovery.write(canvas());
+		browserCanvasRecovery.write({ ...canvas(), id: 'second' });
+		expect(browserCanvasRecovery.list().map((draft) => draft.id)).toEqual(['board', 'second']);
+		expect(tab.getItem('chat-canvas-recovery-v1:bad')).toBe('{');
+	});
+
 	it('keeps one tab’s pending edits when another tab saves the same canvas', () => {
 		const firstTab = storage();
 		const secondTab = storage();
