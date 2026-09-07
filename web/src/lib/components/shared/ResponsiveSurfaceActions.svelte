@@ -51,6 +51,7 @@
 	let root = $state<HTMLDivElement | null>(null);
 	let fixedControl = $state<HTMLDivElement | null>(null);
 	let measurementRail = $state<HTMLDivElement | null>(null);
+	let menuTrigger = $state<HTMLElement | null>(null);
 	let visibleActionIds = $state.raw<ReadonlySet<string> | null>(null);
 	const visibleActions = $derived(
 		actions.filter((action) =>
@@ -188,6 +189,7 @@
 	{#if showMenu}
 		<DropdownMenu>
 			<DropdownMenuTrigger
+				bind:ref={menuTrigger}
 				class={menuClass()}
 				aria-label={menuLabel}
 				title={menuLabel}
@@ -195,7 +197,11 @@
 			>
 				<MenuIcon class="h-4 w-4" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" class={hasPersistentMenuContent ? 'w-64' : 'w-56'}>
+			<DropdownMenuContent
+				align="end"
+				class={hasPersistentMenuContent ? 'w-64' : 'w-56'}
+				getFocusReturnTarget={() => menuTrigger}
+			>
 				{#if menuLeadingContent}
 					{@render menuLeadingContent()}
 					{#if overflowActions.length > 0 || menuContent}

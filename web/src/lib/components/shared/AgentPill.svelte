@@ -30,6 +30,7 @@
 	interface Props {
 		agentId: AgentId;
 		label?: string;
+		appearance?: 'provider' | 'neutral';
 		selected?: boolean;
 		disabled?: boolean;
 		fallbackAgentId?: AgentId;
@@ -41,6 +42,7 @@
 	let {
 		agentId,
 		label,
+		appearance = 'provider',
 		selected = false,
 		disabled = false,
 		fallbackAgentId,
@@ -50,7 +52,10 @@
 	}: Props = $props();
 
 	const resolvedLabel = $derived(agentLabelFor(agentId, label ?? agentId));
-	const variant = $derived(VARIANTS[agentId] ?? VARIANTS[fallbackAgentId ?? ''] ?? DEFAULT_VARIANT);
+	const variant = $derived.by(() => {
+		if (appearance === 'neutral') return DEFAULT_VARIANT;
+		return VARIANTS[agentId] ?? VARIANTS[fallbackAgentId ?? ''] ?? DEFAULT_VARIANT;
+	});
 	const classes = $derived(
 		cn(
 			'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none',

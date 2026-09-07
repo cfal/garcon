@@ -38,6 +38,10 @@ export class NewChatPreambleSelectionState {
 		return this.choice.mode === 'explicit' || this.preview !== null;
 	}
 
+	get canLoadAutomaticPreview(): boolean {
+		return this.options.trimmedPath.length > 0 && this.options.validationStatus === 'valid';
+	}
+
 	get orderedIds(): readonly PreambleId[] | undefined {
 		if (this.choice.mode === 'explicit') return this.choice.orderedPreambleIds;
 		return undefined;
@@ -116,8 +120,22 @@ export class NewChatPreambleSelectionState {
 			if (!this.#isCurrentPreview(version, choiceVersion, context.key)) return;
 			this.#clearPreview();
 		} finally {
-			if (version === this.#previewVersion) this.previewLoading = false;
+			if (this.#isCurrentPreview(version, choiceVersion, context.key)) {
+				this.previewLoading = false;
+			}
 		}
+	}
+
+	async loadAutomaticPreview(): Promise<PreambleSelectionPreviewResponse> {
+		const context = this.#previewContext();
+		if (!this.canLoadAutomaticPreview) {
+			throw new Error('Preamble defaults are unavailable for the current project path');
+		}
+		return preambleSelectionPreview({
+			projectPath: context.projectPath,
+			agentId: context.agentId,
+			tags: context.tags,
+		});
 	}
 
 	reset(): void {

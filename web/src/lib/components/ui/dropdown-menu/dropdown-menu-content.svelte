@@ -11,15 +11,17 @@
 		ref = $bindable(null),
 		sideOffset = 4,
 		portalProps,
+		getFocusReturnTarget,
 		class: className,
 		...restProps
 	}: DropdownMenuPrimitive.ContentProps & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof DropdownMenuPortal>>;
+		getFocusReturnTarget?: () => HTMLElement | null;
 	} = $props();
 	const transientLayers = getOptionalTransientLayers();
 	const layerControl = getTransientLayerControl();
 	const layerId = allocateTransientLayerId('dropdown');
-	const focusReturnTarget =
+	const initialFocusReturnTarget =
 		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
 			? document.activeElement
 			: null;
@@ -36,7 +38,7 @@
 				layerControl.close();
 				return true;
 			},
-			restoreFocus: () => focusReturnTarget?.focus(),
+			restoreFocus: () => (getFocusReturnTarget?.() ?? initialFocusReturnTarget)?.focus(),
 		});
 	});
 </script>
