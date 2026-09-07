@@ -6,9 +6,9 @@
 import type {
 	ChatMaxWidth,
 	LocalSettingsStore,
-	SidebarChatItemLayout,
 } from '$lib/stores/local-settings.svelte.js';
 import type { ThemePreference } from '$lib/theme/themes.js';
+import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 
 export const ONBOARDING_PAGE_IDS = ['theme', 'chat-layout', 'chat-display', 'done'] as const;
 export type OnboardingPageId = (typeof ONBOARDING_PAGE_IDS)[number];
@@ -55,7 +55,7 @@ export class OnboardingWizardState {
 		this.#deps.localSettings.set('themePreference', preference);
 	}
 
-	selectChatItemLayout(layout: SidebarChatItemLayout): void {
+	selectChatItemLayout(layout: ChatItemLayout): void {
 		this.#deps.localSettings.set('sidebarChatItemLayout', layout);
 	}
 

@@ -1,16 +1,16 @@
 import type {
 	SidebarChatGrouping,
-	SidebarChatItemLayout,
 	SidebarInactivityDuration,
 	SidebarSortMode,
 } from '$lib/stores/local-settings.svelte';
+import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 import type { PinnedInsertPosition } from '$shared/settings';
 
 export interface SidebarDisplayOptions {
 	grouping: SidebarChatGrouping;
 	inactivityDuration: SidebarInactivityDuration;
 	groupNestedProjectPaths: boolean;
-	chatItemLayout: SidebarChatItemLayout;
+	chatItemLayout: ChatItemLayout;
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
 }

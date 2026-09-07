@@ -599,8 +599,8 @@ describe('sidebar search interactions', () => {
 		expect(items[8]?.textContent).toContain('Activity');
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' })).toBeTruthy();
 		expect(items[9]?.textContent).toContain('Combine nested paths');
-		expect(screen.getByRole('menuitemradio', { name: 'Default' })).toBeTruthy();
-		expect(items[10]?.textContent).toContain('Default');
+		expect(screen.getByRole('menuitemradio', { name: 'Detailed' })).toBeTruthy();
+		expect(items[10]?.textContent).toContain('Detailed');
 		expect(screen.getByRole('menuitemradio', { name: 'Compact chat items' })).toBeTruthy();
 		expect(items[11]?.textContent).toContain('Compact chat items');
 		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
@@ -684,9 +684,9 @@ describe('sidebar search interactions', () => {
 		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
 		expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe(null);
 		expect(items[7]?.textContent).toContain('Combine nested paths');
-		const defaultLayout = screen.getByRole('menuitemradio', { name: 'Default' });
-		expect(defaultLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[8]?.textContent).toContain('Default');
+		const detailedLayout = screen.getByRole('menuitemradio', { name: 'Detailed' });
+		expect(detailedLayout.getAttribute('aria-checked')).toBe('false');
+		expect(items[8]?.textContent).toContain('Detailed');
 		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
 		expect(items[9]?.textContent).toContain('Compact chat items');

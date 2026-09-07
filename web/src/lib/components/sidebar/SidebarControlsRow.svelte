@@ -28,9 +28,9 @@
 	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import type {
 		SidebarChatGrouping,
-		SidebarChatItemLayout,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
+	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import { sidebarGroupingUsesProjects } from './sidebar-display-options';
 
@@ -39,7 +39,7 @@
 		visibleUnreadCount?: number;
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
-		chatItemLayout?: SidebarChatItemLayout;
+		chatItemLayout?: ChatItemLayout;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
@@ -51,7 +51,7 @@
 		onMarkAllRead?: () => void;
 		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
-		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
+		onSetChatItemLayout?: (layout: ChatItemLayout) => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -66,7 +66,7 @@
 		visibleUnreadCount = 0,
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
-		chatItemLayout = 'default',
+		chatItemLayout = 'detailed',
 		sortMode = 'manual',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
@@ -226,10 +226,10 @@
 					</DropdownMenuGroupHeading>
 					<DropdownMenuRadioGroup
 						value={chatItemLayout}
-						onValueChange={(layout) => onSetChatItemLayout?.(layout as SidebarChatItemLayout)}
+						onValueChange={(layout) => onSetChatItemLayout?.(layout as ChatItemLayout)}
 					>
-						<DropdownMenuRadioItem value="default">
-							{m.settings_sidebar_chat_item_layout_default()}
+						<DropdownMenuRadioItem value="detailed">
+							{m.settings_sidebar_chat_item_layout_detailed()}
 						</DropdownMenuRadioItem>
 						<DropdownMenuRadioItem value="compact">
 							{m.settings_sidebar_compact_chat_items()}

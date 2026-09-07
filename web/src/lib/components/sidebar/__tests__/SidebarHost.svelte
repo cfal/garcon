@@ -22,10 +22,10 @@
 	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import type {
 		SidebarChatGrouping,
-		SidebarChatItemLayout,
 		SidebarInactivityDuration,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
+	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 	import type { ChatSearchSort } from '$shared/chat-search';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
@@ -42,7 +42,7 @@
 		sidebarGrouping?: SidebarChatGrouping;
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
-		sidebarChatItemLayout?: SidebarChatItemLayout;
+		sidebarChatItemLayout?: ChatItemLayout;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
 		chatListDock?: ChatListDock;
@@ -67,7 +67,7 @@
 		sidebarGrouping = 'project',
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
-		sidebarChatItemLayout = 'default',
+		sidebarChatItemLayout = 'detailed',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
 		chatListDock = 'left',
@@ -172,7 +172,7 @@
 				return;
 			}
 			if (key === 'sidebarChatItemLayout') {
-				sidebarChatItemLayout = value as SidebarChatItemLayout;
+				sidebarChatItemLayout = value as ChatItemLayout;
 				return;
 			}
 			if (key === 'sidebarSortMode') {

@@ -1,5 +1,5 @@
 import type { Attachment } from 'svelte/attachments';
-import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
 	virtualItems as selectVirtualItems,
@@ -17,7 +17,7 @@ import {
 
 interface SidebarVirtualGeometryUpdate {
 	readonly rows: readonly SidebarVirtualRow[];
-	readonly chatItemLayout: SidebarChatItemLayout;
+	readonly chatItemLayout: ChatItemLayout;
 	readonly rowHeight: number | undefined;
 	readonly overscan: number;
 }
@@ -34,7 +34,7 @@ export class SidebarVirtualChatListController {
 
 	#virt: VirtualListController;
 	#overscan = DEFAULT_CHAT_ROW_OVERSCAN;
-	#lastEstimatedLayout: SidebarChatItemLayout | undefined;
+	#lastEstimatedLayout: ChatItemLayout | undefined;
 
 	constructor() {
 		const getOverscan = () => this.#overscan;

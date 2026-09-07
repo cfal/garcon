@@ -26,6 +26,10 @@ import {
 	parseThemePreference,
 	type ThemePreference,
 } from '$lib/theme/themes.js';
+import {
+	parseChatItemLayout as parseStoredChatItemLayout,
+	type ChatItemLayout,
+} from '$lib/chat/presentation/chat-item-layout.js';
 
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
 export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
@@ -57,8 +61,6 @@ export const SIDEBAR_INACTIVITY_DURATION_VALUES = [
 ] as const;
 export type SidebarInactivityDuration = (typeof SIDEBAR_INACTIVITY_DURATION_VALUES)[number];
 
-export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
-export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
 export type FileOpenPlacementPreference = 'same-window' | 'new-window' | 'dialog';
 export const FILE_OPEN_PLACEMENT_VALUES = [
 	'same-window',
@@ -142,7 +144,7 @@ export interface LocalSettingsSnapshot {
 	sidebarGrouping: SidebarChatGrouping;
 	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
-	sidebarChatItemLayout: SidebarChatItemLayout;
+	sidebarChatItemLayout: ChatItemLayout;
 	sidebarSortMode: SidebarSortMode;
 	sidebarSearchResultSort: ChatSearchSort;
 	codeEditorWordWrap: boolean;
@@ -293,11 +295,8 @@ function parseSidebarInactivityDuration(value: unknown): SidebarInactivityDurati
 	return isSidebarInactivityDuration(value) ? value : DEFAULTS.sidebarInactivityDuration;
 }
 
-function parseSidebarChatItemLayout(value: unknown): SidebarChatItemLayout {
-	return typeof value === 'string' &&
-		SIDEBAR_CHAT_ITEM_LAYOUT_VALUES.includes(value as SidebarChatItemLayout)
-		? (value as SidebarChatItemLayout)
-		: DEFAULTS.sidebarChatItemLayout;
+function parseSidebarChatItemLayout(value: unknown): ChatItemLayout {
+	return parseStoredChatItemLayout(value) ?? DEFAULTS.sidebarChatItemLayout;
 }
 
 export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementPreference {
@@ -435,7 +434,7 @@ export class LocalSettingsStore {
 	sidebarGrouping = $state<SidebarChatGrouping>(DEFAULTS.sidebarGrouping);
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
-	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
+	sidebarChatItemLayout = $state<ChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
 	sidebarSearchResultSort = $state<ChatSearchSort>(DEFAULTS.sidebarSearchResultSort);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);

@@ -2,9 +2,9 @@
 	import SidebarControlsRow from './SidebarControlsRow.svelte';
 	import type {
 		SidebarChatGrouping,
-		SidebarChatItemLayout,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
+	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -13,7 +13,7 @@
 		visibleUnreadCount: number;
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
-		chatItemLayout?: SidebarChatItemLayout;
+		chatItemLayout?: ChatItemLayout;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
@@ -26,7 +26,7 @@
 		onMarkAllRead?: () => void;
 		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
-		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
+		onSetChatItemLayout?: (layout: ChatItemLayout) => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -43,7 +43,7 @@
 		visibleUnreadCount,
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
-		chatItemLayout = 'default',
+		chatItemLayout = 'detailed',
 		sortMode = 'manual',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,

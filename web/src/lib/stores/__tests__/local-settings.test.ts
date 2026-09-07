@@ -121,6 +121,21 @@ describe('LocalSettingsStore', () => {
 		malformed.destroy();
 	});
 
+	it('migrates the legacy default chat layout to detailed', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarChatItemLayout: 'default' }),
+		);
+
+		const store = createLocalSettingsStore();
+		expect(store.sidebarChatItemLayout).toBe('detailed');
+		store.set('sidebarChatItemLayout', store.sidebarChatItemLayout);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ sidebarChatItemLayout: 'detailed' });
+		store.destroy();
+	});
+
 	it('persists Ctrl+Enter steering and defaults malformed values to enabled', () => {
 		const store = createLocalSettingsStore();
 		store.toggle('steerWithCtrlEnter');

@@ -9,7 +9,8 @@
 	import { getAppShell, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
-	import type { ChatMaxWidth, SidebarChatItemLayout } from '$lib/stores/local-settings.svelte.js';
+	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte.js';
+	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 	import {
 		OnboardingWizardState,
 		type OnboardingPageId,
@@ -58,7 +59,7 @@
 	};
 
 	const layoutOptions: Array<{
-		value: SidebarChatItemLayout;
+		value: ChatItemLayout;
 		label: () => string;
 		hint: () => string;
 	}> = [
@@ -73,7 +74,7 @@
 			hint: m.onboarding_layout_single_line_hint,
 		},
 		{
-			value: 'default',
+			value: 'detailed',
 			label: m.onboarding_layout_detailed,
 			hint: m.onboarding_layout_detailed_hint,
 		},

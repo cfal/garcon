@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
-	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
+	import ChatProcessingIndicator from '$lib/components/chat/ChatProcessingIndicator.svelte';
+	import { cn } from '$lib/utils/cn.js';
 
 	let {
 		statusId,
@@ -16,10 +16,11 @@
 	class={cn('flex items-center justify-center', className)}
 	data-slot="workspace-chat-processing-indicator"
 >
-	<span id={statusId} class="sr-only">{m.chat_window_processing()}</span>
-	<span
-		class="workspace-chat-processing-indicator size-2 rounded-full bg-status-processing"
-		aria-hidden="true"
-		{@attach attachProcessingPulse}
-	></span>
+	<ChatProcessingIndicator
+		phase="running"
+		label={m.chat_window_processing()}
+		{statusId}
+		dotClass="workspace-chat-processing-indicator"
+		dotSlot="workspace-chat-processing-indicator-dot"
+	/>
 </span>

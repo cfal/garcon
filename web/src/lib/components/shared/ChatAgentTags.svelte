@@ -8,12 +8,21 @@
 		agentId: string;
 		tags: string[];
 		tagLimit?: number;
+		wrap?: 'none' | 'two-lines';
 		onTagClick?: (tag: string) => void;
 		onManageTags?: () => void;
 		class?: string;
 	}
 
-	let { agentId, tags, tagLimit = 2, onTagClick, onManageTags, class: className }: Props = $props();
+	let {
+		agentId,
+		tags,
+		tagLimit = 2,
+		wrap = 'none',
+		onTagClick,
+		onManageTags,
+		class: className,
+	}: Props = $props();
 
 	let visibleTags = $derived(tags.slice(0, tagLimit));
 	let overflowCount = $derived(Math.max(0, tags.length - tagLimit));
@@ -29,7 +38,13 @@
 	}
 </script>
 
-<div class={cn('flex items-center gap-1', className)}>
+<div
+	class={cn(
+		'flex items-center gap-1',
+		wrap === 'two-lines' ? 'max-h-10 flex-wrap overflow-hidden' : 'overflow-hidden whitespace-nowrap',
+		className,
+	)}
+>
 	<AgentPill {agentId} label={agentId || m.agent_claude()} fallbackAgentId="claude" />
 	{#each visibleTags as tag (tag)}
 		<ColoredTag

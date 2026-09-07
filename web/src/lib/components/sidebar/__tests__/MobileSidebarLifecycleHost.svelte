@@ -21,9 +21,9 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
 		SidebarChatGrouping,
-		SidebarChatItemLayout,
 		SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte';
+	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
@@ -36,7 +36,7 @@
 		sidebarGrouping?: SidebarChatGrouping;
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
-		sidebarChatItemLayout?: SidebarChatItemLayout;
+		sidebarChatItemLayout?: ChatItemLayout;
 		collapsedProjectKeys?: Set<string>;
 	}
 
@@ -49,7 +49,7 @@
 		sidebarGrouping = 'project',
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
-		sidebarChatItemLayout = 'default',
+		sidebarChatItemLayout = 'detailed',
 		collapsedProjectKeys = new Set<string>(),
 	}: MobileSidebarLifecycleHostProps = $props();
 
@@ -147,7 +147,7 @@
 				return;
 			}
 			if (key === 'sidebarChatItemLayout') {
-				sidebarChatItemLayout = value as SidebarChatItemLayout;
+				sidebarChatItemLayout = value as ChatItemLayout;
 				return;
 			}
 			sidebarSearchResultSort = value as typeof sidebarSearchResultSort;
