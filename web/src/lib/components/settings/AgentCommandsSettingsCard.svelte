@@ -86,6 +86,30 @@
 					onCheckedChange={(checked) => void setCommandSetting('sendMessage', checked)}
 				/>
 			</div>
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<label for="start-agent-enabled" class="text-sm text-foreground">{m.settings_enable_start_agent()}</label>
+					<p class="text-xs text-muted-foreground">{m.settings_start_agent_description()}</p>
+				</div>
+				<Switch
+					id="start-agent-enabled"
+					checked={commands?.startAgent ?? true}
+					disabled={isSaving}
+					onCheckedChange={(checked) => void setCommandSetting('startAgent', checked)}
+				/>
+			</div>
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<label for="schedule-enabled" class="text-sm text-foreground">{m.settings_enable_schedule()}</label>
+					<p class="text-xs text-muted-foreground">{m.settings_schedule_description()}</p>
+				</div>
+				<Switch
+					id="schedule-enabled"
+					checked={commands?.schedule ?? true}
+					disabled={isSaving}
+					onCheckedChange={(checked) => void setCommandSetting('schedule', checked)}
+				/>
+			</div>
 		</div>
 	{/if}
 

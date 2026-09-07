@@ -146,6 +146,25 @@ The skills resolve `garcon-cli` from `PATH`, `$HOME/garcon`, or `/garcon`. Inter
 
 Under the hood, `<garcon-get-chat-id />` gives an agent its runtime identity and `<garcon-send-message>` delivers a bounded message to up to 16 explicit chat IDs. Garcon infers the visible sender, supports deliberate anonymity, and creates no automatic replies.
 
+Agents can also start one independent child or schedule a prompt back to their own chat:
+
+```xml
+<garcon-start-agent agent="codex" model="gpt-5.4-nano" reasoning-effort="low">
+Review the parser tests and report missing cases.
+</garcon-start-agent>
+
+<garcon-schedule in="15m">Check whether the build finished.</garcon-schedule>
+<garcon-schedule every="5m" busy="skip" />
+```
+
+Place each command at an assistant message's leading or trailing edge, outside code fences. Attribute values use double quotes; escape body text with `&amp;` and `&lt;`. Starts require `agent` and `model`; optional `provider` selects a configured provider and optional `reasoning-effort` selects a supported effort. Children inherit the parent's current project path and permission mode, receive ordinary new-chat defaults, and retain a delegation edge. Commands cannot override permissions, paths, tags, or preambles. Unsupported inherited permissions reject the start.
+
+Scheduling accepts `in` (1 minute–365 days) or a minute-aligned `at` timestamp with an explicit timezone. Optional `every` repeats at a fixed interval of 1 minute–3,650 days; without `in` or `at`, the first run follows one interval. Durations use ordered whole `d`, `h`, and `m` components, such as `1h30m`. Optional `until` is inclusive and requires recurrence. `busy` defaults to `queue`; `skip` avoids accumulating work while busy. Schedules target only the requesting chat and use its current configuration when executed. The saved prompt is delivered inside `<garcon-schedule-action>…</garcon-schedule-action>`, or exactly `<garcon-schedule-action />` when empty. Manage saved schedules through **Scheduled prompts** in the sidebar menu; the recurrence editor supports minutes, hours, and days.
+
+Existing hourly/day schedules migrate to minute-based storage version 3 with a private, byte-exact source backup. Their cadence and next occurrence are preserved. Older binaries cannot read version 3; do not downgrade without preserving schedules created or edited since migration.
+
+Remote Settings provides individual start/schedule toggles under the agent-command master switch. Disabling commands does not cancel accepted work. Each request receives a creation outcome and a private result envelope; a preamble-blocked retained child is identified for resumption. An unknown outcome requires inspecting existing work before retrying. Separate emissions may create separate work; imported history never re-executes commands. Saved schedules survive restart, but queued inputs and private replies do not.
+
 ## Trusted Local Use
 
 To disable authentication for a trusted single-user environment:

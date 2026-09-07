@@ -4,6 +4,7 @@
 	import { formatCompactTimeUntil, formatScheduledInstant } from '$lib/scheduling/local-schedule';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ScheduledPrompt } from '$shared/scheduled-prompts';
+	import { parseGarconScheduleAction } from '$shared/garcon-schedule';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -49,9 +50,11 @@
 		onMoveDown,
 	}: Props = $props();
 
-	let title = $derived(
-		scheduledPrompt.prompt.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_prompts_untitled(),
-	);
+	let title = $derived.by(() => {
+		const action = parseGarconScheduleAction(scheduledPrompt.prompt);
+		if (action) return action.body.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_prompts_action();
+		return scheduledPrompt.prompt.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_prompts_untitled();
+	});
 	let timeUntilRun = $derived(
 		formatCompactTimeUntil(scheduledPrompt.schedule.nextRunAt, currentTime),
 	);

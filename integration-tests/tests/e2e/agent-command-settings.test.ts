@@ -59,6 +59,8 @@ describe('Lightpanda agent command settings', () => {
       );
 
       await setSwitch(fixture.page, '#send-message-enabled', false);
+      await setSwitch(fixture.page, '#start-agent-enabled', false);
+      await setSwitch(fixture.page, '#schedule-enabled', false);
       await setSwitch(fixture.page, '#agent-commands-enabled', false);
       await fixture.page.waitForFunction(
         () => document.querySelector('#send-message-enabled') === null,
@@ -98,6 +100,8 @@ describe('Lightpanda agent command settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
+        startAgent: false,
+        schedule: false,
       });
       fixture.assertNoBrowserErrors();
     });
