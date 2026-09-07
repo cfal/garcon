@@ -35,6 +35,8 @@ export function flowNodes(
 			selected: selectedIds.has(node.id),
 			dragHandle: '.canvas-drag-handle',
 			ariaLabel: node.type === 'box' ? node.title : undefined,
+			domAttributes:
+				node.type === 'chat' ? { 'aria-labelledby': `canvas-chat-title-${node.id}` } : undefined,
 		};
 	});
 }

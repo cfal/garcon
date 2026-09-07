@@ -89,6 +89,12 @@ describe('Chromium Chat Canvas', () => {
           .getByRole('button', { name: 'Canvases', exact: true })
           .click();
         await page.locator(node('card')).waitFor({ state: 'visible' });
+        markPhase('keeping graph node names in sync with live chat titles');
+        await integration.client.updateSessionName(chatId, 'Accessible chat title');
+        await page.getByRole('group', { name: 'Accessible chat title', exact: true }).waitFor();
+        await integration.client.updateSessionName(chatId, 'Revised accessible title');
+        await page.getByRole('group', { name: 'Revised accessible title', exact: true }).waitFor();
+        expect(await page.locator(node('card')).getAttribute('aria-labelledby')).toBe('canvas-chat-title-card');
         await page
           .getByRole('button', { name: 'Fit canvas', exact: true })
           .click();
@@ -180,9 +186,12 @@ describe('Chromium Chat Canvas', () => {
           sourceRect!.y + sourceRect!.height / 2,
           { steps: 4 },
         );
+        await page.mouse.move(canvasRect!.x + 40, canvasRect!.y - 20, { steps: 20 });
+        await page.locator('[data-workspace-window-drop-result]').waitFor({ state: 'visible' });
         await page.mouse.move(canvasRect!.x + 40, canvasRect!.y + 300, {
           steps: 20,
         });
+        await page.locator('[data-workspace-window-drop-result]').waitFor({ state: 'hidden' });
         await page.mouse.move(canvasRect!.x + 48, canvasRect!.y + 305, {
           steps: 4,
         });

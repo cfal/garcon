@@ -344,7 +344,7 @@
 			{/if}
 		{/each}
 	</div>
-	{#if dnd.isDragging && !dnd.hasChatDropTarget(workspaceWindow.id)}
+	{#if dnd.isDragging && (!dnd.hasChatDropTarget(workspaceWindow.id) || activeDropTarget)}
 		<div
 			class={cn('pointer-events-auto absolute z-50', dropLayerInsetClass)}
 			style:top={dropLayerTopPx === undefined ? undefined : `${dropLayerTopPx}px`}

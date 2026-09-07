@@ -15,6 +15,9 @@
 	class="canvas-chat-node h-full w-full rounded-lg border bg-card shadow-sm"
 	class:canvas-selected={selected}
 >
+	<span id={`canvas-chat-title-${id}`} class="sr-only">
+		{chat ? chat.title || m.sidebar_chats_new_chat() : m.canvas_unavailable_chat()}
+	</span>
 	<div class="canvas-drag-handle h-[104px] overflow-hidden">
 		<svelte:boundary>
 			<CanvasChatCard {chat} currentTime={view.currentTime} />

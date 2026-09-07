@@ -1320,4 +1320,32 @@ describe('WorkspaceRoot', () => {
 			expect(workspace.openChatInNewWindow).toHaveBeenCalledWith('chat-b', 'window-main', 'right'),
 		);
 	});
+
+	it('previews window drops outside a registered canvas while leaving canvas drops unobstructed', async () => {
+		const { windowDnd, workspace } = installContext();
+		const { container } = renderRoot();
+		const target = container.querySelector<HTMLElement>(
+			'[data-workspace-window-id="window-main"]',
+		)!;
+		vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
+		const canvasElement = document.createElement('div');
+		canvasElement.getBoundingClientRect = () => new DOMRect(20, 20, 60, 60);
+		target.append(canvasElement);
+		const drop = vi.fn();
+		const release = windowDnd.registerChatDropTarget('window-main', canvasElement, drop);
+		windowDnd.beginChatDrag('chat-b');
+		await fireEvent(target, positionedDragEvent('dragover', 50, 50));
+		expect(target.querySelector('[data-workspace-window-drop-layer]')).toBeNull();
+		await fireEvent(target, positionedDragEvent('dragover', 95, 50));
+		expect(target.querySelector('[data-workspace-window-drop-result]')).not.toBeNull();
+		await fireEvent(target, positionedDragEvent('dragover', 50, 50));
+		expect(target.querySelector('[data-workspace-window-drop-layer]')).toBeNull();
+		await fireEvent(target, positionedDragEvent('dragover', 95, 50));
+		await fireEvent(target, positionedDragEvent('drop', 95, 50));
+		expect(drop).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(workspace.openChatInNewWindow).toHaveBeenCalledWith('chat-b', 'window-main', 'right'),
+		);
+		release();
+	});
 });
