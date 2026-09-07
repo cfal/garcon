@@ -135,6 +135,11 @@ describe('composed assistant schedule pipeline', () => {
             `${prefix}<garcon-${family}>\n<garcon-${family}>nested</garcon-${family}>\n<garcon-schedule in="1m" />`,
             `${prefix}<garcon-${family} broken="</garcon-${family}>\n<garcon-schedule in="5m" />`,
             `${prefix}<garcon-${family}>\n<example broken="</garcon-${family}>\n<garcon-schedule in="10m" />`,
+            ...[['<!--', '-->'], ['<![CDATA[', ']]>'], ['<?example', '?>']].flatMap(([open, close]) => [
+              `${prefix}<garcon-${family}>\n${open}</garcon-${family}>${close}\n<garcon-schedule in="1m" />`,
+              `${prefix}<garcon-${family}>\n${open}</garcon-${family}>\n<garcon-schedule in="5m" />`,
+            ]),
+            `${prefix}<garcon-${family}>\n<!DOCTYPE example [<!ENTITY closer "</garcon-${family}>">]>\n</garcon-${family}>\n<garcon-schedule in="10m" />`,
           ];
           for (const content of contents) {
             publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(NOW, content) }] });

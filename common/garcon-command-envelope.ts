@@ -40,6 +40,18 @@ export function garconEnvelopeSpanAt(content: string, start: number, end: number
   while (cursor < end) {
     const next = content.indexOf('<', cursor);
     if (next < 0 || next >= end) break;
+    const opaqueMarkup = content.startsWith('<!--', next) ? ['<!--', '-->']
+      : content.startsWith('<![CDATA[', next) ? ['<![CDATA[', ']]>']
+      : content.startsWith('<?', next) ? ['<?', '?>'] : null;
+    if (opaqueMarkup) {
+      const [open, close] = opaqueMarkup;
+      const closeAt = content.indexOf(close, next + open.length);
+      if (closeAt < 0 || closeAt + close.length > end) break;
+      cursor = closeAt + close.length;
+      continue;
+    }
+    // Unsupported declarations have no trustworthy recovery grammar.
+    if (content.startsWith('<!', next)) break;
     const closer = `</garcon-${nesting.at(-1)}>`;
     if (next + closer.length <= end && content.startsWith(closer, next)) {
       nesting.pop();

@@ -20,3 +20,12 @@ test('quoted delimiters and escaped tag text cannot change the outer span', () =
   const content = '<garcon-schedule ignored="a > b">&lt;garcon-schedule&gt;</garcon-schedule>';
   expect(garconEnvelopeSpanAt(content, 0, content.length)?.end).toBe(content.length);
 });
+
+for (const [open, close] of [['<!--', '-->'], ['<![CDATA[', ']]>'], ['<?example', '?>']]) {
+  test(`${open} contents cannot close or nest the surrounding envelope`, () => {
+    const hidden = `${open}</garcon-start-agent><garcon-schedule>${close}`;
+    const content = `<garcon-start-agent>${hidden}</garcon-start-agent>`;
+    expect(garconEnvelopeSpanAt(content, 0, content.length)?.end).toBe(content.length);
+    expect(garconEnvelopeSpanAt(content, 0, content.indexOf(close) + close.length - 1)?.end).toBeNull();
+  });
+}

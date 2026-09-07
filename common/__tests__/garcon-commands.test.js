@@ -282,6 +282,35 @@ describe('Garcon edge commands', () => {
     expect(result.issues).toHaveLength(1);
   });
 
+  it('keeps unsupported markup opaque while finding an outer envelope boundary', () => {
+    for (const family of ['start-agent', 'schedule', 'send-message']) {
+      for (const prefix of ['', 'Answer\n']) {
+        for (const [open, close] of [['<!--', '-->'], ['<![CDATA[', ']]>'], ['<?example', '?>']]) {
+          for (const terminated of [false, true]) {
+            const malformed = `${prefix}<garcon-${family}>\n${open}</garcon-${family}>${terminated ? close : ''}\n<garcon-schedule in="1m" />`;
+            const result = extractGarconCommands(new AssistantMessage(AT, malformed));
+            expect(result.message.content).toBe(malformed);
+            expect(result.commands).toEqual([]);
+            expect(result.issues).toHaveLength(1);
+            const closed = `${malformed}\n</garcon-${family}>`;
+            const content = `${closed}\n<garcon-schedule in="5m" />`;
+            const recovered = extractGarconCommands(new AssistantMessage(AT, content));
+            expect(recovered.message.content).toBe(terminated ? closed : content);
+            expect(recovered.commands).toMatchObject(terminated
+              ? [{ type: 'schedule', firstRun: { type: 'after', minutes: 5 } }] : []);
+            expect(recovered.commands).toHaveLength(terminated ? 1 : 0);
+            expect(recovered.issues).toHaveLength(1);
+          }
+        }
+        const content = `${prefix}<garcon-${family}>\n<!DOCTYPE example [<!ENTITY closer "</garcon-${family}>">]>\n</garcon-${family}>\n<garcon-schedule in="1m" />`;
+        const result = extractGarconCommands(new AssistantMessage(AT, content));
+        expect(result.message.content).toBe(content);
+        expect(result.commands).toEqual([]);
+        expect(result.issues).toHaveLength(1);
+      }
+    }
+  });
+
   it('never executes code-fenced examples or result/action lookalikes', () => {
     for (const content of [
       '<garcon-schedule-action />', '<garcon-schedule-result status="created" />',
