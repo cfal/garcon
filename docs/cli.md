@@ -127,7 +127,7 @@ The optional `--agent` filter uses an exact agent ID. Without it, every current 
 
 ## Message Presentation
 
-Start, resume, and `send-async` messages can add a visual header with `--message-title` and `--message-style info|notice|error|custom`. A title alone uses `notice`. Custom styling uses `--color <light[,dark]>`.
+Start, resume, and `resume-async` messages can add a visual header with `--message-title` and `--message-style info|notice|error|custom`. A title alone uses `notice`. Custom styling uses `--color <light[,dark]>`.
 
 Presentation distinguishes the ordinary user message in Garcon and is not included in the prompt sent to the agent. `--collapsible` starts the message body collapsed.
 
@@ -302,17 +302,17 @@ Use a handoff artifact for comprehensive high-level synthesis. Use complete XML 
 
 ## Asynchronous Delivery And Steering
 
-`send-async` submits to an existing chat and returns as soon as Garcon accepts it. The turn stays visible and stoppable in the SPA and inherits the target chat's saved execution settings.
+`resume-async` submits to an existing chat and returns as soon as Garcon accepts it. The turn stays visible and stoppable in the SPA and inherits the target chat's saved execution settings.
 
 ```bash
-bun cli/main.ts --workspace default send-async 1785337200123456 \
+bun cli/main.ts --workspace default resume-async 1785337200123456 \
   "Implement the reviewed changes and run the focused tests."
 ```
 
 If the target is busy, the command exits `3` without queueing or steering. Pass `--allow-steer` to deliver into the active turn instead. `--allow-steer` never queues:
 
 ```bash
-bun cli/main.ts --workspace default send-async 1785337200123456 \
+bun cli/main.ts --workspace default resume-async 1785337200123456 \
   --allow-steer \
   --message-title "New blocker" \
   --message-style error \

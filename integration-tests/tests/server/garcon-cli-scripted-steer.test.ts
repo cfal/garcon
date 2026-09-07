@@ -48,7 +48,7 @@ describe('scripted Codex CLI steering', () => {
     await environment?.dispose();
   });
 
-  test('send-async --allow-steer steers the active Codex turn exactly once', async () => {
+  test('resume-async --allow-steer steers the active Codex turn exactly once', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const firstPrompt = marker('CLI_FIRST_PROMPT');
@@ -74,7 +74,7 @@ describe('scripted Codex CLI steering', () => {
       const steered = await runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
-        'send-async', chatId, '--allow-steer',
+        'resume-async', chatId, '--allow-steer',
         '--message-title', 'Steer context',
         '--color', '0EA5E9,7dd3fc',
         '--collapsible',
