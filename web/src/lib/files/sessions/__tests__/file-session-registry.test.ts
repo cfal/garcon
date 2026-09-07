@@ -18,9 +18,8 @@ import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-f
 import { ApiError } from '$lib/api/client.js';
 import { ModuleImportError } from '$lib/utils/module-import-error.js';
 
-const testEditorRuntime: FileEditorRuntimeModule = await import(
-	'$lib/files/editor/code-editor-controller.svelte.js'
-);
+const testEditorRuntime: FileEditorRuntimeModule =
+	await import('$lib/files/editor/code-editor-controller.svelte.js');
 
 function identity(path: string): CanonicalFileIdentity {
 	return {
@@ -291,6 +290,37 @@ describe('FileSessionRegistry', () => {
 			session.editor.detach(lease);
 			host.remove();
 		}
+	});
+
+	it('reconfigures editors only when their effective renderer theme changes', async () => {
+		const harness = createHarness();
+		const session = await harness.registry.open(request('src/theme-palette.ts'));
+		if (!session) throw new Error('Expected a code editor session');
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		if (!session.editor) throw new Error('Expected a loaded code editor');
+		const reconfigure = vi.spyOn(session.editor, 'reconfigure');
+
+		harness.registry.setThemePresentation({
+			colorScheme: 'light',
+			rendererPalette: 'standard',
+		});
+		expect(reconfigure).not.toHaveBeenCalled();
+
+		harness.registry.setThemePresentation({
+			colorScheme: 'light',
+			rendererPalette: 'colorblind',
+		});
+		harness.registry.setThemePresentation({
+			colorScheme: 'light',
+			rendererPalette: 'colorblind',
+		});
+		expect(reconfigure).toHaveBeenCalledOnce();
+
+		harness.registry.setThemePresentation({
+			colorScheme: 'dark',
+			rendererPalette: 'colorblind',
+		});
+		expect(reconfigure).toHaveBeenCalledTimes(2);
 	});
 
 	it('settles a loading code frame before attaching its editor after the read', async () => {

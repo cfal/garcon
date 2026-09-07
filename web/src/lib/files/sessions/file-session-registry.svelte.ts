@@ -10,15 +10,14 @@ import type {
 	CodeEditorController,
 	EditorPresentationSettings,
 } from '$lib/files/editor/code-editor-controller.svelte.js';
+import { resolveEditorThemeId, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
+import type { ThemeRendererPresentation } from '$lib/theme/themes.js';
 import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
 import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
-import type {
-	DesktopPlacement,
-	PresentationHostId,
-} from '$lib/workspace/surface-types.js';
+import type { DesktopPlacement, PresentationHostId } from '$lib/workspace/surface-types.js';
 import type {
 	CanonicalFileIdentity,
 	FileIdentityResponse,
@@ -70,7 +69,7 @@ export interface FileThresholdRequest {
 
 export interface FileSessionsDeps {
 	getIsMobile(): boolean;
-	getEditorSettings(): Omit<EditorPresentationSettings, 'isDark'>;
+	getEditorSettings(): Omit<EditorPresentationSettings, 'editorThemeId'>;
 	getDefaultPlacement(mode: FileRendererMode, origin: PresentationHostId): DesktopPlacement;
 	getPlacement(): FilePlacementPort;
 	onOpenError?(request: FileOpenRequest, error: unknown): void;
@@ -135,7 +134,7 @@ export class FileSessionRegistry {
 	#creationQueue = new SerialQueue();
 	#decisionQueue = new SerialQueue();
 	#editorRuntimePromise: Promise<FileEditorRuntimeModule> | null = null;
-	#isDark = false;
+	#editorThemeId: EditorThemeId = 'standard-light';
 
 	constructor(private readonly deps: FileSessionsDeps) {}
 
@@ -156,8 +155,16 @@ export class FileSessionRegistry {
 	}
 
 	setDarkTheme(isDark: boolean): void {
-		if (this.#isDark === isDark) return;
-		this.#isDark = isDark;
+		this.setThemePresentation({
+			colorScheme: isDark ? 'dark' : 'light',
+			rendererPalette: 'standard',
+		});
+	}
+
+	setThemePresentation(presentation: ThemeRendererPresentation): void {
+		const editorThemeId = resolveEditorThemeId(presentation);
+		if (this.#editorThemeId === editorThemeId) return;
+		this.#editorThemeId = editorThemeId;
 		for (const session of this.all) session.editor?.reconfigure();
 	}
 
@@ -305,10 +312,7 @@ export class FileSessionRegistry {
 			}
 			this.#commitLoadedContent(session, loaded);
 		} catch (error) {
-			if (
-				isAbortError(error) ||
-				!this.#isCurrentRefresh(session, controller, generation)
-			) {
+			if (isAbortError(error) || !this.#isCurrentRefresh(session, controller, generation)) {
 				return;
 			}
 			session.refreshError = error instanceof Error ? error.message : String(error);
@@ -360,10 +364,7 @@ export class FileSessionRegistry {
 			session.freshnessError = null;
 			session.isExternallyStale = this.#revisionIsStale(session.loadedRevision, result);
 		} catch (error) {
-			if (
-				isAbortError(error) ||
-				!this.#isCurrentFreshness(session, controller, generation)
-			) {
+			if (isAbortError(error) || !this.#isCurrentFreshness(session, controller, generation)) {
 				return;
 			}
 			session.freshnessError = error instanceof Error ? error.message : String(error);
@@ -475,8 +476,7 @@ export class FileSessionRegistry {
 		try {
 			const target = this.deps.getIsMobile()
 				? undefined
-				: (request.target ??
-					this.deps.getDefaultPlacement(session.rendererMode, request.origin));
+				: (request.target ?? this.deps.getDefaultPlacement(session.rendererMode, request.origin));
 			placementResult = await this.deps.getPlacement().placeFileSession(session.id, target, {
 				publish,
 				rollback,
@@ -628,10 +628,7 @@ export class FileSessionRegistry {
 		return error instanceof ApiError && error.errorCode === 'FILE_REVISION_CONFLICT';
 	}
 
-	#revisionIsStale(
-		loadedRevision: FileRevision,
-		result: FileRevisionResponse,
-	): boolean {
+	#revisionIsStale(loadedRevision: FileRevision, result: FileRevisionResponse): boolean {
 		return result.status === 'missing' || result.revision !== loadedRevision;
 	}
 
@@ -690,10 +687,10 @@ export class FileSessionRegistry {
 
 	#editorSettings(): EditorPresentationSettings {
 		const settings = this.deps.getEditorSettings();
-		const getIsDark = () => this.#isDark;
+		const getEditorThemeId = () => this.#editorThemeId;
 		return {
-			get isDark() {
-				return getIsDark();
+			get editorThemeId() {
+				return getEditorThemeId();
 			},
 			get wordWrap() {
 				return settings.wordWrap;
