@@ -9,7 +9,8 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import MermaidViewerDialog from './MermaidViewerDialog.svelte';
-	import { renderMermaid } from './mermaid-loader';
+	import { renderMermaid, resolveMermaidThemeId } from './mermaid-loader';
+	import { getThemeRuntime } from '$lib/context';
 
 	interface Props {
 		text?: string;
@@ -17,6 +18,13 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	}
 
 	let { text = '', acquireTransientActivity }: Props = $props();
+	const theme = getThemeRuntime();
+	const mermaidThemeId = $derived(
+		resolveMermaidThemeId({
+			colorScheme: theme.profile.colorScheme,
+			rendererPalette: theme.profile.rendererPalette,
+		}),
+	);
 
 	let renderedSvg = $state('');
 	let renderError = $state('');
@@ -64,19 +72,20 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		}
 
 		const currentText = text;
+		const currentThemeId = mermaidThemeId;
 		loading = true;
 		renderedSvg = '';
 		renderError = '';
 
 		let active = true;
-		renderMermaid(currentText).then(
+		renderMermaid(currentText, currentThemeId).then(
 			(svg) => {
-				if (!active || currentText !== text) return;
+				if (!active || currentText !== text || currentThemeId !== mermaidThemeId) return;
 				renderedSvg = svg;
 				loading = false;
 			},
 			(err) => {
-				if (!active || currentText !== text) return;
+				if (!active || currentText !== text || currentThemeId !== mermaidThemeId) return;
 				renderError = err instanceof Error ? err.message : m.chat_mermaid_render_failed();
 				loading = false;
 			},
