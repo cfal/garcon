@@ -70,6 +70,12 @@ export function resolveWorkspaceWindowCenterDropResult(
 export class WorkspaceWindowDndController {
 	payload = $state<WorkspaceDragPayload | null>(null);
 	activeTarget = $state<WorkspaceWindowDropTarget | null>(null);
+	#chatDropTargets = $state.raw<
+		ReadonlyMap<
+			string,
+			{ element: HTMLElement; drop: (chatId: string, point: { x: number; y: number }) => void }
+		>
+	>(new Map());
 
 	constructor(
 		private readonly layout: WorkspaceLayoutReader,
@@ -82,6 +88,37 @@ export class WorkspaceWindowDndController {
 
 	hasChatPlacement(chatId: string): boolean {
 		return findWorkspaceChatPlacement(this.layout.snapshot, chatId) !== null;
+	}
+
+	registerChatDropTarget(
+		windowId: string,
+		element: HTMLElement,
+		drop: (chatId: string, point: { x: number; y: number }) => void,
+	): () => void {
+		const target = { element, drop };
+		this.#chatDropTargets = new Map(this.#chatDropTargets).set(windowId, target);
+		return () => {
+			if (this.#chatDropTargets.get(windowId) !== target) return;
+			const next = new Map(this.#chatDropTargets);
+			next.delete(windowId);
+			this.#chatDropTargets = next;
+		};
+	}
+
+	hasChatDropTarget(windowId: string): boolean {
+		return this.payload?.kind === 'chat' && this.#chatDropTargets.has(windowId);
+	}
+
+	#contentTarget(windowId: string, event: DragEvent) {
+		const target = this.payload?.kind === 'chat' ? this.#chatDropTargets.get(windowId) : null;
+		if (!target) return null;
+		const rect = target.element.getBoundingClientRect();
+		return event.clientX >= rect.left &&
+			event.clientX <= rect.right &&
+			event.clientY >= rect.top &&
+			event.clientY <= rect.bottom
+			? target
+			: null;
 	}
 
 	beginSurfaceTabDrag(
@@ -109,6 +146,13 @@ export class WorkspaceWindowDndController {
 
 	handleWindowDragOver(windowId: WorkspaceWindowId, event: DragEvent): void {
 		if (!this.payload) return;
+		if (this.#contentTarget(windowId, event)) {
+			event.preventDefault();
+			event.stopPropagation();
+			this.activeTarget = null;
+			if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+			return;
+		}
 		const element = (event.currentTarget as HTMLElement).closest<HTMLElement>(
 			'[data-workspace-window-id]',
 		);
@@ -136,6 +180,12 @@ export class WorkspaceWindowDndController {
 		if (!payload) return null;
 		event.preventDefault();
 		event.stopPropagation();
+		const contentTarget = this.#contentTarget(windowId, event);
+		if (contentTarget && payload.kind === 'chat') {
+			this.endDrag();
+			contentTarget.drop(payload.chatId, { x: event.clientX, y: event.clientY });
+			return null;
+		}
 		const element = (event.currentTarget as HTMLElement).closest<HTMLElement>(
 			'[data-workspace-window-id]',
 		);
