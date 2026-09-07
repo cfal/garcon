@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   SCHEDULED_PROMPT_CHAT_ID_TOKEN,
-  SCHEDULED_PROMPT_INTERVAL_HOURS_MAX,
-  SCHEDULED_PROMPT_INTERVAL_HOURS_MIN,
+  SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX,
+  SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN,
   SCHEDULED_PROMPT_MAX_LENGTH,
   normalizeScheduledPrompt,
   normalizeScheduledPromptDefinitionInput,
@@ -20,12 +20,12 @@ function definition(prompt) {
   };
 }
 
-function recurringDefinition(intervalHours) {
+function recurringDefinition(intervalMinutes) {
   return {
     schedule: {
       type: 'recurring',
       firstRunAtUtc: '2030-01-01T09:00:00.000Z',
-      intervalHours,
+      intervalMinutes,
       endAtUtc: null,
     },
     target: { type: 'existing-chat', chatId: CHAT_ID, busyBehavior: 'queue' },
@@ -77,21 +77,25 @@ describe('scheduled prompt variables', () => {
 });
 
 describe('scheduled prompt recurring intervals', () => {
-  it('accepts the inclusive hourly interval bounds', () => {
-    for (const intervalHours of [SCHEDULED_PROMPT_INTERVAL_HOURS_MIN, SCHEDULED_PROMPT_INTERVAL_HOURS_MAX]) {
-      expect(normalizeScheduledPromptDefinitionInput(recurringDefinition(intervalHours))?.schedule).toMatchObject({
+  it('accepts the inclusive minute interval bounds', () => {
+    for (const intervalMinutes of [SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN, 5, 59, 60, 90, 1440, SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX]) {
+      expect(normalizeScheduledPromptDefinitionInput(recurringDefinition(intervalMinutes))?.schedule).toMatchObject({
         type: 'recurring',
-        intervalHours,
+        intervalMinutes,
       });
     }
   });
 
-  it('rejects invalid hourly intervals and the retired day-based field', () => {
-    for (const intervalHours of [0, 1.5, SCHEDULED_PROMPT_INTERVAL_HOURS_MAX + 1]) {
-      expect(normalizeScheduledPromptDefinitionInput(recurringDefinition(intervalHours))).toBeNull();
+  it('rejects invalid minute intervals and the retired day-based field', () => {
+    for (const intervalMinutes of [0, 1.5, SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX + 1]) {
+      expect(normalizeScheduledPromptDefinitionInput(recurringDefinition(intervalMinutes))).toBeNull();
     }
-    const legacy = recurringDefinition(undefined);
-    legacy.schedule.intervalDays = 1;
-    expect(normalizeScheduledPromptDefinitionInput(legacy)).toBeNull();
+    for (const field of ['intervalDays', 'intervalHours']) {
+      for (const interval of [undefined, 90]) {
+        const legacy = recurringDefinition(interval);
+        legacy.schedule[field] = 1;
+        expect(normalizeScheduledPromptDefinitionInput(legacy)).toBeNull();
+      }
+    }
   });
 });

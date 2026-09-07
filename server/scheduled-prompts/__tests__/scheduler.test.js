@@ -20,7 +20,7 @@ async function tempDir() {
 function recurringPrompt(nextRunAt) {
   return {
     id: 'repeat',
-    schedule: { type: 'recurring', intervalHours: 1, nextRunAt, endAt: null },
+    schedule: { type: 'recurring', intervalMinutes: 60, nextRunAt, endAt: null },
     target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
     prompt: 'Continue the work',
     createdAt: '2029-01-01T00:00:00.000Z',
@@ -28,11 +28,11 @@ function recurringPrompt(nextRunAt) {
   };
 }
 
-function recurringDefinition(firstRunAtUtc, intervalHours = 24) {
+function recurringDefinition(firstRunAtUtc, intervalMinutes = 1440) {
   return {
     schedule: {
       type: 'recurring',
-      intervalHours,
+      intervalMinutes,
       firstRunAtUtc,
       endAtUtc: null,
     },
@@ -45,7 +45,7 @@ function newChatDefinition(firstRunAtUtc, thinkingMode = 'none') {
   return {
     schedule: {
       type: 'recurring',
-      intervalHours: 24,
+      intervalMinutes: 1440,
       firstRunAtUtc,
       endAtUtc: null,
     },
@@ -133,12 +133,15 @@ describe('scheduled prompt scheduler', () => {
     }
   });
 
-  it('claims before dispatch, advances recurrence, and appends an outcome', async () => {
+  it.each([1, 5, 60, 90])('claims and registers the next %i-minute occurrence before dispatch', async (intervalMinutes) => {
     const dir = await tempDir();
     const store = new ScheduledPromptStore(dir);
     await store.init();
     const scheduledFor = '2030-01-01T09:00:00.000Z';
-    await store.create(recurringPrompt(scheduledFor), 0);
+    const prompt = recurringPrompt(scheduledFor);
+    prompt.schedule.intervalMinutes = intervalMinutes;
+    await store.create(prompt, 0);
+    const nextRunAt = new Date(Date.parse(scheduledFor) + intervalMinutes * 60_000).toISOString();
     const cron = new FakeCron();
     const observations = [];
     const runLog = new ScheduledPromptRunLog();
@@ -148,6 +151,7 @@ describe('scheduled prompt scheduler', () => {
       dispatcher: {
         async dispatch(prompt) {
           observations.push({ prompt, persisted: store.get(prompt.id) });
+          expect(cron.jobs.some((job) => !job.stopped && job.expression === cronExpressionForUtcInstant(nextRunAt))).toBe(true);
           return { message: 'Prompt sent to chat 123.' };
         },
       },
@@ -171,7 +175,8 @@ describe('scheduled prompt scheduler', () => {
     }
 
     expect(observations).toHaveLength(1);
-    expect(observations[0].persisted.schedule.nextRunAt).toBe('2030-01-01T10:00:00.000Z');
+    expect(observations[0].persisted.schedule.nextRunAt).toBe(nextRunAt);
+    expect(occurrence.stopped).toBe(true);
     expect(runLog.list().at(-1)).toContain('Prompt sent to chat 123.');
   });
 
@@ -199,12 +204,12 @@ describe('scheduled prompt scheduler', () => {
 
     const snapshot = await scheduler.create({
       expectedRevision: 0,
-      scheduledPrompt: recurringDefinition('2030-01-01T09:15:00.000Z', 6),
+      scheduledPrompt: recurringDefinition('2030-01-01T09:15:00.000Z', 360),
     });
 
     expect(snapshot.prompts[0]?.schedule).toMatchObject({
       type: 'recurring',
-      intervalHours: 6,
+      intervalMinutes: 360,
       nextRunAt: '2030-01-01T09:15:00.000Z',
     });
     expect(cron.jobs.some((job) => job.expression === '15 9 1 1 *')).toBe(true);

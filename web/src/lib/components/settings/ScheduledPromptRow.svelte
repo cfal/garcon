@@ -23,13 +23,17 @@
 		onMoveDown: () => void;
 	}
 
-	function recurringCadenceLabel(intervalHours: number): string {
-		if (intervalHours === 1) return m.scheduled_prompts_hourly();
-		if (intervalHours === 24) return m.scheduled_prompts_daily();
-		if (intervalHours % 24 === 0) {
-			return m.scheduled_prompts_every_days({ count: intervalHours / 24 });
+	function recurringCadenceLabel(intervalMinutes: number): string {
+		if (intervalMinutes === 1) return m.scheduled_prompts_every_minute();
+		if (intervalMinutes === 60) return m.scheduled_prompts_hourly();
+		if (intervalMinutes === 1440) return m.scheduled_prompts_daily();
+		if (intervalMinutes % 1440 === 0) {
+			return m.scheduled_prompts_every_days({ count: intervalMinutes / 1440 });
 		}
-		return m.scheduled_prompts_every_hours({ count: intervalHours });
+		if (intervalMinutes % 60 === 0) {
+			return m.scheduled_prompts_every_hours({ count: intervalMinutes / 60 });
+		}
+		return m.scheduled_prompts_every_minutes({ count: intervalMinutes });
 	}
 
 	let {
@@ -63,7 +67,7 @@
 	});
 	let cadence = $derived.by(() => {
 		if (scheduledPrompt.schedule.type === 'once') return m.scheduled_prompts_once();
-		const label = recurringCadenceLabel(scheduledPrompt.schedule.intervalHours);
+		const label = recurringCadenceLabel(scheduledPrompt.schedule.intervalMinutes);
 		return scheduledPrompt.schedule.endAt
 			? `${label}, ${m.scheduled_prompts_until({ date: formatScheduledInstant(scheduledPrompt.schedule.endAt) })}`
 			: `${label}, ${m.scheduled_prompts_forever().toLowerCase()}`;

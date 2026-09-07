@@ -302,7 +302,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
           ? { type: 'once', nextRunAt: definition.schedule.runAtUtc }
           : {
               type: 'recurring',
-              intervalHours: definition.schedule.intervalHours,
+              intervalMinutes: definition.schedule.intervalMinutes,
               nextRunAt: definition.schedule.firstRunAtUtc,
               endAt: definition.schedule.endAtUtc,
             },
