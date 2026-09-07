@@ -2,9 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { TerminalThemeStore, terminalThemeFor } from '../terminal-theme.svelte.js';
 import type { TerminalThemePresentation } from '../terminal-theme.svelte.js';
 
-const ANSI_KEYS = [
+const DEFAULT_BACKGROUND_FOREGROUND_KEYS = [
 	'foreground',
-	'black',
 	'red',
 	'green',
 	'yellow',
@@ -44,15 +43,34 @@ const PRESENTATIONS: TerminalThemePresentation[] = [
 ];
 
 describe('terminal themes', () => {
-	it('keeps application-selected foreground and ANSI colors readable', () => {
+	it('keeps configured foreground colors readable on the default background', () => {
 		for (const presentation of PRESENTATIONS) {
 			const theme = terminalThemeFor(presentation);
-			for (const key of ANSI_KEYS) {
+			for (const key of DEFAULT_BACKGROUND_FOREGROUND_KEYS) {
 				const color = theme[key];
 				if (typeof color !== 'string') throw new Error(`Missing terminal ${key}`);
 				expect(
 					contrast(color, presentation.background),
 					`${presentation.rendererPalette} ${presentation.colorScheme} ${key}`,
+				).toBeGreaterThanOrEqual(4.5);
+			}
+		}
+	});
+
+	it('keeps explicit ANSI black backgrounds compatible with light foregrounds', () => {
+		for (const presentation of PRESENTATIONS.filter(({ colorScheme }) => colorScheme === 'dark')) {
+			const theme = terminalThemeFor(presentation);
+			const background = theme.black;
+			if (typeof background !== 'string') throw new Error('Missing terminal black');
+			expect(background).toBe('#000000');
+			for (const foregroundKey of ['red', 'brightWhite'] as const) {
+				const foreground = theme[foregroundKey];
+				if (typeof foreground !== 'string') {
+					throw new Error(`Missing terminal ${foregroundKey}`);
+				}
+				expect(
+					contrast(foreground, background),
+					`${presentation.rendererPalette} ${foregroundKey} on black`,
 				).toBeGreaterThanOrEqual(4.5);
 			}
 		}

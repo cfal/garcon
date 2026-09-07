@@ -10,7 +10,7 @@ const STANDARD_DARK_THEME: ITheme = {
 	cursor: '#d4d4d4',
 	cursorAccent: '#1e1e1e',
 	selectionBackground: '#3f6387',
-	black: '#8b8b8b',
+	black: '#000000',
 	red: '#ff7b72',
 	green: '#56d88a',
 	yellow: '#f6d365',
