@@ -62,6 +62,40 @@ describe('ProjectResolutionStore', () => {
 		expect(store.snapshotFor(target)).toEqual({ kind: 'unchecked' });
 	});
 
+	it('preserves an available observation while a fresh resolution is pending', async () => {
+		const refresh = deferred<{
+			target: typeof target;
+			resolution: { kind: 'available'; effectiveProjectKey: string };
+		}>();
+		const fetchResolution = vi
+			.fn()
+			.mockResolvedValueOnce({
+				target,
+				resolution: { kind: 'available' as const, effectiveProjectKey: '/real/project' },
+			})
+			.mockReturnValueOnce(refresh.promise);
+		const store = new ProjectResolutionStore(fetchResolution);
+		const lease = store.retain(target);
+		await lease.resolve();
+
+		const pending = lease.resolve();
+
+		expect(lease.snapshot).toEqual({
+			kind: 'available',
+			effectiveProjectKey: '/real/project',
+		});
+		refresh.resolve({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: '/real/project-refreshed' },
+		});
+		await pending;
+		expect(lease.snapshot).toEqual({
+			kind: 'available',
+			effectiveProjectKey: '/real/project-refreshed',
+		});
+		lease.release();
+	});
+
 	it('aborts and ignores a late result after the target becomes obsolete', async () => {
 		const result = deferred<{
 			target: typeof target;

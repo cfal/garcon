@@ -53,7 +53,7 @@ class ProjectResolutionRecord {
 		if (this.#disposed) return Promise.resolve();
 		if (this.#request) return this.#request.waiter;
 		const controller = new AbortController();
-		this.snapshot = { kind: 'resolving' };
+		if (this.snapshot.kind === 'unchecked') this.snapshot = { kind: 'resolving' };
 		const pending: PendingResolution = {
 			controller,
 			completion: Promise.resolve(),
