@@ -5664,7 +5664,7 @@ describe('ChatCommandService', () => {
     expect(queue.discardPendingChatInput).toHaveBeenCalledWith(SOURCE_CHAT_ID);
   });
 
-  it('atomically discards both pending lanes and pauses through the real coordinator', async () => {
+  it('discards pending input but propagates an authoritative session commit failure', async () => {
     const queueService = makeRealQueue(makeInputProjection());
     const publishSessionFact = mock(() => {
       throw new Error('publication failed');
@@ -5674,7 +5674,7 @@ describe('ChatCommandService', () => {
       schemaVersion: 1,
       value: { path: '/synthetic/relocated.jsonl', agentSessionId: 'agent-1' },
     };
-    const { service } = makeService({
+    const { service, chats } = makeService({
       queueService,
       agents: {
         prepareProjectPathUpdate: mock(async () => ({
@@ -5700,8 +5700,9 @@ describe('ChatCommandService', () => {
     await expect(service.updateProjectPath({
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
-    })).resolves.toMatchObject({ success: true });
+    })).rejects.toThrow('publication failed');
 
+    expect(chats.getChat(SOURCE_CHAT_ID).projectPath).toBe(nextPath);
     expect(await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).toMatchObject({
       entries: [],
       controlEntries: [],

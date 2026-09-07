@@ -526,14 +526,7 @@ export class SessionCommands {
       }
       await this.deps.queue.discardPendingChatInput(input.chatId);
       if (relocatedSession) {
-        try {
-          this.deps.agents.publishSessionFact(input.chatId, relocatedSession);
-        } catch (error) {
-          logger.warn('Project-path session publication failed after persistence', {
-            chatId: input.chatId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+        this.deps.agents.publishSessionFact(input.chatId, relocatedSession);
       }
       return {
         success: true,
