@@ -1,0 +1,258 @@
+:root:where([data-theme='phosphor-light']) {
+	--background: 220 25% 97%;
+	--foreground: 222 32% 11%;
+	--card: 0 0% 100%;
+	--card-foreground: 222 32% 11%;
+	--popover: 0 0% 100%;
+	--popover-foreground: 222 32% 11%;
+	--primary: 160 84% 24%;
+	--primary-foreground: 150 40% 98%;
+	--secondary: 220 18% 92%;
+	--secondary-foreground: 222 28% 16%;
+	--muted: 220 16% 92%;
+	--muted-foreground: 222 10% 40%;
+	--accent: 158 45% 90%;
+	--accent-foreground: 160 70% 14%;
+	--destructive: 0 72% 46%;
+	--destructive-foreground: 0 0% 98%;
+	--border: 220 14% 84%;
+	--workspace-window-titlebar: 220 18% 90%;
+	--workspace-window-titlebar-active: 220 18% 82%;
+	--workspace-window-tab-selected: 0 0% 100%;
+	--workspace-window-tab-selected-inactive: 220 16% 88%;
+	--composer-thinking-static-start: 220 14% 80%;
+	--composer-thinking-pulse-emphasis: 160 45% 55%;
+	--input: 220 14% 80%;
+	--ring: 160 84% 28%;
+	--radius: 0.75rem;
+	--transient-backdrop-color: 222 45% 8%;
+	--transient-backdrop-opacity: 0.38;
+	--transient-backdrop-blur: 4px;
+	--elevation-menu: 0 2px 8px hsl(222 40% 10% / 0.08), 0 8px 24px hsl(222 40% 10% / 0.12);
+	--elevation-dialog: 0 4px 16px hsl(222 40% 10% / 0.12), 0 16px 48px hsl(222 40% 10% / 0.18);
+	--glow-primary: 0 0 0 1px hsl(var(--primary) / 0.3), 0 4px 16px hsl(var(--primary) / 0.28);
+	--chat-header-bg: 220 20% 95%;
+	--chat-header-border: 220 14% 82%;
+	--chat-thinking-bg: 220 16% 92%;
+	--chat-message-action-highlight: 190 88% 34%;
+	--chat-message-action-highlight-opacity: 0.12;
+	--chat-tabs-rail-bg: 220 18% 92%;
+	--chat-tabs-rail-border: 220 14% 82%;
+	--chat-tabs-active-bg: 160 84% 24%;
+	--chat-tabs-active-foreground: 150 40% 98%;
+	--chat-tabs-active-border: 160 84% 24%;
+	--chat-bash-row-bg: 220 18% 93%;
+	--sidebar-background: 222 22% 94%;
+	--sidebar-foreground: 222 32% 11%;
+	--sidebar-primary: 160 84% 24%;
+	--sidebar-primary-foreground: 150 40% 98%;
+	--sidebar-accent: 158 45% 88%;
+	--sidebar-accent-foreground: 160 70% 14%;
+	--sidebar-border: 220 14% 83%;
+	--sidebar-ring: 160 84% 28%;
+	--sidebar-chat-item-bg: 0 0% 100%;
+	--sidebar-chat-item-hover-bg: 158 40% 93%;
+	--sidebar-chat-item-selected-bg: 158 50% 88%;
+	--sidebar-chat-item-selected-foreground: 160 70% 14%;
+	--sidebar-badge-pinned-bg: 45 100% 94%;
+	--sidebar-badge-pinned-foreground: 40 90% 26%;
+	--sidebar-badge-pinned-border: 45 55% 76%;
+	--sidebar-badge-archived-bg: 215 20% 94%;
+	--sidebar-badge-archived-foreground: 215 18% 35%;
+	--sidebar-badge-archived-border: 215 16% 80%;
+	--sidebar-bulk-archive-bg: 146 60% 95%;
+	--sidebar-bulk-archive-foreground: 146 65% 24%;
+	--sidebar-bulk-unarchive-bg: 0 86% 96%;
+	--sidebar-bulk-unarchive-foreground: 0 74% 38%;
+	--provider-codex-bg: 146 48% 94%;
+	--provider-codex-foreground: 146 70% 22%;
+	--provider-codex-border: 146 35% 78%;
+	--provider-cursor-bg: 256 78% 96%;
+	--provider-cursor-foreground: 256 62% 30%;
+	--provider-cursor-border: 256 42% 78%;
+	--provider-claude-bg: 214 100% 95%;
+	--provider-claude-foreground: 214 80% 28%;
+	--provider-claude-border: 214 55% 78%;
+	--provider-opencode-bg: 270 65% 95%;
+	--provider-opencode-foreground: 270 60% 30%;
+	--provider-opencode-border: 270 40% 78%;
+	--provider-amp-bg: 28 90% 95%;
+	--provider-amp-foreground: 28 80% 28%;
+	--provider-amp-border: 28 50% 78%;
+	--provider-factory-bg: 192 84% 94%;
+	--provider-factory-foreground: 192 84% 24%;
+	--provider-factory-border: 192 44% 76%;
+	--provider-pi-bg: 322 78% 95%;
+	--provider-pi-foreground: 322 72% 28%;
+	--provider-pi-border: 322 42% 78%;
+	--provider-openrouter-bg: 152 68% 93%;
+	--provider-openrouter-foreground: 152 60% 26%;
+	--provider-openrouter-border: 152 40% 74%;
+	--provider-zai-bg: 8 92% 94%;
+	--provider-zai-foreground: 8 78% 28%;
+	--provider-zai-border: 8 52% 76%;
+	--tag-blue-bg: 214 95% 93% / 0.5;
+	--tag-blue-foreground: 214 78% 30%;
+	--tag-blue-border: 214 55% 78% / 0.5;
+	--tag-green-bg: 146 60% 92% / 0.5;
+	--tag-green-foreground: 146 65% 24%;
+	--tag-green-border: 146 35% 76% / 0.5;
+	--tag-amber-bg: 45 96% 90% / 0.5;
+	--tag-amber-foreground: 38 84% 28%;
+	--tag-amber-border: 42 55% 72% / 0.5;
+	--tag-purple-bg: 270 82% 94% / 0.5;
+	--tag-purple-foreground: 270 62% 30%;
+	--tag-purple-border: 270 42% 76% / 0.5;
+	--tag-rose-bg: 350 90% 94% / 0.5;
+	--tag-rose-foreground: 346 70% 32%;
+	--tag-rose-border: 346 45% 76% / 0.5;
+	--tag-teal-bg: 174 70% 90% / 0.5;
+	--tag-teal-foreground: 176 72% 24%;
+	--tag-teal-border: 176 42% 72% / 0.5;
+	--tag-indigo-bg: 235 90% 94% / 0.5;
+	--tag-indigo-foreground: 235 62% 32%;
+	--tag-indigo-border: 235 42% 76% / 0.5;
+	--tag-orange-bg: 28 92% 92% / 0.5;
+	--tag-orange-foreground: 24 82% 30%;
+	--tag-orange-border: 24 52% 74% / 0.5;
+	--indicator-attention: 0 78% 54%;
+	--status-processing: 186 90% 40%;
+	--status-processing-foreground: 186 85% 26%;
+	--status-processing-border: 186 65% 55%;
+	--status-info: 270 70% 96%;
+	--status-info-foreground: 270 70% 30%;
+	--status-info-border: 270 40% 78%;
+	--status-success: 146 60% 95%;
+	--status-success-foreground: 146 65% 24%;
+	--status-success-border: 146 35% 76%;
+	--composer-agent-setting: 190 80% 92%;
+	--composer-agent-setting-foreground: 190 80% 26%;
+	--composer-agent-setting-border: 190 50% 72%;
+	--status-error: 0 86% 96%;
+	--status-error-foreground: 0 72% 34%;
+	--status-error-border: 0 50% 78%;
+	--status-neutral: 220 16% 96%;
+	--status-neutral-foreground: 220 12% 35%;
+	--status-neutral-border: 220 12% 80%;
+	--status-warning: 34 93% 52%;
+	--status-warning-foreground: 0 0% 10%;
+	--status-warning-muted-foreground: 34 90% 28%;
+	--status-warning-border: 34 88% 42%;
+	--queue-surface: 34 93% 52% / 0.2;
+	--queue-border: 34 88% 42%;
+	--queue-entry-border: 34 88% 42%;
+	--queue-foreground: 0 0% 14%;
+	--queue-action-bg: 34 93% 52% / 0.3;
+	--queue-action-hover-bg: 34 93% 52% / 0.45;
+	--stop-button-bg: 0 72% 48%;
+	--stop-button-foreground: 0 0% 98%;
+	--stop-button-border: 0 66% 40%;
+	--user-bubble: 162 48% 17%;
+	--user-bubble-selected: 190 45% 28%;
+	--user-bubble-foreground: 150 40% 97%;
+	--user-bubble-timestamp: 155 20% 72%;
+	--markdown-code-background: 220 23% 97%;
+	--markdown-code-foreground: 217 19% 18%;
+	--markdown-code-border: 220 16% 84%;
+	--markdown-code-keyword: 343 72% 40%;
+	--markdown-code-title: 266 48% 44%;
+	--markdown-code-meta: 211 100% 35%;
+	--markdown-code-string: 210 94% 20%;
+	--markdown-code-symbol: 26 92% 42%;
+	--markdown-code-comment: 215 10% 45%;
+	--markdown-code-name: 134 60% 34%;
+	--markdown-code-section: 211 100% 35%;
+	--markdown-code-addition-bg: 138 76% 97%;
+	--markdown-code-addition-fg: 134 60% 34%;
+	--markdown-code-deletion-bg: 353 100% 97%;
+	--markdown-code-deletion-fg: 355 72% 41%;
+	--diff-modified: 48 88% 93%;
+	--diff-modified-foreground: 33 78% 38%;
+	--diff-modified-border: 48 50% 78%;
+	--diff-addition: 142 71% 38%;
+	--diff-deletion: 0 72% 45%;
+	--diff-hunk: 190 88% 38%;
+	--interactive-accent: 190 88% 32%;
+	--file-icon-code: 142 71% 38%;
+	--file-icon-doc: 190 88% 36%;
+	--file-icon-image: 271 76% 53%;
+	--file-icon-folder: 190 88% 36%;
+	--terminal-bg: 220 25% 98%;
+	--git-action-commit: 190 88% 38%;
+	--git-action-commit-hover: 190 88% 32%;
+	--git-action-pull: 146 60% 40%;
+	--git-action-pull-hover: 146 60% 34%;
+	--git-action-push: 30 90% 48%;
+	--git-action-push-hover: 30 90% 40%;
+	--git-action-publish: 271 60% 50%;
+	--git-action-publish-hover: 271 60% 42%;
+	--git-action-foreground: 0 0% 98%;
+	--git-modified: 33 78% 38%;
+	--git-added: 142 71% 38%;
+	--pr-merged: 271 76% 53%;
+	--git-deleted: 0 72% 45%;
+	--git-untracked: 190 88% 36%;
+	--git-renamed: 271 76% 53%;
+	--diff-add-bg: 133 80% 92%;
+	--diff-add-fg: 213 13% 14%;
+	--diff-add-line-num: 213 13% 14%;
+	--diff-del-bg: 5.5 100% 95.7%;
+	--diff-del-fg: 213 13% 14%;
+	--diff-del-line-num: 213 13% 14%;
+	--diff-hunk-header-bg: 214 60% 95%;
+	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235c6470' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	--control-radius: var(--radius);
+	--menu-radius: var(--radius);
+	--menu-item-radius: calc(var(--radius) - 2px);
+	--dialog-radius: calc(var(--radius) + 4px);
+	--dialog-close-radius: calc(var(--radius) - 2px);
+	--menu-padding: 0.375rem;
+	--menu-shadow: var(--elevation-menu);
+	--submenu-shadow: var(--elevation-menu);
+	--tooltip-shadow: var(--elevation-menu);
+	--dialog-shadow: var(--elevation-dialog);
+	--primary-hover-shadow: var(--glow-primary);
+	--dialog-surface: hsl(var(--popover));
+	--scroll-area-thumb: hsl(var(--foreground) / 0.2);
+	--switch-thumb-checked: hsl(var(--primary-foreground));
+	--switch-thumb-unchecked: hsl(var(--foreground));
+	--native-select-background: hsl(var(--muted));
+	--native-select-border: hsl(var(--border));
+	--native-select-radius: var(--radius);
+}
+
+:root:where([data-theme='phosphor-light']) {
+	scrollbar-color: hsl(var(--foreground) / 0.16) transparent;
+}
+
+:root:where([data-theme='phosphor-light']) ::selection {
+	background-color: hsl(var(--primary) / 0.3);
+	color: inherit;
+}
+
+:root:where([data-theme='phosphor-light'])
+	:is(input[type='checkbox'], input[type='radio'], progress) {
+	accent-color: hsl(var(--primary));
+}
+
+:root:where([data-theme='phosphor-light']) ::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+:root:where([data-theme='phosphor-light']) ::-webkit-scrollbar-track,
+:root:where([data-theme='phosphor-light']) ::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+:root:where([data-theme='phosphor-light']) ::-webkit-scrollbar-thumb {
+	border: 2px solid transparent;
+	border-radius: 999px;
+	background: hsl(var(--foreground) / 0.16);
+	background-clip: padding-box;
+}
+
+:root:where([data-theme='phosphor-light']) ::-webkit-scrollbar-thumb:hover {
+	background: hsl(var(--foreground) / 0.3);
+	background-clip: padding-box;
+}
