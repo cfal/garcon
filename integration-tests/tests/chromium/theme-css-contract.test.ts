@@ -122,6 +122,7 @@ describe("compiled theme CSS", () => {
           <span id="interactive-accent-text" class="bg-interactive-accent/10 text-interactive-accent">Selected file</span>
           <button id="filled-interactive-accent" class="bg-interactive-accent text-interactive-accent-foreground hover:brightness-110">Save</button>
           <button id="stage-action" class="bg-git-added/20 text-git-added hover:bg-git-added/30">Stage</button>
+          <button id="unstage-action" class="bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30">Unstage</button>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
           <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
@@ -177,9 +178,9 @@ describe("compiled theme CSS", () => {
       });
       expect(colorblindValues).toEqual({
         lightAdded: "210 80% 30%",
-        lightDeleted: "30 90% 35%",
+        lightDeleted: "30 90% 26%",
         darkAdded: "210 85% 77%",
-        darkDeleted: "30 92% 65%",
+        darkDeleted: "30 92% 68%",
       });
 
       const classDrivenDark = await page.evaluate(() => {
@@ -270,15 +271,19 @@ describe("compiled theme CSS", () => {
           ).toBeGreaterThanOrEqual(4.5);
         }
 
-        const stageAction = await readNormalAndHoveredColors(
-          page,
-          "#stage-action",
-        );
-        for (const [interaction, colors] of Object.entries(stageAction)) {
-          expect(
-            contrastRatio(colors.foreground, colors.background),
-            `${profile.id} Stage action ${interaction}`,
-          ).toBeGreaterThanOrEqual(4.5);
+        for (const action of ["stage", "unstage"] as const) {
+          const colorsByInteraction = await readNormalAndHoveredColors(
+            page,
+            `#${action}-action`,
+          );
+          for (const [interaction, colors] of Object.entries(
+            colorsByInteraction,
+          )) {
+            expect(
+              contrastRatio(colors.foreground, colors.background),
+              `${profile.id} ${action} action ${interaction}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
         }
 
         const scrollAreaThumb = await readNormalAndHoveredColors(

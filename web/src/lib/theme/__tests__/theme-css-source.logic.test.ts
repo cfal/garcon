@@ -41,6 +41,12 @@ function propertyValues(source: string): Record<string, string> {
 }
 
 function relativeLuminance(hsl: string): number {
+	return relativeLuminanceFromChannels(hslToSrgbChannels(hsl));
+}
+
+type ColorChannels = readonly [red: number, green: number, blue: number];
+
+function hslToSrgbChannels(hsl: string): ColorChannels {
 	const [hue, saturationPercent, lightnessPercent] = hsl
 		.split(/\s+/)
 		.map((part) => Number.parseFloat(part));
@@ -49,15 +55,18 @@ function relativeLuminance(hsl: string): number {
 	const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
 	const intermediate = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
 	const offset = lightness - chroma / 2;
-	let channels: readonly number[];
+	let channels: ColorChannels;
 	if (hue < 60) channels = [chroma, intermediate, 0];
 	else if (hue < 120) channels = [intermediate, chroma, 0];
 	else if (hue < 180) channels = [0, chroma, intermediate];
 	else if (hue < 240) channels = [0, intermediate, chroma];
 	else if (hue < 300) channels = [intermediate, 0, chroma];
 	else channels = [chroma, 0, intermediate];
+	return [channels[0] + offset, channels[1] + offset, channels[2] + offset];
+}
+
+function relativeLuminanceFromChannels(channels: ColorChannels): number {
 	return channels
-		.map((channel) => channel + offset)
 		.map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
 		.reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index], 0);
 }
@@ -68,6 +77,22 @@ function contrastRatio(background: string, foreground: string): number {
 	return (
 		(Math.max(backgroundLuminance, foregroundLuminance) + 0.05) /
 		(Math.min(backgroundLuminance, foregroundLuminance) + 0.05)
+	);
+}
+
+function contrastRatioOnSelfTint(surface: string, foreground: string, opacity: number): number {
+	const surfaceChannels = hslToSrgbChannels(surface);
+	const foregroundChannels = hslToSrgbChannels(foreground);
+	const tintedChannels: ColorChannels = [
+		foregroundChannels[0] * opacity + surfaceChannels[0] * (1 - opacity),
+		foregroundChannels[1] * opacity + surfaceChannels[1] * (1 - opacity),
+		foregroundChannels[2] * opacity + surfaceChannels[2] * (1 - opacity),
+	];
+	const surfaceLuminance = relativeLuminanceFromChannels(tintedChannels);
+	const foregroundLuminance = relativeLuminanceFromChannels(foregroundChannels);
+	return (
+		(Math.max(surfaceLuminance, foregroundLuminance) + 0.05) /
+		(Math.min(surfaceLuminance, foregroundLuminance) + 0.05)
 	);
 }
 
@@ -104,9 +129,9 @@ describe('theme profile CSS sources', () => {
 		const dark = profileSource('colorblind-dark');
 
 		expect(light).toContain('--git-added: 210 80% 30%;');
-		expect(light).toContain('--git-deleted: 30 90% 35%;');
+		expect(light).toContain('--git-deleted: 30 90% 26%;');
 		expect(dark).toContain('--git-added: 210 85% 77%;');
-		expect(dark).toContain('--git-deleted: 30 92% 65%;');
+		expect(dark).toContain('--git-deleted: 30 92% 68%;');
 		expect(light).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
 		expect(dark).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
 	});
@@ -169,6 +194,7 @@ describe('theme profile CSS sources', () => {
 			'git-untracked',
 			'interactive-accent',
 		] as const;
+		const selfTintedForegrounds = ['git-added', 'git-deleted'] as const;
 		const surfaces = ['background', 'sidebar-background', 'muted'] as const;
 
 		for (const profile of THEME_PROFILES) {
@@ -184,6 +210,14 @@ describe('theme profile CSS sources', () => {
 					expect(
 						contrastRatio(values[surface], values[foreground]),
 						`${profile.id}: ${foreground} on ${surface}`,
+					).toBeGreaterThanOrEqual(4.5);
+				}
+			}
+			for (const foreground of selfTintedForegrounds) {
+				for (const opacity of [0.2, 0.3]) {
+					expect(
+						contrastRatioOnSelfTint(values.background, values[foreground], opacity),
+						`${profile.id}: ${foreground} on ${opacity * 100}% self tint`,
 					).toBeGreaterThanOrEqual(4.5);
 				}
 			}
