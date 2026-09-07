@@ -1,4 +1,4 @@
-import type { CanvasContent, ChatCanvas } from '$shared/chat-canvas';
+import { parseChatCanvas, type CanvasContent, type ChatCanvas } from '$shared/chat-canvas';
 import type { CanvasRecoveryPort } from '../canvas-recovery';
 
 export function canvasContent(): CanvasContent {
@@ -36,7 +36,13 @@ export function canvasContent(): CanvasContent {
 }
 
 export function canvas(content = canvasContent(), revision = 1): ChatCanvas {
-	return { version: 1, id: 'board', revision, updatedAt: '2026-09-07T00:00:00Z', content };
+	return parseChatCanvas({
+		version: 1,
+		id: 'board',
+		revision,
+		updatedAt: '2026-09-07T00:00:00Z',
+		content,
+	});
 }
 
 export function recoveryMemory() {

@@ -207,6 +207,55 @@ describe('Chromium Chat Canvas', () => {
           await page.locator('[data-workspace-window-id]').count(),
         ).toBeGreaterThan(1);
 
+        markPhase('protecting pending edits while the canvas is hidden');
+        let releaseSave!: () => void;
+        let saveStarted!: () => void;
+        const saveGate = new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        });
+        const pendingSave = new Promise<void>((resolve) => {
+          saveStarted = resolve;
+        });
+        await page.route(`**${endpoint}*`, async (route) => {
+          if (route.request().method() === 'PUT') {
+            saveStarted();
+            await saveGate;
+          }
+          await route.continue();
+        });
+        try {
+          await page
+            .getByRole('button', { name: 'Rename canvas', exact: true })
+            .click();
+          await page.getByRole('dialog').getByRole('textbox').fill('Revised diagram');
+          await page
+            .getByRole('dialog')
+            .getByRole('button', { name: 'Apply', exact: true })
+            .click();
+          await pendingSave;
+          await page.getByRole('button', { name: 'Lineage', exact: true }).click();
+          expect(
+            await page.evaluate(() => {
+              const event = new Event('beforeunload', { cancelable: true });
+              window.dispatchEvent(event);
+              return event.defaultPrevented;
+            }),
+          ).toBe(true);
+        } finally {
+          releaseSave();
+        }
+        await page.getByRole('button', { name: 'Canvases', exact: true }).click();
+        await saved(page);
+        expect((await read()).content.title).toBe('Revised diagram');
+        expect(
+          await page.evaluate(() => {
+            const event = new Event('beforeunload', { cancelable: true });
+            window.dispatchEvent(event);
+            return event.defaultPrevented;
+          }),
+        ).toBe(false);
+        await page.unroute(`**${endpoint}*`);
+
         markPhase('mobile list and form sizing');
         await page.setViewportSize({ width: 390, height: 844 });
         await page

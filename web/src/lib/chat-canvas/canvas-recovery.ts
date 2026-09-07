@@ -9,10 +9,10 @@ export interface CanvasRecoveryPort {
 
 const prefix = 'chat-canvas-recovery-v1:';
 
-// Drafts are removed after a confirmed save or explicit discard; board IDs scope recovery.
+// Tab-scoped drafts prevent one client from overwriting or clearing another client’s unsaved work.
 export const browserCanvasRecovery: CanvasRecoveryPort = {
 	list() {
-		const storage = globalThis.localStorage;
+		const storage = globalThis.sessionStorage;
 		const drafts: ChatCanvas[] = [];
 		for (let index = 0; index < storage.length; index += 1) {
 			const key = storage.key(index);
@@ -23,16 +23,16 @@ export const browserCanvasRecovery: CanvasRecoveryPort = {
 		return drafts;
 	},
 	read(id) {
-		const raw = globalThis.localStorage?.getItem(prefix + id);
+		const raw = globalThis.sessionStorage?.getItem(prefix + id);
 		if (!raw) return null;
 		const canvas = parseChatCanvas(JSON.parse(raw));
 		if (canvas.id !== id) throw new Error('Invalid canvas recovery identity');
 		return canvas;
 	},
 	write(canvas) {
-		globalThis.localStorage?.setItem(prefix + canvas.id, JSON.stringify(canvas));
+		globalThis.sessionStorage?.setItem(prefix + canvas.id, JSON.stringify(canvas));
 	},
 	remove(id) {
-		globalThis.localStorage?.removeItem(prefix + id);
+		globalThis.sessionStorage?.removeItem(prefix + id);
 	},
 };

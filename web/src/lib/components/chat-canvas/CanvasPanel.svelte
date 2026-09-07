@@ -39,20 +39,11 @@
 		const flush = () => {
 			void controller.session?.flush();
 		};
-		const beforeUnload = (event: BeforeUnloadEvent) => {
-			if (!controller.session?.dirty) return;
-			flush();
-			event.preventDefault();
-		};
 		const timer = setInterval(refresh, 15_000);
 		window.addEventListener('focus', refresh);
-		window.addEventListener('pagehide', flush);
-		window.addEventListener('beforeunload', beforeUnload);
 		return () => {
 			clearInterval(timer);
 			window.removeEventListener('focus', refresh);
-			window.removeEventListener('pagehide', flush);
-			window.removeEventListener('beforeunload', beforeUnload);
 			flush();
 		};
 	});
@@ -128,7 +119,7 @@
 					? m.canvas_loading()
 					: session?.saving
 						? m.canvas_saving()
-						: session?.dirty
+						: session?.dirty || session?.conflict
 							? m.canvas_unsaved()
 							: session
 								? m.canvas_saved()

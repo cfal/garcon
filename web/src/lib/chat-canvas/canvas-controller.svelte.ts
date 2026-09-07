@@ -44,6 +44,7 @@ export class CanvasController {
 	view = $state<'diagram' | 'list'>('diagram');
 	#viewports = new Map<string, CanvasViewport>();
 	#disposed = false;
+	#releaseExitGuard: (() => void) | null = null;
 	#refreshing = false;
 	#catalogGeneration = 0;
 	#pendingCreate: CreateCanvasRequest | null = null;
@@ -55,6 +56,7 @@ export class CanvasController {
 
 	async activate(): Promise<void> {
 		if (this.loading || this.#disposed) return;
+		this.#guardUnsavedWork();
 		this.loading = true;
 		try {
 			const { canvases } = await this.api.list();
@@ -162,8 +164,29 @@ export class CanvasController {
 
 	dispose(): void {
 		this.#disposed = true;
+		this.#releaseExitGuard?.();
+		this.#releaseExitGuard = null;
 		this.session?.dispose();
 		this.#viewports.clear();
+	}
+
+	#guardUnsavedWork(): void {
+		if (this.#releaseExitGuard || typeof window === 'undefined') return;
+		const flush = () => {
+			void this.session?.flush();
+		};
+		const beforeUnload = (event: BeforeUnloadEvent) => {
+			if (!this.session?.dirty && !this.session?.conflict) return;
+			flush();
+			event.preventDefault();
+			event.returnValue = '';
+		};
+		window.addEventListener('pagehide', flush);
+		window.addEventListener('beforeunload', beforeUnload);
+		this.#releaseExitGuard = () => {
+			window.removeEventListener('pagehide', flush);
+			window.removeEventListener('beforeunload', beforeUnload);
+		};
 	}
 
 	async #create(content: CanvasContent): Promise<void> {
