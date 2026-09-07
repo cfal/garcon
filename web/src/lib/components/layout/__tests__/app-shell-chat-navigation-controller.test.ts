@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { AppShellChatNavigationController } from '../app-shell-chat-navigation-controller.svelte.js';
+import { shouldSynchronizeFocusedChat } from '../app-shell-chat-navigation.js';
 
 function deferred<T>() {
 	let resolve!: (value: T | PromiseLike<T>) => void;
@@ -17,8 +18,11 @@ function createHarness() {
 	let selectedChatId: string | null = 'chat-b';
 	let isLoadingChats = false;
 	let currentWindowId = 'window-main' as WorkspaceWindowId;
+	let focusedChatId: string | null = 'chat-b';
 	const chats = new Set(['chat-a', 'chat-b', 'chat-c']);
-	const showChat = vi.fn<(chatId: string) => Promise<unknown>>(async () => undefined);
+	const showChat = vi.fn<(chatId: string) => Promise<unknown>>(async (chatId) => {
+		focusedChatId = chatId;
+	});
 	const navigateToChat = vi.fn<(chatId: string) => Promise<void>>(async () => undefined);
 	const navigateToBareRoute = vi.fn<() => Promise<void>>(async () => undefined);
 	const requestComposerFocus = vi.fn();
@@ -37,6 +41,9 @@ function createHarness() {
 		},
 		get currentWindowId() {
 			return currentWindowId;
+		},
+		get focusedChatId() {
+			return focusedChatId;
 		},
 		hasChat: (chatId) => chats.has(chatId),
 		showChatInCurrentWindow: showChat,
@@ -79,6 +86,9 @@ function createHarness() {
 		setCurrentWindowId(windowId: WorkspaceWindowId) {
 			currentWindowId = windowId;
 		},
+		setFocusedChatId(chatId: string | null) {
+			focusedChatId = chatId;
+		},
 	};
 }
 
@@ -109,6 +119,36 @@ describe('AppShellChatNavigationController', () => {
 
 		expect(harness.showChat).toHaveBeenCalledWith('chat-a');
 		await vi.waitFor(() => expect(harness.requestSidebarRecenter).toHaveBeenCalledOnce());
+	});
+
+	it('finishes explicit navigation when placement reuses the same Chat in another window', async () => {
+		const harness = createHarness();
+		const placement = deferred<unknown>();
+		harness.showChat.mockImplementationOnce(() => placement.promise);
+
+		const selecting = harness.controller.showChatInCurrentWindow('chat-a', { navigate: true });
+		expect(harness.controller.pendingWindowId).toBe('window-main');
+		harness.setCurrentWindowId('window-existing');
+		harness.setFocusedChatId('chat-a');
+
+		const shouldSynchronize = shouldSynchronizeFocusedChat({
+			focusedWindowId: 'window-existing',
+			focusedChatId: 'chat-a',
+			focusedChatExists: true,
+			selectedChatId: harness.selectedChatId,
+			pendingChatTarget: harness.controller.pendingChatTarget,
+			pendingWindowId: harness.controller.pendingWindowId,
+		});
+		if (shouldSynchronize) await harness.controller.synchronizeFocusedChat('chat-a');
+
+		placement.resolve(undefined);
+		await selecting;
+
+		expect(shouldSynchronize).toBe(false);
+		expect(harness.selectedChatId).toBe('chat-a');
+		expect(harness.navigateToChat).toHaveBeenCalledWith('chat-a');
+		expect(harness.requestComposerFocus).toHaveBeenCalledOnce();
+		expect(harness.requestSidebarRecenter).toHaveBeenCalledOnce();
 	});
 
 	it('finishes the newest focused-window route last', async () => {
@@ -174,6 +214,7 @@ describe('AppShellChatNavigationController', () => {
 
 		const selecting = harness.controller.showChatInCurrentWindow('chat-a', { navigate: true });
 		harness.chats.delete('chat-a');
+		harness.setFocusedChatId('chat-a');
 		placement.resolve(undefined);
 		await selecting;
 
@@ -207,6 +248,7 @@ describe('AppShellChatNavigationController', () => {
 		expect(harness.showChat).toHaveBeenCalledWith('chat-b');
 		expect(harness.navigateToBareRoute).not.toHaveBeenCalled();
 
+		harness.setFocusedChatId('chat-b');
 		newerPlacement.resolve(undefined);
 		await selecting;
 		expect(harness.selectedChatId).toBe('chat-b');

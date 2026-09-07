@@ -10,6 +10,7 @@ import {
 import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
 import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy';
 import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures';
+import { windowNodeById } from '$lib/workspace/window-tree';
 import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 import type {
 	SidebarChatGrouping,
@@ -39,6 +40,15 @@ export class AppShellBreakpointWorkspace {
 
 	get currentWindowId(): WorkspaceWindowId {
 		return CANONICAL_WINDOW_ID;
+	}
+
+	get focusedChatId(): string | null {
+		const snapshot = this.layout.snapshot;
+		const activeSurfaceId = this.isMobile
+			? snapshot.mobileActiveSurfaceId
+			: windowNodeById(snapshot.desktopRoot, this.currentWindowId)?.tabs.activeId;
+		const surface = activeSurfaceId ? snapshot.surfaces[activeSurfaceId] : null;
+		return surface?.type === 'chat' ? surface.chatId : null;
 	}
 
 	get currentChatSurfaceId() {

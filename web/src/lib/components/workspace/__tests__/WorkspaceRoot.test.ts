@@ -31,6 +31,7 @@ import type { ChatMessagesRequest } from '$lib/api/chats.js';
 import type { ProjectTarget } from '$shared/project-resolution';
 import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
+import { findWorkspaceChatPlacement } from '$lib/workspace/workspace-chat-placement.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -328,12 +329,24 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 			},
 		),
 		showChatInWindow: vi.fn(async (chatId: string, windowId: WorkspaceWindowId) => {
-			commit([{ type: 'set-window-chat', windowId, chatId }]);
-			runtime.currentWindowId = windowId;
-			return chatViewSurfaceId(windowId);
+			const existing = findWorkspaceChatPlacement(layout.snapshot, chatId);
+			const destinationWindowId = existing?.windowId ?? windowId;
+			const surfaceId = existing?.surfaceId ?? chatViewSurfaceId(windowId);
+			commit(
+				existing
+					? [{ type: 'activate-window-tab', windowId: destinationWindowId, surfaceId }]
+					: [{ type: 'set-window-chat', windowId, chatId }],
+			);
+			runtime.currentWindowId = destinationWindowId;
+			return surfaceId;
 		}),
 		openChatInNewWindow: vi.fn(
 			async (chatId: string, targetWindowId: WorkspaceWindowId, edge: WorkspaceWindowEdge) => {
+				const existing = findWorkspaceChatPlacement(layout.snapshot, chatId);
+				if (existing) {
+					await focusSurface(existing.surfaceId);
+					return existing.windowId;
+				}
 				commit([
 					{
 						type: 'open-chat-in-new-window',
@@ -775,7 +788,7 @@ describe('WorkspaceRoot', () => {
 		expect(collectWindowNodes(layout.snapshot.desktopRoot)).toHaveLength(2);
 	});
 
-	it('replaces a sidebar Chat in the exact occupied center destination', async () => {
+	it('shows an existing sidebar Chat instead of replacing an occupied destination', async () => {
 		const { layout, windowDnd, workspace } = installContext();
 		layout.publish(
 			layout.revision,
@@ -801,13 +814,17 @@ describe('WorkspaceRoot', () => {
 		await fireEvent(destination, positionedDragEvent('dragover', 50, 50));
 		expect(
 			destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
-		).toBe(m.workspace_drop_zone_replace_chat());
+		).toBe(m.workspace_show_existing_chat());
 		await fireEvent(destination, positionedDragEvent('drop', 50, 50));
 
 		await waitFor(() =>
 			expect(workspace.showChatInWindow).toHaveBeenCalledWith('chat-a', 'window-2'),
 		);
-		expect(layout.surface(chatViewSurfaceId('window-2'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(chatViewSurfaceId('window-2'))).toMatchObject({ chatId: 'chat-b' });
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, chatViewSurfaceId('window-main'))).toBe(
+			'window-main',
+		);
 		expect(collectWindowNodes(layout.snapshot.desktopRoot)).toHaveLength(3);
 	});
 
@@ -853,7 +870,7 @@ describe('WorkspaceRoot', () => {
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
 	});
 
-	it('keeps one runtime while both windows render the same conversation panel', async () => {
+	it('keeps one runtime while both windows render conversation panels', async () => {
 		const { layout, workspace } = installContext();
 		layout.publish(
 			layout.revision,
