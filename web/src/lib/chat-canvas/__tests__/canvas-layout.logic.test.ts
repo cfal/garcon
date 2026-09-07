@@ -46,6 +46,55 @@ describe('canvas layout and membership', () => {
 		});
 	});
 
+	it('reorders grouped selections atomically regardless of position map order', () => {
+		const content = canvasContent();
+		content.nodes.push({
+			id: 'chat-c',
+			type: 'chat',
+			chatId: '1780000000000003',
+			boxId: 'box-a',
+			position: { x: 0, y: 0 },
+		});
+		const positions = new Map([
+			['chat-a', { x: 16, y: 196 }],
+			['chat-b', { x: 16, y: 340 }],
+		]);
+		const moved = finishNodeMove(content, positions);
+		expect(moved).toEqual(finishNodeMove(content, new Map([...positions].reverse())));
+		expect(moved.nodes.filter((node) => node.type === 'chat').map((node) => node.id)).toEqual([
+			'chat-c',
+			'chat-a',
+			'chat-b',
+		]);
+	});
+
+	it('uses original destination bounds for every card in a cross-box selection', () => {
+		const content = canvasContent();
+		const positions = new Map([
+			['chat-a', { x: 516, y: 52 }],
+			['chat-b', { x: 516, y: 80 }],
+		]);
+		const moved = finishNodeMove(content, positions);
+		expect(moved).toEqual(finishNodeMove(content, new Map([...positions].reverse())));
+		expect(moved.nodes.filter((node) => node.type === 'chat')).toMatchObject([
+			{ id: 'chat-a', boxId: 'box-b' },
+			{ id: 'chat-b', boxId: 'box-b' },
+		]);
+	});
+
+	it('keeps canonical content unchanged for within-slot grouped movement', () => {
+		const content = canvasContent();
+		expect(
+			finishNodeMove(
+				content,
+				new Map([
+					['chat-a', { x: 22, y: 60 }],
+					['chat-b', { x: 22, y: 200 }],
+				]),
+			),
+		).toEqual(content);
+	});
+
 	it('orders a chat inside a box without duplicating it', () => {
 		const moved = moveChat(canvasContent(), 'chat-b', 'box-a', { x: 0, y: 0 }, 0);
 		expect(moved.nodes.filter((node) => node.type === 'chat').map((node) => node.id)).toEqual([

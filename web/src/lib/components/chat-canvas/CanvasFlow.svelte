@@ -234,7 +234,6 @@
 		onnodedragstop={({ nodes: moved }) => finishDrag(moved)}
 		onnodedragstart={beginInteraction}
 		onselectiondragstart={beginInteraction}
-		onselectiondragstop={(_event, moved) => finishDrag(moved)}
 		onselectionchange={({ nodes: selectedNodes, edges: selectedEdges }) =>
 			untrack(() => {
 				const next = new Set([

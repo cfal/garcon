@@ -96,7 +96,7 @@ export function finishNodeMove(
 			.filter((node) => node.type === 'box' && positions.has(node.id))
 			.map((node) => node.id),
 	);
-	let next = {
+	const geometry = {
 		...content,
 		nodes: content.nodes.map((node) =>
 			node.type === 'box' && positions.has(node.id)
@@ -104,25 +104,51 @@ export function finishNodeMove(
 				: node,
 		),
 	};
-	for (const [id, position] of positions) {
-		const node = content.nodes.find((entry) => entry.id === id);
-		if (node?.type !== 'chat' || (node.boxId && movedBoxes.has(node.boxId))) continue;
-		const box = boxAt(next, {
+	const moves = new Map<string, { chat: CanvasChat; index: number }>();
+	for (const node of content.nodes) {
+		const position = positions.get(node.id);
+		if (!position || node.type !== 'chat' || (node.boxId && movedBoxes.has(node.boxId))) continue;
+		const box = boxAt(geometry, {
 			x: position.x + CANVAS_CARD_WIDTH / 2,
 			y: position.y + CANVAS_CARD_HEIGHT / 2,
 		});
-		const index = box
-			? Math.max(
-					0,
-					Math.round(
-						(position.y - box.position.y - CANVAS_BOX_HEADER) /
-							(CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP),
-					),
-				)
-			: undefined;
-		next = moveChat(next, id, box?.id ?? null, position, index);
+		moves.set(node.id, {
+			chat: { ...node, boxId: box?.id ?? null, position: box ? { x: 0, y: 0 } : position },
+			index: box
+				? Math.max(
+						0,
+						Math.round(
+							(position.y - box.position.y - CANVAS_BOX_HEADER) /
+								(CANVAS_CARD_HEIGHT + CANVAS_CHAT_GAP),
+						),
+					)
+				: 0,
+		});
 	}
-	return next;
+	const orderedGroups = new Map<string, CanvasChat[]>();
+	for (const box of geometry.nodes) {
+		if (box.type !== 'box') continue;
+		const arrivals = [...moves.values()]
+			.filter((move) => move.chat.boxId === box.id)
+			.sort((left, right) => left.index - right.index);
+		if (!arrivals.length) continue;
+		const siblings = boxChats(geometry, box.id).filter((chat) => !moves.has(chat.id));
+		let previousIndex = -1;
+		for (const { chat, index } of arrivals) {
+			const insertAt = Math.min(siblings.length, Math.max(previousIndex + 1, index));
+			siblings.splice(insertAt, 0, chat);
+			previousIndex = insertAt;
+		}
+		orderedGroups.set(box.id, siblings);
+	}
+	return {
+		...content,
+		nodes: geometry.nodes.map((node) => {
+			const moved = moves.get(node.id)?.chat ?? node;
+			if (moved.type !== 'chat' || !moved.boxId) return moved;
+			return orderedGroups.get(moved.boxId)?.shift() ?? moved;
+		}),
+	};
 }
 
 export function removeCanvasElements(
