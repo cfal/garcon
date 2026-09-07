@@ -51,6 +51,7 @@
 	let height = $state(0);
 	let viewportApplied = false;
 	let releaseInteraction: (() => void) | null = null;
+	let interactionCancelled = false;
 
 	// Adapts durable document edits to the graph engine; graph gestures remain transient until release.
 	$effect(() => {
@@ -118,6 +119,7 @@
 	onDestroy(endInteraction);
 
 	function beginInteraction() {
+		interactionCancelled = false;
 		releaseInteraction ??= session.beginInteraction();
 	}
 	function endInteraction() {
@@ -126,6 +128,7 @@
 	}
 	function cancelInteraction() {
 		if (!releaseInteraction) return;
+		interactionCancelled = true;
 		nodes = flowNodes(session.document.content, selectedIds);
 		endInteraction();
 	}
@@ -136,14 +139,13 @@
 
 	async function finishDrag(moved: CanvasFlowNode[]) {
 		const release = releaseInteraction;
-		if (!release) return;
 		const positions = new Map<string, CanvasPosition>();
 		for (const node of moved) {
 			const internal = flow.getInternalNode(node.id);
 			if (internal) positions.set(node.id, { ...internal.internals.positionAbsolute });
 		}
 		try {
-			if (editing) session.document.move(positions);
+			if (release && editing) session.document.move(positions);
 		} catch (error) {
 			onerror(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -151,12 +153,15 @@
 			if (releaseInteraction === release) {
 				nodes = flowNodes(session.document.content, selectedIds);
 				endInteraction();
+				interactionCancelled = false;
 			}
 		}
 	}
 
+	// Only document-owned connections are projected; Svelte Flow must not insert rejected edges.
 	function connect(connection: Connection) {
-		if (!editing || connection.source === connection.target) return;
+		if (!visible || !editing || interactionCancelled || connection.source === connection.target)
+			return;
 		if (session.document.content.connections.length >= CANVAS_MAX_CONNECTIONS) {
 			onerror(m.canvas_limit());
 			return;
@@ -216,9 +221,15 @@
 		panOnDrag
 		selectionOnDrag={editing}
 		oninit={initialize}
-		onconnect={connect}
+		onbeforeconnect={connect}
 		onconnectstart={beginInteraction}
-		onconnectend={endInteraction}
+		onconnectend={() => {
+			endInteraction();
+			interactionCancelled = false;
+		}}
+		onclickconnectstart={() => {
+			interactionCancelled = false;
+		}}
 		isValidConnection={(edge) => edge.source !== edge.target}
 		onnodedragstop={({ nodes: moved }) => finishDrag(moved)}
 		onnodedragstart={beginInteraction}
