@@ -1,9 +1,9 @@
 <!-- Renders one real sidebar chat row per layout option so the wizard previews
-     the actual SidebarChatSummary output instead of abstract placeholder bars.
+     the actual ChatSummary output instead of abstract placeholder bars.
      The sample session is deterministic; the container mirrors the sidebar row
      background and selection styling. -->
 <script lang="ts">
-	import SidebarChatSummary from '../sidebar/SidebarChatSummary.svelte';
+	import ChatSummary from '../shared/ChatSummary.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte.js';
 	import { cn } from '$lib/utils/cn.js';
@@ -53,7 +53,7 @@
 	)}
 	aria-hidden="true"
 >
-	<SidebarChatSummary
+	<ChatSummary
 		session={previewSession}
 		{isSelected}
 		currentTime={PREVIEW_NOW}

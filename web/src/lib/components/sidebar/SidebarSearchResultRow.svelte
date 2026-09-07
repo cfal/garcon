@@ -1,5 +1,5 @@
 <script lang="ts">
-	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import ChatSummary from '../shared/ChatSummary.svelte';
 	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatSearchResult, ChatSearchSnippetRole } from '$shared/chat-search';
@@ -48,7 +48,7 @@
 	onclick={() => onSelectChat(chat.id)}
 	onmouseenter={() => onHighlightChange(index)}
 >
-	<SidebarChatSummary
+	<ChatSummary
 		session={chat}
 		isSelected={isHighlighted}
 		suppressUnread={false}

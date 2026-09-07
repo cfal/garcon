@@ -1,14 +1,14 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
+	import ChatAgentTags from './ChatAgentTags.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import { cn } from '$lib/utils/cn';
-	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
+	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
 	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
 
-	interface SidebarChatSummaryProps {
+	interface ChatSummaryProps {
 		session: ChatSessionRecord;
 		isSelected: boolean;
 		suppressUnread?: boolean;
@@ -34,7 +34,7 @@
 		hasDesktopOverlayMenu = false,
 		onTagClick,
 		onManageTags,
-	}: SidebarChatSummaryProps = $props();
+	}: ChatSummaryProps = $props();
 
 	let isUnread = $derived(session.isUnread && !(suppressUnread ?? isSelected));
 	let isProcessing = $derived(session.isProcessing);
@@ -45,7 +45,7 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let activityTimestamp = $derived(session.lastActivityAt ?? session.createdAt);
 	let formattedTimestamp = $derived(
-		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null,
+		showTimestamp ? formatRelativeTimestamp(activityTimestamp, currentTime) : null,
 	);
 	let singleLineStatusClass = $derived(
 		cn(

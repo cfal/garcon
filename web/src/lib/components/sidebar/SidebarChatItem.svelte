@@ -13,7 +13,7 @@
 		DropdownMenuContent,
 	} from '$lib/components/ui/dropdown-menu';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
-	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import ChatSummary from '../shared/ChatSummary.svelte';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
@@ -270,7 +270,7 @@
 
 {#snippet chatSummary()}
 	<div class="relative flex-1 min-w-0">
-		<SidebarChatSummary
+		<ChatSummary
 			{session}
 			{isSelected}
 			{currentTime}
