@@ -42,6 +42,30 @@ describe('MermaidBlock', () => {
 		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'colorblind-light');
 	});
 
+	it('keeps the inline diagram visible while a theme render is pending', async () => {
+		let resolveThemeRender!: (svg: string) => void;
+		mockedRenderMermaid
+			.mockResolvedValueOnce('<svg aria-label="Initial inline diagram"></svg>')
+			.mockReturnValueOnce(
+				new Promise<string>((resolve) => {
+					resolveThemeRender = resolve;
+				}),
+			);
+		const rendered = render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			themeId: 'classic-light',
+		});
+		await screen.findByLabelText('Initial inline diagram');
+
+		rendered.component.setThemeId('colorblind-light');
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
+		expect(screen.getByLabelText('Initial inline diagram')).toBeTruthy();
+		expect(screen.queryByText('Rendering diagram...')).toBeNull();
+
+		resolveThemeRender('<svg aria-label="Rethemed inline diagram"></svg>');
+		await screen.findByLabelText('Rethemed inline diagram');
+	});
+
 	it('ignores stale success and failure completions after a theme change', async () => {
 		const pending: Array<{
 			resolve: (svg: string) => void;
@@ -116,7 +140,7 @@ describe('MermaidBlock', () => {
 		rendered.component.setThemeId('colorblind-light');
 		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
 		expect(zoomLabel).toBeTruthy();
-		expect(screen.getByLabelText('Initial diagram')).toBeTruthy();
+		expect(screen.getAllByLabelText('Initial diagram')).toHaveLength(2);
 
 		resolveThemeRender('<svg viewBox="0 0 200 100" aria-label="Rethemed diagram"></svg>');
 		await waitFor(() => expect(screen.getAllByLabelText('Rethemed diagram')).toHaveLength(2));

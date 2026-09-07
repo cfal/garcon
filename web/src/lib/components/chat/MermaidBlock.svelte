@@ -166,7 +166,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	</div>
 
 	<div class="mermaid-container overflow-x-auto p-4">
-		{#if loading}
+		{#if loading && !renderedSvg}
 			<div class="flex items-center gap-2 text-sm text-muted-foreground">
 				<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
 					<circle
