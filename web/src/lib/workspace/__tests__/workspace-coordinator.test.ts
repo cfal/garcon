@@ -1797,6 +1797,7 @@ describe('WorkspaceCoordinator', () => {
 
 		await coordinator.showChatInCurrentWindow('chat-b');
 		expect(coordinator.currentWindowId).toBe(chatBWindowId);
+		appShell.requestComposerFocus.mockClear();
 
 		frames.register('singleton:files', 'window-files', {
 			element: document.createElement('div'),
@@ -1810,7 +1811,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.lastFocusedSurfaceId).toBe(chatBSurfaceId);
 		expect(coordinator.focusOwner).toEqual({ kind: 'surface', surfaceId: chatBSurfaceId });
 		expect(coordinator.composerAnchorSurfaceId).toBe(chatBSurfaceId);
-		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
+		expect(appShell.requestComposerFocus).not.toHaveBeenCalled();
 		expect(selectedChatId).toBe('chat-b');
 		expect(navigateToChat).not.toHaveBeenCalled();
 		expect(navigationComposerFocus).not.toHaveBeenCalled();
