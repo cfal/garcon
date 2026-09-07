@@ -48,6 +48,7 @@ function createSession(options: {
 	canChangeTarget?: () => boolean;
 	invalidationVersion?: (effectiveProjectKey: string) => number;
 	runMutation?: GitBranchSelectorStateOptions['runMutation'];
+	afterCheckout?: (projectPath: string) => void | Promise<void>;
 }) {
 	const changes: Array<{
 		path: string | null;
@@ -67,6 +68,7 @@ function createSession(options: {
 		},
 		invalidationVersion: options.invalidationVersion ?? (() => 0),
 		canChangeTarget: options.canChangeTarget ?? (() => true),
+		afterCheckout: options.afterCheckout,
 		onTargetChanged: (target, identity, reason, identityChanged) => {
 			changes.push({
 				path: target?.projectPath ?? null,
@@ -462,6 +464,60 @@ describe('GitTargetSessionController', () => {
 		expect(created.changes.filter((change) => change.reason === 'invalidation')).toHaveLength(
 			0,
 		);
+	});
+
+	it('replays checkout invalidation after project availability interrupts reconciliation', async () => {
+		let invalidationVersion = 0;
+		const afterCheckout = vi.fn();
+		api.getGitTargetCandidates
+			.mockResolvedValueOnce({ targets: [candidate('/chat')] })
+			.mockImplementationOnce((_projectPath, options) => {
+				return new Promise((_resolve, reject) => {
+					options?.signal?.addEventListener(
+						'abort',
+						() => reject(new DOMException('Aborted', 'AbortError')),
+						{ once: true },
+					);
+				});
+			})
+			.mockResolvedValue({ targets: [candidate('/chat', { branch: 'feature' })] });
+		const runMutation = vi.fn(
+			async (
+				_surfaceId: string,
+				_projectPath: string,
+				_effectiveProjectKey: string,
+				execute: () => Promise<{ success: boolean }>,
+			) => {
+				const result = await execute();
+				if (result.success) invalidationVersion += 1;
+				return result;
+			},
+		);
+		const { session, changes } = createSession({
+			runMutation,
+			invalidationVersion: () => invalidationVersion,
+			afterCheckout,
+		});
+		setProject(session, '/chat', 'chat');
+		session.setPresentationVisible(true);
+		await session.activate();
+
+		const switching = session.switchBranch('feature', 'local-branch');
+		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
+		session.setProjectState({
+			kind: 'unavailable',
+			context: { chatId: 'chat', projectPath: '/chat' },
+			reason: 'not-found',
+		});
+		await expect(switching).resolves.toBe(true);
+
+		expect(afterCheckout).not.toHaveBeenCalled();
+		expect(changes.filter((change) => change.reason === 'checkout')).toEqual([]);
+		setProject(session, '/chat', 'chat');
+		await session.activate();
+		await expect(session.refreshForInvalidation('chat', invalidationVersion)).resolves.toBe(true);
+
+		expect(changes.filter((change) => change.reason === 'invalidation')).toHaveLength(1);
 	});
 
 	it('rejects target and branch changes while the owner is busy', async () => {

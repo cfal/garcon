@@ -440,9 +440,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 			this.#updateActiveBranch(nextBranch);
 			await this.ensureTargets(true);
 			if (identity !== this.identity) return true;
-			await this.#applyTarget('checkout', true, nextBranch);
-			await this.deps.afterCheckout?.(projectPath);
-			reconciled = true;
+			reconciled = await this.#applyTarget('checkout', true, nextBranch);
+			if (reconciled) await this.deps.afterCheckout?.(projectPath);
 			return true;
 		};
 		try {
@@ -545,8 +544,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 		reason: GitTargetChangeReason,
 		force = false,
 		branchOverride?: string,
-	): Promise<void> {
-		if (this.projectIdentityPending) return;
+	): Promise<boolean> {
+		if (this.projectIdentityPending) return false;
 		const target = this.activeTarget ?? this.fallbackTarget;
 		const projectPath = target?.projectPath ?? null;
 		const effectiveProjectKey = this.effectiveProjectKey;
@@ -554,7 +553,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 			target && effectiveProjectKey
 				? gitTargetIdentity(effectiveProjectKey, target)
 				: null;
-		if (!force && identity === this.#appliedIdentity) return;
+		if (!force && identity === this.#appliedIdentity) return false;
 		const identityChanged = identity !== this.#appliedIdentity;
 		this.#appliedIdentity = identity;
 		if (identityChanged) {
@@ -571,6 +570,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 			);
 		}
 		await this.deps.onTargetChanged(target, identity, reason, identityChanged);
+		return true;
 	}
 
 	#rememberTarget(): void {
