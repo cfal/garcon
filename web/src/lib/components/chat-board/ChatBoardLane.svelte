@@ -40,7 +40,7 @@
 		recoveryChatIds: ReadonlySet<string>;
 		canTransition: boolean;
 		onOpen: (chatId: string) => void;
-		onTransition: (occurrence: ChatBoardOccurrence) => void;
+		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
 		onRecover: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 		initialScrollTop: number;

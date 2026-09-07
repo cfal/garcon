@@ -57,6 +57,19 @@ function chat(): ChatSessionRecord {
 	};
 }
 
+function emulateDetachedChromiumScrollReset(element: HTMLElement): void {
+	let connectedScrollTop = element.scrollTop;
+	Object.defineProperty(element, 'scrollTop', {
+		configurable: true,
+		get() {
+			return element.isConnected ? connectedScrollTop : 0;
+		},
+		set(value: number) {
+			connectedScrollTop = value;
+		},
+	});
+}
+
 function createController(initial: ChatBoardCatalog) {
 	let selectedBoardId: string | null = null;
 	let itemLayout = null as 'compact' | 'detailed' | 'single-line' | null;
@@ -253,6 +266,22 @@ describe('ChatBoardPanel', () => {
 		);
 	});
 
+	it('restores focus to the surviving transition invoker when the dialog closes', async () => {
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
+		const invoker = screen.getByRole('button', { name: 'Transition…' });
+		await fireEvent.click(invoker);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		await waitFor(() => expect(document.activeElement).toBe(invoker));
+	});
+
 	it('keeps independent lane scroll positions across lane and presentation changes', async () => {
 		class TestResizeObserver {
 			static emit: (width: number) => void = () => {};
@@ -286,6 +315,8 @@ describe('ChatBoardPanel', () => {
 		const reviewSelector = `[data-chat-board-lane-list="${reviewColumn.id}"]`;
 		const ready = container.querySelector<HTMLElement>(readySelector)!;
 		const review = container.querySelector<HTMLElement>(reviewSelector)!;
+		emulateDetachedChromiumScrollReset(ready);
+		emulateDetachedChromiumScrollReset(review);
 		ready.scrollTop = 37;
 		review.scrollTop = 83;
 		await fireEvent.scroll(ready);

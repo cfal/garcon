@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 	import { tick, untrack } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Button } from '$lib/components/ui/button';
@@ -42,7 +43,7 @@
 	const instanceId = crypto.randomUUID();
 	const focusController = new ChatBoardFocusController();
 	const laneScrollers = new Map<string, (key: string) => void>();
-	const laneScrollOffsets = new Map<string, number>();
+	const laneScrollOffsets = new SvelteMap<string, number>();
 	let rootRef = $state<HTMLElement | null>(null);
 	let boardViewportRef = $state<HTMLDivElement | null>(null);
 	let presentationBand = $state<ChatBoardPresentationBand>('medium');
@@ -50,6 +51,7 @@
 	let editBoard = $state<ChatBoard | null>(null);
 	let transitionOccurrence = $state<ChatBoardOccurrence | null>(null);
 	let transitionTargetColumnId = $state<string | null>(null);
+	let transitionInvoker: HTMLElement | null = null;
 	let dropTargetColumnId = $state<string | null>(null);
 	let announcement = $state('');
 	let focusedTabId = $state<string | null>(null);
@@ -98,9 +100,10 @@
 			const nextBand: ChatBoardPresentationBand =
 				width < 560 ? 'narrow' : width < 900 ? 'medium' : 'wide';
 			if (nextBand === presentationBand) return;
+			rememberMountedLaneScrollPositions();
 			focusController.preparePresentationChange(nextBand, activeColumnId);
 			presentationBand = nextBand;
-			void tick().then(() => focusController.completePresentationChange());
+			void restoreAfterLaneRemount(() => focusController.completePresentationChange());
 		});
 		observer.observe(rootRef);
 		return () => observer.disconnect();
@@ -209,17 +212,48 @@
 		laneScrollOffsets.set(laneScrollKey(boardId, columnId), scrollTop);
 	}
 
+	function rememberMountedLaneScrollPositions(): void {
+		const boardId = selectedBoard?.id;
+		if (!boardId || !rootRef) return;
+		for (const viewport of rootRef.querySelectorAll<HTMLElement>('[data-chat-board-lane-list]')) {
+			const columnId = viewport.dataset.chatBoardLaneList;
+			if (columnId) rememberLaneScroll(boardId, columnId, viewport.scrollTop);
+		}
+	}
+
+	async function restoreAfterLaneRemount(afterRestore?: () => void): Promise<void> {
+		await tick();
+		requestAnimationFrame(() => {
+			const boardId = selectedBoard?.id;
+			if (boardId && rootRef) {
+				for (const viewport of rootRef.querySelectorAll<HTMLElement>(
+					'[data-chat-board-lane-list]',
+				)) {
+					const columnId = viewport.dataset.chatBoardLaneList;
+					const scrollTop = columnId
+						? laneScrollOffsets.get(laneScrollKey(boardId, columnId))
+						: undefined;
+					if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
+				}
+			}
+			afterRestore?.();
+		});
+	}
+
 	function openTransition(
 		occurrence: ChatBoardOccurrence,
 		targetColumnId: string | null = null,
+		invoker: HTMLElement | null = null,
 	): void {
 		transitionOccurrence = occurrence;
 		transitionTargetColumnId = targetColumnId;
+		transitionInvoker = invoker;
 	}
 
 	async function handleTransitionApplied(chatId: string, targetColumnId: string): Promise<void> {
 		transitionOccurrence = null;
 		transitionTargetColumnId = null;
+		transitionInvoker = null;
 		if (presentationBand === 'narrow') controller.selectColumn(targetColumnId);
 		await tick();
 		laneScrollers.get(targetColumnId)?.(`${targetColumnId}:${chatId}`);
@@ -231,9 +265,15 @@
 
 	async function closeTransition(): Promise<void> {
 		const occurrence = transitionOccurrence;
+		const invoker = transitionInvoker;
 		transitionOccurrence = null;
 		transitionTargetColumnId = null;
+		transitionInvoker = null;
 		await tick();
+		if (invoker?.isConnected && !invoker.matches(':disabled')) {
+			invoker.focus({ preventScroll: true });
+			return;
+		}
 		if (occurrence && focusController.focusOccurrence(occurrence.columnId, occurrence.chat.id))
 			return;
 		if (occurrence && focusController.focusLane(occurrence.columnId)) return;
@@ -257,8 +297,10 @@
 	}
 
 	function selectTab(columnId: string): void {
+		rememberMountedLaneScrollPositions();
 		controller.selectColumn(columnId);
 		focusedTabId = columnId;
+		void restoreAfterLaneRemount();
 	}
 
 	function handleTabKeydown(event: KeyboardEvent, columnId: string): void {
@@ -440,7 +482,7 @@
 							recoveryChatIds={sessions.tagRecoveryRequiredChatIds}
 							canTransition={selectedBoard.columns.length > 1}
 							onOpen={onOpenChat}
-							onTransition={(occurrence) => openTransition(occurrence)}
+							onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
 							onRecover={(chatId) => void retryTagRecovery(chatId)}
 							onRegisterScroller={registerScroller}
 							initialScrollTop={laneScrollTop(selectedBoard.id, narrowLane.column.id)}
@@ -470,7 +512,7 @@
 						recoveryChatIds={sessions.tagRecoveryRequiredChatIds}
 						canTransition={selectedBoard.columns.length > 1}
 						onOpen={onOpenChat}
-						onTransition={(occurrence) => openTransition(occurrence)}
+						onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
 						onRecover={(chatId) => void retryTagRecovery(chatId)}
 						onRegisterScroller={registerScroller}
 						initialScrollTop={laneScrollTop(selectedBoard.id, lane.column.id)}

@@ -34,7 +34,7 @@
 		canTransition: boolean;
 		occurrenceIndex: number;
 		onOpen: (chatId: string) => void;
-		onTransition: (occurrence: ChatBoardOccurrence) => void;
+		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
 		onRecover: (chatId: string) => void;
 	} = $props();
 
@@ -118,7 +118,7 @@
 				aria-label={m.chat_board_transition()}
 				title={m.chat_board_transition()}
 				disabled={!canTransition || pending || recoveryRequired}
-				onclick={() => onTransition(occurrence)}
+				onclick={(event) => onTransition(occurrence, event.currentTarget)}
 				data-chat-board-focus-target="transition"
 			>
 				<ArrowRight class="size-3.5" aria-hidden="true" />
