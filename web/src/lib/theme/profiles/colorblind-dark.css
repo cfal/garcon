@@ -175,12 +175,12 @@
 	--file-icon-image: 271 81% 72%;
 	--file-icon-folder: 214 92% 68%;
 	--terminal-bg: 0 0% 11.76%;
-	--git-action-commit: 214 82% 55%;
-	--git-action-commit-hover: 214 82% 48%;
-	--git-action-pull: 146 56% 46%;
-	--git-action-pull-hover: 146 56% 38%;
-	--git-action-push: 30 85% 52%;
-	--git-action-push-hover: 30 85% 44%;
+	--git-action-commit: 214 82% 48%;
+	--git-action-commit-hover: 214 82% 42%;
+	--git-action-pull: 146 56% 32%;
+	--git-action-pull-hover: 146 56% 27%;
+	--git-action-push: 30 85% 36%;
+	--git-action-push-hover: 30 85% 31%;
 	--git-action-publish: 271 56% 56%;
 	--git-action-publish-hover: 271 56% 48%;
 	--git-action-foreground: 0 0% 98%;

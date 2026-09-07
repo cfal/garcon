@@ -180,10 +180,10 @@
 	--terminal-bg: 222 35% 4%;
 	--git-action-commit: 190 88% 30%;
 	--git-action-commit-hover: 190 88% 26%;
-	--git-action-pull: 146 56% 46%;
-	--git-action-pull-hover: 146 56% 38%;
-	--git-action-push: 30 85% 52%;
-	--git-action-push-hover: 30 85% 44%;
+	--git-action-pull: 146 56% 32%;
+	--git-action-pull-hover: 146 56% 27%;
+	--git-action-push: 30 85% 36%;
+	--git-action-push-hover: 30 85% 31%;
 	--git-action-publish: 271 56% 56%;
 	--git-action-publish-hover: 271 56% 48%;
 	--git-action-foreground: 0 0% 98%;
@@ -228,7 +228,7 @@
 	:root:where([data-theme='phosphor-dark']),
 	:root:where([data-theme='phosphor-dark']) * {
 		scrollbar-width: thin;
-		scrollbar-color: hsl(var(--foreground) / 0.16) transparent;
+		scrollbar-color: hsl(var(--foreground) / 0.42) transparent;
 	}
 }
 
@@ -255,11 +255,11 @@
 :root:where([data-theme='phosphor-dark']) ::-webkit-scrollbar-thumb {
 	border: 2px solid transparent;
 	border-radius: 999px;
-	background: hsl(var(--foreground) / 0.16);
+	background: hsl(var(--foreground) / 0.42);
 	background-clip: padding-box;
 }
 
 :root:where([data-theme='phosphor-dark']) ::-webkit-scrollbar-thumb:hover {
-	background: hsl(var(--foreground) / 0.3);
+	background: hsl(var(--foreground) / 0.58);
 	background-clip: padding-box;
 }

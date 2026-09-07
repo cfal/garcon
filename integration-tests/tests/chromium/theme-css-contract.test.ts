@@ -64,8 +64,13 @@ describe("compiled theme CSS", () => {
             <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Input placeholder">
             <textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
           </div>
-          <button id="git-action" class="bg-git-action-commit text-git-action-foreground">Commit</button>
-          <button id="git-action-hover" class="bg-git-action-commit-hover text-git-action-foreground">Commit</button>
+          <button data-git-action="commit" class="bg-git-action-commit text-git-action-foreground">Commit</button>
+          <button data-git-action="commit hover" class="bg-git-action-commit-hover text-git-action-foreground">Commit</button>
+          <button data-git-action="pull" class="bg-git-action-pull text-git-action-foreground">Pull</button>
+          <button data-git-action="pull hover" class="bg-git-action-pull-hover text-git-action-foreground">Pull</button>
+          <button data-git-action="push" class="bg-git-action-push text-git-action-foreground">Push</button>
+          <button data-git-action="push hover" class="bg-git-action-push-hover text-git-action-foreground">Push</button>
+          <span id="interactive-accent-text" class="bg-interactive-accent/10 text-interactive-accent">Selected file</span>
           <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
@@ -119,7 +124,7 @@ describe("compiled theme CSS", () => {
         };
       });
       expect(colorblindValues).toEqual({
-        lightAdded: "210 80% 45%",
+        lightAdded: "210 80% 43%",
         lightDeleted: "30 90% 50%",
         darkAdded: "210 85% 65%",
         darkDeleted: "30 92% 65%",
@@ -182,13 +187,40 @@ describe("compiled theme CSS", () => {
       }
 
       for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
-        const scrollbarWidth = await page.evaluate((themeId) => {
-          document.documentElement.dataset.theme = themeId;
+        const scrollbarMetrics = await page.evaluate((themeId) => {
+          const root = document.documentElement;
+          root.dataset.theme = themeId;
+          root.classList.toggle("dark", themeId === "phosphor-dark");
           const scrollbar = document.querySelector<HTMLElement>("#scrollbar");
           if (!scrollbar) throw new Error("Missing scrollbar fixture");
-          return scrollbar.offsetWidth - scrollbar.clientWidth;
+          const surface = getComputedStyle(document.body).backgroundColor;
+          const thumb = getComputedStyle(
+            scrollbar,
+            "::-webkit-scrollbar-thumb",
+          ).backgroundColor;
+          const canvas = document.createElement("canvas");
+          canvas.width = 1;
+          canvas.height = 1;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Missing canvas context");
+          context.fillStyle = surface;
+          context.fillRect(0, 0, 1, 1);
+          context.fillStyle = thumb;
+          context.fillRect(0, 0, 1, 1);
+          const [red, green, blue] = context
+            .getImageData(0, 0, 1, 1)
+            .data.slice(0, 3);
+          return {
+            width: scrollbar.offsetWidth - scrollbar.clientWidth,
+            thumb: `rgb(${red}, ${green}, ${blue})`,
+            surface,
+          };
         }, profile);
-        expect(scrollbarWidth, `${profile} scrollbar width`).toBe(10);
+        expect(scrollbarMetrics.width, `${profile} scrollbar width`).toBe(10);
+        expect(
+          contrastRatio(scrollbarMetrics.thumb, scrollbarMetrics.surface),
+          `${profile} scrollbar thumb`,
+        ).toBeGreaterThanOrEqual(3);
       }
 
       for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
@@ -200,16 +232,15 @@ describe("compiled theme CSS", () => {
             document.querySelector<HTMLElement>("#textarea-boundary");
           const dialogSurface =
             document.querySelector<HTMLElement>("#dialog-surface");
-          const gitAction = document.querySelector<HTMLElement>("#git-action");
-          const gitActionHover =
-            document.querySelector<HTMLElement>("#git-action-hover");
+          const interactiveAccent = document.querySelector<HTMLElement>(
+            "#interactive-accent-text",
+          );
           if (
             !select ||
             !input ||
             !textarea ||
             !dialogSurface ||
-            !gitAction ||
-            !gitActionHover
+            !interactiveAccent
           ) {
             throw new Error("Missing theme contrast fixtures");
           }
@@ -234,8 +265,17 @@ describe("compiled theme CSS", () => {
           const selectStyle = getComputedStyle(select);
           const inputStyle = getComputedStyle(input);
           const textareaStyle = getComputedStyle(textarea);
-          const gitActionStyle = getComputedStyle(gitAction);
-          const gitActionHoverStyle = getComputedStyle(gitActionHover);
+          const gitActions = [
+            ...document.querySelectorAll<HTMLElement>("[data-git-action]"),
+          ].map((action) => {
+            const style = getComputedStyle(action);
+            return {
+              name: action.dataset.gitAction,
+              foreground: style.color,
+              background: style.backgroundColor,
+            };
+          });
+          const interactiveAccentStyle = getComputedStyle(interactiveAccent);
           return {
             adjacentSurface: surfaceStyle.backgroundColor,
             inputBorder: inputStyle.borderColor,
@@ -248,16 +288,16 @@ describe("compiled theme CSS", () => {
               textareaStyle.backgroundColor,
               surfaceStyle.backgroundColor,
             ),
-            textareaPlaceholder: getComputedStyle(
-              textarea,
-              "::placeholder",
-            ).color,
+            textareaPlaceholder: getComputedStyle(textarea, "::placeholder")
+              .color,
             selectBackground: selectStyle.backgroundColor,
             selectBorder: selectStyle.borderColor,
-            gitForeground: gitActionStyle.color,
-            gitBackground: gitActionStyle.backgroundColor,
-            gitHoverForeground: gitActionHoverStyle.color,
-            gitHoverBackground: gitActionHoverStyle.backgroundColor,
+            gitActions,
+            interactiveAccentForeground: interactiveAccentStyle.color,
+            interactiveAccentBackground: composite(
+              interactiveAccentStyle.backgroundColor,
+              getComputedStyle(document.body).backgroundColor,
+            ),
           };
         }, profile);
         expect(
@@ -268,27 +308,27 @@ describe("compiled theme CSS", () => {
           contrastRatio(colors.selectBorder, colors.selectBackground),
           `${profile} native-select boundary`,
         ).toBeGreaterThanOrEqual(3);
-        expect(
-          contrastRatio(colors.gitForeground, colors.gitBackground),
-          `${profile} Git commit action`,
-        ).toBeGreaterThanOrEqual(4.5);
-        expect(
-          contrastRatio(colors.gitHoverForeground, colors.gitHoverBackground),
-          `${profile} Git commit action hover`,
-        ).toBeGreaterThanOrEqual(4.5);
-        if (profile === "phosphor-dark") {
+        for (const action of colors.gitActions) {
           expect(
-            contrastRatio(colors.inputPlaceholder, colors.inputBackground),
-            `${profile} input placeholder`,
-          ).toBeGreaterThanOrEqual(4.5);
-          expect(
-            contrastRatio(
-              colors.textareaPlaceholder,
-              colors.textareaBackground,
-            ),
-            `${profile} textarea placeholder`,
+            contrastRatio(action.foreground, action.background),
+            `${profile} Git ${action.name} action`,
           ).toBeGreaterThanOrEqual(4.5);
         }
+        expect(
+          contrastRatio(
+            colors.interactiveAccentForeground,
+            colors.interactiveAccentBackground,
+          ),
+          `${profile} interactive accent text`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrastRatio(colors.inputPlaceholder, colors.inputBackground),
+          `${profile} input placeholder`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrastRatio(colors.textareaPlaceholder, colors.textareaBackground),
+          `${profile} textarea placeholder`,
+        ).toBeGreaterThanOrEqual(4.5);
       }
     } finally {
       await context.close();

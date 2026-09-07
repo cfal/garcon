@@ -103,7 +103,7 @@ describe('theme profile CSS sources', () => {
 		const light = profileSource('colorblind-light');
 		const dark = profileSource('colorblind-dark');
 
-		expect(light).toContain('--git-added: 210 80% 45%;');
+		expect(light).toContain('--git-added: 210 80% 43%;');
 		expect(light).toContain('--git-deleted: 30 90% 50%;');
 		expect(dark).toContain('--git-added: 210 85% 65%;');
 		expect(dark).toContain('--git-deleted: 30 92% 65%;');
@@ -116,6 +116,18 @@ describe('theme profile CSS sources', () => {
 		expect(profileSource('classic-dark')).toContain('--background: 0 0% 10%;');
 		expect(profileSource('phosphor-light')).toContain('--radius: 0.75rem;');
 		expect(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
+	});
+
+	it('keeps Phosphor scrollbar fallbacks aligned with WebKit painting', () => {
+		for (const [themeId, opacity] of [
+			['phosphor-light', '0.52'],
+			['phosphor-dark', '0.42'],
+		] as const) {
+			const source = profileSource(themeId);
+			expect(
+				source.match(new RegExp(`hsl\\(var\\(--foreground\\) / ${opacity}\\)`, 'g')),
+			).toHaveLength(2);
+		}
 	});
 
 	it('keeps application-owned semantic text pairs above minimum contrast', () => {
@@ -139,7 +151,22 @@ describe('theme profile CSS sources', () => {
 			['stop-button-bg', 'stop-button-foreground'],
 			['user-bubble', 'user-bubble-foreground'],
 			['markdown-code-background', 'markdown-code-foreground'],
+			['git-action-commit', 'git-action-foreground'],
+			['git-action-commit-hover', 'git-action-foreground'],
+			['git-action-pull', 'git-action-foreground'],
+			['git-action-pull-hover', 'git-action-foreground'],
+			['git-action-push', 'git-action-foreground'],
+			['git-action-push-hover', 'git-action-foreground'],
+			['git-action-publish', 'git-action-foreground'],
+			['git-action-publish-hover', 'git-action-foreground'],
 		] as const;
+		const foregrounds = [
+			'git-added',
+			'git-modified',
+			'git-untracked',
+			'interactive-accent',
+		] as const;
+		const surfaces = ['background', 'sidebar-background', 'muted'] as const;
 
 		for (const profile of THEME_PROFILES) {
 			const values = propertyValues(profileSource(profile.id));
@@ -148,6 +175,14 @@ describe('theme profile CSS sources', () => {
 					contrastRatio(values[background], values[foreground]),
 					`${profile.id}: ${background}/${foreground}`,
 				).toBeGreaterThanOrEqual(4.5);
+			}
+			for (const foreground of foregrounds) {
+				for (const surface of surfaces) {
+					expect(
+						contrastRatio(values[surface], values[foreground]),
+						`${profile.id}: ${foreground} on ${surface}`,
+					).toBeGreaterThanOrEqual(4.5);
+				}
 			}
 		}
 	});

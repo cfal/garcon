@@ -173,7 +173,7 @@
 	--diff-addition: 142 71% 38%;
 	--diff-deletion: 0 72% 45%;
 	--diff-hunk: 190 88% 38%;
-	--interactive-accent: 190 88% 32%;
+	--interactive-accent: 190 88% 25%;
 	--file-icon-code: 142 71% 38%;
 	--file-icon-doc: 190 88% 36%;
 	--file-icon-image: 271 76% 53%;
@@ -181,18 +181,18 @@
 	--terminal-bg: 220 25% 98%;
 	--git-action-commit: 190 88% 30%;
 	--git-action-commit-hover: 190 88% 26%;
-	--git-action-pull: 146 60% 40%;
-	--git-action-pull-hover: 146 60% 34%;
-	--git-action-push: 30 90% 48%;
-	--git-action-push-hover: 30 90% 40%;
+	--git-action-pull: 146 60% 31%;
+	--git-action-pull-hover: 146 60% 27%;
+	--git-action-push: 30 90% 35%;
+	--git-action-push-hover: 30 90% 30%;
 	--git-action-publish: 271 60% 50%;
 	--git-action-publish-hover: 271 60% 42%;
 	--git-action-foreground: 0 0% 98%;
-	--git-modified: 33 78% 38%;
-	--git-added: 142 71% 38%;
+	--git-modified: 33 78% 32%;
+	--git-added: 142 71% 26%;
 	--pr-merged: 271 76% 53%;
 	--git-deleted: 0 72% 45%;
-	--git-untracked: 190 88% 36%;
+	--git-untracked: 190 88% 27%;
 	--git-renamed: 271 76% 53%;
 	--diff-add-bg: 133 80% 92%;
 	--diff-add-fg: 213 13% 14%;
@@ -229,7 +229,7 @@
 	:root:where([data-theme='phosphor-light']),
 	:root:where([data-theme='phosphor-light']) * {
 		scrollbar-width: thin;
-		scrollbar-color: hsl(var(--foreground) / 0.16) transparent;
+		scrollbar-color: hsl(var(--foreground) / 0.52) transparent;
 	}
 }
 
@@ -256,11 +256,11 @@
 :root:where([data-theme='phosphor-light']) ::-webkit-scrollbar-thumb {
 	border: 2px solid transparent;
 	border-radius: 999px;
-	background: hsl(var(--foreground) / 0.16);
+	background: hsl(var(--foreground) / 0.52);
 	background-clip: padding-box;
 }
 
 :root:where([data-theme='phosphor-light']) ::-webkit-scrollbar-thumb:hover {
-	background: hsl(var(--foreground) / 0.3);
+	background: hsl(var(--foreground) / 0.68);
 	background-clip: padding-box;
 }
