@@ -191,13 +191,13 @@
 	async function loadAutomaticDraft(): Promise<void> {
 		const version = ++automaticPreviewVersion;
 		draftMode = 'defaults';
+		hasManualChanges = false;
 		automaticPreview = { status: 'loading' };
 		try {
 			const nextPreview = await onLoadAutomaticPreview();
 			if (!isCurrentAutomaticPreview(version)) return;
 			automaticPreview = { status: 'ready', preview: nextPreview };
 			draftIds = [...nextPreview.orderedPreambleIds];
-			hasManualChanges = false;
 		} catch {
 			if (!isCurrentAutomaticPreview(version)) return;
 			automaticPreview = { status: 'error' };

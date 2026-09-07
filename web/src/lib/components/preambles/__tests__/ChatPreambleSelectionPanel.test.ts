@@ -370,6 +370,45 @@ describe('NewChatPreamblePicker', () => {
 		expect(close).not.toHaveBeenCalled();
 	});
 
+	it('follows a recovered parent preview after a defaults reload fails', async () => {
+		const refresh = vi.fn();
+		const rendered = render(ChatPreambleSelectionTestHost, {
+			mode: 'new-chat',
+			snapshot: snapshot(),
+			draftIds: [ID_ELIGIBLE],
+			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
+			onLoadAutomaticPreview: vi.fn().mockRejectedValue(new Error('preview unavailable')),
+			onRefreshPreview: refresh,
+		});
+
+		const eligibleRow = slots('chat-preamble-selection-row').find((row) =>
+			row.textContent?.includes('Eligible conventions'),
+		)!;
+		await fireEvent.click(within(eligibleRow).getByRole('switch', { name: /Remove/ }));
+		await rendered.rerender({ defaultsIds: [], projection: null });
+		await fireEvent.click(slot('new-chat-preamble-reset-defaults'));
+		await waitFor(() => {
+			expect(slot('new-chat-preamble-preview-status').getAttribute('role')).toBe('alert');
+		});
+
+		await fireEvent.click(slot('new-chat-preamble-preview-retry'));
+		expect(refresh).toHaveBeenCalledOnce();
+		await rendered.rerender({
+			defaultsIds: [ID_ELIGIBLE],
+			projection: resolvedProjection([ID_ELIGIBLE]),
+		});
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-slot="new-chat-preamble-preview-status"]')).toBeNull();
+			expect((slot('new-chat-preamble-apply') as HTMLButtonElement).disabled).toBe(false);
+			const recoveredRow = slots('chat-preamble-selection-row').find((row) =>
+				row.textContent?.includes('Eligible conventions'),
+			)!;
+			expect(within(recoveredRow).getByRole('switch').getAttribute('aria-checked')).toBe('true');
+		});
+	});
+
 	it('follows refreshed defaults through catalog management while untouched', async () => {
 		let appShell!: AppShellStore;
 		const apply = vi.fn();
