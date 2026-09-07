@@ -14,7 +14,7 @@ import type {
 	ChatTranscriptCursor,
 } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { getChatExecutionControl } from '$lib/api/chats.js';
 import type { WsMessageConsumer } from './connection.svelte.js';
 import type {

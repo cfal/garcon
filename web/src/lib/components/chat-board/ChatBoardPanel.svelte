@@ -9,7 +9,7 @@
 		projectChatBoard,
 		type ChatBoardOccurrence,
 	} from '$lib/chat-board/projection/chat-board-projection.js';
-	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { getLocalSettings } from '$lib/context';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import type { ChatBoard } from '$shared/chat-boards';

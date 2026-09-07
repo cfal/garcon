@@ -8,7 +8,7 @@ import type {
 	LocalSettingsStore,
 } from '$lib/stores/local-settings.svelte.js';
 import type { ThemePreference } from '$lib/theme/themes.js';
-import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 
 export const ONBOARDING_PAGE_IDS = ['theme', 'chat-layout', 'chat-display', 'done'] as const;
 export type OnboardingPageId = (typeof ONBOARDING_PAGE_IDS)[number];

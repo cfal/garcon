@@ -4,7 +4,7 @@
 	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
 	import ChatProcessingIndicator from './ChatProcessingIndicator.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn';
 	import { formatSidebarChatTimestamp } from '../sidebar/chat-timestamp.js';
 	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';

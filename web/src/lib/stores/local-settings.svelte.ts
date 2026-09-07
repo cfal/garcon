@@ -29,7 +29,7 @@ import {
 import {
 	parseChatItemLayout as parseStoredChatItemLayout,
 	type ChatItemLayout,
-} from '$lib/chat/presentation/chat-item-layout.js';
+} from '$lib/layout/chat-item-layout.js';
 import { isChatBoardColumnId, isChatBoardId } from '$shared/chat-boards';
 
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;

@@ -25,7 +25,7 @@
 		SidebarInactivityDuration,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 	import type { ChatSearchSort } from '$shared/chat-search';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';

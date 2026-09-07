@@ -5,7 +5,7 @@
 <script lang="ts">
 	import ChatSummary from '../chat/ChatSummary.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn.js';
 
 	interface OnboardingChatLayoutPreviewProps {

@@ -4,7 +4,7 @@
 		SidebarChatGrouping,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 

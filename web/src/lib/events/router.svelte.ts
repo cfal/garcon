@@ -32,7 +32,7 @@ import {
 	setPendingChatId,
 } from '$lib/chat/conversation/pending-chat-handoff.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
 

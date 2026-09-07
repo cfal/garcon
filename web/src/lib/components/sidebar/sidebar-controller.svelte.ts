@@ -21,7 +21,7 @@ import type {
 	SortChatOrderResponse,
 } from '$shared/chat-order-contracts';
 import type { ChatOrderSortKey } from '$shared/chat-order-sort';
-import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
+import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;

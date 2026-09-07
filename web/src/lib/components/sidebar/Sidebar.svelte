@@ -13,7 +13,7 @@
 		getSidebarSearch,
 		getRemoteSettings,
 	} from '$lib/context';
-	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
+	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
 		PersistedChatOrderGroup,
@@ -35,7 +35,7 @@
 		SidebarChatGrouping,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';

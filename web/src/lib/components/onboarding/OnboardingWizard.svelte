@@ -10,7 +10,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
 	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte.js';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import {
 		OnboardingWizardState,
 		type OnboardingPageId,

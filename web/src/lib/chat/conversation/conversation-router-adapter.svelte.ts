@@ -12,7 +12,7 @@ import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
-import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import type { ResendCandidate } from '$shared/chat-view';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';

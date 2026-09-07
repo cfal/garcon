@@ -13,7 +13,7 @@ import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ConversationSessionsPort } from './conversation-sessions-port.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
@@ -182,27 +182,7 @@ function createDirectAdmissionBarrier(): DirectAdmissionBarrier {
 }
 
 export interface SessionControllerDeps {
-	sessions: Pick<
-		ChatSessionsPort,
-		| 'selectedChatId'
-		| 'selectedChat'
-		| 'byId'
-		| 'startupByChatId'
-		| 'isDraft'
-		| 'patchDraftStartup'
-		| 'patchChat'
-		| 'patchLastReadAt'
-		| 'applyStartEntry'
-		| 'applyProcessingEvent'
-		| 'processingPhase'
-		| 'upsertServerChat'
-		| 'reconcileAcceptedHandoffProjection'
-		| 'observeCommandTagMutation'
-		| 'setSelectedChatId'
-		| 'renameChat'
-		| 'moveChatToBoundary'
-		| 'applyChatTagDelta'
-	>;
+	sessions: ConversationSessionsPort;
 	chatState: SessionTranscriptState;
 	composerState: SessionComposerState;
 	agentState: SessionAgentState;

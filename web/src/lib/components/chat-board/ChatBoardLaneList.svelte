@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 	import {
 		virtualItems as selectVirtualItems,

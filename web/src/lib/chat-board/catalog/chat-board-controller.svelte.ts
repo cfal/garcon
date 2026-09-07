@@ -1,6 +1,6 @@
 import type { ChatBoardApi } from '$lib/api/chat-boards.js';
 import { ApiError } from '$lib/api/client.js';
-import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import {

@@ -16,7 +16,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { Button } from '$lib/components/ui/button';
 	import type { ChatBoard } from '$shared/chat-boards';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {

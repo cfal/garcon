@@ -23,7 +23,7 @@
 		SidebarChatGrouping,
 		SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 

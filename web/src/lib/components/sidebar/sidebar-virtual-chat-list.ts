@@ -1,6 +1,6 @@
 import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
-import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 export const DESKTOP_CHAT_ROW_HEIGHT = 88;

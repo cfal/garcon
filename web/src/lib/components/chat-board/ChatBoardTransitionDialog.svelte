@@ -11,7 +11,7 @@
 		initialTargetTags,
 		projectChatBoardTransition,
 	} from '$lib/chat-board/transition/chat-board-transition.js';
-	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { chatMatchesBoardColumn, type ChatBoard } from '$shared/chat-boards';
 	import { ApiError } from '$lib/api/client.js';
 	import * as m from '$lib/paraglide/messages.js';

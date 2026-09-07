@@ -3,7 +3,7 @@
 	import { setLocalSettings } from '$lib/context';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
-	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import ChatBoardPanel from '../ChatBoardPanel.svelte';
 
 	let {

@@ -1,5 +1,5 @@
 import type { ChatProcessingPhase } from '$shared/chat-types';
-import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import type { ConversationUiPort } from './conversation-ui-state.svelte.js';
 import {
 	ConversationLifecycleState,

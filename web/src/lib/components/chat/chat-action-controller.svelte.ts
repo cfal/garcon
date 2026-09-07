@@ -1,7 +1,7 @@
 import * as m from '$lib/paraglide/messages.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
-import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
+import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatActionDialogsState } from './chat-action-dialogs-state.svelte';
 import type { ChatListEntry } from '$shared/chat-list';

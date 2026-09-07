@@ -44,6 +44,13 @@ import {
 	ChatProjectBindingState,
 	type ProjectPathChangedListener,
 } from './chat-project-binding-state.js';
+import type {
+	ChatArchiveMutation,
+	ChatListLoadStatus,
+	ChatProcessingTransition,
+	ChatSessionsPort,
+	ChatSessionsStoreDeps,
+} from './chat-sessions-contract.js';
 import {
 	insertServerEntry,
 	normalizeExecutionFields,
@@ -51,32 +58,6 @@ import {
 	sameRecord,
 	toRecord,
 } from './chat-session-records.js';
-
-export interface ChatProcessingTransition {
-	chatId: string;
-	previousPhase: ChatProcessingPhase | null;
-	phase: ChatProcessingPhase | null;
-}
-
-export interface ChatSessionsStoreDeps {
-	listChats?: typeof listChats;
-	deleteChat?: typeof deleteChatApi;
-	setLastSelectedChat?: typeof setLastSelectedChat;
-	generateChatTitle?: typeof generateChatTitle;
-	updateSessionName?: typeof updateSessionName;
-	reorderChat?: typeof reorderChatApi;
-	replaceChatTags?: typeof replaceChatTagsApi;
-	applyChatTagDelta?: typeof applyChatTagDeltaApi;
-	transitionChatTags?: typeof transitionChatTagsApi;
-	recoverChatTags?: typeof recoverChatTagsApi;
-	toggleArchive?: typeof toggleArchiveApi;
-	notifyError?: (message: string) => void;
-}
-
-export interface ChatArchiveMutation {
-	chatIds: string[];
-	completion: Promise<void>;
-}
 
 interface ArchiveMutationSettlement {
 	chatId: string;
@@ -115,50 +96,6 @@ function isUnknownTagOutcome(error: unknown): boolean {
 		error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')
 	);
 }
-
-export interface ChatSessionsPort {
-	byId: Record<string, ChatSessionRecord>;
-	order: string[];
-	readonly chatListStatus: ChatListLoadStatus;
-	readonly chatListError: string | null;
-	selectedChatId: string | null;
-	startupByChatId: Record<string, ChatStartupConfig>;
-	readonly selectedChat: ChatSessionRecord | null;
-	setSelectedChatId(chatId: string | null): void;
-	quietRefreshChats(): Promise<void>;
-	renameChat(chatId: string, newTitle: string): Promise<boolean>;
-	moveChatToBoundary(
-		chatId: string,
-		boundary: ChatOrderBoundary,
-	): Promise<ReorderChatResponse | null>;
-	readonly orderedChats: ChatSessionRecord[];
-	readonly pendingTagMutationChatIds: ReadonlySet<string>;
-	readonly tagRecoveryRequiredChatIds: ReadonlySet<string>;
-	replaceChatTags(request: ReplaceChatTagsRequest): Promise<ChatTagsMutationResponse>;
-	applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse>;
-	transitionChatTags(request: TransitionChatTagsRequest): Promise<ChatTagsMutationResponse>;
-	recoverChatTags(chatId: string): Promise<RecoverChatTagsResponse>;
-	observeCommandTagMutation(chatId: string, outcome: CommandTagMutationOutcome): Promise<void>;
-	reconcileAcceptedHandoffProjection(entry: ChatListEntry): void;
-	hasChat(chatId: string): boolean;
-	isDraft(chatId: string): boolean;
-	patchDraftStartup(chatId: string, patch: Partial<ChatStartupConfig>): void;
-	applyStartEntry(entry: ChatListEntry): void;
-	upsertServerChat(entry: ChatListEntry): void;
-	removeChat(chatId: string): void;
-	patchPreview(chatId: string, content: string, timestamp?: string): void;
-	patchActivity(chatId: string, timestamp: string): void;
-	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
-	projectPathRevision(chatId: string): number;
-	onProjectPathChanged(listener: (chatId: string, projectPath: string | null) => void): () => void;
-	patchLastReadAt(chatId: string, lastReadAt: string): void;
-	isChatProcessing(chatId: string): boolean;
-	processingPhase(chatId: string): ChatProcessingPhase | null;
-	applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null): ChatProcessingTransition;
-	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[];
-}
-
-export type ChatListLoadStatus = 'loading' | 'ready' | 'error';
 
 export class ChatSessionsStore implements ChatSessionsPort {
 	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});

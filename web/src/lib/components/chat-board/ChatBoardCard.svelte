@@ -5,7 +5,7 @@
 	import { cn } from '$lib/utils/cn';
 	import ChatSummary from '$lib/components/chat/ChatSummary.svelte';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
-	import type { ChatItemLayout } from '$lib/chat/presentation/chat-item-layout.js';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getChatBoardCardDragData } from './chat-board-dnd.js';
 
