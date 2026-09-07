@@ -38,14 +38,14 @@ describe('Markdown', () => {
 
 		const code = screen.getByText('bun test');
 		expect(code.tagName.toLowerCase()).toBe('code');
-		expect(code.className).toContain('text-primary-foreground');
+		expect(code.className).toContain('text-inherit');
 	});
 
 	it('applies user variant styling to links', () => {
 		render(Markdown, { source: '[link](https://example.com)', variant: 'user' });
 
 		const link = screen.getByRole('link', { name: 'link' });
-		expect(link.className).toContain('text-primary-foreground');
+		expect(link.className).toContain('text-inherit');
 	});
 
 	it('applies thinking variant styling to inline code', () => {
@@ -75,7 +75,7 @@ describe('Markdown', () => {
 
 		const wrapper = container.querySelector('.markdown-body');
 		expect(wrapper).toBeTruthy();
-		expect(wrapper!.className).toContain('text-primary-foreground');
+		expect(wrapper!.className).toContain('text-inherit');
 		expect(wrapper!.className).not.toContain('prose-invert');
 	});
 

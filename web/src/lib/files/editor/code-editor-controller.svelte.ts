@@ -19,12 +19,12 @@ import {
 	foldKeymap,
 } from '@codemirror/language';
 import { unifiedMergeView } from '@codemirror/merge';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { loadLanguageExtension } from '$lib/files/editor/language-loader.js';
 import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+import { editorThemeExtension, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
 
 export interface EditorPresentationSettings {
-	readonly isDark: boolean;
+	readonly editorThemeId: EditorThemeId;
 	readonly wordWrap: boolean;
 	readonly showLineNumbers: boolean;
 	readonly fontSize: number;
@@ -255,7 +255,7 @@ export class CodeEditorController {
 				},
 			}),
 		];
-		if (this.settings.isDark) extensions.push(oneDark);
+		extensions.push(editorThemeExtension(this.settings.editorThemeId));
 		if (this.settings.showLineNumbers) extensions.push(lineNumbers());
 		if (this.settings.wordWrap) extensions.push(EditorView.lineWrapping);
 		if (this.session.readOnly || this.session.refreshing) {
@@ -288,9 +288,7 @@ export class CodeEditorController {
 
 	#serializeDocument(document: Text): string {
 		const content = document.toString();
-		return this.#lineSeparator === '\n'
-			? content
-			: content.replaceAll('\n', this.#lineSeparator);
+		return this.#lineSeparator === '\n' ? content : content.replaceAll('\n', this.#lineSeparator);
 	}
 
 	private async applyLanguage(): Promise<void> {

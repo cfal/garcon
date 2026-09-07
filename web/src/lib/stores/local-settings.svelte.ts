@@ -20,12 +20,13 @@ import {
 	DEFAULT_SNIPPET_TRIGGER,
 	normalizeSnippetTrigger,
 } from '$lib/chat/composer/snippet-trigger.js';
+import { CHAT_SEARCH_SORT_VALUES, type ChatSearchSort } from '$shared/chat-search';
 import {
-	CHAT_SEARCH_SORT_VALUES,
-	type ChatSearchSort,
-} from '$shared/chat-search';
+	DEFAULT_THEME_PREFERENCE,
+	parseThemePreference,
+	type ThemePreference,
+} from '$lib/theme/themes.js';
 
-export type ThemeMode = 'dark' | 'light' | 'system';
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
 export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
 export const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as const;
@@ -121,8 +122,7 @@ export const HIDEABLE_TOOL_TYPE_VALUES: readonly HideableToolType[] = HIDEABLE_T
 );
 
 export interface LocalSettingsSnapshot {
-	theme: ThemeMode;
-	colorblindMode: boolean;
+	themePreference: ThemePreference;
 	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
 	alwaysExpandCliMessages: boolean;
@@ -164,7 +164,6 @@ export interface LocalSettingsSnapshot {
 }
 
 type BooleanLocalSettingKey =
-	| 'colorblindMode'
 	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
 	| 'alwaysExpandCliMessages'
@@ -182,8 +181,7 @@ type BooleanLocalSettingKey =
 	| 'codeEditorLineNumbers';
 
 const DEFAULTS: LocalSettingsSnapshot = {
-	theme: 'system',
-	colorblindMode: false,
+	themePreference: DEFAULT_THEME_PREFERENCE,
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
 	alwaysExpandCliMessages: false,
@@ -250,13 +248,6 @@ function parseCompletionSoundVisibility(value: unknown): CompletionSoundVisibili
 		COMPLETION_SOUND_VISIBILITY_VALUES.includes(value as CompletionSoundVisibility)
 		? (value as CompletionSoundVisibility)
 		: DEFAULTS.completionSoundVisibility;
-}
-
-function parseTheme(value: unknown): ThemeMode {
-	if (typeof value === 'string' && (value === 'dark' || value === 'light' || value === 'system')) {
-		return value;
-	}
-	return DEFAULTS.theme;
 }
 
 export function isChatMaxWidth(value: unknown): value is ChatMaxWidth {
@@ -334,8 +325,7 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
-		theme: parseTheme(parsed.theme),
-		colorblindMode: parseBoolean(parsed.colorblindMode, DEFAULTS.colorblindMode),
+		themePreference: parseThemePreference(parsed.themePreference),
 		overlayBackdropEffects: parseBoolean(
 			parsed.overlayBackdropEffects,
 			DEFAULTS.overlayBackdropEffects,
@@ -359,9 +349,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		sidebarGrouping: parseSidebarChatGrouping(parsed.sidebarGrouping),
-		sidebarInactivityDuration: parseSidebarInactivityDuration(
-			parsed.sidebarInactivityDuration,
-		),
+		sidebarInactivityDuration: parseSidebarInactivityDuration(parsed.sidebarInactivityDuration),
 		sidebarGroupNestedProjectPaths: parseBoolean(
 			parsed.sidebarGroupNestedProjectPaths,
 			DEFAULTS.sidebarGroupNestedProjectPaths,
@@ -427,8 +415,7 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 }
 
 export class LocalSettingsStore {
-	theme = $state<ThemeMode>(DEFAULTS.theme);
-	colorblindMode = $state(DEFAULTS.colorblindMode);
+	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	alwaysExpandCliMessages = $state(DEFAULTS.alwaysExpandCliMessages);
@@ -446,9 +433,7 @@ export class LocalSettingsStore {
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGrouping = $state<SidebarChatGrouping>(DEFAULTS.sidebarGrouping);
-	sidebarInactivityDuration = $state<SidebarInactivityDuration>(
-		DEFAULTS.sidebarInactivityDuration,
-	);
+	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
@@ -469,13 +454,12 @@ export class LocalSettingsStore {
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
 	completionSoundVolume = $state(DEFAULTS.completionSoundVolume);
-	completionSoundVisibility = $state<CompletionSoundVisibility>(
-		DEFAULTS.completionSoundVisibility,
-	);
+	completionSoundVisibility = $state<CompletionSoundVisibility>(DEFAULTS.completionSoundVisibility);
 	customCompletionSoundName = $state<string | null>(DEFAULTS.customCompletionSoundName);
 
 	#storageListener = (event: StorageEvent) => {
-		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
+		if (event.storageArea !== window.localStorage) return;
+		if (event.key !== null && event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
 		this.#apply(readPersistedLocalSettings());
 	};
 
@@ -506,6 +490,9 @@ export class LocalSettingsStore {
 		if (key === 'completionSoundVolume') {
 			next.completionSoundVolume = parseCompletionSoundVolume(value);
 		}
+		if (key === 'themePreference') {
+			next.themePreference = parseThemePreference(value);
+		}
 		this.#apply(next);
 		persistLocalSettings(next);
 	}
@@ -528,8 +515,7 @@ export class LocalSettingsStore {
 
 	snapshot(): LocalSettingsSnapshot {
 		return {
-			theme: this.theme,
-			colorblindMode: this.colorblindMode,
+			themePreference: this.themePreference,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
 			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
@@ -572,8 +558,7 @@ export class LocalSettingsStore {
 	}
 
 	#apply(snap: LocalSettingsSnapshot): void {
-		this.theme = snap.theme;
-		this.colorblindMode = snap.colorblindMode;
+		this.themePreference = snap.themePreference;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;

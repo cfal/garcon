@@ -1,0 +1,2 @@
+export const ONBOARDING_OPTION_CARD_CLASS =
+	'flex cursor-pointer flex-col items-center gap-2 rounded-(--control-radius) border border-border bg-card p-3 text-center transition-colors hover:border-primary/50 has-checked:border-primary has-checked:bg-accent/50 has-checked:shadow-xs has-focus-visible:ring-2 has-focus-visible:ring-ring has-focus-visible:ring-offset-1 has-focus-visible:ring-offset-background';
