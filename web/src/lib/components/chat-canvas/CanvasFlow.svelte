@@ -7,7 +7,7 @@
 		type Edge,
 		type Connection,
 	} from '@xyflow/svelte';
-	import { untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import '@xyflow/svelte/dist/base.css';
 	import type { CanvasPosition } from '$shared/chat-canvas';
 	import { isCanvasSide, CANVAS_MAX_NODES, CANVAS_MAX_CONNECTIONS } from '$shared/chat-canvas';
@@ -47,6 +47,10 @@
 	let edges = $state.raw<Edge[]>([]);
 	let element: HTMLDivElement;
 	let initialized = $state(false);
+	let width = $state(0);
+	let height = $state(0);
+	let viewportApplied = false;
+	let releaseInteraction: (() => void) | null = null;
 
 	// Adapts durable document edits to the graph engine; graph gestures remain transient until release.
 	$effect(() => {
@@ -68,7 +72,15 @@
 		});
 	});
 	$effect(() => {
-		if (!visible || !initialized || !element || session.reloading || controller.loading) return;
+		if (
+			!visible ||
+			!initialized ||
+			!element ||
+			session.reloading ||
+			controller.loading ||
+			controller.closing
+		)
+			return;
 		return untrack(() =>
 			dnd.registerChatDropTarget(presentation, element, (chatId, point) => {
 				if (session.document.content.nodes.length >= CANVAS_MAX_NODES) {
@@ -81,26 +93,65 @@
 			}),
 		);
 	});
+	$effect(() => {
+		if (!visible || !initialized || !width || !height || viewportApplied) return;
+		const frame = requestAnimationFrame(() => {
+			const viewport = controller.viewport(session.saved.id);
+			viewportApplied = true;
+			if (viewport) void flow.setViewport(viewport);
+			else void flow.fitView({ padding: 0.2, maxZoom: 1 });
+		});
+		return () => cancelAnimationFrame(frame);
+	});
+	$effect(() => {
+		if (!visible) {
+			untrack(cancelInteraction);
+			return;
+		}
+		window.addEventListener('blur', cancelInteraction);
+		window.addEventListener('pointercancel', cancelInteraction);
+		return () => {
+			window.removeEventListener('blur', cancelInteraction);
+			window.removeEventListener('pointercancel', cancelInteraction);
+		};
+	});
+	onDestroy(endInteraction);
+
+	function beginInteraction() {
+		releaseInteraction ??= session.beginInteraction();
+	}
+	function endInteraction() {
+		releaseInteraction?.();
+		releaseInteraction = null;
+	}
+	function cancelInteraction() {
+		if (!releaseInteraction) return;
+		nodes = flowNodes(session.document.content, selectedIds);
+		endInteraction();
+	}
 
 	function initialize() {
 		initialized = true;
-		const viewport = controller.viewport(session.saved.id);
-		if (viewport) void flow.setViewport(viewport);
-		else void flow.fitView({ padding: 0.2, maxZoom: 1 });
 	}
 
-	function finishDrag(moved: CanvasFlowNode[]) {
-		if (!editing) return;
+	async function finishDrag(moved: CanvasFlowNode[]) {
+		const release = releaseInteraction;
+		if (!release) return;
 		const positions = new Map<string, CanvasPosition>();
 		for (const node of moved) {
 			const internal = flow.getInternalNode(node.id);
 			if (internal) positions.set(node.id, { ...internal.internals.positionAbsolute });
 		}
 		try {
-			session.document.move(positions);
+			if (editing) session.document.move(positions);
 		} catch (error) {
-			nodes = flowNodes(session.document.content, selectedIds);
 			onerror(error instanceof Error ? error.message : String(error));
+		} finally {
+			await tick();
+			if (releaseInteraction === release) {
+				nodes = flowNodes(session.document.content, selectedIds);
+				endInteraction();
+			}
 		}
 	}
 
@@ -141,7 +192,13 @@
 	}
 </script>
 
-<div class="canvas-flow h-full w-full" bind:this={element} data-canvas-flow>
+<div
+	class="canvas-flow h-full w-full"
+	bind:this={element}
+	bind:clientWidth={width}
+	bind:clientHeight={height}
+	data-canvas-flow
+>
 	<SvelteFlow
 		bind:nodes
 		bind:edges
@@ -160,8 +217,12 @@
 		selectionOnDrag={editing}
 		oninit={initialize}
 		onconnect={connect}
+		onconnectstart={beginInteraction}
+		onconnectend={endInteraction}
 		isValidConnection={(edge) => edge.source !== edge.target}
 		onnodedragstop={({ nodes: moved }) => finishDrag(moved)}
+		onnodedragstart={beginInteraction}
+		onselectiondragstart={beginInteraction}
 		onselectiondragstop={(_event, moved) => finishDrag(moved)}
 		onselectionchange={({ nodes: selectedNodes, edges: selectedEdges }) =>
 			untrack(() => {
@@ -172,7 +233,9 @@
 				if (next.size !== selectedIds.size || [...next].some((id) => !selectedIds.has(id)))
 					onselect(next);
 			})}
-		onmoveend={(_event, viewport) => controller.setViewport(session.saved.id, viewport)}
+		onmoveend={(_event, viewport) => {
+			if (viewportApplied) controller.setViewport(session.saved.id, viewport);
+		}}
 	>
 		<Background patternColor="hsl(var(--border))" gap={24} />
 	</SvelteFlow>
