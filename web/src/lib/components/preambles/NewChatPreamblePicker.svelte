@@ -205,7 +205,7 @@
 	}
 
 	function isCurrentAutomaticPreview(version: number): boolean {
-		return version === automaticPreviewVersion && open;
+		return version === automaticPreviewVersion && open && automaticPreview.status === 'loading';
 	}
 
 	function handleReset(): void {
@@ -221,8 +221,8 @@
 	}
 
 	function retryPreview(): void {
+		if (!canLoadAutomaticPreview) return;
 		if (draftMode === 'defaults' && choice.mode === 'explicit') {
-			if (!canLoadAutomaticPreview) return;
 			void loadAutomaticDraft();
 			return;
 		}
@@ -268,6 +268,7 @@
 							variant="outline"
 							size="sm"
 							data-slot="new-chat-preamble-preview-retry"
+							disabled={!canLoadAutomaticPreview}
 							onclick={retryPreview}
 						>
 							{m.preamble_selection_refresh()}
