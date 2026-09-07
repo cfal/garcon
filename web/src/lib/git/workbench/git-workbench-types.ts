@@ -1,15 +1,9 @@
 import type { GitDiffTab } from '$lib/api/git.js';
+import type { GitTarget } from '$lib/git/targets/git-target.js';
 
 export type DiffMode = 'unified' | 'split';
 
-export interface GitWorkbenchTarget {
-	projectPath: string;
-	repoRoot: string;
-	worktreePath: string;
-	label: string;
-	branch?: string;
-	source: 'chat-project' | 'repo-root' | 'worktree';
-}
+export type GitWorkbenchTarget = GitTarget;
 
 export type GitDiffActionMode = 'stage' | 'unstage';
 
@@ -36,8 +30,8 @@ export interface GitWorkbenchRefreshOptions {
 		| 'branch-change'
 		| 'worktree-change'
 		| 'tab-change'
-		| 'context-change';
-	preserveDrafts?: boolean;
+		| 'context-change'
+		| 'document-expired';
 	preserveSelection?: boolean;
 	preferSelectedFile?: boolean;
 }
@@ -56,11 +50,10 @@ export interface GitWorkbenchLoadGuard {
 }
 
 export const DEFAULT_REFRESH_OPTIONS = {
-	preserveDrafts: true,
 	preserveSelection: true,
 	preferSelectedFile: true,
 };
 
 export function targetKey(target: GitWorkbenchTarget | null): string {
-	return target ? target.projectPath : '';
+	return target?.projectPath ?? '';
 }

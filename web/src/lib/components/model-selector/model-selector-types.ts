@@ -1,5 +1,5 @@
 import type { SessionAgentId } from '$lib/types/app';
-import type { ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ThinkingMode } from '$shared/chat-modes';
 
@@ -46,6 +46,14 @@ export interface AgentSelectorOption {
 	value: SessionAgentId;
 	label: string;
 	description: string;
+}
+
+export type AgentSelectorGroupId = 'direct' | 'agents';
+
+export interface AgentSelectorGroup {
+	id: AgentSelectorGroupId;
+	label: string;
+	options: AgentSelectorOption[];
 }
 
 export interface ModelSourceOption {

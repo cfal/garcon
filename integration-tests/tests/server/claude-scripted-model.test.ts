@@ -1,0 +1,343 @@
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
+import { INTEGRATION_ANTHROPIC_API_KEY } from '../../support/anthropic-test-contract.js';
+import {
+  assistantContents,
+  messagesOfType,
+  userContents,
+} from '../../support/chat-assertions.js';
+import {
+  claudeText,
+  claudeToolUse,
+} from '../../support/fake-claude-model.js';
+import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import {
+  reloadUntilNativeContains,
+  waitForVisibleResponse,
+} from '../../support/live-agent.js';
+import {
+  liveClaudeRunRequest,
+  liveClaudeStartRequest,
+} from '../../support/live-claude.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import {
+  startScriptedClaudeTestEnvironment,
+  type ScriptedClaudeTestEnvironment,
+} from '../../support/scripted-claude.js';
+
+// The real pinned Claude CLI runs the whole turn -- spawn, local tool execution, JSONL
+// transcript persistence -- while the model behind it is a deterministic script.
+describe('Claude against a scripted model', () => {
+  let environment: ScriptedClaudeTestEnvironment | undefined;
+
+  beforeAll(async () => {
+    environment = await startScriptedClaudeTestEnvironment();
+  });
+
+  afterAll(() => {
+    environment?.dispose();
+  });
+
+  test('completes a scripted tool turn end to end', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const marker = `GARCON_SCRIPTED_CLAUDE_${crypto.randomUUID().replaceAll('-', '')}`;
+    const reply = `SCRIPTED_DONE_${crypto.randomUUID().replaceAll('-', '')}`;
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_scripted_1', 'Bash', { command: `echo ${marker}` }),
+    ]);
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-model', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'Run the scripted command.',
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const transcript = await fixture.client.getMessages(chatId);
+      const bash = messagesOfType(transcript.messages, 'bash-tool-use').find(
+        (message) => message.command.includes(`echo ${marker}`),
+      );
+      if (!bash) throw new Error('Scripted Claude shell tool use was not rendered.');
+      const result = messagesOfType(transcript.messages, 'tool-result').find(
+        (message) => message.toolId === bash.toolId,
+      );
+      expect(result?.isError).toBe(false);
+      expect(JSON.stringify(result?.content)).toContain(marker);
+
+      const requests = testEnvironment.model.requests();
+      expect(requests.length).toBeGreaterThanOrEqual(2);
+      expect(requests[0].lastUserText).toContain('Run the scripted command.');
+      const followUp = requests.find((request) =>
+        request.toolResults.some((toolResult) =>
+          toolResult.toolUseId === 'toolu_scripted_1' && toolResult.content.includes(marker)));
+      if (!followUp) throw new Error('Tool result never reached the scripted model.');
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  });
+
+  test('pins subagents to the selected custom endpoint model', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const childPrompt = `Inspect the scripted project ${crypto.randomUUID()}.`;
+    const childReply = `SCRIPTED_CHILD_${crypto.randomUUID().replaceAll('-', '')}`;
+    const reply = `SCRIPTED_PARENT_${crypto.randomUUID().replaceAll('-', '')}`;
+    // An unknown custom ID reproduces Claude Code's Opus fallback; a Haiku alias cannot.
+    const selectedModel = 'integration-custom-claude-model';
+    const requestStart = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_scripted_agent', 'Agent', {
+        description: 'Inspect the scripted project',
+        prompt: childPrompt,
+        subagent_type: 'Explore',
+        run_in_background: false,
+      }),
+    ]);
+    testEnvironment.model.scriptTurn([claudeText(childReply)]);
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-custom-subagent-model', async (fixture) => {
+      const created = await fixture.client.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+        templateId: 'custom',
+        label: 'Integration Custom Claude',
+        endpoint: {
+          protocol: 'anthropic-messages',
+          baseUrl: testEnvironment.model.baseUrl,
+          apiKey: INTEGRATION_ANTHROPIC_API_KEY,
+          defaultModel: selectedModel,
+          models: [{ value: selectedModel, label: 'Integration Custom Claude Model' }],
+          supportsImages: true,
+          modelDiscovery: 'anthropic-models',
+        },
+      });
+      const endpoint = created.endpoints[0];
+      if (!endpoint) throw new Error('Created provider did not contain an endpoint.');
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const request = liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'Delegate the scripted inspection.',
+        permissionMode: 'bypassPermissions',
+      });
+      const turn = await fixture.client.startChat({
+        ...request,
+        model: selectedModel,
+        apiProviderId: created.id,
+        modelEndpointId: endpoint.id,
+        modelProtocol: endpoint.protocol,
+      });
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const requests = testEnvironment.model.requestsSince(requestStart);
+      const childRequest = requests.find((candidate) => candidate.lastUserText.includes(childPrompt));
+      if (!childRequest) throw new Error('The scripted subagent never reached the fake model.');
+      expect(childRequest.body.model).toBe(selectedModel);
+      expect(requests[0]?.body.model).toBe(selectedModel);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  });
+
+  test('holds a model request while the chat remains processing', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const reply = `SCRIPTED_HELD_${crypto.randomUUID().replaceAll('-', '')}`;
+    const held = testEnvironment.model.scriptHeldTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-held-model', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'Wait for the held scripted response.',
+        permissionMode: 'bypassPermissions',
+      }));
+      await held.requested;
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId, phase: 'running' }],
+      });
+
+      held.release();
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  });
+
+  test('resumes the same native session through the publisher issued after transcript reload', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const firstPrompt = `SCRIPTED_RELOAD_FIRST_PROMPT_${crypto.randomUUID()}`;
+    const firstReply = `SCRIPTED_RELOAD_FIRST_REPLY_${crypto.randomUUID()}`;
+    const secondPrompt = `SCRIPTED_RELOAD_SECOND_PROMPT_${crypto.randomUUID()}`;
+    const secondReply = `SCRIPTED_RELOAD_SECOND_REPLY_${crypto.randomUUID()}`;
+    testEnvironment.model.scriptTurn([claudeText(firstReply)]);
+    testEnvironment.model.scriptTurn([claudeText(secondReply)]);
+
+    await withIntegrationFixture('claude-scripted-reload-routing', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const firstCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: firstPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: first.turnId,
+        marker: firstReply,
+        afterIndex: firstCursor,
+      });
+      const sessionBeforeReload = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+      const viewBeforeReload = (await fixture.client.getMessages(chatId)).transcriptViewId;
+
+      await reloadUntilNativeContains(fixture, chatId, firstReply);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(viewBeforeReload);
+      expect(userContents(reloaded.messages)).toEqual([firstPrompt]);
+      expect(assistantContents(reloaded.messages)).toEqual([firstReply]);
+
+      const secondCursor = fixture.client.markEvents();
+      const second = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId,
+        command: secondPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: second.turnId,
+        marker: secondReply,
+        afterIndex: secondCursor,
+      });
+
+      const finalPage = await fixture.client.getMessages(chatId);
+      expect(finalPage.transcriptViewId).toBe(reloaded.transcriptViewId);
+      expect(userContents(finalPage.messages)).toEqual([firstPrompt, secondPrompt]);
+      expect(assistantContents(finalPage.messages)).toEqual([firstReply, secondReply]);
+      const sessionAfterReload = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+      expect(sessionAfterReload.agentSessionId).toBe(sessionBeforeReload.agentSessionId);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
+
+  test('retries a transient HTTP error', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const reply = `SCRIPTED_FAULT_RECOVERY_${crypto.randomUUID().replaceAll('-', '')}`;
+    const prompt = 'Recover from the http-error response.';
+    const requestStart = testEnvironment.model.requests().length;
+    testEnvironment.model.scriptFault({
+      kind: 'http-error',
+      status: 500,
+      message: 'transient scripted HTTP failure',
+    });
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-http-error', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const requests = testEnvironment.model.requests().slice(requestStart);
+      expect(requests).toHaveLength(2);
+      expect(requests.every((request) => request.lastUserText.includes(prompt))).toBe(true);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  });
+
+  for (const fault of [
+    { kind: 'stream-error' as const, message: 'scripted SSE failure' },
+    { kind: 'truncated-stream' as const },
+  ]) {
+    test(`fails the turn after a ${fault.kind} despite a successful retry response`, async () => {
+      if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+      const testEnvironment = environment;
+      const prompt = `Fail on the ${fault.kind} response.`;
+      const requestStart = testEnvironment.model.requests().length;
+      testEnvironment.model.scriptFault(fault);
+      testEnvironment.model.scriptTurn([
+        claudeText(`SCRIPTED_UNUSED_RETRY_${crypto.randomUUID().replaceAll('-', '')}`),
+      ]);
+
+      await withIntegrationFixture(`claude-scripted-${fault.kind}`, async (fixture) => {
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(liveClaudeStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: prompt,
+          permissionMode: 'bypassPermissions',
+        }));
+        expect((await fixture.client.waitForTurnTerminal(
+          chatId,
+          turn.turnId,
+          { afterIndex: cursor, timeoutMs: 30_000 },
+        )).type).toBe('agent-run-failed');
+
+        const requests = testEnvironment.model.requests().slice(requestStart);
+        expect(requests).toHaveLength(2);
+        expect(requests.every((request) => request.lastUserText.includes(prompt))).toBe(true);
+        testEnvironment.model.assertSettled();
+      }, {
+        serverEnvironment: testEnvironment.serverEnvironment,
+      });
+    });
+  }
+});

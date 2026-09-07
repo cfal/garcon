@@ -5,7 +5,7 @@
 
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell, getChatSessions, getWorkspaceCoordinator } from '$lib/context';
-	import { createClientChatId } from '$lib/chat/sessions/client-chat-id.js';
+	import type { ChatId } from '$shared/chat-id';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import type { NewChatConfig } from '$lib/types/app';
 	import NewChatForm from './NewChatForm.svelte';
@@ -21,9 +21,7 @@
 		if (!next) appShell.closeNewChatDialog();
 	}
 
-	function handleStartChat(config: NewChatConfig) {
-		const chatId = createClientChatId();
-
+	function handleStartChat(config: NewChatConfig, chatId: ChatId) {
 		sessions.createDraft({
 			id: chatId,
 			projectPath: config.projectPath,
@@ -39,6 +37,7 @@
 				firstMessage: config.firstMessage,
 				initialImages: config.initialImages,
 				tags: config.tags,
+				orderedPreambleIds: config.orderedPreambleIds,
 			},
 		});
 
@@ -50,7 +49,7 @@
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="top-[var(--app-viewport-center-y)] h-auto max-h-[calc(var(--app-height)-1rem)] w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto p-0 sm:top-[50%] sm:w-full sm:max-h-[90dvh] sm:max-w-3xl"
+		class="safe-viewport-dialog top-[var(--app-viewport-center-y)] h-auto max-h-[calc(var(--app-height)-1rem)] max-w-3xl overflow-x-hidden overflow-y-auto p-0 sm:top-[50%] sm:max-h-[90dvh] sm:max-w-3xl"
 		showCloseButton={false}
 		onOpenAutoFocus={(e) => {
 			// Prevent default auto-focus on the first input (project path),

@@ -1,17 +1,27 @@
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
+import { isRecord } from '../../common/json.js';
 
 const logger = createLogger('settings:domain-stores');
 import {
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   normalizeRemoteFeatureSettings,
 } from '../../common/settings.js';
+import type {
+  PersistedChatOrderGroup,
+  ReorderChatRequest,
+  ReorderChatResponse,
+} from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
 } from './settings-shared.js';
 import type {
   ChatFolder,
+  ChatOrderComparatorOverrides,
+  ChatReorderResult,
+  ChatStartupPreferences,
   ExecutionDefaults,
   ProjectSettings,
   ReorderResult,
@@ -37,13 +47,19 @@ import {
 const ORDER_LIST_KEYS = ['pinnedChatIds', 'normalChatIds', 'archivedChatIds'] as const;
 
 type OrderListKey = typeof ORDER_LIST_KEYS[number];
-type ChatOrderGroup = 'pinned' | 'normal' | 'archived';
+type ChatOrderSnapshot = Record<OrderListKey, string[]>;
 
-interface ResolvedChatGroup {
-  group: ChatOrderGroup;
-  list: string[];
-  key: OrderListKey;
-}
+const ORDER_GROUP_KEYS: Record<PersistedChatOrderGroup, OrderListKey> = {
+  pinned: 'pinnedChatIds',
+  normal: 'normalChatIds',
+  archived: 'archivedChatIds',
+};
+
+const ORDER_GROUP_BY_LIST_KEY: Record<OrderListKey, PersistedChatOrderGroup> = {
+  pinnedChatIds: 'pinned',
+  normalChatIds: 'normal',
+  archivedChatIds: 'archived',
+};
 
 function bumpRemoteSettingsVersion(settings: ProjectSettings): void {
   settings.remoteSettingsVersion = normalizeRemoteSettingsVersion(settings.remoteSettingsVersion) + 1;
@@ -138,26 +154,46 @@ function validateWindowReorder(rawOldOrder: unknown, rawNewOrder: unknown): Wind
   return { success: true, oldOrder, newOrder };
 }
 
-function moveRelative(list: string[], chatId: string, refId: string, mode: string): string[] | null {
-  const from = list.indexOf(chatId);
-  const ref = list.indexOf(refId);
-  if (from < 0 || ref < 0) return null;
-  const next = [...list];
-  next.splice(from, 1);
-  const refAfterRemoval = next.indexOf(refId);
-  const insertAt = mode === 'above' ? refAfterRemoval : refAfterRemoval + 1;
-  next.splice(insertAt, 0, chatId);
-  return next;
+function orderSnapshot(settings: ProjectSettings): ChatOrderSnapshot {
+  return {
+    pinnedChatIds: [...(settings.pinnedChatIds || [])],
+    normalChatIds: [...(settings.normalChatIds || [])],
+    archivedChatIds: [...(settings.archivedChatIds || [])],
+  };
 }
 
-function resolveGroupInSettings(s: ProjectSettings, chatId: string): ResolvedChatGroup | null {
-  const pinned = s.pinnedChatIds || [];
-  if (pinned.includes(chatId)) return { group: 'pinned', list: pinned, key: 'pinnedChatIds' };
-  const normal = s.normalChatIds || [];
-  if (normal.includes(chatId)) return { group: 'normal', list: normal, key: 'normalChatIds' };
-  const archived = s.archivedChatIds || [];
-  if (archived.includes(chatId)) return { group: 'archived', list: archived, key: 'archivedChatIds' };
-  return null;
+function restoreOrderSnapshot(settings: ProjectSettings, snapshot: ChatOrderSnapshot): void {
+  for (const key of ORDER_LIST_KEYS) settings[key] = [...snapshot[key]];
+}
+
+function sameOrderSnapshot(left: ChatOrderSnapshot, right: ChatOrderSnapshot): boolean {
+  return ORDER_LIST_KEYS.every((key) => sameOrderedStringArray(left[key], right[key]));
+}
+
+function resolveOrReconcileGroup(
+  settings: ProjectSettings,
+  chatId: string,
+): PersistedChatOrderGroup {
+  if (settings.pinnedChatIds.includes(chatId)) return 'pinned';
+  if (settings.normalChatIds.includes(chatId)) return 'normal';
+  if (settings.archivedChatIds.includes(chatId)) return 'archived';
+  settings.normalChatIds.push(chatId);
+  return 'normal';
+}
+
+function removeFromEveryOrderGroup(settings: ProjectSettings, chatId: string): void {
+  for (const key of ORDER_LIST_KEYS) {
+    settings[key] = dedup(settings[key]).filter((id) => id !== chatId);
+  }
+}
+
+function sessionNotFound(error: string): ChatReorderResult {
+  return {
+    success: false,
+    error,
+    errorCode: 'SESSION_NOT_FOUND',
+    status: 404,
+  };
 }
 
 export class ChatNameStore {
@@ -174,18 +210,35 @@ export class ChatNameStore {
     return settings.chatNames[chatId] ?? null;
   }
 
+  async #persistSessionName(
+    settings: ProjectSettings,
+    chatId: string,
+    title: string,
+  ): Promise<void> {
+    if (!settings.chatNames) settings.chatNames = {};
+    const trimmed = typeof title === 'string' ? title.trim() : '';
+    if (!trimmed) {
+      delete settings.chatNames[String(chatId)];
+    } else {
+      settings.chatNames[String(chatId)] = trimmed;
+    }
+    await this.#context.save(settings);
+    this.#context.emitSessionNameChanged(chatId, trimmed || '');
+  }
+
   async setSessionName(chatId: string, title: string): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
-      if (!settings.chatNames) settings.chatNames = {};
-      const trimmed = typeof title === 'string' ? title.trim() : '';
-      if (!trimmed) {
-        delete settings.chatNames[String(chatId)];
-      } else {
-        settings.chatNames[String(chatId)] = trimmed;
-      }
-      await this.#context.save(settings);
-      this.#context.emitSessionNameChanged(chatId, trimmed || '');
+      await this.#persistSessionName(settings, chatId, title);
+    });
+  }
+
+  async setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      if (settings.chatNames?.[String(chatId)]) return false;
+      await this.#persistSessionName(settings, chatId, title);
+      return true;
     });
   }
 
@@ -277,12 +330,14 @@ export class FeatureSettingsStore {
     return structuredClone(features);
   }
 
-  async setTranscriptSearchEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
+  async setFeatureSettings(
+    patch: Partial<ProjectSettings['features']>,
+  ): Promise<ProjectSettings['features']> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       settings.features = {
         ...normalizeRemoteFeatureSettings(settings.features),
-        transcriptSearch: { enabled },
+        ...patch,
       };
       bumpRemoteSettingsVersion(settings);
       await this.#context.saveAndMaybeEmitRemote(settings, true);
@@ -316,35 +371,52 @@ export class StartupDefaultsStore {
     return sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
   }
 
-  async recordChatStartup(defaults: Record<string, unknown> | null | undefined): Promise<void> {
-    return this.#context.mutate(async () => {
-      const settings = this.#context.readSettings();
+  // Startup preferences are advisory: recording happens after a chat already
+  // dispatched, so a persistence failure is logged instead of failing the chat.
+  async recordChatStartup(defaults: ChatStartupPreferences | null | undefined): Promise<void> {
+    try {
+      await this.#context.mutate(async () => {
+        const settings = this.#context.readSettings();
 
-      const recent = sanitizeRecentAgentSetting(defaults);
-      if (recent) {
-        settings.recentAgentSettings = dedupeRecentAgentSettings([
-          recent,
-          ...(settings.recentAgentSettings || []),
-        ]);
-      }
+        const recent = sanitizeRecentAgentSetting(defaults);
+        if (recent) {
+          settings.recentAgentSettings = dedupeRecentAgentSettings([
+            recent,
+            ...(settings.recentAgentSettings || []),
+          ]);
+        }
 
-      settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath);
+        settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath);
 
-      const agentId = typeof defaults?.agentId === 'string' ? defaults.agentId.trim() : recent?.agentId ?? '';
-      if (agentId) {
-        const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
-        settings.executionDefaults = {
-          ...current,
-          byAgent: {
-            ...current.byAgent,
-            [agentId]: sanitizeExecutionDefaults(defaults),
-          },
-        };
-      }
+        const agentId = typeof defaults?.agentId === 'string' ? defaults.agentId.trim() : recent?.agentId ?? '';
+        if (agentId) {
+          const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
+          // Chat starts carry a single agentSettings envelope for the starting
+          // agent rather than a prebuilt agentSettingsById map.
+          const envelope = isRecord(defaults?.agentSettings) ? defaults.agentSettings : null;
+          settings.executionDefaults = {
+            ...current,
+            byAgent: {
+              ...current.byAgent,
+              [agentId]: sanitizeExecutionDefaults({
+                permissionMode: defaults?.permissionMode,
+                thinkingMode: defaults?.thinkingMode,
+                agentSettingsById: defaults?.agentSettingsById
+                  ?? (envelope ? { [agentId]: envelope } : undefined),
+              }),
+            },
+          };
+        }
 
-      bumpRemoteSettingsVersion(settings);
-      await this.#context.saveAndMaybeEmitRemote(settings, true);
-    });
+        bumpRemoteSettingsVersion(settings);
+        await this.#context.saveAndMaybeEmitRemote(settings, true);
+      });
+    } catch (error: unknown) {
+      logger.warn(
+        'settings: failed to record chat startup preferences:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   async updateExecutionDefaultsForAgent(
@@ -385,8 +457,7 @@ export class ChatOrderStore {
 
   async reconcileWithRegistry(registry: IChatRegistry): Promise<void> {
     return this.#context.mutate(async () => {
-      const sessions = registry.listAllChats();
-      const allChatIds = new Set(Object.keys(sessions));
+      const allChatIds = new Set(registry.listChatIds());
       const currentSettings = this.#context.readSettings();
       const beforePinned = dedup(currentSettings.pinnedChatIds || []);
 
@@ -564,92 +635,101 @@ export class ChatOrderStore {
     });
   }
 
-  async reorderWindow(list: string, rawOldOrder: unknown, rawNewOrder: unknown): Promise<ReorderResult> {
-    const validation = validateWindowReorder(rawOldOrder, rawNewOrder);
-    if (!validation.success) return validation;
-    const { oldOrder, newOrder } = validation;
-
+  async reorderChat(
+    request: ReorderChatRequest,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatReorderResult> {
     return this.#context.mutate(async () => {
-      const s = this.#context.readSettings();
-      const key = list === 'pinned' ? 'pinnedChatIds' : list === 'archived' ? 'archivedChatIds' : 'normalChatIds';
-      const current = dedup(s[key] || []);
+      const settings = this.#context.readSettings();
+      if (!isKnownChat(request.chatId)) return sessionNotFound('Chat not found');
+      if (
+        request.placement.kind === 'relative'
+        && !isKnownChat(request.placement.referenceChatId)
+      ) {
+        return sessionNotFound('Reference chat not found');
+      }
 
-      const currentSet = new Set(current);
-      for (const id of oldOrder) {
-        if (!currentSet.has(id)) {
+      const before = orderSnapshot(settings);
+      const sourceGroup = resolveOrReconcileGroup(settings, request.chatId);
+      if (request.placement.kind === 'relative') {
+        const referenceGroup = resolveOrReconcileGroup(
+          settings,
+          request.placement.referenceChatId,
+        );
+        if (sourceGroup !== referenceGroup) {
+          restoreOrderSnapshot(settings, before);
           return {
             success: false,
-            error: `ID "${id}" is not in the ${list} list`,
-            errorCode: 'ORDER_ITEM_NOT_FOUND',
-            status: 404,
+            error: 'Cross-group reorder is not allowed',
+            errorCode: 'ORDER_CROSS_GROUP',
+            status: 400,
           };
         }
       }
 
-      const result = applyWindowReorder(current, oldOrder, newOrder);
-      if (!result) {
-        return {
-          success: false,
-          error: 'oldOrder is not a contiguous subsequence of the current list',
-          errorCode: 'ORDER_INVALID_INPUT',
-          status: 400,
-        };
+      removeFromEveryOrderGroup(settings, request.chatId);
+      const target = settings[ORDER_GROUP_KEYS[sourceGroup]];
+      if (request.placement.kind === 'boundary') {
+        const index = request.placement.boundary === 'top' ? 0 : target.length;
+        target.splice(index, 0, request.chatId);
+      } else {
+        const referenceIndex = target.indexOf(request.placement.referenceChatId);
+        if (referenceIndex < 0) {
+          throw new Error('Resolved reorder reference is absent');
+        }
+        const index = request.placement.position === 'before'
+          ? referenceIndex
+          : referenceIndex + 1;
+        target.splice(index, 0, request.chatId);
       }
 
-      s[key] = result;
-      const remoteSettingsChanged = list === 'pinned';
-      if (remoteSettingsChanged) {
-        bumpRemoteSettingsVersion(s);
+      const response: ReorderChatResponse = {
+        success: true,
+        chatId: request.chatId,
+        orderGroup: sourceGroup,
+        changed: !sameOrderSnapshot(before, orderSnapshot(settings)),
+      };
+      if (!response.changed) {
+        return { success: true, response };
       }
-      await this.#context.saveAndMaybeEmitRemote(s, remoteSettingsChanged);
 
-      const anchorChatId = newOrder[0] || list;
-      this.#context.emitListChanged('chats-reordered', anchorChatId);
-      return { success: true };
+      const remoteSettingsChanged = bumpRemoteSettingsVersionForPinnedChange(
+        settings,
+        before.pinnedChatIds,
+      );
+      await this.#context.saveAndMaybeEmitRemote(settings, remoteSettingsChanged);
+      this.#context.emitListChanged('chats-reordered', request.chatId);
+      return { success: true, response };
     });
   }
 
-  async reorderRelative(chatId: string, refId: string, mode: string): Promise<ReorderResult> {
+  async sortChatOrder(
+    compareChatIds: ChatOrderIdComparator,
+    comparatorOverrides: ChatOrderComparatorOverrides = {},
+  ): Promise<{ changed: boolean }> {
     return this.#context.mutate(async () => {
-      const s = this.#context.readSettings();
-      const chatGroup = resolveGroupInSettings(s, chatId);
-      const refGroup = resolveGroupInSettings(s, refId);
+      const settings = this.#context.readSettings();
+      const before = orderSnapshot(settings);
+      let anchorChatId: string | null = null;
 
-      if (!chatGroup || !refGroup) {
-        return {
-          success: false,
-          error: 'Chat not found in any order list',
-          errorCode: 'ORDER_ITEM_NOT_FOUND',
-          status: 404,
-        };
-      }
-      if (chatGroup.group !== refGroup.group) {
-        return {
-          success: false,
-          error: 'Cross-group reorder is not allowed',
-          errorCode: 'ORDER_CROSS_GROUP',
-          status: 400,
-        };
+      for (const key of ORDER_LIST_KEYS) {
+        const compare = comparatorOverrides[ORDER_GROUP_BY_LIST_KEY[key]] ?? compareChatIds;
+        const sorted = [...before[key]].sort(compare);
+        settings[key] = sorted;
+        if (!anchorChatId && !sameOrderedStringArray(before[key], sorted)) {
+          anchorChatId = sorted[0] ?? null;
+        }
       }
 
-      const result = moveRelative(chatGroup.list, chatId, refId, mode);
-      if (!result) {
-        return {
-          success: false,
-          error: 'Chat positions could not be resolved',
-          errorCode: 'ORDER_POSITION_UNRESOLVED',
-          status: 400,
-        };
-      }
+      if (!anchorChatId) return { changed: false };
 
-      s[chatGroup.key] = result;
-      const remoteSettingsChanged = chatGroup.group === 'pinned';
-      if (remoteSettingsChanged) {
-        bumpRemoteSettingsVersion(s);
-      }
-      await this.#context.saveAndMaybeEmitRemote(s, remoteSettingsChanged);
-      this.#context.emitListChanged('chats-reordered-quick', chatId);
-      return { success: true };
+      const remoteSettingsChanged = bumpRemoteSettingsVersionForPinnedChange(
+        settings,
+        dedup(before.pinnedChatIds),
+      );
+      await this.#context.saveAndMaybeEmitRemote(settings, remoteSettingsChanged);
+      this.#context.emitListChanged('chats-reordered', anchorChatId);
+      return { changed: true };
     });
   }
 }

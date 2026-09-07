@@ -16,9 +16,8 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 function createChat(id: string, title: string): ChatSessionRecord {
 	return {
 		id,
+		parentChat: null,
 		projectPath: '/tmp/project',
-		effectiveProjectKey: '/tmp/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title,
 		agentId: 'claude',
@@ -32,8 +31,11 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
+		agentOwnershipEpoch: null,
 		lastMessage: `${title} preview`,
 		tags: [],
 		firstMessage: `${title} first`,
@@ -58,24 +60,17 @@ describe('sidebar search interactions', () => {
 		cleanup();
 	});
 
-	it('opens the highlighted chat from the query input and respects Ctrl-J selection', async () => {
-		const onSelectChat = vi.fn();
-
-		render(SidebarSearchDialogHost, {
-			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
-			onSelectChat,
+	it('omits the separate New Window control from the sidebar toolbar', () => {
+		const { container } = render(SidebarControlsRow, {
+			isLoading: false,
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
+			onShowSettings: vi.fn(),
 		});
 
-		const input = await screen.findByRole('textbox');
-		expect(input.closest('.transient-backdrop')).toBeTruthy();
-		input.focus();
-
-		await fireEvent.keyDown(input, { key: 'Enter' });
-		expect(onSelectChat).toHaveBeenNthCalledWith(1, 'chat-1');
-
-		await fireEvent.keyDown(input, { key: 'j', ctrlKey: true });
-		await fireEvent.keyDown(input, { key: 'Enter' });
-		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
+		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
 	});
 
 	it('renders the overlay in place by default', async () => {
@@ -124,6 +119,180 @@ describe('sidebar search interactions', () => {
 		expect(overlay?.parentElement).toBe(document.body);
 	});
 
+	it('renders labeled full-width action buttons below the input row on mobile', () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+		});
+
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
+		expect(inputShell?.className).toContain('h-11');
+		expect(inputShell?.className).toContain('sm:h-9');
+
+		for (const name of ['Search help', 'Add saved search', 'Manage searches']) {
+			const button = screen.getByRole('button', { name });
+			expect(button.textContent).toContain(name);
+			expect(button.className).toContain('flex-1');
+			expect(button.className).toContain('h-11');
+		}
+	});
+
+	it('opens the highlighted chat from the query input and respects arrow selection', async () => {
+		const onSelectChat = vi.fn();
+
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
+			onSelectChat,
+		});
+
+		const input = await screen.findByRole('textbox');
+		expect(input.closest('.transient-backdrop')).toBeTruthy();
+		input.focus();
+
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onSelectChat).toHaveBeenNthCalledWith(1, 'chat-1');
+
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
+	});
+
+	it('prefetches once keyboard navigation reaches the final eight loaded rows', async () => {
+		const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
+		render(SidebarSearchDialogHost, {
+			filteredChats: Array.from({ length: 10 }, (_, index) =>
+				createChat(`chat-${index}`, `Chat ${index}`),
+			),
+			hasMoreTranscriptResults: true,
+			onLoadMoreTranscriptResults,
+		});
+
+		const input = await screen.findByRole('textbox');
+		input.focus();
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		expect(onLoadMoreTranscriptResults).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		['page', { transcriptSearchPageError: 'Loading more results failed.' }],
+		['revalidation', { transcriptSearchRevalidationError: 'Updating results failed.' }],
+	])(
+		'does not prefetch from the keyboard while a %s error requires explicit retry',
+		async (_errorKind, errorProps) => {
+			const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
+			render(SidebarSearchDialogHost, {
+				filteredChats: Array.from({ length: 10 }, (_, index) =>
+					createChat(`chat-${index}`, `Chat ${index}`),
+				),
+				hasMoreTranscriptResults: true,
+				onLoadMoreTranscriptResults,
+				...errorProps,
+			});
+
+			const input = await screen.findByRole('textbox');
+			input.focus();
+			await fireEvent.keyDown(input, { key: 'ArrowDown' });
+			await fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+			expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
+		},
+	);
+
+	it('changes the search-result sort from the keyboard-reachable menu', async () => {
+		const onSortChange = vi.fn();
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onSortChange,
+		});
+
+		const trigger = await screen.findByRole('button', { name: 'Best match' });
+		trigger.focus();
+		await fireEvent.click(trigger);
+		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Creation time' }));
+
+		expect(onSortChange).toHaveBeenCalledWith('created');
+		expect(screen.getByRole('button', { name: 'Creation time' })).toBeTruthy();
+	});
+
+	it('closes the sort menu before Escape closes the search dialog', async () => {
+		const onClose = vi.fn();
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+			onSortChange: vi.fn(),
+			onClose,
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Best match' }));
+		const item = await screen.findByRole('menuitemradio', { name: 'Recent activity' });
+		await fireEvent.keyDown(item, { key: 'Escape', bubbles: true });
+		expect(onClose).not.toHaveBeenCalled();
+		await waitFor(() => expect(screen.queryByRole('menuitemradio')).toBeNull());
+
+		const input = screen.getByRole('textbox');
+		await fireEvent.keyDown(input, { key: 'Escape', bubbles: true });
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not publish an invalid highlight for empty results', async () => {
+		const onHighlightChange = vi.fn();
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [],
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange,
+			onClose: vi.fn(),
+		});
+
+		const input = await screen.findByRole('textbox');
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		await fireEvent.keyDown(input, { key: 'j', ctrlKey: true });
+
+		expect(onHighlightChange).not.toHaveBeenCalled();
+	});
+
+	it('keeps Tab focus inside the search dialog', async () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [],
+		});
+
+		const dialog = await screen.findByRole('dialog');
+		const input = screen.getByRole('textbox');
+		const focusable = Array.from(
+			dialog.querySelectorAll<HTMLElement>(
+				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+			),
+		);
+		const responsiveCloseButton = focusable.at(-1);
+		const lastVisible = focusable.at(-2);
+		expect(responsiveCloseButton).toBeTruthy();
+		expect(lastVisible).toBeTruthy();
+		responsiveCloseButton!.style.display = 'none';
+		lastVisible!.focus();
+
+		await fireEvent.keyDown(lastVisible!, { key: 'Tab', bubbles: true });
+		expect(document.activeElement).toBe(input);
+
+		await fireEvent.keyDown(input, { key: 'Tab', shiftKey: true, bubbles: true });
+		expect(document.activeElement).toBe(lastVisible);
+
+		dialog.focus();
+		await fireEvent.keyDown(dialog, { key: 'Tab', bubbles: true });
+		expect(document.activeElement).toBe(input);
+
+		dialog.focus();
+		await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true, bubbles: true });
+		expect(document.activeElement).toBe(lastVisible);
+	});
+
 	it('opens a deep virtualized highlighted chat from the query input', async () => {
 		const onSelectChat = vi.fn();
 
@@ -170,7 +339,8 @@ describe('sidebar search interactions', () => {
 			onClose: vi.fn(),
 		});
 
-		const statusRow = screen.getByRole('status');
+		const statusRow = document.querySelector('[data-slot="transcript-search-status"]');
+		if (!(statusRow instanceof HTMLElement)) throw new Error('Expected transcript search status');
 		const results = document.querySelector('[data-slot="search-dialog-results"]');
 		expect(results).toBeInstanceOf(HTMLElement);
 		expect(statusRow.parentElement).toBe(results?.parentElement);
@@ -264,23 +434,6 @@ describe('sidebar search interactions', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('textbox')).toBeNull();
 		});
-	});
-
-	it('renders labeled full-width action buttons below the input row on mobile', () => {
-		render(SidebarSearchDialogHost, {
-			filteredChats: [createChat('chat-1', 'First chat')],
-		});
-
-		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
-		expect(inputShell?.className).toContain('h-11');
-		expect(inputShell?.className).toContain('sm:h-9');
-
-		for (const name of ['Search help', 'Add saved search', 'Manage searches']) {
-			const button = screen.getByRole('button', { name });
-			expect(button.textContent).toContain(name);
-			expect(button.className).toContain('flex-1');
-			expect(button.className).toContain('h-11');
-		}
 	});
 
 	it('closes when clicking outside the dialog panel', async () => {
@@ -395,6 +548,17 @@ describe('sidebar search interactions', () => {
 		expect(screen.getByRole('dialog')).toBeTruthy();
 	});
 
+	it('documents chat order group filters and their negated form', async () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Search help' }));
+
+		expect(screen.getByText('is:X')).toBeTruthy();
+		expect(screen.getByText(/is:!pinned/)).toBeTruthy();
+	});
+
 	it('omits the saved-search pill container when there are no saved searches', async () => {
 		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
@@ -450,6 +614,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts,
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -461,50 +626,69 @@ describe('sidebar search interactions', () => {
 		});
 
 		const items = Array.from(
-			document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
+			document.querySelectorAll<HTMLElement>(
+				'[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
+			),
 		);
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
 		expect(items[2]?.textContent).toContain('Mark all as read');
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Sort by recent activity' })).toBeTruthy();
-		expect(items[3]?.textContent).toContain('Sort by recent activity');
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Group chats by project' })).toBeTruthy();
-		expect(items[4]?.textContent).toContain('Group chats by project');
-		expect(
-			screen.getByRole('menuitemcheckbox', { name: 'Group nested project paths' }),
-		).toBeTruthy();
-		expect(items[5]?.textContent).toContain('Group nested project paths');
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[6]?.textContent).toContain('Compact chat items');
-		expect(items[7]?.textContent).toContain('Scheduled prompts');
-		expect(items[8]?.textContent).toContain('Settings');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
+		expect(screen.getByRole('menuitemradio', { name: 'Manual' })).toBeTruthy();
+		expect(items[3]?.textContent).toContain('Manual');
+		expect(screen.getByRole('menuitemradio', { name: 'Recent activity' })).toBeTruthy();
+		expect(items[4]?.textContent).toContain('Recent activity');
+		expect(screen.getByRole('menuitemradio', { name: 'No grouping' })).toBeTruthy();
+		expect(items[5]?.textContent).toContain('No grouping');
+		expect(screen.getByRole('menuitemradio', { name: 'Project' })).toBeTruthy();
+		expect(items[6]?.textContent).toContain('Project');
+		expect(screen.getByRole('menuitemradio', { name: 'Project and activity' })).toBeTruthy();
+		expect(items[7]?.textContent).toContain('Project and activity');
+		expect(screen.getByRole('menuitemradio', { name: 'Activity' })).toBeTruthy();
+		expect(items[8]?.textContent).toContain('Activity');
+		expect(screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' })).toBeTruthy();
+		expect(items[9]?.textContent).toContain('Combine nested paths');
+		expect(screen.getByRole('menuitemradio', { name: 'Default' })).toBeTruthy();
+		expect(items[10]?.textContent).toContain('Default');
+		expect(screen.getByRole('menuitemradio', { name: 'Compact chat items' })).toBeTruthy();
+		expect(items[11]?.textContent).toContain('Compact chat items');
+		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
+		expect(items[12]?.textContent).toContain('Single-line chat items');
+		expect(items[13]?.textContent).toContain('Autohide sidebar');
+		expect(items[14]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[15]?.textContent).toContain('Scheduled prompts');
+		expect(items[16]?.textContent).toContain('Preambles');
+		expect(items[17]?.textContent).toContain('Settings');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(6);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
 		expect(onShowScheduledPrompts).toHaveBeenCalledOnce();
 	});
 
 	it('shows sidebar display toggles below mark all as read even without quick search entries', async () => {
-		const onToggleGroupByProject = vi.fn();
+		const onSetChatGrouping = vi.fn();
 		const onToggleGroupNestedProjectPaths = vi.fn();
-		const onToggleCompactChatItems = vi.fn();
-		const onToggleSortByRecent = vi.fn();
+		const onSetChatItemLayout = vi.fn();
+		const onSetSortMode = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 1,
-			groupByProject: true,
+			chatGrouping: 'project',
 			groupNestedProjectPaths: true,
-			compactChatItems: true,
-			sortByRecent: false,
+			chatItemLayout: 'compact',
+			sortMode: 'manual',
+			chatListAutohide: true,
+			chatListAutohideAvailable: true,
+			dockOnRight: true,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
-			onToggleGroupByProject,
+			onSetChatGrouping,
 			onToggleGroupNestedProjectPaths,
-			onToggleCompactChatItems,
-			onToggleSortByRecent,
+			onSetChatItemLayout,
+			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -513,98 +697,217 @@ describe('sidebar search interactions', () => {
 
 		await screen.findAllByRole('menuitem');
 		const items = Array.from(
-			document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
+			document.querySelectorAll<HTMLElement>(
+				'[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
+			),
 		);
 		expect(items[0]?.textContent).toContain('Mark all as read');
-		const sortByRecent = screen.getByRole('menuitemcheckbox', {
-			name: 'Sort by recent activity',
+		const manualSort = screen.getByRole('menuitemradio', { name: 'Manual' });
+		expect(manualSort.getAttribute('aria-checked')).toBe('true');
+		expect(items[1]?.textContent).toContain('Manual');
+		const recentActivitySort = screen.getByRole('menuitemradio', {
+			name: 'Recent activity',
 		});
-		expect(items[1]?.textContent).toContain('Sort by recent activity');
-		const groupByProject = screen.getByRole('menuitemcheckbox', {
-			name: 'Group chats by project',
+		expect(recentActivitySort.getAttribute('aria-checked')).toBe('false');
+		expect(items[2]?.textContent).toContain('Recent activity');
+		const noGrouping = screen.getByRole('menuitemradio', { name: 'No grouping' });
+		expect(noGrouping.getAttribute('aria-checked')).toBe('false');
+		expect(items[3]?.textContent).toContain('No grouping');
+		const projectGrouping = screen.getByRole('menuitemradio', {
+			name: 'Project',
 		});
-		expect(groupByProject.getAttribute('aria-checked')).toBe('true');
-		expect(items[2]?.textContent).toContain('Group chats by project');
+		expect(projectGrouping.getAttribute('aria-checked')).toBe('true');
+		expect(items[4]?.textContent).toContain('Project');
+		const projectAndActivityGrouping = screen.getByRole('menuitemradio', {
+			name: 'Project and activity',
+		});
+		expect(projectAndActivityGrouping.getAttribute('aria-checked')).toBe('false');
+		expect(items[5]?.textContent).toContain('Project and activity');
+		const activityGrouping = screen.getByRole('menuitemradio', { name: 'Activity' });
+		expect(activityGrouping.getAttribute('aria-checked')).toBe('false');
+		expect(items[6]?.textContent).toContain('Activity');
 		const groupNestedProjectPaths = screen.getByRole('menuitemcheckbox', {
-			name: 'Group nested project paths',
+			name: 'Combine nested paths',
 		});
 		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
-		expect(items[3]?.textContent).toContain('Group nested project paths');
-		const compactChatItems = screen.getByRole('menuitemcheckbox', {
-			name: 'Compact chat items',
+		expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe(null);
+		expect(items[7]?.textContent).toContain('Combine nested paths');
+		const defaultLayout = screen.getByRole('menuitemradio', { name: 'Default' });
+		expect(defaultLayout.getAttribute('aria-checked')).toBe('false');
+		expect(items[8]?.textContent).toContain('Default');
+		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
+		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
+		expect(items[9]?.textContent).toContain('Compact chat items');
+		const singleLineLayout = screen.getByRole('menuitemradio', {
+			name: 'Single-line chat items',
 		});
-		expect(compactChatItems.getAttribute('aria-checked')).toBe('true');
-		expect(items[4]?.textContent).toContain('Compact chat items');
-		expect(items[5]?.textContent).toContain('Scheduled prompts');
-		expect(items[6]?.textContent).toContain('Settings');
-		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
-		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
-		expect(groupByProject.className).toContain('pe-8');
-		expect(groupByProject.className).not.toContain('ps-8');
+		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
+		expect(items[10]?.textContent).toContain('Single-line chat items');
+		const chatListAutohide = screen.getByRole('menuitemcheckbox', {
+			name: 'Autohide sidebar',
+		});
+		expect(chatListAutohide.getAttribute('aria-checked')).toBe('true');
+		expect(items[11]?.textContent).toContain('Autohide sidebar');
+		const dockOnRight = screen.getByRole('menuitemcheckbox', {
+			name: 'Dock sidebar on the right',
+		});
+		expect(dockOnRight.getAttribute('aria-checked')).toBe('true');
+		expect(items[12]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[13]?.textContent).toContain('Scheduled prompts');
+		expect(items[14]?.textContent).toContain('Preambles');
+		expect(items[15]?.textContent).toContain('Settings');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
+		expect(projectGrouping.querySelector('span')?.className ?? '').toContain('end-2');
+		expect(projectGrouping.className).toContain('pe-8');
+		expect(projectGrouping.className).not.toContain('ps-8');
 
-		expect(sortByRecent).toBeTruthy();
-
-		await fireEvent.click(compactChatItems);
-		expect(onToggleCompactChatItems).toHaveBeenCalledOnce();
-		expect(onToggleGroupByProject).not.toHaveBeenCalled();
+		await fireEvent.click(singleLineLayout);
+		expect(onSetChatItemLayout).toHaveBeenCalledExactlyOnceWith('single-line');
+		expect(onSetChatGrouping).not.toHaveBeenCalled();
 		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
+
+		const [menuTriggerAgain] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTriggerAgain);
+		const projectAndActivityAgain = await screen.findByRole('menuitemradio', {
+			name: 'Project and activity',
+		});
+		await fireEvent.click(projectAndActivityAgain);
+		expect(onSetChatGrouping).toHaveBeenCalledExactlyOnceWith('project-and-activity');
+
+		const [menuTriggerThird] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTriggerThird);
+		const activityAgain = await screen.findByRole('menuitemradio', {
+			name: 'Activity',
+		});
+		await fireEvent.click(activityAgain);
+		expect(onSetChatGrouping).toHaveBeenLastCalledWith('activity');
+		expect(onSetChatGrouping).toHaveBeenCalledTimes(2);
 	});
 
-	it('invokes the sort-by-recent toggle when the menu item is selected', async () => {
-		const onToggleSortByRecent = vi.fn();
+	it('invokes the sort mode handler when a sort order option is selected', async () => {
+		const onSetSortMode = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 0,
-			sortByRecent: false,
+			sortMode: 'manual',
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
-			onToggleSortByRecent,
+			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
 		await fireEvent.click(mobileTrigger);
 
-		const sortByRecent = await screen.findByRole('menuitemcheckbox', {
-			name: 'Sort by recent activity',
+		const recentActivitySort = await screen.findByRole('menuitemradio', {
+			name: 'Recent activity',
 		});
-		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
+		expect(recentActivitySort.getAttribute('aria-checked')).toBe('false');
 
-		await fireEvent.click(sortByRecent);
-		expect(onToggleSortByRecent).toHaveBeenCalledOnce();
+		await fireEvent.click(recentActivitySort);
+		expect(onSetSortMode).toHaveBeenCalledExactlyOnceWith('recent');
 	});
 
-	it('disables nested project grouping when project grouping is off', async () => {
-		const onToggleGroupNestedProjectPaths = vi.fn();
+	it.each(['none', 'activity'] as const)(
+		'disables nested project grouping for %s grouping',
+		async (chatGrouping) => {
+			const onToggleGroupNestedProjectPaths = vi.fn();
 
+			render(SidebarControlsRow, {
+				isLoading: false,
+				visibleUnreadCount: 0,
+				chatGrouping,
+				groupNestedProjectPaths: true,
+				sidebarMenuSearches: [],
+				onOpenSearchDialog: vi.fn(),
+				onCreateChat: vi.fn(),
+				onApplySidebarMenuSearch: vi.fn(),
+				onToggleGroupNestedProjectPaths,
+				onShowScheduledPrompts: vi.fn(),
+				onShowPreambles: vi.fn(),
+				onShowSettings: vi.fn(),
+			});
+
+			const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+			await fireEvent.click(mobileTrigger);
+
+			const groupNestedProjectPaths = await screen.findByRole('menuitemcheckbox', {
+				name: 'Combine nested paths',
+			});
+
+			expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe('');
+			await fireEvent.click(groupNestedProjectPaths);
+			expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
+		},
+	);
+
+	it('disables autohide when the client cannot hover', async () => {
+		const onToggleChatListAutohide = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
-			visibleUnreadCount: 0,
-			groupByProject: false,
-			groupNestedProjectPaths: true,
-			sidebarMenuSearches: [],
+			chatListAutohide: false,
+			chatListAutohideAvailable: false,
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onToggleGroupNestedProjectPaths,
+			onToggleChatListAutohide,
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
-		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
-		await fireEvent.click(mobileTrigger);
-
-		const groupNestedProjectPaths = await screen.findByRole('menuitemcheckbox', {
-			name: 'Group nested project paths',
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+		const autohide = await screen.findByRole('menuitemcheckbox', {
+			name: 'Autohide sidebar',
 		});
 
-		expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe('');
-		await fireEvent.click(groupNestedProjectPaths);
-		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
+		expect(autohide.getAttribute('data-disabled')).toBe('');
+		await fireEvent.click(autohide);
+		expect(onToggleChatListAutohide).not.toHaveBeenCalled();
+	});
+
+	it('toggles autohide and right docking from the sidebar menu', async () => {
+		const onToggleChatListAutohide = vi.fn();
+		const onSetDockOnRight = vi.fn();
+		const view = render(SidebarControlsRow, {
+			isLoading: false,
+			chatListAutohide: false,
+			chatListAutohideAvailable: true,
+			dockOnRight: false,
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onToggleChatListAutohide,
+			onSetDockOnRight,
+			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		let [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Autohide sidebar' }),
+		);
+		expect(onToggleChatListAutohide).toHaveBeenCalledOnce();
+
+		menuTrigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		await fireEvent.click(menuTrigger);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Dock sidebar on the right' }),
+		);
+		expect(onSetDockOnRight).toHaveBeenCalledExactlyOnceWith(true);
+
+		await view.rerender({ dockOnRight: true });
+		menuTrigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		await fireEvent.click(menuTrigger);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Dock sidebar on the right' }),
+		);
+		expect(onSetDockOnRight).toHaveBeenLastCalledWith(false);
 	});
 
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
@@ -617,6 +920,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -634,6 +938,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -644,7 +949,7 @@ describe('sidebar search interactions', () => {
 			expect(screen.getByRole('menu')).toBeTruthy();
 		});
 
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 	});
 
 	it('renders sidebar pill searches and clears a non-matching active search banner', async () => {
@@ -748,6 +1053,7 @@ describe('sidebar search interactions', () => {
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
+			onShowPreambles: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -756,80 +1062,6 @@ describe('sidebar search interactions', () => {
 			element.getAttribute('data-slot'),
 		);
 		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-search-context']);
-	});
-
-	it('shows a recent-activity indicator below the controls row when recent sort is active', () => {
-		render(SidebarSearchDock, {
-			isLoading: false,
-			visibleUnreadCount: 0,
-			sortByRecent: true,
-			sidebarMenuSearches: [],
-			sidebarPillSearches: [],
-			activeQuery: '',
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-			onToggleSortByRecent: vi.fn(),
-			onShowScheduledPrompts: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');
-		const topChildSlots = Array.from(topDock?.children ?? []).map((element) =>
-			element.getAttribute('data-slot'),
-		);
-		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-sort-indicator']);
-		expect(screen.getByText('Recent activity')).toBeTruthy();
-	});
-
-	it('hides the recent-activity indicator when recent sort is off', () => {
-		render(SidebarSearchDock, {
-			isLoading: false,
-			visibleUnreadCount: 0,
-			sortByRecent: false,
-			sidebarMenuSearches: [],
-			sidebarPillSearches: [],
-			activeQuery: '',
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-			onToggleSortByRecent: vi.fn(),
-			onShowScheduledPrompts: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		expect(document.querySelector('[data-slot="sidebar-sort-indicator"]')).toBeNull();
-	});
-
-	it('disables recent sort when the indicator is clicked', async () => {
-		const onToggleSortByRecent = vi.fn();
-		render(SidebarSearchDock, {
-			isLoading: false,
-			visibleUnreadCount: 0,
-			sortByRecent: true,
-			sidebarMenuSearches: [],
-			sidebarPillSearches: [],
-			activeQuery: '',
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-			onToggleSortByRecent,
-			onShowScheduledPrompts: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		const indicator = document.querySelector<HTMLButtonElement>(
-			'[data-slot="sidebar-sort-indicator"] button',
-		);
-		expect(indicator).toBeTruthy();
-		await fireEvent.click(indicator!);
-		expect(onToggleSortByRecent).toHaveBeenCalledOnce();
 	});
 
 	it('supports button-based reordering for saved searches', async () => {

@@ -36,6 +36,17 @@ describe('convertAmpToolUse', () => {
     expect(msg.command).toBe('bun run test');
   });
 
+  it('maps shell_command input to BashToolUseMessage', () => {
+    const msg = convertAmpToolUse(TS, {
+      id: 't-shell',
+      name: 'shell_command',
+      input: { command: 'bun run check', workdir: '/garcon' },
+    });
+
+    expect(msg).toBeInstanceOf(BashToolUseMessage);
+    expect(msg.command).toBe('bun run check');
+  });
+
   it('maps Read path input to ReadToolUseMessage', () => {
     const msg = convertAmpToolUse(TS, {
       id: 't2',

@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import type { TranscriptSearchAllowedChat } from '@garcon/common/chat-search';
 import { searchTranscriptIndexV1 } from './query.js';
 import { openSearchReadDatabase } from './schema.js';
 import type { ReaderEvent, ReaderRequest } from './worker-protocol.js';
@@ -9,8 +10,12 @@ let lifecycleEpoch = '';
 let closing = false;
 const searches = new Map<number, {
   readonly query: Extract<ReaderRequest, { type: 'search-start' }>['query'];
+  readonly order: Extract<ReaderRequest, { type: 'search-start' }>['order'];
+  readonly mode: Extract<ReaderRequest, { type: 'search-start' }>['mode'];
+  readonly offset: number;
   readonly limit: number;
-  readonly allowedChatIds: string[];
+  readonly snippetLimit: number;
+  readonly allowedChats: TranscriptSearchAllowedChat[];
   nextChunkIndex: number;
 }>();
 
@@ -33,14 +38,17 @@ function handle(request: ReaderRequest): void {
         return;
       case 'search-start': {
         if (!db || closing) throw new Error('READER_UNAVAILABLE');
-        if (searches.has(request.requestId)
-            || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 100) {
+        if (searches.has(request.requestId)) {
           throw new Error('INVALID_SEARCH_REQUEST');
         }
         searches.set(request.requestId, {
           query: request.query,
+          order: request.order,
+          mode: request.mode,
+          offset: request.offset,
           limit: request.limit,
-          allowedChatIds: [],
+          snippetLimit: request.snippetLimit,
+          allowedChats: [],
           nextChunkIndex: 0,
         });
         return;
@@ -49,19 +57,23 @@ function handle(request: ReaderRequest): void {
         if (!db || closing) throw new Error('READER_UNAVAILABLE');
         const search = searches.get(request.requestId);
         if (!search || search.nextChunkIndex !== request.chunkIndex
-            || request.allowedChatIds.length > 2_000
-            || Buffer.byteLength(JSON.stringify(request.allowedChatIds)) > 8 * 1024 * 1024) {
+            || request.allowedChats.length > 2_000
+            || Buffer.byteLength(JSON.stringify(request.allowedChats)) > 8 * 1024 * 1024) {
           searches.delete(request.requestId);
           throw new Error('INVALID_SEARCH_FRAME');
         }
-        search.allowedChatIds.push(...request.allowedChatIds);
+        search.allowedChats.push(...request.allowedChats);
         search.nextChunkIndex += 1;
         if (!request.done) return;
         searches.delete(request.requestId);
         const result = searchTranscriptIndexV1(db, {
           query: search.query,
-          allowedChatIds: search.allowedChatIds,
+          allowedChats: search.allowedChats,
+          order: search.order,
+          mode: search.mode,
+          offset: search.offset,
           limit: search.limit,
+          snippetLimit: search.snippetLimit,
         });
         post({ type: 'search-result', ...response(request), ...result });
         return;
@@ -72,8 +84,7 @@ function handle(request: ReaderRequest): void {
         db?.close();
         db = null;
         post({ type: 'closed', ...response(request) });
-        self.close();
-        return;
+        process.exit(0);
     }
   } catch (error) {
     if (request.type === 'search-start' || request.type === 'search-allowlist-chunk') {

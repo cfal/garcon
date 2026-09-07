@@ -15,13 +15,11 @@ export interface SidebarContext {
 	removeChat: (chatId: string) => void;
 	navigateAwayFromChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
-	patchChatProjectPath: (
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	) => void;
+	patchChatProjectPath: (chatId: string, patch: { projectPath: string }) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	refreshChats: () => void;
 	removeChatTranscript: (chatId: string) => void;
+	clearChatPresentations: (chatId: string) => void;
 }
 
 export function handleChatTitle(msg: ChatTitleUpdatedMessage, ctx: SidebarContext) {
@@ -33,6 +31,7 @@ export function handleChatDeleted(msg: ChatSessionDeletedWsMessage, ctx: Sidebar
 	if (!msg.chatId) return;
 	ctx.navigateAwayFromChat(msg.chatId);
 	ctx.removeChat(msg.chatId);
+	ctx.clearChatPresentations(msg.chatId);
 	ctx.removeChatTranscript(msg.chatId);
 }
 
@@ -45,10 +44,9 @@ export function handleChatProjectPathUpdated(
 	msg: ChatProjectPathUpdatedMessage,
 	ctx: SidebarContext,
 ) {
-	if (!msg.chatId || !msg.projectPath || !msg.effectiveProjectKey) return;
+	if (!msg.chatId || !msg.projectPath) return;
 	ctx.patchChatProjectPath(msg.chatId, {
 		projectPath: msg.projectPath,
-		effectiveProjectKey: msg.effectiveProjectKey,
 	});
 }
 

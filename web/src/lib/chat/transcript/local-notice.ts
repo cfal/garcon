@@ -1,4 +1,6 @@
-export type LocalNoticeType = 'info' | 'progress' | 'warning' | 'error';
+import type { ChatOperationalNoticeType } from '$shared/ws-events';
+
+export type LocalNoticeType = ChatOperationalNoticeType | 'progress';
 
 export interface LocalNoticeRow {
 	id: string;

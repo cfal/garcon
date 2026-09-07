@@ -19,6 +19,12 @@
 	--color-destructive: hsl(var(--destructive));
 	--color-destructive-foreground: hsl(var(--destructive-foreground));
 	--color-border: hsl(var(--border));
+	--color-workspace-window-titlebar: hsl(var(--workspace-window-titlebar));
+	--color-workspace-window-titlebar-active: hsl(var(--workspace-window-titlebar-active));
+	--color-workspace-window-tab-selected: hsl(var(--workspace-window-tab-selected));
+	--color-workspace-window-tab-selected-inactive: hsl(
+		var(--workspace-window-tab-selected-inactive)
+	);
 	--color-input: hsl(var(--input));
 	--color-ring: hsl(var(--ring));
 	--color-chat-header: hsl(var(--chat-header-bg));
@@ -29,6 +35,7 @@
 	--color-chat-tabs-active: hsl(var(--chat-tabs-active-bg));
 	--color-chat-tabs-active-foreground: hsl(var(--chat-tabs-active-foreground));
 	--color-chat-tabs-active-border: hsl(var(--chat-tabs-active-border));
+	--color-chat-bash-row: hsl(var(--chat-bash-row-bg));
 
 	--color-sidebar: hsl(var(--sidebar-background));
 	--color-sidebar-foreground: hsl(var(--sidebar-foreground));
@@ -103,7 +110,6 @@
 	--color-tag-orange: hsl(var(--tag-orange-bg));
 	--color-tag-orange-foreground: hsl(var(--tag-orange-foreground));
 	--color-tag-orange-border: hsl(var(--tag-orange-border));
-	--color-indicator-unread: hsl(var(--indicator-unread));
 	--color-indicator-attention: hsl(var(--indicator-attention));
 	--color-status-processing: hsl(var(--status-processing));
 	--color-status-processing-foreground: hsl(var(--status-processing-foreground));
@@ -204,6 +210,12 @@
 	--destructive: 0 84.2% 60.2%;
 	--destructive-foreground: 0 0% 98%;
 	--border: 0 0% 90%;
+	--workspace-window-titlebar: 0 0% 93%;
+	--workspace-window-titlebar-active: 0 0% 84%;
+	--workspace-window-tab-selected: 0 0% 96%;
+	--workspace-window-tab-selected-inactive: 0 0% 88%;
+	--composer-thinking-static-start: 0 0% 85%;
+	--composer-thinking-pulse-emphasis: 0 0% 80%;
 	--input: 0 0% 90%;
 	--ring: 0 0% 40%;
 	--radius: 0.5rem;
@@ -220,6 +232,7 @@
 	--chat-tabs-active-bg: 0 0% 18%;
 	--chat-tabs-active-foreground: 0 0% 98%;
 	--chat-tabs-active-border: 0 0% 18%;
+	--chat-bash-row-bg: 0 0% 94%;
 
 	--sidebar-background: 0 0% 98%;
 	--sidebar-foreground: 0 0% 5%;
@@ -294,7 +307,6 @@
 	--tag-orange-bg: 28 92% 92% / 0.5;
 	--tag-orange-foreground: 24 82% 30%;
 	--tag-orange-border: 24 52% 74% / 0.5;
-	--indicator-unread: 214 90% 48%;
 	--indicator-attention: 0 78% 54%;
 	--status-processing: 214 90% 48%;
 	--status-processing-foreground: 214 85% 32%;
@@ -377,12 +389,12 @@
 	--git-untracked: 214 82% 45%;
 	--git-renamed: 271 76% 53%;
 
-	--diff-add-bg: 138 76% 95%;
-	--diff-add-fg: 134 60% 28%;
-	--diff-add-line-num: 134 40% 50%;
-	--diff-del-bg: 353 100% 96%;
-	--diff-del-fg: 355 72% 36%;
-	--diff-del-line-num: 355 40% 50%;
+	--diff-add-bg: 133 80% 92%;
+	--diff-add-fg: 213 13% 14%;
+	--diff-add-line-num: 213 13% 14%;
+	--diff-del-bg: 5.5 100% 95.7%;
+	--diff-del-fg: 213 13% 14%;
+	--diff-del-line-num: 213 13% 14%;
 	--diff-hunk-header-bg: 214 60% 95%;
 
 	--safe-area-inset-top: env(safe-area-inset-top);
@@ -403,6 +415,14 @@
 	transform: translateY(var(--app-viewport-offset-top, 0px));
 }
 
+.safe-viewport-dialog {
+	inset-inline-start: max(1rem, var(--safe-area-inset-left, 0px));
+	inset-inline-end: max(1rem, var(--safe-area-inset-right, 0px));
+	width: auto;
+	margin-inline: auto;
+	translate: 0 -50%;
+}
+
 .dark {
 	--background: 0 0% 10%;
 	--foreground: 0 0% 95%;
@@ -421,6 +441,12 @@
 	--destructive: 0 62.8% 30.6%;
 	--destructive-foreground: 0 0% 95%;
 	--border: 0 0% 20%;
+	--workspace-window-titlebar: 0 0% 7%;
+	--workspace-window-titlebar-active: 0 0% 1%;
+	--workspace-window-tab-selected: 0 0% 18%;
+	--workspace-window-tab-selected-inactive: 0 0% 12%;
+	--composer-thinking-static-start: 0 0% 25%;
+	--composer-thinking-pulse-emphasis: 0 0% 30%;
 	--input: 0 0% 40%;
 	--ring: 0 0% 60%;
 	--transient-backdrop-color: 0 0% 0%;
@@ -435,6 +461,7 @@
 	--chat-tabs-active-bg: 0 0% 84%;
 	--chat-tabs-active-foreground: 0 0% 8%;
 	--chat-tabs-active-border: 0 0% 84%;
+	--chat-bash-row-bg: 0 0% 6%;
 
 	--sidebar-background: 0 0% 8%;
 	--sidebar-foreground: 0 0% 95%;
@@ -509,7 +536,6 @@
 	--tag-orange-bg: 24 42% 22% / 0.3;
 	--tag-orange-foreground: 24 88% 86%;
 	--tag-orange-border: 24 34% 40% / 0.4;
-	--indicator-unread: 214 95% 68%;
 	--indicator-attention: 0 82% 66%;
 	--status-processing: 214 95% 68%;
 	--status-processing-foreground: 214 95% 86%;
@@ -544,7 +570,7 @@
 	--stop-button-border: 0 62% 46%;
 	--user-bubble: 0 0% 74%;
 	--user-bubble-selected: 213 26% 62%;
-	--user-bubble-foreground: 0 0% 98%;
+	--user-bubble-foreground: 0 0% 5%;
 	--user-bubble-timestamp: 0 0% 28%;
 	--diff-modified: 45 38% 22%;
 	--diff-modified-foreground: 48 85% 78%;
@@ -576,12 +602,12 @@
 	--git-untracked: 214 92% 68%;
 	--git-renamed: 271 81% 72%;
 
-	--diff-add-bg: 145 90% 12%;
-	--diff-add-fg: 132 68% 83%;
-	--diff-add-line-num: 132 40% 55%;
-	--diff-del-bg: 356 89% 14%;
-	--diff-del-fg: 9 100% 88%;
-	--diff-del-line-num: 9 50% 55%;
+	--diff-add-bg: 156 36% 11%;
+	--diff-add-fg: 210 66.7% 96.5%;
+	--diff-add-line-num: 210 66.7% 96.5%;
+	--diff-del-bg: 338.6 23.3% 11.8%;
+	--diff-del-fg: 210 66.7% 96.5%;
+	--diff-del-line-num: 210 66.7% 96.5%;
 	--diff-hunk-header-bg: 214 40% 18%;
 
 	--markdown-code-background: 0 0% 11%;
@@ -668,6 +694,18 @@
 	--status-error: 30 50% 24%;
 	--status-error-foreground: 30 85% 86%;
 	--status-error-border: 30 50% 40%;
+}
+
+/* Must stay unlayered so custom accents override card and user-bubble utilities. */
+.cli-presentation-custom {
+	--cli-presentation-accent: var(--cli-presentation-accent-light);
+	border-color: color-mix(in oklab, var(--cli-presentation-accent) 45%, hsl(var(--border)));
+	background-color: color-mix(in oklab, var(--cli-presentation-accent) 12%, hsl(var(--card)));
+	color: hsl(var(--foreground));
+}
+
+.dark .cli-presentation-custom {
+	--cli-presentation-accent: var(--cli-presentation-accent-dark);
 }
 
 @layer components {
@@ -836,6 +874,15 @@
 			hsl(var(--chat-message-action-highlight) / var(--chat-message-action-highlight-opacity));
 	}
 
+	[data-user-message-navigator-row][data-user-message-presentation] {
+		transition: box-shadow 140ms ease;
+	}
+
+	[data-user-message-navigator-row][data-user-message-presentation]:hover:not(:focus-visible) {
+		box-shadow: inset 0 0 0 9999px
+			hsl(var(--chat-message-action-highlight) / var(--chat-message-action-highlight-opacity));
+	}
+
 	.assistant-message-context-target[data-state='open'] {
 		border-radius: 0;
 	}
@@ -892,6 +939,15 @@
 	}
 }
 
+/* The typography plugin decorates inline code with literal backticks from the
+   utilities layer; chat inline code already renders as a bordered chip. */
+@layer utilities {
+	.markdown-body :not(pre) > code::before,
+	.markdown-body :not(pre) > code::after {
+		content: none;
+	}
+}
+
 @layer base {
 	* {
 		border-color: theme(--color-border);
@@ -936,4 +992,98 @@
 
 .rainbow-ultra-surface:hover {
 	filter: brightness(1.08) saturate(1.08);
+}
+
+/* Thinking treatment defaults to static. The real 1px borders pulse only when
+   the system allows motion and the local Reduce motion setting is off. */
+@keyframes composer-thinking-border-pulse {
+	0%,
+	100% {
+		border-color: hsl(var(--border));
+	}
+
+	50% {
+		border-color: hsl(var(--composer-thinking-pulse-emphasis));
+	}
+}
+
+.composer-thinking-active {
+	--composer-thinking-animation: none;
+	--composer-thinking-composer-background:
+		linear-gradient(hsl(var(--card)) 0 0) padding-box,
+		linear-gradient(
+			to bottom,
+			hsl(var(--composer-thinking-static-start)) 0%,
+			hsl(var(--border)) 100%
+		)
+		border-box;
+	--composer-thinking-composer-border: transparent;
+	--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.composer-thinking-active:not(.composer-reduce-motion) {
+		--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;
+		--composer-thinking-composer-background: hsl(var(--card));
+		--composer-thinking-composer-border: hsl(var(--border));
+		--composer-thinking-status-border: hsl(var(--border));
+	}
+}
+
+@keyframes sidebar-processing-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.4;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.sidebar-processing-indicator,
+	.workspace-chat-processing-indicator {
+		animation: sidebar-processing-pulse 1.6s ease-in-out infinite;
+	}
+
+	.sidebar-reduce-motion .sidebar-processing-indicator {
+		animation: none;
+	}
+}
+
+.composer-thinking-active [data-composer],
+.composer-thinking-active [data-slot='chat-processing-status'] {
+	animation: var(--composer-thinking-animation);
+}
+
+.composer-thinking-active [data-composer] {
+	border-color: var(--composer-thinking-composer-border);
+	background: var(--composer-thinking-composer-background);
+}
+
+.composer-thinking-active [data-slot='chat-processing-status'] {
+	border-color: var(--composer-thinking-status-border);
+}
+.collapsible-body-collapsed {
+	max-height: var(--collapsible-body-max-height, 10rem);
+	overflow: hidden;
+}
+
+.collapsible-body-truncated {
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		black var(--collapsible-body-fade-start, 7rem),
+		transparent var(--collapsible-body-max-height, 10rem)
+	);
+	mask-image: linear-gradient(
+		to bottom,
+		black var(--collapsible-body-fade-start, 7rem),
+		transparent var(--collapsible-body-max-height, 10rem)
+	);
+}
+
+.collapsible-body-tall {
+	--collapsible-body-max-height: 16rem;
+	--collapsible-body-fade-start: 13rem;
 }

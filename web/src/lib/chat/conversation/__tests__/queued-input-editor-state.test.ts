@@ -15,9 +15,10 @@ function entry(revision = 1, content = 'Original message'): QueueEntry {
 function queue(entries: QueueEntry[], overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
 		entries,
-		dispatchingEntryId: null,
+		steeringEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
+		reorderRevision: 0,
 		...overrides,
 	};
 }
@@ -55,17 +56,18 @@ describe('QueuedInputEditorState', () => {
 		expect(editor.baseRevision).toBe(3);
 	});
 
-	it('distinguishes dispatching, sent, and arbitrary removal without losing the draft', () => {
+	it('distinguishes sent and arbitrary removal without losing the draft', () => {
 		const host = new QueuedInputEditorTestHost(queue([entry()]));
 		const editor = host.editor;
 		editor.begin(host.queue!.entries[0]);
 		editor.draft = 'Recover this draft';
 
-		host.queue = queue([], { dispatchingEntryId: 'entry-1' });
-		expect(editor.phase).toBe('dispatching');
-
 		host.queue = queue([], {
-			recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
+			recentlyDispatched: [{
+				entryId: 'entry-1',
+				revision: 1,
+				dispatchedAt: '2026-07-16T00:01:00.000Z',
+			}],
 		});
 		expect(editor.phase).toBe('sent');
 		expect(editor.draft).toBe('Recover this draft');

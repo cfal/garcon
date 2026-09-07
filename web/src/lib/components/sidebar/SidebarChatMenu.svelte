@@ -12,8 +12,26 @@
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Tag from '@lucide/svelte/icons/tag';
 	import CheckSquare from '@lucide/svelte/icons/check-square';
-	import { DropdownMenuItem, DropdownMenuSeparator } from '$lib/components/ui/dropdown-menu';
+	import PanelRight from '@lucide/svelte/icons/panel-right';
+	import PanelTop from '@lucide/svelte/icons/panel-top';
+	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
+	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
+	import History from '@lucide/svelte/icons/history';
+	import {
+		DropdownMenuItem,
+		DropdownMenuSeparator,
+		DropdownMenuSub,
+		DropdownMenuSubContent,
+		DropdownMenuSubTrigger,
+	} from '$lib/components/ui/dropdown-menu';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import {
+		WORKSPACE_WINDOW_EDGES,
+		type WorkspaceWindowEdge,
+	} from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import { workspaceSplitBlockMessage } from '$lib/workspace/workspace-split-blocked-error.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatMenuProps {
 		session: ChatSessionRecord;
@@ -24,8 +42,13 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowEdges: WorkspaceSplitAdmissions;
+		hasChatPlacement?: boolean;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: boolean;
 		onRename: () => void;
 		onDetails: () => void;
 		onShare: () => void;
@@ -43,8 +66,13 @@
 		onEnterMultiSelect,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
+		onOpenInNewWindow,
+		newWindowEdges,
+		hasChatPlacement = false,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = false,
 		onRename,
 		onDetails,
 		onShare,
@@ -53,7 +81,35 @@
 		onDelete,
 	}: SidebarChatMenuProps = $props();
 
-	const hasSidebarActions = $derived(Boolean(onEnterMultiSelect || onMoveToTop || onMoveToBottom));
+	const hasSidebarActions = $derived(
+		Boolean(onEnterMultiSelect || onMoveToTop || onMoveToBottom || onSortChatOrder),
+	);
+	const canOpenInNewWindow = $derived(
+		WORKSPACE_WINDOW_EDGES.some((edge) => newWindowEdges[edge]?.allowed === true),
+	);
+	const newWindowBlockTitle = $derived.by(() => {
+		if (canOpenInNewWindow) return undefined;
+		for (const edge of WORKSPACE_WINDOW_EDGES) {
+			const admission = newWindowEdges[edge];
+			if (admission && !admission.allowed) {
+				return workspaceSplitBlockMessage(admission.reason);
+			}
+		}
+		return undefined;
+	});
+
+	function edgeLabel(edge: WorkspaceWindowEdge): string {
+		switch (edge) {
+			case 'left':
+				return m.workspace_open_new_window_left();
+			case 'right':
+				return m.workspace_open_new_window_right();
+			case 'top':
+				return m.workspace_open_new_window_above();
+			case 'bottom':
+				return m.workspace_open_new_window_below();
+		}
+	}
 </script>
 
 {#if hasSidebarActions}
@@ -75,14 +131,84 @@
 			{m.sidebar_chats_move_to_bottom()}
 		</DropdownMenuItem>
 	{/if}
+	{#if onSortChatOrder}
+		<DropdownMenuSub>
+			<DropdownMenuSubTrigger>
+				<ArrowUpDown />
+				{m.sidebar_chats_reorder()}
+			</DropdownMenuSubTrigger>
+			<DropdownMenuSubContent class="w-56">
+				<DropdownMenuItem onclick={() => onSortChatOrder?.('created')}>
+					<CalendarClock />
+					{m.sidebar_chats_reorder_by_creation()}
+				</DropdownMenuItem>
+				<DropdownMenuItem onclick={() => onSortChatOrder?.('activity')}>
+					<History />
+					{m.sidebar_chats_reorder_by_activity()}
+				</DropdownMenuItem>
+			</DropdownMenuSubContent>
+		</DropdownMenuSub>
+	{/if}
 	<DropdownMenuSeparator />
 {/if}
 
-<DropdownMenuItem onclick={() => onTogglePinned(session.id)}>
+{#if onOpenInNewWindow}
+	{#if hasChatPlacement}
+		<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id)}>
+			<PanelRight />
+			{m.workspace_show_existing_chat()}
+		</DropdownMenuItem>
+	{:else}
+		<DropdownMenuSub>
+			<DropdownMenuSubTrigger disabled={!canOpenInNewWindow} title={newWindowBlockTitle}>
+				<PanelRight />
+				{m.sidebar_chat_open_new_window()}
+			</DropdownMenuSubTrigger>
+			<DropdownMenuSubContent class="w-56">
+				{#each WORKSPACE_WINDOW_EDGES as edge (edge)}
+					{@const admission = newWindowEdges[edge]}
+					<DropdownMenuItem
+						disabled={admission?.allowed !== true}
+						title={admission && !admission.allowed
+							? workspaceSplitBlockMessage(admission.reason)
+							: undefined}
+						onclick={() => {
+							if (admission?.allowed) onOpenInNewWindow?.(session.id, edge);
+						}}
+					>
+						{#if edge === 'left'}
+							<PanelRight class="rotate-180" />
+						{:else if edge === 'right'}
+							<PanelRight />
+						{:else if edge === 'top'}
+							<PanelTop />
+						{:else}
+							<PanelTop class="rotate-180" />
+						{/if}
+						{edgeLabel(edge)}
+					</DropdownMenuItem>
+				{/each}
+			</DropdownMenuSubContent>
+		</DropdownMenuSub>
+	{/if}
+	<DropdownMenuSeparator />
+{/if}
+
+<DropdownMenuItem
+	disabled={isArchiveMutationPending}
+	onclick={() => {
+		if (!isArchiveMutationPending) onTogglePinned(session.id);
+	}}
+>
 	<Pin />
 	{isPinned ? m.sidebar_chats_unpin() : m.sidebar_chats_pin()}
 </DropdownMenuItem>
-<DropdownMenuItem onclick={() => onToggleArchive(session.id)}>
+<DropdownMenuItem
+	disabled={isArchiveMutationPending}
+	onclick={() => {
+		if (!isArchiveMutationPending) onToggleArchive(session.id);
+	}}
+>
 	<Archive class={cn(isArchived ? 'text-muted-foreground' : '')} />
 	{isArchived ? m.sidebar_chats_unarchive() : m.sidebar_chats_archive()}
 </DropdownMenuItem>

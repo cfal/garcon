@@ -9,6 +9,9 @@ import { SnippetStore } from '../store.ts';
 
 const createdDirs = [];
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+const REGISTERED_CHAT_ID = '1787471053739199';
+const PROSPECTIVE_CHAT_ID = '1787471053739200';
+const MISSING_CHAT_ID = '1787471053739201';
 
 async function serviceFixture() {
   const dir = path.join(os.tmpdir(), `garcon-snippet-service-${randomUUID()}`);
@@ -17,11 +20,13 @@ async function serviceFixture() {
   const store = new SnippetStore(dir);
   await store.init();
   const events = [];
+  const chatLookups = [];
   const service = new SnippetService({
     store,
     chats: {
       getChat(id) {
-        return id === 'chat-a' ? { projectPath: '/registered/repo' } : null;
+        chatLookups.push(id);
+        return id === REGISTERED_CHAT_ID ? { projectPath: '/registered/repo' } : null;
       },
     },
     projectPaths: {
@@ -33,7 +38,7 @@ async function serviceFixture() {
     now: () => new Date('2026-01-01T00:00:00.000Z'),
   });
   service.onInvalidated((reason) => events.push(reason));
-  return { service, events };
+  return { service, events, chatLookups };
 }
 
 describe('snippet service', () => {
@@ -49,40 +54,49 @@ describe('snippet service', () => {
     resetServerConfigForTests();
   });
 
-  it('creates, updates, reorders, and removes with post-write invalidations', async () => {
-    const { service, events } = await serviceFixture();
-    await service.create({
-      expectedRevision: 0,
-      snippet: { shortName: 'review', template: 'Review {{arguments}}' },
-    });
-    await service.update({
-      expectedRevision: 1,
-      id: 'snippet-a',
-      snippet: { shortName: 'review', template: 'Updated {{arguments}}' },
-    });
-    await service.reorder({
-      expectedRevision: 2,
-      orderedSnippetIds: ['snippet-a'],
-    });
-    await service.remove({ expectedRevision: 3, id: 'snippet-a' });
-    expect(events).toEqual(['created', 'updated', 'reordered', 'removed']);
-  });
-
-  it('expands chat and project contexts without emitting invalidations', async () => {
+  it('creates, updates, and removes with post-write invalidations', async () => {
     const { service, events } = await serviceFixture();
     await service.create({
       expectedRevision: 0,
       snippet: {
         shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: 'changes',
+      },
+    });
+    await service.update({
+      expectedRevision: 1,
+      id: 'snippet-a',
+      snippet: {
+        shortName: 'review',
+        template: 'Updated {{arguments}}',
+        defaultArguments: 'staged changes',
+      },
+    });
+    await service.remove({ expectedRevision: 2, id: 'snippet-a' });
+    expect(events).toEqual(['created', 'updated', 'removed']);
+  });
+
+  it('expands registered and prospective chat contexts without emitting invalidations', async () => {
+    const { service, events, chatLookups } = await serviceFixture();
+    await service.create({
+      expectedRevision: 0,
+      snippet: {
+        shortName: 'review',
         template: 'Review {{arguments}} in {{project_path}}',
+        defaultArguments: 'changes',
       },
     });
     events.length = 0;
     expect(
       await service.expand({
         shortName: 'review',
-        arguments: 'contracts',
-        context: { type: 'chat', chatId: 'chat-a' },
+        arguments: { type: 'value', value: 'contracts' },
+        context: {
+          type: 'chat',
+          chatId: REGISTERED_CHAT_ID,
+          projectPath: '/ignored',
+        },
       }),
     ).toMatchObject({
       snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
@@ -92,14 +106,142 @@ describe('snippet service', () => {
     expect(
       await service.expand({
         shortName: 'review',
-        arguments: 'routes',
-        context: { type: 'project', projectPath: '/draft/repo' },
+        arguments: { type: 'value', value: 'routes' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
     ).toMatchObject({
       contextProjectPath: '/draft/repo',
       expandedText: 'Review routes in /canonical/draft/repo',
     });
+    expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
     expect(events).toEqual([]);
+  });
+
+  it('uses the saved default only for omitted arguments', async () => {
+    const { service } = await serviceFixture();
+    await service.create({
+      expectedRevision: 0,
+      snippet: {
+        shortName: 'review',
+        template: '{{arguments}} / {{arguments}} / {{project_path}}',
+        defaultArguments: '{{project_path}} changes',
+      },
+    });
+
+    await expect(
+      service.expand({
+        shortName: 'review',
+        arguments: { type: 'default' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
+      }),
+    ).resolves.toMatchObject({
+      expandedText: '{{project_path}} changes / {{project_path}} changes / /canonical/draft/repo',
+    });
+    await expect(
+      service.expand({
+        shortName: 'review',
+        arguments: { type: 'value', value: '' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
+      }),
+    ).resolves.toMatchObject({ expandedText: ' /  / /canonical/draft/repo' });
+    await expect(
+      service.expand({
+        shortName: 'review',
+        arguments: { type: 'value', value: '  ' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
+      }),
+    ).resolves.toMatchObject({
+      expandedText: '   /    / /canonical/draft/repo',
+    });
+  });
+
+  it('rejects unusable defaults and maps oversized default expansion errors', async () => {
+    const { service } = await serviceFixture();
+    await expect(
+      service.create({
+        expectedRevision: 0,
+        snippet: {
+          shortName: 'invalid',
+          template: 'No arguments token',
+          defaultArguments: 'unused',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'SNIPPET_VALIDATION_FAILED', status: 400 });
+
+    await service.create({
+      expectedRevision: 0,
+      snippet: {
+        shortName: 'large',
+        template: '{{arguments}}{{arguments}}{{arguments}}',
+        defaultArguments: 'x'.repeat(32_000),
+      },
+    });
+    await expect(
+      service.expand({
+        shortName: 'large',
+        arguments: { type: 'default' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'SNIPPET_EXPANSION_TOO_LONG',
+      status: 422,
+    });
+  });
+
+  it('expands the supplied ID for both registered and prospective chats', async () => {
+    const { service, chatLookups } = await serviceFixture();
+    await service.create({
+      expectedRevision: 0,
+      snippet: {
+        shortName: 'handoff',
+        template: 'Reply to {{chat_id}} about {{arguments}}',
+        defaultArguments: '',
+      },
+    });
+
+    await expect(
+      service.expand({
+        shortName: 'handoff',
+        arguments: { type: 'value', value: 'the review' },
+        context: { type: 'chat', chatId: REGISTERED_CHAT_ID },
+      }),
+    ).resolves.toMatchObject({
+      expandedText: `Reply to ${REGISTERED_CHAT_ID} about the review`,
+    });
+    await expect(
+      service.expand({
+        shortName: 'handoff',
+        arguments: { type: 'value', value: 'the review' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
+      }),
+    ).resolves.toMatchObject({
+      expandedText: `Reply to ${PROSPECTIVE_CHAT_ID} about the review`,
+    });
+    expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
   });
 
   it('rejects missing chats and unknown snippets', async () => {
@@ -107,19 +249,23 @@ describe('snippet service', () => {
     await expect(
       service.expand({
         shortName: 'missing',
-        arguments: '',
-        context: { type: 'chat', chatId: 'chat-a' },
+        arguments: { type: 'value', value: '' },
+        context: { type: 'chat', chatId: REGISTERED_CHAT_ID },
       }),
     ).rejects.toMatchObject({ code: 'SNIPPET_NOT_FOUND', status: 404 });
     await service.create({
       expectedRevision: 0,
-      snippet: { shortName: 'review', template: 'Review' },
+      snippet: {
+        shortName: 'review',
+        template: 'Review',
+        defaultArguments: '',
+      },
     });
     await expect(
       service.expand({
         shortName: 'review',
-        arguments: '',
-        context: { type: 'chat', chatId: 'missing' },
+        arguments: { type: 'value', value: '' },
+        context: { type: 'chat', chatId: MISSING_CHAT_ID },
       }),
     ).rejects.toMatchObject({ code: 'SNIPPET_CHAT_NOT_FOUND', status: 404 });
   });
@@ -128,14 +274,22 @@ describe('snippet service', () => {
     const { service, events } = await serviceFixture();
     await service.create({
       expectedRevision: 0,
-      snippet: { shortName: 'review', template: 'Review' },
+      snippet: {
+        shortName: 'review',
+        template: 'Review',
+        defaultArguments: '',
+      },
     });
     events.length = 0;
 
     await expect(
       service.create({
         expectedRevision: 0,
-        snippet: { shortName: 'other', template: 'Other' },
+        snippet: {
+          shortName: 'other',
+          template: 'Other',
+          defaultArguments: '',
+        },
       }),
     ).rejects.toMatchObject({ code: 'SNIPPET_REVISION_CONFLICT' });
     expect(events).toEqual([]);
@@ -145,33 +299,37 @@ describe('snippet service', () => {
     const { service, events } = await serviceFixture();
     await service.create({
       expectedRevision: 0,
-      snippet: { shortName: 'review', template: 'Review' },
+      snippet: {
+        shortName: 'review',
+        template: 'Review',
+        defaultArguments: '',
+      },
     });
     await service.remove({ expectedRevision: 1, id: 'snippet-a' });
     events.length = 0;
 
     const update = {
       id: 'snippet-a',
-      snippet: { shortName: 'review', template: 'Updated' },
+      snippet: {
+        shortName: 'review',
+        template: 'Updated',
+        defaultArguments: '',
+      },
     };
-    await expect(
-      service.update({ ...update, expectedRevision: 1 }),
-    ).rejects.toMatchObject({
+    await expect(service.update({ ...update, expectedRevision: 1 })).rejects.toMatchObject({
       code: 'SNIPPET_REVISION_CONFLICT',
       status: 409,
       retryable: true,
     });
-    await expect(
-      service.update({ ...update, expectedRevision: 2 }),
-    ).rejects.toMatchObject({ code: 'SNIPPET_NOT_FOUND', status: 404 });
+    await expect(service.update({ ...update, expectedRevision: 2 })).rejects.toMatchObject({
+      code: 'SNIPPET_NOT_FOUND',
+      status: 404,
+    });
     expect(events).toEqual([]);
   });
 
   it('maps real path-boundary failures to snippet path errors', async () => {
-    const projectBase = path.join(
-      os.tmpdir(),
-      `garcon-snippet-projects-${randomUUID()}`,
-    );
+    const projectBase = path.join(os.tmpdir(), `garcon-snippet-projects-${randomUUID()}`);
     await fs.mkdir(projectBase, { recursive: true });
     createdDirs.push(projectBase);
     process.env.GARCON_PROJECT_BASE_DIR = projectBase;
@@ -184,15 +342,11 @@ describe('snippet service', () => {
       code: 'SNIPPET_PROJECT_PATH_NOT_FOUND',
       status: 404,
     });
-    await expect(
-      projectPaths.resolve(path.join(projectBase, 'missing')),
-    ).rejects.toMatchObject({
+    await expect(projectPaths.resolve(path.join(projectBase, 'missing'))).rejects.toMatchObject({
       code: 'SNIPPET_PROJECT_PATH_NOT_FOUND',
       status: 404,
     });
-    await expect(
-      projectPaths.resolve(path.dirname(projectBase)),
-    ).rejects.toMatchObject({
+    await expect(projectPaths.resolve(path.dirname(projectBase))).rejects.toMatchObject({
       code: 'SNIPPET_PROJECT_PATH_OUTSIDE_BASE',
       status: 403,
     });

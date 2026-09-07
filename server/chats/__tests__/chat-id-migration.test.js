@@ -13,6 +13,8 @@ const SECONDS_CANONICAL_ID = '1772710502000000';
 const MILLISECONDS_ID = '1774634779935';
 const MILLISECONDS_CANONICAL_ID = '1774634779935000';
 const EXISTING_CANONICAL_ID = '1783725900000000';
+const DANGLING_CANONICAL_ID = '1783725900000001';
+const EXISTING_DELEGATION_ID = '1783725900000002';
 
 const createdDirs = [];
 
@@ -46,8 +48,31 @@ describe('workspace chat ID migration', () => {
       version: 2,
       sessions: {
         [SECONDS_ID]: chatEntry(),
-        [MILLISECONDS_ID]: chatEntry('sonnet'),
-        [EXISTING_CANONICAL_ID]: chatEntry('haiku'),
+        [MILLISECONDS_ID]: {
+          ...chatEntry('sonnet'),
+          parentChat: {
+            chatId: SECONDS_ID,
+            relation: 'fork',
+            transcriptViewId: 'view-a',
+            ordinal: 4,
+          },
+        },
+        [EXISTING_CANONICAL_ID]: {
+          ...chatEntry('haiku'),
+          parentChat: {
+            chatId: DANGLING_CANONICAL_ID,
+            relation: 'handoff',
+            transcriptViewId: 'view-deleted',
+            ordinal: 9,
+          },
+        },
+        [EXISTING_DELEGATION_ID]: {
+          ...chatEntry('opus'),
+          parentChat: {
+            chatId: SECONDS_ID,
+            relation: 'delegation',
+          },
+        },
       },
     });
     await writeJson(workspaceDir, 'project-settings.json', {
@@ -112,7 +137,25 @@ describe('workspace chat ID migration', () => {
       SECONDS_CANONICAL_ID,
       MILLISECONDS_CANONICAL_ID,
       EXISTING_CANONICAL_ID,
+      EXISTING_DELEGATION_ID,
     ].sort());
+    expect(chats.sessions[MILLISECONDS_CANONICAL_ID].parentChat).toEqual({
+      chatId: SECONDS_CANONICAL_ID,
+      relation: 'fork',
+      transcriptViewId: 'view-a',
+      ordinal: 4,
+    });
+    expect(chats.sessions[EXISTING_CANONICAL_ID].parentChat).toEqual({
+      chatId: DANGLING_CANONICAL_ID,
+      relation: 'handoff',
+      transcriptViewId: 'view-deleted',
+      ordinal: 9,
+    });
+    expect(chats.sessions[EXISTING_DELEGATION_ID].parentChat).toEqual({
+      chatId: SECONDS_CANONICAL_ID,
+      relation: 'delegation',
+    });
+    expect(result.changedFiles.filter((file) => file === 'chats.json')).toHaveLength(1);
 
     const settings = JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'));
     expect(settings.pinnedChatIds).toEqual([SECONDS_CANONICAL_ID]);
@@ -148,6 +191,16 @@ describe('workspace chat ID migration', () => {
     expect(snapshot.chatId).toBe(MILLISECONDS_CANONICAL_ID);
     expect(await fs.readFile(path.join(workspaceDir, `queues/${SECONDS_CANONICAL_ID}.queue.json`), 'utf8')).toContain('entries');
     expect(await fs.readFile(path.join(eventsDir, `${MILLISECONDS_CANONICAL_ID}.events.jsonl`), 'utf8')).toBe('{}\n');
+    if (process.platform !== 'win32') {
+      for (const fileName of [
+        'project-settings.json',
+        'chat-metadata.json',
+        'shared-chats.json',
+        'chats.json',
+      ]) {
+        expect((await fs.stat(path.join(workspaceDir, fileName))).mode & 0o777).toBe(0o600);
+      }
+    }
 
     const secondRun = await migrateWorkspaceChatIds(workspaceDir);
     expect(secondRun).toEqual({ migratedChatIds: {}, changedFiles: [] });
@@ -173,7 +226,7 @@ describe('workspace chat ID migration', () => {
   it('does not reinterpret uncommon numeric lengths', async () => {
     const workspaceDir = await tempWorkspace();
     await writeJson(workspaceDir, 'chats.json', {
-      version: 3,
+      version: 5,
       sessions: { '177463477993': chatEntry() },
     });
 

@@ -4,8 +4,8 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import CodeEditor from './CodeEditor.svelte';
 	import MarkdownViewer from './MarkdownViewer.svelte';
@@ -25,26 +25,18 @@
 	import { startVisibilityPolling } from '$lib/components/shared/visibility-polling.js';
 	import { FILE_FRESHNESS_POLL_MS } from '$lib/files/sessions/file-freshness.js';
 
-	let {
-		session,
-		presentation,
-	}: {
+	interface Props {
 		session: FileSession;
 		presentation: PresentationHostId;
-	} = $props();
+		onClose?: () => void;
+		closeDisabled?: boolean;
+	}
+
+	let { session, presentation, onClose, closeDisabled = false }: Props = $props();
 	const files = getFileSessions();
-	const compact = $derived(presentation === 'sidebar' || presentation === 'mobile');
+	const compact = $derived(presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
-		if (presentation !== 'mobile') {
-			actions.push({
-				id: 'open-files',
-				label: m.file_session_open_files(),
-				icon: FolderOpen,
-				onclick: () => files.showOpenFiles(),
-				priority: 3,
-			});
-		}
 		if (session.contentKind === 'markdown') {
 			const showingMarkdown = session.rendererMode === 'markdown';
 			actions.push({
@@ -138,6 +130,18 @@
 				{/if}
 			{/snippet}
 		</ResponsiveSurfaceActions>
+		{#if onClose}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={onClose}
+				disabled={closeDisabled}
+				aria-label={m.file_session_close()}
+				title={m.file_session_close()}
+			>
+				<X class="h-4 w-4" />
+			</Button>
+		{/if}
 	</header>
 
 	{#if session.isExternallyStale || session.refreshError}

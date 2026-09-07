@@ -1,11 +1,10 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 
 export interface AcpExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface AcpExecutionRequest {
@@ -14,17 +13,16 @@ export interface AcpExecutionRequest {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
-  readonly clientRequestId?: string;
-  readonly clientMessageId?: string;
-  readonly turnId?: string;
+  readonly operation: AgentRuntimeOperation;
   readonly executionAdmission?: AcpExecutionAdmission;
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Readonly<Record<string, string>>;
-  readonly onAbortable?: () => void;
 }
 
-export type AcpStartRequest = AcpExecutionRequest;
+export interface AcpStartRequest extends AcpExecutionRequest {
+  readonly onSessionActivated?: (session: AcpStartedSession) => void;
+}
 
 export interface AcpResumeRequest extends AcpExecutionRequest {
   readonly agentSessionId: string;
@@ -56,20 +54,9 @@ export function assertAcpExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markAcpExecutionStarted(
+export async function markAcpExecutionStarted(
   request: { readonly executionAdmission?: AcpExecutionAdmission },
-): void {
+): Promise<void> {
   assertAcpExecutionOpen(request);
-  request.executionAdmission?.markStarted();
-}
-
-export function acpEventMetadata(
-  request: Pick<AcpExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
-): RuntimeEventMetadata {
-  return Object.freeze({
-    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-    ...(commandType ? { commandType } : {}),
-    ...(request.turnId ? { turnId: request.turnId } : {}),
-  });
+  await request.executionAdmission?.markStarted();
 }

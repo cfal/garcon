@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'path';
 import os from 'os';
@@ -44,6 +44,8 @@ const ctx = {
     getAgentAuthStatusMap: mock(() => Promise.resolve({})),
     getAgentReadinessMap: mock(() => Promise.resolve({})),
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
+    assertExecutionModeSelectionSupported: mock(() => undefined),
+    normalizeThinkingModeForAgent: mock((_agentId, value) => value),
   },
   settings: {
     getUiSettings: mock(() => ({})),
@@ -235,6 +237,7 @@ describe('GET /api/v1/git/refs validation', () => {
     const url = makeUrl('/api/v1/git/refs', {
       project: gitFixturePath,
       limit: String(GIT_REF_RESULT_LIMITS.max + 1),
+      sort: 'updated',
     });
     const response = await handler(new Request(url), url);
     const body = await response.json();
@@ -242,6 +245,48 @@ describe('GET /api/v1/git/refs validation', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe(`Invalid limit. Expected an integer between 1 and ${GIT_REF_RESULT_LIMITS.max}.`);
   });
+
+  it('accepts an omitted sort pair and valid explicit pairs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-ref-route-'));
+    try {
+      await runGitCommand(projectPath, ['init']);
+      for (const params of [
+        {},
+        { sort: 'name', direction: 'asc' },
+        { sort: 'updated', direction: 'desc' },
+      ]) {
+        const url = makeUrl('/api/v1/git/refs', {
+          project: projectPath,
+          ...params,
+        });
+        const response = await handler(new Request(url), url);
+        expect(response.status).toBe(200);
+      }
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  for (const [label, params] of [
+    ['only sort', { sort: 'updated' }],
+    ['only direction', { direction: 'desc' }],
+    ['an empty sort', { sort: '', direction: 'asc' }],
+    ['an unknown sort', { sort: 'created', direction: 'asc' }],
+    ['an unknown direction', { sort: 'name', direction: 'forward' }],
+  ]) {
+    it(`returns 400 for ${label}`, async () => {
+      const url = makeUrl('/api/v1/git/refs', {
+        project: gitFixturePath,
+        ...params,
+      });
+      const response = await handler(new Request(url), url);
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        'Invalid ref sort. Expected sort=name|updated and direction=asc|desc together.',
+      );
+    });
+  }
 });
 
 describe('POST /api/v1/git/workbench/snapshot validation', () => {
@@ -328,11 +373,11 @@ describe('POST /api/v1/git/workbench/snapshot validation', () => {
       expect(traceLog).toMatchObject({
         route: 'workbench-snapshot',
         responseBytes,
-        slowestCommand: expect.objectContaining({
-          args: expect.any(Array),
-          durationMs: expect.any(Number),
-        }),
+        gitDurationMs: expect.any(Number),
+        maxGitDurationMs: expect.any(Number),
+        slowestGitCommand: expect.any(String),
       });
+      expect(traceLog).not.toHaveProperty('slowestCommand');
       expect(traceLog.commandCount).toBeGreaterThanOrEqual(4);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -341,8 +386,8 @@ describe('POST /api/v1/git/workbench/snapshot validation', () => {
   });
 });
 
-describe('POST /api/v1/git/workbench/fingerprint validation', () => {
-  const handler = routes['/api/v1/git/workbench/fingerprint'].POST;
+describe('POST /api/v1/git/working-tree/fingerprint validation', () => {
+  const handler = routes['/api/v1/git/working-tree/fingerprint'].POST;
 
   beforeEach(() => {
     parseJsonBody.mockClear();
@@ -397,13 +442,13 @@ describe('POST /api/v1/git/workbench/fingerprint validation', () => {
       expect(body.status).toBe('ready');
       expect(body.fingerprint).toStartWith('v1:');
       expect(traceLog).toMatchObject({
-        route: 'workbench-fingerprint',
+        route: 'working-tree-fingerprint',
         responseBytes,
-        slowestCommand: expect.objectContaining({
-          args: expect.any(Array),
-          durationMs: expect.any(Number),
-        }),
+        gitDurationMs: expect.any(Number),
+        maxGitDurationMs: expect.any(Number),
+        slowestGitCommand: expect.any(String),
       });
+      expect(traceLog).not.toHaveProperty('slowestCommand');
       expect(traceLog.commandCount).toBeGreaterThanOrEqual(4);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -415,7 +460,7 @@ describe('POST /api/v1/git/workbench/fingerprint validation', () => {
 describe('POST /api/v1/git/history routes', () => {
   const commitsHandler = routes['/api/v1/git/history/commits'].POST;
   const snapshotHandler = routes['/api/v1/git/history/commit/snapshot'].POST;
-  const filesHandler = routes['/api/v1/git/history/commit/files'].POST;
+  const filesHandler = routes['/api/v1/git/review-documents/files'].POST;
 
   beforeEach(() => {
     parseJsonBody.mockClear();
@@ -456,26 +501,6 @@ describe('POST /api/v1/git/history routes', () => {
     expect(body.error).toBe('Invalid commit snapshot parameters.');
   });
 
-  it('rejects oversized commit body batches', async () => {
-    parseJsonBody.mockImplementation(() =>
-      Promise.resolve({
-        project: gitFixturePath,
-        documentId: 'doc',
-        commit: 'HEAD',
-        context: 5,
-        files: Array.from(
-          { length: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 },
-          (_, index) => `f${index}.ts`,
-        ),
-      }),
-    );
-    const response = await filesHandler(makeRequest({}));
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe(`Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.`);
-  });
-
   it('returns structured snapshot and file bodies for a commit', async () => {
     const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-history-route-'));
 
@@ -498,23 +523,109 @@ describe('POST /api/v1/git/history routes', () => {
       expect(snapshotResponse.status).toBe(200);
       expect(snapshot.status).toBe('ready');
       expect(snapshot.files[0]).toMatchObject({ path: 'a.txt', bodyState: 'unloaded' });
+      expect(snapshotResponse.headers.get('server-timing')).toContain('summary-git;dur=');
+      expect(snapshotResponse.headers.get('server-timing')).toContain('document-register;dur=');
 
       parseJsonBody.mockImplementation(() =>
         Promise.resolve({
           project: projectPath,
           documentId: snapshot.documentId,
-          commit: snapshot.commit.hash,
-          parent: snapshot.selectedParent,
-          context: 5,
           files: ['a.txt'],
+          purpose: 'visible',
         }),
       );
       const filesResponse = await filesHandler(makeRequest({}));
       const body = await filesResponse.json();
 
       expect(filesResponse.status).toBe(200);
+      expect(body.status).toBe('ready');
       expect(body.files['a.txt'].bodyFingerprint).toBe(snapshot.files[0].bodyFingerprint);
-      expect(body.files['a.txt'].rows.some((row) => row.kind === 'add' && row.text === 'two')).toBe(true);
+      expect(body.files['a.txt'].patch).toContain('+two');
+      expect(body.files['a.txt'].rows).toBeUndefined();
+      expect(filesResponse.headers.get('server-timing')).toContain('body-git;dur=');
+      expect(filesResponse.headers.get('server-timing')).toContain('body-split;dur=');
+      expect(filesResponse.headers.get('server-timing')).toContain('patch-scan;dur=');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('POST /api/v1/git/comparison routes', () => {
+  const snapshotHandler = routes['/api/v1/git/comparisons/snapshot'].POST;
+  const filesHandler = routes['/api/v1/git/review-documents/files'].POST;
+
+  beforeEach(() => {
+    parseJsonBody.mockClear();
+    restoreConsoleDebug();
+  });
+
+  it('requires a revision From endpoint', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: gitFixturePath,
+      from: { kind: 'working-tree' },
+      to: { kind: 'revision', revision: 'HEAD' },
+      mode: 'direct',
+    }));
+    const response = await snapshotHandler(makeRequest({}));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: 'Missing or invalid comparison endpoints, project, or mode.',
+    });
+  });
+
+  it('rejects merge-base mode for a Working Tree target', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: gitFixturePath,
+      from: { kind: 'revision', revision: 'HEAD' },
+      to: { kind: 'working-tree' },
+      mode: 'merge-base',
+    }));
+    const response = await snapshotHandler(makeRequest({}));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: 'Working Tree comparisons require direct mode.',
+    });
+  });
+
+  it('returns a typed snapshot and lazy body response', async () => {
+    const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-comparison-route-'));
+    try {
+      await runGitCommand(projectPath, ['init']);
+      await runGitCommand(projectPath, ['config', 'user.email', 'test@example.com']);
+      await runGitCommand(projectPath, ['config', 'user.name', 'Test User']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\n', 'utf8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'initial']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf8');
+      await runGitCommand(projectPath, ['commit', '-am', 'second']);
+
+      parseJsonBody.mockImplementation(() => Promise.resolve({
+        project: projectPath,
+        from: { kind: 'revision', revision: 'HEAD~1' },
+        to: { kind: 'revision', revision: 'HEAD' },
+        mode: 'direct',
+      }));
+      const snapshotResponse = await snapshotHandler(makeRequest({}));
+      const snapshot = await snapshotResponse.json();
+      expect(snapshotResponse.status).toBe(200);
+      expect(snapshot).toMatchObject({ status: 'ready', mode: 'direct' });
+
+      parseJsonBody.mockImplementation(() => Promise.resolve({
+        project: projectPath,
+        documentId: snapshot.documentId,
+        files: ['a.txt'],
+        purpose: 'visible',
+      }));
+      const filesResponse = await filesHandler(makeRequest({}));
+      const bodies = await filesResponse.json();
+      expect(filesResponse.status).toBe(200);
+      expect(bodies.status).toBe('ready');
+      expect(bodies.files['a.txt']).toMatchObject({
+        bodyState: 'loaded',
+        renderedRowCount: expect.any(Number),
+        patchBytes: expect.any(Number),
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -541,8 +652,8 @@ describe('POST /api/v1/git/worktrees/create boundary validation', () => {
   });
 });
 
-describe('POST /api/v1/git/review-document validation', () => {
-  const filesHandler = routes['/api/v1/git/review-document/files'].POST;
+describe('POST /api/v1/git/review-documents validation', () => {
+  const filesHandler = routes['/api/v1/git/review-documents/files'].POST;
 
   beforeEach(() => { parseJsonBody.mockClear(); });
 
@@ -552,8 +663,7 @@ describe('POST /api/v1/git/review-document validation', () => {
         project: '/proj',
         documentId: 'doc',
         files: Array.from({ length: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 }, (_, index) => `file-${index}.ts`),
-        mode: 'working',
-        context: 5,
+        purpose: 'visible',
       }),
     );
     const response = await filesHandler(makeRequest({}));
@@ -563,22 +673,18 @@ describe('POST /api/v1/git/review-document validation', () => {
     expect(body.error).toBe(`Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.`);
   });
 
- 	  it('returns 400 when context is invalid', async () => {
-	    parseJsonBody.mockImplementation(() =>
-	      Promise.resolve({
-	        project: '/proj',
-	        documentId: 'doc',
-	        files: ['a.ts'],
-	        mode: 'working',
-	        context: GIT_DIFF_LIMITS.maxContextLines + 1,
-	      }),
-	    );
-	    const response = await filesHandler(makeRequest({}));
-	    const body = await response.json();
-
-	    expect(response.status).toBe(400);
-	    expect(body.error).toBe(`Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.`);
-	  });
+  it('returns 400 when purpose is invalid', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({
+        project: '/proj',
+        documentId: 'doc',
+        files: ['a.ts'],
+        purpose: 'background',
+      }),
+    );
+    const response = await filesHandler(makeRequest({}));
+    expect(response.status).toBe(400);
+  });
 });
 
 describe('POST /api/v1/git/stage-selection validation', () => {
@@ -689,6 +795,9 @@ describe('malformed JSON body', () => {
   const handler = routes['/api/v1/git/commit-index'].POST;
 
   beforeEach(() => { parseJsonBody.mockClear(); });
+  afterEach(() => {
+    parseJsonBody.mockImplementation((request) => request.json());
+  });
 
   it('returns 400 with typed error when body is not valid JSON', async () => {
     parseJsonBody.mockImplementation(() => { throw new MalformedJsonError(); });
@@ -706,43 +815,43 @@ describe('malformed JSON body', () => {
   });
 });
 
-	describe('route registration', () => {
-	  it('registers workbench routes', () => {
-	    const expectedRoutes = {
-	      '/api/v1/git/commit-index': 'POST',
-	      '/api/v1/git/stage-paths': 'POST',
-	      '/api/v1/git/workbench/snapshot': 'POST',
-	      '/api/v1/git/workbench/fingerprint': 'POST',
-	      '/api/v1/git/review-document/files': 'POST',
-	      '/api/v1/git/history/commits': 'POST',
-	      '/api/v1/git/history/commit/snapshot': 'POST',
-	      '/api/v1/git/history/commit/files': 'POST',
-	      '/api/v1/git/stage-selection': 'POST',
-	      '/api/v1/git/stage-hunk': 'POST',
-	      '/api/v1/git/revert-commit': 'POST',
-	      '/api/v1/git/worktrees': 'GET',
-	      '/api/v1/git/refs': 'GET',
-	      '/api/v1/git/targets': 'GET',
-	      '/api/v1/git/worktrees/create': 'POST',
-	      '/api/v1/git/worktrees/remove': 'POST',
-	      '/api/v1/git/conflicts': 'GET',
-	      '/api/v1/git/conflict-details': 'GET',
-	      '/api/v1/git/conflict/accept': 'POST',
-	      '/api/v1/git/conflict/resolve': 'POST',
-	      '/api/v1/git/stashes': 'GET',
-	      '/api/v1/git/stash/create': 'POST',
-	      '/api/v1/git/stash/apply': 'POST',
-	      '/api/v1/git/stash/pop': 'POST',
-	      '/api/v1/git/stash/drop': 'POST',
-	      '/api/v1/git/file-history': 'GET',
-	      '/api/v1/git/blame': 'GET',
-	      '/api/v1/git/graph': 'GET',
-	      '/api/v1/git/compare': 'GET',
-	    };
+describe('route registration', () => {
+  it('registers workbench routes', () => {
+    const expectedRoutes = {
+      '/api/v1/git/commit-index': 'POST',
+      '/api/v1/git/stage-paths': 'POST',
+      '/api/v1/git/workbench/snapshot': 'POST',
+      '/api/v1/git/working-tree/fingerprint': 'POST',
+      '/api/v1/git/review-documents/files': 'POST',
+      '/api/v1/git/history/commits': 'POST',
+      '/api/v1/git/history/commit/snapshot': 'POST',
+      '/api/v1/git/comparisons/snapshot': 'POST',
+      '/api/v1/git/comparisons/freshness': 'POST',
+      '/api/v1/git/stage-selection': 'POST',
+      '/api/v1/git/stage-hunk': 'POST',
+      '/api/v1/git/revert-commit': 'POST',
+      '/api/v1/git/worktrees': 'GET',
+      '/api/v1/git/refs': 'GET',
+      '/api/v1/git/targets': 'GET',
+      '/api/v1/git/worktrees/create': 'POST',
+      '/api/v1/git/worktrees/remove': 'POST',
+      '/api/v1/git/conflicts': 'GET',
+      '/api/v1/git/conflict-details': 'GET',
+      '/api/v1/git/conflict/accept': 'POST',
+      '/api/v1/git/conflict/resolve': 'POST',
+      '/api/v1/git/stashes': 'GET',
+      '/api/v1/git/stash/create': 'POST',
+      '/api/v1/git/stash/apply': 'POST',
+      '/api/v1/git/stash/pop': 'POST',
+      '/api/v1/git/stash/drop': 'POST',
+      '/api/v1/git/file-history': 'GET',
+      '/api/v1/git/blame': 'GET',
+      '/api/v1/git/graph': 'GET',
+    };
 
-	    for (const [route, method] of Object.entries(expectedRoutes)) {
-	      expect(routes[route]).toBeDefined();
-	      expect(routes[route][method]).toBeFunction();
-	    }
-	  });
-	});
+    for (const [route, method] of Object.entries(expectedRoutes)) {
+      expect(routes[route]).toBeDefined();
+      expect(routes[route][method]).toBeFunction();
+    }
+  });
+});

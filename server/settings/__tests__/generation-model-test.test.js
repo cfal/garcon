@@ -26,6 +26,12 @@ const commitConfigurationKey = generationModelTestConfigurationKey({
   thinkingMode: 'low',
 });
 
+const refinementConfigurationKey = generationModelTestConfigurationKey({
+  agentId: 'amp',
+  model: 'smart',
+  thinkingMode: 'none',
+});
+
 function createHarness() {
   const runSingleQuery = mock(() => Promise.resolve('OK'));
   return {
@@ -44,6 +50,11 @@ function createHarness() {
           model: 'gpt-5.5',
           thinkingMode: 'low',
         },
+        promptRefinement: {
+          agentId: 'amp',
+          model: 'smart',
+          thinkingMode: 'none',
+        },
       })),
     },
     agents: {
@@ -60,6 +71,7 @@ function createHarness() {
         },
       ])),
       runSingleQuery,
+      singleQueryRunsToolsWithoutPermission: mock(() => false),
     },
     runSingleQuery,
   };
@@ -120,6 +132,36 @@ describe('testGenerationModel', () => {
         thinkingMode: 'low',
       }),
     );
+  });
+
+  it('tests a safe prompt refinement target independently', async () => {
+    await testGenerationModel({
+      target: 'promptRefinement',
+      configurationKey: refinementConfigurationKey,
+      settings: harness.settings,
+      agents: harness.agents,
+    });
+
+    expect(harness.runSingleQuery).toHaveBeenCalledWith(
+      'Reply with exactly OK. Do not use tools.',
+      expect.objectContaining({ agentId: 'amp', model: 'smart' }),
+    );
+  });
+
+  it('rejects an unsafe prompt refinement target before provider invocation', async () => {
+    harness.agents.singleQueryRunsToolsWithoutPermission.mockImplementation(() => true);
+
+    await expect(testGenerationModel({
+      target: 'promptRefinement',
+      configurationKey: refinementConfigurationKey,
+      settings: harness.settings,
+      agents: harness.agents,
+    })).rejects.toMatchObject({
+      code: 'GENERATION_TEST_UNSAFE_AGENT',
+      status: 422,
+      retryable: false,
+    });
+    expect(harness.runSingleQuery).not.toHaveBeenCalled();
   });
 
   it('reports unavailable when automatic resolution finds no ready agent', async () => {

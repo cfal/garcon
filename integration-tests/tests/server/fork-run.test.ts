@@ -5,10 +5,81 @@ import {
   countUserContent,
   userContents,
 } from '../../support/chat-assertions.js';
+import { expectedCarriedInput } from '../../support/carried-context.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('fork-run lifecycle', () => {
+  test('captures a child fork-run while its parent turn is still running', async () => {
+    await withIntegrationFixture('fork-run-settlement', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const source = await fixture.client.startDirectChat({
+        chatId: sourceChatId,
+        content: 'fork-race-source',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(sourceChatId, source.turnId);
+
+      const parentChatId = fixture.newChatId();
+      const parentInput = expectedCarriedInput([
+        'fork-race-source',
+        'echo:fork-race-source',
+      ], 'fork-race-parent');
+      const heldParent = fixture.fakeProviders.openAi.holdNext({
+        lastUserText: parentInput,
+      });
+      const parent = await fixture.client.forkRunChat({
+        sourceChatId,
+        chatId: parentChatId,
+        command: 'fork-race-parent',
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: fixture.directAgents.openAi.provider.model,
+        apiProviderId: fixture.directAgents.openAi.provider.providerId,
+        modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
+        modelProtocol: fixture.directAgents.openAi.provider.protocol,
+      });
+      await heldParent.received;
+
+      const childChatId = fixture.newChatId();
+      const childRequest = {
+        sourceChatId: parentChatId,
+        chatId: childChatId,
+        command: 'fork-race-child',
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        permissionMode: 'default' as const,
+        thinkingMode: 'none' as const,
+        model: fixture.directAgents.openAi.provider.model,
+        apiProviderId: fixture.directAgents.openAi.provider.providerId,
+        modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
+        modelProtocol: fixture.directAgents.openAi.provider.protocol,
+      };
+      const child = await fixture.client.forkRunChat(childRequest);
+      await fixture.client.waitForTurnTerminal(childChatId, child.turnId);
+
+      const composedPrompt = 'fork-race-parent\n\nfork-race-child';
+      const childInput = expectedCarriedInput([
+        'fork-race-source',
+        'echo:fork-race-source',
+      ], composedPrompt);
+      const childProviderRequest = fixture.fakeProviders.openAi.requests().find(
+        (request) => request.lastUserText === childInput,
+      );
+      expect(childProviderRequest?.body.messages).toEqual([
+        { role: 'user', content: childInput },
+      ]);
+
+      heldParent.releaseText('echo:fork-race-parent');
+      await fixture.client.waitForTurnTerminal(parentChatId, parent.turnId);
+      expect(assistantContents((await fixture.client.getMessages(childChatId)).messages))
+        .not.toContain('echo:fork-race-parent');
+    });
+  });
+
   test('atomically forks provider context, runs once, and survives restart', async () => {
     await withIntegrationFixture('fork-run-atomic', async (fixture) => {
       const sourceChatId = fixture.newChatId();
@@ -25,6 +96,7 @@ describe('fork-run lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, second.turnId);
+      const sourceAnchor = await fixture.client.getMessages(sourceChatId);
 
       const targetChatId = fixture.newChatId();
       const clientRequestId = crypto.randomUUID();
@@ -42,7 +114,13 @@ describe('fork-run lifecycle', () => {
         modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
         modelProtocol: fixture.directAgents.openAi.provider.protocol,
       };
-      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'fork-target-new' });
+      const targetInput = expectedCarriedInput([
+        'fork-source-first',
+        'echo:fork-source-first',
+        'fork-source-second',
+        'echo:fork-source-second',
+      ], 'fork-target-new');
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: targetInput });
       const cursor = fixture.client.markEvents();
       const accepted = await fixture.client.forkRunChat(request);
       expect(accepted).toMatchObject({
@@ -50,7 +128,15 @@ describe('fork-run lifecycle', () => {
         commandType: 'fork-run',
         clientRequestId,
         chatId: targetChatId,
-        chat: { id: targetChatId },
+        chat: {
+          id: targetChatId,
+          parentChat: {
+            chatId: sourceChatId,
+            relation: 'fork',
+            transcriptViewId: sourceAnchor.transcriptViewId,
+            ordinal: sourceAnchor.lastOrdinal,
+          },
+        },
       });
       expect(accepted.turnId).toBeString();
 
@@ -76,13 +162,9 @@ describe('fork-run lifecycle', () => {
 
       const providerRequest = await held.received;
       expect(providerRequest.body.messages).toEqual([
-        { role: 'user', content: 'fork-source-first' },
-        { role: 'assistant', content: 'echo:fork-source-first' },
-        { role: 'user', content: 'fork-source-second' },
-        { role: 'assistant', content: 'echo:fork-source-second' },
-        { role: 'user', content: 'fork-target-new' },
+        { role: 'user', content: targetInput },
       ]);
-      held.releaseEcho();
+      held.releaseText('echo:fork-target-new');
       const terminal = await fixture.client.waitForTurnTerminal(targetChatId, accepted.turnId, {
         afterIndex: cursor,
       });
@@ -93,27 +175,14 @@ describe('fork-run lifecycle', () => {
         clientRequestId,
       });
 
-      const pendingEvent = fixture.client.eventsSince(cursor).find((event) =>
-        event.type === 'pending-user-input-updated'
-        && event.input.chatId === targetChatId
-        && event.input.clientRequestId === clientRequestId);
-      expect(pendingEvent?.type === 'pending-user-input-updated' ? pendingEvent.input : null)
-        .toMatchObject({
-          clientRequestId,
-          clientMessageId,
-          turnId: accepted.turnId,
-          content: 'fork-target-new',
-        });
-
       const targetUserEvent = fixture.client.eventsSince(cursor).find(
         (event): event is ChatMessagesMessage =>
           event.type === 'chat-messages'
           && event.chatId === targetChatId
-          && event.clientRequestId === clientRequestId
-          && event.turnId === accepted.turnId
           && event.messages.some((entry) =>
             entry.message.type === 'user-message'
-            && entry.message.content === 'fork-target-new'),
+            && entry.message.content === 'fork-target-new'
+            && entry.message.metadata?.clientMessageId === clientMessageId),
       );
       expect(targetUserEvent).toBeDefined();
       const targetEventUser = targetUserEvent?.messages.find((entry) =>
@@ -122,16 +191,8 @@ describe('fork-run lifecycle', () => {
       expect(targetEventUser?.message.type === 'user-message'
         ? targetEventUser.message.metadata
         : null).toMatchObject({
-        clientRequestId,
-        turnId: accepted.turnId,
+        clientMessageId,
       });
-      expect(fixture.client.eventsSince(cursor)).toContainEqual(expect.objectContaining({
-        type: 'pending-user-input-cleared',
-        chatId: targetChatId,
-        clientRequestId,
-        reason: 'persisted',
-      }));
-
       const source = await fixture.client.getMessages(sourceChatId);
       const target = await fixture.client.getMessages(targetChatId);
       expect(userContents(source.messages)).toEqual(['fork-source-first', 'fork-source-second']);
@@ -156,17 +217,19 @@ describe('fork-run lifecycle', () => {
       expect(finalTargetUser?.message.type === 'user-message'
         ? finalTargetUser.message.metadata
         : null).toMatchObject({
-        clientRequestId,
-        turnId: accepted.turnId,
+        clientMessageId,
       });
-      expect(target.pendingUserInputs).toEqual([]);
+      expect(target.resendCandidates).toEqual([]);
       expect(fixture.fakeProviders.openAi.requests().filter((entry) =>
-        entry.lastUserText === 'fork-target-new')).toHaveLength(1);
+        entry.lastUserText === targetInput)).toHaveLength(1);
 
       await fixture.restartGarcon();
-      expect((await fixture.client.listChats()).sessions.map((chat) => chat.id).sort()).toEqual(
+      const restartedChats = (await fixture.client.listChats()).sessions;
+      expect(restartedChats.map((chat) => chat.id).sort()).toEqual(
         [sourceChatId, targetChatId].sort(),
       );
+      expect(restartedChats.find((chat) => chat.id === targetChatId)?.parentChat)
+        .toEqual(accepted.chat.parentChat);
       expect(userContents((await fixture.client.getMessages(sourceChatId)).messages)).toEqual(
         ['fork-source-first', 'fork-source-second'],
       );

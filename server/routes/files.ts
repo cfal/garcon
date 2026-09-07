@@ -3,11 +3,10 @@ import path from 'path';
 import mime from 'mime-types';
 import { withJsonBody } from '../lib/json-route.js';
 import {
-  listDirectoryLegacy,
   listDirectoryNames,
   listDirectoryStrict,
 } from './projects.utils.js';
-import { getProjectBasePath } from '../config.js';
+import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
@@ -50,8 +49,8 @@ import {
   type SaveTextResponse,
   type FileTreeBreadcrumb,
   type FileTreeEntry,
+  type FileTreeHomeDirectory,
   type FileTreeResponse,
-  type LegacyFileTreeEntry,
 } from '../../common/file-contracts.ts';
 
 const logger = createLogger('routes:files');
@@ -59,6 +58,7 @@ const logger = createLogger('routes:files');
 const FILE_LIST_MAX_DEPTH = 10;
 const FILE_LIST_MAX_RESULTS = 10_000;
 const FILE_TREE_CONTAINMENT_CONCURRENCY = 16;
+const ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE = 'Upload too large. Maximum request size is 30MB.';
 const FILE_LIST_SKIP_NAMES = new Set([
   'node_modules',
   'dist',
@@ -159,15 +159,52 @@ function isOmittableFileTreeEntryError(error: unknown): boolean {
   );
 }
 
+async function readAttachmentFormData(request: Request): Promise<FormData> {
+  if (!request.body) return request.formData();
+  let totalBytes = 0;
+  const body = request.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      totalBytes += chunk.byteLength;
+      if (totalBytes > MAX_ATTACHMENT_UPLOAD_BODY_BYTES) {
+        throw new AttachmentValidationError(ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE, 413);
+      }
+      controller.enqueue(chunk);
+    },
+  }));
+
+  const contentType = request.headers.get('content-type');
+  return new Response(body, {
+    headers: contentType ? { 'content-type': contentType } : undefined,
+  }).formData();
+}
+
+async function resolveFileTreeHomeDirectory(
+  fileRootPath: string,
+): Promise<FileTreeHomeDirectory | null> {
+  let homePath: string;
+  try {
+    homePath = await resolveRealWithinCanonicalBase(
+      fileRootPath,
+      getHomeDirectoryPath(),
+    );
+    if (!(await fs.stat(homePath)).isDirectory()) return null;
+  } catch {
+    // Optional Home discovery never discloses paths or blocks the file tree.
+    return null;
+  }
+  return {
+    path: homePath,
+    breadcrumbs: buildFileTreeBreadcrumbs(fileRootPath, homePath),
+  };
+}
+
 interface FilesRouteDependencies {
   listTreeDirectory: typeof listDirectoryStrict;
-  listLegacyTreeDirectory: typeof listDirectoryLegacy;
   resolveSaveTarget: typeof resolveRealWithinBase;
 }
 
 const defaultFilesRouteDependencies: FilesRouteDependencies = {
   listTreeDirectory: listDirectoryStrict,
-  listLegacyTreeDirectory: listDirectoryLegacy,
   resolveSaveTarget: resolveRealWithinBase,
 };
 
@@ -220,6 +257,7 @@ export default function createFilesRoutes(
           false,
         );
       }
+      const homeDirectory = await resolveFileTreeHomeDirectory(fileRootPath);
 
       const listedEntries = await dependencies.listTreeDirectory(
         directoryPath,
@@ -253,6 +291,7 @@ export default function createFilesRoutes(
 
       const response: FileTreeResponse = {
         fileRootPath,
+        homeDirectory,
         directory: {
           path: directoryPath,
           relativePath: portableRelativePath(fileRootPath, directoryPath),
@@ -290,61 +329,6 @@ export default function createFilesRoutes(
       logger.error('files: file tree error:', errorMessage(error));
       return jsonErrorFromUnknown(error);
     }
-  }
-
-  async function handleLegacyTree(
-    _request: Request,
-    url: URL,
-  ): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
-    try {
-      const requestedPath = url.searchParams.get('path');
-      const targetDirectory = requestedPath
-        ? await resolveRealWithinBase(projectPath, requestedPath)
-        : projectPath;
-      const entries = await dependencies.listLegacyTreeDirectory(
-        targetDirectory,
-        true,
-      );
-      const resolvedEntries = await Promise.all(
-        entries.map(async (entry): Promise<LegacyFileTreeEntry | null> => {
-          try {
-            await resolveRealWithinBase(projectPath, entry.path);
-            return {
-              ...entry,
-              relativePath: portableRelativePath(projectPath, entry.path),
-            };
-          } catch (error) {
-            if (isOmittableFileTreeEntryError(error)) return null;
-            throw error;
-          }
-        }),
-      );
-      const response = resolvedEntries.filter(
-        (entry): entry is LegacyFileTreeEntry => entry !== null,
-      );
-      return Response.json(response);
-    } catch (error) {
-      if (isProjectBoundaryError(error)) {
-        return Response.json(
-          { error: 'Path must be under project root' },
-          { status: 403 },
-        );
-      }
-      logger.error('files: legacy file tree error:', errorMessage(error));
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
-    }
-  }
-
-  function handleTree(request: Request, url: URL): Promise<Response> {
-    const usesLegacySelector =
-      url.searchParams.has('chatId') || url.searchParams.has('projectPath');
-    return usesLegacySelector
-      ? handleLegacyTree(request, url)
-      : handleBaseTree(request, url);
   }
 
   async function handleList(_request: Request, url: URL): Promise<Response> {
@@ -626,13 +610,10 @@ export default function createFilesRoutes(
         Number.isFinite(contentLength) &&
         contentLength > MAX_ATTACHMENT_UPLOAD_BODY_BYTES
       ) {
-        return Response.json(
-          { error: 'Upload too large. Maximum request size is 30MB.' },
-          { status: 413 },
-        );
+        throw new AttachmentValidationError(ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE, 413);
       }
 
-      const formData = await request.formData();
+      const formData = await readAttachmentFormData(request);
       const entries = [
         ...formData.getAll('attachments'),
         ...formData.getAll('images'),
@@ -696,7 +677,7 @@ export default function createFilesRoutes(
   }
 
   return {
-    '/api/v1/files/tree': { GET: handleTree },
+    '/api/v1/files/tree': { GET: handleBaseTree },
     '/api/v1/files/list': { GET: handleList },
     '/api/v1/files/identity': { GET: handleIdentity },
     '/api/v1/files/revision': { GET: handleRevision },

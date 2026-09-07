@@ -70,7 +70,7 @@
 	<div class="p-3 space-y-2">
 		<!-- Severity radio group -->
 		<div class="flex gap-2">
-			{#each ['note', 'warning', 'blocker'] as const as sev}
+			{#each ['note', 'warning', 'blocker'] as const as sev (sev)}
 				<label class="flex items-center gap-1 text-[11px] cursor-pointer">
 					<input
 						type="radio"

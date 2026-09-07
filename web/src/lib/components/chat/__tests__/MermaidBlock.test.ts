@@ -23,6 +23,29 @@ describe('MermaidBlock', () => {
 		vi.restoreAllMocks();
 	});
 
+	it('treats empty source as settled without invoking the renderer', async () => {
+		const { container } = render(MermaidBlock, { text: '' });
+
+		await waitFor(() => {
+			expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
+		});
+		expect(mockedRenderMermaid).not.toHaveBeenCalled();
+	});
+
+	it('publishes layout readiness while rendering settles', async () => {
+		let resolveRender!: (svg: string) => void;
+		mockedRenderMermaid.mockReturnValue(
+			new Promise<string>((resolve) => (resolveRender = resolve)),
+		);
+		const { container } = render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
+
+		expect(container.querySelector('[data-chat-layout-pending="true"]')).toBeTruthy();
+		resolveRender('<svg viewBox="0 0 100 100"></svg>');
+		await waitFor(() => {
+			expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
+		});
+	});
+
 	it('opens an expanded viewer with translated zoom and fit controls', async () => {
 		render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
 
@@ -70,6 +93,50 @@ describe('MermaidBlock', () => {
 
 		await fireEvent.click(expandButton);
 		expect(screen.getByText('100%')).toBeTruthy();
+	});
+
+	it('retains its virtual owner until the portalled viewer closes', async () => {
+		const release = vi.fn();
+		const acquireTransientActivity = vi.fn(() => release);
+		render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			acquireTransientActivity,
+		});
+
+		const expandButton = await screen.findByRole('button', { name: 'Expand diagram' });
+		await waitFor(() => expect((expandButton as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(expandButton);
+		expect(acquireTransientActivity).toHaveBeenCalledOnce();
+		expect(release).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close (Escape)' }));
+		await tick();
+		expect(release).toHaveBeenCalledOnce();
+	});
+
+	it('does not release a reopened viewer through an overlapping close', async () => {
+		const firstRelease = vi.fn();
+		const secondRelease = vi.fn();
+		const acquireTransientActivity = vi
+			.fn()
+			.mockReturnValueOnce(firstRelease)
+			.mockReturnValueOnce(secondRelease);
+		render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			acquireTransientActivity,
+		});
+
+		const expandButton = await screen.findByRole('button', { name: 'Expand diagram' });
+		await waitFor(() => expect((expandButton as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(expandButton);
+		await fireEvent.click(screen.getByRole('button', { name: 'Close (Escape)' }));
+		await fireEvent.click(expandButton);
+		await tick();
+
+		expect(acquireTransientActivity).toHaveBeenCalledTimes(2);
+		expect(firstRelease).toHaveBeenCalledOnce();
+		expect(secondRelease).not.toHaveBeenCalled();
+		expect(screen.getByRole('dialog')).toBeTruthy();
 	});
 
 	it('isolates drag ownership and releases it after capture loss and close', async () => {

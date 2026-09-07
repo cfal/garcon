@@ -1,94 +1,119 @@
-// Shared attachment state for managing selected files and image object URLs.
-// Used by both PromptComposer and NewChatForm.
-
+import {
+	CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	chatAttachmentMimeType,
+} from '@garcon/common/attachments';
 import { untrack } from 'svelte';
 
-export const CHAT_ATTACHMENT_ACCEPT =
-	'image/*,.md,.markdown,.pdf,text/markdown,text/plain,application/pdf';
+export interface ChatAttachmentSupport {
+	allowImages: boolean;
+	fileMimeTypes: readonly string[];
+}
 
-const SUPPORTED_ATTACHMENT_EXTENSIONS = new Set(['md', 'markdown', 'pdf']);
-const MIME_BY_EXTENSION: Record<string, string> = {
-	markdown: 'text/markdown',
-	md: 'text/markdown',
-	pdf: 'application/pdf',
+const DEFAULT_CHAT_ATTACHMENT_SUPPORT: ChatAttachmentSupport = {
+	allowImages: true,
+	fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
 };
 
-export function isImageAttachment(file: File): boolean {
-	return file.type.startsWith('image/');
-}
+const ACCEPT_TOKENS_BY_MIME: Record<string, readonly string[]> = {
+	'application/pdf': ['application/pdf', '.pdf'],
+	'text/markdown': ['text/markdown', '.md', '.markdown'],
+	'text/plain': ['text/plain', '.txt'],
+	'video/mp4': ['video/mp4', '.mp4', '.m4v'],
+	'video/quicktime': ['video/quicktime', '.mov'],
+	'video/webm': ['video/webm', '.webm'],
+	'video/x-matroska': ['video/x-matroska', '.mkv'],
+};
 
-export function isSupportedChatAttachment(file: File): boolean {
-	if (isImageAttachment(file)) return true;
-	const mimeType = file.type.toLowerCase();
-	if (mimeType === 'application/pdf' || mimeType === 'text/markdown' || mimeType === 'text/plain') {
-		return true;
+export function chatAttachmentAccept(
+	support: ChatAttachmentSupport = DEFAULT_CHAT_ATTACHMENT_SUPPORT,
+): string {
+	const tokens = support.allowImages ? ['image/*', '.svg'] : [];
+	for (const mimeType of support.fileMimeTypes) {
+		tokens.push(...(ACCEPT_TOKENS_BY_MIME[mimeType] ?? [mimeType]));
 	}
-	const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-	return SUPPORTED_ATTACHMENT_EXTENSIONS.has(ext);
+	return [...new Set(tokens)].join(',');
 }
 
-export function mimeTypeForChatAttachment(file: File): string {
-	const explicit = file.type.trim();
-	if (explicit) return explicit;
-	const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-	return MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
+export const CHAT_ATTACHMENT_ACCEPT = chatAttachmentAccept();
+
+export function mimeTypeForChatAttachment(file: Pick<File, 'name' | 'type'>): string {
+	return chatAttachmentMimeType(file);
 }
 
-function imageKey(file: File, idx: number): string {
-	return `${file.name}:${file.size}:${file.lastModified}:${idx}`;
+export function isImageAttachment(file: Pick<File, 'name' | 'type'>): boolean {
+	return mimeTypeForChatAttachment(file).startsWith('image/');
 }
 
+export function isSupportedChatAttachment(
+	file: Pick<File, 'name' | 'type'>,
+	support: ChatAttachmentSupport = DEFAULT_CHAT_ATTACHMENT_SUPPORT,
+): boolean {
+	const mimeType = mimeTypeForChatAttachment(file);
+	if (mimeType.startsWith('image/')) return support.allowImages;
+	return support.fileMimeTypes.includes(mimeType);
+}
+
+export function isVideoChatAttachment(file: Pick<File, 'name' | 'type'>): boolean {
+	return mimeTypeForChatAttachment(file).startsWith('video/');
+}
+
+/** Manages selected attachments and image preview object URLs. */
 export class ImageAttachmentState {
 	images = $state<File[]>([]);
-	urls = $state<Map<string, string>>(new Map());
+	#urls = $state<Map<File, string>>(new Map());
 
-	/** Adds supported attachment files, deduplicating by name. */
-	add(files: File[]): void {
-		const existingNames = new Set(this.images.map((f) => f.name));
-		const newFiles = files
-			.filter(isSupportedChatAttachment)
-			.filter((f) => !existingNames.has(f.name));
-		if (newFiles.length > 0) {
-			this.images = [...this.images, ...newFiles];
+	get urls(): ReadonlyMap<File, string> {
+		return this.#urls;
+	}
+
+	add(files: File[], support: ChatAttachmentSupport = DEFAULT_CHAT_ATTACHMENT_SUPPORT): void {
+		const seen = new Set(this.images);
+		const newFiles: File[] = [];
+		for (const file of files) {
+			if (seen.has(file) || !isSupportedChatAttachment(file, support)) continue;
+			seen.add(file);
+			newFiles.push(file);
 		}
+		if (newFiles.length > 0) this.images = [...this.images, ...newFiles];
 	}
 
-	/** Removes the image at the given index. */
 	remove(index: number): void {
-		this.images = this.images.filter((_, i) => i !== index);
+		const file = this.images[index];
+		if (!file) return;
+		const url = this.#urls.get(file);
+		if (url) URL.revokeObjectURL(url);
+		const next = new Map(this.#urls);
+		next.delete(file);
+		this.#urls = next;
+		this.images = this.images.filter((_, currentIndex) => currentIndex !== index);
 	}
 
-	/** Clears all images and revokes all object URLs. */
 	clear(): void {
 		this.images = [];
 		this.revokeAll();
 	}
 
-	/** Returns the object URL for a given image at index. */
-	urlFor(file: File, idx: number): string | undefined {
-		return this.urls.get(imageKey(file, idx));
+	urlFor(file: File, _index: number): string | undefined {
+		return this.#urls.get(file);
 	}
 
-	/** Synchronizes object URLs with the current images list.
-	 *  Reuses existing URLs for unchanged files and revokes stale ones.
-	 *  Call this from an $effect that tracks `this.images`. */
 	syncUrls(): void {
-		const prev = untrack(() => this.urls);
-		const next = new Map<string, string>();
-		this.images.forEach((file, idx) => {
-			if (!isImageAttachment(file)) return;
-			const key = imageKey(file, idx);
-			next.set(key, prev.get(key) ?? URL.createObjectURL(file));
-		});
-		for (const [key, url] of prev) {
-			if (!next.has(key)) URL.revokeObjectURL(url);
+		const imageFiles = new Set(this.images.filter(isImageAttachment));
+		const next = new Map(untrack(() => this.#urls));
+		for (const [file, url] of next) {
+			if (!imageFiles.has(file)) {
+				URL.revokeObjectURL(url);
+				next.delete(file);
+			}
 		}
-		this.urls = next;
+		for (const file of imageFiles) {
+			if (!next.has(file)) next.set(file, URL.createObjectURL(file));
+		}
+		this.#urls = next;
 	}
 
-	/** Revokes all object URLs. Call on cleanup/destroy. */
 	revokeAll(): void {
-		for (const url of this.urls.values()) URL.revokeObjectURL(url);
-		this.urls = new Map();
+		for (const url of this.#urls.values()) URL.revokeObjectURL(url);
+		this.#urls = new Map();
 	}
 }

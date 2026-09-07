@@ -1,6 +1,5 @@
 import {
 	getGitBlame,
-	getGitCompare,
 	getGitConflictDetails,
 	getGitConflicts,
 	getGitFileHistory,
@@ -13,7 +12,6 @@ import {
 	gitMarkConflictResolved,
 	gitPopStash,
 	type GitBlameLine,
-	type GitCompareFile,
 	type GitConflictDetails,
 	type GitConflictFile,
 	type GitFileHistoryEntry,
@@ -49,9 +47,6 @@ export class GitPorcelainState {
 	blameLines = $state<GitBlameLine[]>([]);
 	blameTruncated = $state(false);
 	graphCommits = $state<GitGraphCommit[]>([]);
-	compareFiles = $state<GitCompareFile[]>([]);
-	compareBase = $state('HEAD~1');
-	compareHead = $state('HEAD');
 	stashMessage = $state('');
 	stashIncludeUntracked = $state(false);
 	private activeLoadId = 0;
@@ -107,10 +102,22 @@ export class GitPorcelainState {
 	}
 
 	async selectConflict(projectPath: string, filePath: string): Promise<void> {
-		this.cancelActiveLoad();
-		await this.withLoading('Failed to load conflict details', async () => {
-			this.conflictDetails = await getGitConflictDetails(projectPath, filePath);
-		});
+		const context = this.beginTrackedLoad();
+		try {
+			await this.withLoading(
+				'Failed to load conflict details',
+				async () => {
+					const details = await getGitConflictDetails(projectPath, filePath, {
+						signal: context.signal,
+					});
+					if (!this.isActiveLoad(context)) return;
+					this.conflictDetails = details;
+				},
+				context,
+			);
+		} finally {
+			if (this.activeLoadId === context.requestId) this.activeLoadAbort = null;
+		}
 	}
 
 	async acceptConflictSide(
@@ -253,14 +260,6 @@ export class GitPorcelainState {
 		);
 	}
 
-	async compareRefs(projectPath: string): Promise<void> {
-		this.cancelActiveLoad();
-		await this.withLoading('Failed to compare refs', async () => {
-			const result = await getGitCompare(projectPath, this.compareBase, this.compareHead);
-			this.compareFiles = result.files;
-		});
-	}
-
 	reset(): void {
 		this.inspectorView = 'none';
 		this.isLoading = false;
@@ -271,9 +270,6 @@ export class GitPorcelainState {
 		this.blameLines = [];
 		this.blameTruncated = false;
 		this.graphCommits = [];
-		this.compareFiles = [];
-		this.compareBase = 'HEAD~1';
-		this.compareHead = 'HEAD';
 		this.stashMessage = '';
 		this.stashIncludeUntracked = false;
 		this.cancelActiveLoad();

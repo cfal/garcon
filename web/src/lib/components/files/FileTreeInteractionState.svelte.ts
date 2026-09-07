@@ -61,7 +61,7 @@ export class FileTreeInteractionState {
 	activateRow(row: FileTreeRenderRow): void {
 		switch (row.kind) {
 			case 'parent':
-				void this.options.store.goToParent();
+				if (row.path !== null) void this.options.store.goToParent();
 				break;
 			case 'entry':
 				this.options.activateEntry(row);
@@ -81,7 +81,7 @@ export class FileTreeInteractionState {
 			case 'parent':
 				if (event.key === 'Enter') {
 					event.preventDefault();
-					void this.options.store.goToParent();
+					if (row.path !== null) void this.options.store.goToParent();
 				}
 				break;
 			case 'entry':
@@ -154,7 +154,7 @@ export class FileTreeInteractionState {
 			store.toggleDirectory(row.entry.path);
 			return;
 		}
-		this.focusRow(row.parentKey ?? (store.parentPath ? FILE_TREE_PARENT_ROW_KEY : null));
+		this.focusRow(row.parentKey ?? FILE_TREE_PARENT_ROW_KEY);
 	}
 
 	#handleChildStatusKeydown(

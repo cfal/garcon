@@ -132,11 +132,12 @@ describe('ReadReceiptOutboxStore', () => {
 		sessions.upsertFromServer([
 			{
 				id: 'a',
+				parentChat: null,
 				agentId: 'claude',
+				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
 				title: 'A',
 				projectPath: '/p',
-				effectiveProjectKey: '/p',
 				orderGroup: 'normal',
 				tags: [],
 				permissionMode: 'default',
@@ -147,7 +148,10 @@ describe('ReadReceiptOutboxStore', () => {
 				isPinned: false,
 				isArchived: false,
 				isActive: false,
+				isProcessing: false,
+				processingPhase: null,
 				isUnread: true,
+				canReloadFromNativeHistory: false,
 			},
 		]);
 
@@ -169,11 +173,12 @@ describe('ReadReceiptOutboxStore', () => {
 		sessions.upsertFromServer([
 			{
 				id: 'a',
+				parentChat: null,
 				agentId: 'claude',
+				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
 				title: 'Unread',
 				projectPath: '/p',
-				effectiveProjectKey: '/p',
 				orderGroup: 'normal',
 				tags: [],
 				permissionMode: 'default',
@@ -188,15 +193,19 @@ describe('ReadReceiptOutboxStore', () => {
 				isPinned: false,
 				isArchived: false,
 				isActive: false,
+				isProcessing: false,
+				processingPhase: null,
 				isUnread: true,
+				canReloadFromNativeHistory: false,
 			},
 			{
 				id: 'b',
+				parentChat: null,
 				agentId: 'claude',
+				agentOwnershipEpoch: 'epoch-b',
 				model: 'opus',
 				title: 'Read',
 				projectPath: '/p',
-				effectiveProjectKey: '/p',
 				orderGroup: 'normal',
 				tags: [],
 				permissionMode: 'default',
@@ -211,7 +220,10 @@ describe('ReadReceiptOutboxStore', () => {
 				isPinned: false,
 				isArchived: false,
 				isActive: false,
+				isProcessing: false,
+				processingPhase: null,
 				isUnread: false,
+				canReloadFromNativeHistory: false,
 			},
 		]);
 

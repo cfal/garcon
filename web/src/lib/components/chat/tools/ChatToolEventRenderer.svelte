@@ -1,19 +1,17 @@
 <script lang="ts">
-	// Dispatches tool rendering to ChatToolInlineEvent or ChatToolExpandableEvent
-	// based on the config-driven registry in tool-display-registry.ts.
-
 	import type { ToolUseChatMessage, TodoItem } from '$shared/chat-types';
 	import {
 		TOOL_DISPLAY_REGISTRY,
 		getToolDisplayLabel,
+		getToolDisplayPayload,
 	} from '$lib/chat/tools/tool-display-registry.js';
 	import { resolveDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
 	import type {
-		ToolInlineAction,
 		ToolInputDisplayRule,
 		ToolResultDisplayRule,
 	} from '$lib/chat/tools/tool-display-contract.js';
 	import ChatToolInlineEvent from './ChatToolInlineEvent.svelte';
+	import ChatBashToolEvent from './ChatBashToolEvent.svelte';
 	import ChatToolExpandableEvent from './ChatToolExpandableEvent.svelte';
 	import ChatToolDiffView from './content/ChatToolDiffView.svelte';
 	import ChatToolRichTextView from './content/ChatToolRichTextView.svelte';
@@ -22,26 +20,39 @@
 	import ChatToolTodoListView from './content/ChatToolTodoListView.svelte';
 	import CodeBlock from '../CodeBlock.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import type {
+		ConversationDisclosureKind,
+		ConversationDisclosureStatePort,
+	} from '../ConversationFeedItemState.svelte.js';
+	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 
 	interface ToolRendererProps {
 		toolMessage: ToolUseChatMessage;
-			toolResult?: Record<string, unknown>;
-			mode: 'input' | 'result';
-			onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
-			projectBasePath?: string | null;
-			chatProjectPath?: string | null;
-			autoExpandTools?: boolean;
-		}
+		toolResult?: Record<string, unknown>;
+		mode: 'input' | 'result';
+		resultAnchorId?: string;
+		onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
+		projectBasePath?: string | null;
+		chatProjectPath?: string | null;
+		resolveChatReference?: ResolveChatReference;
+		autoExpandTools?: boolean;
+		disclosureState?: ConversationDisclosureStatePort;
+		acquireTransientActivity?: (close: () => void) => () => void;
+	}
 
 	let {
 		toolMessage,
 		toolResult,
-			mode,
-			onFileOpen,
-			projectBasePath,
-			chatProjectPath,
-			autoExpandTools = false,
-		}: ToolRendererProps = $props();
+		mode,
+		resultAnchorId,
+		onFileOpen,
+		projectBasePath,
+		chatProjectPath,
+		resolveChatReference,
+		autoExpandTools = false,
+		disclosureState,
+		acquireTransientActivity,
+	}: ToolRendererProps = $props();
 
 	const toolName = $derived(getToolDisplayLabel(toolMessage));
 	const toolId = $derived(toolMessage.toolId);
@@ -50,7 +61,7 @@
 	let displayConfig = $derived(mode === 'input' ? config.input : config.result);
 
 	let parsedData = $derived(
-		mode === 'input' ? (toolMessage as unknown as Record<string, unknown>) : (toolResult ?? {}),
+		mode === 'input' ? getToolDisplayPayload(toolMessage) : (toolResult ?? {}),
 	);
 
 	function handleAction() {
@@ -61,7 +72,6 @@
 		}
 	}
 
-	// Collapsible config helpers
 	let collapsibleTitle = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return '';
 		return typeof displayConfig.title === 'function'
@@ -78,11 +88,11 @@
 	let contentProps = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return {};
 		return (
-				displayConfig.getContentProps?.(parsedData, {
-					projectPath: chatProjectPath,
-					onFileOpen,
-				}) || {}
-			);
+			displayConfig.getContentProps?.(parsedData, {
+				projectPath: chatProjectPath,
+				onFileOpen,
+			}) || {}
+		);
 	});
 
 	let shouldRenderCollapsedAsInline = $derived.by(() => {
@@ -115,7 +125,6 @@
 		return undefined;
 	});
 
-	// Inline config helpers
 	let inlineValue = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'inline') return '';
 		const cfg = displayConfig as ToolInputDisplayRule;
@@ -140,7 +149,6 @@
 		return cfg.getLanguage?.(parsedData) ?? cfg.language;
 	});
 
-	// Success message helper
 	let successMessage = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return '';
 		if (displayConfig.contentKind !== 'successMessage') return '';
@@ -150,63 +158,27 @@
 		);
 	});
 
-	// Result rendering: when toolResult is available and the result config
-	// specifies a renderable mode, render the result section with an id
-	// so jumpToResult links have a valid scroll target.
-	let resultConfig = $derived(config.result as ToolResultDisplayRule | undefined);
-
-	let shouldRenderResult = $derived.by(() => {
-		if (!toolResult || !resultConfig) return false;
-		if (resultConfig.hidden) return false;
-		if (resultConfig.mode === 'special') return false;
-		if (resultConfig.hideOnSuccess && !toolResult.isError) return false;
-		return resultConfig.mode === 'collapsible';
-	});
-
-	let parsedResultData = $derived.by(() => {
-		if (!toolResult) return {};
-		try {
-			return typeof toolResult === 'string' ? JSON.parse(toolResult as string) : toolResult;
-		} catch {
-			return toolResult;
-		}
-	});
-
-	let resultTitle = $derived.by(() => {
-		if (!shouldRenderResult || !resultConfig || resultConfig.mode !== 'collapsible') return '';
-		return typeof resultConfig.title === 'function'
-			? resultConfig.title(parsedResultData)
-			: resultConfig.title || m.chat_tool_renderer_details();
-	});
-
-	let resultDefaultOpen = $derived.by(() => {
-		if (!shouldRenderResult || !resultConfig || resultConfig.mode !== 'collapsible') return false;
-		if (autoExpandTools) return true;
-		return resultConfig.defaultOpen ?? false;
-	});
-
-	let resultContentProps = $derived.by(() => {
-		if (!shouldRenderResult || !resultConfig || resultConfig.mode !== 'collapsible') return {};
-		return resultConfig.getContentProps?.(parsedResultData) || {};
-	});
-
-	let resultSuccessMessage = $derived.by(() => {
-		if (!shouldRenderResult || !resultConfig) return '';
-		if (resultConfig.contentKind !== 'successMessage') return '';
-		return resultConfig.getMessage?.(parsedResultData) || m.chat_tool_renderer_success();
-	});
-
 	let inputAnchorId = $derived(mode === 'input' ? `tool-input-${toolId}` : undefined);
+	const disclosureKind: ConversationDisclosureKind = $derived(
+		mode === 'input' ? 'tool-input' : 'tool-result',
+	);
+	let displayAnchorId = $derived(
+		mode === 'input' ? inputAnchorId : (resultAnchorId ?? `tool-result-${toolId}`),
+	);
+	let displayOpen = $derived(
+		disclosureState?.open(disclosureKind, toolId, collapsibleDefaultOpen),
+	);
 </script>
 
-{#if displayConfig && displayConfig.mode !== 'hidden'}
-	<div id={inputAnchorId} class="scroll-mt-16">
+{#if mode === 'input' && toolMessage.type === 'bash-tool-use'}
+	<ChatBashToolEvent command={toolMessage.command} anchorId={inputAnchorId} />
+{:else if displayConfig && displayConfig.mode !== 'hidden' && displayConfig.mode !== 'special'}
+	<div id={displayAnchorId} class="scroll-mt-16">
 		{#if displayConfig.mode === 'inline'}
 			{@const cfg = displayConfig as ToolInputDisplayRule}
 			<ChatToolInlineEvent
 				{toolName}
 				{toolResult}
-				{toolId}
 				label={inlineLabel}
 				value={inlineValue}
 				secondary={inlineSecondary}
@@ -216,14 +188,13 @@
 				wrapText={cfg.wrapText}
 				language={inlineLanguage}
 				colorScheme={cfg.colorScheme}
-				resultId={mode === 'input' ? `tool-result-${toolId}` : undefined}
+				resultId={mode === 'input' ? resultAnchorId : undefined}
 			/>
 		{:else if displayConfig.mode === 'collapsible'}
 			{#if shouldRenderCollapsedAsInline}
 				<ChatToolInlineEvent
 					{toolName}
 					{toolResult}
-					{toolId}
 					label={toolName}
 					value={collapsedInlineFilePath || collapsibleTitle}
 					action={collapsedInlineFilePath && onFileOpen ? 'openFile' : 'none'}
@@ -237,134 +208,86 @@
 					{toolId}
 					title={collapsibleTitle}
 					defaultOpen={collapsibleDefaultOpen}
+					open={displayOpen}
+					onOpenChange={disclosureState
+						? (open) =>
+								disclosureState.setOpen(
+									disclosureKind,
+									toolId,
+									open,
+									collapsibleDefaultOpen,
+								)
+						: undefined}
 					onTitleClick={handleTitleClick}
 				>
-					{#snippet children()}
-						{#if displayConfig.contentKind === 'code'}
-							<CodeBlock
-								text={(contentProps.content as string) || ''}
-								lang={(contentProps.language as string) || ''}
-							/>
-						{:else if displayConfig.contentKind === 'diff'}
-							{#if contentProps.diffUnavailable}
-								<ChatToolFileListView
-									files={(contentProps.files as string[]) || []}
-									onFileClick={onFileOpen}
-									title={contentProps.title as string | undefined}
-								/>
-							{:else}
-								<ChatToolDiffView
-									oldContent={(contentProps.oldContent as string) || ''}
-									newContent={(contentProps.newContent as string) || ''}
-									filePath={(contentProps.filePath as string) || ''}
-									showHeader={(contentProps.showHeader as boolean | undefined) ?? true}
-									badge={contentProps.badge as string | undefined}
-									badgeColor={contentProps.badgeColor as 'gray' | 'green' | undefined}
-									onFileClick={contentProps.filePath && onFileOpen
-										? () => onFileOpen?.(contentProps.filePath as string)
-										: undefined}
-								/>
-							{/if}
-							{:else if displayConfig.contentKind === 'markdown'}
-								<ChatToolRichTextView
-									content={(contentProps.content as string) || ''}
-									{projectBasePath}
-									{chatProjectPath}
-									{onFileOpen}
-								/>
-						{:else if displayConfig.contentKind === 'fileList'}
+					{#if displayConfig.contentKind === 'code'}
+						<CodeBlock
+							text={(contentProps.content as string) || ''}
+							lang={(contentProps.language as string) || ''}
+						/>
+					{:else if displayConfig.contentKind === 'diff'}
+						{#if contentProps.diffUnavailable}
 							<ChatToolFileListView
 								files={(contentProps.files as string[]) || []}
 								onFileClick={onFileOpen}
 								title={contentProps.title as string | undefined}
 							/>
-						{:else if displayConfig.contentKind === 'text'}
-							<ChatToolPlainTextView
-								content={(contentProps.content as string) || ''}
-								format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
-								language={contentProps.language as string | undefined}
-							/>
-						{:else if displayConfig.contentKind === 'successMessage'}
-							<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
-								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M5 13l4 4L19 7"
-									/>
-								</svg>
-								{successMessage}
-							</div>
-						{:else if displayConfig.contentKind === 'todoList'}
-							<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
-						{:else if displayConfig.contentKind === 'task'}
-							<ChatToolPlainTextView
-								content={(contentProps.content as string) || ''}
-								format="plain"
+						{:else}
+							<ChatToolDiffView
+								oldContent={(contentProps.oldContent as string) || ''}
+								newContent={(contentProps.newContent as string) || ''}
+								filePath={(contentProps.filePath as string) || ''}
+								showHeader={(contentProps.showHeader as boolean | undefined) ?? true}
+								badge={contentProps.badge as string | undefined}
+								badgeColor={contentProps.badgeColor as 'gray' | 'green' | undefined}
+								onFileClick={contentProps.filePath && onFileOpen
+									? () => onFileOpen?.(contentProps.filePath as string)
+									: undefined}
 							/>
 						{/if}
-					{/snippet}
-				</ChatToolExpandableEvent>
-			{/if}
-		{/if}
-	</div>
-{/if}
-
-{#if shouldRenderResult && resultConfig}
-	<div id="tool-result-{toolId}">
-		<ChatToolExpandableEvent
-			{toolName}
-			{toolId}
-			title={resultTitle}
-			defaultOpen={resultDefaultOpen}
-		>
-				{#snippet children()}
-					{#if resultConfig.contentKind === 'code'}
-						<CodeBlock
-							text={(resultContentProps.content as string) || ''}
-							lang={(resultContentProps.language as string) || ''}
-						/>
-					{:else if resultConfig.contentKind === 'markdown'}
+					{:else if displayConfig.contentKind === 'markdown'}
 						<ChatToolRichTextView
-							content={(resultContentProps.content as string) || ''}
+							content={(contentProps.content as string) || ''}
 							{projectBasePath}
 							{chatProjectPath}
 							{onFileOpen}
+							{resolveChatReference}
+							{acquireTransientActivity}
 						/>
-				{:else if resultConfig.contentKind === 'fileList'}
-					<ChatToolFileListView
-						files={(resultContentProps.files as string[]) || []}
-						onFileClick={onFileOpen}
-						title={resultContentProps.title as string | undefined}
-					/>
-				{:else if resultConfig.contentKind === 'text'}
-					<ChatToolPlainTextView
-						content={(resultContentProps.content as string) || ''}
-						format={(resultContentProps.format as 'plain' | 'json' | 'code') || 'plain'}
-						language={resultContentProps.language as string | undefined}
-					/>
-				{:else if resultConfig.contentKind === 'successMessage'}
-					<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
-						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M5 13l4 4L19 7"
-							/>
-						</svg>
-						{resultSuccessMessage}
-					</div>
-				{:else if resultConfig.contentKind === 'todoList'}
-					<ChatToolTodoListView todos={resultContentProps.todos as TodoItem[] | undefined} />
-				{:else if resultConfig.contentKind === 'task'}
-					<ChatToolPlainTextView
-						content={(resultContentProps.content as string) || ''}
-						format="plain"
-					/>
-				{/if}
-			{/snippet}
-		</ChatToolExpandableEvent>
+					{:else if displayConfig.contentKind === 'fileList'}
+						<ChatToolFileListView
+							files={(contentProps.files as string[]) || []}
+							onFileClick={onFileOpen}
+							title={contentProps.title as string | undefined}
+						/>
+					{:else if displayConfig.contentKind === 'text'}
+						<ChatToolPlainTextView
+							content={(contentProps.content as string) || ''}
+							format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
+							language={contentProps.language as string | undefined}
+						/>
+					{:else if displayConfig.contentKind === 'successMessage'}
+						<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
+							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M5 13l4 4L19 7"
+								/>
+							</svg>
+							{successMessage}
+						</div>
+					{:else if displayConfig.contentKind === 'todoList'}
+						<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
+					{:else if displayConfig.contentKind === 'task'}
+						<ChatToolPlainTextView
+							content={(contentProps.content as string) || ''}
+							format="plain"
+						/>
+					{/if}
+				</ChatToolExpandableEvent>
+			{/if}
+		{/if}
 	</div>
 {/if}

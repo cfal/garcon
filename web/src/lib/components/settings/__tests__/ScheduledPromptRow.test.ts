@@ -70,7 +70,7 @@ describe('ScheduledPromptRow', () => {
 	it('shows and updates the next-run countdown for a recurring scheduled prompt', async () => {
 		const scheduledPrompt = makePrompt({
 			type: 'recurring',
-			intervalDays: 2,
+			intervalHours: 2,
 			nextRunAt: '2030-01-01T02:03:00.000Z',
 			endAt: null,
 		});
@@ -91,5 +91,24 @@ describe('ScheduledPromptRow', () => {
 
 		expect(screen.getByText('(next run due now)')).toBeTruthy();
 		expect(screen.queryByText('(next run in 2h3m)')).toBeNull();
+	});
+
+	it.each([
+		{ intervalHours: 1, label: 'Hourly, forever' },
+		{ intervalHours: 5, label: 'Every 5 hours, forever' },
+		{ intervalHours: 24, label: 'Daily, forever' },
+		{ intervalHours: 48, label: 'Every 2 days, forever' },
+	])('labels a $intervalHours-hour cadence as "$label"', ({ intervalHours, label }) => {
+		const { container } = renderRow(
+			makePrompt({
+				type: 'recurring',
+				intervalHours,
+				nextRunAt: '2030-01-01T02:03:00.000Z',
+				endAt: null,
+			}),
+			new Date('2030-01-01T00:00:00.000Z'),
+		);
+
+		expect(container.textContent).toContain(label);
 	});
 });

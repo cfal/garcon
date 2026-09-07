@@ -7,7 +7,7 @@ export class ChatIdAllocator {
   #lastIssued = 0n;
 
   constructor(
-    private readonly chats: Pick<IChatRegistry, 'getChat'>,
+    private readonly chats: Pick<IChatRegistry, 'hasChat'>,
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -17,7 +17,7 @@ export class ChatIdAllocator {
 
     for (let attempt = 0; attempt < MAX_ALLOCATION_ATTEMPTS; attempt += 1) {
       const chatId = chatIdFromEpochMicroseconds(candidate);
-      if (!this.chats.getChat(chatId)) {
+      if (!this.chats.hasChat(chatId)) {
         this.#lastIssued = candidate;
         return chatId;
       }

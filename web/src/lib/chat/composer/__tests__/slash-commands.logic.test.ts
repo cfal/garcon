@@ -4,10 +4,12 @@ import {
 	BUILTIN_SLASH_COMMANDS,
 	findSlashCommandTrigger,
 	parseCompactCommand,
+	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
 	parseSnippetCommand,
 	parseSteerCommand,
+	parseTagCommand,
 } from '$lib/chat/composer/slash-commands.js';
 
 describe('slash command helpers', () => {
@@ -62,7 +64,10 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const goal = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'goal');
 		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
 		const steer = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'steer');
+		const steerShort = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'st');
 		const rename = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'rename');
+		const move = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'move');
+		const tag = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'tag');
 		const snippet = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'snippet');
 		const snippetShort = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 's');
 		expect(compact).toBeDefined();
@@ -76,8 +81,17 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(scheduleIn?.description).toBeTruthy();
 		expect(steer?.source).toBe('command');
 		expect(steer?.description).toBeTruthy();
+		expect(steerShort?.source).toBe('command');
+		expect(steerShort?.description).toBeTruthy();
 		expect(rename?.source).toBe('command');
 		expect(rename?.description).toBeTruthy();
+		expect(move).toHaveLength(1);
+		expect(move[0].source).toBe('command');
+		expect(tag).toHaveLength(1);
+		expect(tag[0].source).toBe('command');
+		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name.startsWith('move-to-'))).toBe(
+			false,
+		);
 		expect(snippet?.source).toBe('command');
 		expect(snippet?.description).toBeTruthy();
 		expect(snippetShort?.source).toBe('command');
@@ -86,32 +100,120 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 	});
 });
 
+describe('parseMoveChatBoundaryCommand', () => {
+	for (const [input, boundary] of [
+		['/move top', 'top'],
+		['/MOVE TOP', 'top'],
+		['  /Move Bottom  ', 'bottom'],
+		['/move bottom ', 'bottom'],
+	] as const) {
+		it(`parses ${JSON.stringify(input)}`, () => {
+			expect(parseMoveChatBoundaryCommand(input)).toEqual({ kind: 'valid', boundary });
+		});
+	}
+
+	for (const input of [
+		'/move',
+		'/move middle',
+		'/move top now',
+		'/move bottom later',
+		'/move\ntop',
+		'/move top\nnow',
+	]) {
+		it(`claims unsupported arguments in ${JSON.stringify(input)}`, () => {
+			expect(parseMoveChatBoundaryCommand(input)).toEqual({
+				kind: 'invalid',
+				error: 'arguments-not-supported',
+			});
+		});
+	}
+
+	for (const input of [
+		'/movement top',
+		'/move-to-top',
+		'/move-to-bottom',
+		'please /move top',
+		'/other /move top',
+	]) {
+		it(`does not claim ${JSON.stringify(input)}`, () => {
+			expect(parseMoveChatBoundaryCommand(input)).toEqual({ kind: 'not-command' });
+		});
+	}
+});
+
+describe('parseTagCommand', () => {
+	it('normalizes and deduplicates tags for both actions', () => {
+		expect(parseTagCommand('/tag add Review-Needed review-needed QA')).toEqual({
+			kind: 'valid',
+			action: 'add',
+			tags: ['qa', 'review-needed'],
+		});
+		expect(parseTagCommand(' /TAG RM missing Urgent ')).toEqual({
+			kind: 'valid',
+			action: 'rm',
+			tags: ['missing', 'urgent'],
+		});
+	});
+
+	for (const input of ['/tag', '/tag add', '/tag rm', '/tag remove urgent', '/tag add !!!']) {
+		it(`rejects invalid arguments in ${JSON.stringify(input)}`, () => {
+			expect(parseTagCommand(input)).toEqual({ kind: 'invalid' });
+		});
+	}
+
+	for (const input of ['/tags add urgent', '/tagged add urgent', 'please /tag add urgent']) {
+		it(`does not claim ${JSON.stringify(input)}`, () => {
+			expect(parseTagCommand(input)).toEqual({ kind: 'not-command' });
+		});
+	}
+});
+
 describe('parseSnippetCommand', () => {
 	it('parses every supported spelling with a short name', () => {
 		for (const command of ['/snippet', '/s']) {
 			expect(parseSnippetCommand(`${command} review`)).toEqual({
 				kind: 'valid',
 				shortName: 'review',
-				arguments: '',
+				arguments: { type: 'default' },
 			});
 		}
 	});
 
-	it('preserves raw arguments', () => {
+	it('distinguishes omitted arguments from an explicit empty value', () => {
+		expect(parseSnippetCommand('/s review')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: { type: 'default' },
+		});
+		for (const input of ['/s review ', '/s review\t', '/s review\n', '/s review\r\n']) {
+			expect(parseSnippetCommand(input)).toEqual({
+				kind: 'valid',
+				shortName: 'review',
+				arguments: { type: 'value', value: '' },
+			});
+		}
+	});
+
+	it('preserves raw explicit arguments after exactly one separator', () => {
 		expect(parseSnippetCommand('/snippet review API  boundaries\nthen concurrency')).toEqual({
 			kind: 'valid',
 			shortName: 'review',
-			arguments: 'API  boundaries\nthen concurrency',
+			arguments: { type: 'value', value: 'API  boundaries\nthen concurrency' },
 		});
 		expect(parseSnippetCommand('/s review first\r\nsecond')).toEqual({
 			kind: 'valid',
 			shortName: 'review',
-			arguments: 'first\r\nsecond',
+			arguments: { type: 'value', value: 'first\r\nsecond' },
 		});
 		expect(parseSnippetCommand('/snippet review   indented\n')).toEqual({
 			kind: 'valid',
 			shortName: 'review',
-			arguments: '  indented\n',
+			arguments: { type: 'value', value: '  indented\n' },
+		});
+		expect(parseSnippetCommand('/snippet review\r\nsecond')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: { type: 'value', value: 'second' },
 		});
 	});
 
@@ -145,11 +247,17 @@ describe('parseSteerCommand', () => {
 			kind: 'valid',
 			prompt: 'Check the test\nthen continue',
 		});
+		expect(parseSteerCommand('/ST Check the test\nthen continue')).toEqual({
+			kind: 'valid',
+			prompt: 'Check the test\nthen continue',
+		});
 	});
 
 	it('requires guidance and ignores similar commands', () => {
 		expect(parseSteerCommand('/steer')).toEqual({ kind: 'invalid' });
+		expect(parseSteerCommand('/st')).toEqual({ kind: 'invalid' });
 		expect(parseSteerCommand('/steering continue')).toEqual({ kind: 'not-command' });
+		expect(parseSteerCommand('/status continue')).toEqual({ kind: 'not-command' });
 	});
 });
 

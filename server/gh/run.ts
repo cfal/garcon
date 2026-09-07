@@ -1,10 +1,31 @@
 import { promises as fs } from 'fs';
+import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
 import type { GhCommandOptions, GhCommandResult, GhProcessError } from './gh-types.js';
 
 const GH_DEFAULT_TIMEOUT_MS = 30_000;
+const GH_DEFAULT_MAX_STDOUT_BYTES = 64 * 1024 * 1024;
+const GH_DEFAULT_MAX_STDERR_BYTES = 2 * 1024 * 1024;
 
-function streamText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
-  return stream ? new Response(stream).text().catch(() => '') : Promise.resolve('');
+export class GhOutputLimitError extends Error {
+  constructor(
+    readonly stream: 'stdout' | 'stderr',
+    readonly maxBytes: number,
+  ) {
+    super(`GitHub CLI ${stream} exceeded the ${maxBytes} byte limit.`);
+    this.name = 'GhOutputLimitError';
+  }
+}
+
+function readGhOutput(
+  stream: ReadableStream<Uint8Array> | null,
+  streamName: 'stdout' | 'stderr',
+  maxBytes: number,
+): Promise<string> {
+  return readTextStreamWithLimit(
+    stream,
+    maxBytes,
+    () => new GhOutputLimitError(streamName, maxBytes),
+  );
 }
 
 function makeGhProcessError(
@@ -49,6 +70,7 @@ export async function runGh(
       stdout: 'pipe',
       stderr: 'pipe',
       signal,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
     });
   } catch (error) {
     // Bun throws synchronously when the executable is missing.
@@ -64,14 +86,31 @@ export async function runGh(
   };
   signal.addEventListener('abort', abortListener, { once: true });
 
+  let outputLimitError: GhOutputLimitError | null = null;
+  const captureOutput = (output: Promise<string>): Promise<string> =>
+    output.catch((error) => {
+      if (error instanceof GhOutputLimitError) {
+        outputLimitError ??= error;
+        proc.kill();
+      }
+      return '';
+    });
   const [stdout, stderr, exitCode] = await Promise.all([
-    streamText(proc.stdout),
-    streamText(proc.stderr),
+    captureOutput(readGhOutput(
+      proc.stdout,
+      'stdout',
+      options.maxStdoutBytes ?? GH_DEFAULT_MAX_STDOUT_BYTES,
+    )),
+    captureOutput(readTextStreamPrefix(
+      proc.stderr,
+      options.maxStderrBytes ?? GH_DEFAULT_MAX_STDERR_BYTES,
+    )),
     proc.exited,
   ]).finally(() => {
     signal.removeEventListener('abort', abortListener);
   });
 
+  if (outputLimitError) throw outputLimitError;
   if (exitCode === 0) return { stdout, stderr };
 
   throw makeGhProcessError(args, exitCode, stdout, stderr, {

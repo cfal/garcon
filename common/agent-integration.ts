@@ -1,4 +1,4 @@
-import type { JsonObject } from './json.js';
+import { isRecord, type JsonObject } from './json.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 
@@ -34,15 +34,23 @@ export const AGENT_SETTING_OPTION_LABEL_KEYS = [
   'automatic',
   'enabled',
   'disabled',
-  'smart',
-  'deep',
 ] as const;
 export type AgentSettingOptionLabelKey = (typeof AGENT_SETTING_OPTION_LABEL_KEYS)[number];
+
+export const AGENT_SETTING_OPTION_DESCRIPTION_KEYS = [
+  'thinkingAutomatic',
+  'thinkingEnabled',
+  'thinkingDisabled',
+] as const;
+export type AgentSettingOptionDescriptionKey =
+  (typeof AGENT_SETTING_OPTION_DESCRIPTION_KEYS)[number];
 
 export interface AgentOption {
   readonly value: string;
   readonly label: string;
   readonly labelKey?: AgentSettingOptionLabelKey;
+  readonly description?: string;
+  readonly descriptionKey?: AgentSettingOptionDescriptionKey;
 }
 
 interface AgentSettingDescriptorBase {
@@ -65,6 +73,12 @@ export function isAgentSettingLabelKey(value: unknown): value is AgentSettingLab
 
 export function isAgentSettingOptionLabelKey(value: unknown): value is AgentSettingOptionLabelKey {
   return AGENT_SETTING_OPTION_LABEL_KEYS.includes(value as AgentSettingOptionLabelKey);
+}
+
+export function isAgentSettingOptionDescriptionKey(
+  value: unknown,
+): value is AgentSettingOptionDescriptionKey {
+  return AGENT_SETTING_OPTION_DESCRIPTION_KEYS.includes(value as AgentSettingOptionDescriptionKey);
 }
 
 export interface AgentCatalogDescriptor {
@@ -95,10 +109,6 @@ export function parseAgentSettingsById(
     parsed[agentId] = envelope;
   }
   return parsed;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

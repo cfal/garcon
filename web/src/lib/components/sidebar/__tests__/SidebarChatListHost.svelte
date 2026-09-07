@@ -1,54 +1,63 @@
 <script lang="ts">
 	import SidebarChatList from '../SidebarChatList.svelte';
-	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
-	import type { SidebarDisplayOptions } from '../sidebar-display-options';
-	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats';
+	import { setAppShell, setModelCatalog } from '$lib/context';
+	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from '../sidebar-display-options';
+	import type {
+		PersistedChatOrderGroup,
+		RelativeChatOrderPlacement,
+	} from '$shared/chat-order-contracts';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 	interface SidebarChatListHostProps {
 		chats: ChatSessionRecord[];
 		filteredChats?: ChatSessionRecord[];
 		searchFilter?: string;
+		onNewChat?: () => void;
 		selectedChatId?: string | null;
 		isMobile?: boolean;
-		displayOptions?: SidebarDisplayOptions;
+		displayOptions?: Partial<SidebarDisplayOptions>;
 		collapsedProjectKeys?: ReadonlySet<string>;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onQuickMove?: (
-			list: ChatOrderList,
+			list: PersistedChatOrderGroup,
 			chatId: string,
-			target: ReorderQuickTarget,
+			placement: RelativeChatOrderPlacement,
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
 		chats,
 		filteredChats = chats,
 		searchFilter = '',
+		onNewChat,
 		selectedChatId = null,
 		isMobile = false,
-		displayOptions = {
-			groupByProject: false,
-			groupNestedProjectPaths: false,
-			compactChatItems: false,
-			sortMode: 'manual',
-		},
+		displayOptions: displayOptionsInput = {},
 		collapsedProjectKeys = new Set<string>(),
 		onToggleProjectCollapsed,
 		onQuickMove = () => {},
+		onSortChatOrder = () => {},
 	}: SidebarChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
-	let internalCollapsedKeys = $state<ReadonlySet<string>>(new Set<string>());
+	let displayOptions = $derived({
+		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		grouping: 'none' as const,
+		...displayOptionsInput,
+	});
+	let internalCollapsedKeys = $derived<ReadonlySet<string>>(new Set(collapsedProjectKeys));
 	let effectiveCollapsedKeys = $derived(
 		onToggleProjectCollapsed ? collapsedProjectKeys : internalCollapsedKeys,
 	);
-
-	$effect(() => {
-		internalCollapsedKeys = new Set(collapsedProjectKeys);
-	});
 
 	function handleProjectCollapseToggle(projectKey: string): void {
 		if (onToggleProjectCollapsed) {
@@ -79,11 +88,7 @@
 		},
 	} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		startDrag() {},
-		endDrag() {},
-	} as never);
+	setWorkspaceWindowDndTestContext();
 </script>
 
 <div
@@ -100,6 +105,7 @@
 		{isMobile}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{searchFilter}
+		{onNewChat}
 		{displayOptions}
 		collapsedProjectKeys={effectiveCollapsedKeys}
 		onToggleProjectCollapsed={handleProjectCollapseToggle}
@@ -112,5 +118,7 @@
 		onTogglePinned={() => {}}
 		onToggleArchive={() => {}}
 		{onQuickMove}
+		{onSortChatOrder}
+		newWindowEdges={workspaceSplitAdmissions()}
 	/>
 </div>

@@ -1,31 +1,84 @@
 <script lang="ts">
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
-	import GitCommitVirtualDiffRow from './GitCommitVirtualDiffRow.svelte';
+	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
+	import type {
+		CommentComposerState,
+		GitDiffSeverity,
+	} from '$lib/git/review/git-inline-comment.svelte.js';
+	import GitVirtualDiffRow from './GitVirtualDiffRow.svelte';
 	import GitCommitVirtualFileHeader from './GitCommitVirtualFileHeader.svelte';
 	import GitVirtualDiffViewport from './GitVirtualDiffViewport.svelte';
 	import GitVirtualPlaceholderRow from './GitVirtualPlaceholderRow.svelte';
+	import type { GitDiffRowInteraction } from './git-diff-row-interaction.js';
 
 	interface GitCommitVirtualDiffSurfaceProps {
-		rows: GitVirtualReviewRow[];
-		fileRowIndex: Map<string, number>;
+		documentId: string | null;
+		active?: boolean;
+		source: GitVirtualReviewRowSource;
 		fontSize: number;
 		scrollToRequest: { filePath: string; token: number } | null;
 		overscan?: number;
-		onVisibleRowsChange: (rows: GitVirtualReviewRow[]) => void;
+		onBodyDemand: (demand: GitReviewBodyDemand) => void;
 		onSelectFile: (filePath: string) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
+		composerState: CommentComposerState;
+		commentFeedback: {
+			filePath: string;
+			side: 'before' | 'after';
+			line: number;
+			message: string;
+		} | null;
+		commentError: string | null;
+		commentCopyText: string | null;
+		onAddComment: (filePath: string, side: 'before' | 'after', line: number) => void;
+		onComposerBodyChange: (body: string) => void;
+		onComposerSeverityChange: (severity: GitDiffSeverity) => void;
+		onComposerSubmit: () => void;
+		onComposerClose: () => void;
+		onComposerFocusHandled: () => void;
+		onOpenChat: () => void;
+		emptyMessage: string;
 	}
 
 	let {
-		rows,
-		fileRowIndex,
+		documentId,
+		active = true,
+		source,
 		fontSize,
 		scrollToRequest,
 		overscan = 18,
-		onVisibleRowsChange,
+		onBodyDemand,
 		onSelectFile,
 		onOpenInEditor,
+		composerState,
+		commentFeedback,
+		commentError,
+		commentCopyText,
+		onAddComment,
+		onComposerBodyChange,
+		onComposerSeverityChange,
+		onComposerSubmit,
+		onComposerClose,
+		onComposerFocusHandled,
+		onOpenChat,
+		emptyMessage,
 	}: GitCommitVirtualDiffSurfaceProps = $props();
+
+	let rowInteraction = $derived.by<GitDiffRowInteraction>(() => ({
+		kind: 'commentable',
+		composerState,
+		commentFeedback,
+		commentError,
+		commentCopyText,
+		onAddComment,
+		onComposerBodyChange,
+		onComposerSeverityChange,
+		onComposerSubmit,
+		onComposerClose,
+		onComposerFocusHandled,
+		onOpenChat,
+	}));
 </script>
 
 {#snippet renderCommitRow(row: GitVirtualReviewRow)}
@@ -33,18 +86,21 @@
 		<GitCommitVirtualFileHeader {row} {onSelectFile} />
 	{:else if row.kind === 'file-placeholder' || row.kind === 'file-limit' || row.kind === 'collection-limit'}
 		<GitVirtualPlaceholderRow {row} />
-	{:else}
-		<GitCommitVirtualDiffRow {row} {fontSize} {onOpenInEditor} />
+	{:else if row.kind === 'unified-row' || row.kind === 'split-row'}
+		<GitVirtualDiffRow {row} {fontSize} interaction={rowInteraction} {onOpenInEditor} />
 	{/if}
 {/snippet}
 
 <GitVirtualDiffViewport
-	{rows}
-	{fileRowIndex}
+	layoutIdentity={documentId}
+	reviewDocumentId={documentId}
+	{active}
+	{source}
+	pinFileHeaders={true}
 	{fontSize}
 	{scrollToRequest}
 	{overscan}
-	emptyMessage="No files match the current filter."
-	{onVisibleRowsChange}
+	{emptyMessage}
+	{onBodyDemand}
 	rowSnippet={renderCommitRow}
 />

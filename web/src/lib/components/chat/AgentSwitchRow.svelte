@@ -1,12 +1,12 @@
 <script lang="ts">
 	// Renders a cross-agent continuation boundary: a divider marking where the
-	// chat was continued under a different agent with a fresh seeded session,
-	// so prior tool state was not carried over.
+	// chat was continued under a different agent with a fresh seeded session and
+	// earlier context carried as history.
 
 	import ArrowRightLeft from '@lucide/svelte/icons/arrow-right-left';
 	import type { AgentSwitchMessage } from '$shared/chat-types';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import { agentLabelFor } from '$lib/i18n/agent-labels';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {

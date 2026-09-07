@@ -11,10 +11,11 @@ mock.module('../../config.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 const registry = {
   getChat: mock(() => undefined),
+  hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
   updateChat: mock(() => undefined),
   removeChat: mock(() => undefined),
@@ -30,18 +31,26 @@ const settings = {
   getPinnedChatIds: mock(() => []),
   getNormalChatIds: mock(() => []),
   getArchivedChatIds: mock(() => []),
-  reorderWindow: mock(() => Promise.resolve({ success: true })),
-  reorderRelative: mock(() => Promise.resolve({ success: true })),
+  reorderChat: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+  })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
@@ -49,19 +58,17 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-validate-start');
-const pendingInputs = createRoutePendingInputs();
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
-const routes = createChatRoutes({
+const routeDeps = {
   registry,
   settings,
   queue,
-  pathCache,
+  processing: { phase: mock(() => null) },
   metadata,
   chatViews,
   agents,
-	pendingInputs,
-	chatListProjector,
+  chatListProjector,
   commandService: createRouteCommandService({
     registry,
     queue,
@@ -69,11 +76,10 @@ const routes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
-		pathCache,
-		chatListProjector,
+    chatListProjector,
   }),
-});
+};
+const routes = createChatRoutes(routeDeps);
 const handler = routes['/api/v1/chats/validate-start'].GET;
 
 async function ensureCleanBase() {
@@ -126,6 +132,26 @@ describe('GET /api/v1/chats/validate-start', () => {
 
     expect(body.valid).toBe(false);
     expect(body.errorCode).toBe('not_directory');
+  });
+
+  it('returns permission_denied for inaccessible directories', async () => {
+    const deniedRoutes = createChatRoutes({
+      ...routeDeps,
+      inspectProject: mock(async () => ({
+        kind: 'unavailable',
+        reason: 'permission-denied',
+      })),
+    });
+    const deniedHandler = deniedRoutes['/api/v1/chats/validate-start'].GET;
+    const request = new Request(
+      `http://localhost/api/v1/chats/validate-start?path=${encodeURIComponent(testBasePath)}`,
+    );
+    const response = await deniedHandler(request, new URL(request.url));
+
+    await expect(response.json()).resolves.toMatchObject({
+      valid: false,
+      errorCode: 'permission_denied',
+    });
   });
 
   it('returns valid true and isGitRepo false for plain directories', async () => {

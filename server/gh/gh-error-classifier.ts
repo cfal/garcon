@@ -2,6 +2,8 @@
 // status codes and user-facing messages. Used by the route layer when an error
 // is not already a GhDomainError.
 
+import { errorMessage } from '../lib/errors.js';
+
 export type ClassifiedGhErrorCode =
   | 'GH_MISSING'
   | 'AUTH_FAILED'
@@ -19,16 +21,8 @@ export interface ClassifiedGhError {
   details?: string;
 }
 
-function errorMessage(error: unknown): string {
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-  }
-  return 'GitHub CLI operation failed.';
-}
-
 export function classifyGhError(error: unknown): ClassifiedGhError {
-  const message = errorMessage(error);
+  const message = errorMessage(error, 'GitHub CLI operation failed.');
   const text = message.toLowerCase();
 
   if (text.includes('gh) is not installed') || text.includes('command not found')) {

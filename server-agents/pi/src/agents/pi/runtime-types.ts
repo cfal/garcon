@@ -1,11 +1,10 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 
 export interface PiExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface PiExecutionRequest {
@@ -14,16 +13,16 @@ export interface PiExecutionRequest {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
-  readonly clientRequestId?: string;
-  readonly turnId?: string;
+  readonly operation: AgentRuntimeOperation;
   readonly executionAdmission?: PiExecutionAdmission;
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Readonly<Record<string, string>>;
-  readonly onAbortable?: () => void;
 }
 
-export type PiStartRequest = PiExecutionRequest;
+export interface PiStartRequest extends PiExecutionRequest {
+  readonly onSessionActivated?: (session: PiStartedSession) => void;
+}
 
 export interface PiResumeRequest extends PiExecutionRequest {
   readonly agentSessionId: string;
@@ -41,20 +40,9 @@ export function assertPiExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markPiExecutionStarted(
+export async function markPiExecutionStarted(
   request: { readonly executionAdmission?: PiExecutionAdmission },
-): void {
+): Promise<void> {
   assertPiExecutionOpen(request);
-  request.executionAdmission?.markStarted();
-}
-
-export function piEventMetadata(
-  request: Pick<PiExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
-): RuntimeEventMetadata {
-  return Object.freeze({
-    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-    ...(commandType ? { commandType } : {}),
-    ...(request.turnId ? { turnId: request.turnId } : {}),
-  });
+  await request.executionAdmission?.markStarted();
 }

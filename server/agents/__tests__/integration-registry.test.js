@@ -22,23 +22,18 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       configuration: [{ key: `${id.toUpperCase()}_BIN`, source: 'environment', description: 'Binary' }],
     },
     execution: {
-      start: async () => ({ agentSessionId: 'session', nativeSession: null }),
-      resume: async () => {},
+      start: async () => ({ id: 'execution' }),
+      resume: async () => ({ id: 'execution' }),
       abort: async () => false,
-      isRunning: () => false,
       runningSessions: () => [],
-      subscribe: () => () => {},
     },
-    transcript: {
-      resolveNativeSession: async () => null,
-      load: async () => ({ messages: [], revision: 'empty' }),
-      preview: async () => null,
-      revision: async () => 'empty',
-      resolveIndexSource: async () => null,
-      refreshIndexSource: async () => null,
-      describeSource: async () => null,
-      release: async () => {},
-    },
+    attachments: null,
+    legacyHistoryImport: null,
+    nativeHistoryImport: null,
+    nativeActivity: null,
+    nativeSessions: null,
+    sessionConfiguration: null,
+    projectPathUpdates: null,
     catalog: {
       snapshot: async () => ({
         models: [],
@@ -60,12 +55,17 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       migrateOwnedStorage: lifecycle.migrateOwnedStorage ?? (async () => {}),
     },
     migration: {
+      translateLegacyModel: async ({ model }) => model,
       translateLegacyNativeSession: async () => null,
       translateLegacySettings: async () => null,
     },
     auth: null,
     commands: null,
+    compaction: null,
     forking: null,
+    steering: null,
+    goals: null,
+    transientControls: null,
     endpoints: null,
     singleQuery: null,
     testHost: host,
@@ -75,9 +75,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
 function integrationClass(id, options = {}) {
   return class TestIntegration {
     static integrationId = id;
-    static apiVersion = options.apiVersion ?? 2;
-    static transcriptIndex = { apiVersion: 1, moduleUrl: import.meta.url };
-
+    static apiVersion = options.apiVersion ?? 5;
     constructor(host) {
       options.onConstruct?.(host);
       Object.assign(this, createFacetIntegration(host, id, options.lifecycle));
@@ -89,7 +87,6 @@ function hostFactory(workspaceDir) {
   return new IntegrationHostFactory({
     workspaceDir,
     resolveCredential: async () => null,
-    loadCarryOver: async ({ expectedRevision }) => ({ revision: expectedRevision, messages: [] }),
     loggerFactory: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
     readEnvironment: (name) => name === 'ALPHA_BIN' ? '/bin/alpha' : undefined,
   });

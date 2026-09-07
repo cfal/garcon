@@ -2,10 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  runAgentIntegrationConformance,
-  runAgentTranscriptIndexerConformance,
-} from '@garcon/server-agent-interface/testing';
+import { runAgentIntegrationConformance } from '@garcon/server-agent-interface/testing';
 import { defaultAgentIntegrations } from '../default-agent-integrations.js';
 import { IntegrationHostFactory } from '../integration-host.js';
 import { IntegrationRegistry } from '../integration-registry.js';
@@ -21,11 +18,10 @@ describe('default agent integration conformance', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('runs the required contract suite for every shipped integration', async () => {
+  it('[TLV5-L12.03-CORE-UNIT-01] runs the required contract suite for every shipped integration', async () => {
     const hostFactory = new IntegrationHostFactory({
       workspaceDir,
       resolveCredential: async () => null,
-      loadCarryOver: async ({ expectedRevision }) => ({ revision: expectedRevision, messages: [] }),
       readEnvironment: () => undefined,
       loggerFactory: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
     });
@@ -43,11 +39,6 @@ describe('default agent integration conformance', () => {
       await runAgentIntegrationConformance({
         integrationClass,
         integration: registry.require(integrationClass.integrationId),
-      });
-      await runAgentTranscriptIndexerConformance({
-        integrationId: integrationClass.integrationId,
-        moduleUrl: integrationClass.transcriptIndex.moduleUrl,
-        logger: { debug() {}, info() {}, warn() {}, error() {} },
       });
     }
 

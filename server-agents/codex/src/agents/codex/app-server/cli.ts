@@ -34,7 +34,7 @@ export async function resolveCodexCliCommand(): Promise<string> {
 function bundledCodexCliPath(): string {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const executableName = process.platform === 'win32' ? 'codex.cmd' : 'codex';
-  return path.resolve(currentDir, '../../node_modules/.bin', executableName);
+  return path.resolve(currentDir, '../../../../node_modules/.bin', executableName);
 }
 
 async function isExecutableFile(filePath: string): Promise<boolean> {

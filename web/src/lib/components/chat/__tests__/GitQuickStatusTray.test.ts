@@ -3,11 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitQuickStatusTray from '../GitQuickStatusTray.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
+const NAME_ASC = { key: 'name', direction: 'asc' } as const;
+
 function refsFromNames(names: string[]) {
 	return names.map((name) => ({
 		name,
 		ref: `refs/heads/${name}`,
 		kind: 'local-branch' as const,
+		updatedAt: null,
 		isCurrent: name === 'main',
 	}));
 }
@@ -96,6 +99,23 @@ describe('GitQuickStatusTray', () => {
 		expect(onCommit).toHaveBeenCalledOnce();
 	});
 
+	it('keeps controls visible while disabling non-anchor announcements', () => {
+		const { container } = render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				onCommit: vi.fn(),
+				announcementsEnabled: false,
+			},
+		});
+
+		const tray = container.firstElementChild?.firstElementChild;
+		expect(tray?.getAttribute('role')).toBeNull();
+		expect(tray?.getAttribute('aria-live')).toBe('off');
+		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+	});
+
 	it('skips zero-value summary items', () => {
 		render(GitQuickStatusTray, {
 			props: {
@@ -148,6 +168,8 @@ describe('GitQuickStatusTray', () => {
 		const onClose = vi.fn();
 		const onCreateBranch = vi.fn();
 		const onSwitchBranch = vi.fn();
+		const onSearchRefs = vi.fn();
+		const onSortRefs = vi.fn();
 
 		render(GitQuickStatusTray, {
 			props: {
@@ -156,20 +178,30 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				branchSelector: {
 					refs: refsFromNames(['main', 'feature/tray', 'bugfix/login']),
+					sort: NAME_ASC,
 					isOpen: true,
 					isLoading: false,
 					onToggle,
 					onClose,
 					onCreateBranch,
 					onSwitchBranch,
+					onSearchRefs,
+					onSortRefs,
 				},
 				onCommit: vi.fn(),
 			},
 		});
 
+		const menuClass = document.querySelector('[data-slot="popover-content"]')?.className ?? '';
+		expect(menuClass).toContain('w-[min(36rem,calc(100vw-2rem))]');
+
 		const search = screen.getByRole('combobox', { name: 'Find a ref' });
 		await fireEvent.input(search, { target: { value: 'feature' } });
 		expect(screen.queryByText('Branches')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated, newest first' }));
+		expect(onSortRefs).toHaveBeenCalledWith('updated', 'feature');
+		await new Promise((resolve) => window.setTimeout(resolve, 180));
+		expect(onSearchRefs).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('option', { name: /feature\/tray/ }));
 		expect(onClose).toHaveBeenCalledOnce();
@@ -193,12 +225,14 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				branchSelector: {
 					refs: refsFromNames(['main', 'feature/tray']),
+					sort: NAME_ASC,
 					isOpen: false,
 					isLoading: false,
 					onToggle,
 					onClose: vi.fn(),
 					onCreateBranch: vi.fn(),
 					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
 				},
 				onCommit: vi.fn(),
 			},
@@ -209,7 +243,40 @@ describe('GitQuickStatusTray', () => {
 		expect(onToggle).toHaveBeenCalledOnce();
 	});
 
-	it('truncates long branch names in the switch confirmation dialog', async () => {
+	it('expands the branch control on wide screens without wrapping on narrow screens', () => {
+		const longBranch = 'feature/a-long-current-branch-name';
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary({ branch: longBranch }),
+				isRefreshing: false,
+				branchSelector: {
+					refs: refsFromNames([longBranch]),
+					sort: NAME_ASC,
+					isOpen: false,
+					isLoading: false,
+					onToggle: vi.fn(),
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		const trigger = screen.getByRole('button', {
+			name: new RegExp(`current ref ${longBranch}`, 'i'),
+		});
+		const label = within(trigger).getByText(longBranch);
+		expect(trigger.className).toContain('max-w-44');
+		expect(trigger.className).toContain('sm:max-w-80');
+		expect(label.className).toContain('max-w-32');
+		expect(label.className).toContain('sm:max-w-64');
+		expect(label.className).toContain('truncate');
+	});
+
+	it('widens the switch confirmation dialog while preserving narrow-screen truncation', async () => {
 		const longBranch =
 			'feature/some-extremely-long-branch-name-that-should-never-wrap-the-confirmation-dialog';
 		render(GitQuickStatusTray, {
@@ -219,12 +286,14 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				branchSelector: {
 					refs: refsFromNames(['main', longBranch]),
+					sort: NAME_ASC,
 					isOpen: true,
 					isLoading: false,
 					onToggle: vi.fn(),
 					onClose: vi.fn(),
 					onCreateBranch: vi.fn(),
 					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
 				},
 				onCommit: vi.fn(),
 			},
@@ -236,6 +305,13 @@ describe('GitQuickStatusTray', () => {
 			name: `Switch to branch ${longBranch}?`,
 		});
 		const branchText = within(heading).getByText(longBranch);
+		const dialogClass = heading.closest('[data-slot="dialog-content"]')?.className ?? '';
+		const headerClass = heading.closest('[data-slot="dialog-header"]')?.className ?? '';
+		expect(dialogClass).toContain('w-[calc(100%-2rem)]');
+		expect(dialogClass).toContain('sm:max-w-2xl');
+		expect(headerClass).toContain('min-w-0');
+		expect(headerClass).toContain('max-w-full');
+		expect(heading.className).toContain('max-w-full');
 		expect(branchText.className).toContain('truncate');
 	});
 
@@ -248,12 +324,14 @@ describe('GitQuickStatusTray', () => {
 				isMobile: true,
 				branchSelector: {
 					refs: refsFromNames(['main', 'feature/tray']),
+					sort: NAME_ASC,
 					isOpen: true,
 					isLoading: false,
 					onToggle: vi.fn(),
 					onClose: vi.fn(),
 					onCreateBranch: vi.fn(),
 					onSwitchBranch: vi.fn(),
+					onSortRefs: vi.fn(),
 				},
 				onCommit: vi.fn(),
 			},

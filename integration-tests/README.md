@@ -1,6 +1,6 @@
 # Integration Tests
 
-This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses deterministic OpenAI-compatible and Anthropic Messages fake providers. The E2E lane adds the production SPA and Lightpanda.
+This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses deterministic OpenAI-compatible and Anthropic Messages fake providers. The E2E lane adds the production SPA and Lightpanda; the Chromium lane owns rendered layout and browser geometry.
 
 Integration coverage is required, not optional, when a change can fail only after multiple owners interact. Queueing, transcript stability, reconnect, restart recovery, command idempotency, concurrent chats, provider failures, forks, and deletion all belong here. A focused unit test should still cover the underlying component behavior.
 
@@ -11,6 +11,7 @@ Integration coverage is required, not optional, when a change can fail only afte
 | Pure logic, parsers, stores, reducers, adapters, and isolated components | A unit test beside the owning production module |
 | Server behavior spanning HTTP, WebSocket, provider IO, persistence, process lifecycle, or multiple server services | `tests/server/` |
 | User behavior whose contract includes SPA routing, rendering, dialogs, browser events, or client/server coordination | `tests/e2e/` |
+| User behavior whose contract depends on rendered layout, measurement, scrolling, focus, or selection geometry | `tests/chromium/` |
 
 Prefer the lowest layer that can reproduce the failure, but do not mock away the boundary under test. Cross-boundary production regressions generally require both a focused unit test and a regression test in this package. Lightpanda tests complement server integration tests; they do not replace them.
 
@@ -28,9 +29,11 @@ integration-tests/
     e2e-fixture.ts           Server fixture plus Lightpanda and production SPA
     spa-driver.ts            Reusable user-level SPA actions and waits
     lightpanda-process.ts    Isolated Lightpanda CDP lifecycle
+    chromium-fixture.ts      Server fixture plus real Chromium and failure diagnostics
   tests/
     server/                  Black-box server integration tests
     e2e/                     Lightpanda SPA workflows
+    chromium/                Rendered-browser geometry and interaction workflows
   artifacts/                 Failure diagnostics; generated and gitignored
 ```
 
@@ -99,7 +102,7 @@ Lightpanda validates DOM, routing, events, and browser/server coordination. It d
 - Assert `fixture.assertNoBrowserErrors()` in successful E2E workflows. Do not swallow console, protocol, cleanup, or shutdown failures.
 - Do not commit generated files under `artifacts/`. Successful runs remove their temporary directories automatically.
 
-Set `KEEP_INTEGRATION_ARTIFACTS=1` to retain isolated fixture directories for investigation. Failed server tests write diagnostics under `artifacts/server/`; failed E2E tests write the DOM snapshot, browser errors, Lightpanda logs, server exchanges, WebSocket events, and provider requests under `artifacts/e2e/`.
+Set `KEEP_INTEGRATION_ARTIFACTS=1` to retain isolated non-credential fixture directories for investigation. Credential-backed fixtures always remove their temporary provider homes and transcripts. Failed server tests write diagnostics under `artifacts/server/`; failed E2E tests write the DOM snapshot, browser errors, Lightpanda logs, server exchanges, WebSocket events, and provider requests under `artifacts/e2e/`.
 
 ## Running Tests
 
@@ -109,14 +112,22 @@ From the repository root:
 bun run typecheck
 bun run test:integration:server
 
+DEEPSEEK_TESTING_KEY=... \
+CLAUDE_TESTING_BASE_URL=... \
+CLAUDE_TESTING_MODEL=... \
+bun run test:live:claude
+OPENAI_TESTING_KEY=... bun run test:live:codex
+DEEPSEEK_TESTING_KEY=... bun run test:live:opencode
+
 bun run build
 LIGHTPANDA_BIN=/path/to/lightpanda bun run test:integration:e2e
+bun run test:integration:chromium
 
 bun run check
 bun run test
 ```
 
-`bun run test:integration` runs the server integration lane but not the Lightpanda lane. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
+`bun run test:integration` runs the deterministic server integration lane but not the credential-backed live-provider or Lightpanda lanes. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. Credential-backed suites use the separate `test:live` and `test:live:<provider>` commands; do not run them locally unless actively changing those tests, and rely on the PR CI live-provider gate otherwise. Testing credentials are named for the model provider whose quota they spend, so one secret drives every agent lane that bills that provider. The live Claude lane requires `DEEPSEEK_TESTING_KEY` plus `CLAUDE_TESTING_BASE_URL` and `CLAUDE_TESTING_MODEL` (DeepSeek's Anthropic-compatible endpoint and a model it serves), and uses the pinned test-only Claude CLI with low effort. The live Codex lane requires `OPENAI_TESTING_KEY` and uses the pinned test-only Codex CLI, `gpt-5.4-nano`, and low effort. The live OpenCode lane requires `DEEPSEEK_TESTING_KEY` and defaults to the pinned test-only OpenCode binary with `deepseek/deepseek-v4-flash`; `OPENCODE_TESTING_PROVIDER=openai` (with `OPENAI_TESTING_KEY`) and `OPENCODE_TESTING_MODEL` select another supported provider or model. All live lanes use a temporary provider home without changing the user's CLI login and redact failure diagnostics that omit provider content and server logs. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
 
 Focused runs are useful while iterating:
 
@@ -124,6 +135,7 @@ Focused runs are useful while iterating:
 cd integration-tests
 bun test --max-concurrency=1 --timeout=30000 tests/server/queue-lifecycle.test.ts
 bun test --max-concurrency=1 --timeout=60000 tests/e2e/queue-workflow.test.ts
+bun test --max-concurrency=1 --timeout=120000 tests/chromium/transcript-virtualization.test.ts
 ```
 
 Keep the configured single-test concurrency. The suites exercise process lifecycle and ordered race scenarios deliberately.
@@ -132,7 +144,11 @@ Keep the configured single-test concurrency. The suites exercise process lifecyc
 
 The deterministic lane exercises `direct-openai-compatible` and `direct-anthropic-compatible` through separate protocol fakes. Both providers are present in every fixture and remain alive across Garcon restarts. The Anthropic fake covers the Messages HTTP and SSE contract; it is not a fake Claude Code process or Claude Agent SDK. Together the fakes prove Garcon's multi-agent routing, lifecycle, queue, transcript, persistence, search, and SPA behavior without spending credentials or depending on external availability. They do not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.
 
-Future credential-backed provider suites should be opt-in, isolated from the deterministic required lane, and explicit about cost, rate limits, cleanup, and supported environments. Add them when test API keys are available; do not weaken or replace fake-provider coverage with live-provider tests.
+Credential-backed provider suites remain isolated from the deterministic required lane and must be explicit about cost, rate limits, cleanup, and supported environments. The live Claude lane receives its DeepSeek testing key and Anthropic-compatible endpoint configuration only in the temporary Garcon process environment. Do not weaken or replace fake-provider coverage with live-provider tests.
+
+Credential-backed Claude assertions may require visible assistant output, but must not require exact model text or a model-selected tool call. Exact queue, fork-point, native graph, permission, tool-result, and persistence semantics belong in the real-CLI scripted Claude tier, where model behavior is deterministic.
+
+The live Claude lane covers real Claude CLI and network transport, consecutive queue dispatch, native reload idempotence, restart/resume, whole-chat fork isolation, streaming interruption, and post-cancellation recovery.
 
 ## Change Checklist
 

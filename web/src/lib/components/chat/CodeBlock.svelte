@@ -9,6 +9,7 @@ language packages are fetched.
 </script>
 
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import HighlightedCodeText from './HighlightedCodeText.svelte';
@@ -27,12 +28,20 @@ language packages are fetched.
 			: 'm-0 overflow-x-auto whitespace-pre px-3 pb-3 pt-1 text-xs font-mono',
 	);
 	let copied = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 	async function handleCopy() {
 		const didCopy = await copyToClipboard(text);
 		if (!didCopy) return;
 		copied = true;
-		setTimeout(() => (copied = false), 2000);
+		if (copyTimer) clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => {
+			copied = false;
+			copyTimer = null;
+		}, 2000);
 	}
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 </script>
 
 <div

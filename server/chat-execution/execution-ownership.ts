@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import type { ChatStopIntent } from '../../common/chat-types.ts';
 import type { AgentExecutionAdmission } from '../agents/session-types.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
@@ -11,56 +10,71 @@ import {
 import type {
   DirectTurnReservation,
   DrainSuppressionReason,
-  SessionStopInFlight,
+  TranscriptSnapshotReservation,
 } from './types.ts';
 import { executionTurnIdentity } from './types.ts';
 
-// One chat's runtime execution state. Collapsing the former twelve parallel
-// per-chat collections into a single record makes the invariants ("a chat cannot
-// drain while holding a direct reservation") checkable in one place and lets a
-// single garbage-collection step retire a chat once every field is back to rest.
+// Exactly one of these owns a chat at a time, which the reserve methods enforce. Handles that
+// only mean something during a drain live inside that variant so they cannot outlast it.
+type ChatOwner =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'direct'; readonly reservationId: string }
+  | {
+      readonly kind: 'draining';
+      activeEntryId: string | null;
+    }
+  | { readonly kind: 'snapshot'; readonly reservationId: string };
+
+const IDLE_OWNER: ChatOwner = { kind: 'idle' };
+
 interface ChatExecutionState {
-  draining: boolean;
-  directReservationId: string | null;
-  directAdmission: AbortController | null;
-  drainAdmission: AbortController | null;
-  activeDrainEntryId: string | null;
-  shutdownDrainEntryId: string | null;
-  drainRequested: boolean;
-  suppressions: Set<DrainSuppressionReason>;
-  attempt: QueueExecutionAttempt | null;
-  sessionStop: SessionStopInFlight | null;
-  drainStop: SessionStopInFlight | null;
+  owner: ChatOwner;
+  // Outlives the owner that created it: a finished turn keeps the chat owned until its terminal
+  // event retires it, so its admission handle is released with the attempt, not the reservation.
+  turn: { attempt: QueueExecutionAttempt; admissionController: AbortController } | null;
+  // Intent recorded while something else owns the chat.
+  pending: { drainRequested: boolean; suppressions: Set<DrainSuppressionReason> };
+  repairSnapshot: TranscriptSnapshotReservation | null;
+}
+
+function ownsExecution(state: ChatExecutionState): boolean {
+  return state.owner.kind !== 'idle' || state.turn !== null || state.repairSnapshot !== null;
+}
+
+// A turn the user started holds the chat: a direct reservation, or the queue entry a drain is
+// currently running. A drain between entries and a settling turn are excluded.
+function isTurnReservedState(state: ChatExecutionState): boolean {
+  return state.owner.kind === 'direct'
+    || (state.owner.kind === 'draining' && state.owner.activeEntryId !== null);
 }
 
 function emptyChatExecutionState(): ChatExecutionState {
   return {
-    draining: false,
-    directReservationId: null,
-    directAdmission: null,
-    drainAdmission: null,
-    activeDrainEntryId: null,
-    shutdownDrainEntryId: null,
-    drainRequested: false,
-    suppressions: new Set(),
-    attempt: null,
-    sessionStop: null,
-    drainStop: null,
+    owner: IDLE_OWNER,
+    turn: null,
+    pending: { drainRequested: false, suppressions: new Set() },
+    repairSnapshot: null,
+  };
+}
+
+function createExecutionAdmission(): {
+  readonly admissionController: AbortController;
+  readonly executionAdmission: AgentExecutionAdmission;
+} {
+  const admissionController = new AbortController();
+  return {
+    admissionController,
+    executionAdmission: Object.freeze({
+      signal: admissionController.signal,
+      markStarted: async () => {},
+    }),
   };
 }
 
 function isIdle(state: ChatExecutionState): boolean {
-  return !state.draining
-    && state.directReservationId === null
-    && state.directAdmission === null
-    && state.drainAdmission === null
-    && state.activeDrainEntryId === null
-    && state.shutdownDrainEntryId === null
-    && !state.drainRequested
-    && state.suppressions.size === 0
-    && state.attempt === null
-    && state.sessionStop === null
-    && state.drainStop === null;
+  return !ownsExecution(state)
+    && !state.pending.drainRequested
+    && state.pending.suppressions.size === 0;
 }
 
 export class ExecutionOwnership {
@@ -77,38 +91,45 @@ export class ExecutionOwnership {
     return state;
   }
 
-  // Retires a chat once it holds no live state, replacing the scattered per-field
-  // deletes that previously risked orphaning one collection while clearing another.
+  // Shutdown aborts whichever admissions are live. Provider abort is handled separately and
+  // never delays ownership retirement.
+  #abortAdmissions(state: ChatExecutionState, reason: Error): void {
+    state.turn?.admissionController.abort(reason);
+  }
+
+  // Drain handles only exist while a drain owns the chat. The drainer sets them between
+  // beginDrain and endDrain, so reaching here otherwise means a caller escaped that window.
+  #requireDraining(chatId: string, action: string): Extract<ChatOwner, { kind: 'draining' }> {
+    const state = this.#chats.get(chatId);
+    if (state?.owner.kind !== 'draining') {
+      throw new Error(`Cannot ${action} for a chat that is not draining`);
+    }
+    return state.owner;
+  }
+
+  // Retires the complete record once the chat holds no live execution state.
   #gc(chatId: string): void {
     const state = this.#chats.get(chatId);
     if (state && isIdle(state)) this.#chats.delete(chatId);
   }
 
   beginShutdown(reason: Error): string[] {
-    for (const state of this.#chats.values()) {
-      state.directAdmission?.abort(reason);
-      if (state.activeDrainEntryId !== null) state.shutdownDrainEntryId = state.activeDrainEntryId;
-      state.drainAdmission?.abort(reason);
+    const owners: string[] = [];
+    for (const [chatId, state] of this.#chats) {
+      this.#abortAdmissions(state, reason);
+      if (ownsExecution(state)) owners.push(chatId);
     }
-    const owners = new Set<string>();
-    for (const [chatId, state] of this.#chats) if (state.directReservationId !== null) owners.add(chatId);
-    for (const [chatId, state] of this.#chats) if (state.draining) owners.add(chatId);
-    for (const [chatId, state] of this.#chats) if (state.attempt !== null) owners.add(chatId);
-    return [...owners];
+    return owners;
   }
 
   abortAdmission(chatId: string, reason: Error): void {
     const state = this.#chats.get(chatId);
     if (!state) return;
-    if (state.activeDrainEntryId !== null) state.shutdownDrainEntryId = state.activeDrainEntryId;
-    state.directAdmission?.abort(reason);
-    state.drainAdmission?.abort(reason);
+    this.#abortAdmissions(state, reason);
   }
 
   hasAnyOwner(): boolean {
-    for (const state of this.#chats.values()) {
-      if (state.draining || state.directReservationId !== null || state.attempt !== null) return true;
-    }
+    for (const state of this.#chats.values()) if (ownsExecution(state)) return true;
     return false;
   }
 
@@ -131,115 +152,184 @@ export class ExecutionOwnership {
 
   hasOwner(chatId: string): boolean {
     const state = this.#chats.get(chatId);
-    return state !== undefined
-      && (state.draining || state.directReservationId !== null || state.attempt !== null);
+    return state !== undefined && ownsExecution(state);
   }
 
-  isReserved(chatId: string): boolean {
+  isTurnReserved(chatId: string): boolean {
     const state = this.#chats.get(chatId);
-    return state !== undefined && (state.draining || state.directReservationId !== null);
+    return state !== undefined && isTurnReservedState(state);
   }
 
+  turnReservedChatIds(): string[] {
+    return [...this.#chats]
+      .filter(([, state]) => isTurnReservedState(state))
+      .map(([chatId]) => chatId);
+  }
+
+  reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation {
+    if (this.hasOwner(chatId)) throw new Error('Another chat operation already owns execution');
+    const reservation = Object.freeze({ chatId, reservationId: crypto.randomUUID() });
+    this.#state(chatId).owner = { kind: 'snapshot', reservationId: reservation.reservationId };
+    return reservation;
+  }
+
+  hasTranscriptSnapshot(chatId: string): boolean {
+    const state = this.#chats.get(chatId);
+    return state !== undefined
+      && (state.owner.kind === 'snapshot' || state.repairSnapshot !== null);
+  }
+
+  releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): void {
+    const state = this.#chats.get(reservation.chatId);
+    if (!state) return;
+    if (state.repairSnapshot?.reservationId === reservation.reservationId) {
+      state.repairSnapshot = null;
+      if (state.owner.kind === 'snapshot'
+          && state.owner.reservationId === reservation.reservationId) {
+        state.owner = IDLE_OWNER;
+      }
+      this.#gc(reservation.chatId);
+      return;
+    }
+    if (state.owner.kind !== 'snapshot') return;
+    if (state.owner.reservationId !== reservation.reservationId) {
+      throw new Error('Transcript snapshot reservation is no longer active');
+    }
+    state.owner = IDLE_OWNER;
+    this.#gc(reservation.chatId);
+  }
+
+  replaceTurnWithTranscriptSnapshot(
+    chatId: string,
+    turn: TurnIdentity,
+  ): TranscriptSnapshotReservation | null {
+    const state = this.#chats.get(chatId);
+    if (!state?.turn?.attempt.matches(turn)) return null;
+    if (state.repairSnapshot) return state.repairSnapshot;
+    const reservation = Object.freeze({ chatId, reservationId: crypto.randomUUID() });
+    state.repairSnapshot = reservation;
+    return reservation;
+  }
+
+  // Refuses every owner kind, including a direct reservation and a turn still settling. The
+  // coordinator already screens callers on the wider `hasOwner || isChatRunning`, so these
+  // throws are unreachable through it; they keep the invariant local to the class instead of
+  // resting on callers, and they are the only guard against re-reserving the same kind, which
+  // would strand the settling attempt this overwrites.
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation {
     const state = this.#state(chatId);
-    if (state.draining) throw new Error('Cannot reserve a direct turn while draining');
-    const admissionController = new AbortController();
+    if (ownsExecution(state)) {
+      throw new Error('Cannot reserve a direct turn while another operation owns execution');
+    }
+    const { admissionController, executionAdmission } = createExecutionAdmission();
     const reservation = Object.freeze({
       chatId,
       reservationId: crypto.randomUUID(),
-      executionAdmission: Object.freeze<AgentExecutionAdmission>({
-        signal: admissionController.signal,
-        markStarted: () => undefined,
-      }),
+      executionAdmission,
     });
-    state.directReservationId = reservation.reservationId;
-    state.directAdmission = admissionController;
     const identity = executionTurnIdentity(turn) ?? { turnId: crypto.randomUUID() };
-    state.attempt = new QueueExecutionAttempt(identity);
+    state.owner = { kind: 'direct', reservationId: reservation.reservationId };
+    state.turn = { attempt: new QueueExecutionAttempt(identity), admissionController };
     return reservation;
   }
 
   hasDirect(chatId: string): boolean {
-    const state = this.#chats.get(chatId);
-    return state !== undefined && state.directReservationId !== null;
+    return this.#chats.get(chatId)?.owner.kind === 'direct';
   }
 
   isDirectCurrent(reservation: DirectTurnReservation): boolean {
-    return this.#chats.get(reservation.chatId)?.directReservationId === reservation.reservationId;
+    const owner = this.#chats.get(reservation.chatId)?.owner;
+    return owner?.kind === 'direct' && owner.reservationId === reservation.reservationId;
   }
 
   releaseDirect(reservation: DirectTurnReservation): void {
     const state = this.#chats.get(reservation.chatId);
     if (!state) return;
-    state.directReservationId = null;
+    if (state.owner.kind === 'direct') {
+      state.owner = state.repairSnapshot
+        ? { kind: 'snapshot', reservationId: state.repairSnapshot.reservationId }
+        : IDLE_OWNER;
+    }
     this.#gc(reservation.chatId);
   }
 
   isDraining(chatId: string): boolean {
-    return this.#chats.get(chatId)?.draining === true;
+    return this.#chats.get(chatId)?.owner.kind === 'draining';
   }
 
   beginDrain(chatId: string): void {
     const state = this.#state(chatId);
-    if (state.directReservationId !== null) {
-      throw new Error('Cannot drain a chat holding a direct reservation');
+    if (state.owner.kind === 'direct' || state.owner.kind === 'snapshot') {
+      throw new Error('Cannot drain a chat holding an execution reservation');
     }
-    state.draining = true;
+    if (state.owner.kind === 'draining') return;
+    state.owner = { kind: 'draining', activeEntryId: null };
   }
 
   endDrain(chatId: string): void {
     const state = this.#chats.get(chatId);
     if (!state) return;
-    state.draining = false;
-    state.drainAdmission = null;
-    state.activeDrainEntryId = null;
-    state.shutdownDrainEntryId = null;
-    state.drainStop = null;
+    if (state.owner.kind === 'draining') {
+      state.owner = state.repairSnapshot
+        ? { kind: 'snapshot', reservationId: state.repairSnapshot.reservationId }
+        : IDLE_OWNER;
+    }
     this.#gc(chatId);
   }
 
   setActiveDrainEntry(chatId: string, entryId: string): void {
-    this.#state(chatId).activeDrainEntryId = entryId;
-  }
-
-  activeDrainEntry(chatId: string): string | undefined {
-    return this.#chats.get(chatId)?.activeDrainEntryId ?? undefined;
-  }
-
-  setDrainAdmission(chatId: string, controller: AbortController): void {
-    this.#state(chatId).drainAdmission = controller;
-  }
-
-  shutdownTargetsEntry(chatId: string, entryId: string): boolean {
-    return this.#chats.get(chatId)?.shutdownDrainEntryId === entryId;
+    this.#requireDraining(chatId, 'set the active drain entry').activeEntryId = entryId;
   }
 
   attempt(chatId: string): QueueExecutionAttempt | undefined {
-    return this.#chats.get(chatId)?.attempt ?? undefined;
+    return this.#chats.get(chatId)?.turn?.attempt ?? undefined;
   }
 
   hasAttempt(chatId: string): boolean {
-    const state = this.#chats.get(chatId);
-    return state !== undefined && state.attempt !== null;
+    return this.#chats.get(chatId)?.turn != null;
   }
 
-  installAttempt(chatId: string, attempt: QueueExecutionAttempt): void {
+  installAttempt(chatId: string, attempt: QueueExecutionAttempt): AgentExecutionAdmission {
     const state = this.#state(chatId);
-    if (state.attempt !== null) {
+    if (state.turn !== null) {
       throw new Error('Another chat turn already owns execution');
     }
-    state.attempt = attempt;
+    const { admissionController, executionAdmission } = createExecutionAdmission();
+    state.turn = { attempt, admissionController };
+    return executionAdmission;
   }
 
   isCurrentAttempt(chatId: string, attempt: QueueExecutionAttempt): boolean {
-    return this.#chats.get(chatId)?.attempt === attempt;
+    return this.#chats.get(chatId)?.turn?.attempt === attempt;
   }
 
   removeAttempt(chatId: string, attempt: QueueExecutionAttempt): boolean {
     const state = this.#chats.get(chatId);
-    if (!state || state.attempt !== attempt) return false;
-    state.attempt = null;
-    state.directAdmission = null;
+    if (!state || state.turn?.attempt !== attempt) return false;
+    state.turn = null;
+    if (state.owner.kind === 'idle' && state.repairSnapshot) {
+      state.owner = {
+        kind: 'snapshot',
+        reservationId: state.repairSnapshot.reservationId,
+      };
+    }
+    this.#gc(chatId);
+    return true;
+  }
+
+  retireAttempt(chatId: string, attempt: QueueExecutionAttempt, reason?: Error): boolean {
+    const state = this.#chats.get(chatId);
+    if (!state || state.turn?.attempt !== attempt) return false;
+    if (reason) state.turn.admissionController.abort(reason);
+    attempt.markSettled();
+    state.turn = null;
+    if (state.owner.kind === 'direct') {
+      state.owner = state.repairSnapshot
+        ? { kind: 'snapshot', reservationId: state.repairSnapshot.reservationId }
+        : IDLE_OWNER;
+    } else if (state.owner.kind === 'draining') {
+      state.owner.activeEntryId = null;
+    }
     this.#gc(chatId);
     return true;
   }
@@ -249,22 +339,22 @@ export class ExecutionOwnership {
   }
 
   requestDrain(chatId: string): void {
-    this.#state(chatId).drainRequested = true;
+    this.#state(chatId).pending.drainRequested = true;
   }
 
   consumeDrainRequest(chatId: string): void {
     const state = this.#chats.get(chatId);
     if (!state) return;
-    state.drainRequested = false;
+    state.pending.drainRequested = false;
     this.#gc(chatId);
   }
 
   hasDrainRequest(chatId: string): boolean {
-    return this.#chats.get(chatId)?.drainRequested === true;
+    return this.#chats.get(chatId)?.pending.drainRequested === true;
   }
 
   hasSuppression(chatId: string, reason: DrainSuppressionReason): boolean {
-    return this.#chats.get(chatId)?.suppressions.has(reason) === true;
+    return this.#chats.get(chatId)?.pending.suppressions.has(reason) === true;
   }
 
   enterAbortSuppression(chatId: string): void {
@@ -295,84 +385,35 @@ export class ExecutionOwnership {
   }
 
   #addSuppression(chatId: string, reason: DrainSuppressionReason): void {
-    this.#state(chatId).suppressions.add(reason);
+    this.#state(chatId).pending.suppressions.add(reason);
   }
 
   #removeSuppression(chatId: string, reason: DrainSuppressionReason): void {
     const state = this.#chats.get(chatId);
     if (!state) return;
-    state.suppressions.delete(reason);
+    state.pending.suppressions.delete(reason);
     this.#gc(chatId);
   }
 
-  // Clears a chat's transient execution state on reset/deletion. Deliberately
-  // preserves `draining` and any in-flight session stop, matching the prior
-  // per-collection clear that left `#draining`/`#sessionStops` untouched.
+  // Preserves an active drain while clearing other transient state.
   clearChat(chatId: string, reason: Error): void {
     const state = this.#chats.get(chatId);
     if (state) {
-      state.suppressions.clear();
-      state.drainRequested = false;
-      state.directReservationId = null;
-      state.directAdmission?.abort(reason);
-      state.directAdmission = null;
-      state.drainAdmission?.abort(reason);
-      state.drainAdmission = null;
-      state.activeDrainEntryId = null;
-      state.shutdownDrainEntryId = null;
-      state.attempt?.markSettled();
-      state.attempt = null;
-      state.drainStop = null;
+      state.pending.suppressions.clear();
+      state.pending.drainRequested = false;
+      this.#abortAdmissions(state, reason);
+      state.turn?.attempt.markSettled();
+      state.turn = null;
+      state.repairSnapshot = null;
+      // A live drain keeps its ownership while its loop unwinds against a deleted chat, but
+      // loses the handles that only describe the entry it was running.
+      state.owner = state.owner.kind === 'draining'
+        ? { kind: 'draining', activeEntryId: null }
+        : IDLE_OWNER;
     }
     this.#turnFinalizations.clearChat(chatId);
     this.#gc(chatId);
     this.notifyOwnersChanged();
-  }
-
-  reserveStop(chatId: string, intent: ChatStopIntent): SessionStopInFlight {
-    const state = this.#state(chatId);
-    if (state.sessionStop) return state.sessionStop;
-    let resolveStop!: (success: boolean) => void;
-    let rejectStop!: (error: unknown) => void;
-    const promise = new Promise<boolean>((resolve, reject) => {
-      resolveStop = resolve;
-      rejectStop = reject;
-    });
-    const operation: SessionStopInFlight = {
-      intent,
-      stopId: crypto.randomUUID(),
-      promise,
-      resolve: resolveStop,
-      reject: rejectStop,
-      started: false,
-    };
-    state.sessionStop = operation;
-    if (state.draining && !state.drainStop) {
-      state.drainStop = operation;
-    }
-    return operation;
-  }
-
-  stop(chatId: string): SessionStopInFlight | undefined {
-    return this.#chats.get(chatId)?.sessionStop ?? undefined;
-  }
-
-  clearStop(chatId: string, operation: SessionStopInFlight): void {
-    const state = this.#chats.get(chatId);
-    if (!state || state.sessionStop !== operation) return;
-    state.sessionStop = null;
-    this.#gc(chatId);
-  }
-
-  drainStop(chatId: string): SessionStopInFlight | undefined {
-    return this.#chats.get(chatId)?.drainStop ?? undefined;
-  }
-
-  consumeDrainStop(chatId: string, operation: SessionStopInFlight): void {
-    const state = this.#chats.get(chatId);
-    if (!state || state.drainStop !== operation) return;
-    state.drainStop = null;
-    this.#gc(chatId);
   }
 
   beginFinalization(chatId: string, turnId: string): QueuedTurnFinalizationHandle {

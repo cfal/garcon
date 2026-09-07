@@ -117,7 +117,7 @@
 				type="button"
 				id={optionId(index)}
 				role="option"
-				aria-selected={index === activeIndex}
+				aria-selected={row.value === selectedValue}
 				data-model-index={index}
 				style={`height:${rowHeight}px; transform:translateY(${index * rowHeight}px);`}
 				class={cn(

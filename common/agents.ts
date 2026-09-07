@@ -40,11 +40,15 @@ export interface AgentCatalogEntry {
   label: string;
   description?: string;
   kind: "agent";
+  supportsCompact: boolean;
   supportsFork: boolean;
   supportsForkAtMessage: boolean;
   supportsForkWhileRunning: boolean;
   supportsUpdateProjectPath: boolean;
+  supportsSteering: boolean;
+  supportsGoals: boolean;
   supportsImages: boolean;
+  fileAttachmentMimeTypes?: string[];
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
   authLoginSupported: boolean;

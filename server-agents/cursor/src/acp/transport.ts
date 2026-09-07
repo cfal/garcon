@@ -12,7 +12,7 @@ interface AcpProcess {
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
   exited: Promise<number>;
-  kill(signal?: string): void;
+  kill(): void;
 }
 
 type PendingRequest = {
@@ -40,13 +40,20 @@ function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
 }
 
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
-  return Bun.spawn([command, ...args], {
+  const process = Bun.spawn([command, ...args], {
     cwd: options.cwd,
     env: options.env,
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
-  }) as unknown as AcpProcess;
+  });
+  return {
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    exited: process.exited,
+    kill: () => { process.kill(); },
+  };
 }
 
 export class AcpTransport extends EventEmitter {
@@ -73,7 +80,7 @@ export class AcpTransport extends EventEmitter {
     void this.#watchExit(this.#process.exited);
   }
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown, onSent?: () => void): Promise<T> {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = this.#requestTimeoutMs > 0
@@ -90,6 +97,7 @@ export class AcpTransport extends EventEmitter {
           method,
           ...(params === undefined ? {} : { params }),
         });
+        onSent?.();
       } catch (error) {
         this.#rejectPending(id, error instanceof Error ? error : new Error(String(error)));
       }
@@ -130,16 +138,19 @@ export class AcpTransport extends EventEmitter {
     this.#process = null;
   }
 
-  onRpcMessage(cb: (message: AcpJsonRpcMessage) => void): void {
+  onRpcMessage(cb: (message: AcpJsonRpcMessage) => void): () => void {
     this.on('rpc-message', cb);
+    return () => this.off('rpc-message', cb);
   }
 
-  onStderr(cb: (line: string) => void): void {
+  onStderr(cb: (line: string) => void): () => void {
     this.on('stderr', cb);
+    return () => this.off('stderr', cb);
   }
 
-  onExit(cb: (exitCode: number) => void): void {
+  onExit(cb: (exitCode: number) => void): () => void {
     this.on('exit', cb);
+    return () => this.off('exit', cb);
   }
 
   #write(payload: AcpJsonRpcMessage): void {

@@ -54,6 +54,11 @@ interface GitQuickSummaryCacheEntry {
 	lastUpdatedAt: number;
 }
 
+export interface GitQuickProjectLease {
+	readonly projectPath: string;
+	readonly isProcessing: boolean;
+}
+
 const setGlobalTimeout: QuickSummarySetTimeout = (callback, delayMs) =>
 	globalThis.setTimeout(callback, delayMs);
 const clearGlobalTimeout: QuickSummaryClearTimeout = (handle) => {
@@ -90,18 +95,20 @@ function systemNow(): number {
 
 export class GitQuickSummaryStore {
 	projectPath = $state<string | null>(null);
+	visibleProjects = $state.raw<readonly GitQuickProjectLease[]>([]);
 	entries = $state<Record<string, GitQuickSummaryCacheEntry>>({});
 	isEnabled = $state(true);
-	isProcessing = $state(false);
 
-	private requestGeneration = 0;
-	private inFlight: AbortController | null = null;
-	private pendingRefresh: GitQuickRefreshReason | null = null;
-	private debounceTimer: QuickSummaryTimeoutHandle | null = null;
+	private readonly requestGenerationByProject = new Map<string, number>();
+	private readonly inFlightByProject = new Map<string, AbortController>();
+	private readonly pendingRefreshByProject = new Map<string, GitQuickRefreshReason>();
+	private readonly debounceTimerByProject = new Map<string, QuickSummaryTimeoutHandle>();
 	private readonly getSummary: typeof getGitQuickSummary;
 	private readonly setTimeoutFn: QuickSummarySetTimeout;
 	private readonly clearTimeoutFn: QuickSummaryClearTimeout;
 	private readonly now: QuickSummaryNow;
+	#ownedPollingKey = '';
+	#stopOwnedPolling: (() => void) | null = null;
 
 	constructor(deps: GitQuickSummaryStoreDeps = {}) {
 		this.getSummary = deps.getSummary ?? getGitQuickSummary;
@@ -167,76 +174,144 @@ export class GitQuickSummaryStore {
 
 	setProject(projectPath: string | null): void {
 		if (projectPath === this.projectPath) return;
-		const previousProjectPath = this.projectPath;
-		this.clearDebounce();
-		this.inFlight?.abort();
-		this.requestGeneration += 1;
-		if (previousProjectPath) this.updateEntry(previousProjectPath, { isRefreshing: false });
 		this.projectPath = projectPath;
-		if (projectPath && this.isEnabled) {
+		if (projectPath) {
 			this.touchProject(projectPath);
-			this.pruneCache(projectPath);
-			this.scheduleRefresh('project-change', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
+			this.pruneCache();
+			if (this.#hasVisibleProject(projectPath) && this.isEnabled) {
+				this.scheduleRefreshFor(
+					projectPath,
+					'project-change',
+					QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS,
+				);
+			}
 		}
+	}
+
+	setVisibleProjects(projects: readonly GitQuickProjectLease[]): void {
+		const deduplicated = new Map<string, GitQuickProjectLease>();
+		for (const project of projects) {
+			if (!project.projectPath) continue;
+			const previous = deduplicated.get(project.projectPath);
+			deduplicated.set(project.projectPath, {
+				projectPath: project.projectPath,
+				isProcessing: Boolean(previous?.isProcessing || project.isProcessing),
+			});
+		}
+		const next = [...deduplicated.values()].sort((left, right) =>
+			left.projectPath.localeCompare(right.projectPath),
+		);
+		const previous = new Map(this.visibleProjects.map((project) => [project.projectPath, project]));
+		if (
+			next.length === this.visibleProjects.length &&
+			next.every((project, index) => {
+				const current = this.visibleProjects[index];
+				return (
+					current?.projectPath === project.projectPath &&
+					current.isProcessing === project.isProcessing
+				);
+			})
+		) {
+			return;
+		}
+
+		const nextPaths = new Set(next.map((project) => project.projectPath));
+		for (const project of this.visibleProjects) {
+			if (nextPaths.has(project.projectPath)) continue;
+			this.#cancelProjectWork(project.projectPath);
+			this.updateEntry(project.projectPath, { isRefreshing: false });
+		}
+
+		this.visibleProjects = next;
+		for (const project of next) {
+			this.touchProject(project.projectPath);
+			const previousLease = previous.get(project.projectPath);
+			if (!this.isEnabled) continue;
+			if (!previousLease) {
+				this.scheduleRefreshFor(
+					project.projectPath,
+					'project-change',
+					QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS,
+				);
+			} else if (previousLease.isProcessing && !project.isProcessing) {
+				this.scheduleRefreshFor(
+					project.projectPath,
+					'agent-stopped',
+					QUICK_GIT_STOPPED_DEBOUNCE_MS,
+				);
+			}
+		}
+		this.pruneCache();
 	}
 
 	setEnabled(enabled: boolean): void {
 		if (enabled === this.isEnabled) return;
 		this.isEnabled = enabled;
 		if (!enabled) {
-			this.clearDebounce();
-			this.inFlight?.abort();
-			if (this.projectPath) this.updateEntry(this.projectPath, { isRefreshing: false });
+			for (const project of this.visibleProjects) {
+				this.#cancelProjectWork(project.projectPath);
+				this.updateEntry(project.projectPath, { isRefreshing: false });
+			}
 			return;
 		}
-		if (this.projectPath) {
-			this.touchProject(this.projectPath);
-			this.pruneCache(this.projectPath);
-			this.scheduleRefresh('tray-visible', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
+		for (const project of this.visibleProjects) {
+			this.touchProject(project.projectPath);
+			this.scheduleRefreshFor(
+				project.projectPath,
+				'tray-visible',
+				QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS,
+			);
 		}
-	}
-
-	setProcessing(processing: boolean): void {
-		if (processing === this.isProcessing) return;
-		const wasProcessing = this.isProcessing;
-		this.isProcessing = processing;
-		if (wasProcessing && !processing) {
-			this.scheduleRefresh('agent-stopped', QUICK_GIT_STOPPED_DEBOUNCE_MS);
-		}
+		this.pruneCache();
 	}
 
 	scheduleRefresh(reason: GitQuickRefreshReason, delayMs = 300): void {
-		if (!this.projectPath || !this.isEnabled) return;
-		this.pendingRefresh = reason;
-		this.clearDebounce();
-		this.debounceTimer = this.setTimeoutFn(() => {
-			this.debounceTimer = null;
-			void this.refresh(this.pendingRefresh ?? reason);
-		}, delayMs);
+		if (!this.projectPath) return;
+		this.scheduleRefreshFor(this.projectPath, reason, delayMs);
 	}
 
-	async refresh(_reason: GitQuickRefreshReason): Promise<void> {
-		const projectPath = this.projectPath;
-		if (!projectPath || !this.isEnabled) return;
-		this.clearDebounce();
-		this.pendingRefresh = null;
-		const generation = ++this.requestGeneration;
-		this.inFlight?.abort();
+	scheduleRefreshFor(projectPath: string, reason: GitQuickRefreshReason, delayMs = 300): void {
+		if (!this.isEnabled || !this.#hasVisibleProject(projectPath)) return;
+		this.pendingRefreshByProject.set(projectPath, reason);
+		this.#clearProjectDebounce(projectPath);
+		const timer = this.setTimeoutFn(() => {
+			this.debounceTimerByProject.delete(projectPath);
+			const pendingReason = this.pendingRefreshByProject.get(projectPath) ?? reason;
+			this.pendingRefreshByProject.delete(projectPath);
+			void this.refreshFor(projectPath, pendingReason);
+		}, delayMs);
+		this.debounceTimerByProject.set(projectPath, timer);
+	}
+
+	async refresh(reason: GitQuickRefreshReason): Promise<void> {
+		if (!this.projectPath) return;
+		await this.refreshFor(this.projectPath, reason);
+	}
+
+	async refreshFor(projectPath: string, _reason: GitQuickRefreshReason): Promise<void> {
+		if (!this.isEnabled || !this.#hasVisibleProject(projectPath)) return;
+		this.#clearProjectDebounce(projectPath);
+		this.pendingRefreshByProject.delete(projectPath);
+		const generation = (this.requestGenerationByProject.get(projectPath) ?? 0) + 1;
+		this.requestGenerationByProject.set(projectPath, generation);
+		this.inFlightByProject.get(projectPath)?.abort();
 		const controller = new AbortController();
-		this.inFlight = controller;
+		this.inFlightByProject.set(projectPath, controller);
 		this.updateEntry(projectPath, { isRefreshing: true, lastAccessedAt: this.now() });
 
 		try {
 			const result = await this.getSummary(projectPath, { signal: controller.signal });
 			if (!this.isCurrentResponse(projectPath, generation)) return;
 			this.applyResponse(projectPath, result);
-			this.pruneCache(projectPath);
+			this.pruneCache();
 		} catch (error) {
 			if (isAbortError(error) || !this.isCurrentResponse(projectPath, generation)) return;
 			this.applyRefreshError(projectPath, error);
-			this.pruneCache(projectPath);
+			this.pruneCache();
 		} finally {
-			if (this.inFlight === controller) this.inFlight = null;
+			if (this.inFlightByProject.get(projectPath) === controller) {
+				this.inFlightByProject.delete(projectPath);
+			}
 			if (this.isCurrentResponse(projectPath, generation)) {
 				this.updateEntry(projectPath, { isRefreshing: false });
 			}
@@ -248,16 +323,29 @@ export class GitQuickSummaryStore {
 		setIntervalFn = setGlobalInterval,
 		clearIntervalFn = clearGlobalInterval,
 	}: QuickSummaryPollingOptions = {}): () => void {
-		if (!this.projectPath || !this.isEnabled) return () => {};
-		const intervalMs = this.isProcessing ? QUICK_GIT_PROCESSING_POLL_MS : QUICK_GIT_IDLE_POLL_MS;
-		const intervalReason: GitQuickRefreshReason = this.isProcessing
-			? 'agent-processing-poll'
-			: 'idle-poll';
+		if (this.visibleProjects.length === 0 || !this.isEnabled) return () => {};
+		const intervalMs = this.visibleProjects.every((project) => project.isProcessing)
+			? QUICK_GIT_PROCESSING_POLL_MS
+			: QUICK_GIT_IDLE_POLL_MS;
 		const tick = (reason: GitQuickRefreshReason): void => {
-			if (!this.projectPath || !this.isEnabled || !canPollCommitSummary(documentRef)) return;
-			void this.refresh(reason);
+			if (!this.isEnabled || !canPollCommitSummary(documentRef)) return;
+			for (const project of this.visibleProjects) {
+				if (
+					reason !== 'visibility' &&
+					project.isProcessing &&
+					this.now() - (this.entryFor(project.projectPath)?.lastUpdatedAt ?? 0) <
+						QUICK_GIT_PROCESSING_POLL_MS
+				) {
+					continue;
+				}
+				let refreshReason: GitQuickRefreshReason;
+				if (reason === 'visibility') refreshReason = reason;
+				else if (project.isProcessing) refreshReason = 'agent-processing-poll';
+				else refreshReason = 'idle-poll';
+				void this.refreshFor(project.projectPath, refreshReason);
+			}
 		};
-		const intervalId = setIntervalFn(() => tick(intervalReason), intervalMs);
+		const intervalId = setIntervalFn(() => tick('idle-poll'), intervalMs);
 		const handleVisibilityChange = (): void => {
 			tick('visibility');
 		};
@@ -270,10 +358,22 @@ export class GitQuickSummaryStore {
 		};
 	}
 
+	reconcilePolling(options: QuickSummaryPollingOptions = {}): void {
+		const nextKey =
+			this.isEnabled && this.visibleProjects.length > 0 ? JSON.stringify(this.visibleProjects) : '';
+		if (nextKey === this.#ownedPollingKey) return;
+		this.#stopOwnedPolling?.();
+		this.#stopOwnedPolling = null;
+		this.#ownedPollingKey = nextKey;
+		if (nextKey) this.#stopOwnedPolling = this.startPolling(options);
+	}
+
 	destroy(): void {
-		this.clearDebounce();
-		this.inFlight?.abort();
-		this.inFlight = null;
+		this.#stopOwnedPolling?.();
+		this.#stopOwnedPolling = null;
+		this.#ownedPollingKey = '';
+		for (const project of this.visibleProjects) this.#cancelProjectWork(project.projectPath);
+		this.visibleProjects = [];
 		this.entries = {};
 	}
 
@@ -309,7 +409,11 @@ export class GitQuickSummaryStore {
 	}
 
 	private isCurrentResponse(projectPath: string, generation: number): boolean {
-		return generation === this.requestGeneration && this.projectPath === projectPath;
+		return (
+			generation === this.requestGenerationByProject.get(projectPath) &&
+			this.#hasVisibleProject(projectPath) &&
+			this.isEnabled
+		);
 	}
 
 	private applyRefreshError(projectPath: string, error: unknown): void {
@@ -364,29 +468,44 @@ export class GitQuickSummaryStore {
 		};
 	}
 
-	private pruneCache(activeProjectPath: string | null = this.projectPath): void {
+	private pruneCache(): void {
 		const now = this.now();
-		const activeEntry = activeProjectPath ? this.entryFor(activeProjectPath) : null;
+		const protectedPaths = new Set(this.visibleProjects.map((project) => project.projectPath));
+		if (this.projectPath) protectedPaths.add(this.projectPath);
+		const protectedEntries = [...protectedPaths].flatMap((projectPath) => {
+			const entry = this.entryFor(projectPath);
+			return entry ? [entry] : [];
+		});
 		const retained = Object.values(this.entries)
 			.filter((entry) => {
-				if (entry.projectPath === activeProjectPath) return true;
+				if (protectedPaths.has(entry.projectPath)) return false;
 				return now - entry.lastAccessedAt <= QUICK_GIT_CACHE_MAX_AGE_MS;
 			})
 			.sort((left, right) => right.lastAccessedAt - left.lastAccessedAt);
+		const bounded = [...protectedEntries, ...retained].slice(0, QUICK_GIT_CACHE_MAX_ENTRIES);
 
-		const bounded = retained.slice(0, QUICK_GIT_CACHE_MAX_ENTRIES);
-		if (activeEntry && !bounded.some((entry) => entry.projectPath === activeEntry.projectPath)) {
-			bounded.unshift(activeEntry);
-		}
-
-		this.entries = Object.fromEntries(
-			bounded.slice(0, QUICK_GIT_CACHE_MAX_ENTRIES).map((entry) => [entry.projectPath, entry]),
-		);
+		this.entries = Object.fromEntries(bounded.map((entry) => [entry.projectPath, entry]));
 	}
 
-	private clearDebounce(): void {
-		if (!this.debounceTimer) return;
-		this.clearTimeoutFn(this.debounceTimer);
-		this.debounceTimer = null;
+	#hasVisibleProject(projectPath: string): boolean {
+		return this.visibleProjects.some((project) => project.projectPath === projectPath);
+	}
+
+	#cancelProjectWork(projectPath: string): void {
+		this.#clearProjectDebounce(projectPath);
+		this.pendingRefreshByProject.delete(projectPath);
+		this.requestGenerationByProject.set(
+			projectPath,
+			(this.requestGenerationByProject.get(projectPath) ?? 0) + 1,
+		);
+		this.inFlightByProject.get(projectPath)?.abort();
+		this.inFlightByProject.delete(projectPath);
+	}
+
+	#clearProjectDebounce(projectPath: string): void {
+		const timer = this.debounceTimerByProject.get(projectPath);
+		if (timer === undefined) return;
+		this.clearTimeoutFn(timer);
+		this.debounceTimerByProject.delete(projectPath);
 	}
 }

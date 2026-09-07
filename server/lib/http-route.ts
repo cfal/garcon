@@ -18,6 +18,10 @@ type MarkedRouteHandler = RouteHandler & { [noAuthRouteMarker]?: true };
 type WrappedRouteHandler = (request: Request, server?: unknown) => Promise<Response>;
 type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
 
+export interface HttpRouteAuthOptions {
+  localCapability?: string;
+}
+
 // Marks a route handler as publicly accessible without JWT auth.
 export function markRouteNoAuth<T extends RouteHandler>(handler: T): T {
   if (typeof handler !== 'function') {
@@ -56,7 +60,12 @@ async function invokeRouteHandler(
 }
 
 // Wraps one route handler with URL parsing and JWT auth enforcement.
-export function wrapRoute(handler: RouteHandler, routePath: string, method: string): WrappedRouteHandler {
+export function wrapRoute(
+  handler: RouteHandler,
+  routePath: string,
+  method: string,
+  authOptions: HttpRouteAuthOptions = {},
+): WrappedRouteHandler {
   if (isAuthDisabled()) {
     return async (req: Request, server?: unknown): Promise<Response> => {
       return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL });
@@ -71,19 +80,25 @@ export function wrapRoute(handler: RouteHandler, routePath: string, method: stri
   }
 
   return async (req: Request, server?: unknown): Promise<Response> => {
-    const { errorResponse, principal } = await authenticateHttpRequest(req);
+    const { errorResponse, principal } = await authenticateHttpRequest(req, authOptions);
     if (errorResponse) return compressHttpResponse(req, errorResponse);
     return invokeRouteHandler(handler, req, server, { principal });
   };
 }
 
 // Wraps all routes in the route table with auth-aware wrappers.
-export function wrapRoutes(rawRoutes: RouteMap): WrappedRouteMap {
+export function wrapRoutes(
+  rawRoutes: RouteMap,
+  authOptions: HttpRouteAuthOptions = {},
+): WrappedRouteMap {
   return Object.fromEntries(
     Object.entries(rawRoutes).map(([routePath, methods]) => [
       routePath,
       Object.fromEntries(
-        Object.entries(methods).map(([method, handler]) => [method, wrapRoute(handler, routePath, method)])
+        Object.entries(methods).map(([method, handler]) => [
+          method,
+          wrapRoute(handler, routePath, method, authOptions),
+        ])
       ),
     ])
   );

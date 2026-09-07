@@ -6,7 +6,9 @@
 import type { SlashCommand } from '$shared/slash-commands';
 import { hasLeadingSlashCommand } from '$shared/scheduled-prompts';
 import { parseScheduleDuration, type ScheduleDurationError } from '$shared/schedule-duration';
-import { SNIPPET_SHORT_NAME_PATTERN } from '$shared/snippets';
+import { SNIPPET_SHORT_NAME_PATTERN, type SnippetArgumentsInput } from '$shared/snippets';
+import type { ChatOrderBoundary } from '$shared/chat-order-contracts';
+import { normalizeTags } from '$shared/tags';
 
 // Built-in commands surfaced in the composer menu even when agent discovery
 // misses them. Each command is handled by its owning submit or runtime path.
@@ -22,6 +24,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		description: 'Fork the conversation into a new chat',
 	},
 	{
+		name: 'handoff',
+		source: 'command',
+		description: 'Continue in a new chat with the same agent and a compacted transcript',
+	},
+	{
 		name: 'in',
 		source: 'command',
 		description: 'Schedule a prompt in this chat after a delay',
@@ -32,14 +39,29 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		description: 'Rename the current chat',
 	},
 	{
+		name: 'move',
+		source: 'command',
+		description: 'Move this chat to the top or bottom of its section in Manual order',
+	},
+	{
+		name: 'tag',
+		source: 'command',
+		description: 'Add or remove tags on this chat',
+	},
+	{
 		name: 'goal',
 		source: 'command',
-		description: 'Set a Codex goal and start working toward it',
+		description: 'Set an agent goal and start working toward it',
 	},
 	{
 		name: 'steer',
 		source: 'command',
-		description: 'Send guidance to the active Codex turn immediately',
+		description: 'Send guidance to the active turn',
+	},
+	{
+		name: 'st',
+		source: 'command',
+		description: 'Short alias for /steer',
 	},
 	{
 		name: 's',
@@ -103,11 +125,9 @@ export interface CompactCommand {
 }
 
 export type SteerCommandParseResult =
-	| { kind: 'not-command' }
-	| { kind: 'invalid' }
-	| { kind: 'valid'; prompt: string };
+	{ kind: 'not-command' } | { kind: 'invalid' } | { kind: 'valid'; prompt: string };
 
-const STEER_COMMAND_RE = /^\s*\/steer(?=\s|$)(?:\s+([\s\S]*))?$/i;
+const STEER_COMMAND_RE = /^\s*\/(?:steer|st)(?=\s|$)(?:\s+([\s\S]*))?$/i;
 
 export function parseSteerCommand(input: string): SteerCommandParseResult {
 	const match = STEER_COMMAND_RE.exec(input);
@@ -117,7 +137,7 @@ export function parseSteerCommand(input: string): SteerCommandParseResult {
 	return { kind: 'valid', prompt };
 }
 
-export function isCodexGoalCommand(input: string): boolean {
+export function isGoalCommand(input: string): boolean {
 	return /^\s*\/goal(?=\s|$)/i.test(input);
 }
 
@@ -145,10 +165,46 @@ export function parseRenameCommand(input: string): RenameCommand | null {
 	return { title: (match[1] ?? '').trim() };
 }
 
+export type MoveChatBoundaryCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid'; error: 'arguments-not-supported' }
+	| { kind: 'valid'; boundary: ChatOrderBoundary };
+
+const MOVE_CHAT_BOUNDARY_RE = /^\s*\/move(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*))?$/i;
+
+export function parseMoveChatBoundaryCommand(input: string): MoveChatBoundaryCommandParseResult {
+	const match = MOVE_CHAT_BOUNDARY_RE.exec(input);
+	if (!match) return { kind: 'not-command' };
+	if (/[\r\n]/.test(input)) return { kind: 'invalid', error: 'arguments-not-supported' };
+	const boundary = (match[1] ?? '').toLowerCase();
+	if ((boundary !== 'top' && boundary !== 'bottom') || (match[2] ?? '').trim()) {
+		return { kind: 'invalid', error: 'arguments-not-supported' };
+	}
+	return {
+		kind: 'valid',
+		boundary,
+	};
+}
+
+export type TagCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid' }
+	| { kind: 'valid'; action: 'add' | 'rm'; tags: string[] };
+
+const TAG_COMMAND_RE = /^\s*\/tag(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*))?$/i;
+
+export function parseTagCommand(input: string): TagCommandParseResult {
+	const match = TAG_COMMAND_RE.exec(input);
+	if (!match) return { kind: 'not-command' };
+	const action = (match[1] ?? '').toLowerCase();
+	if (action !== 'add' && action !== 'rm') return { kind: 'invalid' };
+	const tags = normalizeTags((match[2] ?? '').split(/\s+/));
+	if (tags.length === 0) return { kind: 'invalid' };
+	return { kind: 'valid', action, tags };
+}
+
 export type ScheduleInCommandError =
-	| ScheduleDurationError
-	| 'prompt-required'
-	| 'slash-prompt-unsupported';
+	ScheduleDurationError | 'prompt-required' | 'slash-prompt-unsupported';
 
 export type ScheduleInCommandParseResult =
 	| { kind: 'not-command' }
@@ -184,7 +240,11 @@ export function parseScheduleInCommand(input: string): ScheduleInCommandParseRes
 export type SnippetCommandParseResult =
 	| { kind: 'not-command' }
 	| { kind: 'invalid'; error: 'short-name-required' | 'invalid-short-name' }
-	| { kind: 'valid'; shortName: string; arguments: string };
+	| { kind: 'valid'; shortName: string; arguments: SnippetArgumentsInput };
+
+function stripSnippetArgumentSeparator(remainder: string): string {
+	return remainder.startsWith('\r\n') ? remainder.slice(2) : remainder.slice(1);
+}
 
 export function parseSnippetCommand(input: string): SnippetCommandParseResult {
 	const command = /^\/(\S+)(?=\s|$)/.exec(input);
@@ -204,6 +264,9 @@ export function parseSnippetCommand(input: string): SnippetCommandParseResult {
 	return {
 		kind: 'valid',
 		shortName,
-		arguments: remainder ? remainder.slice(1) : '',
+		arguments:
+			remainder.length === 0
+				? { type: 'default' }
+				: { type: 'value', value: stripSnippetArgumentSeparator(remainder) },
 	};
 }

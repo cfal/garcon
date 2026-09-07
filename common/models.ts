@@ -12,14 +12,17 @@ export const CLAUDE_MODELS = {
     { value: 'opus', label: 'Opus', supportsImages: true },
     { value: 'sonnet', label: 'Sonnet', supportsImages: true },
     { value: 'haiku', label: 'Haiku', supportsImages: true },
-    { value: 'fable', label: 'Fable 5', supportsImages: true },
+    { value: 'fable', label: 'Fable', supportsImages: true },
   ] satisfies SharedModelOption[],
   DEFAULT: 'opus',
 };
 
+export const GPT_6_ASTRA_MODEL = 'gpt-6-astra';
+
 export const CODEX_MODELS = {
   OPTIONS: [
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
+    { value: GPT_6_ASTRA_MODEL, label: 'GPT-6-Astra', supportsImages: true },
     { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', supportsImages: true },
     { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', supportsImages: true },
     { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna', supportsImages: true },
@@ -32,10 +35,12 @@ export const CODEX_MODELS = {
 
 export const AMP_MODELS = {
   OPTIONS: [
-    { value: 'smart', label: 'Amp Smart', supportsImages: false },
-    { value: 'deep', label: 'Amp Deep', supportsImages: false },
+    { value: 'low', label: 'Amp Low', supportsImages: true },
+    { value: 'medium', label: 'Amp Medium', supportsImages: true },
+    { value: 'high', label: 'Amp High', supportsImages: true },
+    { value: 'ultra', label: 'Amp Ultra', supportsImages: true },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'smart',
+  DEFAULT: 'medium',
 };
 
 export const FACTORY_MODELS = {

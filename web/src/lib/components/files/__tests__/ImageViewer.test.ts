@@ -3,6 +3,7 @@ import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ImageViewer from '../ImageViewer.svelte';
 import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
 describe('ImageViewer', () => {
 	afterEach(() => {
@@ -27,6 +28,111 @@ describe('ImageViewer', () => {
 		first.unmount();
 		render(ImageViewer, { session });
 		expect(screen.getByText('125%')).toBeTruthy();
+	});
+
+	it('restores manual viewport offsets across presentation remounts', async () => {
+		const session = new FileSession(
+			{
+				canonicalFileRootPath: '/workspace/project',
+				normalizedRelativePath: 'image.png',
+			},
+			'/workspace/project\0image.png',
+		);
+		session.imageObjectUrl = 'blob:image';
+		session.image = {
+			...session.image,
+			mode: 'manual',
+			scale: 2,
+			scrollLeft: 31,
+			scrollTop: 79,
+		};
+		const first = render(ImageViewer, { session });
+		await tick();
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const firstViewport = screen.getByRole('img').closest('.overflow-auto') as HTMLDivElement;
+		expect(firstViewport.dataset.workspaceScrollRegion).toBe('primary');
+		emulateDetachedScrollReset(firstViewport);
+		expect(firstViewport.scrollLeft).toBe(31);
+		expect(firstViewport.scrollTop).toBe(79);
+		firstViewport.scrollLeft = 47;
+		firstViewport.scrollTop = 113;
+		await fireEvent.scroll(firstViewport);
+		first.unmount();
+
+		render(ImageViewer, { session });
+		await tick();
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const restoredViewport = screen.getByRole('img').closest('.overflow-auto') as HTMLDivElement;
+		expect(restoredViewport.scrollLeft).toBe(47);
+		expect(restoredViewport.scrollTop).toBe(113);
+	});
+
+	it('does not overwrite saved dialog offsets when unmounted before restoration', async () => {
+		let nextFrame = 1;
+		const frames = new Map<number, FrameRequestCallback>();
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+			const frame = nextFrame++;
+			frames.set(frame, callback);
+			return frame;
+		});
+		vi.stubGlobal('cancelAnimationFrame', (frame: number) => frames.delete(frame));
+		const session = new FileSession(
+			{
+				canonicalFileRootPath: '/workspace/project',
+				normalizedRelativePath: 'image.png',
+			},
+			'/workspace/project\0image.png',
+		);
+		session.image = {
+			...session.image,
+			mode: 'manual',
+			scrollLeft: 23,
+			scrollTop: 101,
+		};
+
+		const dialog = render(ImageViewer, { session });
+		await tick();
+		dialog.unmount();
+
+		expect(session.image.scrollLeft).toBe(23);
+		expect(session.image.scrollTop).toBe(101);
+	});
+
+	it('does not overwrite saved offsets before the initial restore frame', async () => {
+		let nextFrame = 1;
+		const frames = new Map<number, FrameRequestCallback>();
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+			const frame = nextFrame++;
+			frames.set(frame, callback);
+			return frame;
+		});
+		vi.stubGlobal('cancelAnimationFrame', (frame: number) => frames.delete(frame));
+		const session = new FileSession(
+			{
+				canonicalFileRootPath: '/workspace/project',
+				normalizedRelativePath: 'image.png',
+			},
+			'/workspace/project\0image.png',
+		);
+		session.imageObjectUrl = 'blob:image';
+		session.image = {
+			...session.image,
+			mode: 'manual',
+			scrollLeft: 23,
+			scrollTop: 101,
+		};
+		render(ImageViewer, { session });
+		await tick();
+		const viewport = screen.getByRole('img').closest('.overflow-auto') as HTMLDivElement;
+
+		viewport.scrollLeft = 0;
+		viewport.scrollTop = 0;
+		await fireEvent.scroll(viewport);
+
+		expect(session.image.scrollLeft).toBe(23);
+		expect(session.image.scrollTop).toBe(101);
 	});
 
 	it('keeps the initial cursor focal point stable through a rapid wheel burst', async () => {
@@ -78,18 +184,52 @@ describe('ImageViewer', () => {
 		}
 
 		expect(session.image.scale).toBeCloseTo(Math.exp(0.4));
-		expect(session.image.focalX).toBeCloseTo(0.25);
-		expect(session.image.focalY).toBeCloseTo(0.25);
 
 		image.getBoundingClientRect = () => new DOMRect(80, 80, 400, 200);
 		flushFrame();
 		expect(viewport.scrollLeft).toBe(30);
 		expect(viewport.scrollTop).toBe(5);
-
-		viewport.dispatchEvent(new Event('scroll'));
-		expect(session.image.focalX).toBeCloseTo(0.25);
-		expect(session.image.focalY).toBeCloseTo(0.25);
 		expect(session.image.scrollLeft).toBe(30);
 		expect(session.image.scrollTop).toBe(5);
+	});
+
+	it('keeps rendered geometry stable while persisting user scroll', async () => {
+		const session = new FileSession(
+			{
+				canonicalFileRootPath: '/workspace/project',
+				normalizedRelativePath: 'image.png',
+			},
+			'/workspace/project\0image.png',
+		);
+		session.imageObjectUrl = 'blob:image';
+		session.image = { ...session.image, mode: 'manual', scale: 2 };
+		render(ImageViewer, { session });
+		await tick();
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+		const image = screen.getByRole('img');
+		const viewport = image.closest('.overflow-auto') as HTMLDivElement;
+		const stage = image.parentElement as HTMLDivElement;
+		const canvas = stage.parentElement as HTMLDivElement;
+		viewport.getBoundingClientRect = () => new DOMRect(0, 0, 500, 400);
+		image.getBoundingClientRect = () => new DOMRect(80, 80, 400, 200);
+		const renderedGeometry = {
+			canvas: canvas.getAttribute('style'),
+			stage: stage.getAttribute('style'),
+		};
+
+		viewport.scrollLeft = 47;
+		viewport.scrollTop = 113;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(session.image.scrollLeft).toBe(47);
+		expect(session.image.scrollTop).toBe(113);
+		expect(Object.keys(session.image).sort()).toEqual(['mode', 'scale', 'scrollLeft', 'scrollTop']);
+		expect({
+			canvas: canvas.getAttribute('style'),
+			stage: stage.getAttribute('style'),
+		}).toEqual(renderedGeometry);
 	});
 });

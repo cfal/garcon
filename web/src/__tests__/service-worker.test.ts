@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithTimeout, isManifestPath, precacheAppShell } from '../service-worker-helpers';
+import {
+	fetchWithTimeout,
+	isManifestPath,
+	precacheAppShell,
+	shouldCacheNavigationResponse,
+} from '../service-worker-helpers';
 
 describe('service worker helpers', () => {
 	beforeEach(() => {
@@ -53,6 +58,19 @@ describe('service worker helpers', () => {
 		expect(isManifestPath('/site.webmanifest')).toBe(true);
 		expect(isManifestPath('https://garcon.test/site.webmanifest')).toBe(true);
 		expect(isManifestPath('/icon.svg')).toBe(false);
+	});
+
+	it('does not cache navigation responses marked no-store', () => {
+		const response = (cacheControl?: string) =>
+			({
+				ok: true,
+				type: 'basic',
+				headers: new Headers(cacheControl ? { 'Cache-Control': cacheControl } : undefined),
+			}) as Response;
+
+		expect(shouldCacheNavigationResponse(response())).toBe(true);
+		expect(shouldCacheNavigationResponse(response('public, max-age=60'))).toBe(true);
+		expect(shouldCacheNavigationResponse(response('private, NO-STORE'))).toBe(false);
 	});
 
 	it('times out navigation fetches while preserving the late response hook', async () => {

@@ -1,293 +1,706 @@
-// Persists text-only direct chat history for compatible API providers.
+import crypto from 'node:crypto';
+import { constants, promises as fs, type BigIntStats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+import path from 'node:path';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
+import type {
+  AgentHost,
+  AgentNativeSessionRef,
+} from '@garcon/server-agent-interface';
+import { hasNodeErrorCode } from '../lib/errors.js';
+import { syncDirectory } from '../lib/json-file-store.js';
 
-import { promises as fs } from 'fs';
-import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
-import { syncDirectory } from '@garcon/server-agent-common/lib/json-file-store';
+const DIRECT_SESSION_NAMESPACE = 'direct-sessions-v1';
+const DIRECT_SESSION_SCHEMA_VERSION = 1;
+const DIRECT_SESSION_HEADER_MAX_BYTES = 4 * 1024;
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
-export type DirectConversationRole = 'user' | 'assistant';
-
-export interface DirectMessageIdentity {
-  clientRequestId?: string;
-  clientMessageId?: string;
-  turnId?: string;
+export interface DirectSessionHeaderV1 {
+  readonly type: 'session';
+  readonly schemaVersion: 1;
+  readonly ownerId: string;
+  readonly sessionId: string;
+  readonly createdAt: string;
 }
 
-export interface DirectConversationMessage {
-  role: DirectConversationRole;
-  content: string;
-  clientRequestId?: string;
-  clientMessageId?: string;
-  turnId?: string;
+export interface DirectUserRecordV1 {
+  readonly type: 'user';
+  readonly at: string;
+  readonly runId: string;
+  readonly content: string;
+  readonly attachments: readonly AgentAttachment[];
 }
 
-export interface PersistedDirectMessage extends DirectConversationMessage {
-  timestamp: string;
+export interface DirectResponsesCheckpointV1 {
+  readonly kind: 'openai-response';
+  readonly responseId: string;
+  readonly endpointId: string;
+  readonly endpointFingerprint: string;
+  readonly model: string;
 }
 
-export interface DirectSessionStoreConfig {
-  getSessionDir: () => string;
-  getSessionFilePath: (sessionId: string) => string;
-  fileSystem?: Pick<
-    typeof fs,
-    'mkdir' | 'open' | 'readFile' | 'rm' | 'stat'
-  >;
-  syncDirectory?: (directory: string) => Promise<void>;
+export interface DirectAssistantRecordV1 {
+  readonly type: 'assistant';
+  readonly at: string;
+  readonly runId: string;
+  readonly content: string;
+  readonly checkpoint: DirectResponsesCheckpointV1 | null;
 }
 
-const DELIVERY_IDENTITY_FIELDS = [
-  'clientRequestId',
-  'clientMessageId',
-  'turnId',
-] as const;
+export type DirectSessionRecordV1 = DirectUserRecordV1 | DirectAssistantRecordV1;
 
-type DeliveryIdentityField = typeof DELIVERY_IDENTITY_FIELDS[number];
-
-interface DirectSessionFileRevision {
-  size: number;
-  mtimeMs: number;
-  ctimeMs: number;
+export interface DirectSessionSnapshot {
+  readonly header: DirectSessionHeaderV1;
+  readonly records: readonly DirectSessionRecordV1[];
+  readonly path: string;
 }
 
-function fileRevision(stat: { size: number; mtimeMs: number; ctimeMs: number }): DirectSessionFileRevision {
-  return {
-    size: stat.size,
-    mtimeMs: stat.mtimeMs,
-    ctimeMs: stat.ctimeMs,
-  };
+export interface DirectSessionStoreOptions {
+  readonly host: Pick<AgentHost, 'agentId' | 'storage'>;
+  readonly now?: () => string;
+  readonly readFile?: (file: FileHandle) => Promise<Buffer>;
+  readonly syncDirectory?: (directory: string) => Promise<void>;
 }
 
-function fileRevisionsMatch(
-  left: DirectSessionFileRevision | undefined,
-  right: DirectSessionFileRevision,
-): boolean {
-  return left?.size === right.size
-    && left.mtimeMs === right.mtimeMs
-    && left.ctimeMs === right.ctimeMs;
+interface ParsedSessionFile {
+  readonly header: DirectSessionHeaderV1;
+  readonly records: readonly DirectSessionRecordV1[];
+  readonly appendOffset: number;
+  readonly separator: '' | '\n';
+  readonly ignoredTail: boolean;
 }
 
-function matchingIdentityFields(
-  message: DirectMessageIdentity,
-  identity: DirectMessageIdentity,
-): DeliveryIdentityField[] {
-  return DELIVERY_IDENTITY_FIELDS.filter((field) => (
-    identity[field] !== undefined && message[field] === identity[field]
-  ));
+interface DirectSessionFileIdentity {
+  readonly ctimeNs: bigint;
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly mtimeNs: bigint;
+  readonly size: bigint;
 }
 
-function hasExactIdentity(
-  message: DirectMessageIdentity,
-  identity: DirectMessageIdentity,
-): boolean {
-  return DELIVERY_IDENTITY_FIELDS.every((field) => message[field] === identity[field]);
+interface DirectSessionAppendState {
+  readonly appendOffset: number;
+  readonly assistantRunIds: Set<string>;
+  readonly identity: DirectSessionFileIdentity;
+  readonly ignoredTail: boolean;
+  readonly separator: '' | '\n';
+  readonly userRunIds: Set<string>;
 }
 
 export class DirectSessionStore {
-  readonly #validatedFileRevisions = new Map<string, DirectSessionFileRevision>();
-  readonly #fileSystem: NonNullable<DirectSessionStoreConfig['fileSystem']>;
+  readonly #host: DirectSessionStoreOptions['host'];
+  readonly #now: () => string;
+  readonly #readFile: (file: FileHandle) => Promise<Buffer>;
   readonly #syncDirectory: (directory: string) => Promise<void>;
+  readonly #operations = new Map<string, Promise<void>>();
+  readonly #appendStates = new Map<string, DirectSessionAppendState>();
+  #directoryPromise: Promise<string> | null = null;
 
-  constructor(private readonly config: DirectSessionStoreConfig) {
-    this.#fileSystem = config.fileSystem ?? fs;
-    this.#syncDirectory = config.syncDirectory ?? syncDirectory;
+  constructor(options: DirectSessionStoreOptions) {
+    this.#host = options.host;
+    this.#now = options.now ?? (() => new Date().toISOString());
+    this.#readFile = options.readFile ?? ((file) => file.readFile());
+    this.#syncDirectory = options.syncDirectory ?? syncDirectory;
   }
 
-  async append(
-    sessionId: string,
-    role: DirectConversationRole,
-    content: string,
-    identity: DirectMessageIdentity = {},
-  ): Promise<void> {
-    await this.#fileSystem.mkdir(this.config.getSessionDir(), { recursive: true });
-    const entry: PersistedDirectMessage = {
-      role,
-      content,
-      timestamp: new Date().toISOString(),
-      ...(identity.clientRequestId ? { clientRequestId: identity.clientRequestId } : {}),
-      ...(identity.clientMessageId ? { clientMessageId: identity.clientMessageId } : {}),
-      ...(identity.turnId ? { turnId: identity.turnId } : {}),
+  createSessionId(): string {
+    return crypto.randomUUID();
+  }
+
+  nativeReference(sessionId: string): AgentNativeSessionRef {
+    requireSessionId(sessionId);
+    return {
+      ownerId: this.#host.agentId,
+      schemaVersion: DIRECT_SESSION_SCHEMA_VERSION,
+      value: { sessionId },
     };
-    const sessionFilePath = this.config.getSessionFilePath(sessionId);
-    const prepared = await this.#prepareFileForAppend(sessionFilePath);
-    const serialized = `${prepared.separator}${JSON.stringify(entry)}\n`;
-    const file = await this.#fileSystem.open(sessionFilePath, 'a');
-    try {
-      await file.writeFile(serialized, 'utf8');
-      await file.sync();
-    } finally {
-      await file.close().catch(() => {});
+  }
+
+  sessionIdFromReference(
+    reference: AgentNativeSessionRef | null,
+    expectedSessionId?: string | null,
+  ): string {
+    if (!isRecord(reference) || !hasExactKeys(reference, ['ownerId', 'schemaVersion', 'value'])) {
+      throw new TypeError('Direct native session reference is invalid');
     }
-    if (!prepared.fileExisted) await this.#syncDirectory(this.config.getSessionDir());
-    await this.#rememberFileRevision(
-      sessionFilePath,
-      prepared.fileLength + Buffer.byteLength(serialized),
-    );
+    if (
+      reference.ownerId !== this.#host.agentId
+      || reference.schemaVersion !== DIRECT_SESSION_SCHEMA_VERSION
+      || !isRecord(reference.value)
+      || !hasExactKeys(reference.value, ['sessionId'])
+    ) {
+      throw new TypeError('Direct native session reference is invalid');
+    }
+    const sessionId = requireSessionId(reference.value.sessionId);
+    if (expectedSessionId !== undefined && expectedSessionId !== null) {
+      requireSessionId(expectedSessionId);
+      if (sessionId !== expectedSessionId) {
+        throw new TypeError('Direct native session reference does not match the selected session');
+      }
+    }
+    return sessionId;
+  }
+
+  async create(input: {
+    readonly sessionId: string;
+    readonly runId: string;
+    readonly content: string;
+    readonly attachments: readonly AgentAttachment[];
+  }): Promise<DirectSessionSnapshot> {
+    const sessionId = requireSessionId(input.sessionId);
+    return this.#serialized(sessionId, async () => {
+      const directory = await this.#directory();
+      const filePath = path.join(directory, `${sessionId}.jsonl`);
+      const createdAt = requireTimestamp(this.#now(), 'createdAt');
+      const header: DirectSessionHeaderV1 = {
+        type: 'session',
+        schemaVersion: DIRECT_SESSION_SCHEMA_VERSION,
+        ownerId: requireNonEmptyString(this.#host.agentId, 'ownerId'),
+        sessionId,
+        createdAt,
+      };
+      const user = parseUserRecord({
+        type: 'user',
+        at: createdAt,
+        runId: input.runId,
+        content: input.content,
+        attachments: input.attachments,
+      });
+      const payload = encodeLines([header, user]);
+      const file = await fs.open(
+        filePath,
+        constants.O_WRONLY
+          | constants.O_CREAT
+          | constants.O_EXCL
+          | constants.O_NOFOLLOW,
+        0o600,
+      );
+      let identity: DirectSessionFileIdentity | null = null;
+      try {
+        await file.chmod(0o600);
+        await file.writeFile(payload);
+        await file.sync();
+        identity = fileIdentity(await file.stat({ bigint: true }));
+      } finally {
+        await file.close().catch(() => undefined);
+      }
+      await this.#syncDirectory(directory);
+      if (!identity) throw new Error('Direct session creation did not capture file identity');
+      this.#appendStates.set(
+        sessionId,
+        appendStateFor({
+          appendOffset: payload.byteLength,
+          identity,
+          records: [user],
+        }),
+      );
+      return { header, records: [user], path: filePath };
+    });
+  }
+
+  async load(sessionId: string): Promise<DirectSessionSnapshot> {
+    const validatedSessionId = requireSessionId(sessionId);
+    return this.#serialized(validatedSessionId, async () => {
+      const filePath = await this.#sessionFilePath(validatedSessionId);
+      const file = await openRegularFile(filePath, constants.O_RDONLY);
+      try {
+        const parsed = parseSessionFile(
+          await this.#readFile(file),
+          this.#host.agentId,
+          validatedSessionId,
+        );
+        const identity = fileIdentity(await file.stat({ bigint: true }));
+        this.#appendStates.set(validatedSessionId, appendStateFor({ ...parsed, identity }));
+        return { header: parsed.header, records: parsed.records, path: filePath };
+      } finally {
+        await file.close().catch(() => undefined);
+      }
+    });
+  }
+
+  async inspect(sessionId: string): Promise<{ readonly path: string }> {
+    const validatedSessionId = requireSessionId(sessionId);
+    return this.#serialized(validatedSessionId, async () => {
+      const filePath = await this.#sessionFilePath(validatedSessionId);
+      const file = await openRegularFile(filePath, constants.O_RDONLY);
+      try {
+        await validateSessionHeader(file, this.#host.agentId, validatedSessionId);
+        return { path: filePath };
+      } finally {
+        await file.close().catch(() => undefined);
+      }
+    });
+  }
+
+  async appendUser(input: {
+    readonly sessionId: string;
+    readonly runId: string;
+    readonly content: string;
+    readonly attachments: readonly AgentAttachment[];
+  }): Promise<DirectUserRecordV1> {
+    const record = parseUserRecord({
+      type: 'user',
+      at: requireTimestamp(this.#now(), 'at'),
+      runId: input.runId,
+      content: input.content,
+      attachments: input.attachments,
+    });
+    await this.#append(input.sessionId, record);
+    return record;
+  }
+
+  async appendAssistant(input: {
+    readonly sessionId: string;
+    readonly runId: string;
+    readonly content: string;
+    readonly checkpoint?: DirectResponsesCheckpointV1 | null;
+  }): Promise<DirectAssistantRecordV1> {
+    const record = parseAssistantRecord({
+      type: 'assistant',
+      at: requireTimestamp(this.#now(), 'at'),
+      runId: input.runId,
+      content: input.content,
+      checkpoint: input.checkpoint ?? null,
+    });
+    await this.#append(input.sessionId, record);
+    return record;
   }
 
   async delete(sessionId: string): Promise<void> {
-    const sessionFilePath = this.config.getSessionFilePath(sessionId);
-    this.#validatedFileRevisions.delete(sessionFilePath);
+    const validatedSessionId = requireSessionId(sessionId);
+    await this.#serialized(validatedSessionId, async () => {
+      const directory = await this.#directory();
+      const filePath = path.join(directory, `${validatedSessionId}.jsonl`);
+      try {
+        await fs.rm(filePath);
+      } catch (error) {
+        if (hasNodeErrorCode(error, 'ENOENT')) {
+          this.#appendStates.delete(validatedSessionId);
+          return;
+        }
+        throw error;
+      }
+      this.#appendStates.delete(validatedSessionId);
+      await this.#syncDirectory(directory);
+    });
+  }
+
+  async #append(sessionId: string, record: DirectSessionRecordV1): Promise<void> {
+    const validatedSessionId = requireSessionId(sessionId);
+    await this.#serialized(validatedSessionId, async () => {
+      const filePath = await this.#sessionFilePath(validatedSessionId);
+      const file = await openRegularFile(filePath, constants.O_RDWR);
+      try {
+        const observedIdentity = fileIdentity(await file.stat({ bigint: true }));
+        let appendState = this.#appendStates.get(validatedSessionId);
+        if (!appendState || !sameFileIdentity(appendState.identity, observedIdentity)) {
+          const parsed = parseSessionFile(
+            await this.#readFile(file),
+            this.#host.agentId,
+            validatedSessionId,
+          );
+          appendState = appendStateFor({
+            ...parsed,
+            identity: fileIdentity(await file.stat({ bigint: true })),
+          });
+          this.#appendStates.set(validatedSessionId, appendState);
+        }
+        validateNextRecord(appendState, record);
+        if (appendState.ignoredTail) {
+          await file.truncate(appendState.appendOffset);
+          await file.sync();
+        }
+        const encoded = Buffer.from(
+          `${appendState.separator}${JSON.stringify(record)}\n`,
+          'utf8',
+        );
+        await writeAll(file, encoded, appendState.appendOffset);
+        await file.sync();
+        const userRunIds = new Set(appendState.userRunIds);
+        const assistantRunIds = new Set(appendState.assistantRunIds);
+        if (record.type === 'user') userRunIds.add(record.runId);
+        else assistantRunIds.add(record.runId);
+        this.#appendStates.set(validatedSessionId, {
+          appendOffset: appendState.appendOffset + encoded.byteLength,
+          assistantRunIds,
+          identity: fileIdentity(await file.stat({ bigint: true })),
+          ignoredTail: false,
+          separator: '',
+          userRunIds,
+        });
+      } finally {
+        await file.close().catch(() => undefined);
+      }
+    });
+  }
+
+  async #directory(): Promise<string> {
+    const pending = this.#directoryPromise
+      ?? this.#host.storage.directory(DIRECT_SESSION_NAMESPACE);
+    this.#directoryPromise = pending;
     try {
-      await this.#fileSystem.rm(sessionFilePath);
-      await this.#syncDirectory(this.config.getSessionDir());
-    } catch (error: unknown) {
-      if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
+      return await pending;
+    } catch (error) {
+      if (this.#directoryPromise === pending) this.#directoryPromise = null;
+      throw error;
     }
   }
 
-  async prepareUserTurn(
-    sessionId: string,
-    content: string,
-    identity: DirectMessageIdentity,
-  ): Promise<'appended' | 'already-persisted' | 'turn-complete'> {
-    const suppliedFields = DELIVERY_IDENTITY_FIELDS.filter((field) => identity[field] !== undefined);
-    if (suppliedFields.length === 0) {
-      await this.append(sessionId, 'user', content, identity);
-      return 'appended';
-    }
-
-    const messages = await this.read(sessionId) ?? [];
-    const matchingUserIndexes = messages.flatMap((message, index) => (
-      message.role === 'user' && matchingIdentityFields(message, identity).length > 0
-        ? [index]
-        : []
-    ));
-    if (matchingUserIndexes.length === 0) {
-      await this.append(sessionId, 'user', content, identity);
-      return 'appended';
-    }
-
-    if (matchingUserIndexes.length !== 1) {
-      throw new Error('Direct session delivery identity resolves to multiple persisted user messages');
-    }
-    const userIndex = matchingUserIndexes[0]!;
-    const persistedUser = messages[userIndex]!;
-    if (!hasExactIdentity(persistedUser, identity)) {
-      throw new Error('Direct session delivery identity conflicts with the persisted identity tuple');
-    }
-    if (persistedUser.content !== content) {
-      throw new Error('Direct session delivery identity was reused with different content');
-    }
-    const completed = messages
-      .slice(userIndex + 1)
-      .some((message) => message.role === 'assistant' && hasExactIdentity(message, identity));
-    return completed ? 'turn-complete' : 'already-persisted';
+  async #sessionFilePath(sessionId: string): Promise<string> {
+    return path.join(await this.#directory(), `${sessionId}.jsonl`);
   }
 
-  async read(sessionId: string): Promise<DirectConversationMessage[] | null> {
-    let raw = '';
-    const sessionFilePath = this.config.getSessionFilePath(sessionId);
+  async #serialized<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#operations.get(sessionId) ?? Promise.resolve();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queued = previous.catch(() => undefined).then(() => gate);
+    this.#operations.set(sessionId, queued);
+    await previous.catch(() => undefined);
     try {
-      raw = await this.#fileSystem.readFile(sessionFilePath, 'utf8');
-    } catch (error: unknown) {
-      if (hasNodeErrorCode(error, 'ENOENT')) return null;
-      throw error;
-    }
-
-    const messages = parseDirectSession(raw);
-    if (raw.endsWith('\n')) {
-      await this.#rememberFileRevision(sessionFilePath, Buffer.byteLength(raw));
-    }
-
-    return messages.length > 0 ? messages : null;
-  }
-
-  async #prepareFileForAppend(
-    sessionFilePath: string,
-  ): Promise<{ separator: string; fileLength: number; fileExisted: boolean }> {
-    try {
-      const stat = await this.#fileSystem.stat(sessionFilePath);
-      if (fileRevisionsMatch(
-        this.#validatedFileRevisions.get(sessionFilePath),
-        fileRevision(stat),
-      )) {
-        return { separator: '', fileLength: stat.size, fileExisted: true };
-      }
-    } catch (error: unknown) {
-      if (hasNodeErrorCode(error, 'ENOENT')) {
-        this.#validatedFileRevisions.delete(sessionFilePath);
-        return { separator: '', fileLength: 0, fileExisted: false };
-      }
-      throw error;
-    }
-
-    let raw: Buffer;
-    try {
-      raw = await this.#fileSystem.readFile(sessionFilePath);
-    } catch (error: unknown) {
-      if (hasNodeErrorCode(error, 'ENOENT')) {
-        return { separator: '', fileLength: 0, fileExisted: false };
-      }
-      throw error;
-    }
-    if (raw.length === 0) return { separator: '', fileLength: 0, fileExisted: true };
-
-    const lastNewline = raw.lastIndexOf(0x0a);
-    const completeLength = lastNewline + 1;
-    const complete = raw.subarray(0, completeLength).toString('utf8');
-    parseDirectSession(complete);
-    if (completeLength === raw.length) {
-      return { separator: '', fileLength: raw.length, fileExisted: true };
-    }
-
-    const trailing = raw.subarray(completeLength).toString('utf8');
-    if (parseDirectMessageLine(trailing)) {
-      return { separator: '\n', fileLength: raw.length, fileExisted: true };
-    }
-    const file = await this.#fileSystem.open(sessionFilePath, 'r+');
-    try {
-      await file.truncate(completeLength);
-      await file.sync();
+      return await operation();
     } finally {
-      await file.close().catch(() => {});
-    }
-    return { separator: '', fileLength: completeLength, fileExisted: true };
-  }
-
-  async #rememberFileRevision(sessionFilePath: string, expectedSize: number): Promise<void> {
-    const stat = await this.#fileSystem.stat(sessionFilePath);
-    if (stat.size === expectedSize) {
-      this.#validatedFileRevisions.set(sessionFilePath, fileRevision(stat));
-    } else {
-      this.#validatedFileRevisions.delete(sessionFilePath);
+      release();
+      if (this.#operations.get(sessionId) === queued) this.#operations.delete(sessionId);
     }
   }
 }
 
-function parseDirectSession(raw: string): DirectConversationMessage[] {
-  const lines = raw.split('\n');
-  const hasIncompleteTail = !raw.endsWith('\n');
-  const messages: DirectConversationMessage[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]!;
-    if (!line.trim()) continue;
-    const parsed = parseDirectMessageLine(line);
-    if (parsed) {
-      messages.push(parsed);
+async function openRegularFile(filePath: string, flags: number): Promise<FileHandle> {
+  const file = await fs.open(filePath, flags | constants.O_NOFOLLOW);
+  try {
+    const stats = await file.stat();
+    if (!stats.isFile()) throw new TypeError('Direct session source is not a regular file');
+    return file;
+  } catch (error) {
+    await file.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function writeAll(
+  file: FileHandle,
+  value: Uint8Array,
+  offset: number,
+): Promise<void> {
+  let written = 0;
+  while (written < value.byteLength) {
+    const result = await file.write(value, written, value.byteLength - written, offset + written);
+    if (result.bytesWritten <= 0) throw new Error('Direct session append made no progress');
+    written += result.bytesWritten;
+  }
+}
+
+function parseSessionFile(
+  raw: Buffer,
+  expectedOwnerId: string,
+  expectedSessionId: string,
+): ParsedSessionFile {
+  const endsWithNewline = raw.at(-1) === 0x0a;
+  const lastNewline = raw.lastIndexOf(0x0a);
+  const completeLength = endsWithNewline ? raw.length : lastNewline + 1;
+  const completeLines = decodeUtf8(raw.subarray(0, completeLength))
+    .split('\n')
+    .slice(0, -1);
+  const values = completeLines.map((line, index) => parseJsonLine(line, index + 1));
+  let ignoredTail = false;
+  let separator: '' | '\n' = '';
+  let appendOffset = raw.length;
+
+  if (values.length < 1) throw new TypeError('Direct session is missing its header');
+  const header = parseHeader(values[0]);
+  if (header.ownerId !== expectedOwnerId || header.sessionId !== expectedSessionId) {
+    throw new TypeError('Direct session header does not match the selected session');
+  }
+  let records = values.slice(1).map(parseSessionRecord);
+  validateSequence(records);
+  if (!endsWithNewline && completeLength < raw.length) {
+    try {
+      const tail = parseSessionRecord(parseJsonLine(
+        decodeUtf8(raw.subarray(completeLength)),
+        completeLines.length + 1,
+      ));
+      validateSequence([...records, tail]);
+      records = [...records, tail];
+      separator = '\n';
+    } catch {
+      ignoredTail = true;
+      appendOffset = completeLength;
+    }
+  }
+  if (records.length < 1 || records[0]?.type !== 'user') {
+    throw new TypeError('Direct session is missing its first user record');
+  }
+  return { header, records, appendOffset, separator, ignoredTail };
+}
+
+function parseJsonLine(line: string, lineNumber: number): unknown {
+  if (!line) throw new TypeError(`Direct session record ${lineNumber} is empty`);
+  try {
+    return JSON.parse(line) as unknown;
+  } catch (error) {
+    throw new TypeError(`Direct session record ${lineNumber} is malformed`, { cause: error });
+  }
+}
+
+function parseHeader(value: unknown): DirectSessionHeaderV1 {
+  if (!isRecord(value) || !hasExactKeys(
+    value,
+    ['type', 'schemaVersion', 'ownerId', 'sessionId', 'createdAt'],
+  )) {
+    throw new TypeError('Direct session header is invalid');
+  }
+  if (value.type !== 'session' || value.schemaVersion !== DIRECT_SESSION_SCHEMA_VERSION) {
+    throw new TypeError('Direct session header schema is unsupported');
+  }
+  return {
+    type: 'session',
+    schemaVersion: DIRECT_SESSION_SCHEMA_VERSION,
+    ownerId: requireNonEmptyString(value.ownerId, 'ownerId'),
+    sessionId: requireSessionId(value.sessionId),
+    createdAt: requireTimestamp(value.createdAt, 'createdAt'),
+  };
+}
+
+function parseSessionRecord(value: unknown): DirectSessionRecordV1 {
+  if (!isRecord(value)) throw new TypeError('Direct session record is invalid');
+  if (value.type === 'user') return parseUserRecord(value);
+  if (value.type === 'assistant') return parseAssistantRecord(value);
+  throw new TypeError('Direct session record type is unsupported');
+}
+
+function parseUserRecord(value: unknown): DirectUserRecordV1 {
+  if (!isRecord(value) || !hasExactKeys(value, ['type', 'at', 'runId', 'content', 'attachments'])) {
+    throw new TypeError('Direct user record is invalid');
+  }
+  const content = requireString(value.content, 'content');
+  const attachments = parseAttachments(value.attachments);
+  if (!content && attachments.length === 0) {
+    throw new TypeError('Direct user record requires content or attachments');
+  }
+  return {
+    type: 'user',
+    at: requireTimestamp(value.at, 'at'),
+    runId: requireNonEmptyString(value.runId, 'runId'),
+    content,
+    attachments,
+  };
+}
+
+function parseAssistantRecord(value: unknown): DirectAssistantRecordV1 {
+  if (!isRecord(value) || !hasExactKeys(value, ['type', 'at', 'runId', 'content', 'checkpoint'])) {
+    throw new TypeError('Direct assistant record is invalid');
+  }
+  const content = requireString(value.content, 'content');
+  if (!content.trim()) throw new TypeError('Direct assistant record content is empty');
+  return {
+    type: 'assistant',
+    at: requireTimestamp(value.at, 'at'),
+    runId: requireNonEmptyString(value.runId, 'runId'),
+    content,
+    checkpoint: value.checkpoint === null ? null : parseCheckpoint(value.checkpoint),
+  };
+}
+
+function parseCheckpoint(value: unknown): DirectResponsesCheckpointV1 {
+  if (!isRecord(value) || !hasExactKeys(
+    value,
+    ['kind', 'responseId', 'endpointId', 'endpointFingerprint', 'model'],
+  )) {
+    throw new TypeError('Direct Responses checkpoint is invalid');
+  }
+  const endpointFingerprint = requireNonEmptyString(
+    value.endpointFingerprint,
+    'endpointFingerprint',
+  );
+  if (!SHA256_PATTERN.test(endpointFingerprint)) {
+    throw new TypeError('Direct Responses checkpoint fingerprint is invalid');
+  }
+  if (value.kind !== 'openai-response') {
+    throw new TypeError('Direct Responses checkpoint kind is invalid');
+  }
+  return {
+    kind: 'openai-response',
+    responseId: requireNonEmptyString(value.responseId, 'responseId'),
+    endpointId: requireNonEmptyString(value.endpointId, 'endpointId'),
+    endpointFingerprint,
+    model: requireNonEmptyString(value.model, 'model'),
+  };
+}
+
+function parseAttachments(value: unknown): readonly AgentAttachment[] {
+  if (!Array.isArray(value)) throw new TypeError('Direct user attachments are invalid');
+  return value.map((attachment) => {
+    if (!isRecord(attachment) || !hasExactKeys(attachment, ['kind', 'data', 'name', 'mimeType'])) {
+      throw new TypeError('Direct user attachment is invalid');
+    }
+    if (attachment.kind !== 'image') throw new TypeError('Direct user attachment kind is invalid');
+    const name = attachment.name;
+    if (name !== null && typeof name !== 'string') {
+      throw new TypeError('Direct user attachment name is invalid');
+    }
+    if (typeof name === 'string' && !name.isWellFormed()) {
+      throw new TypeError('Direct user attachment name contains malformed Unicode');
+    }
+    return {
+      kind: 'image',
+      data: requireNonEmptyString(attachment.data, 'attachment data'),
+      name,
+      mimeType: requireNonEmptyString(attachment.mimeType, 'attachment MIME type'),
+    };
+  });
+}
+
+function validateSequence(records: readonly DirectSessionRecordV1[]): void {
+  const users = new Set<string>();
+  const assistants = new Set<string>();
+  for (const record of records) {
+    if (record.type === 'user') {
+      if (users.has(record.runId)) throw new TypeError('Direct session contains a duplicate user run');
+      users.add(record.runId);
       continue;
     }
-    if (hasIncompleteTail && index === lines.length - 1) continue;
-    throw new Error(`Direct session transcript contains malformed record at line ${index + 1}`);
+    if (!users.has(record.runId)) {
+      throw new TypeError('Direct assistant record has no preceding user record');
+    }
+    if (assistants.has(record.runId)) {
+      throw new TypeError('Direct session contains a duplicate assistant run');
+    }
+    assistants.add(record.runId);
   }
-  return messages;
 }
 
-export function parseDirectMessageLine(line: string): DirectConversationMessage | null {
-  if (!line.trim()) return null;
-  try {
-    const parsed = JSON.parse(line) as Record<string, unknown>;
-    const role = parsed.role;
-    const content = parsed.content;
-    if ((role === 'user' || role === 'assistant') && typeof content === 'string') {
-      return {
-        role,
-        content,
-        ...(typeof parsed.clientRequestId === 'string' ? { clientRequestId: parsed.clientRequestId } : {}),
-        ...(typeof parsed.clientMessageId === 'string' ? { clientMessageId: parsed.clientMessageId } : {}),
-        ...(typeof parsed.turnId === 'string' ? { turnId: parsed.turnId } : {}),
-      };
-    }
-  } catch {
-    return null;
+function appendStateFor(input: {
+  readonly appendOffset: number;
+  readonly identity: DirectSessionFileIdentity;
+  readonly records: readonly DirectSessionRecordV1[];
+  readonly ignoredTail?: boolean;
+  readonly separator?: '' | '\n';
+}): DirectSessionAppendState {
+  validateSequence(input.records);
+  const userRunIds = new Set<string>();
+  const assistantRunIds = new Set<string>();
+  for (const record of input.records) {
+    if (record.type === 'user') userRunIds.add(record.runId);
+    else assistantRunIds.add(record.runId);
   }
-  return null;
+  return {
+    appendOffset: input.appendOffset,
+    assistantRunIds,
+    identity: input.identity,
+    ignoredTail: input.ignoredTail ?? false,
+    separator: input.separator ?? '',
+    userRunIds,
+  };
+}
+
+function validateNextRecord(
+  appendState: DirectSessionAppendState,
+  record: DirectSessionRecordV1,
+): void {
+  if (record.type === 'user') {
+    if (appendState.userRunIds.has(record.runId)) {
+      throw new TypeError('Direct session contains a duplicate user run');
+    }
+    return;
+  }
+  if (!appendState.userRunIds.has(record.runId)) {
+    throw new TypeError('Direct assistant record has no preceding user record');
+  }
+  if (appendState.assistantRunIds.has(record.runId)) {
+    throw new TypeError('Direct session contains a duplicate assistant run');
+  }
+}
+
+function fileIdentity(stats: BigIntStats): DirectSessionFileIdentity {
+  return {
+    ctimeNs: stats.ctimeNs,
+    dev: stats.dev,
+    ino: stats.ino,
+    mtimeNs: stats.mtimeNs,
+    size: stats.size,
+  };
+}
+
+function sameFileIdentity(
+  left: DirectSessionFileIdentity,
+  right: DirectSessionFileIdentity,
+): boolean {
+  return left.ctimeNs === right.ctimeNs
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.mtimeNs === right.mtimeNs
+    && left.size === right.size;
+}
+
+async function validateSessionHeader(
+  file: FileHandle,
+  expectedOwnerId: string,
+  expectedSessionId: string,
+): Promise<void> {
+  const buffer = Buffer.alloc(DIRECT_SESSION_HEADER_MAX_BYTES + 1);
+  const { bytesRead } = await file.read(buffer, 0, buffer.byteLength, 0);
+  const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
+  if (newline < 0 || newline > DIRECT_SESSION_HEADER_MAX_BYTES) {
+    throw new TypeError('Direct session header exceeds the maximum size');
+  }
+  const header = parseHeader(parseJsonLine(decodeUtf8(buffer.subarray(0, newline)), 1));
+  if (header.ownerId !== expectedOwnerId || header.sessionId !== expectedSessionId) {
+    throw new TypeError('Direct session header does not match the selected session');
+  }
+}
+
+function encodeLines(values: readonly unknown[]): Buffer {
+  return Buffer.from(`${values.map((value) => JSON.stringify(value)).join('\n')}\n`, 'utf8');
+}
+
+function decodeUtf8(value: Uint8Array): string {
+  try {
+    return utf8Decoder.decode(value);
+  } catch (error) {
+    throw new TypeError('Direct session contains invalid UTF-8', { cause: error });
+  }
+}
+
+function requireSessionId(value: unknown): string {
+  if (typeof value !== 'string' || !SESSION_ID_PATTERN.test(value)) {
+    throw new TypeError('Direct session ID is invalid');
+  }
+  return value;
+}
+
+function requireTimestamp(value: unknown, field: string): string {
+  const timestamp = requireNonEmptyString(value, field);
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== timestamp) {
+    throw new TypeError(`Direct session ${field} is invalid`);
+  }
+  return timestamp;
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  const string = requireString(value, field);
+  if (!string) throw new TypeError(`Direct session ${field} is empty`);
+  return string;
+}
+
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.isWellFormed()) {
+    throw new TypeError(`Direct session ${field} is invalid`);
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === expected.length
+    && expected.every((key) => Object.hasOwn(value, key));
 }

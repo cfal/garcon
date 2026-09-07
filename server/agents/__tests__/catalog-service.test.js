@@ -35,7 +35,15 @@ function createIntegration() {
           type: "enum",
           label: "Effort",
           labelKey: "thinking",
-          options: [{ value: "high", label: "High", labelKey: "deep" }],
+          options: [
+            {
+              value: "high",
+              label: "High",
+              labelKey: "enabled",
+              description: "Uses extended thinking for every response.",
+              descriptionKey: "thinkingEnabled",
+            },
+          ],
         },
       ],
       defaults: () => ({
@@ -45,7 +53,15 @@ function createIntegration() {
       }),
     },
     auth: { launchLogin: async () => ({}) },
-    forking: { supportsAtMessage: true, supportsWhileRunning: false },
+    forking: {
+      async fork() { return { kind: 'unmaterialized' }; },
+      async discard() {},
+    },
+    steering: {
+      captureTarget: () => ({}),
+      steer: async () => ({ kind: "accepted" }),
+    },
+    goals: null,
     endpoints: {},
   };
 }
@@ -76,7 +92,9 @@ describe("AgentCatalogService", () => {
       label: "Sample Agent",
       supportsFork: true,
       supportsForkAtMessage: true,
-      supportsForkWhileRunning: false,
+      supportsForkWhileRunning: true,
+      supportsSteering: true,
+      supportsGoals: false,
       supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,
@@ -90,7 +108,12 @@ describe("AgentCatalogService", () => {
           type: "enum",
           labelKey: "thinking",
           options: [
-            expect.objectContaining({ value: "high", labelKey: "deep" }),
+            expect.objectContaining({
+              value: "high",
+              labelKey: "enabled",
+              description: "Uses extended thinking for every response.",
+              descriptionKey: "thinkingEnabled",
+            }),
           ],
         }),
       ],

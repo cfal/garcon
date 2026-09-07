@@ -3,11 +3,7 @@ import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { FrameExpectation, SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
-import {
-	CHAT_SURFACE_ID,
-	type PresentationHostId,
-	type WorkspaceLayoutSnapshot,
-} from './surface-types.js';
+import type { PresentationHostId, WorkspaceLayoutSnapshot } from './surface-types.js';
 import { visiblePresentationMap } from './visible-presentations.js';
 
 interface WorkspacePresentationFramesDeps {
@@ -25,6 +21,11 @@ export class WorkspacePresentationFrames {
 
 	version(surfaceId: string): number {
 		return this.versions[surfaceId] ?? 0;
+	}
+
+	supersedePendingTransition(): number {
+		this.#presentationGeneration += 1;
+		return this.#presentationGeneration;
 	}
 
 	async retry(surfaceId: string, host: PresentationHostId): Promise<boolean> {
@@ -77,7 +78,7 @@ export class WorkspacePresentationFrames {
 		}
 		const expectations: FrameExpectation[] = [];
 		for (const [host, surfaceId] of after) {
-			if (surfaceId === CHAT_SURFACE_ID || before.get(host) === surfaceId) continue;
+			if (next.surfaces[surfaceId]?.type === 'chat' || before.get(host) === surfaceId) continue;
 			this.clearError(surfaceId);
 			expectations.push(frames.beginTransfer(surfaceId, host));
 			this.#bumpVersion(surfaceId);
@@ -97,7 +98,7 @@ export class WorkspacePresentationFrames {
 		const message = error instanceof Error ? error.message : m.workspace_surface_attach_failed();
 		const nextErrors = { ...this.errors };
 		for (const surfaceId of visiblePresentationMap(snapshot, mode).values()) {
-			if (surfaceId !== CHAT_SURFACE_ID) nextErrors[surfaceId] = message;
+			if (snapshot.surfaces[surfaceId]?.type !== 'chat') nextErrors[surfaceId] = message;
 		}
 		this.errors = nextErrors;
 	}

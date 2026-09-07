@@ -7,7 +7,7 @@ import {
 	type DeviceAuthInfo,
 	type AgentReadiness,
 } from '$lib/api/agents.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 
 export interface AuthStatus {
 	authenticated: boolean;
@@ -429,16 +429,6 @@ export class SettingsAuthState {
 	}
 
 	#agentIds(): SettingsAgentId[] {
-		const catalog = this.#modelCatalog as unknown as {
-			getAgentMetadataList?: () => Array<{ id: string }>;
-			getAgents?: () => string[];
-		};
-		if (typeof catalog.getAgentMetadataList === 'function') {
-			return catalog.getAgentMetadataList().map((metadata) => metadata.id);
-		}
-		if (typeof catalog.getAgents === 'function') {
-			return catalog.getAgents();
-		}
-		return [];
+		return this.#modelCatalog.getAgentMetadataList().map((metadata) => metadata.id);
 	}
 }

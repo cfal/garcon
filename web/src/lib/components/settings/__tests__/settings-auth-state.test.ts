@@ -6,7 +6,7 @@ import {
 	getAgentAuthStatus,
 	launchAgentAuthLogin,
 } from '$lib/api/agents.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 
 vi.mock('$lib/api/agents.js', () => ({
 	completeAgentAuthLogin: vi.fn(),

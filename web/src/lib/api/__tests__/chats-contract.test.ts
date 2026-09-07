@@ -6,8 +6,8 @@ import {
 	togglePinned,
 	toggleArchive,
 	markChatsReadBatch,
-	reorderChats,
-	reorderChatsQuick,
+	reorderChat,
+	sortChatOrder,
 	forkChat,
 	validateStart,
 	runChat,
@@ -19,7 +19,10 @@ import {
 	createQueuedInput,
 	replaceQueuedInput,
 	deleteQueuedInput,
-	sendActiveInput,
+	moveQueuedInput,
+	steerChat,
+	steerQueuedEntry,
+	submitGoalControl,
 	getChatExecutionControl,
 	clearChatQueue,
 	pauseChatQueue,
@@ -28,10 +31,14 @@ import {
 	updateChatModel,
 	updateChatProjectPath,
 	getChatMessages,
+	searchChatTranscripts,
 	getChatDetails,
 	setLastSelectedChat,
 } from '../chats';
 import type { ChatListResponse } from '$shared/chat-list';
+import type { CommandErrorCode } from '$shared/chat-command-contracts';
+import { CHAT_STOP_OUTCOMES } from '$shared/chat-types';
+import { ApiError } from '../client';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -57,14 +64,76 @@ describe('chats API contract', () => {
 
 	function emptyControl() {
 		return {
+			serverInstanceId: 'server-instance-test',
 			queue: {
 				entries: [],
-				dispatchingEntryId: null,
+				steeringEntryId: null,
 				recentlyDispatched: [],
 				pause: null,
+				reorderRevision: 0,
 			},
 			version: 0,
 			updatedAt: null,
+		};
+	}
+
+	function chatEntry(id: string) {
+		return {
+			id,
+			parentChat: null,
+			agentId: 'claude',
+			agentOwnershipEpoch: 'epoch-1',
+			model: 'opus',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			agentSettings: CLAUDE_SETTINGS,
+			title: 'Chat',
+			projectPath: '/project',
+			orderGroup: 'normal',
+			tags: [],
+			activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+			preview: { lastMessage: '' },
+			isPinned: false,
+			isArchived: false,
+			isActive: false,
+			isProcessing: true,
+			processingPhase: 'running',
+			isUnread: false,
+			canReloadFromNativeHistory: false,
+		};
+	}
+
+	function chatSearchResponse(overrides: Record<string, unknown> = {}) {
+		return {
+			query: 'needle',
+			mode: 'prefix',
+			snippetLimit: 1,
+			results: [
+				{
+					chatId: 'chat-1',
+					transcriptViewId: 'view-1',
+					score: 1,
+					matchedMessageCount: 1,
+					snippets: [
+						{
+							ordinal: 1,
+							role: 'user',
+							timestamp: null,
+							text: 'needle',
+						},
+					],
+				},
+			],
+			page: { offset: 0, limit: 500, total: 501, hasMore: true, nextOffset: 1 },
+			index: {
+				indexedChatCount: 1,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unindexedChatCount: 0,
+				unsupportedChatCount: 0,
+				resultsTruncated: false,
+			},
+			...overrides,
 		};
 	}
 
@@ -82,14 +151,15 @@ describe('chats API contract', () => {
 			sessions: [
 				{
 					id: 'chat-1',
+					parentChat: null,
 					agentId: 'claude',
+					agentOwnershipEpoch: 'epoch-1',
 					model: 'opus',
 					permissionMode: 'default',
 					thinkingMode: 'none',
 					agentSettings: CLAUDE_SETTINGS,
 					title: 'Chat 1',
 					projectPath: '/repo',
-					effectiveProjectKey: '/repo',
 					orderGroup: 'normal',
 					tags: [],
 					activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
@@ -97,7 +167,10 @@ describe('chats API contract', () => {
 					isPinned: false,
 					isArchived: false,
 					isActive: false,
+					isProcessing: false,
+					processingPhase: null,
 					isUnread: false,
+					canReloadFromNativeHistory: false,
 				},
 			],
 			total: 1,
@@ -113,6 +186,52 @@ describe('chats API contract', () => {
 		expect(url).toBe('/api/v1/chats');
 		expect(opts.method ?? 'GET').toBe('GET');
 	});
+
+	it.each([
+		[true, 'running'],
+		[true, 'stopping'],
+		[false, null],
+	] as const)(
+		'round-trips the REST processing pair %s/%s',
+		async (isProcessing, processingPhase) => {
+			const payload = {
+				sessions: [
+					{
+						id: 'chat-1',
+						isProcessing,
+						processingPhase,
+					},
+				],
+				total: 1,
+				lastSelectedChatId: 'chat-1',
+			} as unknown as ChatListResponse;
+			fetchMock.mockResolvedValue(jsonResponse(payload));
+
+			await expect(listChats()).resolves.toMatchObject({
+				sessions: [{ isProcessing, processingPhase }],
+			});
+		},
+	);
+
+	it.each([
+		[false, 'running'],
+		[false, 'stopping'],
+		[true, null],
+		[true, 'unknown'],
+	])(
+		'rejects the contradictory REST processing pair %s/%s',
+		async (isProcessing, processingPhase) => {
+			fetchMock.mockResolvedValue(
+				jsonResponse({
+					sessions: [{ id: 'chat-1', isProcessing, processingPhase }],
+					total: 1,
+					lastSelectedChatId: 'chat-1',
+				}),
+			);
+
+			await expect(listChats()).rejects.toThrow('Invalid chat list processing response');
+		},
+	);
 
 	it('setLastSelectedChat sends PUT /api/v1/chats/last-selected', async () => {
 		const payload = { success: true as const, lastSelectedChatId: 'chat-1' };
@@ -135,6 +254,11 @@ describe('chats API contract', () => {
 			lastActivityAt: '2026-02-21T11:00:00.000Z',
 			agentSessionId: 'thread-abc',
 			transcriptSource: null,
+			carryOver: {
+				revision: 'carry-v1:0',
+				archivedMessageCount: 0,
+				segments: [],
+			},
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -146,7 +270,8 @@ describe('chats API contract', () => {
 	});
 
 	it('startChat sends POST with correct shape', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true, chatId: 'c-1' }));
+		const payload = { success: true, chatId: 'c-1', chat: chatEntry('c-1') };
+		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await startChat({
 			clientRequestId: 'req-start-1',
@@ -161,12 +286,13 @@ describe('chats API contract', () => {
 			command: 'hello',
 		});
 
-		expect(result).toEqual({ success: true, chatId: 'c-1' });
+		expect(result).toEqual(payload);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/start');
 		expect(opts.method).toBe('POST');
 
 		expect(JSON.parse(opts.body)).toEqual({
+			origin: 'interactive',
 			clientRequestId: 'req-start-1',
 			clientMessageId: 'msg-start-1',
 			chatId: 'c-1',
@@ -181,7 +307,7 @@ describe('chats API contract', () => {
 	});
 
 	it('startChat forwards top-level images and explicit tags', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, chat: chatEntry('c-2') }));
 		const images = [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }];
 
 		await startChat({
@@ -208,6 +334,39 @@ describe('chats API contract', () => {
 		expect(body.tags).toEqual(['fast']);
 	});
 
+	it('startChat rejects a recovered response after the chat was deleted', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				commandType: 'chat-start',
+				clientRequestId: 'req-deleted',
+				chatId: 'c-deleted',
+				turnId: 'turn-deleted',
+				status: 'duplicate',
+				acceptedAt: '2026-08-01T00:00:00.000Z',
+				chat: null,
+			}),
+		);
+
+		await expect(
+			startChat({
+				clientRequestId: 'req-deleted',
+				clientMessageId: 'msg-deleted',
+				chatId: 'c-deleted',
+				agentId: 'claude',
+				projectPath: '/project',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				agentSettings: CLAUDE_SETTINGS,
+				command: 'hello',
+			}),
+		).rejects.toMatchObject({
+			status: 410,
+			errorCode: 'SESSION_NOT_FOUND',
+		});
+	});
+
 	it('generateChatTitle sends POST /api/v1/chats/title/generate', async () => {
 		const payload = { success: true as const, chatId: 'chat-1', title: 'Generated Title' };
 		fetchMock.mockResolvedValue(jsonResponse(payload));
@@ -230,7 +389,7 @@ describe('chats API contract', () => {
 	});
 
 	it('startChat normalizes invalid mode values before sending the request', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, chat: chatEntry('c-3') }));
 
 		await startChat({
 			clientRequestId: 'req-start-3',
@@ -267,6 +426,7 @@ describe('chats API contract', () => {
 			clientRequestId: 'req-1',
 			clientMessageId: 'msg-1',
 			chatId: 'c-1',
+			transcriptViewId: 'view-1',
 			command: 'hello',
 			permissionMode: 'default',
 			thinkingMode: 'none',
@@ -286,7 +446,83 @@ describe('chats API contract', () => {
 		});
 	});
 
+	it('uses the extended timeout only for a fenced agent handoff', async () => {
+		const timeout = vi.spyOn(AbortSignal, 'timeout');
+		const response = {
+			success: true as const,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'c-1',
+			turnId: 'turn-1',
+			status: 'accepted' as const,
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		};
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse(response, 202))
+			.mockResolvedValueOnce(jsonResponse({ ...response, chat: chatEntry('c-1') }, 202));
+
+		await runChat({
+			clientRequestId: 'req-normal',
+			clientMessageId: 'msg-normal',
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			command: 'normal',
+		});
+		await runChat({
+			clientRequestId: 'req-handoff',
+			clientMessageId: 'msg-handoff',
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			command: 'handoff',
+			handoff: {
+				expectedAgentOwnershipEpoch: 'epoch-1',
+				target: {
+					agentId: 'codex',
+					model: 'gpt-5.5',
+					permissionMode: 'default',
+					thinkingMode: 'high',
+					agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+				},
+			},
+		});
+
+		expect(timeout).toHaveBeenNthCalledWith(1, 30_000);
+		expect(timeout).toHaveBeenNthCalledWith(2, 13 * 60_000);
+	});
+
+	it('rejects a successful handoff response without a durable chat projection', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					success: true,
+					commandType: 'agent-run',
+					clientRequestId: 'req-handoff',
+					chatId: 'c-1',
+					turnId: 'turn-1',
+					status: 'accepted',
+					acceptedAt: '2026-05-14T00:00:00.000Z',
+				},
+				202,
+			),
+		);
+
+		await expect(
+			runChat({
+				clientRequestId: 'req-handoff',
+				clientMessageId: 'msg-handoff',
+				chatId: 'c-1',
+				transcriptViewId: 'view-1',
+				command: 'handoff',
+				handoff: {
+					expectedAgentOwnershipEpoch: 'epoch-1',
+					target: { agentId: 'codex', model: 'gpt-5.5' },
+				},
+			}),
+		).rejects.toThrow('durable chat projection is missing');
+	});
+
 	it('forkRunChat sends POST /api/v1/chats/fork-run', async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
 		fetchMock.mockResolvedValue(
 			jsonResponse(
 				{
@@ -306,6 +542,7 @@ describe('chats API contract', () => {
 			sourceChatId: 'c-1',
 			chatId: 'c-2',
 			command: 'continue',
+			allowHandoffFork: true,
 			permissionMode: 'default',
 			thinkingMode: 'none',
 			agentSettings: CLAUDE_SETTINGS,
@@ -315,12 +552,14 @@ describe('chats API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/fork-run');
 		expect(opts.method).toBe('POST');
+		expect(timeoutSpy).not.toHaveBeenCalled();
 		expect(JSON.parse(opts.body)).toMatchObject({
 			clientRequestId: 'req-1',
 			clientMessageId: 'msg-1',
 			sourceChatId: 'c-1',
 			chatId: 'c-2',
 			command: 'continue',
+			allowHandoffFork: true,
 		});
 	});
 
@@ -332,7 +571,7 @@ describe('chats API contract', () => {
 				clientRequestId: 'req-stop',
 				status: 'accepted',
 				acceptedAt: 't',
-				stopped: true,
+				outcome: 'interrupt-requested',
 				control: emptyControl(),
 			}),
 		);
@@ -359,17 +598,29 @@ describe('chats API contract', () => {
 		await sendPermissionDecision({
 			clientRequestId: 'req-perm',
 			chatId: 'c-1',
-			permissionRequestId: 'perm-1',
+			permissionOccurrenceId: 'incarnation-1',
+			control: {
+				serverInstanceId: 'server-instance-test',
+				chatId: 'c-1',
+				runId: 'turn-1',
+				permissionOccurrenceId: 'incarnation-1',
+			},
 			allow: true,
 			alwaysAllow: false,
 			response: { outcome: { outcome: 'accepted' } },
 		});
 
 		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/permissions/decision');
-		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+			expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
 			clientRequestId: 'req-perm',
 			chatId: 'c-1',
-			permissionRequestId: 'perm-1',
+			permissionOccurrenceId: 'incarnation-1',
+			control: {
+				serverInstanceId: 'server-instance-test',
+				chatId: 'c-1',
+				runId: 'turn-1',
+				permissionOccurrenceId: 'incarnation-1',
+			},
 			allow: true,
 			alwaysAllow: false,
 			response: { outcome: { outcome: 'accepted' } },
@@ -384,7 +635,7 @@ describe('chats API contract', () => {
 				clientRequestId: 'req-interrupt',
 				status: 'accepted',
 				acceptedAt: 't',
-				stopped: true,
+				outcome: 'already-idle',
 				control: emptyControl(),
 			}),
 		);
@@ -403,6 +654,49 @@ describe('chats API contract', () => {
 		});
 	});
 
+	it.each(CHAT_STOP_OUTCOMES)('accepts the %s Stop outcome', async (outcome) => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				commandType: 'agent-stop',
+				clientRequestId: 'req-stop',
+				status: 'accepted',
+				acceptedAt: 't',
+				outcome,
+				control: emptyControl(),
+			}),
+		);
+
+		await expect(
+			stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', agentId: 'claude' }),
+		).resolves.toMatchObject({ outcome });
+	});
+
+	it('rejects missing and unknown Stop outcomes at the HTTP boundary', async () => {
+		const response = {
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop',
+			status: 'accepted',
+			acceptedAt: 't',
+			control: emptyControl(),
+		};
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse(response))
+			.mockResolvedValueOnce(jsonResponse({ ...response, outcome: 'unexpected' }));
+
+		await expect(
+			stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', agentId: 'claude' }),
+		).rejects.toThrow('Invalid chat Stop outcome response');
+		await expect(
+			interruptAndSendChat({
+				clientRequestId: 'req-interrupt',
+				chatId: 'c-1',
+				agentId: 'claude',
+			}),
+		).rejects.toThrow('Invalid chat Stop outcome response');
+	});
+
 	it('queue helpers use REST endpoints and encode identifiers', async () => {
 		const control = emptyControl();
 		fetchMock.mockImplementation(() =>
@@ -415,14 +709,18 @@ describe('chats API contract', () => {
 
 		await createQueuedInput({
 			clientRequestId: 'req-queue',
+			clientMessageId: 'message-queue',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: 'queue this',
 		});
 		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/queue/entries');
 		expect(fetchMock.mock.calls[1][1].method).toBe('POST');
-		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+			expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
 			clientRequestId: 'req-queue',
+			clientMessageId: 'message-queue',
 			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: 'queue this',
 		});
 
@@ -456,46 +754,220 @@ describe('chats API contract', () => {
 			entryId: 'entry/1',
 		});
 
-		await sendActiveInput({
-			clientRequestId: 'req-active',
+		await moveQueuedInput({
+			clientRequestId: 'req-move',
 			chatId: 'c/1',
+			entryId: 'entry/2',
+			targetEntryId: 'entry/1',
+			placement: 'before',
+			expectedReorderRevision: 4,
+			expectedSourceRevision: 2,
+			expectedTargetRevision: 3,
+		});
+		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/queue/entries/move');
+		expect(fetchMock.mock.calls[4][1].method).toBe('PUT');
+		expect(JSON.parse(fetchMock.mock.calls[4][1].body)).toEqual({
+			clientRequestId: 'req-move',
+			chatId: 'c/1',
+			entryId: 'entry/2',
+			targetEntryId: 'entry/1',
+			placement: 'before',
+			expectedReorderRevision: 4,
+			expectedSourceRevision: 2,
+			expectedTargetRevision: 3,
+		});
+
+		await submitGoalControl({
+			clientRequestId: 'req-goal',
+			clientMessageId: 'message-goal',
+			chatId: 'c/1',
+			transcriptViewId: 'view-1',
+			content: '/goal pause',
+		});
+		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/goal-control');
+		expect(fetchMock.mock.calls[5][1].method).toBe('POST');
+
+		await steerChat({
+			clientRequestId: 'req-steer',
+			clientMessageId: 'message-steer',
+			chatId: 'c/1',
+			transcriptViewId: 'view-1',
 			content: 'steer now',
 		});
-		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/active-input');
-		expect(fetchMock.mock.calls[4][1].method).toBe('POST');
+		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/steer');
+		expect(fetchMock.mock.calls[6][1].method).toBe('POST');
+		expect(JSON.parse(fetchMock.mock.calls[6][1].body)).toEqual({
+			clientRequestId: 'req-steer',
+			clientMessageId: 'message-steer',
+			chatId: 'c/1',
+			transcriptViewId: 'view-1',
+			content: 'steer now',
+		});
 
 		await clearChatQueue('c/1');
 		await pauseChatQueue('c/1');
 		await resumeChatQueue('c/1', 'pause/1');
 
-		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/clear');
-		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/pause');
-		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/resume');
-		expect(JSON.parse(fetchMock.mock.calls[7][1].body)).toEqual({
+		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/clear');
+		expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/chats/queue/pause');
+		expect(fetchMock.mock.calls[9][0]).toBe('/api/v1/chats/queue/resume');
+		expect(JSON.parse(fetchMock.mock.calls[9][1].body)).toEqual({
 			chatId: 'c/1',
 			pauseId: 'pause/1',
 		});
 	});
 
+	it('posts queued steering observations without client-supplied content', async () => {
+		const control = emptyControl();
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(
+				{
+					success: true,
+					commandType: 'steer',
+					clientRequestId: 'request-queue-steer',
+					chatId: 'c/1',
+					status: 'accepted',
+					acceptedAt: '2026-08-02T00:00:00.000Z',
+					turnId: 'turn-active',
+					serverInstanceId: control.serverInstanceId,
+					control,
+				},
+				202,
+			),
+		);
+
+		await expect(
+			steerQueuedEntry({
+				clientRequestId: 'request-queue-steer',
+				chatId: 'c/1',
+				transcriptViewId: 'view-1',
+				entryId: 'entry/1',
+				expectedRevision: 3,
+				expectedReorderRevision: 7,
+			}),
+		).resolves.toMatchObject({ control });
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue/entries/steer');
+		expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			clientRequestId: 'request-queue-steer',
+			chatId: 'c/1',
+			transcriptViewId: 'view-1',
+			entryId: 'entry/1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+		});
+	});
+
+	it('rejects malformed present queue-steer control snapshots', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(
+				{
+					success: true,
+					commandType: 'steer',
+					clientRequestId: 'request-queue-steer',
+					chatId: 'c-1',
+					status: 'accepted',
+					acceptedAt: '2026-08-02T00:00:00.000Z',
+					turnId: 'turn-active',
+					serverInstanceId: 'server-instance-test',
+					control: { ...emptyControl(), queue: { entries: [] } },
+				},
+				202,
+			),
+		);
+
+		await expect(
+			steerQueuedEntry({
+				clientRequestId: 'request-queue-steer',
+				chatId: 'c-1',
+				transcriptViewId: 'view-1',
+				entryId: 'entry-1',
+				expectedRevision: 3,
+				expectedReorderRevision: 7,
+			}),
+		).rejects.toThrow('Invalid queued steer execution control response');
+	});
+
+	it('rejects missing or mismatched queued-steer server identities', async () => {
+		const response = {
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'request-queue-steer',
+			chatId: 'c-1',
+			status: 'accepted',
+			acceptedAt: '2026-08-02T00:00:00.000Z',
+			turnId: 'turn-active',
+			control: emptyControl(),
+		};
+		const request = {
+			clientRequestId: 'request-queue-steer',
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			entryId: 'entry-1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+		};
+		fetchMock.mockResolvedValueOnce(jsonResponse(response, 202));
+		await expect(steerQueuedEntry(request)).rejects.toThrow(
+			'Invalid queued steer server instance response',
+		);
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ ...response, serverInstanceId: 'server-other' }, 202),
+		);
+		await expect(steerQueuedEntry(request)).rejects.toThrow(
+			'Mismatched queued steer server instance response',
+		);
+	});
+
+	it('rejects queue controls without a bounded opaque server instance ID', async () => {
+		for (const serverInstanceId of [
+			undefined,
+			null,
+			'',
+			' server-a',
+			'server-a ',
+			'x'.repeat(129),
+		]) {
+			fetchMock.mockResolvedValueOnce(
+				jsonResponse({
+					success: true,
+					chatId: 'chat-1',
+					control: { ...emptyControl(), serverInstanceId },
+				}),
+			);
+			await expect(getChatExecutionControl('chat-1')).rejects.toThrow(
+				'Invalid chat execution control response',
+			);
+		}
+	});
+
 	it('settings, model, project path, and history helpers use REST endpoints', async () => {
-		fetchMock.mockImplementation((url: string) =>
-			Promise.resolve(
+		fetchMock.mockImplementation((url: string) => {
+			const requestUrl = new URL(url, 'http://garcon.local');
+			const beforeOrdinal = requestUrl.searchParams.get('beforeOrdinal');
+			const pageNewestOrdinal = beforeOrdinal === null ? 0 : Number(beforeOrdinal) - 1;
+			return Promise.resolve(
 				jsonResponse(
 					url.startsWith('/api/v1/chats/messages')
 						? {
-								chatId: 'c/1',
+								historyState: { kind: 'complete' },
+								chatId: requestUrl.searchParams.get('chatId'),
 								messages: [],
-								generationId: 'generation-1',
-								lastSeq: 0,
-								pageOldestSeq: 0,
-								pendingUserInputs: [],
+								transcriptViewId: 'view-1',
+								lastOrdinal: pageNewestOrdinal,
+								pageOldestOrdinal: 0,
+								pageNewestOrdinal,
+								nextBeforeOrdinal: null,
+								resendCandidates: [],
 								hasMore: false,
 								limit: 50,
 							}
 						: { success: true },
 				),
-			),
-		);
+			);
+		});
 
 		await updateExecutionSettings({ chatId: 'c-1', permissionMode: 'manualBypass' });
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/execution-settings');
@@ -523,35 +995,53 @@ describe('chats API contract', () => {
 			projectPath: '/workspace/repo-worktree',
 		});
 
-		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeSeq: 20 });
+		const messages = await getChatMessages({
+			chatId: 'c/1',
+			limit: 50,
+			beforeOrdinal: 20,
+			transcriptViewId: 'view-1',
+		});
 		expect(fetchMock.mock.calls[3][0]).toBe(
-			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeSeq=20',
+			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeOrdinal=20&transcriptViewId=view-1',
 		);
 		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
-		expect(messages.generationId).toBe('generation-1');
+		expect(messages).toMatchObject({
+			historyState: { kind: 'complete' },
+			transcriptViewId: 'view-1',
+		});
 
 		await getChatMessages({ chatId: 'c/2' });
 		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/messages?chatId=c%2F2&limit=50');
+
+		await getChatMessages({ chatId: 'c/3', purpose: 'activation' });
+		expect(fetchMock.mock.calls[5][0]).toBe(
+			'/api/v1/chats/messages?chatId=c%2F3&limit=50&purpose=activation',
+		);
 	});
 
 	it('rejects malformed chat message page metadata', async () => {
 		const validPage = {
+			historyState: { kind: 'complete' },
 			chatId: 'c-1',
 			messages: [],
-			generationId: 'generation-1',
-			lastSeq: 0,
-			pageOldestSeq: 0,
-			pendingUserInputs: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 0,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 0,
+			nextBeforeOrdinal: null,
+			resendCandidates: [],
 			hasMore: false,
 			limit: 20,
 		};
 
 		const cases: Array<[string, Record<string, unknown>]> = [
 			['chatId', { chatId: '' }],
-			['generationId', { generationId: '' }],
-			['lastSeq', { lastSeq: '0' }],
-			['pageOldestSeq', { pageOldestSeq: -1 }],
-			['pendingUserInputs', { pendingUserInputs: [{ clientRequestId: 'req-1' }] }],
+			['transcriptViewId', { transcriptViewId: '' }],
+			['lastOrdinal', { lastOrdinal: '0' }],
+			['pageOldestOrdinal', { pageOldestOrdinal: -1 }],
+			['pageNewestOrdinal', { pageNewestOrdinal: -1 }],
+			['nextBeforeOrdinal', { nextBeforeOrdinal: undefined }],
+			['resendCandidates', { resendCandidates: [{ ordinal: 1 }] }],
 			['hasMore', { hasMore: 'false' }],
 			['limit', { limit: 0 }],
 		];
@@ -561,6 +1051,352 @@ describe('chats API contract', () => {
 
 			await expect(getChatMessages({ chatId: 'c-1' })).rejects.toThrow(fieldName);
 		}
+	});
+
+	it('[TLV5-PAGE.09-WEB-CONTRACT-01] accepts an all-hidden raw page with a strict continuation', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponse({
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 300,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 50,
+		}));
+
+		await expect(getChatMessages({
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			beforeOrdinal: 251,
+			limit: 50,
+		})).resolves.toMatchObject({
+			messages: [],
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			hasMore: true,
+		});
+	});
+
+	it('[TLV5-PAGE.08-WEB-CONTRACT-01] accepts a server-clamped raw interval ceiling', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponse({
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 250,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 50,
+		}));
+
+		await expect(getChatMessages({
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			beforeOrdinal: 999,
+			limit: 50,
+		})).resolves.toMatchObject({
+			lastOrdinal: 250,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			hasMore: true,
+		});
+	});
+
+	it('[TLV5-PAGE.10-WEB-CONTRACT-01] rejects malformed or stalled raw continuations', async () => {
+		const validPage = {
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 300,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 250,
+			nextBeforeOrdinal: 201,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 50,
+		};
+		const request = {
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			beforeOrdinal: 251,
+			limit: 50,
+		} satisfies Parameters<typeof getChatMessages>[0];
+
+		for (const patch of [
+			{ nextBeforeOrdinal: null },
+			{ nextBeforeOrdinal: null, hasMore: false },
+			{ nextBeforeOrdinal: 0 },
+			{ nextBeforeOrdinal: 2 },
+			{ nextBeforeOrdinal: 251 },
+			{ nextBeforeOrdinal: 201, hasMore: false },
+		]) {
+			fetchMock.mockResolvedValueOnce(jsonResponse({ ...validPage, ...patch }));
+			await expect(getChatMessages(request)).rejects.toThrow('Invalid chat messages page');
+		}
+	});
+
+	it('[TLV5-PAGE.01-WEB-CONTRACT-01] qualifies transcript page requests by view and validates the response against the request', async () => {
+		const message = (ordinal: number, content: string) => ({
+			ordinal,
+			message: {
+				type: 'assistant-message',
+				timestamp: '2026-08-15T00:00:00.000Z',
+				content,
+			},
+		});
+		const validPage = {
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [message(40, 'earlier'), message(49, 'later')],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 100,
+			pageOldestOrdinal: 40,
+			pageNewestOrdinal: 49,
+			nextBeforeOrdinal: 30,
+			resendCandidates: [],
+			hasMore: true,
+			limit: 20,
+		};
+		const request = {
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			limit: 20,
+			beforeOrdinal: 50,
+		} satisfies Parameters<typeof getChatMessages>[0];
+		fetchMock.mockResolvedValueOnce(jsonResponse(validPage));
+
+		await getChatMessages(request);
+
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			'/api/v1/chats/messages?chatId=c-1&limit=20&beforeOrdinal=50&transcriptViewId=view-1',
+		);
+
+		const invalidResponses = [
+			{ ...validPage, chatId: 'another-chat' },
+			{ ...validPage, transcriptViewId: 'another-view' },
+			{ ...validPage, limit: 19 },
+			{ ...validPage, pageNewestOrdinal: 50 },
+			{ ...validPage, pageOldestOrdinal: 51, pageNewestOrdinal: 49 },
+			{ ...validPage, lastOrdinal: 48 },
+			{ ...validPage, messages: [message(49, 'later'), message(40, 'earlier')] },
+			{ ...validPage, messages: [message(40, 'first'), message(40, 'duplicate')] },
+			{ ...validPage, messages: [message(40, 'earlier'), message(50, 'outside range')] },
+			{ ...validPage, messages: [message(41, 'wrong lower bound'), message(49, 'later')] },
+			{ ...validPage, pageOldestOrdinal: 0 },
+			{ ...validPage, messages: [], pageOldestOrdinal: 40 },
+		];
+		for (const response of invalidResponses) {
+			fetchMock.mockResolvedValueOnce(jsonResponse(response));
+			await expect(getChatMessages(request)).rejects.toThrow('Invalid chat messages page');
+		}
+	});
+
+	it('qualifies a newest-page refresh when the caller already owns a transcript view', async () => {
+		const validPage = {
+			historyState: { kind: 'complete' },
+			chatId: 'c-1',
+			messages: [],
+			transcriptViewId: 'view-1',
+			lastOrdinal: 0,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 0,
+			nextBeforeOrdinal: null,
+			resendCandidates: [],
+			hasMore: false,
+			limit: 20,
+		};
+		const request = {
+			chatId: 'c-1',
+			limit: 20,
+			transcriptViewId: 'view-1',
+		} satisfies Parameters<typeof getChatMessages>[0];
+		fetchMock.mockResolvedValueOnce(jsonResponse(validPage));
+
+		await getChatMessages(request);
+
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			'/api/v1/chats/messages?chatId=c-1&limit=20&transcriptViewId=view-1',
+		);
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ ...validPage, transcriptViewId: 'replacement-view' }),
+		);
+		await expect(getChatMessages(request)).rejects.toThrow(
+			'transcriptViewId does not match request',
+		);
+	});
+
+	it('accepts the server-clamped effective page limit', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				historyState: { kind: 'complete' },
+				chatId: 'c-1',
+				messages: [],
+				transcriptViewId: 'view-1',
+				lastOrdinal: 0,
+				pageOldestOrdinal: 0,
+				pageNewestOrdinal: 0,
+				nextBeforeOrdinal: null,
+				resendCandidates: [],
+				hasMore: false,
+				limit: 200,
+			}),
+		);
+
+		await expect(getChatMessages({ chatId: 'c-1', limit: 999_999 })).resolves.toMatchObject({
+			chatId: 'c-1',
+			limit: 200,
+		});
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			'/api/v1/chats/messages?chatId=c-1&limit=999999',
+		);
+	});
+
+	it('accepts degraded history only without sequence metadata', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				historyState: {
+					kind: 'degraded',
+					errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+					retryable: false,
+				},
+				chatId: 'c-1',
+				messages: [],
+			}),
+		);
+
+		await expect(getChatMessages({ chatId: 'c-1' })).resolves.toEqual({
+			historyState: {
+				kind: 'degraded',
+				errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+				retryable: false,
+			},
+			chatId: 'c-1',
+			messages: [],
+		});
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({
+				historyState: {
+					kind: 'degraded',
+					errorCode: 'CARRYOVER_HISTORY_UNAVAILABLE',
+					retryable: false,
+				},
+				chatId: 'c-1',
+				messages: [],
+				lastOrdinal: 0,
+			}),
+		);
+		await expect(getChatMessages({ chatId: 'c-1' })).rejects.toThrow('lastOrdinal');
+	});
+
+	it('validates a compact transcript-search prefix against its request', async () => {
+		const payload = chatSearchResponse();
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(
+			searchChatTranscripts({
+				query: 'needle',
+				mode: 'prefix',
+				offset: 0,
+				limit: 500,
+				snippetLimit: 1,
+			}),
+		).resolves.toEqual(payload);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			query: 'needle',
+			mode: 'prefix',
+			offset: 0,
+			limit: 500,
+			snippetLimit: 1,
+		});
+	});
+
+	it('permits a transcript-search cursor whose rows were filtered by the controller', async () => {
+		const payload = chatSearchResponse({
+			mode: 'page',
+			snippetLimit: 1,
+			results: [],
+			page: { offset: 0, limit: 50, total: 100, hasMore: true, nextOffset: 50 },
+		});
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(
+			searchChatTranscripts({
+				query: 'needle',
+				mode: 'page',
+				offset: 0,
+				limit: 50,
+				snippetLimit: 1,
+			}),
+		).resolves.toEqual(payload);
+	});
+
+	it.each([
+		[
+			'mode',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.mode = 'page';
+			},
+		],
+		[
+			'snippet limit',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.snippetLimit = 2;
+			},
+		],
+		[
+			'offset',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.offset = 1;
+			},
+		],
+		[
+			'limit',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.limit = 499;
+			},
+		],
+		[
+			'snippet count',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.results[0]!.snippets.push({ ...payload.results[0]!.snippets[0]!, ordinal: 2 });
+			},
+		],
+		[
+			'cursor presence',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.hasMore = false;
+			},
+		],
+		[
+			'cursor bounds',
+			(payload: ReturnType<typeof chatSearchResponse>) => {
+				payload.page.nextOffset = 501;
+			},
+		],
+	] as const)('rejects a transcript-search %s mismatch', async (_caseName, mutate) => {
+		const payload = chatSearchResponse();
+		mutate(payload);
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(
+			searchChatTranscripts({
+				query: 'needle',
+				mode: 'prefix',
+				offset: 0,
+				limit: 500,
+				snippetLimit: 1,
+			}),
+		).rejects.toThrow('Invalid chat search response');
 	});
 
 	it('deleteChat sends chatId in the JSON body', async () => {
@@ -613,42 +1449,111 @@ describe('chats API contract', () => {
 		expect(body.entries).toEqual(entries);
 	});
 
-	it('reorderChats sends list, oldOrder, newOrder', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+	it('reorderChat sends and parses a boundary placement', async () => {
+		const result = {
+			success: true as const,
+			chatId: 'c-1',
+			orderGroup: 'normal' as const,
+			changed: true,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(result));
 
-		await reorderChats({
-			list: 'normal',
-			oldOrder: ['a', 'b'],
-			newOrder: ['b', 'a'],
+		await expect(
+			reorderChat({
+				chatId: 'c-1',
+				placement: { kind: 'boundary', boundary: 'top' },
+			}),
+		).resolves.toEqual(result);
+
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/reorder');
+		expect(options.method).toBe('POST');
+		expect(JSON.parse(options.body)).toEqual({
+			chatId: 'c-1',
+			placement: { kind: 'boundary', boundary: 'top' },
+		});
+	});
+
+	it('reorderChat sends a relative placement', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				chatId: 'c-1',
+				orderGroup: 'pinned',
+				changed: false,
+			}),
+		);
+
+		await reorderChat({
+			chatId: 'c-1',
+			placement: { kind: 'relative', referenceChatId: 'c-2', position: 'before' },
 		});
 
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.list).toBe('normal');
-		expect(body.oldOrder).toEqual(['a', 'b']);
-		expect(body.newOrder).toEqual(['b', 'a']);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			chatId: 'c-1',
+			placement: { kind: 'relative', referenceChatId: 'c-2', position: 'before' },
+		});
 	});
 
-	it('reorderChatsQuick sends chatId with an above neighbor', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+	for (const [name, response] of [
+		['missing chat ID', { success: true, orderGroup: 'normal', changed: true }],
+		['invalid group', { success: true, chatId: 'c-1', orderGroup: 'orphan', changed: true }],
+		[
+			'invalid changed value',
+			{ success: true, chatId: 'c-1', orderGroup: 'normal', changed: 'yes' },
+		],
+	] as const) {
+		it(`rejects a reorder response with ${name}`, async () => {
+			fetchMock.mockResolvedValue(jsonResponse(response));
 
-		await reorderChatsQuick({ chatId: 'c-1', chatIdAbove: 'c-0' });
+			await expect(
+				reorderChat({
+					chatId: 'c-1',
+					placement: { kind: 'boundary', boundary: 'bottom' },
+				}),
+			).rejects.toThrow('Invalid chat reorder response');
+		});
+	}
 
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.chatId).toBe('c-1');
-		expect(body.chatIdAbove).toBe('c-0');
+	it('sortChatOrder sends and parses a creation-time preset', async () => {
+		const result = {
+			success: true as const,
+			sortKey: 'created' as const,
+			changed: true,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(result));
+
+		await expect(sortChatOrder({ sortKey: 'created' })).resolves.toEqual(result);
+
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/sort');
+		expect(options.method).toBe('POST');
+		expect(JSON.parse(options.body)).toEqual({ sortKey: 'created' });
 	});
 
-	it('reorderChatsQuick sends chatId with a below neighbor', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+	it('sortChatOrder accepts an unchanged activity preset response', async () => {
+		const result = {
+			success: true as const,
+			sortKey: 'activity' as const,
+			changed: false,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(result));
 
-		await reorderChatsQuick({ chatId: 'c-1', chatIdBelow: 'c-2' });
+		await expect(sortChatOrder({ sortKey: 'activity' })).resolves.toEqual(result);
+	});
 
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.chatId).toBe('c-1');
-		expect(body.chatIdBelow).toBe('c-2');
+	it('sortChatOrder rejects a malformed response', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ success: true, sortKey: 'activity', changed: 'yes' }),
+		);
+
+		await expect(sortChatOrder({ sortKey: 'activity' })).rejects.toThrow(
+			'Invalid chat order sort response',
+		);
 	});
 
 	it('forkChat sends POST with sourceChatId and chatId', async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
 		fetchMock.mockResolvedValue(
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }),
 		);
@@ -659,18 +1564,82 @@ describe('chats API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/fork');
 		expect(opts.method).toBe('POST');
+		expect(timeoutSpy).not.toHaveBeenCalled();
 		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2' });
 	});
 
-	it('forkChat sends an optional message cutoff sequence', async () => {
+	it('forkChat surfaces retryable transcript-persistence refusals', async () => {
+		const errorCode = 'TRANSCRIPT_NOT_YET_PERSISTED' satisfies CommandErrorCode;
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					success: false,
+					error: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+					errorCode,
+					retryable: true,
+				},
+				409,
+			),
+		);
+
+		let failure: unknown;
+		try {
+			await forkChat({ sourceChatId: '1', chatId: '2' });
+		} catch (error) {
+			failure = error;
+		}
+
+		expect(failure).toBeInstanceOf(ApiError);
+		expect(failure).toMatchObject({
+			status: 409,
+			message: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+			errorCode,
+			retryable: true,
+		});
+	});
+
+	it('forkChat sends an optional view-bound message cutoff', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'codex' }),
 		);
 
-		await forkChat({ sourceChatId: '1', chatId: '2', upToSeq: 7 });
+		await forkChat({
+			sourceChatId: '1',
+			chatId: '2',
+			upToOrdinal: 7,
+			transcriptViewId: 'view-1',
+		});
 
 		const [, opts] = fetchMock.mock.calls[0];
-		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2', upToSeq: 7 });
+		expect(JSON.parse(opts.body)).toEqual({
+			sourceChatId: '1',
+			chatId: '2',
+			upToOrdinal: 7,
+			transcriptViewId: 'view-1',
+		});
+	});
+
+	it('forkChat sends handoff-fork consent only when the user has given it', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'codex' }),
+		);
+
+		await forkChat({
+			sourceChatId: '1',
+			chatId: '2',
+			upToOrdinal: 7,
+			transcriptViewId: 'view-1',
+			allowHandoffFork: true,
+		});
+
+		const [, opts] = fetchMock.mock.calls[0];
+		expect(JSON.parse(opts.body)).toEqual({
+			sourceChatId: '1',
+			chatId: '2',
+			upToOrdinal: 7,
+			transcriptViewId: 'view-1',
+			allowHandoffFork: true,
+		});
 	});
 
 	it('validateStart calls GET /api/v1/chats/validate-start', async () => {

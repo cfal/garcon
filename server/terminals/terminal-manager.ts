@@ -7,6 +7,7 @@ import {
   type TerminalCreateResponse,
   type TerminalErrorCode,
   type TerminalMetadata,
+  type TerminalRenameResponse,
   type TerminalStreamServerMessage,
   type TerminalTerminateResponse,
 } from "../../common/terminal.js";
@@ -173,6 +174,17 @@ export class TerminalManager {
       .sort((left, right) => left.displaySequence - right.displaySequence);
   }
 
+  rename(
+    principal: ServerPrincipal,
+    terminalId: string,
+    title: string | null,
+  ): TerminalRenameResponse {
+    const session = this.#requireSession(principal, terminalId);
+    session.metadata.title = title;
+    this.#broadcastStatus(session, "rename");
+    return { success: true, terminalId, title };
+  }
+
   async create(
     principal: ServerPrincipal,
     request: TerminalCreateRequest,
@@ -255,6 +267,7 @@ export class TerminalManager {
       const metadata: TerminalMetadata = {
         terminalId,
         displaySequence,
+        title: null,
         initialWorkingDirectory: cwd,
         processStatus: "running",
         attachmentStatus: "detached",
@@ -609,23 +622,27 @@ export class TerminalManager {
       if (session.terminating) return;
       session.metadata.processStatus = "exited";
       session.metadata.exitCode = exitCode;
-      for (const subscriber of session.subscribers) {
-        try {
-          subscriber.sendTerminalMessage({
-            type: "terminal-status",
-            terminal: cloneTerminalMetadata(session.metadata),
-          });
-        } catch (error) {
-          logger.warn(
-            `terminal exit notification failed id=${session.metadata.terminalId} connection=${subscriber.connectionId}:`,
-            errorMessage(error),
-          );
-        }
-      }
+      this.#broadcastStatus(session, "exit");
       logger.info(
         `terminal exited id=${session.metadata.terminalId} principal=${session.principalKey} code=${exitCode}`,
       );
     });
+  }
+
+  #broadcastStatus(session: TerminalSession, event: "rename" | "exit"): void {
+    for (const subscriber of session.subscribers) {
+      try {
+        subscriber.sendTerminalMessage({
+          type: "terminal-status",
+          terminal: cloneTerminalMetadata(session.metadata),
+        });
+      } catch (error) {
+        logger.warn(
+          `terminal ${event} notification failed id=${session.metadata.terminalId} connection=${subscriber.connectionId}:`,
+          errorMessage(error),
+        );
+      }
+    }
   }
 
   #enqueue(
@@ -649,12 +666,21 @@ export class TerminalManager {
           `terminal operation failed id=${session.metadata.terminalId}:`,
           errorMessage(error),
         );
-        peer.sendTerminalMessage({
-          type: "terminal-error",
-          terminalId: session.metadata.terminalId,
-          code: "terminal-internal",
-          message: "Terminal operation failed.",
-        });
+        try {
+          peer.sendTerminalMessage({
+            type: "terminal-error",
+            terminalId: session.metadata.terminalId,
+            code: "terminal-internal",
+            message: "Terminal operation failed.",
+          });
+        } catch (sendError) {
+          // A failed peer send must not reject the chain; no later operation
+          // would exist to absorb the rejection.
+          logger.warn(
+            `terminal error notification failed id=${session.metadata.terminalId} connection=${peer.connectionId}:`,
+            errorMessage(sendError),
+          );
+        }
       })
       .finally(() => {
         session.pendingOperations -= 1;

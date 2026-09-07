@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
-import type { HostId } from '$lib/workspace/surface-types.js';
 import FileTreeVirtualRows from '../FileTreeVirtualRows.svelte';
+import type { FileTreeViewMode } from '../file-tree-view-profile.js';
 import {
 	FILE_TREE_COARSE_ROW_HEIGHT,
 	FILE_TREE_HEADER_HEIGHT,
@@ -29,6 +29,7 @@ function entries(count: number): FileTreeEntry[] {
 function response(items: FileTreeEntry[]): FileTreeResponse {
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory: null,
 		directory: {
 			path: '/workspace',
 			relativePath: '',
@@ -39,34 +40,114 @@ function response(items: FileTreeEntry[]): FileTreeResponse {
 	};
 }
 
-function renderRows(count: number, presentation: HostId | 'mobile' = 'main') {
+function renderRows(count: number, viewMode: FileTreeViewMode = 'columns') {
 	const store = new FileTreeStore();
 	store.navigation = { kind: 'ready', response: response(entries(count)) };
+	const onFileSelect = vi.fn();
 	const result = render(FileTreeVirtualRows, {
 		store,
-		presentation,
-		onFileSelect: vi.fn(),
+		viewMode,
+		onFileSelect,
 	});
-	return { ...result, store };
+	const setViewMode = (nextViewMode: FileTreeViewMode) =>
+		result.rerender({ store, viewMode: nextViewMode, onFileSelect });
+	return { ...result, store, setViewMode };
+}
+
+function mockFinePointerViewport(
+	treegrid: HTMLElement,
+	clampTiming: 'eager' | 'layout' = 'eager',
+): void {
+	const viewportHeight = 640;
+	let physicalScrollOffset = 0;
+	const renderedScrollHeight = (): number => {
+		const headerHeight = treegrid.querySelector('[data-file-tree-column-grid]') ? 32 : 0;
+		const virtualRow = treegrid.querySelector<HTMLElement>('[data-file-tree-virtual-row]');
+		const virtualHeight = Number.parseFloat(virtualRow?.parentElement?.style.height ?? '0');
+		return headerHeight + virtualHeight;
+	};
+	const clampPhysicalOffset = (): void => {
+		const maximum = Math.max(0, renderedScrollHeight() - viewportHeight);
+		physicalScrollOffset = Math.min(physicalScrollOffset, maximum);
+	};
+
+	Object.defineProperties(treegrid, {
+		clientHeight: { configurable: true, value: viewportHeight },
+		scrollHeight: {
+			configurable: true,
+			get: () => {
+				if (clampTiming === 'layout') clampPhysicalOffset();
+				return renderedScrollHeight();
+			},
+		},
+		scrollTop: {
+			configurable: true,
+			get: () => {
+				if (clampTiming === 'eager') clampPhysicalOffset();
+				return physicalScrollOffset;
+			},
+			set: (value: number) => {
+				physicalScrollOffset = Math.max(0, value);
+			},
+		},
+	});
+	installFileTreeRects(treegrid);
+}
+
+function installFileTreeRects(treegrid: HTMLElement): void {
+	const sizer = treegrid.querySelector<HTMLElement>('[data-file-tree-virtual-sizer]');
+	if (!sizer) throw new Error('Expected file tree virtual sizer');
+	Object.defineProperty(treegrid, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => new DOMRect(0, 0, 0, treegrid.clientHeight),
+	});
+	Object.defineProperty(sizer, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => {
+			const headerHeight = treegrid.querySelector('[data-file-tree-column-grid]') ? 32 : 0;
+			return new DOMRect(0, headerHeight - treegrid.scrollTop, 0, sizer.offsetHeight);
+		},
+	});
+}
+
+function scrollOnNextAnimationFrame(element: HTMLElement, offset: number): Promise<void> {
+	return new Promise((resolve) => {
+		requestAnimationFrame(() => {
+			element.scrollTop = offset;
+			element.dispatchEvent(new Event('scroll'));
+			resolve();
+		});
+	});
+}
+
+function forceLayoutOnNextAnimationFrame(element: HTMLElement): Promise<void> {
+	return new Promise((resolve) => {
+		requestAnimationFrame(() => {
+			void element.scrollHeight;
+			resolve();
+		});
+	});
 }
 
 describe('FileTreeVirtualRows', () => {
 	beforeEach(() => localStorage.clear());
 	afterEach(cleanup);
 
-	it('caps the table minimum width at the available mobile panel width', () => {
-		const { container } = renderRows(1, 'mobile');
+	it('caps the multi-column table minimum width at the available panel width', () => {
+		const { container } = renderRows(1);
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
 
 		expect(table?.style.minWidth).toBe('min(520px, 100%)');
 	});
 
 	it('suppresses scroll-boundary bounce in the file viewport', () => {
-		const { container } = renderRows(1, 'mobile');
+		const { container } = renderRows(1);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 
+		expect(treegrid?.dataset.workspaceScrollRegion).toBe('primary');
 		expect(treegrid?.classList.contains('overscroll-none')).toBe(true);
 		expect(treegrid?.classList.contains('overscroll-contain')).toBe(false);
+		expect(treegrid?.style.getPropertyValue('overflow-anchor')).toBe('none');
 	});
 
 	it('uses compact desktop rows and a reduced coarse-pointer row height', async () => {
@@ -86,7 +167,7 @@ describe('FileTreeVirtualRows', () => {
 		});
 
 		try {
-			const { container } = renderRows(1, 'mobile');
+			const { container, setViewMode } = renderRows(1);
 			const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 			await waitFor(() =>
 				expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe(
@@ -96,6 +177,12 @@ describe('FileTreeVirtualRows', () => {
 			expect(treegrid?.style.getPropertyValue('--file-tree-disclosure-size')).toBe(
 				`${FILE_TREE_COARSE_ROW_HEIGHT}px`,
 			);
+
+			await setViewMode('details');
+			await waitFor(() =>
+				expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe('52px'),
+			);
+			expect(treegrid?.style.getPropertyValue('--file-tree-disclosure-size')).toBe('36px');
 		} finally {
 			Object.defineProperty(window, 'matchMedia', {
 				configurable: true,
@@ -104,20 +191,26 @@ describe('FileTreeVirtualRows', () => {
 		}
 	});
 
-	it('uses the compact row height for fine pointers', () => {
-		const { container } = renderRows(1);
+	it('uses the compact row height for fine pointers', async () => {
+		const { container, setViewMode } = renderRows(1);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 
 		expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe(
 			`${FILE_TREE_ROW_HEIGHT}px`,
 		);
+
+		await setViewMode('details');
+		await waitFor(() =>
+			expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
+		);
+		expect(treegrid?.style.getPropertyValue('--file-tree-disclosure-size')).toBe('28px');
 	});
 
-	it('preserves the scrollable table minimum width in desktop presentations', () => {
-		const { container } = renderRows(1, 'sidebar');
+	it('caps the scrollable table minimum width in column mode', () => {
+		const { container } = renderRows(1);
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
 
-		expect(table?.style.minWidth).toBe('520px');
+		expect(table?.style.minWidth).toBe('min(520px, 100%)');
 	});
 
 	it('caps the single-column mobile table at the available panel width', () => {
@@ -127,7 +220,7 @@ describe('FileTreeVirtualRows', () => {
 		store.setColumnVisible('modified', false);
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'mobile',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
@@ -135,8 +228,27 @@ describe('FileTreeVirtualRows', () => {
 		expect(table?.style.minWidth).toBe('min(240px, 100%)');
 	});
 
+	it('starts a details view with details geometry and semantics', async () => {
+		const { container } = renderRows(1, 'details');
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
+		const header = screen.getByRole('columnheader', {
+			name: 'Name and details, sorted by Name',
+		});
+
+		expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe('44px');
+		expect(treegrid?.style.getPropertyValue('--file-tree-disclosure-size')).toBe('28px');
+		expect(treegrid?.getAttribute('aria-colcount')).toBe('1');
+		expect(table?.style.minWidth).toBe('min(240px, 100%)');
+		expect(header.getAttribute('aria-colindex')).toBe('1');
+		expect(header.getAttribute('aria-sort')).toBe('ascending');
+		await waitFor(() =>
+			expect(screen.getAllByRole('row')[1]?.getAttribute('aria-rowindex')).toBe('2'),
+		);
+	});
+
 	it('keeps a 100,000-row directory to a bounded mounted window with absolute ARIA positions', async () => {
-		const { container } = renderRows(100_000);
+		const { container, setViewMode } = renderRows(100_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 
@@ -145,14 +257,132 @@ describe('FileTreeVirtualRows', () => {
 		});
 		const wrappers = [...container.querySelectorAll<HTMLElement>('[data-file-tree-virtual-row]')];
 		expect(wrappers.length).toBeLessThan(80);
-		expect(treegrid.getAttribute('aria-rowcount')).toBe('100001');
+		expect(treegrid.getAttribute('aria-rowcount')).toBe('100002');
 
 		const rowIndexes = [
 			...container.querySelectorAll<HTMLElement>('[role="row"][aria-rowindex]'),
 		].map((row) => Number(row.getAttribute('aria-rowindex')));
 		expect(rowIndexes[0]).toBe(1);
 		expect(rowIndexes).toEqual([...rowIndexes].sort((left, right) => left - right));
+
+		await setViewMode('details');
+		await waitFor(() =>
+			expect(treegrid.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
+		);
+		expect(container.querySelectorAll('[data-file-tree-virtual-row]').length).toBeLessThan(80);
 	}, 15_000);
+
+	it('preserves the visible anchor and focused row across view geometry changes', async () => {
+		const { container, setViewMode } = renderRows(1_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
+		treegrid.scrollTop = 640;
+		await fireEvent.scroll(treegrid);
+		const path = '/workspace/file-000022.ts';
+		const focused = await waitFor(() => {
+			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${path}"]`);
+			if (!row) throw new Error('Expected anchor row');
+			return row;
+		});
+		focused.focus();
+
+		await setViewMode('details');
+
+		await waitFor(() => expect(treegrid.scrollTop).toBeCloseTo(992, 0));
+		const restored = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${path}"]`);
+		expect(restored).toBe(focused);
+		expect(document.activeElement).toBe(focused);
+	});
+
+	it('preserves the physical end when columns grow into details rows', async () => {
+		const { container, setViewMode } = renderRows(1_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
+		treegrid.scrollTop = 27_420;
+		await fireEvent.scroll(treegrid);
+
+		await setViewMode('details');
+
+		await waitFor(() => expect(treegrid.scrollTop).toBe(43_404));
+	});
+
+	it('preserves the physical end when details rows shrink into columns', async () => {
+		const { container, setViewMode } = renderRows(1_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
+		await setViewMode('details');
+		await waitFor(() =>
+			expect(treegrid.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
+		);
+		treegrid.scrollTop = 43_404;
+		await fireEvent.scroll(treegrid);
+
+		await setViewMode('columns');
+
+		await waitFor(() => expect(treegrid.scrollTop).toBe(27_420));
+	});
+
+	it('preserves a deep anchor instead of treating a shrinking geometry as the end', async () => {
+		const { container, setViewMode } = renderRows(1_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid, 'layout');
+		await setViewMode('details');
+		await waitFor(() =>
+			expect(treegrid.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
+		);
+		treegrid.scrollTop = 30_000;
+		await fireEvent.scroll(treegrid);
+		await waitFor(() =>
+			expect(
+				container.querySelector('[data-file-tree-row-key="/workspace/file-000681.ts"]'),
+			).toBeTruthy(),
+		);
+
+		const frameLayout = forceLayoutOnNextAnimationFrame(treegrid);
+		await setViewMode('columns');
+		await frameLayout;
+
+		await waitFor(() => expect(treegrid.scrollTop).toBeCloseTo(19_104, 0));
+	});
+
+	it('preserves a near-end anchor after the removed header temporarily clamps scrolling', async () => {
+		const { container, setViewMode } = renderRows(1_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
+		treegrid.scrollTop = 27_380;
+		await fireEvent.scroll(treegrid);
+		const path = '/workspace/file-000977.ts';
+		await waitFor(() => {
+			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${path}"]`);
+			if (!row) throw new Error('Expected near-end anchor row');
+		});
+
+		await setViewMode('details');
+
+		await waitFor(() => expect(treegrid.scrollTop).toBeCloseTo(43_012, 0));
+	});
+
+	it('does not overwrite user scrolling while a geometry restore is deferred', async () => {
+		const { container, setViewMode } = renderRows(1_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
+		treegrid.scrollTop = 640;
+		await fireEvent.scroll(treegrid);
+
+		const userScroll = scrollOnNextAnimationFrame(treegrid, 700);
+		await setViewMode('details');
+		await userScroll;
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+		expect(treegrid.scrollTop).toBe(700);
+	});
 
 	it('focuses an initially unmounted End target and retains it while the viewport moves away', async () => {
 		const { container } = renderRows(10_000);
@@ -182,6 +412,9 @@ describe('FileTreeVirtualRows', () => {
 
 	it('cancels a stale long-distance focus transfer when a newer request wins', async () => {
 		const { container } = renderRows(10_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
 		const firstPath = '/workspace/file-000000.ts';
 		const first = await waitFor(() => {
 			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${firstPath}"]`);
@@ -199,6 +432,7 @@ describe('FileTreeVirtualRows', () => {
 		await waitFor(() =>
 			expect(document.activeElement?.getAttribute('data-file-tree-row-key')).toBe(firstPath),
 		);
+		expect(treegrid.scrollTop).toBe(0);
 	});
 
 	it('reconciles removed DOM focus to the nearest surviving actionable row', async () => {
@@ -207,7 +441,7 @@ describe('FileTreeVirtualRows', () => {
 		store.navigation = { kind: 'ready', response: response(items) };
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const removedPath = items[1]!.path;
@@ -232,7 +466,7 @@ describe('FileTreeVirtualRows', () => {
 		store.navigation = { kind: 'ready', response: response(items) };
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
@@ -251,6 +485,7 @@ describe('FileTreeVirtualRows', () => {
 				value: FILE_TREE_HEADER_HEIGHT + items.length * FILE_TREE_ROW_HEIGHT,
 			},
 		});
+		installFileTreeRects(treegrid);
 		const outside = document.createElement('button');
 		document.body.append(outside);
 		first.focus();
@@ -273,7 +508,7 @@ describe('FileTreeVirtualRows', () => {
 		store.navigation = { kind: 'ready', response: response(items) };
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
@@ -290,10 +525,9 @@ describe('FileTreeVirtualRows', () => {
 			relativePath: '000-prepended.ts',
 		}));
 
+		const userScroll = scrollOnNextAnimationFrame(treegrid, 700);
 		store.navigation = { kind: 'ready', response: response([...prepended, ...items]) };
-		await tick();
-		treegrid.scrollTop = 700;
-		await fireEvent.scroll(treegrid);
+		await userScroll;
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -316,7 +550,7 @@ describe('FileTreeVirtualRows', () => {
 		store.loadingDirs = new Set([directory.path]);
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const status = await screen.findByRole('status');
@@ -331,6 +565,7 @@ describe('FileTreeVirtualRows', () => {
 		const { container, store } = renderRows(500);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
 		treegrid.scrollTop = 640;
 		await fireEvent.scroll(treegrid);
 		expect(treegrid.scrollTop).toBe(640);
@@ -343,11 +578,13 @@ describe('FileTreeVirtualRows', () => {
 		const store = new FileTreeStore();
 		store.navigation = { kind: 'ready', response: response(entries(1_000)) };
 		const sortEntries = vi.spyOn(store, 'sortEntries');
-		const { container } = render(FileTreeVirtualRows, {
+		const onFileSelect = vi.fn();
+		const rendered = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
-			onFileSelect: vi.fn(),
+			viewMode: 'columns',
+			onFileSelect,
 		});
+		const { container } = rendered;
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		await waitFor(() =>
@@ -357,6 +594,8 @@ describe('FileTreeVirtualRows', () => {
 
 		treegrid.scrollTop = 6_400;
 		await fireEvent.scroll(treegrid);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await rendered.rerender({ store, viewMode: 'details', onFileSelect });
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 		expect(sortEntries).toHaveBeenCalledTimes(callsAfterModelBuild);

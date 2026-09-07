@@ -1,17 +1,16 @@
 <script lang="ts">
 	import X from '@lucide/svelte/icons/x';
 	import PanelLeft from '@lucide/svelte/icons/panel-left';
-	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import SurfaceErrorState from '$lib/components/workspace/SurfaceErrorState.svelte';
 	import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
-	import OpenFilesDialog from './OpenFilesDialog.svelte';
 	import {
 		getAppShell,
 		getFileSessions,
+		getNotifications,
 		getWorkspaceCoordinator,
 		getSurfaceFrames,
 	} from '$lib/context';
@@ -25,6 +24,7 @@
 
 	const files = getFileSessions();
 	const appShell = getAppShell();
+	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
 	const surfaceFrames = getSurfaceFrames();
 	const frameBridge = new SurfaceFrameBridge();
@@ -41,6 +41,16 @@
 	function retryFileSurface(): void {
 		rendererRetryKey += 1;
 	}
+
+	async function moveDialogFileToWindow(): Promise<void> {
+		try {
+			await workspace.moveDialogFileToWindow(workspace.lastFocusedWindowId);
+		} catch (error) {
+			notifications.error(
+				error instanceof Error ? error.message : m.file_session_move_to_window_failed(),
+			);
+		}
+	}
 </script>
 
 <Dialog.Root
@@ -52,6 +62,7 @@
 	<Dialog.Content
 		showCloseButton={false}
 		transientKind="file-dialog"
+		data-workspace-surface-id={surfaceId ?? undefined}
 		class={maximized
 			? 'flex h-dvh w-screen max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none'
 			: 'flex h-[min(90dvh,1000px)] w-[min(96vw,1440px)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none'}
@@ -61,20 +72,11 @@
 				<Button
 					variant="ghost"
 					size="icon-sm"
-					onclick={() => void workspace.moveDialogFileToHost('main')}
-					aria-label={m.file_session_move_main()}
-					title={m.file_session_move_main()}
+					onclick={() => void moveDialogFileToWindow()}
+					aria-label={m.file_session_move_to_window()}
+					title={m.file_session_move_to_window()}
 				>
-					<PanelLeft class="h-4 w-4" />
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					onclick={() => void workspace.moveDialogFileToHost('sidebar')}
-					aria-label={m.file_session_move_sidebar()}
-					title={m.file_session_move_sidebar()}
-				>
-					<PanelRight class="h-4 w-4" />
+					<PanelLeft class="h-4 w-4 rtl:-scale-x-100" />
 				</Button>
 				<Button
 					variant="ghost"
@@ -206,7 +208,7 @@
 </Dialog.Root>
 
 <Dialog.Root
-	open={Boolean(files.thresholdRequest) && (!files.openFilesVisible || appShell.isMobile)}
+	open={Boolean(files.thresholdRequest)}
 	requestClose={() => files.resolveThreshold('cancel')}
 >
 	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
@@ -220,16 +222,7 @@
 			<Button variant="ghost" onclick={() => files.resolveThreshold('cancel')}
 				>{m.file_session_cancel()}</Button
 			>
-			{#if !appShell.isMobile}
-				<Button variant="outline" onclick={() => files.resolveThreshold('review')}
-					>{m.file_session_review_open()}</Button
-				>
-			{/if}
 			<Button onclick={() => files.resolveThreshold('open')}>{m.file_session_open_anyway()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
-
-{#if !appShell.isMobile}
-	<OpenFilesDialog />
-{/if}

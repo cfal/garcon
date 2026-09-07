@@ -1,22 +1,40 @@
 import type { Database } from 'bun:sqlite';
 import type {
   ChatSearchIndexStatus,
+  ChatSearchPage,
   ChatSearchClauseV1,
   ChatSearchQueryV1,
   ChatSearchResult,
+  ChatSearchResultMode,
   ChatSearchSnippetRole,
   ChatSearchTokenV1,
+  TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
+  CHAT_SEARCH_DEFAULT_PAGE_SIZE,
+  CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_PREFIX_SIZE,
+  CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS,
+  CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
-  CHAT_SEARCH_MIN_PREFIX_CHARS,
 } from '@garcon/common/chat-search';
+import type { TranscriptSearchOrder } from './worker-protocol.js';
 
-const DEFAULT_RESULT_LIMIT = 20;
-const MAX_RESULT_LIMIT = 100;
-const SNIPPETS_PER_CHAT = 3;
-const MAX_SNIPPET_CHARS = 512;
+const SNIPPET_PREFIX = '... ';
+const SNIPPET_SUFFIX = ' ...';
+const MAX_SNIPPET_CHARS = CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS
+  - [...SNIPPET_PREFIX].length
+  - [...SNIPPET_SUFFIX].length;
+export const SEARCH_QUERY_MATCH_ROW_LIMIT = 10_000;
+
+const SEARCHABLE_STATE_JOIN = `
+    JOIN search_chat_state state ON state.chat_id = chunks.chat_id
+      AND state.transcript_view_id = chunks.transcript_view_id
+      AND state.status IN ('pending', 'indexed')
+      AND chunks.ordinal <= state.indexed_through
+`;
 
 interface CompiledTerm {
   query: string;
@@ -28,13 +46,15 @@ interface CompiledTerm {
 
 interface ResultRow {
   chatId: string;
+  transcriptViewId: string;
   rank: number;
 }
 
 interface FtsSnippetMatchRow {
   rowId: number;
   chatId: string;
-  messageOrdinal: number;
+  transcriptViewId: string;
+  ordinal: number;
   role: number;
   timestamp: string | null;
   rank: number;
@@ -44,6 +64,11 @@ interface SnippetToken {
   normalized: string;
   start: number;
   end: number;
+}
+
+interface SnippetMatch {
+  matchedMessageCount: number;
+  ranked: FtsSnippetMatchRow[];
 }
 
 function escapeFtsWord(word: string): string {
@@ -120,6 +145,10 @@ function publicRole(role: number): ChatSearchSnippetRole {
   return 'system';
 }
 
+function resultKey(chatId: string, transcriptViewId: string): string {
+  return `${chatId.length}:${chatId}${transcriptViewId}`;
+}
+
 function snippetWindow(body: string, tokens: SnippetToken[], firstTokenIndex: number): string {
   if (tokens.length === 0) return '';
   const startToken = Math.max(0, firstTokenIndex - 8);
@@ -129,67 +158,7 @@ function snippetWindow(body: string, tokens: SnippetToken[], firstTokenIndex: nu
   const characters = [...normalized];
   const text = characters.slice(0, MAX_SNIPPET_CHARS).join('');
   const hasSuffix = endToken < tokens.length || characters.length > MAX_SNIPPET_CHARS;
-  return `${startToken > 0 ? '... ' : ''}${text}${hasSuffix ? ' ...' : ''}`;
-}
-
-function quotedValues(query: string): Map<string, number> {
-  const values = new Map<string, number>();
-  for (const match of query.matchAll(/"([^"]+)"|'([^']+)'/g)) {
-    const value = (match[1] ?? match[2] ?? '').toLowerCase();
-    values.set(value, (values.get(value) ?? 0) + 1);
-  }
-  return values;
-}
-
-function rawTerms(query: string, textTokens?: string[]): Array<{ text: string; quoted: boolean }> {
-  if (textTokens?.length) {
-    const quoted = quotedValues(query);
-    return textTokens.map((text) => {
-      const key = text.toLowerCase();
-      const quotedCount = quoted.get(key) ?? 0;
-      if (quotedCount > 0) quoted.set(key, quotedCount - 1);
-      return { text, quoted: /\s/u.test(text) || quotedCount > 0 };
-    });
-  }
-  const terms: Array<{ text: string; quoted: boolean }> = [];
-  const matcher = /"([^"]+)"|'([^']+)'|(\S+)/g;
-  for (const match of query.matchAll(matcher)) {
-    terms.push({
-      text: match[1] ?? match[2] ?? match[3] ?? '',
-      quoted: match[1] !== undefined || match[2] !== undefined,
-    });
-  }
-  return terms;
-}
-
-export function compileSearchTerms(query: string, textTokens?: string[]): CompiledTerm[] {
-  const sourceTerms = rawTerms(query, textTokens);
-  if (sourceTerms.length > CHAT_SEARCH_MAX_TERMS) {
-    throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_TERMS} terms`);
-  }
-  const terms: CompiledTerm[] = [];
-  let wordCount = 0;
-  for (const raw of sourceTerms) {
-    const words = wordsIn(raw.text);
-    if (words.length === 0) continue;
-    if (wordCount + words.length > CHAT_SEARCH_MAX_WORDS) {
-      throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_WORDS} words`);
-    }
-    wordCount += words.length;
-    const compiled = raw.quoted
-      ? `"${words.join(' ').replaceAll('"', '""')}"`
-      : words.map((word) => [...word].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
-        ? `${escapeFtsWord(word)}*`
-        : escapeFtsWord(word)).join(' AND ');
-    terms.push({
-      query: compiled,
-      words,
-      normalizedWords: words.map(normalizeFtsToken),
-      exactPhrase: raw.quoted,
-      prefixWords: words.map((word) => !raw.quoted && [...word].length >= CHAT_SEARCH_MIN_PREFIX_CHARS),
-    });
-  }
-  return terms;
+  return `${startToken > 0 ? SNIPPET_PREFIX : ''}${text}${hasSuffix ? SNIPPET_SUFFIX : ''}`;
 }
 
 function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
@@ -234,169 +203,268 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
   });
 }
 
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+function clampLimit(limit: number | undefined, mode: ChatSearchResultMode): number {
+  if (!Number.isInteger(limit)) return CHAT_SEARCH_DEFAULT_PAGE_SIZE;
+  const maximum = mode === 'prefix' ? CHAT_SEARCH_MAX_PREFIX_SIZE : CHAT_SEARCH_MAX_PAGE_SIZE;
+  return Math.min(maximum, Math.max(1, Number(limit)));
 }
 
-function clampLimit(limit: number | undefined): number {
-  if (!Number.isInteger(limit)) return DEFAULT_RESULT_LIMIT;
-  return Math.min(MAX_RESULT_LIMIT, Math.max(1, Number(limit)));
+function clampOffset(offset: number | undefined): number {
+  if (!Number.isSafeInteger(offset)) return 0;
+  return Math.min(CHAT_SEARCH_MAX_OFFSET, Math.max(0, Number(offset)));
 }
 
-function prepareAllowed(allowedChatIds: string[]): string[] {
-  return uniqueStrings(allowedChatIds);
+function clampSnippetLimit(snippetLimit: number | undefined): number {
+  if (!Number.isInteger(snippetLimit)) return CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
+  return Math.min(CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT, Math.max(1, Number(snippetLimit)));
+}
+
+function prepareAllowed(allowedChats: readonly TranscriptSearchAllowedChat[]): TranscriptSearchAllowedChat[] {
+  const prepared = new Map<string, TranscriptSearchAllowedChat>();
+  for (const entry of allowedChats) {
+    const chatId = entry.chatId.trim();
+    const transcriptViewId = entry.transcriptViewId.trim();
+    if (!chatId || !transcriptViewId) continue;
+    if (!Number.isSafeInteger(entry.throughOrdinal) || entry.throughOrdinal < 0) {
+      throw new RangeError('Transcript search allowlist frontier is invalid');
+    }
+    const existing = prepared.get(chatId);
+    if (existing && (
+      existing.transcriptViewId !== transcriptViewId
+      || existing.throughOrdinal !== entry.throughOrdinal
+    )) {
+      throw new RangeError('Transcript search allowlist has contradictory snapshots');
+    }
+    prepared.set(chatId, { chatId, transcriptViewId, throughOrdinal: entry.throughOrdinal });
+  }
+  return [...prepared.values()];
+}
+
+function stageAllowedChats(
+  db: Database,
+  allowed: readonly TranscriptSearchAllowedChat[],
+): void {
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS search_allowed_chats (
+      chat_id TEXT PRIMARY KEY,
+      transcript_view_id TEXT NOT NULL,
+      through_ordinal INTEGER NOT NULL
+    ) WITHOUT ROWID, STRICT;
+    DELETE FROM temp.search_allowed_chats;
+  `);
+  db.query(`
+    INSERT INTO temp.search_allowed_chats(chat_id, transcript_view_id, through_ordinal)
+    SELECT json_extract(value, '$.chatId'), json_extract(value, '$.transcriptViewId'),
+      json_extract(value, '$.throughOrdinal')
+    FROM json_each(?)
+  `).run(JSON.stringify(allowed));
+}
+
+function retainSnippetCandidate(
+  match: SnippetMatch,
+  row: FtsSnippetMatchRow,
+  snippetLimit: number,
+): void {
+  match.matchedMessageCount += 1;
+  match.ranked.push(row);
+  match.ranked.sort((left, right) =>
+    left.rank - right.rank || left.ordinal - right.ordinal);
+  if (match.ranked.length > snippetLimit) match.ranked.pop();
+}
+
+function hydrateSnippets(
+  db: Database,
+  resultRows: readonly ResultRow[],
+  terms: readonly CompiledTerm[],
+  matches: ReadonlyMap<string, SnippetMatch>,
+): Map<string, { matchedMessageCount: number; snippets: ChatSearchResult['snippets'] }> {
+  const bodyStatement = db.prepare<{ body: string }, [number]>('SELECT body FROM search_chunks WHERE id = ?');
+  try {
+    return new Map(resultRows.flatMap((result) => {
+      const key = resultKey(result.chatId, result.transcriptViewId);
+      const match = matches.get(key);
+      if (!match) return [];
+      return [[key, {
+        matchedMessageCount: match.matchedMessageCount,
+        snippets: match.ranked.map((candidate) => {
+          const body = bodyStatement.get(candidate.rowId)?.body ?? '';
+          const tokens = tokenizeForSnippet(body);
+          const firstTokenIndex = matchSnippetTerms(tokens, [...terms]);
+          return {
+            ordinal: Number(candidate.ordinal),
+            role: publicRole(candidate.role),
+            timestamp: candidate.timestamp,
+            text: snippetWindow(body, tokens, firstTokenIndex ?? 0),
+          };
+        }),
+      }] as const];
+    }));
+  } finally {
+    bodyStatement.finalize();
+  }
 }
 
 function searchIndexStatusForPreparedAllowed(
   db: Database,
-  allowed: string[],
+  allowed: readonly TranscriptSearchAllowedChat[],
 ): ChatSearchIndexStatus {
   if (allowed.length === 0) {
-    return { indexedChatCount: 0, pendingChatCount: 0, failedChatCount: 0, unsupportedChatCount: 0 };
+    return {
+      indexedChatCount: 0,
+      pendingChatCount: 0,
+      failedChatCount: 0,
+      unindexedChatCount: 0,
+      unsupportedChatCount: 0,
+      resultsTruncated: false,
+    };
   }
   const counts = db.query<{
     indexed: number;
     failed: number;
-    unsupported: number;
-  }, [string]>(`
-    WITH allowed(chat_id) AS (
-      SELECT CAST(value AS TEXT) FROM json_each(?)
-    )
+  }, []>(`
     SELECT
-      COALESCE(SUM(CASE WHEN state.status = 'sealed' THEN 1 ELSE 0 END), 0) AS indexed,
-      COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-      COALESCE(SUM(CASE WHEN state.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
-    FROM allowed
+      COALESCE(SUM(CASE WHEN state.status = 'indexed'
+        AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS indexed,
+      COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
+    FROM temp.search_allowed_chats allowed
     LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
-  `).get(JSON.stringify(allowed)) ?? { indexed: 0, failed: 0, unsupported: 0 };
+      AND state.transcript_view_id = allowed.transcript_view_id
+  `).get() ?? { indexed: 0, failed: 0 };
   const indexedChatCount = Number(counts.indexed);
   const failedChatCount = Number(counts.failed);
-  const unsupportedChatCount = Number(counts.unsupported);
   return {
     indexedChatCount,
     failedChatCount,
-    unsupportedChatCount,
+    unindexedChatCount: 0,
+    unsupportedChatCount: 0,
+    resultsTruncated: false,
     pendingChatCount: Math.max(
       0,
-      allowed.length - indexedChatCount - failedChatCount - unsupportedChatCount,
+      allowed.length - indexedChatCount - failedChatCount,
     ),
   };
 }
 
-export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatSearchIndexStatus {
-  return searchIndexStatusForPreparedAllowed(db, prepareAllowed(allowedChatIds));
+interface TermMatch extends ResultRow {
+  readonly rows: FtsSnippetMatchRow[];
 }
 
-function collectSnippets(
+function collectBoundedTermMatches(
   db: Database,
-  resultRows: ResultRow[],
-  terms: CompiledTerm[],
-): Map<string, { matchedMessageCount: number; snippets: ChatSearchResult['snippets'] }> {
-  if (resultRows.length === 0) return new Map();
-  const snippetQuery = [...new Set(terms.map((term) => term.query))]
-    .map((term) => `(${term})`)
-    .join(' OR ');
-  const rows = db.query<FtsSnippetMatchRow, [string, string]>(`
-    WITH results(chat_id) AS (
-      SELECT CAST(value AS TEXT) FROM json_each(?)
-    )
+  term: CompiledTerm,
+): { matches: Map<string, TermMatch>; truncated: boolean } {
+  const rows = db.query<FtsSnippetMatchRow, [string, number]>(`
     SELECT
       chunks.id AS rowId,
       chunks.chat_id AS chatId,
-      chunks.message_ordinal AS messageOrdinal,
+      chunks.transcript_view_id AS transcriptViewId,
+      chunks.ordinal AS ordinal,
       chunks.role AS role,
       chunks.timestamp AS timestamp,
       search_chunks_fts.rank AS rank
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN results ON results.chat_id = chunks.chat_id
+    ${SEARCHABLE_STATE_JOIN}
+    JOIN temp.search_allowed_chats allowed ON allowed.chat_id = chunks.chat_id
+      AND allowed.transcript_view_id = chunks.transcript_view_id
+      AND chunks.ordinal <= allowed.through_ordinal
     WHERE search_chunks_fts MATCH ?
-  `).all(JSON.stringify(resultRows.map((row) => row.chatId)), `body:(${snippetQuery})`);
-  const matches = new Map<string, {
-    matchedMessageCount: number;
-    ranked: FtsSnippetMatchRow[];
-  }>();
-  for (const row of rows) {
-    const current = matches.get(row.chatId) ?? { matchedMessageCount: 0, ranked: [] };
-    current.matchedMessageCount += 1;
-    current.ranked.push(row);
-    current.ranked.sort((left, right) =>
-      left.rank - right.rank || left.messageOrdinal - right.messageOrdinal);
-    if (current.ranked.length > SNIPPETS_PER_CHAT) current.ranked.pop();
-    matches.set(row.chatId, current);
-  }
-  const bodyStatement = db.prepare<{ body: string }, [number]>('SELECT body FROM search_chunks WHERE id = ?');
-  const response = new Map([...matches].map(([chatId, match]) => [chatId, {
-    matchedMessageCount: match.matchedMessageCount,
-    snippets: match.ranked.map((candidate) => {
-      const body = bodyStatement.get(candidate.rowId)?.body ?? '';
-      const tokens = tokenizeForSnippet(body);
-      const firstTokenIndex = matchSnippetTerms(tokens, terms);
-      return {
-        messageOrdinal: Number(candidate.messageOrdinal),
-        role: publicRole(candidate.role),
-        timestamp: candidate.timestamp,
-        text: snippetWindow(body, tokens, firstTokenIndex ?? 0),
-      };
-    }),
-  }]));
-  bodyStatement.finalize();
-  return response;
-}
-
-function collectSingleTermResults(
-  db: Database,
-  term: CompiledTerm,
-  allowed: string[],
-  limit: number,
-): ResultRow[] {
-  return db.query<ResultRow, [string, string, number]>(`
-    WITH allowed(chat_id) AS (
-      SELECT CAST(value AS TEXT) FROM json_each(?)
-    )
-    SELECT
-      chunks.chat_id AS chatId,
-      MIN(search_chunks_fts.rank) AS rank
-    FROM search_chunks_fts
-    JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN allowed ON allowed.chat_id = chunks.chat_id
-    WHERE search_chunks_fts MATCH ?
-    GROUP BY chunks.chat_id
-    ORDER BY rank ASC, chatId ASC
+    ORDER BY search_chunks_fts.rowid DESC
     LIMIT ?
-  `).all(JSON.stringify(allowed), `body:(${term.query})`, limit);
+  `).all(`body:(${term.query})`, SEARCH_QUERY_MATCH_ROW_LIMIT + 1);
+  const truncated = rows.length > SEARCH_QUERY_MATCH_ROW_LIMIT;
+  if (truncated) rows.length = SEARCH_QUERY_MATCH_ROW_LIMIT;
+  const matches = new Map<string, TermMatch>();
+  for (const row of rows) {
+    const key = resultKey(row.chatId, row.transcriptViewId);
+    const current = matches.get(key) ?? {
+      chatId: row.chatId,
+      transcriptViewId: row.transcriptViewId,
+      rank: row.rank,
+      rows: [],
+    };
+    current.rank = Math.min(current.rank, row.rank);
+    current.rows.push(row);
+    matches.set(key, current);
+  }
+  return { matches, truncated };
 }
 
-export function searchTranscriptIndex(
-  db: Database,
-  options: {
-    query: string;
-    textTokens?: string[];
-    allowedChatIds: string[];
-    limit?: number;
-  },
-): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
-  const allowed = prepareAllowed(options.allowedChatIds);
-  const index = searchIndexStatusForPreparedAllowed(db, allowed);
-  const terms = compileSearchTerms(options.query, options.textTokens);
-  if (allowed.length === 0 || terms.length === 0) return { results: [], index };
+function compareResultRows(
+  left: ResultRow,
+  right: ResultRow,
+  order: TranscriptSearchOrder,
+  priorityByChatId: ReadonlyMap<string, number> | null,
+): number {
+  if (order === 'allowlist') {
+    const priority = (priorityByChatId?.get(left.chatId) ?? Number.MAX_SAFE_INTEGER)
+      - (priorityByChatId?.get(right.chatId) ?? Number.MAX_SAFE_INTEGER);
+    if (priority !== 0) return priority;
+  } else {
+    const rank = left.rank - right.rank;
+    if (rank !== 0) return rank;
+  }
+  return left.chatId.localeCompare(right.chatId)
+    || left.transcriptViewId.localeCompare(right.transcriptViewId);
+}
 
-  const limit = clampLimit(options.limit);
-  const resultRows = terms.length === 1
-    ? collectSingleTermResults(db, terms[0], allowed, limit)
-    : collectMultiTermResults(db, terms, allowed, limit);
-  const snippetByChat = collectSnippets(db, resultRows, terms);
+function collectBoundedSearch(
+  db: Database,
+  terms: CompiledTerm[],
+  allowed: readonly TranscriptSearchAllowedChat[],
+  options: {
+    readonly order: TranscriptSearchOrder;
+    readonly offset: number;
+    readonly limit: number;
+    readonly snippetLimit: number;
+  },
+): {
+  resultRows: ResultRow[];
+  snippetByChat: Map<string, {
+    matchedMessageCount: number;
+    snippets: ChatSearchResult['snippets'];
+  }>;
+  page: ChatSearchPage;
+  truncated: boolean;
+} {
+  const termMatches = terms.map((term) => collectBoundedTermMatches(db, term));
+  const first = termMatches[0]?.matches ?? new Map<string, TermMatch>();
+  const priorityByChatId = options.order === 'allowlist'
+    ? new Map(allowed.map((entry, index) => [entry.chatId, index]))
+    : null;
+  const orderedRows = [...first.entries()]
+    .filter(([key]) => termMatches.every((term) => term.matches.has(key)))
+    .map(([key, match]) => ({
+      chatId: match.chatId,
+      transcriptViewId: match.transcriptViewId,
+      rank: termMatches.reduce((sum, term) => sum + term.matches.get(key)!.rank, 0),
+    }))
+    .sort((left, right) => compareResultRows(left, right, options.order, priorityByChatId));
+  const resultRows = orderedRows.slice(options.offset, options.offset + options.limit);
+  const nextOffset = options.offset + resultRows.length;
+  const hasMore = nextOffset < orderedRows.length;
+  const snippets = new Map<string, SnippetMatch>();
+  for (const result of resultRows) {
+    const key = resultKey(result.chatId, result.transcriptViewId);
+    const rows = new Map<number, FtsSnippetMatchRow>();
+    for (const term of termMatches) {
+      for (const row of term.matches.get(key)?.rows ?? []) rows.set(row.rowId, row);
+    }
+    const match: SnippetMatch = { matchedMessageCount: 0, ranked: [] };
+    for (const row of rows.values()) retainSnippetCandidate(match, row, options.snippetLimit);
+    snippets.set(key, match);
+  }
   return {
-    results: resultRows.map((row) => {
-      const snippets = snippetByChat.get(row.chatId) ?? { matchedMessageCount: 0, snippets: [] };
-      return {
-        chatId: row.chatId,
-        score: -Number(row.rank || 0),
-        matchedMessageCount: snippets.matchedMessageCount,
-        snippets: snippets.snippets,
-      };
-    }),
-    index,
+    resultRows,
+    snippetByChat: hydrateSnippets(db, resultRows, terms, snippets),
+    page: {
+      offset: options.offset,
+      limit: options.limit,
+      total: orderedRows.length,
+      hasMore,
+      nextOffset: hasMore ? nextOffset : null,
+    },
+    truncated: termMatches.some((term) => term.truncated),
   };
 }
 
@@ -404,64 +472,65 @@ export function searchTranscriptIndexV1(
   db: Database,
   options: {
     query: ChatSearchQueryV1;
-    allowedChatIds: string[];
+    allowedChats: readonly TranscriptSearchAllowedChat[];
+    order?: TranscriptSearchOrder;
+    mode?: ChatSearchResultMode;
+    offset?: number;
     limit?: number;
+    snippetLimit?: number;
   },
-): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
-  const allowed = prepareAllowed(options.allowedChatIds);
+): {
+  mode: ChatSearchResultMode;
+  snippetLimit: number;
+  results: ChatSearchResult[];
+  page: ChatSearchPage;
+  index: ChatSearchIndexStatus;
+} {
+  const mode = options.mode ?? 'page';
+  const snippetLimit = clampSnippetLimit(options.snippetLimit);
+  if (mode === 'prefix' && (options.offset ?? 0) !== 0) {
+    throw new RangeError('Transcript search prefix offset must be zero');
+  }
+  if (mode === 'prefix' && snippetLimit !== 1) {
+    throw new RangeError('Transcript search prefix requires one snippet');
+  }
+  const allowed = prepareAllowed(options.allowedChats);
+  stageAllowedChats(db, allowed);
   const index = searchIndexStatusForPreparedAllowed(db, allowed);
   const terms = compileStructuredTerms(options.query);
-  if (allowed.length === 0 || terms.length === 0) return { results: [], index };
-  const limit = clampLimit(options.limit);
-  const resultRows = terms.length === 1
-    ? collectSingleTermResults(db, terms[0], allowed, limit)
-    : collectMultiTermResults(db, terms, allowed, limit);
-  const snippetByChat = collectSnippets(db, resultRows, terms);
+  const limit = clampLimit(options.limit, mode);
+  const offset = clampOffset(options.offset);
+  const emptyPage: ChatSearchPage = {
+    offset,
+    limit,
+    total: 0,
+    hasMore: false,
+    nextOffset: null,
+  };
+  if (allowed.length === 0 || terms.length === 0) {
+    return { mode, snippetLimit, results: [], page: emptyPage, index };
+  }
+  const { resultRows, snippetByChat, page, truncated } = collectBoundedSearch(
+    db,
+    terms,
+    allowed,
+    { order: options.order ?? 'relevance', offset, limit, snippetLimit },
+  );
   return {
+    mode,
+    snippetLimit,
     results: resultRows.map((row) => {
-      const snippets = snippetByChat.get(row.chatId) ?? { matchedMessageCount: 0, snippets: [] };
+      const snippets = snippetByChat.get(resultKey(row.chatId, row.transcriptViewId))
+        ?? { matchedMessageCount: 0, snippets: [] };
       return {
         chatId: row.chatId,
+        transcriptViewId: row.transcriptViewId,
         score: -Number(row.rank || 0),
         matchedMessageCount: snippets.matchedMessageCount,
         snippets: snippets.snippets,
       };
     }),
-    index,
+    page,
+    index: { ...index, resultsTruncated: truncated },
   };
-}
-
-function collectMultiTermResults(
-  db: Database,
-  terms: CompiledTerm[],
-  allowed: string[],
-  limit: number,
-): ResultRow[] {
-  const selects = terms.map((_, index) => `
-    SELECT chunks.chat_id AS chat_id, ${index} AS term_ordinal,
-      MIN(search_chunks_fts.rank) AS best_rank
-    FROM search_chunks_fts
-    JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN allowed ON allowed.chat_id = chunks.chat_id
-    WHERE search_chunks_fts MATCH ?
-    GROUP BY chunks.chat_id
-  `).join(' UNION ALL ');
-  const sql = `
-    WITH allowed(chat_id) AS (
-      SELECT CAST(value AS TEXT) FROM json_each(?)
-    ), term_matches AS (${selects})
-    SELECT chat_id AS chatId, SUM(best_rank) AS rank
-    FROM term_matches
-    GROUP BY chat_id
-    HAVING COUNT(DISTINCT term_ordinal) = ?
-    ORDER BY rank ASC, chat_id ASC
-    LIMIT ?
-  `;
-  const parameters: Array<string | number> = [
-    JSON.stringify(allowed),
-    ...terms.map((term) => `body:(${term.query})`),
-    terms.length,
-    limit,
-  ];
-  return db.query<ResultRow, Array<string | number>>(sql).all(...parameters);
 }

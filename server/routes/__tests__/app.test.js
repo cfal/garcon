@@ -23,6 +23,8 @@ import {
   SavedSearchAlreadyExistsError,
   SavedSearchNotFoundError,
 } from '../../settings/errors.js';
+import { CorruptStateFileError } from '../../lib/json-file-store.ts';
+import { DomainError } from '../../lib/domain-error.js';
 
 function remoteSettingsSource(overrides = {}) {
   return {
@@ -51,7 +53,22 @@ function createMockCtx() {
       getRemoteSettingsVersion: mock(() => 0),
       getUiSettings: mock(() => ({})),
       setUiSettings: mock(() => Promise.resolve({})),
-      setTranscriptSearchEnabled: mock(() => Promise.resolve({ transcriptSearch: { enabled: false } })),
+      setFeatureSettings: mock(() => Promise.resolve({
+        transcriptSearch: { enabled: false },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+        },
+      })),
+      getFeatureSettings: mock(() => ({
+        transcriptSearch: { enabled: false },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+        },
+      })),
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => []),
@@ -75,6 +92,8 @@ function createMockCtx() {
       getAgentCatalogEntries: mock(() => Promise.resolve([])),
       getModels: mock(() => Promise.resolve([])),
       runSingleQuery: mock(() => Promise.resolve('OK')),
+      singleQueryRunsToolsWithoutPermission: mock(() => false),
+      assertExecutionModeSelectionSupported: mock(() => undefined),
     },
   };
 }
@@ -84,6 +103,14 @@ const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents);
 
 beforeEach(() => {
   ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource());
+  ctx.settings.getFeatureSettings.mockImplementation(() => ({
+    transcriptSearch: { enabled: false },
+    agentCommands: {
+      enabled: true,
+      chatIdDiscovery: true,
+      sendMessage: true,
+    },
+  }));
 });
 
 function makeRequest(url, method, body) {
@@ -101,7 +128,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setSessionName.mockClear();
     ctx.settings.getUiSettings.mockClear();
     ctx.settings.setUiSettings.mockClear();
-    ctx.settings.setTranscriptSearchEnabled.mockClear();
+    ctx.settings.setFeatureSettings.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
@@ -117,6 +144,8 @@ describe('PUT /api/app/session-name', () => {
     ctx.agents.getAgentCatalogEntries.mockClear();
     ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
     ctx.agents.getModels.mockClear();
+    ctx.agents.assertExecutionModeSelectionSupported.mockClear();
+    ctx.agents.assertExecutionModeSelectionSupported.mockImplementation(() => undefined);
     parseJsonBody.mockClear();
   });
 
@@ -285,14 +314,19 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.chatTitle.agentId).toBe('claude');
     expect(body.uiEffective.chatTitle.model).toBe('haiku');
     expect(body.uiEffective.chatTitle.thinkingMode).toBe('none');
+    expect(body.uiEffective.agentSwitchCompaction.contextWindowTokens).toBe(500_000);
     expect(body.uiEffective.commitMessage.agentId).toBe('claude');
     expect(body.uiEffective.commitMessage.model).toBe('haiku');
     expect(body.uiEffective.commitMessage.thinkingMode).toBe('none');
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
+    expect(body.uiEffective.promptRefinement.agentId).toBe('claude');
+    expect(body.uiEffective.promptRefinement.model).toBe('haiku');
+    expect(body.uiEffective.promptRefinement.thinkingMode).toBe('none');
+    expect(body.uiEffective.promptRefinement).not.toHaveProperty('enabled');
     expect(body.chatSortOrder).toBeUndefined();
   });
 
-  it('auto-enables generation defaults from authenticated agent priority', async () => {
+  it('auto-resolves generation defaults without auto-enabling compaction', async () => {
     ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({ version: 1 }));
     ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
@@ -311,9 +345,15 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.chatTitle.enabled).toBe(true);
     expect(body.uiEffective.chatTitle.agentId).toBe('codex');
     expect(body.uiEffective.chatTitle.model).toBe('gpt-5.5');
+    expect(body.uiEffective.agentSwitchCompaction.enabled).toBe(false);
+    expect(body.uiEffective.agentSwitchCompaction.agentId).toBe('codex');
+    expect(body.uiEffective.agentSwitchCompaction.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
+    expect(body.uiEffective.promptRefinement.agentId).toBe('codex');
+    expect(body.uiEffective.promptRefinement.model).toBe('gpt-5.5');
+    expect(body.uiEffective.promptRefinement).not.toHaveProperty('enabled');
   });
 
   it('preserves persisted commitMessage extra fields in uiEffective', async () => {
@@ -342,6 +382,59 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
   });
 
+  it('preserves persisted promptRefinement prompt fields in uiEffective', async () => {
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      version: 4,
+      ui: {
+        promptRefinement: {
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          thinkingMode: 'high',
+          customPrompt: 'Refine {{USER_PROMPT}}',
+        },
+      },
+    }));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.uiEffective.promptRefinement).toEqual({
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      thinkingMode: 'high',
+      customPrompt: 'Refine {{USER_PROMPT}}',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      source: 'manual',
+    });
+    expect(body.uiEffective.promptRefinement).not.toHaveProperty('enabled');
+  });
+
+  it('removes commit-only fields from persisted and effective title settings', async () => {
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      version: 4,
+      ui: {
+        chatTitle: {
+          enabled: true,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          thinkingMode: 'medium',
+          customPrompt: 'Unsupported title prompt',
+          useCommonDirPrefix: true,
+        },
+      },
+    }));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.ui.chatTitle).not.toHaveProperty('customPrompt');
+    expect(body.ui.chatTitle).not.toHaveProperty('useCommonDirPrefix');
+    expect(body.uiEffective.chatTitle).not.toHaveProperty('customPrompt');
+    expect(body.uiEffective.chatTitle).not.toHaveProperty('useCommonDirPrefix');
+  });
+
   it('preserves complete saved generation selections without catalog reconciliation', async () => {
     const chatTitle = {
       enabled: true,
@@ -360,15 +453,35 @@ describe('GET /api/app/settings', () => {
       modelProtocol: 'anthropic-messages',
       thinkingMode: 'high',
     };
+    const agentSwitchCompaction = {
+      enabled: true,
+      agentId: 'direct-openai-compatible',
+      model: 'compaction-model',
+      apiProviderId: 'custom-provider',
+      modelEndpointId: 'custom-endpoint',
+      modelProtocol: 'openai-compatible',
+      thinkingMode: 'low',
+      contextWindowTokens: 200_000,
+    };
+    const promptRefinement = {
+      agentId: 'direct-openai-compatible',
+      model: 'refinement-model',
+      apiProviderId: 'custom-provider',
+      modelEndpointId: 'custom-endpoint',
+      modelProtocol: 'openai-compatible',
+      thinkingMode: 'medium',
+    };
     ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
-      ui: { chatTitle, commitMessage },
+      ui: { chatTitle, agentSwitchCompaction, commitMessage, promptRefinement },
     }));
 
     const response = await handler();
     const body = await response.json();
 
     expect(body.uiEffective.chatTitle).toMatchObject(chatTitle);
+    expect(body.uiEffective.agentSwitchCompaction).toMatchObject(agentSwitchCompaction);
     expect(body.uiEffective.commitMessage).toMatchObject(commitMessage);
+    expect(body.uiEffective.promptRefinement).toMatchObject(promptRefinement);
     expect(ctx.agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
     expect(ctx.agents.getAgentReadinessMap).not.toHaveBeenCalled();
     expect(ctx.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
@@ -406,6 +519,8 @@ describe('POST /api/app/generation/test', () => {
     }));
     ctx.agents.runSingleQuery.mockClear();
     ctx.agents.runSingleQuery.mockImplementation(() => Promise.resolve('OK'));
+    ctx.agents.singleQueryRunsToolsWithoutPermission.mockClear();
+    ctx.agents.singleQueryRunsToolsWithoutPermission.mockImplementation(() => false);
     ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({}));
     ctx.agents.getAgentReadinessMap.mockImplementation(() => Promise.resolve({}));
     ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
@@ -482,6 +597,31 @@ describe('POST /api/app/generation/test', () => {
     expect(ctx.agents.runSingleQuery.mock.calls[0][1]).not.toHaveProperty('prompt');
   });
 
+  it('rejects an unsafe saved prompt refinement target before invoking it', async () => {
+    const promptRefinement = {
+      agentId: 'amp',
+      model: 'smart',
+      thinkingMode: 'none',
+    };
+    ctx.settings.getUiSettings.mockImplementation(() => ({ promptRefinement }));
+    ctx.agents.singleQueryRunsToolsWithoutPermission.mockImplementation(() => true);
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      target: 'promptRefinement',
+      configurationKey: generationModelTestConfigurationKey(promptRefinement),
+    }));
+
+    const response = await handler(makeRequest(
+      'http://localhost/api/v1/app/generation/test',
+      'POST',
+      { target: 'promptRefinement' },
+    ));
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.errorCode).toBe('GENERATION_TEST_UNSAFE_AGENT');
+    expect(ctx.agents.runSingleQuery).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid targets with a typed contract error', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ target: 'chat' }));
 
@@ -516,7 +656,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setSessionName.mockClear();
     ctx.settings.getUiSettings.mockClear();
     ctx.settings.setUiSettings.mockClear();
-    ctx.settings.setTranscriptSearchEnabled.mockClear();
+    ctx.settings.setFeatureSettings.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
@@ -524,6 +664,41 @@ describe('PUT /api/app/settings', () => {
     ctx.agents.getAgentAuthStatusMap.mockClear();
     ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
+  });
+
+  it('reports corrupt settings state as an opaque server error', async () => {
+    ctx.settings.setUiSettings.mockRejectedValueOnce(new CorruptStateFileError(
+      '/server/config/project-settings.json',
+      '/server/config/project-settings.json.corrupt-test',
+    ));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { fontSize: 14 } }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+  });
+
+  it('reports filesystem write failures as opaque server errors', async () => {
+    ctx.settings.setUiSettings.mockRejectedValueOnce(new Error(
+      "EACCES: permission denied, open '/server/config/.project-settings.json.tmp'",
+    ));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { fontSize: 14 } }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
   });
 
   it('patches ui settings', async () => {
@@ -536,6 +711,70 @@ describe('PUT /api/app/settings', () => {
 
     expect(body.success).toBe(true);
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ fontSize: 14 });
+  });
+
+  it('canonicalizes hidden bash command patterns before persistence', async () => {
+    const input = [
+      { pattern: 'git *', mode: 'glob' },
+      { pattern: '^cargo', mode: 'regex' },
+      { pattern: 'git *', mode: 'glob' },
+    ];
+    const expected = input.slice(0, 2);
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { hiddenBashCommandPatterns: input },
+    }));
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      ui: { hiddenBashCommandPatterns: expected },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      hiddenBashCommandPatterns: expected,
+    });
+    expect(body.settings.ui.hiddenBashCommandPatterns).toEqual(expected);
+  });
+
+  it('clears hidden bash command patterns with an empty list', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { hiddenBashCommandPatterns: [] },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ hiddenBashCommandPatterns: [] });
+  });
+
+  it('rejects malformed hidden bash command patterns before persistence', async () => {
+    const validBoundary = Array.from(
+      { length: 200 },
+      (_, index) => ({ pattern: `command-${index}`, mode: 'glob' }),
+    );
+    const invalidLists = [
+      'git *',
+      [{ pattern: 'git *', mode: 'shell' }],
+      [{ pattern: '', mode: 'glob' }],
+      [{ pattern: '([unclosed', mode: 'regex' }],
+      [...validBoundary, { ...validBoundary[0] }],
+      [{ pattern: 'x'.repeat(1_001), mode: 'glob' }],
+    ];
+
+    for (const hiddenBashCommandPatterns of invalidLists) {
+      ctx.settings.setUiSettings.mockClear();
+      parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+        ui: { hiddenBashCommandPatterns },
+      }));
+
+      const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+      expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+    }
   });
 
   it('patches paths settings', async () => {
@@ -563,7 +802,9 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(200);
     expect(body.settings.features.transcriptSearch.enabled).toBe(true);
-    expect(ctx.settings.setTranscriptSearchEnabled).toHaveBeenCalledWith(true);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
+      transcriptSearch: { enabled: true },
+    });
   });
 
   it('rejects malformed transcript search settings', async () => {
@@ -576,20 +817,302 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(400);
     expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
-    expect(ctx.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
+    expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
+  });
+
+  it('merges a partial agent command patch without losing sibling settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: { agentCommands: { chatIdDiscovery: false } },
+    }));
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      features: {
+        transcriptSearch: { enabled: false },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: false,
+          sendMessage: false,
+        },
+      },
+    }));
+    ctx.settings.getFeatureSettings.mockImplementation(() => ({
+      transcriptSearch: { enabled: false },
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: false,
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.settings.features.agentCommands.chatIdDiscovery).toBe(false);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: false,
+      },
+    });
+  });
+
+  it('persists both feature toggles in one mutation', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        transcriptSearch: { enabled: true },
+        agentCommands: { enabled: false },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
+      transcriptSearch: { enabled: true },
+      agentCommands: {
+        enabled: false,
+        chatIdDiscovery: true,
+        sendMessage: true,
+      },
+    });
+  });
+
+  it('forwards the complete agent command object through the transcript search coordinator', async () => {
+    const transcriptSearchSettings = { setEnabled: mock(async () => undefined) };
+    const routes = createWorkspaceRoutes(
+      ctx.settings,
+      ctx.agents,
+      undefined,
+      undefined,
+      undefined,
+      transcriptSearchSettings,
+    );
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        transcriptSearch: { enabled: true },
+        agentCommands: { sendMessage: false },
+      },
+    }));
+
+    const response = await routes['/api/v1/app/settings'].PUT(
+      makeRequest('http://localhost/api/app/settings', 'PUT', {}),
+    );
+
+    expect(response.status).toBe(200);
+    expect(transcriptSearchSettings.setEnabled).toHaveBeenCalledWith(true, {
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: false,
+      },
+    });
+    expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed agent command settings without mutation', async () => {
+    ctx.settings.setFeatureSettings.mockClear();
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        transcriptSearch: { enabled: true },
+        agentCommands: { sendMessage: 'no' },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('features.agentCommands.sendMessage must be a boolean');
+    expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+    expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
   it('patches ui.chatTitle settings', async () => {
-    const chatTitleConfig = { enabled: true, agentId: 'opencode', model: 'anthropic/claude-sonnet-4-5' };
-    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { chatTitle: chatTitleConfig } }));
+    const chatTitleInput = {
+      enabled: true,
+      agentId: 'opencode',
+      model: 'anthropic/claude-sonnet-4-5',
+      customPrompt: 'Unsupported title prompt',
+      useCommonDirPrefix: true,
+    };
+    const chatTitleConfig = {
+      enabled: true,
+      agentId: 'opencode',
+      model: 'anthropic/claude-sonnet-4-5',
+    };
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { chatTitle: chatTitleInput } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ chatTitle: chatTitleConfig }));
     ctx.settings.getPathSettings.mockImplementation(() => ({}));
 
-    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { chatTitle: chatTitleConfig } }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {
+      ui: { chatTitle: chatTitleInput },
+    }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ chatTitle: chatTitleConfig });
+  });
+
+  it('persists supported compaction context windows and drops invalid values', async () => {
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+      ui: {
+        agentSwitchCompaction: {
+          enabled: true,
+          contextWindowTokens: 200_000,
+        },
+      },
+    }));
+
+    const validResponse = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(validResponse.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenLastCalledWith({
+      agentSwitchCompaction: {
+        enabled: true,
+        contextWindowTokens: 200_000,
+      },
+    });
+
+    ctx.settings.setUiSettings.mockClear();
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+      ui: {
+        agentSwitchCompaction: {
+          enabled: true,
+          contextWindowTokens: 250_000,
+        },
+      },
+    }));
+
+    const invalidResponse = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(invalidResponse.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      agentSwitchCompaction: { enabled: true },
+    });
+  });
+
+  it('ignores a title settings patch containing only unsupported fields', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: {
+        chatTitle: {
+          customPrompt: 'Unsupported title prompt',
+          useCommonDirPrefix: true,
+        },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+  });
+
+  it('preserves commit prompt settings while stripping title-only enabled state', async () => {
+    const commitMessageInput = {
+      enabled: false,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      customPrompt: 'Summarize the diff',
+      useCommonDirPrefix: true,
+    };
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { commitMessage: commitMessageInput },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      commitMessage: {
+        agentId: 'codex',
+        model: 'gpt-5.5',
+        customPrompt: 'Summarize the diff',
+        useCommonDirPrefix: true,
+      },
+    });
+  });
+
+  it('preserves prompt refinement settings while stripping unrelated fields', async () => {
+    const promptRefinementInput = {
+      enabled: false,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      customPrompt: 'Refine {{USER_PROMPT}}',
+      useCommonDirPrefix: true,
+    };
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { promptRefinement: promptRefinementInput },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      promptRefinement: {
+        agentId: 'codex',
+        model: 'gpt-5.5',
+        customPrompt: 'Refine {{USER_PROMPT}}',
+      },
+    });
+  });
+
+  it('rejects invalid generation prompt patches before persistence', async () => {
+    const cases = [
+      { commitMessage: { customPrompt: 42 } },
+      { commitMessage: { customPrompt: 'x'.repeat(32_001) } },
+      { promptRefinement: { customPrompt: 'Missing the required token' } },
+      { promptRefinement: { customPrompt: 'x'.repeat(32_001) } },
+    ];
+
+    for (const ui of cases) {
+      ctx.settings.setUiSettings.mockClear();
+      parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui }));
+      const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+      const body = await response.json();
+      expect(response.status).toBe(400);
+      expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+      expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+    }
+  });
+
+  it('rejects unsupported generation efforts before mutating settings', async () => {
+    ctx.agents.assertExecutionModeSelectionSupported.mockImplementation((agentId, selection) => {
+      if (agentId === 'amp' && selection.thinkingMode === 'high') {
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          'Thinking mode high is not supported by amp',
+          422,
+        );
+      }
+    });
+
+    for (const target of ['chatTitle', 'agentSwitchCompaction', 'commitMessage', 'promptRefinement']) {
+      ctx.settings.setUiSettings.mockClear();
+      ctx.settings.setFeatureSettings.mockClear();
+      ctx.settings.setPathSettings.mockClear();
+      parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+        ui: {
+          [target]: {
+            agentId: 'amp',
+            model: 'medium',
+            thinkingMode: 'high',
+          },
+        },
+      }));
+
+      const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+      const body = await response.json();
+
+      expect(response.status).toBe(422);
+      expect(body.errorCode).toBe('VALIDATION_FAILED');
+      expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+      expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
+      expect(ctx.settings.setPathSettings).not.toHaveBeenCalled();
+    }
   });
 
   it('patches and trims ui.appIdentity title settings', async () => {
@@ -894,6 +1417,54 @@ describe('Telegram token settings API', () => {
     expect(telegramSettings.completeRecipientLink).toHaveBeenCalled();
   });
 
+  it('reports corrupt Telegram state as an opaque server error', async () => {
+    const { routes, telegramSettings } = createTelegramRoutes();
+    telegramSettings.beginRecipientLink.mockRejectedValueOnce(new CorruptStateFileError(
+      '/server/config/notifications.json',
+      '/server/config/notifications.json.corrupt-test',
+    ));
+
+    const response = await routes['/api/v1/app/telegram/recipient/link'].POST(
+      makeRequest('http://localhost/api/app/telegram/recipient/link', 'POST', {}),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+  });
+
+  it('keeps corrupt Telegram state opaque during token mutations', async () => {
+    const corrupt = () => new CorruptStateFileError(
+      '/server/config/notifications.json',
+      '/server/config/notifications.json.corrupt-test',
+    );
+    const expected = {
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    };
+
+    let fixture = createTelegramRoutes();
+    fixture.telegramSettings.setBotToken.mockRejectedValueOnce(corrupt());
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: 'secret-token' }));
+    let response = await fixture.routes['/api/v1/app/telegram/token'].PUT(
+      makeRequest('http://localhost/api/app/telegram/token', 'PUT', { botToken: 'secret-token' }),
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual(expected);
+
+    fixture = createTelegramRoutes();
+    fixture.telegramSettings.clearBotToken.mockRejectedValueOnce(corrupt());
+    response = await fixture.routes['/api/v1/app/telegram/token'].DELETE();
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual(expected);
+  });
+
   it('sends test notification to the linked recipient only', async () => {
     const { routes, publicStatus, telegramNotifier } = createTelegramRoutes();
 
@@ -943,6 +1514,23 @@ describe('saved searches API', () => {
 
     expect(response.status).toBe(200);
     expect(body.savedSearches).toEqual(searches);
+  });
+
+  it('reports corrupt settings state as an opaque server error', async () => {
+    ctx.settings.getSavedSearches.mockRejectedValueOnce(new CorruptStateFileError(
+      '/server/config/project-settings.json',
+      '/server/config/project-settings.json.corrupt-test',
+    ));
+
+    const response = await getHandler();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
   });
 
   it('creates a saved search with valid payload', async () => {

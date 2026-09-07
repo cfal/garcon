@@ -34,6 +34,7 @@ const agentCatalogEntries = [
     defaultModel: "gpt-5.5",
     models: [
       { value: "gpt-5.5", label: "GPT-5.5", supportsImages: true },
+      { value: "gpt-6-astra", label: "GPT-6-Astra", supportsImages: true },
       { value: "gpt-5.6-sol", label: "GPT-5.6-Sol", supportsImages: true },
       { value: "gpt-5.6-terra", label: "GPT-5.6-Terra", supportsImages: true },
       { value: "gpt-5.6-luna", label: "GPT-5.6-Luna", supportsImages: true },
@@ -53,7 +54,7 @@ const agentCatalogEntries = [
     supportsFork: true,
     supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
-    supportsUpdateProjectPath: false,
+    supportsUpdateProjectPath: true,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -159,6 +160,8 @@ const agentCatalogEntries = [
   },
 ].map((entry) => ({
   ...entry,
+  supportsSteering: entry.id === "codex",
+  supportsGoals: entry.id === "codex",
   supportedPermissionModes: ["default", "manualBypass"],
   supportedThinkingModes: ["none", "high"],
   settings: [],
@@ -319,6 +322,8 @@ describe("GET /api/v1/models", () => {
     expect(claude.supportsFork).toBe(true);
     expect(claude.supportsForkAtMessage).toBe(true);
     expect(claude.supportsForkWhileRunning).toBe(true);
+    expect(claude.supportsSteering).toBe(false);
+    expect(claude.supportsGoals).toBe(false);
     expect(claude.supportsUpdateProjectPath).toBe(true);
     expect(claude.supportsImages).toBe(true);
     expect(Array.isArray(claude.models)).toBe(true);
@@ -328,6 +333,8 @@ describe("GET /api/v1/models", () => {
     expect(codex.supportsFork).toBe(true);
     expect(codex.supportsForkAtMessage).toBe(true);
     expect(codex.supportsForkWhileRunning).toBe(true);
+    expect(codex.supportsSteering).toBe(true);
+    expect(codex.supportsGoals).toBe(true);
     expect(codex.supportsUpdateProjectPath).toBe(true);
     expect(codex.supportsImages).toBe(true);
     expect(codex.defaultModel).toBe("gpt-5.5");
@@ -339,6 +346,7 @@ describe("GET /api/v1/models", () => {
     const codexModelValues = codex.models.map((model) => model.value);
     expect(codexModelValues).toEqual([
       "gpt-5.5",
+      "gpt-6-astra",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
@@ -348,6 +356,9 @@ describe("GET /api/v1/models", () => {
     ]);
     expect(
       codex.models.find((model) => model.value === "gpt-5.5"),
+    ).toMatchObject({ supportsImages: true });
+    expect(
+      codex.models.find((model) => model.value === "gpt-6-astra"),
     ).toMatchObject({ supportsImages: true });
     expect(
       codex.models.find((model) => model.value === "gpt-5.6-sol"),
@@ -376,7 +387,7 @@ describe("GET /api/v1/models", () => {
     expect(opencode.supportsFork).toBe(true);
     expect(opencode.supportsForkAtMessage).toBe(false);
     expect(opencode.supportsForkWhileRunning).toBe(false);
-    expect(opencode.supportsUpdateProjectPath).toBe(false);
+    expect(opencode.supportsUpdateProjectPath).toBe(true);
     expect(opencode.supportsImages).toBe(false);
 
     const factory = body.catalog.agents.find((p) => p.id === "factory");
@@ -451,6 +462,16 @@ describe("GET /api/v1/models", () => {
 
     expect(body.catalog.agents.length).toBe(1);
     expect(body.catalog.agents[0].id).toBe("claude");
+  });
+
+  it("lists available agents when an agent filter is unknown", async () => {
+    const url = new URL("http://localhost/api/v1/models?agent=unknown");
+    const response = await handler(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toContain("Available agents: claude");
+    expect(body.error).toContain("codex");
   });
 
   it("uses strict Pi discovery for the Pi agent filter", async () => {

@@ -5,6 +5,7 @@ This is the operating model for how engineers design, implement, review, and evo
 ## Key Directives
 
 - If there was a design doc, ALWAYS re-read it after compaction.
+- `docs/transcript-ledger-v5-design.md` is the governing transcript design; re-read it before changing transcript, ledger, history migration, provider publication, paging, replay, or transcript UX behavior.
 - Always git clone dependencies into /tmp to inspect if necessary
 - ALWAYS refer to Svelte 5, either docs or by cloning the repo, to make sure we're following best practices and canonical patterns
 - DO NOT add to tech debt. It is CRITICAL that we keep the architecture clean and rational, even if that means taking longer to fix or refactor what we're working on.
@@ -19,11 +20,20 @@ This is the operating model for how engineers design, implement, review, and evo
 - DO NOT run the same tests again and again to grep for different output. Instead, forward 2>&1 and `tee` the cargo test to a /tmp file, and grep from it after.
 - DO NOT consider backwards compatibility, as the server and client are always distributed together.
 - DO NOT use emojis
-- Keep Garcon core lean and agent agnostic. All agent-specific runtime, dependencies, storage, index-source parsing, and translation code must stay behind `@garcon/server-agent-interface` in `server-agents/<id>/`; `server/agents/default-agent-integrations.ts` is the only core provider import point. Provider-neutral transcript search, its shared database, and its fixed Worker pair live in `server-agents/common`.
-- If interacting with the Claude, Codex, or Opencode SDK, clone it and look through if as needed:
-  - https://github.com/anthropics/claude-agent-sdk-python
-    - this is the Python SDK - the Typescript one is closed source, but you can find references in our node_modules
-  - [https://github.com/openai](https://github.com/openai) - SDK contained inside
+- Never commit real transcripts or excerpts; durable transcript fixtures must replace all content and identifying values with deterministic generic content and synthetic identities while preserving only the required structure.
+- Keep Garcon core lean and agent agnostic. All agent-specific runtime, dependencies, storage, native-history parsing, and translation code must stay behind `@garcon/server-agent-interface` in `server-agents/<id>/`; `server/agents/default-agent-integrations.ts` is the only core provider import point. The authoritative provider-neutral transcript ledger lives in `server/ledger/` as one SQLite database per chat. Provider-neutral transcript search, its separate derived workspace database, and its fixed Worker pair live in `server-agents/common`.
+- `chats.json` owns chat existence, enumeration-required configuration and current bindings, and fixed-size cross-chat relations. Each per-chat ledger owns only that chat's ordered transcript. `chat-metadata.json` is derived preview/list cache; cold or growing per-chat detail may use separate metadata only when workspace enumeration does not require it.
+- New provider capabilities are expressed as nullable facets on `AgentIntegration` (like `forking`), not as optional methods on an existing facet; optional methods force per-call guards in core and hide capability differences from the conformance kit.
+- cursor is a best-effort provider: unit coverage only, no scripted-model tier. Do not assume scripted or live parity when changing it; Claude and Codex are the reference integrations.
+- opencode has pinned real-binary scripted-model coverage (the exact `opencode-ai` binary behind the shared fake Chat Completions model, fully isolated from user config, auth, and sessions; Linux-only) plus a credential-backed DeepSeek restart smoke. Its transport is one spawned `opencode serve` with a process-wide `/global/event` stream; readiness, retry ownership, and prompt-part correlation are locked by the scripted event-stream suite. The runtime watches the spawned process for its whole lifetime (`OpenCodeInstance.server.termination`): a post-readiness death retires the cached instance immediately, fails active turns exactly once, disarms the unavailability cooldown, and respawns lazily on the next demand. In-flight start/resume admissions are fenced by instance identity (`#assertInstanceCurrent`) so a retired instance can never register sessions, publish activation, or receive prompts.
+- Pi is a first-class provider with a scripted-model integration tier (deterministic fake-model coverage through the real pinned Pi CLI), same class as Claude and Codex. Its transport is the long-lived Pi RPC process; steering lands at the tool-call boundary.
+- Keep execution state ephemeral. Queue entries, pending user inputs, and the command ledger live only for the server process lifetime; restart intentionally starts them empty and must not replay or recover them from disk. `server/chats/agent-ownership-journal.ts` is the durable exception for cross-provider ownership transfers/deletions, not queue recovery. The per-chat SQLite transcript ledger is durable conversation state; the workspace-wide SQLite search index in `server-agents/common` is separate, derived, and rebuildable.
+- Chat busy-ness has exactly two public questions: `ownsExecution` for exclusive access to a chat's transcript or view, and the processing projection for whether the user should see a turn running. Consume one of them. Do not compose `ExecutionOwnership` fields, provider running state, and reservation state into a new predicate: four features once did exactly that with four different non-nested subsets, and the fork and reload guards ended up contradicting each other. Adding or widening a predicate means updating the `ExecutionOwnership` module documentation and `server/chat-execution/__tests__/execution-api-contract.test.js` in the same change. In review, treat a new boolean on `ExecutionOwnership`, a new predicate on the coordinator's public facets, or an `isChatRunning || ...` composition outside the coordinator as recreating this debt.
+- Use the official Claude Agent SDK as the primary reference when changing the Claude integration. It is not a complete source of truth because Garcon adds lifecycle requirements such as provider-neutral queue ownership, but its protocol, process, control, and cleanup behavior should guide the implementation.
+- When a provider's stream behavior is ambiguous, check whether the reference implementation already fought the same battle before inventing local semantics. The Python Agent SDK's inline comments and issue references document CLI protocol rationale (turn versus run boundaries, task lifecycle frames versus `background_tasks_changed` snapshots), and its CHANGELOG maps each release to the bundled CLI version whose behavior it describes - compare that against the CLI version Garcon runs.
+- Clone references into /tmp pinned to a commit, and cite file plus line as permalinks at that commit in comments and design docs, so the citation survives upstream drift:
+  - https://github.com/anthropics/claude-agent-sdk-python - the readable mirror of the closed-source TypeScript SDK; its comments state where they mirror the TypeScript implementation, so treat it as authoritative for both.
+  - https://github.com/openai/codex - codex-rs holds core, rollout, and app-server behavior; verify fake-server and scripted-model assumptions against the pinned clone, not memory.
   - [https://github.com/anomalyco/opencode](https://github.com/anomalyco/opencode) - SDK contained inside
 
 ## Comment Style
@@ -47,6 +57,7 @@ Required for every WS/API contract change:
 - Update sender and receiver logic.
 - Add or update tests.
 - Add migration note in PR description if behavior changed.
+- Within a chat, `chat-messages` precede the emitting turn's terminal-driven `chat-processing-updated`, `chat-session-stopped`, and `agent-run-finished`/`agent-run-failed`; the server-event-wiring task queue enforces this, and new per-chat lifecycle broadcasts must be scheduled through it, not emitted synchronously.
 
 ## Tool Use Contract Discipline
 
@@ -218,9 +229,10 @@ Rules:
 
 ### Git Domain
 
-`web/src/lib/git/` is the canonical home for reusable Git and Commit behavior and state. Its approved concerns are `commit`, `history`, `review`, `surface`, `targets`, and `workbench`.
+`web/src/lib/git/` is the canonical home for reusable Git and Commit behavior and state. Its approved concerns are `commit`, `history`, `pull-requests`, `review`, `surface`, `targets`, and `workbench`.
 
 - `commit` owns both the portable Commit controller and workbench commit action.
+- `pull-requests` owns GitHub pull-request list/detail state and refresh orchestration.
 - `review` owns diff row models, line selection, review drafts, and virtual review.
 - `targets` owns repository, branch, and worktree selection.
 - `workbench` owns changed-file state and staging orchestration.
@@ -232,6 +244,7 @@ Rules:
 - `web/src/lib/files/` owns File sessions, editor controllers, and tree state.
 - `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
 - `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
+- `web/src/lib/chat-map/` owns chat-lineage normalization and retained Chat Map surface state.
 - Their Svelte renderers remain in the corresponding `components` directories.
 
 ### Utilities Layer
@@ -384,7 +397,14 @@ After completion of a task, verify:
 
 ### Integration Tests
 
-Integration coverage is mandatory when correctness crosses server, HTTP/WebSocket, persistence, provider, or SPA boundaries. Add black-box server tests under `integration-tests/tests/server` for chat lifecycle, queueing, reconnect, restart/recovery, provider failure, fork, and deletion behavior. Add Lightpanda tests under `integration-tests/tests/e2e` when the browser workflow itself is part of the contract. Every production regression in these flows must gain an integration test that reproduces it; unit tests remain required for the underlying component behavior.
+Integration coverage is mandatory when correctness crosses server, HTTP/WebSocket, persistence, provider, or SPA boundaries. Add black-box server tests under `integration-tests/tests/server` for chat lifecycle, queueing, reconnect, restart semantics (including empty execution state), provider failure, ownership-journal recovery, fork, and deletion behavior. Add Lightpanda tests under `integration-tests/tests/e2e` when the browser workflow itself is part of the contract. Every production regression in these flows must gain an integration test that reproduces it; unit tests remain required for the underlying component behavior.
+
+A bug or flake first observed in a live suite or in production may only be closed by a change that reproduces it deterministically: extend the scripted-model fakes, add a scripted scenario, or add an interleaving test. Adjusting the failing test to tolerate the behavior is not a fix. New provider-behavior coverage goes on the scripted-model tier, not on the protocol-level fakes.
+
+- Use the configured DeepSeek Anthropic-compatible endpoint for credential-backed Claude tests and `gpt-5.4-nano` for Codex integration tests.
+- Always use the lowest supported reasoning effort in integration tests.
+- Keep credential-backed agent suites under `test:live:*`, outside routine test commands.
+- Never run live-agent tests locally unless actively changing those tests; rely on the PR CI live-provider gate otherwise.
 
 ### Regression Focus Areas
 
@@ -484,7 +504,10 @@ If any of these are missing, the task is not done.
 
 - Regenerate Paraglide message modules whenever translation keys are renamed, added, or removed.
 - Run this command from the repository root:
-  - `cd web && bunx @inlang/paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide`
+  - `cd web && bun run i18n:compile`
+- Use the script rather than calling the compiler directly. It carries the `locale-modules`
+  output structure that `vite.config.ts` regenerates with, and a bare `paraglide-js compile`
+  emits a different layout.
 - After regenerating, run validation:
   - `bun run check`
   - `bun run test`

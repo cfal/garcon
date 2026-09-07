@@ -1,120 +1,140 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { resetServerConfigForTests } from '../../config.ts';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
-function makeRouter(providerSessions, mappings = {}) {
-  const agents = Object.entries(providerSessions).map(([id, runningSessions]) => ({
-    descriptor: { id },
-    execution: {
-      runningSessions: typeof runningSessions === 'function'
-        ? mock(runningSessions)
-        : mock(() => runningSessions),
-    },
-  }));
-  const registry = {
-    getChatByAgentSessionId: mock((agentSessionId) => {
-      const chatId = mappings[agentSessionId];
-      return chatId ? [chatId, { agentSessionId }] : null;
-    }),
-  };
-  const directory = {
-    list: mock(() => agents),
-  };
-
-  return new AgentRuntimeRouter({
-    registry,
-    directory,
-    endpointResolver: {},
-    events: {},
-    getCarryOverRevision: () => 'carry-1',
-    loadCarryOver: () => [],
-  });
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
 }
 
-describe('AgentRuntimeRouter running chat snapshots', () => {
-  it('maps provider session IDs to a sorted unique chat ID snapshot', () => {
-    const router = makeRouter(
-      {
-        claude: [{ agentSessionId: 'claude-session' }, { agentSessionId: 'shared-session' }],
-        codex: [{ agentSessionId: 'codex-session' }, { agentSessionId: 'shared-session' }],
-      },
-      {
-        'claude-session': 'chat-z',
-        'codex-session': 'chat-a',
-        'shared-session': 'chat-shared',
-      },
-    );
-
-    expect(router.getRunningChatIdsSnapshot()).toEqual([
-      'chat-a',
-      'chat-shared',
-      'chat-z',
-    ]);
+function makeRouter(execution) {
+  const transcript = createRuntimeTranscriptFixture();
+  const entry = {
+    id: 'chat-1',
+    agentId: 'test',
+    agentSessionId: null,
+    nativeSession: null,
+    agentOwnershipEpoch: 'epoch-1',
+    agentSettingsById: {},
+    projectPath: '/repo',
+    model: 'model-a',
+    apiProviderId: null,
+    modelEndpointId: null,
+    permissionMode: 'default',
+    thinkingMode: 'none',
+  };
+  const integration = {
+    descriptor: {
+      id: 'test',
+      supportedPermissionModes: ['default'],
+      supportedThinkingModes: ['none'],
+    },
+    settings: {
+      defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }),
+      parse: (value) => value,
+    },
+    execution,
+  };
+  const router = new AgentRuntimeRouter({
+    registry: {
+      getChat: mock(() => entry),
+      updateChat: mock((_chatId, patch) => Object.assign(entry, patch)),
+      getChatByAgentSessionId: mock(() => null),
+    },
+    directory: {
+      require: mock(() => integration),
+      get: mock(() => integration),
+      list: mock(() => [integration]),
+    },
+    endpointResolver: {
+      resolveSelection: mock((request) => ({
+        model: request.model,
+        apiProviderId: null,
+        endpointId: null,
+        protocol: null,
+        isLocal: false,
+      })),
+      resolveEndpointReference: mock(() => null),
+    },
+    events: {
+      trackTurn: mock(() => undefined),
+      getActiveTurn: mock(() => null),
+    },
+    getCarryOverRevision: () => 'carry-1',
+    createCarriedContext: async () => ({ kind: 'no-history' }),
+    ledger: transcript.ledger,
+    hasPendingOwnershipTransfer: () => false,
+    adoption: transcript.adoption,
   });
+  return { router, transcript };
+}
 
-  it('returns an authoritative empty snapshot when no provider has running sessions', () => {
-    const router = makeRouter({ claude: [], codex: [] });
+describe('AgentRuntimeRouter execution handles', () => {
+  it('tracks only live core-owned execution handles', async () => {
+    const execution = {
+      start: mock(async () => ({ id: 'handle-1' })),
+      resume: mock(async () => ({ id: 'handle-1' })),
+      abort: mock(async () => undefined),
+    };
+    const { router, transcript } = makeRouter(execution);
 
+    await router.startSession('chat-1', 'hello', { turnId: 'turn-1' });
+    expect(router.getRunningChatIdsSnapshot()).toEqual(['chat-1']);
+    expect(router.getRunningSessionCount()).toBe(1);
+
+    transcript.sink.publish({ type: 'run-ended', runId: 'turn-1', outcome: 'finished' });
     expect(router.getRunningChatIdsSnapshot()).toEqual([]);
   });
 
-  it('fails when a provider runtime getter throws', () => {
-    const router = makeRouter({
-      claude: () => {
-        throw new Error('runtime unavailable');
-      },
-    });
+  it('aborts the eventual handle when interruption wins during launch', async () => {
+    const launchStarted = deferred();
+    const handleReady = deferred();
+    const handle = { id: 'handle-1' };
+    const execution = {
+      start: mock(async () => {
+        launchStarted.resolve();
+        return handleReady.promise;
+      }),
+      resume: mock(async () => handle),
+      abort: mock(async () => undefined),
+    };
+    const { router } = makeRouter(execution);
 
-    expect(() => router.getRunningChatIdsSnapshot()).toThrow('runtime unavailable');
+    const launching = router.startSession('chat-1', 'hello', { turnId: 'turn-1' });
+    await launchStarted.promise;
+    expect(router.getRunningChatIdsSnapshot()).toEqual(['chat-1']);
+    expect(router.getRunningSessionCount()).toBe(1);
+    await expect(router.abortSession('chat-1')).resolves.toBe(true);
+    handleReady.resolve(handle);
+    await launching;
+
+    expect(execution.abort).toHaveBeenCalledWith(handle);
+    expect(router.getRunningChatIdsSnapshot()).toEqual([]);
   });
 
-  it('fails when a provider returns a non-array running-session value', () => {
-    const router = makeRouter({ claude: { agentSessionId: 'session-1' } });
-
-    expect(() => router.getRunningChatIdsSnapshot()).toThrow(
-      'Running sessions for claude are not an array',
-    );
-  });
-
-  it('fails when a running session has no valid ID', () => {
-    for (const invalidSession of ['bare-session-id', {}, { agentSessionId: '' }, { agentSessionId: '   ' }, null]) {
-      const router = makeRouter({ claude: [invalidSession] });
-
-      expect(() => router.getRunningChatIdsSnapshot()).toThrow(
-        'Running session for claude has no ID',
-      );
-    }
-  });
-
-  it('fails closed during the normal runtime-to-registry pre-bind window', () => {
-    const router = makeRouter({ claude: [{ agentSessionId: 'starting-session' }] });
-
-    expect(() => router.getRunningChatIdsSnapshot()).toThrow(
-      'Running chat snapshot has 1 unmapped session(s)',
-    );
-  });
-
-  it('reports aggregate content-free diagnostics without returning a partial snapshot', () => {
-    const router = makeRouter(
-      {
-        claude: [
-          { agentSessionId: 'mapped-session' },
-          { agentSessionId: 'orphan-session', startedAt: '2020-01-01T00:00:00.000Z' },
-        ],
-        codex: [{ agentSessionId: 'second-orphan', startedAt: '2021-01-01T00:00:00.000Z' }],
-      },
-      { 'mapped-session': 'chat-mapped' },
-    );
-
-    expect.assertions(5);
+  it('reports the concurrent session cap with a typed domain error', async () => {
+    const previousLimit = process.env.GARCON_MAX_SESSIONS;
+    process.env.GARCON_MAX_SESSIONS = '1';
+    resetServerConfigForTests();
     try {
-      router.getRunningChatIdsSnapshot();
-    } catch (error) {
-      expect(error.message).toBe('Running chat snapshot has 2 unmapped session(s)');
-      expect(error.message).not.toContain('orphan-session');
-      expect(error.message).not.toContain('second-orphan');
-      expect(error.message).not.toContain('claude');
-      expect(error.message).not.toContain('codex');
+      const execution = {
+        start: mock(async () => ({ id: 'handle-1' })),
+        resume: mock(async () => ({ id: 'handle-1' })),
+        abort: mock(async () => undefined),
+      };
+      const { router } = makeRouter(execution);
+      await router.startSession('chat-1', 'first', { turnId: 'turn-1' });
+
+      await expect(router.startSession('chat-1', 'second', { turnId: 'turn-2' }))
+        .rejects.toMatchObject({ code: 'SESSION_LIMIT', status: 429, retryable: true });
+      expect(execution.start).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousLimit === undefined) delete process.env.GARCON_MAX_SESSIONS;
+      else process.env.GARCON_MAX_SESSIONS = previousLimit;
+      resetServerConfigForTests();
     }
   });
 });

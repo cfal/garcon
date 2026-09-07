@@ -1,4 +1,4 @@
-import { AuthStorage, createAgentSessionServices, getAgentDir } from '@earendil-works/pi-coding-agent';
+import { createAgentSessionServices, getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { SharedModelOption } from '@garcon/common/models';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { PiConfig } from '../../config.js';
@@ -53,31 +53,18 @@ function diagnosticMessage(value: unknown): string {
 
 interface PiDiagnosticServices {
   diagnostics?: unknown[];
-  modelRegistry?: { getError?: () => unknown };
+  modelRuntime?: { getError?: () => unknown };
   settingsManager?: { drainErrors?: () => unknown[] };
 }
 
-interface PiAuthStorageDiagnostics {
-  drainErrors?: () => unknown[];
-}
-
-function collectPiDiscoveryDiagnostics(
-  services: PiDiagnosticServices,
-  authStorage: PiAuthStorageDiagnostics,
-): string[] {
+function collectPiDiscoveryDiagnostics(services: PiDiagnosticServices): string[] {
   const diagnostics: string[] = [];
-  const authErrors = typeof authStorage?.drainErrors === 'function'
-    ? authStorage.drainErrors()
-    : [];
-  for (const error of authErrors) {
-    diagnostics.push(`auth storage: ${diagnosticMessage(error)}`);
-  }
 
-  const modelRegistryError = typeof services?.modelRegistry?.getError === 'function'
-    ? services.modelRegistry.getError()
+  const modelRuntimeError = typeof services?.modelRuntime?.getError === 'function'
+    ? services.modelRuntime.getError()
     : undefined;
-  if (modelRegistryError) {
-    diagnostics.push(`model registry: ${diagnosticMessage(modelRegistryError)}`);
+  if (modelRuntimeError) {
+    diagnostics.push(`model runtime: ${diagnosticMessage(modelRuntimeError)}`);
   }
 
   if (Array.isArray(services?.diagnostics)) {
@@ -102,17 +89,15 @@ function delay(ms: number): Promise<void> {
 }
 
 async function readPiModelsFromSdk(): Promise<SharedModelOption[]> {
-  const authStorage = AuthStorage.create();
   const services = await createAgentSessionServices({
     cwd: process.cwd(),
     agentDir: getAgentDir(),
-    authStorage,
   });
-  const models = services.modelRegistry
-    .getAvailable()
+  const available = await services.modelRuntime.getAvailable();
+  const models = available
     .map(piSdkModelToOption)
     .filter((model): model is SharedModelOption => Boolean(model));
-  const diagnostics = collectPiDiscoveryDiagnostics(services, authStorage);
+  const diagnostics = collectPiDiscoveryDiagnostics(services);
   if (models.length === 0 && diagnostics.length > 0) {
     throw new PiModelDiscoveryTransientError(diagnostics.join('; '));
   }

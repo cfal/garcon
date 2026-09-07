@@ -1,5 +1,5 @@
 import type { SessionAgentId } from '$lib/types/app';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RecentAgentSetting } from '$shared/settings';
 import {
 	buildModelSources,
@@ -32,6 +32,7 @@ export function buildModelSelectorRecents(
 		const agentId = recent.agentId as SessionAgentId;
 		if (!selectable.has(agentId)) continue;
 
+		// Canonicalizes persisted raw names before resolving the displayed model.
 		const modelValue = modelCatalog.selectionValueFor(
 			agentId,
 			recent.model,

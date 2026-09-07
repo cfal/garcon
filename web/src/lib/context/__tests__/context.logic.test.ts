@@ -16,16 +16,18 @@ import {
 	setAppShell,
 	getWs,
 	setWs,
+	getChatProcessingReconciler,
+	setChatProcessingReconciler,
 	getModelCatalog,
 	setModelCatalog,
-	getActiveTranscriptState,
-	setActiveTranscriptState,
 	getComposerState,
 	setComposerState,
 	getAgentState,
 	setAgentState,
-	getConversationLifecycle,
-	setConversationLifecycle,
+	getConversationLifecycles,
+	setConversationLifecycles,
+	getConversationUi,
+	setConversationUi,
 	getNotifications,
 	setNotifications,
 	getSidebarSearch,
@@ -54,6 +56,12 @@ describe('context factories', () => {
 		expect(typeof setAppShell).toBe('function');
 		expect(typeof getWs).toBe('function');
 		expect(typeof setWs).toBe('function');
+		expect(typeof getChatProcessingReconciler).toBe('function');
+		expect(typeof setChatProcessingReconciler).toBe('function');
+		expect(typeof getConversationLifecycles).toBe('function');
+		expect(typeof setConversationLifecycles).toBe('function');
+		expect(typeof getConversationUi).toBe('function');
+		expect(typeof setConversationUi).toBe('function');
 		expect(typeof getModelCatalog).toBe('function');
 		expect(typeof setModelCatalog).toBe('function');
 		expect(typeof getNotifications).toBe('function');
@@ -69,13 +77,9 @@ describe('context factories', () => {
 		});
 
 	it('exports getter/setter pairs for all chat-level contexts', () => {
-		expect(typeof getActiveTranscriptState).toBe('function');
-		expect(typeof setActiveTranscriptState).toBe('function');
 		expect(typeof getComposerState).toBe('function');
 		expect(typeof setComposerState).toBe('function');
 		expect(typeof getAgentState).toBe('function');
 		expect(typeof setAgentState).toBe('function');
-		expect(typeof getConversationLifecycle).toBe('function');
-		expect(typeof setConversationLifecycle).toBe('function');
 	});
 });

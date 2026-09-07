@@ -1,18 +1,91 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { EventEmitter } from 'events';
 import { AttentionTracker } from '../../notifications/attention-tracker.js';
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, UserMessage, AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
+import { PermissionRequestMessage, AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
 
 function createMockAgentRegistry() {
   const emitter = new EventEmitter();
   return {
-    onMessages: (cb) => emitter.on('messages', cb),
-    onFinished: (cb) => emitter.on('finished', cb),
-    onFailed: (cb) => emitter.on('failed', cb),
-    emitMessages: (chatId, msgs) => emitter.emit('messages', chatId, msgs),
-    emitFinished: (chatId, exitCode) => emitter.emit('finished', chatId, exitCode),
-    emitFailed: (chatId, msg) => emitter.emit('failed', chatId, msg),
+    onTranscriptCommitted: (cb) => emitter.on('transcript', cb),
+    emitAssistant: (chatId, messages) => emitter.emit('transcript', {
+      type: 'rows',
+      chatId,
+      viewId: 'view-1',
+      rows: messages.map((message, index) => ({
+        kind: 'provider-row',
+        ordinal: index + 1,
+        at: message.timestamp,
+        providerMeta: null,
+        message,
+      })),
+    }),
+    emitPermissionRequest: (chatId, message) => emitter.emit('transcript', {
+      type: 'permission',
+      chatId,
+      viewId: 'view-1',
+      runId: 'run-1',
+      row: {
+        kind: 'permission-requested',
+        ordinal: 1,
+        at: message.timestamp,
+        providerMeta: null,
+        lifecycle: {
+          kind: 'requested',
+          permissionOccurrenceId: message.permissionOccurrenceId,
+          requestedTool: message.requestedTool,
+          options: [],
+        },
+      },
+    }),
+    emitPermissionRemoved: (chatId, permissionOccurrenceId) => emitter.emit('transcript', {
+      type: 'permission',
+      chatId,
+      viewId: 'view-1',
+      runId: 'run-1',
+      row: {
+        kind: 'permission-cancelled',
+        ordinal: 2,
+        at: '2024-01-01T00:00:02Z',
+        providerMeta: null,
+        lifecycle: {
+          kind: 'cancelled',
+          permissionOccurrenceId,
+          reason: null,
+        },
+      },
+    }),
+    emitPermissionCleared: (chatId) => emitRunEnded(emitter, chatId, 'finished'),
+    emitFinished: (chatId, exitCode) => emitRunEnded(
+      emitter,
+      chatId,
+      exitCode === 0 ? 'finished' : 'failed',
+      exitCode === 0 ? undefined : { code: 'PROVIDER_EXIT', message: `exit code ${exitCode}` },
+    ),
+    emitFailed: (chatId, message) => emitRunEnded(
+      emitter,
+      chatId,
+      'failed',
+      { code: 'PROVIDER_FAILURE', message },
+    ),
   };
+}
+
+function emitRunEnded(emitter, chatId, outcome, error) {
+  emitter.emit('transcript', {
+    type: 'run-ended',
+    chatId,
+    viewId: 'view-1',
+    runId: 'run-1',
+    row: {
+      kind: 'run-ended',
+      ordinal: 3,
+      at: '2024-01-01T00:00:03Z',
+      providerMeta: null,
+      origin: 'provider',
+      outcome,
+      ...(error ? { error } : {}),
+    },
+  });
 }
 
 function createMockQueue() {
@@ -83,12 +156,11 @@ describe('AttentionTracker', () => {
     return new AttentionTracker(agents, queue, settings, registry, history, telegram, telegramSettings);
   }
 
-  // Simulates a conversation round: adds messages to history and emits
-  // the assistant message through onMessages (as the real provider does).
+  // Simulates a conversation round and its durable assistant commit.
   function simulateConversation(chatId, userText, assistantText) {
     historyMessages.push({ type: 'user-message', content: userText });
     historyMessages.push({ type: 'assistant-message', content: assistantText });
-    agents.emitMessages(chatId, [new AssistantMessage('2024-01-01T00:00:01Z', assistantText)]);
+    agents.emitAssistant(chatId, [new AssistantMessage('2024-01-01T00:00:01Z', assistantText)]);
   }
 
   describe('permission notifications', () => {
@@ -96,8 +168,10 @@ describe('AttentionTracker', () => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      const msg = new PermissionRequestMessage(
+        '2024-01-01T00:00:01Z', 'incarnation-1', bashTool,
+      );
+      agents.emitPermissionRequest('c1', msg);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
@@ -115,33 +189,62 @@ describe('AttentionTracker', () => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'deploy the app' });
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:01Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      const msg = new PermissionRequestMessage(
+        '2024-01-01T00:00:01Z', 'incarnation-1', bashTool,
+      );
+      agents.emitPermissionRequest('c1', msg);
 
       await new Promise(r => setTimeout(r, 10));
       const [, html] = telegram.send.mock.calls[0];
       expect(html).toContain('codex');
     });
 
-    it('deduplicates permission notifications by ID', async () => {
+    it('deduplicates permission notifications by occurrence', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
-      agents.emitMessages('c1', [msg]);
+      const msg = new PermissionRequestMessage(
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
+      );
+      agents.emitPermissionRequest('c1', msg);
+      agents.emitPermissionRequest('c1', msg);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
     });
 
-    it('clears pending permission on resolved', async () => {
+    it('tracks distinct permission occurrence UUIDs separately', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
-      const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      const resMsg = new PermissionResolvedMessage('2024-01-01T00:00:01Z', 'perm-1', true);
+      const first = new PermissionRequestMessage(
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
+      );
+      const second = new PermissionRequestMessage(
+        '2024-01-01T00:00:00Z', 'incarnation-2', bashTool,
+      );
+      agents.emitPermissionRequest('c1', first);
+      agents.emitPermissionRequest('c1', second);
+      agents.emitPermissionRemoved('c1', 'incarnation-1');
+      queue.emitChatIdle('c1');
 
-      agents.emitMessages('c1', [reqMsg]);
-      agents.emitMessages('c1', [resMsg]);
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).toHaveBeenCalledTimes(2);
+
+      agents.emitPermissionRemoved('c1', 'incarnation-2');
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).toHaveBeenCalledTimes(3);
+    });
+
+    it('clears pending permission on control removal', async () => {
+      createTracker();
+      const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
+      const reqMsg = new PermissionRequestMessage(
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
+      );
+
+      agents.emitPermissionRequest('c1', reqMsg);
+      agents.emitPermissionRemoved('c1', 'incarnation-1');
 
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
@@ -150,14 +253,15 @@ describe('AttentionTracker', () => {
       expect(telegram.send).toHaveBeenCalledTimes(2);
     });
 
-    it('clears pending permission on cancelled', async () => {
+    it('clears pending permissions on a control clear', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
-      const reqMsg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      const cancelMsg = new PermissionCancelledMessage('2024-01-01T00:00:01Z', 'perm-1', 'cancelled');
+      const reqMsg = new PermissionRequestMessage(
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
+      );
 
-      agents.emitMessages('c1', [reqMsg]);
-      agents.emitMessages('c1', [cancelMsg]);
+      agents.emitPermissionRequest('c1', reqMsg);
+      agents.emitPermissionCleared('c1');
 
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
@@ -232,11 +336,35 @@ describe('AttentionTracker', () => {
       expect(html).toContain('Failed');
     });
 
+    it('sends one notification for repeated idle events from one settle', async () => {
+      createTracker();
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      queue.emitChatIdle('c1');
+
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-arms idle notification delivery when new messages arrive', async () => {
+      createTracker();
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      simulateConversation('c1', 'continue', 'Continued');
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).toHaveBeenCalledTimes(2);
+    });
+
     it('does NOT send idle notification when permission is pending', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      const msg = new PermissionRequestMessage(
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
+      );
+      agents.emitPermissionRequest('c1', msg);
       queue.emitChatIdle('c1');
 
       await new Promise(r => setTimeout(r, 10));
@@ -246,8 +374,10 @@ describe('AttentionTracker', () => {
     it('clears pending permission state when a chat is removed', async () => {
       createTracker();
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:00Z', 'tool-1', 'echo hello');
-      const msg = new PermissionRequestMessage('2024-01-01T00:00:00Z', 'perm-1', bashTool);
-      agents.emitMessages('c1', [msg]);
+      const msg = new PermissionRequestMessage(
+        '2024-01-01T00:00:00Z', 'incarnation-1', bashTool,
+      );
+      agents.emitPermissionRequest('c1', msg);
       registry.emitChatRemoved('c1');
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
@@ -272,7 +402,7 @@ describe('AttentionTracker', () => {
     it('sends stopped notification with user message as title', async () => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'run tests' });
-      queue.emitSessionStopped('c1', true);
+      queue.emitSessionStopped('c1', 'interrupt-requested');
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
@@ -282,10 +412,10 @@ describe('AttentionTracker', () => {
       expect(html).toContain('Stopped');
     });
 
-    it('does not report an unsuccessful stop as stopped', async () => {
+    it.each(['already-idle', 'failed'])('does not report %s as an acknowledged stop', async (outcome) => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'run tests' });
-      queue.emitSessionStopped('c1', false);
+      queue.emitSessionStopped('c1', outcome);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).not.toHaveBeenCalled();

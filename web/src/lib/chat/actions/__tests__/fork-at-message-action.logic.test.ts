@@ -3,7 +3,10 @@ import {
 	canShowForkAtMessageAction,
 	canUseForkAction,
 	canUseForkAtMessageAction,
+	remapForkAtMessage,
+	selectForkAtMessage,
 } from '$lib/chat/actions/fork-at-message-action.js';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
 
 describe('canUseForkAction', () => {
 	it('disables whole-chat fork when the agent does not support forking', () => {
@@ -98,5 +101,44 @@ describe('canUseForkAtMessageAction', () => {
 				isProcessing: true,
 			}),
 		).toBe(true);
+	});
+});
+
+describe('fork-at-message view recovery', () => {
+	it('remaps the selected message by identity and occurrence after renumbering', () => {
+		const duplicate = new AssistantMessage('2026-07-29T00:00:00.000Z', 'same reply');
+		const selection = selectForkAtMessage([
+			{ ordinal: 4, message: duplicate },
+			{ ordinal: 5, message: new AssistantMessage('2026-07-29T00:00:01.000Z', 'same reply') },
+		], 'view-1', 5);
+
+		expect(selection).not.toBeNull();
+		expect(remapForkAtMessage([
+			{ ordinal: 8, message: new AssistantMessage('2026-07-29T01:00:00.000Z', 'same reply') },
+			{ ordinal: 9, message: new AssistantMessage('2026-07-29T01:00:01.000Z', 'same reply') },
+		], 'view-2', selection!)).toMatchObject({
+			ordinal: 9,
+			transcriptViewId: 'view-2',
+			occurrence: 2,
+		});
+	});
+
+	it('uses user message identity when presentation fields change', () => {
+		const selection = selectForkAtMessage([{
+			ordinal: 3,
+			message: new UserMessage('2026-07-29T00:00:00.000Z', 'before', undefined, {
+				clientMessageId: 'message-1',
+			}),
+		}], 'view-1', 3);
+
+		expect(remapForkAtMessage([{
+			ordinal: 7,
+			message: new UserMessage('2026-07-29T01:00:00.000Z', 'after', undefined, {
+				clientMessageId: 'message-1',
+			}),
+		}], 'view-2', selection!)).toMatchObject({
+			ordinal: 7,
+			transcriptViewId: 'view-2',
+		});
 	});
 });

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ModelSelectorPopover from './ModelSelectorPopover.svelte';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -13,6 +14,7 @@
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
 		recents?: ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
+		selectableAgentIds?: readonly SessionAgentId[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -24,6 +26,7 @@
 		onChange,
 		recents = [],
 		preferRecentsOnOpen = false,
+		selectableAgentIds,
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -36,6 +39,7 @@
 	{onChange}
 	{recents}
 	{preferRecentsOnOpen}
+	{selectableAgentIds}
 	{disabled}
 	{align}
 	{side}

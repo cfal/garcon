@@ -7,19 +7,26 @@ import {
 } from '../submission-settlement.js';
 
 function createDeps() {
+	let currentRevision = 1;
+	const restoreDraftIfRevision = vi.fn(
+		(_chatId: string, expectedRevision: number, _text: string, _images: readonly File[]) =>
+			expectedRevision === currentRevision,
+	);
 	const deps = {
 		chatState: {
-			appendLocalNotice: vi.fn(),
-			clearPendingUserInput: vi.fn(),
-			updatePendingUserInputDeliveryStatus: vi.fn(),
+			appendLocalNoticeForChat: vi.fn(),
+			clearOptimisticUserInput: vi.fn(),
 		},
 		composerState: {
-			inputText: 'current',
-			images: [] as File[],
-			saveDraft: vi.fn(),
+			restoreDraftIfRevision,
 		},
 	} satisfies SubmissionSettlementDeps;
-	return deps;
+	return {
+		...deps,
+		setCurrentRevision(revision: number) {
+			currentRevision = revision;
+		},
+	};
 }
 
 const failures = [
@@ -27,32 +34,29 @@ const failures = [
 		kind: 'unknown',
 		error: () => new CommandOutcomeUnknownError(),
 		outcome: 'unknown',
-		deliveryStatus: 'unconfirmed',
-		clearsPending: false,
+		clearsOptimistic: false,
 		refreshes: true,
 	},
 	{
 		kind: 'rejected',
 		error: () => new ApiError(400, 'rejected', 'VALIDATION_FAILED'),
 		outcome: 'rejected',
-		deliveryStatus: 'failed',
-		clearsPending: false,
+		clearsOptimistic: true,
 		refreshes: false,
 	},
 	{
 		kind: 'admission conflict',
 		error: () => new ApiError(409, 'busy', 'SESSION_BUSY', undefined, true),
 		outcome: 'rejected',
-		deliveryStatus: null,
-		clearsPending: true,
+		clearsOptimistic: true,
 		refreshes: true,
 	},
 ] as const;
 
 describe('settleSubmissionFailure', () => {
 	for (const failure of failures) {
-		for (const restoreComposerOnFailure of [true, false]) {
-			it(`${failure.kind} with restore=${restoreComposerOnFailure}`, async () => {
+		for (const ownsComposer of [true, false]) {
+			it(`${failure.kind} with composer ownership=${ownsComposer}`, async () => {
 				const deps = createDeps();
 				const refreshControl = vi.fn(async () => undefined);
 				const onRejected = vi.fn();
@@ -62,37 +66,30 @@ describe('settleSubmissionFailure', () => {
 						chatId: 'chat-1',
 						previousText: 'previous',
 						previousImages: [],
-						restoreComposerOnFailure,
+						ownsComposer,
 					},
 					failure.error(),
 					{
-						clientRequestId: 'request-1',
+						clientMessageId: 'message-1',
+						composerRevisionAfterClear: 1,
 						unknownNotice: 'unknown notice',
 						rejectedNotice: () => 'rejected notice',
-						clearPendingOnAdmissionConflict: true,
+						refreshOnAdmissionConflict: true,
 						refreshControl,
 						onRejected,
 					},
 				);
 
 				expect(result).toBe(failure.outcome);
-				expect(deps.chatState.clearPendingUserInput).toHaveBeenCalledTimes(
-					failure.clearsPending ? 1 : 0,
+				expect(deps.chatState.clearOptimisticUserInput).toHaveBeenCalledTimes(
+					failure.clearsOptimistic ? 1 : 0,
 				);
-				if (failure.deliveryStatus) {
-					expect(deps.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith(
-						'request-1',
-						failure.deliveryStatus,
-					);
-				} else {
-					expect(deps.chatState.updatePendingUserInputDeliveryStatus).not.toHaveBeenCalled();
-				}
 				expect(refreshControl).toHaveBeenCalledTimes(failure.refreshes ? 1 : 0);
-				const restores = restoreComposerOnFailure && failure.outcome === 'rejected';
-				expect(deps.composerState.inputText).toBe(restores ? 'previous' : 'current');
-				expect(deps.composerState.saveDraft).toHaveBeenCalledTimes(restores ? 1 : 0);
+				const restores = ownsComposer && failure.outcome === 'rejected';
+				expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalledTimes(restores ? 1 : 0);
 				expect(onRejected).toHaveBeenCalledTimes(failure.outcome === 'rejected' ? 1 : 0);
-				expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+				expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+					'chat-1',
 					'error',
 					failure.outcome === 'unknown' ? 'unknown notice' : 'rejected notice',
 				);
@@ -110,7 +107,7 @@ describe('settleSubmissionFailure', () => {
 				chatId: 'chat-1',
 				previousText: 'queued text',
 				previousImages: [],
-				restoreComposerOnFailure: true,
+				ownsComposer: true,
 			},
 			new Error('queue failed'),
 			{
@@ -121,7 +118,35 @@ describe('settleSubmissionFailure', () => {
 		);
 
 		expect(restoreRejected).toHaveBeenCalledOnce();
-		expect(deps.composerState.inputText).toBe('current');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
+	});
+
+	it('preserves a newer draft when a cleared submission is rejected', async () => {
+		const deps = createDeps();
+		deps.setCurrentRevision(2);
+
+		await settleSubmissionFailure(
+			deps,
+			{
+				chatId: 'chat-1',
+				previousText: 'submitted text',
+				previousImages: [],
+				ownsComposer: true,
+			},
+			new Error('request rejected'),
+			{
+				unknownNotice: 'unknown',
+				rejectedNotice: () => 'rejected',
+				composerRevisionAfterClear: 1,
+			},
+		);
+
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalledWith(
+			'chat-1',
+			1,
+			'submitted text',
+			[],
+		);
+		expect(deps.composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
 	});
 });

@@ -1,4 +1,5 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
+import { TEXT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import {
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
@@ -9,21 +10,20 @@ import {
   type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { classifyDirectIntegrationError } from '@garcon/server-agent-common/direct/errors';
 import { DirectExecution } from '@garcon/server-agent-common/direct/execution';
-import { createDirectOpenAiChatRuntime } from '@garcon/server-agent-common/direct/router';
-import { createDirectSessionPaths } from '@garcon/server-agent-common/direct/session-paths';
 import {
-  createDirectTranscript,
-} from '@garcon/server-agent-common/direct/transcript';
-import { createDirectCompatibleTranscriptSource } from '@garcon/server-agent-common/direct/transcript-source';
+  createDirectNativeHistoryImport,
+  createDirectNativeSessionAccess,
+} from '@garcon/server-agent-common/direct/native-session';
+import { createDirectOpenAiChatRuntime } from '@garcon/server-agent-common/direct/router';
+import { DirectSessionStore } from '@garcon/server-agent-common/direct/session-store';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
-import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
-import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 
 const DESCRIPTOR = {
   id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -40,48 +40,39 @@ const DESCRIPTOR = {
 
 export default class DirectOpenAiCompatibleIntegration implements AgentIntegration {
   static readonly integrationId = DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID;
-  static readonly apiVersion = 2 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 1,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
+  static readonly apiVersion = 5 as const;
   readonly descriptor = DESCRIPTOR;
+  readonly attachments = {
+    fileMimeTypes: TEXT_FILE_ATTACHMENT_MIME_TYPES,
+  } as const;
   readonly execution;
-  readonly transcript;
+  readonly legacyHistoryImport = null;
+  readonly nativeHistoryImport;
+  readonly nativeActivity = null;
+  readonly nativeSessions;
+  readonly sessionConfiguration = null;
+  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
-  readonly forking;
+  readonly compaction = null;
+  readonly forking = null;
+  readonly steering = null;
+  readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
   constructor(host: AgentHost) {
-    const nativeSessions = createPathNativeSessionCodec(
-      DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-    );
-    const sessionPaths = createDirectSessionPaths(
-      host.storage.rootDirectory,
-      'openai-compatible-sessions',
-    );
+    const sessions = new DirectSessionStore({ host });
     const runtime = createDirectOpenAiChatRuntime({
-      runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
       runtimeLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
-      sessionPaths,
-      logger: host.logger,
+      sessions,
     });
-    const reader = createDirectCompatibleTranscriptSource({
-      agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-      sessionLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
-      findSessionFilePath: sessionPaths.findSessionFilePath,
-    });
+    this.nativeHistoryImport = createDirectNativeHistoryImport(sessions);
+    this.nativeSessions = createDirectNativeSessionAccess(sessions);
 
     this.settings = createVersionedSettings({
       ownerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -89,12 +80,11 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       defaults: {},
       descriptors: [],
     });
-    this.execution = new DirectExecution(host, runtime, nativeSessions);
-    this.transcript = createDirectTranscript({
-      ownerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-      reader,
-      nativeSessions,
-    });
+    const providerExecution = new DirectExecution(host, runtime);
+    this.projectPathUpdates = {
+      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
+    };
+    this.execution = createAgentProducerAdapter(providerExecution, host.logger).execution;
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: '',
@@ -102,19 +92,13 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       requiresStrictModelDiscovery: false,
       generation: { priority: 50, model: '' },
     });
-    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
+    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions: null });
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
         return { authenticated: false, canReauth: false, label: '', source: 'none' };
       },
     };
-    this.forking = createJsonlForking({
-      host,
-      supportsWhileRunning: false,
-      transcript: this.transcript,
-      nativeSessions,
-    });
     this.endpoints = {
       async validate(selection) {
         if (selection.protocol !== 'openai-compatible') {
@@ -140,7 +124,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
           return await runtime.runSingleQuery(request.prompt, endpoint, {
             projectPath: request.projectPath,
             model: request.model,
-            ...request.settings.values,
+            ...singleQueryRuntimeOptions(request),
           });
         } catch (error) {
           throw classifyDirectIntegrationError(error);

@@ -4,10 +4,12 @@
 	import SidebarSearchDock from './SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
 	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
+	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import {
 		getAppShell,
+		getMinuteClock,
 		getNotifications,
 		getLocalSettings,
 		getReadReceiptOutbox,
@@ -15,25 +17,45 @@
 		getSidebarSearch,
 		getRemoteSettings,
 	} from '$lib/context';
+	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
+	import type {
+		PersistedChatOrderGroup,
+		RelativeChatOrderPlacement,
+	} from '$shared/chat-order-contracts';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
-	import { transcriptSearchFacetSignature } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
+	import {
+		EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
+		transcriptSearchInvalidationProjection,
+	} from '$lib/sidebar/search/transcript-search-invalidation.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
-	import type { SidebarDisplayOptions } from './sidebar-display-options';
+	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
+	import {
+		sidebarGroupingUsesProjects,
+		type SidebarDisplayOptions,
+	} from './sidebar-display-options';
+	import type {
+		SidebarChatGrouping,
+		SidebarChatItemLayout,
+		SidebarSortMode,
+	} from '$lib/stores/local-settings.svelte';
+	import type { ChatSearchSort } from '$shared/chat-search';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 
 	interface QuickMoveWrite {
-		list: ChatOrderList;
+		list: PersistedChatOrderGroup;
 		chatId: string;
-		target: ReorderQuickTarget;
+		placement: RelativeChatOrderPlacement;
 		onSuccess?: () => void;
 		onFailure?: () => void;
 	}
@@ -54,12 +76,21 @@
 		onRequestRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => Promise<void> | void;
 		onToggleArchive: (chatId: string) => Promise<void> | void;
+		isArchiveMutationPending?: (chatId: string) => boolean;
+		isChatOptimisticallyArchived?: (chatId: string) => boolean;
+		startArchivingChats?: (chatIds: readonly string[]) => ChatArchiveMutation;
+		startUnarchivingChats?: (chatIds: readonly string[]) => ChatArchiveMutation;
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => Promise<void> | void;
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onManageTags: (chat: ChatSessionRecord) => void;
+		onOpenChatInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		chatListAutohideAvailable?: boolean;
+		onChatListAutohideChange?: (enabled: boolean) => void;
 		onShowScheduledPrompts: () => void;
+		onShowPreambles: () => void;
 		onShowSettings: () => void;
+		newWindowEdges: WorkspaceSplitAdmissions;
 	}
 
 	let {
@@ -75,12 +106,21 @@
 		onRequestRenameChat,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = () => false,
+		isChatOptimisticallyArchived = () => false,
+		startArchivingChats = () => ({ chatIds: [], completion: Promise.resolve() }),
+		startUnarchivingChats = () => ({ chatIds: [], completion: Promise.resolve() }),
 		onShowDetails,
 		onForkChat,
 		onShareChat,
 		onManageTags,
+		onOpenChatInNewWindow,
+		chatListAutohideAvailable = false,
+		onChatListAutohideChange,
 		onShowScheduledPrompts,
+		onShowPreambles,
 		onShowSettings,
+		newWindowEdges,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
 	const notifications = getNotifications();
@@ -93,30 +133,52 @@
 		get onQuietRefresh() {
 			return onQuietRefresh;
 		},
+		get isArchiveMutationPending() {
+			return isArchiveMutationPending;
+		},
+		get startArchivingChats() {
+			return startArchivingChats;
+		},
+		get startUnarchivingChats() {
+			return startUnarchivingChats;
+		},
 	});
 
 	const selection = new SidebarChatSelectionState();
 	const bulkDelete = new SidebarBulkDeleteState();
-	const MINUTE_MS = 60_000;
+	const minuteClock = getMinuteClock();
 
 	// Sidebar UI state.
 	let isBulkOperating = $state(false);
-	let currentTime = $state(new Date());
+	let currentTime = $derived(minuteClock.currentTime);
 	let isMarkingAllRead = $state(false);
 	let transcriptSearchRetryVersion = $state(0);
 	let displayOptions = $derived<SidebarDisplayOptions>({
-		groupByProject: localSettings.sidebarGroupByProject,
+		grouping: localSettings.sidebarGrouping,
+		inactivityDuration: localSettings.sidebarInactivityDuration,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
-		compactChatItems: localSettings.sidebarCompactChatItems,
+		chatItemLayout: localSettings.sidebarChatItemLayout,
 		sortMode: localSettings.sidebarSortMode,
+		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 	});
 	let transcriptSearchTarget = $derived(
 		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
 	);
-	let transcriptSearchChatSignature = $derived(transcriptSearchFacetSignature(chats));
 	let transcriptSearchEnabled = $derived(
 		remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
 	);
+	let transcriptSearchInvalidation = $derived.by(() => {
+		if (!transcriptSearchEnabled) return EMPTY_TRANSCRIPT_SEARCH_INVALIDATION;
+		return transcriptSearchInvalidationProjection(
+			chats,
+			transcriptSearchTarget,
+			localSettings.sidebarSearchResultSort,
+		);
+	});
+	let transcriptSearchHasTerms = $derived(transcriptSearchInvalidation.hasTranscriptTerms);
+	let transcriptSearchCandidateSet = $derived(transcriptSearchInvalidation.candidateSignature);
+	let transcriptSearchContentRevision = $derived(transcriptSearchInvalidation.contentSignature);
+	let transcriptSearchTimeOrder = $derived(transcriptSearchInvalidation.timeOrderSignature);
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
@@ -126,57 +188,39 @@
 	let displayedChatIds = $derived.by(() =>
 		buildSidebarDisplayChatIds({
 			displayedChats: sidebarSearch.filteredChats,
-			groupByProject: displayOptions.groupByProject,
+			grouping: displayOptions.grouping,
+			currentTime,
+			inactivityDuration: displayOptions.inactivityDuration,
+			sortMode: displayOptions.sortMode,
+			pinnedInsertPosition: displayOptions.pinnedInsertPosition,
+			isChatOptimisticallyArchived,
+			optimisticArchiveOrder: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
 	);
 	let displayedChatIdSet = $derived(new Set(displayedChatIds));
-	let allProjectKeys = $derived.by(() =>
-		buildSidebarProjectKeys({
+	let allProjectKeys = $derived.by(() => {
+		const projectKeys = buildSidebarProjectKeys({
 			displayedChats: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
-		}),
-	);
-
-	function millisecondsUntilNextMinute(nowMs = Date.now()): number {
-		const elapsedInMinute = nowMs % MINUTE_MS;
-		return elapsedInMinute === 0 ? MINUTE_MS : MINUTE_MS - elapsedInMinute;
-	}
-
-	// Refreshes relative timestamp labels on minute boundaries.
-	$effect(() => {
-		let intervalId: ReturnType<typeof setInterval> | null = null;
-
-		const refreshCurrentTime = () => {
-			currentTime = new Date();
-		};
-
-		const timeoutId = setTimeout(() => {
-			refreshCurrentTime();
-			intervalId = setInterval(refreshCurrentTime, MINUTE_MS);
-		}, millisecondsUntilNextMinute());
-
-		const handleVisibilityChange = () => {
-			if (document.visibilityState === 'visible') refreshCurrentTime();
-		};
-
-		document.addEventListener('visibilitychange', handleVisibilityChange);
-
-		return () => {
-			clearTimeout(timeoutId);
-			if (intervalId) clearInterval(intervalId);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
-		};
+		});
+		// Activity sections collapse through the same store; their keys stay in
+		// the pruning allowlist regardless of mode so section collapse
+		// preferences survive grouping-mode switches, like project keys do.
+		projectKeys.push(...SIDEBAR_SECTION_COLLAPSE_KEYS);
+		return projectKeys;
 	});
 
 	$effect(() => {
 		const query = transcriptSearchTarget;
 		const enabled = transcriptSearchEnabled;
-		transcriptSearchChatSignature;
+		const candidateSignature = transcriptSearchCandidateSet;
+		localSettings.sidebarSearchResultSort;
 		transcriptSearchRetryVersion;
-		if (!enabled || !query.trim()) {
-			sidebarSearch.clearTranscriptSearch();
+		untrack(() => sidebarSearch.updateTranscriptSearchCandidateSignature(candidateSignature));
+		if (!enabled || !transcriptSearchHasTerms) {
+			untrack(() => sidebarSearch.clearTranscriptSearch());
 			return;
 		}
 
@@ -189,6 +233,14 @@
 			clearTimeout(timeoutId);
 			controller.abort();
 		};
+	});
+
+	$effect(() => {
+		const query = transcriptSearchTarget;
+		transcriptSearchContentRevision;
+		transcriptSearchTimeOrder;
+		if (query !== untrack(() => sidebarSearch.transcriptSearchQuery)) return;
+		untrack(() => sidebarSearch.scheduleTranscriptSearchRevalidation());
 	});
 
 	function handleChatClick(chatId: string) {
@@ -209,9 +261,9 @@
 		onNewChat();
 	}
 
-	const quickMoveQueue = createPerListWriteQueue<ChatOrderList, QuickMoveWrite>(
-		async ({ chatId, target }) => {
-			await controller.quickMove(chatId, target);
+	const quickMoveQueue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(
+		async ({ chatId, placement }) => {
+			await controller.reorderChat(chatId, placement);
 		},
 		(error, task) => {
 			reportActionFailure(
@@ -223,13 +275,28 @@
 	);
 
 	function handleQuickMove(
-		list: ChatOrderList,
+		list: PersistedChatOrderGroup,
 		chatId: string,
-		target: ReorderQuickTarget,
+		placement: RelativeChatOrderPlacement,
 		onSuccess?: () => void,
 		onFailure?: () => void,
 	) {
-		quickMoveQueue.enqueue({ list, chatId, target, onSuccess, onFailure });
+		quickMoveQueue.enqueue({ list, chatId, placement, onSuccess, onFailure });
+	}
+
+	async function handleSortChatOrder(sortKey: ChatOrderSortKey): Promise<void> {
+		try {
+			const response = await controller.sortChatOrder(sortKey);
+			if (!response.changed) return;
+			notifications.info(m.notifications_reorder_chats_applied());
+			appShell.requestSidebarRecenterToSelected();
+		} catch (error) {
+			reportActionFailure(
+				'Failed to sort manual chat order:',
+				m.notifications_reorder_chats_failed(),
+				error,
+			);
+		}
 	}
 
 	// Multi-select mode handlers.
@@ -288,17 +355,19 @@
 		userMessage: string,
 	) {
 		isBulkOperating = true;
+		const operation = controller.startBulkOperation(action, {
+			selectedChats,
+			allChats: chats,
+			displayedChatIds,
+			selectedChatId,
+		});
+		if (operation.nextSelectedChatId) {
+			onChatSelect(operation.nextSelectedChatId);
+		} else if (operation.shouldCreateNewChat) {
+			onNewChat();
+		}
 		try {
-			const result = await controller.runBulkOperation(action, {
-				selectedChats,
-				allChats: chats,
-				selectedChatId,
-			});
-			if (result.nextSelectedChatId) {
-				onChatSelect(result.nextSelectedChatId);
-			} else if (result.shouldCreateNewChat) {
-				onNewChat();
-			}
+			await operation.completion;
 		} catch (error) {
 			reportActionFailure(logMessage, userMessage, error);
 		} finally {
@@ -365,31 +434,48 @@
 		}
 	}
 
-	function handleToggleGroupByProject(): void {
-		localSettings.toggle('sidebarGroupByProject');
+	function handleSetChatGrouping(grouping: SidebarChatGrouping): void {
+		localSettings.set('sidebarGrouping', grouping);
 	}
 
 	function handleToggleGroupNestedProjectPaths(): void {
-		if (!localSettings.sidebarGroupByProject) return;
+		if (!sidebarGroupingUsesProjects(localSettings.sidebarGrouping)) return;
 		localSettings.toggle('sidebarGroupNestedProjectPaths');
 	}
 
-	function handleToggleCompactChatItems(): void {
-		localSettings.toggle('sidebarCompactChatItems');
+	function handleSetChatItemLayout(layout: SidebarChatItemLayout): void {
+		localSettings.set('sidebarChatItemLayout', layout);
 	}
 
-	function handleToggleSortByRecent(): void {
-		localSettings.set(
-			'sidebarSortMode',
-			localSettings.sidebarSortMode === 'recent' ? 'manual' : 'recent',
-		);
+	function handleSetSortMode(sortMode: SidebarSortMode): void {
+		localSettings.set('sidebarSortMode', sortMode);
+	}
+
+	function handleSetSearchResultSort(sort: ChatSearchSort): void {
+		if (sort === localSettings.sidebarSearchResultSort) return;
+		localSettings.set('sidebarSearchResultSort', sort);
+		sidebarSearch.resetTranscriptSearchForSortChange();
+	}
+
+	function handleToggleChatListAutohide(): void {
+		if (!chatListAutohideAvailable) return;
+		const enabled = !localSettings.chatListAutohide;
+		localSettings.set('chatListAutohide', enabled);
+		onChatListAutohideChange?.(enabled);
+	}
+
+	function handleSetDockOnRight(enabled: boolean): void {
+		localSettings.set('chatListDock', enabled ? 'right' : 'left');
 	}
 
 	// Search dialog actions.
 
 	function handleSearchSelectChat(chatId: string) {
 		sidebarSearch.confirmSearchDialog();
-		onChatSelect(chatId);
+		void sidebarSearch.openTranscriptResult(chatId, (id, seq) => {
+			if (seq !== null) searchResultNavigation.set(id, seq);
+			onChatSelect(id);
+		});
 	}
 
 	function handleApplySavedSearch(search: SavedChatSearch) {
@@ -417,17 +503,27 @@
 	);
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -- keydown on container for Escape handling -->
-<div class="h-full flex flex-col bg-card md:select-none relative" onkeydown={handleSidebarKeydown}>
+<!-- The container delegates bubbled Escape handling for the sidebar subtree. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	data-slot="sidebar"
+	class={[
+		'h-full flex flex-col bg-card md:select-none relative',
+		localSettings.reduceMotion && 'sidebar-reduce-motion',
+	]}
+	onkeydown={handleSidebarKeydown}
+>
 	<div class="order-1 flex-shrink-0">
 		<SidebarSearchDock
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
-			{isMarkingAllRead}
-			groupByProject={displayOptions.groupByProject}
+			chatGrouping={displayOptions.grouping}
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
-			compactChatItems={displayOptions.compactChatItems}
-			sortByRecent={displayOptions.sortMode === 'recent'}
+			chatItemLayout={displayOptions.chatItemLayout}
+			sortMode={displayOptions.sortMode}
+			chatListAutohide={localSettings.chatListAutohide}
+			{chatListAutohideAvailable}
+			dockOnRight={localSettings.chatListDock === 'right'}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
 			activeQuery={sidebarSearch.activeQuery}
@@ -436,14 +532,17 @@
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}
-			onToggleGroupByProject={handleToggleGroupByProject}
+			onSetChatGrouping={handleSetChatGrouping}
 			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
-			onToggleCompactChatItems={handleToggleCompactChatItems}
-			onToggleSortByRecent={handleToggleSortByRecent}
+			onSetChatItemLayout={handleSetChatItemLayout}
+			onSetSortMode={handleSetSortMode}
+			onToggleChatListAutohide={handleToggleChatListAutohide}
+			onSetDockOnRight={handleSetDockOnRight}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}
 			{onShowScheduledPrompts}
+			{onShowPreambles}
 			{onShowSettings}
 		/>
 	</div>
@@ -457,6 +556,7 @@
 			{isMobile}
 			{currentTime}
 			searchFilter={sidebarSearch.activeQuery}
+			{onNewChat}
 			isMultiSelectMode={selection.isActive}
 			isMultiSelected={(id) => selection.isSelected(id)}
 			{displayOptions}
@@ -473,6 +573,8 @@
 			onToggleArchive={(id) => {
 				void onToggleArchive(id);
 			}}
+			{isArchiveMutationPending}
+			{isChatOptimisticallyArchived}
 			{onShowDetails}
 			onForkChat={(id) => {
 				void onForkChat(id);
@@ -480,7 +582,10 @@
 			{onShareChat}
 			onTagClick={handleTagClick}
 			{onManageTags}
+			onOpenInNewWindow={onOpenChatInNewWindow}
+			{newWindowEdges}
 			onQuickMove={handleQuickMove}
+			onSortChatOrder={handleSortChatOrder}
 		/>
 	</div>
 
@@ -545,7 +650,7 @@
 				>
 				{#if bulkDelete.confirmation}
 					<ul class="list-disc pl-4 space-y-0.5 text-sm text-foreground max-h-32 overflow-y-auto">
-						{#each bulkDelete.confirmation.chatTitles.slice(0, 5) as title}
+						{#each bulkDelete.confirmation.chatTitles.slice(0, 5) as title, index (index)}
 							<li class="truncate">{title}</li>
 						{/each}
 						{#if bulkDelete.confirmation.chatTitles.length > 5}
@@ -584,7 +689,21 @@
 	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
 	transcriptSearchIndexing={sidebarSearch.transcriptSearchIndexing}
 	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}
+	transcriptSearchStatus={sidebarSearch.transcriptSearchStatus}
 	transcriptSearchError={sidebarSearch.transcriptSearchError}
+	sort={localSettings.sidebarSearchResultSort}
+	showTranscriptPagination={sidebarSearch.transcriptSearchPage !== null}
+	hasMoreTranscriptResults={sidebarSearch.transcriptSearchPage?.hasMore === true &&
+		!sidebarSearch.transcriptSearchLimitReached}
+	loadingMoreTranscriptResults={sidebarSearch.transcriptSearchLoadingMore}
+	transcriptSearchPageError={sidebarSearch.transcriptSearchPageError}
+	transcriptSearchRevalidating={sidebarSearch.transcriptSearchRevalidating}
+	transcriptSearchRevalidationError={sidebarSearch.transcriptSearchRevalidationError}
+	transcriptSearchLimitReached={sidebarSearch.transcriptSearchLimitReached}
+	transcriptSearchAnnouncement={sidebarSearch.transcriptSearchAnnouncement}
+	transcriptSearchAnnouncementVersion={sidebarSearch.transcriptSearchAnnouncementVersion}
+	resultsResetVersion={sidebarSearch.transcriptSearchResultsResetVersion}
+	revalidationVersion={sidebarSearch.transcriptSearchRevalidationVersion}
 	{currentTime}
 	highlightedIndex={sidebarSearch.highlightedResultIndex}
 	onQueryChange={(q) => sidebarSearch.updateDraftQuery(q)}
@@ -598,6 +717,10 @@
 	onRetryTranscriptSearch={() => {
 		transcriptSearchRetryVersion += 1;
 	}}
+	onSortChange={handleSetSearchResultSort}
+	onLoadMoreTranscriptResults={() => sidebarSearch.loadMoreTranscriptResults()}
+	onRetryTranscriptSearchRevalidation={() => sidebarSearch.retryTranscriptSearchRevalidation()}
+	reduceMotion={localSettings.reduceMotion}
 	onClose={() => sidebarSearch.closeSearchDialog()}
 />
 

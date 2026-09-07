@@ -20,7 +20,8 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
+import { DomainError } from '../../lib/domain-error.js';
 
 const SOURCE_CHAT_ID = '1783725900000300';
 const TARGET_CHAT_ID = '1783725900000301';
@@ -29,6 +30,7 @@ import { forkChatFileCopy } from '../../chats/fork-chat.js';
 
 const registry = {
   getChat: mock(() => undefined),
+  hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
   updateChat: mock(() => undefined),
   removeChat: mock(() => undefined),
@@ -46,41 +48,58 @@ const settings = {
   ensureInNormal: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-  reorderWindow: mock(() => Promise.resolve({ success: true })),
-  reorderRelative: mock(() => Promise.resolve({ success: true })),
+  reorderChat: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+  })),
 };
-const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = createRoutePathCache();
+const queue = {
+  deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+  reserveTranscriptSnapshot: mock((chatId) => ({ chatId, reservationId: 'snapshot-reservation' })),
+  releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
+  ownsExecution: mock(() => false),
+};
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => undefined),
+  assertExecutionModeSelectionSupported: mock(() => undefined),
+  normalizeThinkingModeForAgent: mock((_agentId, thinkingMode) => thinkingMode ?? 'none'),
   supportsFork: mock(() => true),
   supportsForkAtMessage: mock(() => true),
   supportsForkWhileRunning: mock(() => false),
   isAgentSessionRunning: mock(() => false),
-  forkAgentSession: mock(() => Promise.resolve({})),
+  forkAgentSession: mock(() => Promise.resolve({
+    kind: 'materialized',
+    session: { agentSessionId: 'forked-session', nativeSession: null },
+  })),
+  discardForkedAgentSession: mock(() => Promise.resolve(undefined)),
 };
 
 const commandLedger = createRouteCommandLedger('chats-fork');
-const pendingInputs = createRoutePendingInputs();
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
-  pathCache,
+  processing: { phase: mock(() => null) },
   metadata,
   chatViews,
   agents,
-	pendingInputs,
 	chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -89,8 +108,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
-		pathCache,
 		chatListProjector,
   }),
 });
@@ -218,6 +235,13 @@ describe('POST /api/v1/chats/fork', () => {
           'test-agent': { ownerId: 'test-agent', schemaVersion: 1, values: {} },
         },
         projectPath: '/proj',
+        tags: [],
+        model: '',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        carryOverSegments: [],
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
       };
       if (id === TARGET_CHAT_ID) return forkedChat;
       return null;
@@ -242,6 +266,17 @@ describe('POST /api/v1/chats/fork', () => {
         projectPath: '/proj',
         model: '',
         tags: [],
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        carryOverSegments: [],
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+        parentChat: {
+          chatId: SOURCE_CHAT_ID,
+          relation: 'fork',
+          transcriptViewId: 'view-source',
+          ordinal: 1,
+        },
       });
       return {
         sourceChatId: SOURCE_CHAT_ID,
@@ -261,7 +296,6 @@ describe('POST /api/v1/chats/fork', () => {
       id: TARGET_CHAT_ID,
       agentId: 'test-agent',
       projectPath: '/proj',
-      effectiveProjectKey: '/proj',
       orderGroup: 'orphan',
     });
   });
@@ -275,6 +309,34 @@ describe('POST /api/v1/chats/fork', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('Malformed JSON');
+  });
+
+  it('returns a structured 422 when the selected transcript is unavailable', async () => {
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 2,
+    });
+    registry.getChat.mockImplementation((id) => {
+      if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
+      return null;
+    });
+    forkChatFileCopy.mockRejectedValue(new DomainError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Fork message is outside the source transcript',
+      422,
+    ));
+
+    const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
+    const response = await handler(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      success: false,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: false,
+    });
   });
 
   it('returns 500 for unexpected errors', async () => {

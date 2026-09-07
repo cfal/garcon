@@ -1,4 +1,4 @@
-import { renderMultiFileDiff } from '../git/diff-engine.js';
+import { parseMultiFileDiffPatches } from '../git/diff-engine.js';
 import { createLogger } from '../lib/log.js';
 import type { GhStatusResponse } from '../../common/gh.js';
 import { classifyGhError, type ClassifiedGhError } from './gh-error-classifier.js';
@@ -130,20 +130,22 @@ export function createGhService(): GhService {
       }
       await assertAccessibleDirectory(projectPath);
 
-      const raw = await runGhJson<GhRawPullRequest>(
-        projectPath,
-        ['pr', 'view', String(number), '--json', VIEW_FIELDS],
-        { signal },
-      );
-      const { stdout: diffText } = await runGh(
-        projectPath,
-        ['pr', 'diff', String(number)],
-        { signal, timeoutMs: DIFF_TIMEOUT_MS },
-      );
-
-      const rendered = renderMultiFileDiff(diffText);
-      const threads = await loadReviewThreads(projectPath, number, signal);
-      return buildDetail(raw, rendered, threads);
+      const [raw, diff, threads] = await Promise.all([
+        runGhJson<GhRawPullRequest>(
+          projectPath,
+          ['pr', 'view', String(number), '--json', VIEW_FIELDS],
+          { signal },
+        ),
+        runGh(
+          projectPath,
+          ['pr', 'diff', String(number)],
+          { signal, timeoutMs: DIFF_TIMEOUT_MS },
+        ),
+        loadReviewThreads(projectPath, number, signal),
+      ]);
+      const diffText = diff.stdout;
+      const patches = parseMultiFileDiffPatches(diffText);
+      return buildDetail(raw, patches, threads);
     },
 
     toHttpError(error: unknown): Response {

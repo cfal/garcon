@@ -1,12 +1,20 @@
 import { promises as fs } from 'fs';
+import path from 'path';
 import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
-import { errorMessage } from '../lib/errors.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import { getHttpIdleTimeoutSeconds } from '../config.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
-import { chunkGitPathspecs } from './pathspecs.js';
-import { GIT_REF_RESULT_LIMITS } from './types.js';
+import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
+import { GIT_REF_RESULT_LIMITS, type GitCommandOptions } from './types.js';
+import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { probeWorktreeLayout } from './worktree-layout.js';
+import { isExpectedMissingGitResult } from './comparison-errors.js';
+import { commitSelectedFiles } from './selected-file-commit.js';
+import { discard } from './discard.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -16,9 +24,11 @@ import type {
   CommitOptions,
   FileOptions,
   GitAgentRunner,
+  GitCommitResult,
   GitRefOption,
   GitRefsResponse,
   GitRefsOptions,
+  GitRefSort,
   ProjectOptions,
   PushOptions,
   RemoteInfo,
@@ -32,7 +42,6 @@ import {
   resolvePathWithinProject,
   runGit,
   runGitWithStdin,
-  stripDiffHeaders,
 } from './run.js';
 import {
   assertExistingCommitRef,
@@ -42,22 +51,106 @@ import {
 
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
+const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
+const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
+// Network commands run within the HTTP idle budget minus a margin, so a slow
+// remote surfaces a git error before the idle timeout drops the response.
+// The budget only tightens the runner's 30s default; it never loosens it.
+const NETWORK_GIT_TIMEOUT_MARGIN_MS = 2_000;
+const NETWORK_GIT_DEFAULT_TIMEOUT_MS = 30_000;
+
+export function resolveNetworkGitTimeoutMs(idleSeconds: number): number {
+  // A disabled budget (0) must not tighten anything; without this guard it
+  // would clamp every network command to the 1s floor.
+  if (idleSeconds <= 0) return NETWORK_GIT_DEFAULT_TIMEOUT_MS;
+  return Math.min(
+    NETWORK_GIT_DEFAULT_TIMEOUT_MS,
+    Math.max(1_000, idleSeconds * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
+  );
+}
+
+function networkGitOptions(): GitCommandOptions {
+  return {
+    timeoutMs: resolveNetworkGitTimeoutMs(getHttpIdleTimeoutSeconds()),
+    // Fails fast on credential prompts instead of hanging until the timeout.
+    env: { GIT_TERMINAL_PROMPT: '0' },
+  };
+}
+const repositoryCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
   options?: { disableOptionalLocks?: boolean },
 ) => Promise<{ stdout: string }>;
 
-const REF_KIND_ORDER: Record<GitRefOption['kind'], number> = {
-  'local-branch': 0,
-  'remote-branch': 1,
-  tag: 2,
-  other: 3,
-};
+async function runWithRepositoryCommitLock<T>(
+  projectPath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const layout = await probeWorktreeLayout(projectPath);
+  const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
+  return repositoryCommitLock.runExclusive(lockKey, operation);
+}
 
 function normalizeRefResultLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
   return Math.min(limit, GIT_REF_RESULT_LIMITS.max);
+}
+
+async function hasCommitStateRef(projectPath: string, ref: string): Promise<boolean> {
+  try {
+    await runGit(
+      projectPath,
+      ['rev-parse', '--verify', '--quiet', ref],
+      readOnlyGitOptions(),
+    );
+    return true;
+  } catch (error) {
+    if (isExpectedMissingGitResult(error)) return false;
+    throw error;
+  }
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
+}
+
+async function hasRebaseOrAmConflictState(projectPath: string): Promise<boolean> {
+  const { stdout } = await runGit(
+    projectPath,
+    [
+      'rev-parse',
+      '--git-path',
+      'rebase-merge/stopped-sha',
+      '--git-path',
+      'rebase-merge/amend',
+      '--git-path',
+      'rebase-apply',
+    ],
+    readOnlyGitOptions(),
+  );
+  const [stoppedPath, amendPath, applyPath] = stdout
+    .trimEnd()
+    .split('\n')
+    .map((statePath) => path.resolve(projectPath, statePath));
+
+  if (await fileExists(applyPath)) return true;
+  // Interactive edit stops permit isolated commits; conflicted stops omit the amend marker.
+  return (await fileExists(stoppedPath)) && !(await fileExists(amendPath));
+}
+
+async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
+  // Git continuation states require preserving the complete staged operation.
+  for (const ref of WHOLE_INDEX_COMMIT_STATE_REFS) {
+    if (await hasCommitStateRef(projectPath, ref)) return true;
+  }
+  return hasRebaseOrAmConflictState(projectPath);
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {
@@ -68,7 +161,7 @@ function normalizeRefSearchQuery(query: string | undefined): string | null {
 
 function refPatternsForQuery(query: string): string[] {
   // Keeps opening the selector cheap by avoiding large remote/tag namespaces until search.
-  if (!query) return ['refs/heads'];
+  if (!query) return [LOCAL_BRANCH_REF_PATTERN];
   if (query.startsWith('refs/')) return [`${query}*`];
   if (query.includes('/')) {
     return [
@@ -98,9 +191,35 @@ function gitRefDisplayName(refname: string): Pick<GitRefOption, 'name' | 'kind'>
   return { name: refname, kind: 'other' };
 }
 
+function gitRefSortArgs(
+  sort: GitRefSort,
+  patterns: readonly string[],
+): string[] {
+  const canUseDefaultRefOrder =
+    sort.key === 'name' &&
+    sort.direction === 'asc' &&
+    patterns.length === 1 &&
+    patterns[0] === LOCAL_BRANCH_REF_PATTERN;
+  // Git's full-refname order equals short-name order under this common prefix.
+  // Omitting --sort lets --count stop iteration early.
+  if (canUseDefaultRefOrder) return [];
+
+  const directionPrefix = sort.direction === 'desc' ? '-' : '';
+  const primary = sort.key === 'name' ? 'refname:lstrip=2' : 'creatordate';
+  return ['--sort=refname', `--sort=${directionPrefix}${primary}`];
+}
+
+function creatorDateIso(value: string | undefined): string | null {
+  if (!value || !/^-?\d+$/.test(value)) return null;
+  const milliseconds = Number(value) * 1_000;
+  if (!Number.isSafeInteger(milliseconds)) return null;
+  const timestamp = new Date(milliseconds);
+  return Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : null;
+}
+
 function parseGitRefLine(line: string, currentBranch: string | null, head: string): GitRefOption | null {
   if (!line) return null;
-  const [refname, objectName] = line.split('\0');
+  const [refname, objectName, creatorDate] = line.split('\0');
   if (!refname) return null;
   if (refname.startsWith('refs/remotes/') && refname.endsWith('/HEAD')) return null;
 
@@ -113,16 +232,38 @@ function parseGitRefLine(line: string, currentBranch: string | null, head: strin
     name,
     ref: refname,
     kind,
+    updatedAt: creatorDateIso(creatorDate),
     ...(isCurrent ? { isCurrent: true } : {}),
   };
 }
 
-function sortGitRefs(refs: GitRefOption[]): GitRefOption[] {
-  return refs.sort((a, b) => {
-    const kindDelta = REF_KIND_ORDER[a.kind] - REF_KIND_ORDER[b.kind];
-    if (kindDelta !== 0) return kindDelta;
-    return a.name.localeCompare(b.name);
-  });
+interface GitHeadIdentity {
+  currentBranch: string | null;
+  head: string;
+}
+
+async function readGitHeadIdentity(
+  projectPath: string,
+  signal?: AbortSignal,
+): Promise<GitHeadIdentity> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', 'HEAD', '--symbolic-full-name', 'HEAD'],
+      readOnlyGitOptions({ signal }),
+    );
+    const [head = '', symbolicHead = ''] = stdout.trim().split(/\r?\n/);
+    const prefix = 'refs/heads/';
+    return {
+      head,
+      currentBranch: symbolicHead.startsWith(prefix)
+        ? symbolicHead.slice(prefix.length)
+        : null,
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { currentBranch: null, head: '' };
+  }
 }
 
 async function resolveLocalBranchCheckoutName(
@@ -213,42 +354,45 @@ export async function collectCommitMessageDiffContext(
   return diffContext;
 }
 
+// Resolves the display branch and whether the repository has any commits.
+// Detached HEAD falls back to a descriptive label.
+async function resolveStatusBranch(projectPath: string): Promise<{ branch: string; hasCommits: boolean }> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
+    let branch = stdout.trim();
+    if (branch === 'HEAD') {
+      const { stdout: headOutput } = await runGit(
+        projectPath,
+        ['rev-parse', '--verify', 'HEAD'],
+        readOnlyGitOptions(),
+      );
+      branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
+    }
+    return { branch, hasCommits: true };
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
+      return { branch: 'main', hasCommits: false };
+    }
+    throw error;
+  }
+}
+
 export function createStatusOperations(agents: GitAgentRunner) {
   async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    let branch = 'main';
-    let hasCommits = true;
-    try {
-      const { stdout: branchOutput } = await runGit(
-        projectPath,
-        ['rev-parse', '--abbrev-ref', 'HEAD'],
-        readOnlyGitOptions(),
-      );
-      branch = branchOutput.trim();
-      if (branch === 'HEAD') {
-        const { stdout: headOutput } = await runGit(
-          projectPath,
-          ['rev-parse', '--verify', 'HEAD'],
-          readOnlyGitOptions(),
-        );
-        branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
-      }
-    } catch (error) {
-      const message = errorMessage(error);
-      if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
-        hasCommits = false;
-        branch = 'main';
-      } else {
-        throw error;
-      }
-    }
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '-uall'],
-      readOnlyGitOptions(),
-    );
+    // Branch resolution and the working-tree scan are independent reads;
+    // run them concurrently instead of paying sequential spawn latency.
+    const [branchInfo, { stdout: statusOutput }] = await Promise.all([
+      resolveStatusBranch(projectPath),
+      runGit(projectPath, ['status', '--porcelain', '-uall'], readOnlyGitOptions()),
+    ]);
+    const { branch, hasCommits } = branchInfo;
 
     const modified: string[] = [];
     const added: string[] = [];
@@ -259,11 +403,27 @@ export function createStatusOperations(agents: GitAgentRunner) {
       const status = line.substring(0, 2);
       const file = line.substring(3).trim().replace(/\/+$/g, '');
       if (!file) return;
-      if (status === 'M ' || status === ' M' || status === 'MM') {
-        modified.push(file);
-      } else if (status === 'A ' || status === 'AM') {
+      // Classifies by letter so every porcelain variant lands somewhere:
+      // T (typechange) and U (unmerged) count as modifications of a tracked
+      // path, and any A wins because the index still holds an addition. Index
+      // intent also wins over worktree deletion, so AD/MD read as added or
+      // modified rather than deleted. Renames and copies drop out as before:
+      // their porcelain line carries "old -> new", which is not a path this
+      // endpoint's consumers could act on. R/C can appear in either column;
+      // the unstaged form (DR, via an intent-to-add destination) pairs a
+      // worktree rename the same way.
+      const staged = status[0];
+      const unstaged = status[1];
+      if (staged === 'R' || staged === 'C' || unstaged === 'R' || unstaged === 'C') return;
+      if (staged === 'A' || unstaged === 'A') {
         added.push(file);
-      } else if (status === 'D ' || status === ' D') {
+      } else if (
+        staged === 'U' || unstaged === 'U' ||
+        staged === 'M' || unstaged === 'M' ||
+        staged === 'T' || unstaged === 'T'
+      ) {
+        modified.push(file);
+      } else if (staged === 'D' || unstaged === 'D') {
         deleted.push(file);
       } else if (status === '??') {
         untracked.push(file);
@@ -271,103 +431,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
     });
 
     return { branch, hasCommits, modified, added, deleted, untracked };
-  }
-
-  async function getDiff({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    const isUntracked = statusOutput.startsWith('??');
-    const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
-
-    let diff;
-    if (isUntracked) {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        diff = `--- directory: ${file}`;
-      } else {
-        const fileContent = await fs.readFile(filePath, 'utf-8');
-        const lines = fileContent.split('\n');
-        diff = `--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
-      }
-    } else if (isDeleted) {
-      const { stdout: fileContent } = await runGit(
-        projectPath,
-        ['show', `HEAD:${file}`],
-        readOnlyGitOptions(),
-      );
-      const lines = fileContent.split('\n');
-      diff = `--- a/${file}\n+++ /dev/null\n@@ -1,${lines.length} +0,0 @@\n${lines.map((line) => `-${line}`).join('\n')}`;
-    } else {
-      const { stdout: unstagedDiff } = await runGit(
-        projectPath,
-        ['diff', '--', file],
-        readOnlyGitOptions(),
-      );
-      if (unstagedDiff) {
-        diff = stripDiffHeaders(unstagedDiff);
-      } else {
-        const { stdout: stagedDiff } = await runGit(
-          projectPath,
-          ['diff', '--cached', '--', file],
-          readOnlyGitOptions(),
-        );
-        diff = stripDiffHeaders(stagedDiff) || '';
-      }
-    }
-
-    return { diff };
-  }
-
-  async function getFileWithDiff({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    const isUntracked = statusOutput.startsWith('??');
-    const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
-
-    let currentContent = '';
-    let oldContent = '';
-
-    if (isDeleted) {
-      const { stdout: headContent } = await runGit(
-        projectPath,
-        ['show', `HEAD:${file}`],
-        readOnlyGitOptions(),
-      );
-      oldContent = headContent;
-      currentContent = headContent;
-    } else {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        throw new GitDomainError('INVALID_INPUT', 'Cannot generate a line diff for a directory. Select a file instead.');
-      }
-      currentContent = await fs.readFile(filePath, 'utf-8');
-      if (!isUntracked) {
-        try {
-          const { stdout: headContent } = await runGit(
-            projectPath,
-            ['show', `HEAD:${file}`],
-            readOnlyGitOptions(),
-          );
-          oldContent = headContent;
-        } catch {
-          oldContent = '';
-        }
-      }
-    }
-
-    return { currentContent, oldContent, isDeleted, isUntracked };
   }
 
   async function initialCommit({ projectPath }: ProjectOptions): Promise<unknown> {
@@ -386,66 +449,79 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout, message: 'Initial commit created successfully' };
   }
 
-  async function commit({ projectPath, message, files }: CommitOptions): Promise<unknown> {
+  async function commit({ projectPath, message, files }: CommitOptions): Promise<GitCommitResult> {
     await assertGitRepository(projectPath);
     for (const file of files) {
-      await runGit(projectPath, ['add', '--', file]);
+      if (!file) throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot be empty.');
+      if (file.includes('\0')) {
+        throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot contain NUL bytes.');
+      }
+      try {
+        resolvePathWithinProject(projectPath, file);
+      } catch {
+        throw new GitDomainError(
+          'INVALID_INPUT',
+          'Pathspecs must resolve inside the project root.',
+        );
+      }
     }
-    const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-    return { success: true, output: stdout };
+    return runWithRepositoryCommitLock(projectPath, async () => {
+      if (!(await requiresWholeIndexCommit(projectPath))) {
+        const result = await commitSelectedFiles(projectPath, message, files);
+        return { success: true, ...result, commitScope: 'selected-files' };
+      }
+
+      for (const file of files) {
+        await runGit(projectPath, ['add', '--', literalGitPathspec(file)]);
+      }
+      const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
+      return {
+        success: true,
+        output: stdout,
+        commitScope: 'whole-index',
+        indexSynchronized: true,
+      };
+    });
   }
 
   async function getRefs({
     projectPath,
     query,
     limit,
+    sort = DEFAULT_GIT_REF_SORT,
     signal,
   }: GitRefsOptions): Promise<GitRefsResponse> {
-    await assertGitRepository(projectPath);
     const normalizedQuery = normalizeRefSearchQuery(query);
-    if (normalizedQuery === null) return { refs: [] };
-
-    let currentBranch: string | null = null;
-    let head = '';
-
-    try {
-      const { stdout } = await runGit(
-        projectPath,
-        ['symbolic-ref', '--quiet', '--short', 'HEAD'],
-        readOnlyGitOptions({ signal }),
-      );
-      currentBranch = stdout.trim() || null;
-    } catch {
-      currentBranch = null;
+    if (normalizedQuery === null) {
+      await assertGitRepository(projectPath, signal);
+      return { refs: [] };
     }
 
-    try {
-      const { stdout } = await runGit(
-        projectPath,
-        ['rev-parse', '--verify', 'HEAD'],
-        readOnlyGitOptions({ signal }),
-      );
-      head = stdout.trim();
-    } catch {
-      head = '';
-    }
+    const refPatterns = refPatternsForQuery(normalizedQuery);
+    const refArgs = [
+      'for-each-ref',
+      `--count=${normalizeRefResultLimit(limit)}`,
+      ...gitRefSortArgs(sort, refPatterns),
+      '--format=%(refname)%00%(objectname)%00%(creatordate:unix)',
+      ...refPatterns,
+    ];
+    const [repositoryResult, identityResult, refResult] =
+      await Promise.allSettled([
+        assertGitRepository(projectPath, signal),
+        readGitHeadIdentity(projectPath, signal),
+        runGit(projectPath, refArgs, readOnlyGitOptions({ signal })),
+      ]);
 
-    const { stdout } = await runGit(
-      projectPath,
-      [
-        'for-each-ref',
-        `--count=${normalizeRefResultLimit(limit)}`,
-        '--format=%(refname)%00%(objectname)',
-        ...refPatternsForQuery(normalizedQuery),
-      ],
-      readOnlyGitOptions({ signal }),
-    );
-    const refs = sortGitRefs(
-      stdout
-        .split('\n')
-        .map((line) => parseGitRefLine(line, currentBranch, head))
-        .filter((ref): ref is GitRefOption => Boolean(ref)),
-    );
+    // Preserves repository validation as the canonical failure; failures wait for every command to settle.
+    if (repositoryResult.status === 'rejected') throw repositoryResult.reason;
+    if (identityResult.status === 'rejected') throw identityResult.reason;
+    if (refResult.status === 'rejected') throw refResult.reason;
+
+    const identity = identityResult.value;
+    const refs = refResult.value.stdout
+      .split('\n')
+      .map((line) => parseGitRefLine(line, identity.currentBranch, identity.head))
+      .filter((ref): ref is GitRefOption => Boolean(ref));
     return { refs };
   }
 
@@ -618,7 +694,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['fetch', remoteName]);
+    const { stdout } = await runGit(projectPath, ['fetch', remoteName], networkGitOptions());
     return { success: true, output: stdout || 'Fetch completed successfully', remoteName };
   }
 
@@ -647,7 +723,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin/branch as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['pull', remoteName, remoteBranch]);
+    const { stdout } = await runGit(
+      projectPath,
+      ['pull', remoteName, remoteBranch],
+      networkGitOptions(),
+    );
     return {
       success: true,
       output: stdout || 'Pull completed successfully',
@@ -692,43 +772,17 @@ export function createStatusOperations(agents: GitAgentRunner) {
       }
     }
 
-    const { stdout } = await runGit(projectPath, ['push', targetRemote, `${branch}:${targetBranch}`]);
+    const { stdout } = await runGit(
+      projectPath,
+      ['push', targetRemote, `${branch}:${targetBranch}`],
+      networkGitOptions(),
+    );
     return {
       success: true,
       output: stdout || 'Push completed successfully',
       remoteName: targetRemote,
       remoteBranch: targetBranch,
     };
-  }
-
-  async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    if (!statusOutput.trim()) {
-      throw new GitDomainError('INVALID_INPUT', 'No local working-tree changes were found for this file.');
-    }
-
-    const status = statusOutput.substring(0, 2);
-    if (status === '??') {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        await fs.rm(filePath, { recursive: true, force: true });
-      } else {
-        await fs.unlink(filePath);
-      }
-    } else if (status.includes('M') || status.includes('D')) {
-      await runGit(projectPath, ['restore', '--', file]);
-    } else if (status.includes('A')) {
-      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
-    }
-
-    return { success: true, message: `Changes discarded for ${file}` };
   }
 
   async function deleteUntracked({ projectPath, file }: FileOptions): Promise<unknown> {
@@ -761,8 +815,10 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
   async function commitIndex({ projectPath, message }: CommitIndexOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
-    const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-    return { success: true, output: stdout };
+    return runWithRepositoryCommitLock(projectPath, async () => {
+      const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
+      return { success: true, output: stdout };
+    });
   }
 
   function pathspecStdin(paths: string[]): string {
@@ -819,8 +875,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
   return {
     getStatus,
-    getDiff,
-    getFileWithDiff,
     initialCommit,
     commit,
     getBranches,

@@ -1,7 +1,9 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
-import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from './history-loader.js';
+import {
+  cursorStoreDbPath,
+  loadImportableCursorChatMessagesBySessionId,
+} from './history-loader.js';
 
 export interface CursorTranscriptReference {
   readonly agentSessionId?: string | null;
@@ -10,33 +12,30 @@ export interface CursorTranscriptReference {
 }
 
 export interface CursorTranscriptReader {
-  loadMessages(
-    session: CursorTranscriptReference,
-    context?: { readonly chatId?: string },
-  ): Promise<ChatMessage[]>;
-  getPreview(session: CursorTranscriptReference): Promise<unknown>;
+  loadMessages(session: CursorTranscriptReference): Promise<ChatMessage[]>;
+  sourcePath(session: CursorTranscriptReference): string | null;
 }
 
 // Cursor ACP sessions persist SQLite transcripts under ~/.cursor/acp-sessions.
 export function createCursorTranscriptSource(
-  requestIdentities: CursorRequestIdentityStore,
+  options: { readonly cursorHome?: string } = {},
 ): CursorTranscriptReader {
+  const sessionId = (session: CursorTranscriptReference): string => (
+    session.agentSessionId
+      || getCursorAgentSessionIdFromNativePath(session.nativePath)
+      || ''
+  );
   return {
-    async loadMessages(session, context): Promise<ChatMessage[]> {
-      const agentSessionId = session.agentSessionId
-        || getCursorAgentSessionIdFromNativePath(session.nativePath)
-        || '';
-      const messages = await loadCursorChatMessagesBySessionId(agentSessionId, session.projectPath);
-      return requestIdentities.applyToMessages(messages, {
-        chatId: context?.chatId,
-        agentSessionId,
-      });
+    async loadMessages(session): Promise<ChatMessage[]> {
+      return loadImportableCursorChatMessagesBySessionId(
+        sessionId(session),
+        session.projectPath,
+        options.cursorHome,
+      );
     },
-    async getPreview(session): Promise<unknown> {
-      const agentSessionId = session.agentSessionId
-        || getCursorAgentSessionIdFromNativePath(session.nativePath)
-        || '';
-      return getCursorPreviewFromSessionId(agentSessionId, session.projectPath);
+    sourcePath(session): string | null {
+      const id = sessionId(session);
+      return id ? cursorStoreDbPath(id, session.projectPath, options.cursorHome) : null;
     },
   };
 }

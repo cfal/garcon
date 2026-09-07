@@ -9,6 +9,8 @@
 	import TelegramSettingsPanel from './TelegramSettingsPanel.svelte';
 	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
 	import TranscriptSearchSettingsCard from './TranscriptSearchSettingsCard.svelte';
+	import AgentCommandsSettingsCard from './AgentCommandsSettingsCard.svelte';
+	import HiddenBashCommandsSettingsCard from './HiddenBashCommandsSettingsCard.svelte';
 
 	const remoteSettings = getRemoteSettings();
 
@@ -38,6 +40,8 @@
 			{m.status_loading()}
 		</div>
 	{:else}
+		<HiddenBashCommandsSettingsCard />
+
 		{#if saveError}
 			<div
 				class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -46,14 +50,20 @@
 			</div>
 		{/if}
 
-		<div class="bg-muted/50 border border-border rounded-lg">
-			<div class="flex items-center justify-between px-4 py-2">
-				<div class="text-sm font-medium text-foreground">
-					{m.sidebar_chats_pinned_insert_position()}
+		<div class="bg-muted/50 border border-border rounded-lg px-4 py-2">
+			<div class="flex items-center justify-between gap-4">
+				<div class="min-w-0">
+					<label class="text-sm font-medium text-foreground" for="remote-pinned-insert-position">
+						{m.sidebar_chats_pinned_insert_position()}
+					</label>
+					<p id="remote-pinned-insert-position-hint" class="mt-0.5 text-xs text-muted-foreground">
+						{m.sidebar_chats_pinned_insert_position_activity_hint()}
+					</p>
 				</div>
 				<select
-					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
-					aria-label={m.sidebar_chats_pinned_insert_position()}
+					id="remote-pinned-insert-position"
+					class="shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+					aria-describedby="remote-pinned-insert-position-hint"
 					value={remoteSettings.snapshot?.ui.pinnedInsertPosition ?? 'top'}
 					onchange={(e) =>
 						onPinnedInsertPositionChange(
@@ -67,6 +77,7 @@
 		</div>
 
 		<TranscriptSearchSettingsCard />
+		<AgentCommandsSettingsCard />
 
 		<RemoteGenerationSettingsCard
 			settingsKey="chatTitle"
@@ -75,10 +86,24 @@
 		/>
 
 		<RemoteGenerationSettingsCard
+			settingsKey="agentSwitchCompaction"
+			enabledLabel={m.settings_agent_switch_compaction_enabled()}
+			modelLabel={m.settings_agent_switch_compaction_model()}
+			blurb={m.settings_agent_switch_compaction_hint()}
+		/>
+
+		<RemoteGenerationSettingsCard
 			settingsKey="commitMessage"
 			modelLabel={m.settings_commit_message_model()}
 			showDirectoryPrefix
-			showPrompt
+			promptKind="commit-message"
+		/>
+
+		<RemoteGenerationSettingsCard
+			settingsKey="promptRefinement"
+			modelLabel={m.settings_prompt_refinement_model()}
+			blurb={m.settings_prompt_refinement_hint()}
+			promptKind="prompt-refinement"
 		/>
 
 		<TelegramSettingsPanel />

@@ -1,7 +1,4 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import {
   AnthropicCompatibleChatRuntime,
   anthropicMessagesUrl,
@@ -9,9 +6,12 @@ import {
   buildAnthropicCompatibleUserContent,
   runAnthropicCompatibleSingleQuery,
 } from '../anthropic-compatible-chat-runtime.ts';
+import {
+  createTestDirectSessionStore,
+  removeTestDirectSessionStores,
+} from './session-store-fixture.ts';
 
 const originalFetch = globalThis.fetch;
-const createdDirs = [];
 
 function streamResponse(chunks, options = {}) {
   const encoder = new TextEncoder();
@@ -31,48 +31,48 @@ function streamResponse(chunks, options = {}) {
   });
 }
 
-async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-anthropic-runtime-'));
-  createdDirs.push(dir);
-  return dir;
-}
-
-function runtimeConfig(dir, overrides = {}) {
+function runtimeConfig(overrides = {}) {
   return {
-    runtimeId: 'direct-anthropic-compatible',
     runtimeLabel: 'Direct (Anthropic)',
     defaultModel: 'acme-sonnet',
-    fallbackModels: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
+    sessions: createTestDirectSessionStore(),
     getApiKey: () => 'sk-ant',
     getBaseUrl: () => 'https://api.example.test',
-    getSessionDir: () => dir,
-    getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
     ...overrides,
   };
 }
 
-function makeRuntime(dir, overrides = {}) {
-  return new AnthropicCompatibleChatRuntime(runtimeConfig(dir, overrides));
+function makeRuntime(overrides = {}) {
+  return new AnthropicCompatibleChatRuntime(runtimeConfig(overrides));
 }
 
-function waitForMessages(runtime) {
-  return new Promise((resolve) => {
-    runtime.onMessages((_chatId, messages) => resolve(messages));
-  });
+function captureOperation(runId) {
+  const events = [];
+  let resolveTerminal;
+  const terminal = new Promise((resolve) => { resolveTerminal = resolve; });
+  return {
+    events,
+    terminal,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+        if (event.type === 'run-ended') resolveTerminal(event);
+      },
+    },
+  };
 }
 
-function waitForFailure(runtime) {
-  return new Promise((resolve) => {
-    runtime.onFailed((_chatId, message) => resolve(message));
-  });
+function capturedMessages(capture) {
+  return capture.events
+    .filter((event) => event.type === 'rows')
+    .flatMap((event) => event.rows.map((row) => row.message));
 }
 
 describe('AnthropicCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    for (const dir of createdDirs.splice(0)) {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
+    await removeTestDirectSessionStores();
   });
 
   it('builds Anthropic endpoint URLs from root and v1 base URLs', () => {
@@ -141,18 +141,18 @@ describe('AnthropicCompatibleChatRuntime', () => {
   });
 
   it('streams text deltas and emits the final assistant message', async () => {
-    const dir = await tempDir();
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
       return streamResponse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: '<think>private</think>\n' } },
         { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello' } },
-        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world ' } },
       ]);
     });
 
-    const runtime = makeRuntime(dir);
-    const messagesPromise = waitForMessages(runtime);
+    const runtime = makeRuntime();
+    const capture = captureOperation('run-stream');
 
     await runtime.startSession({
       chatId: 'chat-1',
@@ -162,9 +162,11 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: capture.operation,
     });
 
-    const messages = await messagesPromise;
+    await capture.terminal;
+    const messages = capturedMessages(capture);
     expect(requestBody).toMatchObject({
       model: 'acme-sonnet',
       max_tokens: 4096,
@@ -176,8 +178,37 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(messages[0].content).toBe('hello world');
   });
 
+  it('accepts buffered JSON for an interactive Anthropic session', async () => {
+    let requestBody;
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return Response.json({
+        content: [
+          { type: 'thinking', thinking: 'hidden' },
+          { type: 'text', text: 'session response' },
+        ],
+      });
+    });
+    const runtime = makeRuntime();
+    const capture = captureOperation('run-json');
+
+    await runtime.startSession({
+      chatId: 'chat-json',
+      command: 'hello',
+      projectPath: '/tmp/project',
+      model: 'acme-sonnet',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+      operation: capture.operation,
+    });
+
+    expect(requestBody.stream).toBe(true);
+    await capture.terminal;
+    expect(capturedMessages(capture)).toMatchObject([{ content: 'session response' }]);
+  });
+
   it('forwards the current interactive effort and removes it for Default', async () => {
-    const dir = await tempDir();
     const requestBodies = [];
     globalThis.fetch = mock(async (_url, init) => {
       requestBodies.push(JSON.parse(init.body));
@@ -185,8 +216,8 @@ describe('AnthropicCompatibleChatRuntime', () => {
         { type: 'content_block_delta', delta: { type: 'text_delta', text: 'done' } },
       ]);
     });
-    const runtime = makeRuntime(dir);
-    const firstMessages = waitForMessages(runtime);
+    const runtime = makeRuntime();
+    const first = captureOperation('run-first');
 
     const started = await runtime.startSession({
       chatId: 'chat-1',
@@ -196,28 +227,33 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'high',
       claudeThinkingMode: 'auto',
+      operation: first.operation,
     });
-    await firstMessages;
+    await first.terminal;
 
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'second',
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
       thinkingMode: 'low',
       claudeThinkingMode: 'auto',
+      operation: captureOperation('run-second').operation,
     });
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'third',
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: captureOperation('run-third').operation,
     });
 
     expect(requestBodies[0].output_config).toEqual({ effort: 'high' });
@@ -226,14 +262,20 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(requestBodies.every((body) => !Object.hasOwn(body, 'thinking'))).toBe(true);
   });
 
-  it('hydrates an unknown session from persisted JSONL before resuming', async () => {
-    const dir = await tempDir();
-    const sessionId = 'persisted-session';
-    await fs.writeFile(path.join(dir, `${sessionId}.jsonl`), [
-      JSON.stringify({ role: 'user', content: 'first message' }),
-      JSON.stringify({ role: 'assistant', content: 'first response' }),
-      '',
-    ].join('\n'));
+  it('hydrates an unknown session from persisted native history', async () => {
+    const sessionId = '10000000-0000-4000-8000-000000000001';
+    const sessions = createTestDirectSessionStore();
+    await sessions.create({
+      sessionId,
+      runId: 'run-first',
+      content: 'first message',
+      attachments: [],
+    });
+    await sessions.appendAssistant({
+      sessionId,
+      runId: 'run-first',
+      content: 'first response',
+    });
 
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
@@ -243,20 +285,22 @@ describe('AnthropicCompatibleChatRuntime', () => {
       ]);
     });
 
-    const runtime = makeRuntime(dir, {
+    const runtime = makeRuntime({
       defaultModel: 'fallback-model',
-      fallbackModels: [{ value: 'fallback-model', label: 'Fallback' }],
+      sessions,
     });
 
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: sessionId,
+      nativeSession: sessions.nativeReference(sessionId),
       command: 'second message',
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
       thinkingMode: 'max',
       claudeThinkingMode: 'auto',
+      operation: captureOperation('run-hydrated').operation,
     });
 
     expect(requestBody.messages).toEqual([
@@ -269,16 +313,16 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(requestBody).not.toHaveProperty('thinking');
   });
 
-  it('runs one-shot prompts through non-streaming Anthropic Messages', async () => {
+  it('streams one-shot prompts through Anthropic Messages', async () => {
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
-      return new Response(JSON.stringify({
-        content: [
-          { type: 'text', text: 'commit' },
-          { type: 'text', text: ' message' },
-        ],
-      }));
+      return streamResponse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: '<thi' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'nk>private</think>' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: '\n commit' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' message ' } },
+      ]);
     });
 
     const result = await runAnthropicCompatibleSingleQuery(
@@ -292,6 +336,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       model: 'acme-opus',
       max_tokens: 4096,
       messages: [{ role: 'user', content: 'Generate a commit message' }],
+      stream: true,
     });
     expect(requestBody).not.toHaveProperty('output_config');
     expect(requestBody).not.toHaveProperty('thinking');
@@ -313,6 +358,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
 
     expect(result).toBe('OK');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody.stream).toBe(true);
     expect(requestBody.output_config).toEqual({ effort: 'max' });
     expect(requestBody).not.toHaveProperty('thinking');
   });
@@ -330,14 +376,129 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects partial streamed text followed by an Anthropic error event', async () => {
-    const dir = await tempDir();
+  it('ignores one-shot thinking and signature deltas before visible text', async () => {
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'hidden' } },
+      { type: 'content_block_delta', delta: { type: 'signature_delta', signature: 'secret' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'visible' } },
+    ]));
+
+    await expect(runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+    )).resolves.toBe('visible');
+  });
+
+  it('returns no visible one-shot text for a completed thinking-only stream', async () => {
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'hidden' } },
+    ]));
+
+    await expect(runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+    )).resolves.toBe('');
+  });
+
+  it('accepts buffered JSON when Anthropic ignores the streaming request', async () => {
+    globalThis.fetch = mock(async () => Response.json({
+      content: [
+        { type: 'thinking', thinking: 'hidden' },
+        { type: 'text', text: '<think>private</think>\n visible ' },
+      ],
+    }));
+
+    await expect(runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+    )).resolves.toBe('visible');
+  });
+
+  it('rejects partial one-shot text followed by an Anthropic error event', async () => {
     globalThis.fetch = mock(async () => streamResponse([
       { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
       { type: 'error', error: { message: 'generation failed' } },
     ]));
-    const runtime = makeRuntime(dir);
-    const failure = waitForFailure(runtime);
+
+    await expect(runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+    )).rejects.toThrow('Direct (Anthropic) stream error: generation failed');
+  });
+
+  it('rejects a one-shot stream that closes before message_stop', async () => {
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+    ], { complete: false }));
+
+    await expect(runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+    )).rejects.toThrow('Direct (Anthropic) stream ended before message_stop.');
+  });
+
+  it('skips malformed one-shot events before valid text and message_stop', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {malformed}\n\n'));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'valid' },
+        })}\n\n`));
+        controller.enqueue(encoder.encode('data: {"type":"message_stop"}\n\n'));
+        controller.close();
+      },
+    }), {
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    await expect(runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+    )).resolves.toBe('valid');
+  });
+
+  it('preserves caller abort while reading a one-shot stream', async () => {
+    const externalController = new AbortController();
+    const encoder = new TextEncoder();
+    let markBodyStarted;
+    const bodyStarted = new Promise((resolve) => {
+      markBodyStarted = resolve;
+    });
+    globalThis.fetch = mock(async (_url, init) => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'partial' },
+        })}\n\n`));
+        init.signal.addEventListener('abort', () => {
+          controller.error(init.signal.reason);
+        }, { once: true });
+        markBodyStarted();
+      },
+    }), {
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    const result = runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+      { signal: externalController.signal },
+    );
+    await bodyStarted;
+    externalController.abort(new DOMException('Stopped', 'AbortError'));
+
+    await expect(result).rejects.toThrow('Stopped');
+  });
+
+  it('rejects partial streamed text followed by an Anthropic error event', async () => {
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+      { type: 'error', error: { message: 'generation failed' } },
+    ]));
+    const runtime = makeRuntime();
+    const capture = captureOperation('run-error');
 
     await runtime.startSession({
       chatId: 'chat-error',
@@ -347,20 +508,20 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: capture.operation,
     });
 
-    await expect(failure).resolves.toBe(
+    await expect(capture.terminal.then((event) => event.error?.message)).resolves.toBe(
       'Direct (Anthropic) stream error: generation failed',
     );
   });
 
   it('rejects a valid partial stream that closes before message_stop', async () => {
-    const dir = await tempDir();
     globalThis.fetch = mock(async () => streamResponse([
       { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
     ], { complete: false }));
-    const runtime = makeRuntime(dir);
-    const failure = waitForFailure(runtime);
+    const runtime = makeRuntime();
+    const capture = captureOperation('run-truncated');
 
     await runtime.startSession({
       chatId: 'chat-truncated',
@@ -370,9 +531,10 @@ describe('AnthropicCompatibleChatRuntime', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
+      operation: capture.operation,
     });
 
-    await expect(failure).resolves.toBe(
+    await expect(capture.terminal.then((event) => event.error?.message)).resolves.toBe(
       'Direct (Anthropic) stream ended before message_stop.',
     );
   });

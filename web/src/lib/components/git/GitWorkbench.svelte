@@ -12,11 +12,11 @@
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
-	import PanelLeft from '@lucide/svelte/icons/panel-left';
 	import GitFileTree from './GitFileTree.svelte';
+	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
+	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
-	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
@@ -24,40 +24,50 @@
 		GitDiffActionTarget,
 		GitWorkbenchTarget,
 	} from '$lib/git/workbench/git-workbench-types.js';
-	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import type { GitInspectorView } from '$lib/git/workbench/git-porcelain.svelte.js';
 	import type { ConfirmAction } from '$lib/api/git.js';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+	import { buildGitWorkbenchCommentMessage } from '$lib/git/workbench/git-workbench-comment-message.js';
+	import { buildGitReviewBodyCommentContext } from '$lib/git/review/git-review-comment-context.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers, getWorkspaceShortcuts } from '$lib/context';
-	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
+	import { singletonSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import {
 		containerPresentationForWidth,
 		observeContainerWidth,
-		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
 	import { gitContainerBreakpoints } from './git-container-presentation.js';
+	import {
+		persistGitDiffDocumentFileTreeVisible,
+		readGitDiffDocumentFileTreeVisible,
+	} from '$lib/git/surface/git-file-tree-preferences.js';
 
 	interface GitWorkbenchProps {
 		projectPath?: string | null;
 		target?: GitWorkbenchTarget | null;
-		isMobile: boolean;
+		presentation: WorkspaceWindowId | 'mobile';
+		active?: boolean;
 		wb: GitWorkbenchStore;
 		diffFontSize: number;
-		onSendToChat?: (message: string) => Promise<boolean>;
+		onAppendToChatDraft?: ChatDraftAppend;
+		onOpenChat?: () => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 	}
 
 	let {
 		projectPath = null,
 		target = null,
-		isMobile,
+		presentation,
+		active = true,
 		wb,
 		diffFontSize,
-		onSendToChat,
+		onAppendToChatDraft,
+		onOpenChat = () => undefined,
 		onOpenInEditor,
 	}: GitWorkbenchProps = $props();
+	let isMobile = $derived(presentation === 'mobile');
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
 			? {
@@ -71,6 +81,11 @@
 	);
 	let activeTarget = $derived(target ?? fallbackTarget);
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? null);
+	let viewportLayoutIdentity = $derived(
+		activeTarget
+			? `workbench:${JSON.stringify([activeTarget.repoRoot, activeTarget.worktreePath])}`
+			: null,
+	);
 	let isWorkbenchTargetCurrent = $derived(
 		Boolean(
 			activeTarget &&
@@ -85,7 +100,7 @@
 	let review = $derived(wb.review);
 	let selection = $derived(wb.selection);
 	let staging = $derived(wb.staging);
-	let commit = $derived(wb.commit);
+	let initialCommit = $derived(wb.initialCommit);
 	let drafts = $derived(wb.drafts);
 	let porcelain = $derived(wb.porcelain);
 	const workspaceShortcuts = getWorkspaceShortcuts();
@@ -94,24 +109,35 @@
 	type SinglePane = 'files' | 'diff';
 	let containerWidth = $state(0);
 	let singlePane = $state<SinglePane>('files');
-	let compactTreeOpen = $state(false);
+	let fileTreeVisible = $state(readGitDiffDocumentFileTreeVisible());
 	const observeWorkbenchWidth = observeContainerWidth((width) => {
 		containerWidth = width;
 	});
-	let containerPresentation = $derived<ContainerPresentation>(
-		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, gitContainerBreakpoints),
+	let containerPresentation = $derived<'narrow' | 'wide'>(
+		isMobile || containerPresentationForWidth(containerWidth, gitContainerBreakpoints) !== 'wide'
+			? 'narrow'
+			: 'wide',
+	);
+	let filePaneHidden = $derived(
+		containerPresentation === 'wide' ? !fileTreeVisible : singlePane !== 'files',
+	);
+	let diffViewportActive = $derived(
+		active && (containerPresentation === 'wide' || singlePane === 'diff'),
 	);
 
-	function handleVisibleRowsChange(rows: GitVirtualReviewRow[]): void {
-		if (!activeProjectPath) return;
-		wb.handleVisibleReviewRows(activeProjectPath, rows);
+	function toggleFileTree(): void {
+		fileTreeVisible = !fileTreeVisible;
+		persistGitDiffDocumentFileTreeVisible(fileTreeVisible);
+	}
+
+	function handleBodyDemand(demand: GitReviewBodyDemand): void {
+		wb.handleReviewBodyDemand(demand);
 	}
 
 	function handleSelectFile(path: string): void {
 		if (!activeProjectPath) return;
 		void wb.selectFile(activeProjectPath, path);
 		if (containerPresentation === 'narrow') singlePane = 'diff';
-		if (containerPresentation === 'compact') compactTreeOpen = false;
 	}
 
 	function handleSelectDirectory(path: string): void {
@@ -120,7 +146,6 @@
 		if (!firstFile) return;
 		void wb.selectFile(activeProjectPath, firstFile);
 		if (containerPresentation === 'narrow') singlePane = 'diff';
-		if (containerPresentation === 'compact') compactTreeOpen = false;
 	}
 
 	function handleAddCommentForFile(filePath: string, side: 'before' | 'after', line: number): void {
@@ -133,42 +158,29 @@
 		drafts.openCommentComposer(filePath, side, line);
 	}
 
-	async function handleFinalizeReview(): Promise<void> {
-		if (onSendToChat) {
-			await drafts.finalizeReviewToAgent(onSendToChat);
-		} else {
-			const message = drafts.buildFinalizedReviewMessage();
-			const copied = await copyToClipboard(message);
-			if (copied) {
-				drafts.reviewComments = [];
-				drafts.reviewSummary = '';
-			} else {
-				wb.lastError = m.git_review_copy_failed();
-			}
-		}
-		drafts.reviewModalOpen = false;
+	function handleAppendComment(): void {
+		const composer = drafts.commentComposer;
+		if (!composer.open || !composer.body.trim()) return;
+		const file = review.summary?.files.find((candidate) => candidate.path === composer.filePath);
+		const loadedBody = review.fileBodies[composer.filePath];
+		drafts.appendComment(
+			onAppendToChatDraft,
+			buildGitWorkbenchCommentMessage({
+				filePath: composer.filePath,
+				...(file?.originalPath ? { originalPath: file.originalPath } : {}),
+				tab: files.activeTab,
+				side: composer.side,
+				line: composer.line,
+				contextLines: buildGitReviewBodyCommentContext(loadedBody, composer.side, composer.line),
+				body: composer.body,
+				severity: composer.severity,
+			}),
+		);
 	}
 
 	function handleInitialCommit(): void {
 		if (!activeProjectPath) return;
-		commit.createInitialCommit(activeProjectPath);
-	}
-
-	function startTreeResize(e: PointerEvent): void {
-		const startX = e.clientX;
-		const startWidth = files.treePaneWidthPx;
-		const target = e.currentTarget as HTMLElement;
-		target.setPointerCapture(e.pointerId);
-
-		function onMove(ev: PointerEvent): void {
-			files.setTreePaneWidth(startWidth + (ev.clientX - startX));
-		}
-		function onUp(): void {
-			target.removeEventListener('pointermove', onMove);
-			target.removeEventListener('pointerup', onUp);
-		}
-		target.addEventListener('pointermove', onMove);
-		target.addEventListener('pointerup', onUp);
+		initialCommit.create(activeProjectPath);
 	}
 
 	function handleStageFile(filePath: string): void {
@@ -344,7 +356,7 @@
 
 {#snippet diffTabs()}
 	<div class="flex min-w-0">
-		{#each ['unstaged', 'staged'] as const as tab}
+		{#each ['unstaged', 'staged'] as const as tab (tab)}
 			<button
 				type="button"
 				onclick={() => wb.setActiveTab(tab)}
@@ -400,6 +412,7 @@
 			<div class="flex items-center gap-1">
 				{@render diffNavigation()}
 				{@render inspectorButtons()}
+				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={toggleFileTree} />
 			</div>
 		</div>
 	{/if}
@@ -409,16 +422,19 @@
 		{porcelain}
 	/>
 	<GitVirtualDiffSurface
-		rows={review.virtualRows}
-		fileRowIndex={review.fileRowIndex}
+		layoutIdentity={viewportLayoutIdentity}
+		reviewDocumentId={review.summary?.documentId ?? null}
+		active={diffViewportActive}
+		source={review.rowSource}
 		activeTab={files.activeTab}
 		fontSize={diffFontSize}
 		selectedLineKeys={selection.selectedLineKeys}
 		operationPending={staging.hasPendingOperations || wb.isExternallyStale}
 		scrollToRequest={review.scrollRequest}
 		composerState={drafts.commentComposer}
+		showInlineCommentComposer={!isMobile}
 		{overscan}
-		onVisibleRowsChange={handleVisibleRowsChange}
+		onBodyDemand={handleBodyDemand}
 		onSelectFile={handleSelectFile}
 		onToggleLineSelection={(key) => selection.toggleLineSelection(key)}
 		onSelectLineRange={(start, end, selectAll) => selection.selectLineRange(start, end, selectAll)}
@@ -429,17 +445,20 @@
 		onStageFile={handleStageFile}
 		onUnstageFile={handleUnstageFile}
 		onAddCommentForFile={handleAddCommentForFile}
-		onEditComment={(id, patch) => drafts.updateDraftComment(id, patch)}
-		onRemoveComment={(id) => drafts.removeDraftComment(id)}
+		commentFeedback={drafts.commentFeedback}
+		commentError={drafts.commentError}
+		commentCopyText={drafts.commentCopyText}
 		onComposerBodyChange={(body) => {
-			drafts.commentComposer = { ...drafts.commentComposer, body };
+			drafts.setCommentBody(body);
 		}}
 		onComposerSeverityChange={(severity) => {
-			drafts.commentComposer = { ...drafts.commentComposer, severity };
+			drafts.setCommentSeverity(severity);
 		}}
-		onComposerSubmit={() => drafts.commitCommentComposer()}
+		onComposerSubmit={handleAppendComment}
 		onComposerClose={() => drafts.closeCommentComposer()}
+		onComposerFocusHandled={() => drafts.markCommentComposerFocused()}
 		{onOpenInEditor}
+		{onOpenChat}
 	/>
 	{#if selection.hasSelection}
 		<div class="flex shrink-0 gap-2 border-t border-border bg-background px-3 py-2">
@@ -533,10 +552,10 @@
 					</div>
 					<button
 						onclick={handleInitialCommit}
-						disabled={commit.isCreatingInitialCommit}
+						disabled={initialCommit.isCreating}
 						class="px-3 py-1 text-xs rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110 disabled:opacity-50 transition-all"
 					>
-						{#if commit.isCreatingInitialCommit}
+						{#if initialCommit.isCreating}
 							<LoaderCircle class="w-3 h-3 inline animate-spin mr-1" />
 						{/if}
 						Create initial commit
@@ -546,7 +565,7 @@
 
 			{#if containerPresentation === 'narrow'}
 				<div class="flex shrink-0 border-b border-border" data-git-segmented-navigation>
-					{#each ['files', 'diff'] as const as pane}
+					{#each ['files', 'diff'] as const as pane (pane)}
 						<button
 							type="button"
 							onclick={() => {
@@ -568,78 +587,31 @@
 					containerPresentation === 'wide' ? 'grid' : 'flex',
 				)}
 				style={containerPresentation === 'wide'
-					? `grid-template-columns: ${files.treePaneWidthPx}px 6px minmax(0,1fr); grid-template-rows: minmax(0,1fr);`
+					? `grid-template-columns: ${fileTreeVisible ? `${files.treePaneWidthPx}px 6px minmax(0,1fr)` : '0px minmax(0,1fr)'}; grid-template-rows: minmax(0,1fr);`
 					: undefined}
-				data-git-compact-layout={containerPresentation === 'compact' ? '' : undefined}
 				data-git-wide-layout={containerPresentation === 'wide' ? '' : undefined}
 			>
-				{#if containerPresentation === 'compact' && compactTreeOpen}
-					<button
-						type="button"
-						class="absolute inset-0 z-10 cursor-default rounded-none bg-background/60"
-						aria-label="Close changed files"
-						onclick={() => (compactTreeOpen = false)}
-					></button>
-				{/if}
 				<div
 					class={cn(
 						'flex min-h-0 flex-col overflow-hidden bg-background',
-						containerPresentation === 'wide' && 'border-r border-border',
-						containerPresentation === 'compact' &&
-							(compactTreeOpen
-								? 'absolute inset-y-0 left-0 z-20 max-w-[85%] border-r border-border shadow-lg'
-								: 'hidden'),
+						containerPresentation === 'wide' && fileTreeVisible && 'border-r border-border',
 						containerPresentation === 'narrow' && 'absolute inset-0',
-						containerPresentation === 'narrow' &&
-							singlePane !== 'files' &&
-							'invisible pointer-events-none',
+						filePaneHidden && 'invisible pointer-events-none',
 					)}
-					style={containerPresentation === 'compact' && compactTreeOpen
-						? 'width: min(20rem, 85%);'
-						: undefined}
-					aria-label={containerPresentation === 'compact' ? 'Changed files' : undefined}
-					role={containerPresentation === 'compact' ? 'complementary' : undefined}
-					aria-hidden={containerPresentation === 'narrow' && singlePane !== 'files'}
-					inert={containerPresentation === 'narrow' && singlePane !== 'files'}
+					aria-hidden={filePaneHidden}
+					inert={filePaneHidden}
 					data-git-files-pane
 				>
-					{#if containerPresentation === 'compact'}
-						<div
-							class="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5"
-						>
-							<span class="text-xs font-medium text-foreground">Changed files</span>
-							<button
-								type="button"
-								class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								aria-label="Close changed files"
-								onclick={() => (compactTreeOpen = false)}
-							>
-								<X class="h-3.5 w-3.5" />
-							</button>
-						</div>
-					{/if}
 					<div class="min-h-0 flex-1 overflow-hidden">
 						{@render fileTree(containerPresentation !== 'wide')}
 					</div>
 				</div>
-				{#if containerPresentation === 'wide'}
-					<button
-						type="button"
-						aria-label={m.git_resize_file_tree()}
-						data-git-tree-resizer
-						class="m-0 cursor-col-resize rounded-none border-none bg-border/60 p-0 transition-colors hover:bg-interactive-accent/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						onpointerdown={startTreeResize}
-						onkeydown={(event) => {
-							if (event.key === 'ArrowLeft') {
-								event.preventDefault();
-								files.setTreePaneWidth(files.treePaneWidthPx - 16);
-							}
-							if (event.key === 'ArrowRight') {
-								event.preventDefault();
-								files.setTreePaneWidth(files.treePaneWidthPx + 16);
-							}
-						}}
-					></button>
+				{#if containerPresentation === 'wide' && fileTreeVisible}
+					<GitFileTreeResizeHandle
+						width={files.treePaneWidthPx}
+						onResize={(width) => files.previewTreePaneWidth(width)}
+						onResizeCommit={(width) => files.setTreePaneWidth(width)}
+					/>
 				{/if}
 				<div
 					class={cn(
@@ -654,22 +626,8 @@
 					inert={containerPresentation === 'narrow' && singlePane !== 'diff'}
 					data-git-diff-pane
 				>
-					{#if containerPresentation === 'compact'}
-						<div class="shrink-0 border-b border-border px-2 py-1">
-							<button
-								type="button"
-								class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								onclick={() => (compactTreeOpen = !compactTreeOpen)}
-								aria-expanded={compactTreeOpen}
-								aria-label={compactTreeOpen ? 'Hide changed files' : 'Show changed files'}
-							>
-								<PanelLeft class="h-3.5 w-3.5" />
-								Files
-							</button>
-						</div>
-					{/if}
 					{@render diffPane(
-						containerPresentation === 'wide' ? 5 : containerPresentation === 'compact' ? 4 : 3,
+						containerPresentation === 'wide' ? 5 : 3,
 						containerPresentation === 'narrow',
 					)}
 				</div>
@@ -677,34 +635,19 @@
 		{/if}
 	</div>
 
-	{#if drafts.reviewModalOpen}
-		<GitReviewChangesModal
-			commentsByFile={drafts.commentsByFile}
-			commentCount={drafts.reviewComments.length}
-			reviewSummary={drafts.reviewSummary}
-			{isMobile}
-			onSummaryChange={(s) => {
-				drafts.reviewSummary = s;
-			}}
-			onUpdateComment={(id, patch) => drafts.updateDraftComment(id, patch)}
-			onRemoveComment={(id) => drafts.removeDraftComment(id)}
-			onSend={handleFinalizeReview}
-			onClose={() => {
-				drafts.reviewModalOpen = false;
-			}}
-		/>
-	{/if}
-
 	{#if drafts.commentComposer.open && isMobile}
 		<GitCommentModal
 			composer={drafts.commentComposer}
 			onBodyChange={(b) => {
-				drafts.commentComposer = { ...drafts.commentComposer, body: b };
+				drafts.setCommentBody(b);
 			}}
 			onSeverityChange={(s) => {
-				drafts.commentComposer = { ...drafts.commentComposer, severity: s };
+				drafts.setCommentSeverity(s);
 			}}
-			onSubmit={() => drafts.commitCommentComposer()}
+			error={drafts.commentError}
+			copyText={drafts.commentCopyText}
+			onFocusHandled={() => drafts.markCommentComposerFocused()}
+			onSubmit={handleAppendComment}
 			onClose={() => drafts.closeCommentComposer()}
 		/>
 	{/if}

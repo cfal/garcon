@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { DomainError } from '../../lib/domain-error.js';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -46,6 +47,16 @@ const agents = {
   getAgentCatalogEntries: mock(() => Promise.resolve([])),
   getModels: mock(() => Promise.resolve([])),
   hasAgent: mock((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId)),
+  assertExecutionModeSelectionSupported: mock((agentId, selection) => {
+    if (agentId === 'amp' && selection.thinkingMode !== undefined && selection.thinkingMode !== 'none') {
+      throw new DomainError(
+        'VALIDATION_FAILED',
+        `Thinking mode ${selection.thinkingMode} is not supported by ${agentId}`,
+        422,
+      );
+    }
+  }),
+  normalizeThinkingModeForAgent: mock((agentId, value) => agentId === 'amp' ? 'none' : value),
 };
 
 const settings = {
@@ -87,6 +98,18 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
+    agents.assertExecutionModeSelectionSupported.mockClear();
+    agents.assertExecutionModeSelectionSupported.mockImplementation((agentId, selection) => {
+      if (agentId === 'amp' && selection.thinkingMode !== undefined && selection.thinkingMode !== 'none') {
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          `Thinking mode ${selection.thinkingMode} is not supported by ${agentId}`,
+          422,
+        );
+      }
+    });
+    agents.normalizeThinkingModeForAgent.mockClear();
+    agents.normalizeThinkingModeForAgent.mockImplementation((agentId, value) => agentId === 'amp' ? 'none' : value);
     settings.getUiSettings.mockClear();
     settings.getUiSettings.mockImplementation(() => ({}));
     assertRealWithinProjectBase.mockClear();
@@ -95,7 +118,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     isProjectBoundaryError.mockImplementation(() => false);
   });
 
-  it('uses persisted commit message settings when the request omits them', async () => {
+  it('normalizes stale persisted commit message effort when the request omits it', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       project: '/proj',
       files: ['src/a.ts'],
@@ -126,7 +149,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
-      thinkingMode: 'high',
+      thinkingMode: 'none',
       customPrompt: 'Summarize {{files}}',
       useCommonDirPrefix: false,
       signal: expect.any(AbortSignal),
@@ -246,6 +269,23 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     expect(generateCommitMessageForFiles).toHaveBeenCalledWith(
       expect.objectContaining({ thinkingMode: 'max' }),
     );
+  });
+
+  it('rejects an unsupported explicit effort for the selected agent', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      agentId: 'amp',
+      model: 'medium',
+      thinkingMode: 'high',
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid explicit effort', async () => {

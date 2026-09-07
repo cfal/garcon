@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { VirtualItem } from '@tanstack/svelte-virtual';
+import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 import type { FileTreeEntry } from '$shared/file-contracts';
 import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 import { buildFileTreeRenderModel } from '$lib/files/tree/file-tree-render-rows.js';
@@ -7,6 +7,11 @@ import {
 	captureFileTreeVirtualAnchor,
 	resolveFileTreeAnchorIndex,
 } from '../file-tree-virtual-anchor.js';
+import {
+	createFileTreeVirtualLayout,
+	fileTreeLogicalItemStart,
+	fileTreeLogicalToPhysicalOffset,
+} from '../file-tree-virtual-layout.js';
 
 function row(name: string): FileTableRow {
 	const entry: FileTreeEntry = {
@@ -22,7 +27,7 @@ function row(name: string): FileTableRow {
 }
 
 function item(index: number, start: number, size = 32): VirtualItem {
-	return { index, key: index, start, size, end: start + size, lane: 0 };
+	return { index, key: String(index), start, size, end: start + size };
 }
 
 function model(rows: readonly FileTableRow[]) {
@@ -55,16 +60,38 @@ describe('file tree virtual anchor', () => {
 	it('resolves an exact stable key after rows are inserted above it', () => {
 		const a = row('a');
 		const b = row('b');
-		const anchor = { key: b.key, previousIndex: 1, offsetFromContentViewport: -5 };
-		expect(resolveFileTreeAnchorIndex(anchor, [a, b], model([row('new'), a, b]))).toBe(2);
+		const previous = model([a, b]);
+		const anchor = { key: b.key, previousIndex: 2, offsetFromContentViewport: -5 };
+		expect(resolveFileTreeAnchorIndex(anchor, previous.rows, model([row('new'), a, b]))).toBe(3);
 	});
 
 	it('falls back to the nearest surviving predecessor and then the first row', () => {
 		const a = row('a');
 		const b = row('b');
 		const c = row('c');
-		const anchor = { key: c.key, previousIndex: 2, offsetFromContentViewport: 0 };
-		expect(resolveFileTreeAnchorIndex(anchor, [a, b, c], model([a]))).toBe(0);
-		expect(resolveFileTreeAnchorIndex(anchor, [a, b, c], model([]))).toBeNull();
+		const previous = model([a, b, c]);
+		const anchor = { key: c.key, previousIndex: 3, offsetFromContentViewport: 0 };
+		expect(resolveFileTreeAnchorIndex(anchor, previous.rows, model([a]))).toBe(1);
+		expect(resolveFileTreeAnchorIndex(anchor, previous.rows, model([]))).toBe(0);
+	});
+
+	it('maps a column-layout anchor into details-layout coordinates', () => {
+		const rows = Array.from({ length: 23 }, (_, index) => row(`file-${index}`));
+		const anchor = captureFileTreeVirtualAnchor(rows, [item(22, 648, 28)], 640, 32);
+		const detailsLayout = createFileTreeVirtualLayout({
+			rowCount: 1_000,
+			rowHeight: 44,
+			viewportHeight: 640,
+			scrollMargin: 0,
+		});
+		if (!anchor) throw new Error('Expected a virtual anchor');
+
+		const logicalOffset =
+			fileTreeLogicalItemStart(detailsLayout, anchor.previousIndex) -
+			detailsLayout.scrollMargin -
+			anchor.offsetFromContentViewport;
+
+		expect(anchor.offsetFromContentViewport).toBe(-24);
+		expect(fileTreeLogicalToPhysicalOffset(detailsLayout, logicalOffset)).toBe(992);
 	});
 });

@@ -3,6 +3,7 @@ import {
   type AgentId,
 } from '../../common/agents.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
+import { isRecord } from '../../common/json.js';
 import type { ApiProtocol, ApiProviderCatalogEntry } from '../../common/api-providers.js';
 import type {
   AgentInterruptAndSendCommandRequest,
@@ -10,18 +11,28 @@ import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   AgentStopResponse,
-  ActiveInputCommandRequest,
-  ActiveInputCommandResponse,
+	AgentTurnCommandResponse,
+  GoalControlCommandRequest,
+  GoalControlCommandResponse,
   CommandAcceptedResponse,
+  ForkChatCommandRequest,
   ForkChatResponse,
   ForkRunCommandRequest,
   ForkRunCommandResponse,
+  PermissionDecisionCommandRequest,
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryDeleteResponse,
+  QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
+  QueueEntrySteerCommandRequest,
+  QueueEntrySteerCommandResponse,
   QueueMutationResponse,
+  SteerCommandRequest,
+  SteerCommandResponse,
+  ProjectPathPatchRequest,
+  ProjectPathPatchResponse,
   StartChatCommandRequest,
   StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
@@ -31,7 +42,33 @@ import type {
   MarkChatsReadRequest,
   MarkChatsReadResponse,
 } from '../../common/chat-list.js';
-import type { ChatSearchRequest, ChatSearchResponse } from '../../common/chat-search.js';
+import type {
+  ChatSearchRequest,
+  ChatSearchResponse,
+  TranscriptSearchPhase,
+  TranscriptSearchStatusResponse,
+} from '../../common/chat-search.js';
+import {
+  parseChatSnapshotResponse,
+  type ChatSnapshotResponse,
+} from '../../common/chat-snapshot.js';
+import type { TransientFeedRow } from '../../common/chat-transient-feed.js';
+import {
+  parseReorderChatResponse,
+  parseSortChatOrderResponse,
+  type ReorderChatRequest,
+  type ReorderChatResponse,
+  type SortChatOrderRequest,
+  type SortChatOrderResponse,
+} from '../../common/chat-order-contracts.js';
+import type {
+  GenerateChatTitleRequest,
+  GenerateChatTitleResponse,
+} from '../../common/chat-title-contracts.js';
+import type {
+  RefinePromptRequest,
+  RefinePromptResponse,
+} from '../../common/prompt-refinement.js';
 import {
   normalizeScheduledPromptsSnapshot,
   type CreateScheduledPromptRequest,
@@ -42,16 +79,23 @@ import {
   parseChatExecutionControlState,
 	type ChatExecutionControlState,
 } from '../../common/chat-execution-control.js';
-import { parseChatViewMessages, type ChatViewMessage } from '../../common/chat-view.js';
-import { normalizePendingUserInput, type PendingUserInput } from '../../common/pending-user-input.js';
+import {
+  parseResendCandidates,
+  parseTranscriptMessages,
+  type ResendCandidate,
+  type TranscriptMessage,
+  type TranscriptReadPurpose,
+} from '../../common/chat-view.js';
 import type {
   RemoteSettingsSnapshot,
   UpdateRemoteSettingsInput,
 } from '../../common/settings.js';
 import {
+  ChatTransientFeedMutationMessage,
   parseServerWsMessage,
   type AgentRunFailedMessage,
   type AgentRunFinishedMessage,
+  type ChatMessagesMessage,
   type ChatReloadedMessage,
   type ChatProcessingUpdatedMessage,
   type ChatSubscribedMessage,
@@ -94,6 +138,7 @@ export interface ConfiguredDirectTestAgent {
 
 export interface DirectTestAgents {
   openAi: ConfiguredDirectTestAgent;
+  openAiResponses: ConfiguredDirectTestAgent;
   anthropic: ConfiguredDirectTestAgent;
 }
 
@@ -104,6 +149,7 @@ export interface DirectStartInput {
   agent: ConfiguredDirectTestAgent;
   clientRequestId?: string;
   clientMessageId?: string;
+  orderedPreambleIds?: string[];
 }
 
 export interface DirectRunInput {
@@ -114,13 +160,19 @@ export interface DirectRunInput {
   clientMessageId?: string;
 }
 
+export interface DirectHandoffInput extends DirectRunInput {
+  expectedAgentOwnershipEpoch?: string;
+}
+
 export interface ChatMessagesPage {
   chatId: string;
-  messages: ChatViewMessage[];
-  generationId: string;
-  lastSeq: number;
-  pageOldestSeq: number;
-  pendingUserInputs: PendingUserInput[];
+  messages: TranscriptMessage[];
+  transcriptViewId: string;
+  lastOrdinal: number;
+  pageOldestOrdinal: number;
+  pageNewestOrdinal: number;
+  nextBeforeOrdinal: number | null;
+  resendCandidates: ResendCandidate[];
   hasMore: boolean;
   limit: number;
 }
@@ -151,10 +203,38 @@ interface GarconWebSocket {
 
 export interface GarconTestClientOptions {
   createWebSocket?: (url: string) => GarconWebSocket;
+  redactSensitiveDiagnostics?: boolean;
 }
+
+export type CommittedUserInputMessage = ChatMessagesMessage;
 
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSED = 3;
+const SAFE_DIAGNOSTIC_STRING_KEYS = new Set([
+  'agentid',
+  'code',
+  'method',
+  'model',
+  'permissionmode',
+  'requesttype',
+  'status',
+  'stopintent',
+  'thinkingmode',
+  'timestamp',
+  'type',
+]);
+
+// A typed deferred or degraded history response; tests assert on the state
+// instead of a transport failure.
+export class UnavailableChatHistoryError extends Error {
+  constructor(
+    readonly chatId: string,
+    readonly historyState: { kind: 'deferred' | 'degraded'; errorCode?: string; retryable?: boolean },
+  ) {
+    super(`Chat ${chatId} history is ${historyState.kind}`);
+    this.name = 'UnavailableChatHistoryError';
+  }
+}
 
 export class GarconApiError extends Error {
   constructor(
@@ -175,12 +255,20 @@ export class GarconWsRequestError extends Error {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
+function redact(
+  value: unknown,
+  redactSensitiveDiagnostics = false,
+  parentKey?: string,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redact(item, redactSensitiveDiagnostics, parentKey));
+  }
+  if (redactSensitiveDiagnostics && typeof value === 'string') {
+    const normalized = parentKey?.toLowerCase() ?? '';
+    return SAFE_DIAGNOSTIC_STRING_KEYS.has(normalized) || normalized.endsWith('id')
+      ? value
+      : '[REDACTED]';
+  }
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) => {
     const normalized = key.toLowerCase();
@@ -192,7 +280,7 @@ function redact(value: unknown): unknown {
     ) {
       return [key, '[REDACTED]'];
     }
-    return [key, redact(item)];
+    return [key, redact(item, redactSensitiveDiagnostics, key)];
   }));
 }
 
@@ -227,6 +315,7 @@ async function responseBody(response: Response): Promise<unknown> {
 export class GarconTestClient {
   readonly #baseUrl: string;
   readonly #createWebSocket: (url: string) => GarconWebSocket;
+  readonly #redactSensitiveDiagnostics: boolean;
   readonly #exchanges: HttpExchange[] = [];
   readonly #eventRecords: EventRecord[] = [];
   readonly #waiters = new Set<EventWaiter>();
@@ -237,6 +326,7 @@ export class GarconTestClient {
   private constructor(baseUrl: string, options: GarconTestClientOptions) {
     this.#baseUrl = baseUrl.replace(/\/$/, '');
     this.#createWebSocket = options.createWebSocket ?? ((url) => new WebSocket(url));
+    this.#redactSensitiveDiagnostics = options.redactSensitiveDiagnostics === true;
   }
 
   static async connect(baseUrl: string, options: GarconTestClientOptions = {}): Promise<GarconTestClient> {
@@ -266,7 +356,12 @@ export class GarconTestClient {
   }
 
   eventRecords(): readonly EventRecord[] {
-    return this.#eventRecords.slice();
+    if (!this.#redactSensitiveDiagnostics) return this.#eventRecords.slice();
+    return this.#eventRecords.map((record) => ({
+      raw: redact(record.raw, true),
+      parsed: redact(record.parsed, true) as ServerWsMessage,
+      receivedAt: record.receivedAt,
+    }));
   }
 
   exchanges(): readonly HttpExchange[] {
@@ -342,6 +437,32 @@ export class GarconTestClient {
     };
   }
 
+  async createOpenAiResponsesProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
+    const model = 'integration-responses-echo';
+    const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+      templateId: 'custom',
+      label: 'Integration Fake OpenAI Responses',
+      endpoint: {
+        protocol: 'openai-compatible',
+        baseUrl: `${providerBaseUrl.replace(/\/$/, '')}/v1`,
+        apiKey: INTEGRATION_OPENAI_API_KEY,
+        capabilities: { chatCompletions: false, responses: true },
+        defaultModel: model,
+        models: [{ value: model, label: 'Integration Responses Echo' }],
+        supportsImages: false,
+        modelDiscovery: 'openai-models',
+      },
+    });
+    const endpoint = created.endpoints[0];
+    if (!endpoint) throw new Error('Created Responses provider did not contain an endpoint');
+    return {
+      providerId: created.id,
+      endpointId: endpoint.id,
+      model,
+      protocol: 'openai-compatible',
+    };
+  }
+
   async createAnthropicProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
     const model = 'integration-anthropic-echo';
     const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
@@ -373,6 +494,42 @@ export class GarconTestClient {
 
   listChats(): Promise<ChatListResponse> {
     return this.get<ChatListResponse>('/api/v1/chats');
+  }
+
+  async reorderChat(request: ReorderChatRequest): Promise<ReorderChatResponse> {
+    const response = await this.post<unknown>('/api/v1/chats/reorder', request);
+    const parsed = parseReorderChatResponse(response);
+    if (!parsed) throw new Error(`Invalid chat reorder response: ${JSON.stringify(response)}`);
+    return parsed;
+  }
+
+  async sortChatOrder(request: SortChatOrderRequest): Promise<SortChatOrderResponse> {
+    const response = await this.post<unknown>('/api/v1/chats/sort', request);
+    const parsed = parseSortChatOrderResponse(response);
+    if (!parsed) {
+      throw new Error(`Invalid chat order sort response: ${JSON.stringify(response)}`);
+    }
+    return parsed;
+  }
+
+  togglePinned(chatId: string): Promise<{ success: boolean; isPinned: boolean }> {
+    return this.post('/api/v1/chats/pin', { chatId });
+  }
+
+  toggleArchive(chatId: string): Promise<{ success: boolean; isArchived: boolean }> {
+    return this.post('/api/v1/chats/archive', { chatId });
+  }
+
+  generateChatTitle(request: GenerateChatTitleRequest): Promise<GenerateChatTitleResponse> {
+    return this.post<GenerateChatTitleResponse>('/api/v1/chats/title/generate', request);
+  }
+
+  refinePrompt(request: RefinePromptRequest): Promise<RefinePromptResponse> {
+    return this.post<RefinePromptResponse>('/api/v1/prompts/refine', request);
+  }
+
+  updateSessionName(chatId: string, title: string): Promise<{ success: boolean }> {
+    return this.put('/api/v1/app/session-name', { chatId, title });
   }
 
   async getScheduledPrompts(): Promise<ScheduledPromptsSnapshot> {
@@ -414,6 +571,7 @@ export class GarconTestClient {
 
   directStartRequest(input: DirectStartInput): StartChatCommandRequest {
     return {
+      origin: 'interactive',
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
       chatId: input.chatId,
@@ -427,18 +585,54 @@ export class GarconTestClient {
       thinkingMode: 'none',
       agentSettings: input.agent.agentSettings,
       command: input.content,
+      ...(input.orderedPreambleIds === undefined
+        ? {}
+        : { orderedPreambleIds: input.orderedPreambleIds }),
     };
   }
 
-  runChat(request: AgentRunCommandRequest): Promise<CommandAcceptedResponse> {
-    return this.post<CommandAcceptedResponse>('/api/v1/chats/run', request);
+  async runChat(
+    request: Omit<AgentRunCommandRequest, 'transcriptViewId'>
+      & { transcriptViewId?: string },
+  ): Promise<AgentTurnCommandResponse> {
+    return this.post<AgentTurnCommandResponse>('/api/v1/chats/run', {
+      ...request,
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
   }
 
   runDirectChat(input: DirectRunInput): Promise<CommandAcceptedResponse> {
     return this.runChat(this.directRunRequest(input));
   }
 
-  directRunRequest(input: DirectRunInput): AgentRunCommandRequest {
+  async handoffDirectChat(input: DirectHandoffInput): Promise<AgentTurnCommandResponse> {
+    const expectedAgentOwnershipEpoch = input.expectedAgentOwnershipEpoch
+      ?? (await this.listChats()).sessions.find((chat) => chat.id === input.chatId)?.agentOwnershipEpoch;
+    if (!expectedAgentOwnershipEpoch) {
+      throw new Error(`Chat ${input.chatId} has no ownership epoch for an agent handoff`);
+    }
+    return this.runChat({
+      clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
+      clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
+      chatId: input.chatId,
+      command: input.content,
+      handoff: {
+        expectedAgentOwnershipEpoch,
+        target: {
+          agentId: input.agent.agentId,
+          model: input.agent.provider.model,
+          apiProviderId: input.agent.provider.providerId,
+          modelEndpointId: input.agent.provider.endpointId,
+          modelProtocol: input.agent.provider.protocol,
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          agentSettings: input.agent.agentSettings,
+        },
+      },
+    });
+  }
+
+  directRunRequest(input: DirectRunInput): Omit<AgentRunCommandRequest, 'transcriptViewId'> {
     return {
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
@@ -454,12 +648,61 @@ export class GarconTestClient {
     };
   }
 
-  forkChat(request: { sourceChatId: string; chatId: string; upToSeq?: number }): Promise<ForkChatResponse> {
+  forkChat(request: ForkChatCommandRequest): Promise<ForkChatResponse> {
     return this.post<ForkChatResponse>('/api/v1/chats/fork', request);
   }
 
   forkRunChat(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse> {
     return this.post<ForkRunCommandResponse>('/api/v1/chats/fork-run', request);
+  }
+
+  async sendPermissionDecision(
+    request: Omit<PermissionDecisionCommandRequest, 'control'> & {
+      readonly control?: PermissionDecisionCommandRequest['control'];
+    },
+  ): Promise<CommandAcceptedResponse> {
+    const control = request.control ?? await this.#permissionControl(
+      request.chatId,
+      request.permissionOccurrenceId,
+    );
+    return this.post<CommandAcceptedResponse>(
+      '/api/v1/chats/permissions/decision',
+      { ...request, control },
+    );
+  }
+
+  async getChatSnapshot(chatId: string, messageLimit = 1): Promise<ChatSnapshotResponse> {
+    const query = new URLSearchParams({ chatId, limit: String(messageLimit) });
+    return parseChatSnapshotResponse(
+      await this.get<unknown>(`/api/v1/chats/snapshot?${query}`),
+    );
+  }
+
+  async #permissionControl(
+    chatId: string,
+    permissionOccurrenceId: string,
+  ): Promise<PermissionDecisionCommandRequest['control']> {
+    const snapshot = await this.getChatSnapshot(chatId, 0);
+    const rows = snapshot.transientFeed.rows.filter((candidate) => (
+      candidate.permissionOccurrenceId === permissionOccurrenceId
+      && candidate.message.type === 'permission-request'
+    ));
+    if (rows.length !== 1) {
+      throw new Error(
+        `Expected one transient permission for ${permissionOccurrenceId}, found ${rows.length}`,
+      );
+    }
+    const row = rows[0]!;
+    return {
+      serverInstanceId: snapshot.transientFeed.serverInstanceId,
+      chatId,
+      runId: row.runId,
+      permissionOccurrenceId: row.permissionOccurrenceId,
+    };
+  }
+
+  updateProjectPath(request: ProjectPathPatchRequest): Promise<ProjectPathPatchResponse> {
+    return this.patch<ProjectPathPatchResponse>('/api/v1/chats/project-path', request);
   }
 
   deleteChat(chatId: string): Promise<{ success: boolean }> {
@@ -468,6 +711,42 @@ export class GarconTestClient {
 
   searchChats(request: ChatSearchRequest): Promise<ChatSearchResponse> {
     return this.post<ChatSearchResponse>('/api/v1/chats/search', request);
+  }
+
+  async timedSearchChats(request: ChatSearchRequest): Promise<{
+    status: number;
+    elapsedMs: number;
+    body: ChatSearchResponse & { error?: string; errorCode?: string };
+  }> {
+    const started = performance.now();
+    const { response, parsed } = await this.requestRaw('POST', '/api/v1/chats/search', request);
+    return {
+      status: response.status,
+      elapsedMs: performance.now() - started,
+      body: parsed as ChatSearchResponse & { error?: string; errorCode?: string },
+    };
+  }
+
+  async timedGet(path: string): Promise<{ status: number; elapsedMs: number }> {
+    const started = performance.now();
+    const { response } = await this.requestRaw('GET', path);
+    return { status: response.status, elapsedMs: performance.now() - started };
+  }
+
+  async waitForSearchPhase(
+    phases: readonly TranscriptSearchPhase[],
+    options: { timeoutMs: number },
+  ): Promise<TranscriptSearchStatusResponse> {
+    const deadline = Date.now() + options.timeoutMs;
+    let last: TranscriptSearchStatusResponse | null = null;
+    while (Date.now() < deadline) {
+      last = await this.get<TranscriptSearchStatusResponse>('/api/v1/chats/search/status');
+      if (phases.includes(last.phase)) return last;
+      await Bun.sleep(250);
+    }
+    throw new Error(
+      `Search phase ${JSON.stringify(phases)} not reached. Last: ${JSON.stringify(last)}`,
+    );
   }
 
   async waitForChatSearch(
@@ -492,16 +771,47 @@ export class GarconTestClient {
     return this.post<MarkChatsReadResponse>('/api/v1/chats/read', request);
   }
 
-  enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
-    return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', request);
+  async enqueue(
+    request: Omit<QueueEntryCreateCommandRequest, 'transcriptViewId' | 'clientMessageId'>
+      & { transcriptViewId?: string; clientMessageId?: string },
+  ): Promise<QueueEntryCommandResponse> {
+    return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', {
+      ...request,
+      clientMessageId: request.clientMessageId ?? crypto.randomUUID(),
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
   }
 
-  sendActiveInput(request: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse> {
-    return this.post<ActiveInputCommandResponse>('/api/v1/chats/active-input', request);
+  submitGoalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse> {
+    return this.post<GoalControlCommandResponse>('/api/v1/chats/goal-control', request);
+  }
+
+  async steer(
+    request: Omit<SteerCommandRequest, 'transcriptViewId'> & { transcriptViewId?: string },
+  ): Promise<SteerCommandResponse> {
+    return this.post<SteerCommandResponse>('/api/v1/chats/steer', {
+      ...request,
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
+  }
+
+  async steerQueued(
+    request: Omit<QueueEntrySteerCommandRequest, 'transcriptViewId'>
+      & { transcriptViewId?: string; clientMessageId?: string },
+  ): Promise<QueueEntrySteerCommandResponse> {
+    const { clientMessageId: _legacyClientMessageId, ...command } = request;
+    return this.post<QueueEntrySteerCommandResponse>('/api/v1/chats/queue/entries/steer', {
+      ...command,
+      transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
+    });
   }
 
   enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse> {
     return this.enqueue({ chatId, content, clientRequestId: crypto.randomUUID() });
+  }
+
+  async #currentTranscriptViewId(chatId: string): Promise<string> {
+    return (await this.getMessages(chatId, { limit: 1 })).transcriptViewId;
   }
 
   replaceQueued(request: QueueEntryReplaceCommandRequest): Promise<QueueEntryCommandResponse> {
@@ -510,6 +820,10 @@ export class GarconTestClient {
 
   deleteQueued(request: QueueEntryDeleteCommandRequest): Promise<QueueEntryDeleteResponse> {
     return this.delete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', request);
+  }
+
+  moveQueued(request: QueueEntryMoveCommandRequest): Promise<QueueEntryCommandResponse> {
+    return this.put<QueueEntryCommandResponse>('/api/v1/chats/queue/entries/move', request);
   }
 
   pauseQueue(chatId: string): Promise<QueueMutationResponse> {
@@ -541,30 +855,60 @@ export class GarconTestClient {
     return control;
   }
 
-  async getMessages(chatId: string, options: { limit?: number; beforeSeq?: number } = {}): Promise<ChatMessagesPage> {
+  async getMessages(
+    chatId: string,
+    options: { limit?: number } & (
+      | {
+          beforeOrdinal?: undefined;
+          transcriptViewId?: never;
+          purpose?: TranscriptReadPurpose;
+        }
+      | {
+          beforeOrdinal: number;
+          transcriptViewId: string;
+          purpose?: never;
+        }
+    ) = {},
+  ): Promise<ChatMessagesPage> {
     const query = new URLSearchParams({
       chatId,
       limit: String(options.limit ?? 100),
     });
-    if (options.beforeSeq !== undefined) query.set('beforeSeq', String(options.beforeSeq));
-    const response = await this.get<Record<string, unknown>>(`/api/v1/chats/messages?${query}`);
-    const messages = parseChatViewMessages(response.messages);
-    if (!messages) throw new Error(`Invalid messages response: ${JSON.stringify(response)}`);
-    if (!Array.isArray(response.pendingUserInputs)) {
-      throw new Error(`Invalid pendingUserInputs response: ${JSON.stringify(response)}`);
+    if (options.beforeOrdinal !== undefined) {
+      query.set('beforeOrdinal', String(options.beforeOrdinal));
+      query.set('transcriptViewId', options.transcriptViewId);
     }
-    const pendingUserInputs = response.pendingUserInputs.map(normalizePendingUserInput);
-    if (pendingUserInputs.some((input) => input === null)) {
-      throw new Error(`Invalid pending user input: ${JSON.stringify(response.pendingUserInputs)}`);
+    if (options.purpose !== undefined) query.set('purpose', options.purpose);
+    const response = await this.get<Record<string, unknown>>(`/api/v1/chats/messages?${query}`);
+    const historyState = response.historyState as { kind?: unknown } | undefined;
+    if (historyState && historyState.kind !== 'complete') {
+      throw new UnavailableChatHistoryError(
+        requiredString(response.chatId, 'chatId'),
+        historyState as UnavailableChatHistoryError['historyState'],
+      );
+    }
+    const messages = parseTranscriptMessages(response.messages);
+    if (!messages) throw new Error(`Invalid messages response: ${JSON.stringify(response)}`);
+    const resendCandidates = parseResendCandidates(response.resendCandidates);
+    if (!resendCandidates) {
+      throw new Error(`Invalid resend candidates response: ${JSON.stringify(response)}`);
     }
     if (typeof response.hasMore !== 'boolean') throw new Error('Invalid messages response: hasMore');
+    const nextBeforeOrdinal = response.nextBeforeOrdinal === null
+      ? null
+      : positiveInteger(response.nextBeforeOrdinal, 'nextBeforeOrdinal');
+    if (response.hasMore !== (nextBeforeOrdinal !== null)) {
+      throw new Error('Invalid messages response: hasMore/nextBeforeOrdinal');
+    }
     return {
       chatId: requiredString(response.chatId, 'chatId'),
       messages,
-      generationId: requiredString(response.generationId, 'generationId'),
-      lastSeq: nonNegativeInteger(response.lastSeq, 'lastSeq'),
-      pageOldestSeq: nonNegativeInteger(response.pageOldestSeq, 'pageOldestSeq'),
-      pendingUserInputs: pendingUserInputs as PendingUserInput[],
+      transcriptViewId: requiredString(response.transcriptViewId, 'transcriptViewId'),
+      lastOrdinal: nonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
+      pageOldestOrdinal: nonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
+      pageNewestOrdinal: nonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
+      nextBeforeOrdinal,
+      resendCandidates,
       hasMore: response.hasMore,
       limit: positiveInteger(response.limit, 'limit'),
     };
@@ -597,18 +941,33 @@ export class GarconTestClient {
 
   async subscribe(
     chatId: string,
-    generationId: string,
-    afterSeq: number,
+    transcriptViewId: string,
+    afterOrdinal: number,
+    throughOrdinal?: number,
   ): Promise<ChatSubscribedMessage> {
     const clientRequestId = crypto.randomUUID();
     const afterIndex = this.markEvents();
-    this.sendWs(new ChatSubscribeRequest(clientRequestId, chatId, generationId, afterSeq));
-    return await this.waitForEvent(
-      (message): message is ChatSubscribedMessage =>
-        message.type === 'chat-subscribed' && message.clientRequestId === clientRequestId,
+    const request = new ChatSubscribeRequest(
+      clientRequestId,
+      chatId,
+      transcriptViewId,
+      afterOrdinal,
+      throughOrdinal,
+    );
+    this.sendWs(request);
+    const outcome = await this.waitForEvent(
+      (message): message is ChatSubscribedMessage | ClientRequestErrorMessage =>
+        (message.type === 'chat-subscribed' && message.clientRequestId === clientRequestId)
+        || (
+          message.type === 'client-request-error'
+          && message.clientRequestId === clientRequestId
+          && message.requestType === 'chat-subscribe'
+        ),
       `chat-subscribed ${clientRequestId}`,
       { afterIndex },
     );
+    if (outcome.type === 'client-request-error') throw new GarconWsRequestError(outcome);
+    return outcome;
   }
 
   async reloadChat(chatId: string): Promise<ChatReloadedMessage> {
@@ -639,8 +998,24 @@ export class GarconTestClient {
       (message): message is ChatProcessingUpdatedMessage =>
         message.type === 'chat-processing-updated'
         && message.chatId === chatId
-        && message.isProcessing === isProcessing,
+        && (message.phase !== null) === isProcessing,
       `${chatId} processing=${isProcessing}`,
+      options,
+    );
+  }
+
+  async waitForCommittedUserInput(
+    chatId: string,
+    content: string,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<CommittedUserInputMessage> {
+    return await this.waitForEvent(
+      (message): message is CommittedUserInputMessage =>
+        message.type === 'chat-messages'
+        && message.chatId === chatId
+        && message.messages.some((entry) =>
+          entry.message.type === 'user-message' && entry.message.content === content),
+      `committed user input ${content}`,
       options,
     );
   }
@@ -658,6 +1033,40 @@ export class GarconTestClient {
       `${chatId} terminal turn ${turnId ?? '(any)'}`,
       options,
     );
+  }
+
+  async waitForSessionStopped(
+    chatId: string,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<void> {
+    await this.waitForEvent(
+      (message): message is ServerWsMessage => message.type === 'chat-session-stopped'
+        && (message as { chatId?: string }).chatId === chatId,
+      `${chatId} chat-session-stopped`,
+      options,
+    );
+  }
+
+  async waitForTransientPermission(
+    chatId: string,
+    predicate: (row: TransientFeedRow) => boolean = () => true,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<TransientFeedRow> {
+    const event = await this.waitForEvent(
+      (message): message is ChatTransientFeedMutationMessage => (
+        message instanceof ChatTransientFeedMutationMessage
+        && message.chatId === chatId
+        && message.mutation.kind === 'upsert'
+        && message.mutation.row.message.type === 'permission-request'
+        && predicate(message.mutation.row)
+      ),
+      `${chatId} transient permission`,
+      options,
+    );
+    if (event.mutation.kind !== 'upsert') {
+      throw new Error('Transient permission event lost its upsert mutation');
+    }
+    return event.mutation.row;
   }
 
   async waitForEvent<T extends ServerWsMessage>(
@@ -736,19 +1145,33 @@ export class GarconTestClient {
     return this.request<T>('PUT', path, body);
   }
 
+  patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('PATCH', path, body);
+  }
+
   delete<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>('DELETE', path, body);
   }
 
   describeEvents(): string {
-    return JSON.stringify(this.#eventRecords.map((record, index) => ({
+    return JSON.stringify(redact(this.#eventRecords.map((record, index) => ({
       index,
       receivedAt: record.receivedAt,
       event: record.parsed,
-    })), null, 2);
+    })), this.#redactSensitiveDiagnostics), null, 2);
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const { response, parsed } = await this.requestRaw(method, path, body);
+    if (!response.ok) throw new GarconApiError(response.status, parsed, method, path);
+    return parsed as T;
+  }
+
+  private async requestRaw(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<{ response: Response; parsed: unknown }> {
     const response = await fetch(`${this.#baseUrl}${path}`, {
       method,
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
@@ -759,11 +1182,12 @@ export class GarconTestClient {
       method,
       path,
       status: response.status,
-      ...(body === undefined ? {} : { requestBody: redact(body) }),
-      responseBody: redact(parsed),
+      ...(body === undefined
+        ? {}
+        : { requestBody: redact(body, this.#redactSensitiveDiagnostics) }),
+      responseBody: redact(parsed, this.#redactSensitiveDiagnostics),
     });
-    if (!response.ok) throw new GarconApiError(response.status, parsed, method, path);
-    return parsed as T;
+    return { response, parsed };
   }
 
   private sendWs(message: ClientWsMessage): void {

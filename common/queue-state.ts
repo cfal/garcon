@@ -8,6 +8,7 @@ export interface QueueEntry {
 
 export interface RecentlyDispatchedQueueEntry {
   entryId: string;
+  revision: number;
   dispatchedAt: string;
 }
 
@@ -24,9 +25,10 @@ export type AutomaticQueuePauseKind = Exclude<
 
 export interface ChatQueueState {
   entries: QueueEntry[];
-  dispatchingEntryId: string | null;
+  steeringEntryId: string | null;
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   pause: QueuePause | null;
+  reorderRevision: number;
 }
 
 export const MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES = 32;
@@ -34,9 +36,10 @@ export const MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES = 32;
 export function emptyChatQueueState(): ChatQueueState {
   return {
     entries: [],
-    dispatchingEntryId: null,
+    steeringEntryId: null,
     recentlyDispatched: [],
     pause: null,
+    reorderRevision: 0,
   };
 }
 
@@ -65,8 +68,15 @@ function parseRecentlyDispatched(value: unknown): RecentlyDispatchedQueueEntry |
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
   const entryId = typeof item.entryId === 'string' ? item.entryId : '';
+  const revision = typeof item.revision === 'number'
+    && Number.isSafeInteger(item.revision)
+    && item.revision > 0
+    ? item.revision
+    : null;
   const dispatchedAt = typeof item.dispatchedAt === 'string' ? item.dispatchedAt : '';
-  return entryId && dispatchedAt ? { entryId, dispatchedAt } : null;
+  return entryId && revision !== null && dispatchedAt
+    ? { entryId, revision, dispatchedAt }
+    : null;
 }
 
 export function normalizeChatQueueState(value: unknown): ChatQueueState {
@@ -111,23 +121,31 @@ export function parseChatQueueState(value: unknown): ChatQueueState | null {
   const pause = parseQueuePause(raw.pause);
   if (pause === undefined) return null;
   if (!Array.isArray(raw.entries) || !Array.isArray(raw.recentlyDispatched)) return null;
+  if (
+    typeof raw.reorderRevision !== 'number'
+    || !Number.isSafeInteger(raw.reorderRevision)
+    || raw.reorderRevision < 0
+  ) {
+    return null;
+  }
   const entries = raw.entries.map(parseQueueEntry);
   const recentlyDispatched = raw.recentlyDispatched.map(parseRecentlyDispatched);
   if (entries.some((entry) => entry === null) || recentlyDispatched.some((entry) => entry === null)) {
     return null;
   }
-  const dispatchingEntryId = raw.dispatchingEntryId === null
+  const steeringEntryId = raw.steeringEntryId === null
     ? null
-    : typeof raw.dispatchingEntryId === 'string' && raw.dispatchingEntryId.trim()
-      ? raw.dispatchingEntryId
+    : typeof raw.steeringEntryId === 'string' && raw.steeringEntryId.trim()
+      ? raw.steeringEntryId
       : undefined;
-  if (dispatchingEntryId === undefined) return null;
+  if (steeringEntryId === undefined) return null;
 
   return {
     entries: entries as QueueEntry[],
-    dispatchingEntryId,
+    steeringEntryId,
     recentlyDispatched: (recentlyDispatched as RecentlyDispatchedQueueEntry[])
       .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES),
     pause,
+    reorderRevision: raw.reorderRevision,
   };
 }

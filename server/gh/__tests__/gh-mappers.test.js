@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import {
-  buildRenderedFileSet,
+  buildPatchFileSet,
   buildThreads,
   mapChecksState,
   mapMergeable,
@@ -151,7 +151,7 @@ describe('buildThreads', () => {
   });
 });
 
-describe('buildRenderedFileSet', () => {
+describe('buildPatchFileSet', () => {
   const rendered = [
     {
       path: 'x.ts',
@@ -167,14 +167,15 @@ describe('buildRenderedFileSet', () => {
         category: 'normal',
         isBinary: false,
         isTooLarge: false,
-        rows: [],
-        hunks: [],
+        renderedRowCount: 0,
+        patchBytes: 0,
+        patch: '',
       },
     },
   ];
 
   it('prefers GitHub per-file line counts and exposes bodies by path', () => {
-    const set = buildRenderedFileSet(rendered, [{ path: 'x.ts', additions: 5, deletions: 3 }]);
+    const set = buildPatchFileSet(rendered, [{ path: 'x.ts', additions: 5, deletions: 3 }]);
     expect(set.files[0].additions).toBe(5);
     expect(set.files[0].deletions).toBe(3);
     expect(set.files[0].workTreeStatus).toBe('M');
@@ -182,7 +183,7 @@ describe('buildRenderedFileSet', () => {
   });
 
   it('falls back to rendered counts when GitHub file data is missing', () => {
-    const set = buildRenderedFileSet(rendered, undefined);
+    const set = buildPatchFileSet(rendered, undefined);
     expect(set.files[0].additions).toBe(1);
     expect(set.files[0].deletions).toBe(1);
   });

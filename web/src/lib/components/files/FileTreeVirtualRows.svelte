@@ -1,24 +1,32 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
 	import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 	import { buildFileTreeRenderModel } from '$lib/files/tree/file-tree-render-rows.js';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
-	import type { HostId } from '$lib/workspace/surface-types.js';
 	import { isImageFilePath } from '$lib/utils/file-kind.js';
+	import { errorMessage } from '$lib/utils/error-message.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
+	import FileTreeDetailsHeader from './FileTreeDetailsHeader.svelte';
 	import FileTreeRenderRow from './FileTreeRenderRow.svelte';
 	import { FileTreeVirtualController } from './FileTreeVirtualController.svelte.js';
+	import {
+		createFileTreeViewProfile,
+		fileTreeViewGeometry,
+		type FileTreeViewMode,
+	} from './file-tree-view-profile.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	let {
 		store,
-		presentation,
+		viewMode,
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
 	}: {
 		store: FileTreeStore;
-		presentation: HostId | 'mobile';
+		viewMode: FileTreeViewMode;
 		selectedPath?: string | null;
 		onFileSelect: (entry: FileTreeEntry) => void;
 		onImageSelect?: (entry: FileTreeEntry) => void;
@@ -44,10 +52,15 @@
 			store.showHiddenFiles,
 		]),
 	);
-	let minimumTableWidth = $derived(store.visibleColumnKeys.length === 1 ? '240px' : '520px');
-	let tableMinimumWidth = $derived(
-		presentation === 'mobile' ? `min(${minimumTableWidth}, 100%)` : minimumTableWidth,
+	let profile = $derived(
+		createFileTreeViewProfile({
+			mode: viewMode,
+			visibleColumnKeys: store.visibleColumnKeys,
+			columnGridTemplate: store.columnGridTemplate,
+		}),
 	);
+	let geometry = $derived(fileTreeViewGeometry(viewMode));
+	let tableMinimumWidth = $derived(`min(${profile.minimumTableWidthPx}px, 100%)`);
 
 	function activateEntry(row: FileTableRow): void {
 		if (row.entry.type === 'directory') {
@@ -72,48 +85,61 @@
 		get store() {
 			return store;
 		},
+		get geometry() {
+			return geometry;
+		},
 		activateEntry,
 	});
+	onDestroy(() => controller.destroy());
 	const interaction = controller.interaction;
-	const virtualizer = controller.virtualizer;
-	const measureVirtualRow = controller.measureVirtualRow;
+	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
 	let activeFocusKey = $derived(controller.activeFocusKey);
-	let virtualItems = $derived($virtualizer.getVirtualItems());
-	let totalHeight = $derived($virtualizer.getTotalSize());
-
-	function errorMessage(error: unknown): string {
-		return error instanceof Error ? error.message : String(error);
-	}
+	let virtualSnapshot = $derived(controller.snapshot);
+	let virtualItems = $derived(controller.renderedItems(virtualSnapshot));
+	let totalHeight = $derived(virtualSnapshot.sizerSize);
 </script>
 
 <div
 	bind:this={viewportRef}
+	{@attach controller.viewport}
+	{@attach primaryScrollRegion}
 	role="treegrid"
 	aria-label={`${m.filetree_project_files()}: ${store.currentDirectoryLabel}`}
 	aria-rowcount={model.rows.length + 1}
-	aria-colcount={store.visibleColumnKeys.length}
+	aria-colcount={profile.accessibleColumnCount}
 	aria-busy={store.isRefreshing}
 	class="file-tree-virtual-grid min-h-0 flex-1 overflow-auto overscroll-none"
+	style:overflow-anchor="none"
 	style:--file-tree-row-height={`${controller.rowHeight}px`}
-	style:--file-tree-disclosure-size={`${controller.rowHeight}px`}
+	style:--file-tree-disclosure-size={`${controller.disclosureSize}px`}
+	style:--file-tree-entry-icon-size={`${profile.entryIconSizePx}px`}
 	data-file-tree-grid
 >
 	<div role="presentation" style:min-width={tableMinimumWidth}>
-		<FileTreeColumnHeader {store} ariaRowIndex={1} />
+		{#if profile.mode === 'columns'}
+			<FileTreeColumnHeader {store} ariaRowIndex={1} />
+		{:else}
+			<FileTreeDetailsHeader
+				sortKey={store.sortKey}
+				sortDirection={store.sortDirection}
+				ariaRowIndex={1}
+			/>
+		{/if}
 		{#if model.rows.length > 0}
 			<div
 				role="presentation"
 				class="relative w-full overflow-clip"
 				style:height={`${totalHeight}px`}
+				data-file-tree-virtual-sizer
+				{@attach controller.sizer}
 			>
 				{#each virtualItems as virtualItem (virtualItem.key)}
-					{@const row = model.rows[virtualItem.index]}
+					{@const row = controller.rowAt(virtualItem.index)}
 					{#if row}
 						<div
 							role="presentation"
 							data-index={virtualItem.index}
 							data-file-tree-virtual-row
-							use:measureVirtualRow
 							class="absolute left-0 top-0 w-full"
 							style:transform={`translateY(${controller.getVirtualRowOffset(virtualItem.index)}px)`}
 						>
@@ -121,6 +147,7 @@
 								<FileTreeRenderRow
 									{row}
 									{store}
+									{profile}
 									ariaRowIndex={virtualItem.index + 2}
 									focused={activeFocusKey === row.key}
 									selected={row.kind === 'entry' && selectedPath === row.entry.path}
@@ -134,6 +161,7 @@
 										aria-rowindex={virtualItem.index + 2}
 										aria-level={row.level}
 										class="file-tree-virtual-row-content grid items-center overflow-hidden px-3 text-xs text-destructive"
+										style={`grid-template-columns: ${profile.gridTemplate}`}
 									>
 										<div role="gridcell" class="truncate">
 											{row.kind === 'entry' ? `${row.entry.name}: ` : ''}{errorMessage(error)}
@@ -175,5 +203,10 @@
 	.file-tree-virtual-grid :global(.file-tree-disclosure-slot) {
 		height: var(--file-tree-disclosure-size);
 		width: var(--file-tree-disclosure-size);
+	}
+
+	.file-tree-virtual-grid :global(.file-tree-entry-icon) {
+		height: var(--file-tree-entry-icon-size);
+		width: var(--file-tree-entry-icon-size);
 	}
 </style>

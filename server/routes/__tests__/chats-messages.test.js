@@ -1,4 +1,9 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE } from '../../lib/domain-error.js';
 
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
@@ -6,37 +11,63 @@ mock.module('../../chats/title-generator.js', () => ({
   TitleGenerationError: class TitleGenerationError extends Error {},
 }));
 
-mock.module('../../chats/fork-chat.js', () => ({
-  forkChatFileCopy: mock(() => Promise.resolve({})),
-}));
-
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
-import { ChatViewStore } from '../../chats/chat-view-store.js';
-import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
-import { ChatNativeReloader } from '../../chats/chat-native-reload.js';
-import { ChatProcessErrorRecovery } from '../../chats/chat-process-error-recovery.js';
-import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
-import { transcriptRevision } from '../../lib/transcript-revision.js';
+import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
+import { LedgerFencedError } from '../../ledger/errors.ts';
+import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
+import { TranscriptLedgerService } from '../../ledger/service.ts';
+import { TranscriptLedgerStore } from '../../ledger/store.ts';
+import {
+  createRouteChatListProjector,
+  createRouteCommandLedger,
+  createRouteCommandService,
+} from './chat-routes-test-utils.js';
+
+const CHAT_ID = '1783725900000200';
+
+function completeQueue() {
+  return {
+    serverInstanceId: 'server-instance-test',
+    entries: [],
+    controlEntries: [],
+    recentlyDispatched: [],
+    appliedCommands: [],
+    pause: null,
+    reorderRevision: 0,
+    version: 0,
+    updatedAt: null,
+  };
+}
 
 function createRoutesFixture(overrides = {}) {
-  const registry = {
-    getChat: mock(() => ({
-      id: '123',
-      agentId: 'claude',
-      agentSessionId: 'provider-session-123',
-      projectPath: '/tmp/project',
-      nativePath: '/tmp/session.jsonl',
-    })),
+  const entry = {
+    id: CHAT_ID,
+    agentId: 'claude',
+    agentSessionId: 'provider-session-123',
+    nativeSession: null,
+    agentOwnershipEpoch: 'epoch-1',
+    carryOverSegments: [],
+    carryOverMigrationQuarantine: null,
+    nativeSeedReceipt: null,
+    projectPath: '/tmp/project',
+    tags: [],
+    model: 'opus',
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    agentSettingsById: {},
+  };
+  const registry = overrides.registry ?? {
+    getChat: mock((chatId) => chatId === CHAT_ID ? entry : null),
+    hasChat: mock((chatId) => chatId === CHAT_ID),
     addChat: mock(() => true),
     updateChat: mock(() => null),
     removeChat: mock(() => true),
-    listAllChats: mock(() => ({})),
+    listAllChats: mock(() => ({ [CHAT_ID]: entry })),
   };
   const settings = {
-    getPinnedChatIds: mock(async () => []),
-    getNormalChatIds: mock(async () => []),
-    getArchivedChatIds: mock(async () => []),
+    getPinnedChatIds: mock(() => []),
+    getNormalChatIds: mock(() => []),
+    getArchivedChatIds: mock(() => []),
     getChatName: mock(() => null),
     recordChatStartup: mock(async () => undefined),
     ensureInNormal: mock(async () => undefined),
@@ -44,56 +75,37 @@ function createRoutesFixture(overrides = {}) {
     removeSessionName: mock(async () => undefined),
     togglePin: mock(async () => ({ isPinned: true })),
     toggleArchive: mock(async () => ({ isArchived: true })),
-    reorderWindow: mock(async () => ({ success: true })),
-    reorderRelative: mock(async () => ({ success: true })),
+    reorderChat: mock(async () => ({
+      success: true,
+      response: { success: true, chatId: CHAT_ID, orderGroup: 'normal', changed: true },
+    })),
   };
   const queue = {
+    readChatExecutionControl: mock(async () => completeQueue()),
+    ownsExecution: mock(() => false),
     deleteChatQueueFile: mock(async () => undefined),
-    submit: mock(async () => undefined),
-    registerPendingUserInput: mock(async () => undefined),
-    reserveDirectTurn: mock((chatId) => ({
-      chatId,
-      reservationId: 'reservation-1',
-      executionAdmission: {
-        signal: new AbortController().signal,
-        markStarted() {},
-      },
-    })),
-    releaseDirectTurn: mock(async () => undefined),
-    completeDirectTurn: mock(async () => undefined),
-    failDirectTurn: mock(async () => undefined),
-    runReservedTurn: mock(async () => undefined),
-    abortForChatDeletion: mock(async () => true),
-    triggerDrain: mock(async () => undefined),
-	    readChatExecutionControl: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 0, updatedAt: null })),
-	    createChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
-	    replaceChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
-	    deleteChatQueueEntry: mock(async () => ({ entryId: 'entry-1', queue: { entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null } })),
-	    deliverActiveInput: mock(async () => false),
-	    clearChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null })),
-	    pauseChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null })),
-	    resumeChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 3, updatedAt: null })),
   };
-  const pathCache = createRoutePathCache();
   const metadata = {
     listAllChatMetadata: mock(() => new Map()),
     getChatMetadata: mock(() => null),
     addNewChatMetadata: mock(() => undefined),
   };
   const chatViews = overrides.chatViews ?? {
-    getOrCreatePage: mock(async (_chatId, limit, beforeSeq) => ({
+    page: mock(async (_chatId, limit, beforeOrdinal) => ({
+      transcriptViewId: 'view-1',
       messages: [],
-      generationId: 'generation-1',
-      lastSeq: 0,
-      pageOldestSeq: beforeSeq ?? 0,
+      lastOrdinal: 12,
+      pageOldestOrdinal: beforeOrdinal ?? 0,
+      pageNewestOrdinal: 12,
       hasMore: false,
       limit,
     })),
-    reconcileNativeSnapshot: mock(async () => undefined),
   };
   const agents = {
     hasAgent: mock(() => true),
     supportsFork: mock(() => true),
+    supportsForkAtMessage: mock(() => true),
+    supportsForkWhileRunning: mock(() => true),
     supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [] })),
@@ -102,27 +114,23 @@ function createRoutesFixture(overrides = {}) {
     runSingleQuery: mock(async () => 'title'),
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock(async () => undefined),
-  };
-  const pendingInputs = overrides.pendingInputs ?? {
-    register: mock(async () => undefined),
-    reconcileRetainedHistory: mock(async () => undefined),
-    reconcileNativeHistory: mock(async () => undefined),
-    listForChat: mock(() => []),
-    listForTransport: mock(() => []),
-    hasInFlightForChat: mock(() => false),
-    clearChat: mock(() => undefined),
+    resendCandidates: mock(() => [{ ordinal: 11, content: 'Try again', attachmentNames: [] }]),
   };
   const commandLedger = createRouteCommandLedger('chats-messages');
-  const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+  const chatListProjector = createRouteChatListProjector({
+    registry,
+    settings,
+    metadata,
+    agents,
+  });
   const routes = createChatRoutes({
     registry,
     settings,
     queue,
-    pathCache,
+    processing: overrides.processing ?? { phase: mock(() => null) },
     metadata,
     chatViews,
     agents,
-    pendingInputs,
     chatListProjector,
     commandService: createRouteCommandService({
       registry,
@@ -131,205 +139,403 @@ function createRoutesFixture(overrides = {}) {
       metadata,
       agents,
       commandLedger,
-      pendingInputs,
-      pathCache,
       chatListProjector,
+      ownership: overrides.ownership,
     }),
   });
 
-  return { chatViews, pendingInputs, routes };
+  return { agents, chatViews, routes };
 }
 
 describe('GET /api/v1/chats/messages', () => {
-  it('clamps pagination parameters before reading history', async () => {
-    const { chatViews, pendingInputs, routes } = createRoutesFixture();
-    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=999999&beforeSeq=10');
+  it('[TLV5-L09.03-ROUTE-UNIT-01] forwards activation only for a newest-history read', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const activeUrl = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&purpose=activation`,
+    );
+    const backgroundUrl = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`,
+    );
+    const olderUrl = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&beforeOrdinal=10&transcriptViewId=view-1&purpose=activation',
+    );
+
+    await expect(routes['/api/v1/chats/messages'].GET(new Request(activeUrl), activeUrl))
+      .resolves.toMatchObject({ status: 200 });
+    expect(chatViews.page).toHaveBeenNthCalledWith(
+      1,
+      CHAT_ID,
+      20,
+      undefined,
+      undefined,
+      undefined,
+      'activation',
+    );
+
+    await expect(routes['/api/v1/chats/messages'].GET(new Request(backgroundUrl), backgroundUrl))
+      .resolves.toMatchObject({ status: 200 });
+    expect(chatViews.page).toHaveBeenNthCalledWith(
+      2,
+      CHAT_ID,
+      20,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    const olderResponse = await routes['/api/v1/chats/messages'].GET(
+      new Request(olderUrl),
+      olderUrl,
+    );
+    expect(olderResponse.status).toBe(400);
+    expect((await olderResponse.json()).errorCode).toBe('VALIDATION_FAILED');
+    expect(chatViews.page).toHaveBeenCalledTimes(2);
+  });
+
+  it('clamps view-qualified pagination before reading the ledger', async () => {
+    const { agents, chatViews, routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&limit=999999&beforeOrdinal=10&transcriptViewId=view-1',
+    );
 
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      chatId: '123',
-      generationId: 'generation-1',
+    await expect(response.json()).resolves.toEqual({
+      historyState: { kind: 'complete' },
+      chatId: CHAT_ID,
+      transcriptViewId: 'view-1',
       messages: [],
-      lastSeq: 0,
-      pageOldestSeq: 10,
+      lastOrdinal: 12,
+      pageOldestOrdinal: 10,
+      pageNewestOrdinal: 12,
       hasMore: false,
+      resendCandidates: [{ ordinal: 11, content: 'Try again', attachmentNames: [] }],
       limit: 200,
-      pendingUserInputs: [],
     });
-    expect(pendingInputs.reconcileRetainedHistory).toHaveBeenCalledWith('123');
-    expect(chatViews.getOrCreatePage).toHaveBeenCalledWith('123', 200, 10);
+    expect(chatViews.page).toHaveBeenCalledWith(
+      CHAT_ID,
+      200,
+      10,
+      'view-1',
+      undefined,
+      undefined,
+    );
+    expect(agents.resendCandidates).toHaveBeenCalledWith(CHAT_ID);
   });
 
-  it('rejects invalid beforeSeq values', async () => {
+  it('requires a transcript view for every earlier-page cursor', async () => {
     const { chatViews, routes } = createRoutesFixture();
-    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&beforeSeq=abc');
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&beforeOrdinal=10`,
+    );
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      errorCode: 'VALIDATION_FAILED',
+    });
+    expect(chatViews.page).not.toHaveBeenCalled();
+  });
+
+  it('suppresses resend candidates while the chat is processing', async () => {
+    const { agents, routes } = createRoutesFixture({
+      processing: { phase: mock(() => 'running') },
+    });
+    const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).resendCandidates).toEqual([]);
+    expect(agents.resendCandidates).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid beforeOrdinal values', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&beforeOrdinal=abc`,
+    );
 
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
     const body = await response.json();
 
     expect(response.status).toBe(400);
     expect(body.errorCode).toBe('VALIDATION_FAILED');
-    expect(body.error).toBe('beforeSeq must be a positive integer');
-    expect(chatViews.getOrCreatePage).not.toHaveBeenCalled();
+    expect(body.error).toBe('beforeOrdinal must be a positive integer');
+    expect(chatViews.page).not.toHaveBeenCalled();
   });
 
-  it('bounds native full loads across repeated reads with an unresolved conflicting echo', async () => {
-    const history = [
-      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-1'),
-      new AssistantMessage('2026-06-01T00:00:01.000Z', 'history-2'),
-    ];
-    const nativeMessages = [
-      ...history,
-      new UserMessage(
-        '2026-06-01T00:00:02.000Z',
-        'pending',
-        undefined,
-        { clientRequestId: 'req-native', turnId: 'turn-native' },
-      ),
-    ];
-    const loadAll = mock(async () => nativeMessages);
-    const loadPage = mock(async (limit, offset) => {
-      const end = nativeMessages.length - offset;
-      const start = Math.max(0, end - limit);
-      return {
-        messages: nativeMessages.slice(start, end),
-        total: nativeMessages.length,
-        hasMore: start > 0,
-        offset,
-        limit,
-        revision: transcriptRevision(nativeMessages),
-      };
-    });
-    const views = new ChatViewStore(() => false, { messageLimit: 2 });
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: loadAll,
-      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
-      hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
-    });
-    await pendingInputs.register('123', 'pending', {
-      clientRequestId: 'req-live',
-      turnId: 'turn-live',
-      createdAt: '2026-06-01T00:00:02.000Z',
-      images: [{
-        name: 'large.png',
-        mimeType: 'image/png',
-        data: `data:image/png;base64,${'a'.repeat(20_000)}`,
-      }],
-    });
-    await views.appendAfterEnsuringGeneration(
-      '123',
-      async () => history,
-      [new UserMessage(
-        '2026-06-01T00:00:02.000Z',
-        'pending',
-        undefined,
-        { clientRequestId: 'req-live', turnId: 'turn-live', deliveryStatus: 'accepted' },
-      )],
-    );
-    await pendingInputs.reconcileNativeHistory('123');
-    const chatViews = {
-      getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
-        chatId,
-        { loadAll, loadPage },
-        limit,
-        beforeSeq,
-      ),
-    };
-    const { routes } = createRoutesFixture({ chatViews, pendingInputs });
-    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=2');
-
-    for (let request = 0; request < 3; request += 1) {
-      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
-      expect(response.status).toBe(200);
-      const payload = await response.json();
-      expect(payload).toMatchObject({
-        pendingUserInputs: [{ clientRequestId: 'req-live' }],
-      });
-      expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
-    }
-
-    expect(loadAll).toHaveBeenCalledTimes(1);
-    expect(loadPage).not.toHaveBeenCalled();
-  });
-
-  it('serves unmatched inputs as unconfirmed after process-error native replacement', async () => {
-    const nativeMessages = [new UserMessage(
-      '2026-06-01T00:00:00.100Z',
-      'persisted before failure',
-      undefined,
-      { clientRequestId: 'req-persisted' },
-    )];
-    const loadAll = mock(async () => nativeMessages);
-    const views = new ChatViewStore(() => false);
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: loadAll,
-      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
-      hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
-    });
-    await pendingInputs.register('123', 'persisted before failure', {
-      clientRequestId: 'req-persisted',
-      createdAt: '2026-06-01T00:00:00.000Z',
-    });
-    await pendingInputs.register('123', 'not persisted before failure', {
-      clientRequestId: 'req-failed',
-      createdAt: '2026-06-01T00:00:01.000Z',
-      images: [{
-        name: 'failure.png',
-        mimeType: 'image/png',
-        data: `data:image/png;base64,${'b'.repeat(20_000)}`,
-      }],
-    });
-    await views.appendAfterEnsuringGeneration('123', async () => [], [
-      new UserMessage(
-        '2026-06-01T00:00:00.000Z',
-        'persisted before failure',
-        undefined,
-        { clientRequestId: 'req-persisted', deliveryStatus: 'accepted' },
-      ),
-      new UserMessage(
-        '2026-06-01T00:00:01.000Z',
-        'not persisted before failure',
-        undefined,
-        { clientRequestId: 'req-failed', deliveryStatus: 'accepted' },
-      ),
-    ]);
-    const recovery = new ChatProcessErrorRecovery(
-      views,
-      new ChatNativeReloader(views, { loadNativeMessages: loadAll }, () => false),
-      pendingInputs,
+  it('rejects invalid limit values instead of silently defaulting them', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&limit=not-a-number`,
     );
 
-    await expect(recovery.recover('123', 'provider crashed')).resolves.toMatchObject({
-      kind: 'generation-reset',
-    });
-
-    const chatViews = {
-      getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
-        chatId,
-        { loadAll },
-        limit,
-        beforeSeq,
-      ),
-    };
-    const { routes } = createRoutesFixture({ chatViews, pendingInputs });
-    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=20');
     const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
-    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).errorCode).toBe('VALIDATION_FAILED');
+    expect(chatViews.page).not.toHaveBeenCalled();
+  });
+
+  it('rejects a page from a transcript view other than the requested view', async () => {
+    const { routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&limit=20&beforeOrdinal=10&transcriptViewId=requested-view',
+    );
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('STALE_TRANSCRIPT_VIEW');
+  });
+
+  it('rejects a newest-page refresh from a replaced transcript view', async () => {
+    const { routes } = createRoutesFixture();
+    const url = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&limit=20&transcriptViewId=requested-view',
+    );
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('STALE_TRANSCRIPT_VIEW');
+  });
+
+  it('returns a typed fenced-ledger state instead of an empty complete page', async () => {
+    const { routes } = createRoutesFixture({
+      chatViews: {
+        page: mock(async () => {
+          throw new TranscriptHistoryUnavailableError({
+            kind: 'degraded',
+            errorCode: 'LEDGER_FENCED',
+            retryable: false,
+          });
+        }),
+      },
+    });
+    const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
 
     expect(response.status).toBe(200);
-    expect(payload.messages.map((entry) => entry.message.content)).toEqual([
-      'persisted before failure',
-      'provider crashed',
-    ]);
-    expect(payload.pendingUserInputs).toEqual([expect.objectContaining({
-      clientRequestId: 'req-failed',
-      content: 'not persisted before failure',
-      deliveryStatus: 'unconfirmed',
-    })]);
-    expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
-    expect(loadAll).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual({
+      historyState: {
+        kind: 'degraded',
+        errorCode: 'LEDGER_FENCED',
+        retryable: false,
+      },
+      chatId: CHAT_ID,
+      messages: [],
+    });
   });
 
+  it('logs only sanitized fence identifiers and never the underlying cause detail', async () => {
+    const sentinelPath = '/sentinel-root/chat-sentinel/ledger.sqlite';
+    const underlying = Object.assign(new Error(`unable to open ${sentinelPath}`), {
+      name: 'SQLiteError',
+      code: 'SQLITE_CORRUPT',
+    });
+    const fenced = new LedgerFencedError(CHAT_ID, { cause: underlying });
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const { routes } = createRoutesFixture({
+        chatViews: {
+          page: mock(async () => {
+            throw new TranscriptHistoryUnavailableError({
+              kind: 'degraded',
+              errorCode: 'LEDGER_FENCED',
+              retryable: false,
+            }, { cause: fenced });
+          }),
+        },
+      });
+      const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+      expect(response.status).toBe(200);
+      expect(warn).toHaveBeenCalledWith(
+        '[routes:chats]',
+        'Transcript ledger read is fenced.',
+        { causeName: 'SQLiteError', causeCode: 'SQLITE_CORRUPT' },
+      );
+      // The generic diagnostic logs the raw message and chat ID, so the fenced path must return
+      // before it rather than merely logging less afterwards.
+      expect(error).not.toHaveBeenCalled();
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain(sentinelPath);
+      expect(logged).not.toContain(CHAT_ID);
+      expect(logged).not.toContain(underlying.message);
+      expect(logged).not.toContain(fenced.message);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it('sanitizes a retryable adoption failure', async () => {
+    const { routes } = createRoutesFixture({
+      chatViews: {
+        page: mock(async () => {
+          throw new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            'Cannot open /home/private/.codex/sessions/rollout-secret.jsonl',
+            true,
+          );
+        }),
+      },
+    });
+    const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+    });
+  });
+
+  it('[TLV5-ADOPT.10-SOURCE-FAILURE-ROUTE-UNIT-01] keeps adoption source failures content-free through route logging and response', async () => {
+    const transcriptSentinel = 'PRIVATE_TRANSCRIPT_SENTINEL_9e806c88';
+    const root = await mkdtemp(join(tmpdir(), 'garcon-adoption-source-privacy-'));
+    const store = new TranscriptLedgerStore(root);
+    const ledger = new TranscriptLedgerService(store);
+    const warnings = [];
+    const entry = {
+      agentId: 'test-provider',
+      agentSessionId: null,
+      nativeSession: null,
+      nativeSeedReceipt: null,
+      agentOwnershipEpoch: 'owner-1',
+      agentSettingsById: {
+        'test-provider': { ownerId: 'test-provider', schemaVersion: 1, values: {} },
+      },
+      projectPath: '/tmp/project',
+      model: 'model',
+      permissionMode: 'default',
+      thinkingMode: 'medium',
+      carryOverSegments: [],
+      carryOverMigrationQuarantine: null,
+    };
+    const sourceError = Object.assign(
+      new SyntaxError(`Invalid provider row containing ${transcriptSentinel}`),
+      { code: 'LEGACY_JSON_PARSE_FAILED' },
+    );
+    const adoption = new TranscriptAdoptionService({
+      ledger,
+      registry: {
+        getChat: (chatId) => chatId === CHAT_ID ? entry : null,
+        updateChat: () => entry,
+      },
+      integrations: {
+        require: () => ({
+          descriptor: { id: 'test-provider' },
+          settings: {
+            defaults: () => entry.agentSettingsById['test-provider'],
+            parse: (value) => value,
+          },
+          legacyHistoryImport: {
+            async *load() {
+              throw sourceError;
+            },
+          },
+          nativeHistoryImport: null,
+        }),
+      },
+      getCarryOverRevision: () => 'carryover-1',
+      loadFrozenPrefix: async () => [],
+      logger: { warn: (message, fields) => warnings.push([message, fields]) },
+    });
+    let propagatedError;
+    const chatViews = {
+      page: mock(async () => {
+        try {
+          return await adoption.ensure(CHAT_ID);
+        } catch (error) {
+          propagatedError = error;
+          throw error;
+        }
+      }),
+    };
+    const routeLogMessage = `sessions: error reading messages for ${CHAT_ID}:`;
+    const originalConsoleError = console.error;
+    const routeError = spyOn(console, 'error').mockImplementation((...args) => {
+      if (args[1] !== routeLogMessage) originalConsoleError(...args);
+    });
+
+    try {
+      const { routes } = createRoutesFixture({ chatViews });
+      const url = new URL(`http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`);
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      const body = await response.json();
+      const sourceRouteErrors = routeError.mock.calls.filter((args) => args[1] === routeLogMessage);
+      const observedSurfaces = {
+        warnings,
+        propagatedError: {
+          name: propagatedError?.name,
+          code: propagatedError?.code,
+          message: propagatedError?.message,
+          retryable: propagatedError?.retryable,
+          details: propagatedError?.details,
+        },
+        routeErrors: sourceRouteErrors,
+        response: body,
+      };
+
+      expect(JSON.stringify(observedSurfaces)).not.toContain(transcriptSentinel);
+      expect(warnings).toEqual([[
+        'Transcript adoption source failed.',
+        {
+          chatId: CHAT_ID,
+          provider: 'test-provider',
+          phase: 'legacy-history-import',
+          reason: 'LEGACY_JSON_PARSE_FAILED',
+        },
+      ]]);
+      expect(propagatedError).toBeInstanceOf(AgentIntegrationError);
+      expect(propagatedError?.cause).toBeUndefined();
+      expect(observedSurfaces.propagatedError).toEqual({
+        name: 'AgentIntegrationError',
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        message: 'Transcript adoption source failed',
+        retryable: true,
+        details: {
+          provider: 'test-provider',
+          phase: 'legacy-history-import',
+        },
+      });
+      expect(sourceRouteErrors).toEqual([[
+        '[routes:chats]',
+        routeLogMessage,
+        'Transcript adoption source failed',
+      ]]);
+      expect(response.status).toBe(503);
+      expect(body).toMatchObject({
+        success: false,
+        error: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
+        errorCode: 'TRANSCRIPT_UNAVAILABLE',
+        retryable: true,
+      });
+      expect(ledger.currentView(CHAT_ID)).toBeNull();
+    } finally {
+      routeError.mockRestore();
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

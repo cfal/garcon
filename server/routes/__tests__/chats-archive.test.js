@@ -18,7 +18,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000600';
 const CHAT_ID_2 = '1783725900000601';
@@ -28,6 +28,9 @@ const chat = () => ({
   agentSessionId: null,
   nativeSession: null,
   agentOwnershipEpoch: 'epoch-1',
+  carryOverSegments: [],
+  nativeSeedReceipt: null,
+  carryOverMigrationQuarantine: null,
   agentSettingsById: { claude: { ownerId: 'claude', schemaVersion: 1, values: {} } },
   projectPath: '/proj',
   tags: [],
@@ -38,6 +41,7 @@ const chat = () => ({
 
 const registry = {
   getChat: mock(() => undefined),
+  hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
   updateChat: mock(() => undefined),
   removeChat: mock(() => undefined),
@@ -57,14 +61,20 @@ const settings = {
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -72,18 +82,16 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-archive');
-const pendingInputs = createRoutePendingInputs();
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
-  pathCache,
+  processing: { phase: mock(() => null) },
   metadata,
   chatViews,
   agents,
-	pendingInputs,
 	chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -92,8 +100,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
-		pathCache,
 		chatListProjector,
   }),
 });

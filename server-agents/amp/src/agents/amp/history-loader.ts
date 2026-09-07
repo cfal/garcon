@@ -6,9 +6,10 @@ import {
   UserMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
-import { convertAmpToolUse } from './tool-use-converter.js';
+import { convertAmpToolUse, isAmpHousekeepingToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 export interface AmpContentPart {
   type: string;
@@ -32,15 +33,7 @@ export interface AmpThreadMessage {
 
 export interface AmpThreadExport {
   created?: number | string;
-  title?: string;
   messages?: AmpThreadMessage[];
-}
-
-export interface AmpPreview {
-  firstMessage: string;
-  lastMessage: string;
-  lastActivity: string | null;
-  createdAt: string | null;
 }
 
 function toIsoString(value: number | string | undefined): string | null {
@@ -74,10 +67,6 @@ function getTextParts(content: AmpContentPart[]): string[] {
 
 function getUserText(content: AmpContentPart[]): string {
   return getTextParts(content).join('\n');
-}
-
-function getAssistantText(content: AmpContentPart[]): string {
-  return getTextParts(content).at(-1) || '';
 }
 
 interface ToolResultPayload {
@@ -114,89 +103,111 @@ function getSortedMessages(threadExport: AmpThreadExport): AmpThreadMessage[] {
 }
 
 export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[] {
-  if (!threadExport || typeof threadExport !== 'object') return [];
+  assertImportableAmpThreadExport(threadExport);
 
   const createdAt = toIsoString(threadExport.created) || new Date().toISOString();
   const messages: ChatMessage[] = [];
+  const hiddenToolUseIds = new Set(getSortedMessages(threadExport)
+    .flatMap((message) => message.content ?? [])
+    .filter((part) => part.type === 'tool_use' && isAmpHousekeepingToolUse(part))
+    .map((part) => part.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0));
 
   for (const message of getSortedMessages(threadExport)) {
+    const converted: ChatMessage[] = [];
     const timestamp = getMessageTimestamp(message, createdAt);
     const content: AmpContentPart[] = Array.isArray(message.content) ? message.content : [];
 
     if (message.role === 'user') {
       for (const part of content) {
         if (part.type !== 'tool_result') continue;
+        if (part.toolUseID && hiddenToolUseIds.has(part.toolUseID)) continue;
         const { content: resultContent, isError } = getToolResultPayload(part);
-        messages.push(new ToolResultMessage(timestamp, part.toolUseID || '', resultContent, isError));
+        converted.push(new ToolResultMessage(timestamp, part.toolUseID || '', resultContent, isError));
       }
 
       const text = getUserText(content);
       if (text) {
-        messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
+        converted.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
       }
+      appendAmpSource(messages, converted, message.messageId);
       continue;
     }
 
     if (message.role === 'assistant') {
       for (const part of content) {
         if (part.type === 'thinking' && part.thinking) {
-          messages.push(new ThinkingMessage(timestamp, part.thinking));
+          converted.push(new ThinkingMessage(timestamp, part.thinking));
         } else if (part.type === 'text' && part.text?.trim()) {
-          messages.push(new AssistantMessage(timestamp, part.text));
+          converted.push(new AssistantMessage(timestamp, part.text));
         } else if (part.type === 'tool_use') {
-          messages.push(convertAmpToolUse(timestamp, part));
+          if (isAmpHousekeepingToolUse(part)) continue;
+          converted.push(convertAmpToolUse(timestamp, part));
         }
       }
+      appendAmpSource(messages, converted, message.messageId);
       continue;
     }
 
     if (message.role === 'info') {
       const infoText = getUserText(content);
       if (infoText) {
-        messages.push(new ErrorMessage(timestamp, infoText));
+        converted.push(new ErrorMessage(timestamp, infoText));
       }
     }
+    appendAmpSource(messages, converted, message.messageId);
   }
 
   return messages;
 }
 
-export function getAmpPreview(threadExport: AmpThreadExport): AmpPreview | null {
-  if (!threadExport || typeof threadExport !== 'object') return null;
-
-  const createdAt = toIsoString(threadExport.created);
-  const messages = getSortedMessages(threadExport);
-
-  let firstMessage: string | null = null;
-  let lastMessage = '';
-  let lastActivity = createdAt;
-
-  for (const message of messages) {
-    const timestamp = getMessageTimestamp(message, createdAt || new Date().toISOString());
-    if (timestamp && (!lastActivity || timestamp > lastActivity)) {
-      lastActivity = timestamp;
+function assertImportableAmpThreadExport(value: unknown): asserts value is AmpThreadExport {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Amp thread export must be an object');
+  }
+  const thread = value as Record<string, unknown>;
+  if (!Array.isArray(thread.messages)) {
+    throw new Error('Amp thread export has invalid messages');
+  }
+  if (thread.created !== undefined && toIsoString(thread.created as number | string) === null) {
+    throw new Error('Amp thread export has an invalid creation time');
+  }
+  for (const message of thread.messages) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      throw new Error('Amp thread export contains an invalid message');
     }
-
-    const content: AmpContentPart[] = Array.isArray(message.content) ? message.content : [];
-
-    if (!firstMessage && message.role === 'user') {
-      const userText = getUserText(content);
-      if (userText) firstMessage = userText;
+    const record = message as Record<string, unknown>;
+    if (typeof record.role !== 'string' || !Array.isArray(record.content)) {
+      throw new Error('Amp thread export contains an invalid message');
     }
-
-    if (message.role === 'user') {
-      const userText = getUserText(content);
-      if (userText) lastMessage = '> ' + userText;
-    } else if (message.role === 'assistant') {
-      const assistantText = getAssistantText(content);
-      if (assistantText) lastMessage = assistantText;
+    if (record.messageId !== undefined && !Number.isSafeInteger(record.messageId)) {
+      throw new Error('Amp thread export contains an invalid message ID');
+    }
+    for (const part of record.content) {
+      const rawPart = part as Record<string, unknown>;
+      if (
+        !part
+        || typeof part !== 'object'
+        || Array.isArray(part)
+        || typeof rawPart.type !== 'string'
+        || !rawPart.type
+        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
+      ) {
+        throw new Error('Amp thread export contains an invalid content part');
+      }
     }
   }
+}
 
-  return {
-    firstMessage: firstMessage || threadExport.title || 'Unknown Amp Session',
-    lastMessage,
-    lastActivity: lastActivity || null,
-    createdAt: createdAt || null,
-  };
+function appendAmpSource(
+  messages: ChatMessage[],
+  converted: ChatMessage[],
+  messageId: number | undefined,
+): void {
+  converted.forEach((message, withinSourceOrdinal) => {
+    messages.push(attachNativeMessageSource(message, {
+      ...(Number.isSafeInteger(messageId) ? { entryId: `amp-message:${messageId}` } : {}),
+      withinSourceOrdinal,
+    }));
+  });
 }

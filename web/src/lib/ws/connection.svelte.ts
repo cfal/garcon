@@ -7,6 +7,11 @@ import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
 import { createRandomId } from '$lib/utils/random-id';
 import { reconnectDelayMs } from './reconnect-policy';
+import {
+	parseServerWsMessage,
+	WsPongMessage,
+	type ChatProcessingSnapshotResult,
+} from '$shared/ws-events';
 
 // Trims the message log once all registered consumers have drained
 // past this many entries. Keeps memory bounded on long-running sessions.
@@ -14,10 +19,10 @@ const TRIM_THRESHOLD = 500;
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 6_000;
-const HEARTBEAT_IMMEDIATE_PROBE_MS = 250;
 const HEARTBEAT_JITTER_MS = 1_500;
 const CONNECTION_STABILITY_MS = 10_000;
 const CONNECT_ATTEMPT_DEDUPE_MS = 2_000;
+const CONNECT_ATTEMPT_TIMEOUT_MS = 10_000;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -25,13 +30,7 @@ export interface WsMessage {
 }
 
 export type WsConnectionPhase =
-	| 'idle'
-	| 'connecting'
-	| 'connected'
-	| 'reconnecting'
-	| 'offline'
-	| 'failed'
-	| 'destroyed';
+	'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'failed' | 'destroyed';
 
 export type WsConnectionIssue =
 	| 'initial-connect'
@@ -41,6 +40,7 @@ export type WsConnectionIssue =
 	| 'browser-offline'
 	| 'browser-online'
 	| 'visibility-visible'
+	| 'connect-timeout'
 	| 'connect-threw'
 	| 'missing-auth'
 	| 'manual-disconnect';
@@ -60,7 +60,17 @@ export interface DrainCursor {
 	current: number;
 }
 
-export type WsMessageConsumer = (data: Record<string, unknown>) => boolean;
+export type ChatProcessingSnapshotSource =
+	'heartbeat' | 'visibility' | 'stop-probe' | 'admission' | 'reconnect';
+
+export interface WsMessageContext {
+	readonly processingSnapshotSource?: ChatProcessingSnapshotSource;
+}
+
+export type WsMessageConsumer = (
+	data: Record<string, unknown>,
+	context: WsMessageContext,
+) => boolean;
 export type WsConnectionListener = (connected: boolean) => void;
 
 export interface PrimaryWsConnectionPort {
@@ -74,6 +84,7 @@ interface PendingRequest {
 	resolve: (data: Record<string, unknown>) => void;
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
+	context: WsMessageContext;
 }
 
 const INITIAL_CONNECTION_STATUS: WsConnectionStatus = {
@@ -111,6 +122,7 @@ export class WsConnection {
 	#cursors = new Set<DrainCursor>();
 	#trimOffset = 0;
 	#reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+	#connectTimeout: ReturnType<typeof setTimeout> | null = null;
 	#stabilityTimeout: ReturnType<typeof setTimeout> | null = null;
 	#reconnectAttempts = 0;
 	#destroyed = false;
@@ -145,7 +157,8 @@ export class WsConnection {
 					return;
 				}
 				if (this.isConnected) {
-					this.#scheduleHeartbeat(HEARTBEAT_IMMEDIATE_PROBE_MS);
+					this.#clearHeartbeatTimer();
+					void this.#sendVisibilityProbe();
 				} else {
 					this.#connectNow('visibility-visible');
 				}
@@ -205,6 +218,7 @@ export class WsConnection {
 
 			websocket.onopen = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				this.#clearConnectTimeout();
 				const now = Date.now();
 				this.#lastInboundAt = now;
 				this.#connectStartedAt = null;
@@ -229,12 +243,12 @@ export class WsConnection {
 				try {
 					const data = JSON.parse(event.data as string) as Record<string, unknown>;
 
-					// Resolve pending request-response correlation before
-					// pushing to the shared log. Correlated responses are
-					// consumed here and never dispatched to the event router.
+					// Applies synchronous consumers before resolving correlated requests.
+					// Correlated responses are never dispatched to the event router.
 					const rid = data.clientRequestId as string | undefined;
 					if (rid && this.#pendingRequests.has(rid)) {
 						const pending = this.#pendingRequests.get(rid)!;
+						this.#consumeMessage(data, pending.context);
 						this.#pendingRequests.delete(rid);
 						clearTimeout(pending.timer);
 
@@ -246,7 +260,7 @@ export class WsConnection {
 						return;
 					}
 
-					if (this.#consumeMessage(data)) return;
+					if (this.#consumeMessage(data, {})) return;
 
 					this.#messageLog.push({ data, timestamp: Date.now() });
 					this.#tryTrim();
@@ -283,6 +297,8 @@ export class WsConnection {
 				});
 				this.#setConnectionStatus({ reason: 'socket-error' });
 			};
+
+			this.#scheduleConnectTimeout(websocket);
 		} catch (error) {
 			console.error('Error creating WebSocket connection:', error);
 			const episodeId = this.#beginOutage();
@@ -365,6 +381,7 @@ export class WsConnection {
 
 	#handleSocketClosed(reason: WsConnectionIssue): void {
 		const episodeId = this.#beginOutage();
+		this.#clearConnectTimeout();
 		this.#clearStabilityTimeout();
 		this.#suspendHeartbeat();
 		this.#setConnected(false);
@@ -416,6 +433,10 @@ export class WsConnection {
 
 	/** Sends a request and returns a Promise resolved by a matching clientRequestId response. */
 	sendRequest<T = Record<string, unknown>>(msg: object, timeoutMs = 10_000): Promise<T> {
+		return this.#sendRequest(msg, timeoutMs, {});
+	}
+
+	#sendRequest<T>(msg: object, timeoutMs: number, context: WsMessageContext): Promise<T> {
 		const clientRequestId = generateRequestId();
 		const payload = { ...(msg as Record<string, unknown>), clientRequestId };
 
@@ -429,6 +450,7 @@ export class WsConnection {
 				resolve: resolve as (data: Record<string, unknown>) => void,
 				reject,
 				timer,
+				context,
 			});
 
 			if (!this.sendMessage(payload)) {
@@ -437,6 +459,22 @@ export class WsConnection {
 				reject(new Error('WebSocket not connected'));
 			}
 		});
+	}
+
+	async requestProcessingSnapshot(
+		source: Exclude<ChatProcessingSnapshotSource, 'reconnect'> = 'stop-probe',
+	): Promise<ChatProcessingSnapshotResult> {
+		const raw = await this.#sendRequest<Record<string, unknown>>(
+			{ type: 'ws-ping', sentAt: Date.now() },
+			HEARTBEAT_TIMEOUT_MS,
+			{ processingSnapshotSource: source },
+		);
+		const parsed = parseServerWsMessage(raw);
+		if (!(parsed instanceof WsPongMessage)) {
+			console.error('[WsConnection] Malformed processing snapshot response', { source });
+			throw new Error('Malformed processing snapshot response');
+		}
+		return parsed.processing;
 	}
 
 	/** Registers a drain cursor for cooperative trimming. Returns a cleanup function. */
@@ -476,6 +514,7 @@ export class WsConnection {
 
 	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
+		this.#clearConnectTimeout();
 		this.#clearStabilityTimeout();
 		this.#suspendHeartbeat();
 		if (options.rejectPending) this.#rejectAllPending();
@@ -522,10 +561,10 @@ export class WsConnection {
 		this.#pendingRequests.clear();
 	}
 
-	#consumeMessage(data: Record<string, unknown>): boolean {
+	#consumeMessage(data: Record<string, unknown>, context: WsMessageContext): boolean {
 		for (const consumer of [...this.#messageConsumers]) {
 			try {
-				if (consumer(data)) return true;
+				if (consumer(data, context)) return true;
 			} catch (error) {
 				console.error('WebSocket message consumer failed:', error);
 			}
@@ -547,25 +586,34 @@ export class WsConnection {
 		const generation = this.#heartbeatGeneration;
 		this.#heartbeatInFlight = true;
 		try {
-			const raw = await this.sendRequest<Record<string, unknown>>(
-				{
-					type: 'ws-ping',
-					sentAt: Date.now(),
-				},
-				HEARTBEAT_TIMEOUT_MS,
-			);
+			await this.requestProcessingSnapshot('heartbeat');
 			if (generation !== this.#heartbeatGeneration) return;
-			if (raw.type !== 'ws-pong') throw new Error('Unexpected heartbeat response');
 			this.#heartbeatInFlight = false;
 			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 		} catch {
 			if (generation !== this.#heartbeatGeneration) return;
 			this.#heartbeatInFlight = false;
 			if (this.#destroyed || !this.isConnected) return;
-			if (
-				this.#lastInboundAt !== null &&
-				Date.now() - this.#lastInboundAt < HEARTBEAT_TIMEOUT_MS
-			) {
+			if (this.#lastInboundAt !== null && Date.now() - this.#lastInboundAt < HEARTBEAT_TIMEOUT_MS) {
+				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
+				return;
+			}
+			this.#forceReconnect('heartbeat-timeout', { reconnectNow: true });
+		}
+	}
+
+	async #sendVisibilityProbe(): Promise<void> {
+		if (!this.isConnected || this.#destroyed) return;
+		const generation = this.#heartbeatGeneration;
+		try {
+			// A visibility repair must not reuse an older scheduled heartbeat snapshot.
+			await this.requestProcessingSnapshot('visibility');
+			if (generation !== this.#heartbeatGeneration) return;
+			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
+		} catch {
+			if (generation !== this.#heartbeatGeneration) return;
+			if (this.#destroyed || !this.isConnected) return;
+			if (this.#lastInboundAt !== null && Date.now() - this.#lastInboundAt < HEARTBEAT_TIMEOUT_MS) {
 				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 				return;
 			}
@@ -594,7 +642,8 @@ export class WsConnection {
 			this.#activeSocket?.readyState === WebSocket.CONNECTING &&
 			this.#connectStartedAt !== null &&
 			Date.now() - this.#connectStartedAt < CONNECT_ATTEMPT_DEDUPE_MS
-		) return;
+		)
+			return;
 		this.#clearReconnectTimeout();
 		this.#nextConnectReason = reason;
 		this.connect(getAuthToken(), this.#authDisabled);
@@ -653,6 +702,32 @@ export class WsConnection {
 		if (this.#reconnectTimeout !== null) {
 			clearTimeout(this.#reconnectTimeout);
 			this.#reconnectTimeout = null;
+		}
+	}
+
+	#scheduleConnectTimeout(socket: WebSocket): void {
+		this.#clearConnectTimeout();
+		this.#connectTimeout = setTimeout(() => {
+			this.#connectTimeout = null;
+			if (
+				this.#destroyed ||
+				!this.#isCurrentSocket(socket) ||
+				socket.readyState !== WebSocket.CONNECTING
+			)
+				return;
+
+			console.warn('WebSocket connection attempt timed out');
+			const episodeId = this.#beginOutage();
+			this.#rejectAllPending();
+			this.#closeExisting({ rejectPending: false });
+			this.#scheduleReconnect('connect-timeout', episodeId);
+		}, CONNECT_ATTEMPT_TIMEOUT_MS);
+	}
+
+	#clearConnectTimeout(): void {
+		if (this.#connectTimeout !== null) {
+			clearTimeout(this.#connectTimeout);
+			this.#connectTimeout = null;
 		}
 	}
 

@@ -5,6 +5,8 @@ import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatOrderGroup } from '$shared/chat-list';
+import type { ParentChatRef } from '$shared/chat-parentage';
+import type { ChatProcessingPhase } from '$shared/chat-types';
 
 export type ChatStatus = 'draft' | 'running';
 
@@ -20,13 +22,13 @@ export interface ChatStartupConfig {
 	firstMessage: string;
 	initialImages?: File[];
 	tags?: string[];
+	orderedPreambleIds?: readonly string[];
 }
 
 export interface ChatSessionRecord {
 	id: string;
+	parentChat: ParentChatRef | null;
 	projectPath: string;
-	effectiveProjectKey: string | null;
-	projectIdentityState: 'pending' | 'available';
 	orderGroup: ChatOrderGroup | null;
 	title: string;
 	agentId: SessionAgentId;
@@ -43,8 +45,11 @@ export interface ChatSessionRecord {
 	isPinned: boolean;
 	isArchived: boolean;
 	isProcessing: boolean;
+	processingPhase: ChatProcessingPhase | null;
+	canReloadFromNativeHistory: boolean;
 	isUnread: boolean;
 	status: ChatStatus;
+	agentOwnershipEpoch: string | null;
 	lastMessage?: string;
 	tags: string[];
 	firstMessage?: string;

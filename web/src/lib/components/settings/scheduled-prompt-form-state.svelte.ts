@@ -1,4 +1,5 @@
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import type { SessionAgentId } from '$lib/types/app';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
@@ -9,14 +10,21 @@ import {
 	nextLocalTimeUtcIso,
 } from '$lib/scheduling/local-schedule';
 import {
-	SCHEDULED_PROMPT_INTERVAL_DAYS_MAX,
-	SCHEDULED_PROMPT_INTERVAL_DAYS_MIN,
+	SCHEDULED_PROMPT_INTERVAL_HOURS_MAX,
+	SCHEDULED_PROMPT_INTERVAL_HOURS_MIN,
 	SCHEDULED_PROMPT_MAX_LENGTH,
 	hasLeadingSlashCommand,
+	scheduledPromptFitsRenderedLimit,
 	type ScheduledPrompt,
 	type ScheduledPromptDefinitionInput,
 } from '$shared/scheduled-prompts';
 import * as m from '$lib/paraglide/messages.js';
+
+const HOURS_PER_DAY = 24;
+
+export interface ScheduledPromptFormStateOptions {
+	get selectableAgentIds(): readonly SessionAgentId[];
+}
 
 export class ScheduledPromptFormState {
 	readonly startup: NewChatFormState;
@@ -25,7 +33,8 @@ export class ScheduledPromptFormState {
 	scheduleType = $state<'once' | 'recurring'>('once');
 	date = $state('');
 	time = $state('09:00');
-	intervalDays = $state(1);
+	intervalAmount = $state(1);
+	intervalUnit = $state<'hours' | 'days'>('days');
 	recurrenceEnd = $state<'forever' | 'until'>('forever');
 	endDate = $state('');
 	targetType = $state<'new-chat' | 'existing-chat'>('new-chat');
@@ -43,25 +52,34 @@ export class ScheduledPromptFormState {
 		private readonly modelCatalog: ModelCatalogStore,
 		remoteSettings: RemoteSettingsStore,
 		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'>,
+		private readonly options: ScheduledPromptFormStateOptions,
 	) {
-		this.startup = new NewChatFormState(modelCatalog, remoteSettings);
+		this.startup = new NewChatFormState({
+			modelCatalog,
+			remoteSettings,
+			get selectableAgentIds() {
+				return options.selectableAgentIds;
+			},
+		});
 	}
 
 	get canSave(): boolean {
-		return (
-			!this.saving &&
-			this.prompt.trim().length > 0 &&
-			this.prompt.trim().length <= SCHEDULED_PROMPT_MAX_LENGTH &&
-			!hasLeadingSlashCommand(this.prompt) &&
-			this.scheduleValid &&
-			this.targetValid
-		);
+		return !this.saving && this.promptError === null && this.scheduleValid && this.targetValid;
+	}
+
+	get intervalAmountMax(): number {
+		return this.intervalUnit === 'days'
+			? SCHEDULED_PROMPT_INTERVAL_HOURS_MAX / HOURS_PER_DAY
+			: SCHEDULED_PROMPT_INTERVAL_HOURS_MAX;
 	}
 
 	get promptError(): string | null {
 		if (!this.prompt.trim()) return m.scheduled_prompts_prompt_required();
 		if (this.prompt.trim().length > SCHEDULED_PROMPT_MAX_LENGTH) {
 			return m.scheduled_prompts_prompt_too_long();
+		}
+		if (!scheduledPromptFitsRenderedLimit(this.prompt.trim())) {
+			return m.scheduled_prompts_prompt_rendered_too_long();
 		}
 		if (hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
 		return null;
@@ -81,8 +99,9 @@ export class ScheduledPromptFormState {
 		}
 		return (
 			this.startup.settingsLoaded &&
+			this.options.selectableAgentIds.includes(this.startup.agentId) &&
 			this.startup.validationStatus === 'valid' &&
-			Boolean(this.startup.modelValue)
+			this.startup.resolvedModelSelection !== null
 		);
 	}
 
@@ -105,7 +124,14 @@ export class ScheduledPromptFormState {
 		if (scheduledPrompt.schedule.type === 'recurring') {
 			this.#originalNextRunAt = scheduledPrompt.schedule.nextRunAt;
 			this.#originalLocalTime = this.time;
-			this.intervalDays = scheduledPrompt.schedule.intervalDays;
+			const intervalHours = scheduledPrompt.schedule.intervalHours;
+			if (intervalHours % HOURS_PER_DAY === 0) {
+				this.intervalUnit = 'days';
+				this.intervalAmount = intervalHours / HOURS_PER_DAY;
+			} else {
+				this.intervalUnit = 'hours';
+				this.intervalAmount = intervalHours;
+			}
 			this.recurrenceEnd = scheduledPrompt.schedule.endAt ? 'until' : 'forever';
 			this.endDate = scheduledPrompt.schedule.endAt
 				? localDateValue(new Date(scheduledPrompt.schedule.endAt))
@@ -120,12 +146,12 @@ export class ScheduledPromptFormState {
 			this.busyBehavior = scheduledPrompt.target.busyBehavior;
 			return;
 		}
-		this.startup.selectAgent(scheduledPrompt.target.agentId);
-		this.startup.applyResolvedModel(
-			scheduledPrompt.target.agentId,
-			scheduledPrompt.target.model,
-			scheduledPrompt.target.modelEndpointId,
-		);
+		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
+			model: scheduledPrompt.target.model,
+			apiProviderId: scheduledPrompt.target.apiProviderId,
+			modelEndpointId: scheduledPrompt.target.modelEndpointId,
+			modelProtocol: scheduledPrompt.target.modelProtocol,
+		});
 		this.startup.projectPath = scheduledPrompt.target.projectPath;
 		this.startup.setPermissionMode(scheduledPrompt.target.permissionMode);
 		this.startup.setThinkingMode(scheduledPrompt.target.thinkingMode);
@@ -150,7 +176,8 @@ export class ScheduledPromptFormState {
 				prompt: this.prompt.trim(),
 			};
 		}
-		const selection = this.modelCatalog.selectionFor(this.startup.agentId, this.startup.modelValue);
+		const selection = this.startup.resolvedModelSelection;
+		if (!selection) return null;
 		return {
 			schedule,
 			target: {
@@ -170,34 +197,46 @@ export class ScheduledPromptFormState {
 		};
 	}
 
+	private buildRecurringEndAtUtc(): string | null {
+		if (this.recurrenceEnd !== 'until') return null;
+		if (
+			this.#originalEndAt &&
+			this.#originalEndDate === this.endDate &&
+			this.#originalLocalTime === this.time
+		) {
+			return this.#originalEndAt;
+		}
+		return localDateTimeToUtcIso(this.endDate, this.time);
+	}
+
 	private buildSchedule(now: Date): ScheduledPromptDefinitionInput['schedule'] | null {
 		const minimum = Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
 		if (this.scheduleType === 'once') {
 			const runAtUtc = localDateTimeToUtcIso(this.date, this.time);
 			return runAtUtc && Date.parse(runAtUtc) >= minimum ? { type: 'once', runAtUtc } : null;
 		}
+		const intervalHours =
+			this.intervalUnit === 'days' ? this.intervalAmount * HOURS_PER_DAY : this.intervalAmount;
 		if (
-			!Number.isSafeInteger(this.intervalDays) ||
-			this.intervalDays < SCHEDULED_PROMPT_INTERVAL_DAYS_MIN ||
-			this.intervalDays > SCHEDULED_PROMPT_INTERVAL_DAYS_MAX
+			!Number.isSafeInteger(this.intervalAmount) ||
+			!Number.isSafeInteger(intervalHours) ||
+			intervalHours < SCHEDULED_PROMPT_INTERVAL_HOURS_MIN ||
+			intervalHours > SCHEDULED_PROMPT_INTERVAL_HOURS_MAX
 		)
 			return null;
-		const firstRunAtUtc =
+		let firstRunAtUtc: string | null;
+		if (
 			this.#originalNextRunAt &&
 			this.#originalLocalTime === this.time &&
 			Date.parse(this.#originalNextRunAt) >= minimum
-				? this.#originalNextRunAt
-				: nextLocalTimeUtcIso(this.time, now);
+		) {
+			firstRunAtUtc = this.#originalNextRunAt;
+		} else {
+			firstRunAtUtc = nextLocalTimeUtcIso(this.time, now);
+		}
 		if (!firstRunAtUtc || Date.parse(firstRunAtUtc) < minimum) return null;
-		const endAtUtc =
-			this.recurrenceEnd !== 'until'
-				? null
-				: this.#originalEndAt &&
-					  this.#originalEndDate === this.endDate &&
-					  this.#originalLocalTime === this.time
-					? this.#originalEndAt
-					: localDateTimeToUtcIso(this.endDate, this.time);
+		const endAtUtc = this.buildRecurringEndAtUtc();
 		if (this.recurrenceEnd === 'until' && (!endAtUtc || endAtUtc < firstRunAtUtc)) return null;
-		return { type: 'recurring', firstRunAtUtc, intervalDays: this.intervalDays, endAtUtc };
+		return { type: 'recurring', firstRunAtUtc, intervalHours, endAtUtc };
 	}
 }

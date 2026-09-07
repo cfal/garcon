@@ -2,14 +2,12 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import Copy from '@lucide/svelte/icons/copy';
-	import Check from '@lucide/svelte/icons/check';
-	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type {
 		ChatDeleteConfirmation,
 		ChatDetailsDialog,
 		ChatRenameConfirmation,
 	} from './chat-action-dialogs-state.svelte';
+	import ChatDetailsTextField from './ChatDetailsTextField.svelte';
 
 	interface ChatActionDialogsProps {
 		chatDeleteConfirmation: ChatDeleteConfirmation | null;
@@ -36,17 +34,10 @@
 	let renameValue = $state('');
 	let renameInputRef = $state<HTMLInputElement | null>(null);
 	let deleteButtonRef = $state<HTMLButtonElement | null>(null);
-	let firstMessageCopied = $state(false);
-	let agentSessionIdCopied = $state(false);
-	let transcriptSourceCopied = $state(false);
 
 	let deleteOpen = $derived(chatDeleteConfirmation !== null);
 	let renameOpen = $derived(chatRenameConfirmation !== null);
 	let detailsOpen = $derived(chatDetailsDialog !== null);
-
-	// Uses selectable pre surfaces instead of textareas so iOS does not zoom on focus.
-	const detailsTextSurfaceClass =
-		'w-full max-w-full min-w-0 select-text overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-input bg-background p-2 font-mono text-xs leading-snug text-foreground';
 
 	// Populates the rename field whenever a different chat opens the dialog.
 	$effect(() => {
@@ -95,20 +86,8 @@
 		});
 	}
 
-	function displayText(value: string | null): string {
-		return value || '';
-	}
-
-	async function copyField(e: MouseEvent, text: string | null, onCopied: (v: boolean) => void) {
-		const value = displayText(text);
-		if (!value) return;
-
-		const container = (e.currentTarget as HTMLElement)?.closest('[role="dialog"]') ?? undefined;
-		const copied = await copyToClipboard(value, container);
-		if (!copied) return;
-
-		onCopied(true);
-		setTimeout(() => onCopied(false), 2000);
+	function displayModel(value: string): string {
+		return value || m.sidebar_details_unavailable();
 	}
 </script>
 
@@ -173,6 +152,60 @@
 				class="min-w-0 max-h-[65vh] overflow-y-auto overflow-x-hidden px-6 pt-1 pb-6 sm:max-h-[60vh]"
 			>
 				<div class="space-y-4 min-w-0">
+					<ChatDetailsTextField
+						label={m.sidebar_details_chat_id()}
+						value={chatDetailsDialog?.chatId ?? null}
+						surfaceClass="min-h-12 max-h-24"
+					/>
+					<ChatDetailsTextField
+						label={m.sidebar_details_project_path()}
+						value={chatDetailsDialog?.projectPath ?? null}
+						surfaceClass="min-h-12 max-h-24"
+					/>
+					{#if chatDetailsDialog?.carryOverSegments.length}
+						<section class="min-w-0 space-y-2" aria-label={m.sidebar_details_carryover_history()}>
+							<h3 class="text-sm font-medium">{m.sidebar_details_carryover_history()}</h3>
+							<ol class="divide-y divide-border border-y border-border">
+								{#each chatDetailsDialog.carryOverSegments as segment (segment.id)}
+									<svelte:boundary>
+										<li class="min-w-0 py-3 text-sm">
+											<div class="min-w-0 break-words font-medium">
+												{segment.agentId} / {displayModel(segment.model)}
+												{#if segment.trailingHandoff}
+													<span class="text-muted-foreground">
+														-&gt; {segment.trailingHandoff.agentId} /
+														{displayModel(segment.trailingHandoff.model)}
+													</span>
+												{/if}
+											</div>
+											<div
+												class="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+											>
+												<span>{formatHumanDate(segment.capturedAt)}</span>
+												<span>
+													{m.sidebar_details_carryover_messages({
+														visible: segment.visibleMessageCount,
+														stored: segment.storedMessageCount,
+													})}
+												</span>
+												{#if segment.truncated}
+													<span>{m.sidebar_details_carryover_truncated()}</span>
+												{/if}
+											</div>
+											<div class="mt-1 break-all font-mono text-xs text-muted-foreground">
+												{segment.id}
+											</div>
+										</li>
+										{#snippet failed()}
+											<li class="py-3 text-sm text-muted-foreground">
+												{m.sidebar_details_unavailable()}
+											</li>
+										{/snippet}
+									</svelte:boundary>
+								{/each}
+							</ol>
+						</section>
+					{/if}
 					<div class="space-y-1">
 						<div class="text-sm font-medium">{m.sidebar_details_created_at()}</div>
 						<div class="text-sm text-muted-foreground">
@@ -180,39 +213,13 @@
 						</div>
 					</div>
 					{#if chatDetailsDialog?.transcriptSource}
-						<div class="min-w-0 space-y-1">
-							<div class="flex items-center justify-between gap-2">
-								<div class="text-sm font-medium">
-									{chatDetailsDialog.transcriptSource.kind === 'filesystem-path'
-										? m.sidebar_details_native_path()
-										: m.sidebar_details_native_reference()}
-								</div>
-								<button
-									type="button"
-									class="inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-									onclick={(e) =>
-										copyField(
-											e,
-											chatDetailsDialog?.transcriptSource?.value || null,
-											(v) => (transcriptSourceCopied = v),
-										)}
-									title={m.chat_tool_display_copy_to_clipboard()}
-									aria-label={m.chat_tool_display_copy_to_clipboard()}
-								>
-									{#if transcriptSourceCopied}
-										<Check class="h-4 w-4 text-status-success-foreground" />
-									{:else}
-										<Copy class="h-4 w-4" />
-									{/if}
-								</button>
-							</div>
-							<pre
-								role="region"
-								aria-label={chatDetailsDialog.transcriptSource.kind === 'filesystem-path'
-									? m.sidebar_details_native_path()
-									: m.sidebar_details_native_reference()}
-								class="{detailsTextSurfaceClass} max-h-24 min-h-12">{chatDetailsDialog.transcriptSource.value}</pre>
-						</div>
+						<ChatDetailsTextField
+							label={chatDetailsDialog.transcriptSource.kind === 'filesystem-path'
+								? m.sidebar_details_native_path()
+								: m.sidebar_details_native_reference()}
+							value={chatDetailsDialog.transcriptSource.value}
+							surfaceClass="min-h-12 max-h-24"
+						/>
 					{/if}
 					<div class="space-y-1">
 						<div class="text-sm font-medium">{m.sidebar_details_last_activity()}</div>
@@ -220,64 +227,16 @@
 							{formatHumanDate(chatDetailsDialog?.lastActivityAt || null)}
 						</div>
 					</div>
-					<div class="space-y-1">
-						<div class="flex items-center justify-between gap-2">
-							<div class="text-sm font-medium">{m.sidebar_details_agent_session_id()}</div>
-							<button
-								type="button"
-								class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-								onclick={(e) =>
-									copyField(
-										e,
-										chatDetailsDialog?.agentSessionId || null,
-										(v) => (agentSessionIdCopied = v),
-									)}
-								title={m.chat_tool_display_copy_to_clipboard()}
-								aria-label={m.chat_tool_display_copy_to_clipboard()}
-							>
-								{#if agentSessionIdCopied}
-									<Check class="w-4 h-4 text-status-success-foreground" />
-								{:else}
-									<Copy class="w-4 h-4" />
-								{/if}
-							</button>
-						</div>
-						<pre
-							role="region"
-							aria-label={m.sidebar_details_agent_session_id()}
-							class="{detailsTextSurfaceClass} min-h-12 max-h-24">{displayText(
-								chatDetailsDialog?.agentSessionId || null,
-							)}</pre>
-					</div>
-					<div class="space-y-1">
-						<div class="flex items-center justify-between gap-2">
-							<div class="text-sm font-medium">{m.sidebar_details_first_message()}</div>
-							<button
-								type="button"
-								class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-								onclick={(e) =>
-									copyField(
-										e,
-										chatDetailsDialog?.firstMessage || null,
-										(v) => (firstMessageCopied = v),
-									)}
-								title={m.chat_tool_display_copy_to_clipboard()}
-								aria-label={m.chat_tool_display_copy_to_clipboard()}
-							>
-								{#if firstMessageCopied}
-									<Check class="w-4 h-4 text-status-success-foreground" />
-								{:else}
-									<Copy class="w-4 h-4" />
-								{/if}
-							</button>
-						</div>
-						<pre
-							role="region"
-							aria-label={m.sidebar_details_first_message()}
-							class="{detailsTextSurfaceClass} h-32 max-h-[40vh]">{displayText(
-								chatDetailsDialog?.firstMessage || null,
-							)}</pre>
-					</div>
+					<ChatDetailsTextField
+						label={m.sidebar_details_agent_session_id()}
+						value={chatDetailsDialog?.agentSessionId ?? null}
+						surfaceClass="min-h-12 max-h-24"
+					/>
+					<ChatDetailsTextField
+						label={m.sidebar_details_first_message()}
+						value={chatDetailsDialog?.firstMessage ?? null}
+						surfaceClass="h-32 max-h-[40vh]"
+					/>
 				</div>
 			</div>
 		{/if}

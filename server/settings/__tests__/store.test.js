@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
+import { CorruptStateFileError, QUARANTINE_INFIX } from '../../lib/json-file-store.ts';
 import { SettingsStore } from '../store.js';
 
 let tmpDir;
@@ -66,6 +67,14 @@ describe('settings store', () => {
       expect(loaded.chatNames.a).toBe('title a');
     });
 
+    it('writes owner-only settings files', async () => {
+      if (process.platform === 'win32') return;
+
+      await store.saveSettings({ ui: {}, paths: {}, chatNames: {} });
+
+      expect((await fs.stat(settingsFile())).mode & 0o777).toBe(0o600);
+    });
+
     it('strips unknown top-level fields during load', async () => {
       await writeRaw({
         ui: { theme: 'dark' },
@@ -116,6 +125,20 @@ describe('settings store', () => {
       expect(name).toBe('Trimmed Title');
     });
 
+    it('setSessionNameIfAbsent preserves an explicit title queued first', async () => {
+      const explicitWrite = store.setSessionName('abc', 'Explicit Title');
+      const generatedWrite = store.setSessionNameIfAbsent('abc', 'Generated Title');
+
+      await expect(generatedWrite).resolves.toBe(false);
+      await explicitWrite;
+      expect(store.getChatName('abc')).toBe('Explicit Title');
+    });
+
+    it('setSessionNameIfAbsent persists when no title exists', async () => {
+      await expect(store.setSessionNameIfAbsent('abc', 'Generated Title')).resolves.toBe(true);
+      expect(store.getChatName('abc')).toBe('Generated Title');
+    });
+
     it('removeSessionName deletes the entry', async () => {
       await store.setSessionName('abc', 'My Title');
       await store.removeSessionName('abc');
@@ -156,6 +179,81 @@ describe('settings store', () => {
       const ui = await store.getUiSettings();
       expect(ui.theme).toBe('dark');
       expect(ui.fontSize).toBe(14);
+    });
+
+    it('normalizes and persists hidden bash command patterns', async () => {
+      const patterns = [
+        { pattern: 'git *', mode: 'glob' },
+        { pattern: '^cargo', mode: 'regex' },
+        { pattern: 'git *', mode: 'glob' },
+      ];
+
+      await store.setUiSettings({ theme: 'dark' });
+      await store.setUiSettings({ hiddenBashCommandPatterns: patterns });
+
+      expect(await store.getUiSettings()).toEqual({
+        theme: 'dark',
+        hiddenBashCommandPatterns: [
+          { pattern: 'git *', mode: 'glob' },
+          { pattern: '^cargo', mode: 'regex' },
+        ],
+      });
+      expect(await store.getRemoteSettingsVersion()).toBe(2);
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.ui).toEqual(await store.getUiSettings());
+    });
+
+    it('drops malformed hidden bash command patterns from loaded settings', async () => {
+      await writeRaw({
+        ui: {
+          theme: 'dark',
+          hiddenBashCommandPatterns: [{ pattern: '([unclosed', mode: 'regex' }],
+        },
+        paths: {},
+        chatNames: {},
+      });
+
+      expect(await store.getUiSettings()).toEqual({ theme: 'dark' });
+    });
+
+    it('strips commit-only fields from title settings while preserving commit settings', async () => {
+      await store.setUiSettings({
+        chatTitle: {
+          enabled: true,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          customPrompt: 'Unsupported title prompt',
+          useCommonDirPrefix: true,
+        },
+        commitMessage: {
+          enabled: false,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          customPrompt: 'Summarize the diff',
+          useCommonDirPrefix: true,
+        },
+      });
+
+      expect(store.getUiSettings()).toMatchObject({
+        chatTitle: {
+          enabled: true,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+        },
+        commitMessage: {
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          customPrompt: 'Summarize the diff',
+          useCommonDirPrefix: true,
+        },
+      });
+      expect(store.getUiSettings().chatTitle).not.toHaveProperty('customPrompt');
+      expect(store.getUiSettings().chatTitle).not.toHaveProperty('useCommonDirPrefix');
+      expect(store.getUiSettings().commitMessage).not.toHaveProperty('enabled');
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.ui).toEqual(store.getUiSettings());
     });
 
     it('trims and persists app identity title settings', async () => {
@@ -558,7 +656,14 @@ describe('settings store', () => {
     it('returns empty settings for missing file', async () => {
       const settings = await store.loadSettings();
       expect(settings).toEqual({
-        features: { transcriptSearch: { enabled: false } },
+        features: {
+          transcriptSearch: { enabled: false },
+          agentCommands: {
+            enabled: true,
+            chatIdDiscovery: true,
+            sendMessage: true,
+          },
+        },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         ...startupSettings(),
@@ -567,17 +672,17 @@ describe('settings store', () => {
       });
     });
 
-    it('returns empty settings for malformed JSON', async () => {
-      await fs.writeFile(settingsFile(), 'not json{{{', 'utf8');
-      const settings = await store.loadSettings();
-      expect(settings).toEqual({
-        features: { transcriptSearch: { enabled: false } },
-        ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
-        pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
-        ...startupSettings(),
-        chatFolders: [],
-        savedChatSearches: [],
-      });
+    it('quarantines non-object settings and remains fail-closed', async () => {
+      const corruptBytes = 'null';
+      await fs.writeFile(settingsFile(), corruptBytes, 'utf8');
+
+      await expect(store.loadSettings()).rejects.toBeInstanceOf(CorruptStateFileError);
+
+      const [quarantineName] = (await fs.readdir(tmpDir)).filter((entry) =>
+        entry.startsWith(`project-settings.json${QUARANTINE_INFIX}`));
+      expect(await fs.readFile(path.join(tmpDir, quarantineName), 'utf8')).toBe(corruptBytes);
+      await expect(fs.stat(settingsFile())).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(store.loadSettings()).rejects.toBeInstanceOf(CorruptStateFileError);
     });
 
     it('normalizes invalid execution defaults on load', async () => {
@@ -623,6 +728,7 @@ describe('settings store', () => {
     it('adds missing chat IDs to normalChatIds', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {}, 'c': {} }),
+        listChatIds: () => ['a', 'b', 'c'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -643,6 +749,7 @@ describe('settings store', () => {
     it('removes unknown IDs from ordering lists', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {} }),
+        listChatIds: () => ['a'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -662,6 +769,7 @@ describe('settings store', () => {
     it('resolves cross-list duplicates by precedence', async () => {
       const mockRegistry = {
         listAllChats: () => ({ 'a': {}, 'b': {} }),
+        listChatIds: () => ['a', 'b'],
       };
       await store.saveSettings({
         ui: {}, paths: {}, chatNames: {},
@@ -765,74 +873,44 @@ describe('settings store', () => {
     });
   });
 
-  describe('reorderWindow', () => {
-    it('reorders a contiguous window within a list', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b', 'c', 'd'], archivedChatIds: [] });
+  describe('reorderChat', () => {
+    const isKnownChat = (chatId) => ['a', 'b', 'c'].includes(chatId);
+
+    it('persists a placement and emits the generic list invalidation', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b', 'c'], archivedChatIds: [] });
       const events = [];
       store.onListChanged((reason, chatId) => events.push({ reason, chatId }));
 
-      const result = await store.reorderWindow('normal', ['b', 'c'], ['c', 'b']);
+      const result = await store.reorderChat({
+        chatId: 'c',
+        placement: { kind: 'relative', referenceChatId: 'a', position: 'before' },
+      }, isKnownChat);
 
-      expect(result).toEqual({ success: true });
-      const settings = await store.loadSettings();
-      expect(settings.normalChatIds).toEqual(['a', 'c', 'b', 'd']);
-      expect(events[0].reason).toBe('chats-reordered');
+      expect(result).toEqual({
+        success: true,
+        response: { success: true, chatId: 'c', orderGroup: 'normal', changed: true },
+      });
+      expect((await store.loadSettings()).normalChatIds).toEqual(['c', 'a', 'b']);
+      expect(events).toEqual([{ reason: 'chats-reordered', chatId: 'c' }]);
     });
 
-    it('bumps remote settings version when reordering pinned chats', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b', 'c'], normalChatIds: [], archivedChatIds: [] });
-      const remoteEvents = [];
-      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
-
-      const result = await store.reorderWindow('pinned', ['a', 'b'], ['b', 'a']);
-
-      expect(result).toEqual({ success: true });
-      expect(await store.getPinnedChatIds()).toEqual(['b', 'a', 'c']);
-      expect(await store.getRemoteSettingsVersion()).toBe(1);
-      expect(remoteEvents).toEqual(['changed']);
-    });
-
-    it('rejects empty oldOrder', async () => {
-      const result = await store.reorderWindow('normal', [], []);
-      expect(result.success).toBe(false);
-    });
-
-    it('rejects mismatched IDs between oldOrder and newOrder', async () => {
-      const result = await store.reorderWindow('normal', ['a', 'b'], ['a', 'c']);
-      expect(result.success).toBe(false);
-    });
-  });
-
-  describe('reorderRelative', () => {
-    it('moves a chat above another in the same group', async () => {
+    it('resolves the section after an earlier queued group mutation', async () => {
       await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b', 'c'], archivedChatIds: [] });
 
-      const result = await store.reorderRelative('c', 'a', 'above');
+      const archive = store.toggleArchive('a');
+      const reorder = store.reorderChat({
+        chatId: 'a',
+        placement: { kind: 'boundary', boundary: 'bottom' },
+      }, isKnownChat);
 
-      expect(result).toEqual({ success: true });
+      await archive;
+      expect(await reorder).toEqual({
+        success: true,
+        response: { success: true, chatId: 'a', orderGroup: 'archived', changed: false },
+      });
       const settings = await store.loadSettings();
-      expect(settings.normalChatIds).toEqual(['c', 'a', 'b']);
-    });
-
-    it('bumps remote settings version when quickly reordering pinned chats', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b', 'c'], normalChatIds: [], archivedChatIds: [] });
-      const remoteEvents = [];
-      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
-
-      const result = await store.reorderRelative('c', 'a', 'above');
-
-      expect(result).toEqual({ success: true });
-      expect(await store.getPinnedChatIds()).toEqual(['c', 'a', 'b']);
-      expect(await store.getRemoteSettingsVersion()).toBe(1);
-      expect(remoteEvents).toEqual(['changed']);
-    });
-
-    it('rejects cross-group reorder', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a'], normalChatIds: ['b'], archivedChatIds: [] });
-
-      const result = await store.reorderRelative('a', 'b', 'above');
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Cross-group');
+      expect(settings.normalChatIds).toEqual(['b', 'c']);
+      expect(settings.archivedChatIds).toEqual(['a']);
     });
   });
 
@@ -952,6 +1030,40 @@ describe('settings store', () => {
       }]);
     });
 
+    it('maps a chat start agentSettings envelope into per-agent execution defaults', async () => {
+      const envelope = { ownerId: 'codex', schemaVersion: 1, values: { effort: 'high' } };
+      await store.recordChatStartup({
+        origin: 'interactive',
+        agentId: 'codex',
+        projectPath: '/workspace/project-a',
+        model: 'gpt-5.4',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'medium',
+        agentSettings: envelope,
+      });
+
+      expect(store.getExecutionDefaults().byAgent.codex).toEqual({
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'medium',
+        agentSettingsById: { codex: envelope },
+      });
+    });
+
+    it('keeps recordChatStartup best-effort when persistence fails', async () => {
+      await fs.mkdir(settingsFile());
+      try {
+        await store.recordChatStartup({
+          agentId: 'codex',
+          projectPath: '/workspace/project-a',
+          model: 'gpt-5.4',
+        });
+      } finally {
+        await fs.rm(settingsFile(), { recursive: true });
+      }
+
+      expect(store.getRecentAgentSettings()).toEqual([]);
+    });
+
     it('moves duplicate recent targets to the front and caps the list', async () => {
       for (let index = 0; index < 21; index += 1) {
         await store.recordChatStartup({
@@ -1008,25 +1120,135 @@ describe('settings store', () => {
     });
   });
 
-  describe('transcript search feature settings', () => {
-    it('defaults missing and malformed persisted values to disabled', async () => {
-      await writeRaw({ features: { transcriptSearch: { enabled: 'yes' } } });
-      expect(store.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: false } });
+  describe('feature settings', () => {
+    it('removes unknown fields from persisted command settings', async () => {
+      await writeRaw({
+        features: {
+          transcriptSearch: { enabled: false },
+          agentCommands: {
+            enabled: true,
+            chatIdDiscovery: true,
+            sendMessage: true,
+            removedCommand: true,
+          },
+        },
+      });
+
+      expect(store.getFeatureSettings().agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: true,
+      });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
-      expect(persisted.features).toEqual({ transcriptSearch: { enabled: false } });
+      expect(persisted.features.agentCommands).toEqual(
+        store.getFeatureSettings().agentCommands,
+      );
+    });
+
+    it('normalizes malformed feature settings and persists the complete command object', async () => {
+      await writeRaw({
+        features: {
+          transcriptSearch: { enabled: 'yes' },
+          agentCommands: { enabled: false, chatIdDiscovery: 'no' },
+        },
+      });
+      expect(store.getFeatureSettings()).toEqual({
+        transcriptSearch: { enabled: false },
+        agentCommands: {
+          enabled: false,
+          chatIdDiscovery: true,
+          sendMessage: true,
+        },
+      });
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.features).toEqual({
+        transcriptSearch: { enabled: false },
+        agentCommands: {
+          enabled: false,
+          chatIdDiscovery: true,
+          sendMessage: true,
+        },
+      });
+    });
+
+    it('migrates legacy chat ID discovery without disabling other commands', async () => {
+      await writeRaw({
+        features: {
+          transcriptSearch: { enabled: false },
+          chatIdDiscovery: { enabled: false },
+        },
+      });
+
+      expect(store.getFeatureSettings().agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: true,
+      });
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.features.agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: true,
+      });
+      expect(persisted.features.chatIdDiscovery).toBeUndefined();
     });
 
     it('persists enabled and increments the remote settings version once', async () => {
       const events = [];
       store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setTranscriptSearchEnabled(true);
-      expect(store.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: true } });
+      await store.setFeatureSettings({ transcriptSearch: { enabled: true } });
+      expect(store.getFeatureSettings()).toEqual({
+        transcriptSearch: { enabled: true },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+        },
+      });
       expect(store.getRemoteSettingsVersion()).toBe(1);
       expect(events).toEqual(['changed']);
 
       const reloaded = new SettingsStore(tmpDir);
       await reloaded.init();
-      expect(reloaded.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: true } });
+      expect(reloaded.getFeatureSettings()).toEqual({
+        transcriptSearch: { enabled: true },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+        },
+      });
+    });
+
+    it('persists the complete agent command settings and emits one remote change', async () => {
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('changed'));
+      await store.setFeatureSettings({
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: false,
+          sendMessage: false,
+        },
+      });
+
+      expect(store.getFeatureSettings()).toEqual({
+        transcriptSearch: { enabled: false },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: false,
+          sendMessage: false,
+        },
+      });
+      expect(store.getRemoteSettingsVersion()).toBe(1);
+      expect(events).toEqual(['changed']);
+
+      const reloaded = new SettingsStore(tmpDir);
+      await reloaded.init();
+      expect(reloaded.getFeatureSettings().agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: false,
+      });
     });
   });
 });

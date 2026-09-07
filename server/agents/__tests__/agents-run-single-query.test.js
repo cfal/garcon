@@ -1,13 +1,18 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
 function makeRouter(overrides = {}) {
+  const transcript = createRuntimeTranscriptFixture();
   const run = mock(async () => 'response');
   const integration = {
-    descriptor: { id: 'test' },
+    descriptor: {
+      id: 'test',
+      supportedThinkingModes: overrides.supportedThinkingModes ?? ['none', 'xhigh'],
+    },
     settings: {
       defaults: mock(() => envelope('test', { defaulted: true })),
       parse: mock((input) => input),
@@ -40,8 +45,12 @@ function makeRouter(overrides = {}) {
     },
     endpointResolver,
     events: {},
+    projection: {},
     getCarryOverRevision: () => 'carry-1',
-    loadCarryOver: () => [],
+    getCarryOverMessageCount: async () => 0,
+    ledger: transcript.ledger,
+    hasPendingOwnershipTransfer: () => false,
+    adoption: transcript.adoption,
   });
   return { router, integration, endpointResolver, run };
 }
@@ -106,6 +115,39 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
         },
       },
     }));
+  });
+
+  it('preserves one-shot thinking, timeout, cancellation, and cwd fallback', async () => {
+    const { router, run } = makeRouter();
+    const controller = new AbortController();
+
+    await router.runSingleQuery('prompt', {
+      agentId: 'test',
+      model: 'model-a',
+      cwd: '/repo-from-cwd',
+      thinkingMode: 'xhigh',
+      timeoutMs: 110_000,
+      signal: controller.signal,
+    });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      projectPath: '/repo-from-cwd',
+      thinkingMode: 'xhigh',
+      timeoutMs: 110_000,
+      signal: controller.signal,
+    }));
+  });
+
+  it('normalizes unsupported one-shot thinking through the integration descriptor', async () => {
+    const { router, run } = makeRouter({ supportedThinkingModes: [] });
+
+    await router.runSingleQuery('prompt', {
+      agentId: 'test',
+      model: 'model-a',
+      thinkingMode: 'high',
+    });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ thinkingMode: 'none' }));
   });
 
   it('rejects integrations without the optional one-shot facet', async () => {

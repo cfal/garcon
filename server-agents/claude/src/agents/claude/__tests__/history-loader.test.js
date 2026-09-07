@@ -1,16 +1,11 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import {
-  getClaudeSessionMessagesFromNativePath,
-  loadClaudeChatMessages,
-  loadClaudeChatMessagePage,
-} from '../history-loader.js';
-import { PendingUserInputService } from '../../../../../../server/chats/pending-user-input-service.js';
+import { loadClaudeChatMessages } from '../history-loader.js';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
+import { CLAUDE_STEERING_PROMPT_PREFIX } from '../user-input.js';
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-load-test-'));
@@ -23,319 +18,392 @@ async function withTempJsonl(lines, fn) {
   }
 }
 
-describe('Claude pending-input evidence', () => {
-  it('preserves a captured CLI entity-bearing input through native reconciliation', async () => {
-    const fixturePath = fileURLToPath(new URL('./fixtures/claude-user-message-entities.jsonl', import.meta.url));
-    const content = 'Fixture capture only. Do not inspect or modify files. Preserve this marker as the literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';
-    const service = new PendingUserInputService({
-      loadNativeMessages: () => loadClaudeChatMessages(fixturePath),
-      getRetainedHistoryMessages: () => [],
-    });
-    await service.register('chat-1', content, {
-      clientRequestId: 'request-1',
-      createdAt: '2026-07-17T15:20:02.700Z',
-    });
+describe('Claude strict history import', () => {
+  it('[TLV5-ADOPT.07-CLAUDE-UNIT-01] rejects incomplete records and recognized content payloads before retry', async () => {
+    const invalidEntry = JSON.stringify({ sessionId: 'session-1', type: 'user' });
+    await withTempJsonl([invalidEntry], async (filePath) => {
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).rejects.toThrow();
 
-    const nativeMessages = await loadClaudeChatMessages(fixturePath);
-    expect(nativeMessages).toMatchObject([{ type: 'user-message', content }]);
-    await service.reconcileNativeHistory('chat-1');
-    expect(service.listForChat('chat-1')).toEqual([]);
+      const malformedPartShapes = [
+        ['null part', null],
+        ['primitive part', 17],
+        ['array part', []],
+        ['part type missing', {}],
+        ['part type empty', { type: '' }],
+        ['part type non-string', { type: 17 }],
+      ];
+      const invalidParts = [
+        ...['user', 'assistant'].flatMap((role) => malformedPartShapes.map(
+          ([label, part]) => [`${role} ${label}`, role, part],
+        )),
+        ['user text missing', 'user', { type: 'text' }],
+        ['user text non-string', 'user', { type: 'text', text: 17 }],
+        ['assistant text missing', 'assistant', { type: 'text' }],
+        ['assistant text non-string', 'assistant', { type: 'text', text: 17 }],
+        ['thinking missing', 'assistant', { type: 'thinking' }],
+        ['thinking non-string', 'assistant', { type: 'thinking', thinking: false }],
+      ];
+      const invalidContents = [
+        ...invalidParts.map(([label, role, part]) => [label, role, [part]]),
+        [
+          'recognized part before malformed part',
+          'assistant',
+          [{ type: 'text', text: 'recognized assistant content' }, {}],
+        ],
+        [
+          'malformed part before recognized part',
+          'assistant',
+          [{}, { type: 'text', text: 'recognized assistant content' }],
+        ],
+      ];
+      const outcomes = [];
+      for (const [label, role, content] of invalidContents) {
+        await fs.writeFile(filePath, `${JSON.stringify({
+          sessionId: 'session-1',
+          type: role,
+          uuid: 'invalid-part',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          message: { role, content },
+        })}\n`, 'utf8');
+        try {
+          await loadClaudeChatMessages(filePath, undefined, { throwOnError: true });
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
+
+      const topLevelContents = [
+        ['user', 'retained top-level user content'],
+        ['assistant', 'retained top-level assistant content'],
+      ];
+      await fs.writeFile(filePath, `${topLevelContents.map(([role, content], index) => JSON.stringify({
+        sessionId: 'session-1',
+        type: role,
+        uuid: `top-level-${role}`,
+        timestamp: `2026-08-16T00:00:0${index}.000Z`,
+        message: { role, content },
+      })).join('\n')}\n`, 'utf8');
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toMatchObject([
+        { type: 'user-message', content: topLevelContents[0][1] },
+        { type: 'assistant-message', content: topLevelContents[1][1] },
+      ]);
+
+      await fs.writeFile(filePath, [
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'queue-operation',
+          uuid: 'housekeeping',
+          timestamp: '2026-08-16T00:00:00.000Z',
+          operation: 'dequeue',
+        }),
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'user',
+          uuid: 'empty-user',
+          timestamp: '2026-08-16T00:00:01.000Z',
+          message: {
+            role: 'user',
+            content: [
+              { type: 'text', text: '' },
+              { type: 'future-housekeeping', payload: { retained: true } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          sessionId: 'session-1',
+          type: 'assistant',
+          uuid: 'empty-assistant',
+          timestamp: '2026-08-16T00:00:02.000Z',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '' },
+              { type: 'thinking', thinking: '' },
+              { type: 'future-housekeeping', payload: { retained: true } },
+            ],
+          },
+        }),
+        ...['user', 'assistant'].map((role, index) => JSON.stringify({
+          sessionId: 'session-1',
+          type: role,
+          uuid: `empty-${role}-array`,
+          timestamp: `2026-08-16T00:00:0${index + 3}.000Z`,
+          message: { role, content: [] },
+        })),
+      ].join('\n') + '\n', 'utf8');
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toEqual([]);
+
+      await fs.writeFile(filePath, '', 'utf8');
+      await expect(loadClaudeChatMessages(filePath, undefined, {
+        throwOnError: true,
+      })).resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidContents.map(([label]) => [label, 'rejected']));
+    });
   });
 });
 
-describe('loadClaudeChatMessagePage', () => {
-  it('loads only the first value from a concatenated physical line', async () => {
-    const user = {
+describe('Claude native user-input conversion', () => {
+  it('preserves a captured CLI entity-bearing input with its native identity', async () => {
+    const fixturePath = fileURLToPath(new URL('./fixtures/claude-user-message-entities.jsonl', import.meta.url));
+    const content = 'Fixture capture only. Do not inspect or modify files. Preserve this marker as the literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';
+    const nativeMessages = await loadClaudeChatMessages(fixturePath);
+    expect(nativeMessages).toMatchObject([{ type: 'user-message', content }]);
+    // Entity-bearing content never participates in identity: provider metadata
+    // carries the native uuid used for import deduplication and native forks.
+    expect(getNativeMessageSource(nativeMessages[0])).toMatchObject({ entryId: expect.any(String) });
+  });
+
+  it('converts a user input persisted only as a queued command attachment', async () => {
+    const content = 'it finished now';
+    const queuedCommand = {
       sessionId: 'session-1',
-      type: 'user',
-      uuid: 'entry-1',
-      timestamp: '2026-02-21T09:00:00.000Z',
-      message: { role: 'user', content: 'recovered prompt' },
+      type: 'attachment',
+      uuid: 'queued-1',
+      timestamp: '2026-07-21T14:00:00.000Z',
+      attachment: {
+        type: 'queued_command',
+        prompt: content,
+        commandMode: 'prompt',
+        timestamp: '2026-07-21T14:00:01.000Z',
+      },
     };
-    const mode = { sessionId: 'session-1', type: 'mode', mode: 'normal' };
-    const assistant = {
-      sessionId: 'session-1',
-      type: 'assistant',
-      uuid: 'entry-2',
-      timestamp: '2026-02-21T09:00:01.000Z',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'later reply' }] },
-    };
 
-    await withTempJsonl([
-      `${JSON.stringify(user)}${JSON.stringify(mode)}`,
-      '{bad}',
-      JSON.stringify(assistant),
-    ], async (filePath) => {
+    await withTempJsonl([JSON.stringify(queuedCommand)], async (filePath) => {
       const messages = await loadClaudeChatMessages(filePath);
-      const page = await loadClaudeChatMessagePage(filePath, 10, 0);
-      const raw = await getClaudeSessionMessagesFromNativePath(filePath);
-
-      expect(messages.map((message) => message.content)).toEqual(['recovered prompt', 'later reply']);
-      expect(getNativeMessageSource(messages[0])).toEqual({ entryId: 'entry-1', lineNumber: 1 });
-      expect(page.messages.map((message) => message.content)).toEqual(['recovered prompt', 'later reply']);
-      expect(raw.map((entry) => entry.type)).toEqual(['user', 'assistant']);
+      expect(messages).toMatchObject([{
+        type: 'user-message',
+        content,
+        timestamp: '2026-07-21T14:00:01.000Z',
+      }]);
+      expect(getNativeMessageSource(messages[0])).toEqual({
+        entryId: 'queued-1',
+        lineNumber: 1,
+      });
     });
   });
 
-  it('loads the initial page from tail JSONL entries', async () => {
-    const lines = Array.from({ length: 6 }, (_, index) => JSON.stringify({
-      sessionId: 'session-1',
-      type: index % 2 === 0 ? 'user' : 'assistant',
-      timestamp: `2026-02-21T10:00:0${index}.000Z`,
-      message: {
-        role: index % 2 === 0 ? 'user' : 'assistant',
-        content: index % 2 === 0 ? `prompt ${index}` : [{ type: 'text', text: `reply ${index}` }],
-      },
-    }));
-
-    const page = await withTempJsonl(lines, (filePath) => loadClaudeChatMessagePage(filePath, 2, 0));
-
-    expect(page).toMatchObject({ total: 6, hasMore: true, offset: 0, limit: 2 });
-    expect(page.messages.map((message) => message.content)).toEqual(['prompt 4', 'reply 5']);
-  });
-
-  it('uses deterministic source timestamps when native timestamps are missing or non-string', async () => {
-    const lines = [undefined, 123].map((timestamp, index) => JSON.stringify({
-      sessionId: 'session-1',
-      type: 'assistant',
-      ...(timestamp === undefined ? {} : { timestamp }),
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: `reply ${index}` }],
-      },
-    }));
-
-    await withTempJsonl(lines, async (filePath) => {
-      const first = await loadClaudeChatMessages(filePath);
-      const second = await loadClaudeChatMessages(filePath);
-      const firstPage = await loadClaudeChatMessagePage(filePath, 2, 0);
-      const secondPage = await loadClaudeChatMessagePage(filePath, 2, 0);
-
-      expect(second).toEqual(first);
-      expect(first.map((message) => message.timestamp)).toEqual([
-        '2000-01-01T00:00:00.001Z',
-        '2000-01-01T00:00:00.002Z',
-      ]);
-      expect(secondPage.revision).toBe(firstPage.revision);
-      expect(firstPage.revision).toBe(transcriptRevision(first));
-    });
-  });
-
-  it('loads older pages with an exact total without retaining full messages', async () => {
-    const lines = Array.from({ length: 600 }, (_, index) => JSON.stringify({
-      sessionId: 'session-1',
-      type: 'assistant',
-      timestamp: new Date(Date.UTC(2026, 1, 21, 10, 0, index)).toISOString(),
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: `reply ${index} ${'x'.repeat(800)}` }],
-      },
-    }));
-
-    const page = await withTempJsonl(lines, (filePath) => loadClaudeChatMessagePage(filePath, 3, 5));
-
-    expect(page).toMatchObject({ total: 600, hasMore: true, offset: 5, limit: 3 });
-    expect(page.messages.map((message) => message.content.slice(0, 9))).toEqual([
-      'reply 592', 'reply 593', 'reply 594',
-    ]);
-  });
-
-  it('matches full-loader ordering for out-of-order timestamps at arbitrary offsets', async () => {
-    const timestamps = [5, 0, 1, 2, 3, 4];
-    const lines = timestamps.map((second, index) => JSON.stringify({
-      sessionId: 'session-1',
-      type: 'assistant',
-      timestamp: `2026-02-21T10:00:0${second}.000Z`,
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: `reply ${index}` }],
-      },
-    }));
-
-    await withTempJsonl(lines, async (filePath) => {
-      const full = await loadClaudeChatMessages(filePath);
-      for (const offset of [0, 2]) {
-        const page = await loadClaudeChatMessagePage(filePath, 2, offset);
-        const end = full.length - offset;
-        expect(page.messages).toEqual(full.slice(end - 2, end));
-        expect(page.revision).toBe(transcriptRevision(full));
-      }
-    });
-  });
-
-  it('matches full ordering with mixed invalid and missing timestamps', async () => {
-    const timestamps = ['2026-02-21T10:00:03.000Z', 'invalid', undefined,
-      '2026-02-21T10:00:01.000Z', '2026-02-21T10:00:02.000Z'];
-    const lines = timestamps.map((timestamp, index) => JSON.stringify({
-      sessionId: 'session-1',
-      type: 'assistant',
-      ...(timestamp === undefined ? {} : { timestamp }),
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: `reply ${index}` }],
-      },
-    }));
-
-    await withTempJsonl(lines, async (filePath) => {
-      const expected = (await loadClaudeChatMessages(filePath)).map((message) => message.content);
-      for (const offset of [0, 1, 3]) {
-        const page = await loadClaudeChatMessagePage(filePath, 2, offset);
-        const end = expected.length - offset;
-        expect(page.messages.map((message) => message.content)).toEqual(
-          expected.slice(Math.max(0, end - 2), end),
-        );
-      }
-    });
-  });
-
-  it('preserves stable ordering for equal timestamps at multiple offsets', async () => {
-    const lines = Array.from({ length: 6 }, (_, index) => JSON.stringify({
-      sessionId: 'session-1',
-      type: 'assistant',
-      timestamp: '2026-02-21T10:00:00.000Z',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: `reply ${index}` }],
-      },
-    }));
-
-    await withTempJsonl(lines, async (filePath) => {
-      for (const offset of [0, 2, 4]) {
-        const page = await loadClaudeChatMessagePage(filePath, 2, offset);
-        expect(page.messages.map((message) => message.content)).toEqual(
-          [`reply ${4 - offset}`, `reply ${5 - offset}`],
-        );
-      }
-    });
-  });
-
-  it('changes revisions when same-source message parts are reversed', async () => {
-    const entry = (content) => JSON.stringify({
-      sessionId: 'session-1',
-      type: 'assistant',
-      timestamp: '2026-02-21T10:00:00.000Z',
-      message: { role: 'assistant', content },
-    });
-    const thinking = { type: 'thinking', thinking: 'reasoning' };
-    const text = { type: 'text', text: 'answer' };
-    let firstRevision;
-    await withTempJsonl([entry([thinking, text])], async (filePath) => {
-      firstRevision = (await loadClaudeChatMessagePage(filePath, 2, 0)).revision;
-    });
-    await withTempJsonl([entry([text, thinking])], async (filePath) => {
-      const secondRevision = (await loadClaudeChatMessagePage(filePath, 2, 0)).revision;
-      expect(secondRevision).not.toBe(firstRevision);
-    });
-  });
-
-  it('binds each compaction metadata tuple to its boundary position', async () => {
-    const lines = (swap) => [
-      JSON.stringify({
-        sessionId: 'session-1', type: 'system', subtype: 'compact_boundary',
-        timestamp: '2026-02-21T10:00:01.000Z',
-        compactMetadata: swap
-          ? { trigger: 'auto', preTokens: 200, postTokens: 20 }
-          : { trigger: 'manual', preTokens: 100, postTokens: 10 },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1', type: 'user', isCompactSummary: true,
-        timestamp: '2026-02-21T10:00:02.000Z',
-        message: { role: 'user', content: 'Summary: first' },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1', type: 'system', subtype: 'compact_boundary',
-        timestamp: '2026-02-21T10:00:03.000Z',
-        compactMetadata: swap
-          ? { trigger: 'manual', preTokens: 100, postTokens: 10 }
-          : { trigger: 'auto', preTokens: 200, postTokens: 20 },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1', type: 'user', isCompactSummary: true,
-        timestamp: '2026-02-21T10:00:04.000Z',
-        message: { role: 'user', content: 'Summary: second' },
-      }),
-    ];
-    let firstRevision;
-    await withTempJsonl(lines(false), async (filePath) => {
-      firstRevision = (await loadClaudeChatMessagePage(filePath, 2, 0)).revision;
-    });
-    await withTempJsonl(lines(true), async (filePath) => {
-      const secondRevision = (await loadClaudeChatMessagePage(filePath, 2, 0)).revision;
-      expect(secondRevision).not.toBe(firstRevision);
-    });
-  });
-
-  it('changes revisions when boundary timestamps change compaction pairing', async () => {
-    const lines = (reverseBoundaries) => [
-      JSON.stringify({
-        sessionId: 'session-1', type: 'system', subtype: 'compact_boundary',
-        timestamp: reverseBoundaries
-          ? '2026-02-21T10:00:03.000Z' : '2026-02-21T10:00:01.000Z',
-        compactMetadata: { trigger: 'manual', preTokens: 100, postTokens: 10 },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1', type: 'user', isCompactSummary: true,
-        timestamp: '2026-02-21T10:00:02.000Z',
-        message: { role: 'user', content: 'Summary: first' },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1', type: 'system', subtype: 'compact_boundary',
-        timestamp: reverseBoundaries
-          ? '2026-02-21T10:00:01.000Z' : '2026-02-21T10:00:03.000Z',
-        compactMetadata: { trigger: 'auto', preTokens: 200, postTokens: 20 },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1', type: 'user', isCompactSummary: true,
-        timestamp: '2026-02-21T10:00:04.000Z',
-        message: { role: 'user', content: 'Summary: second' },
-      }),
-    ];
-    const load = (reverseBoundaries) => withTempJsonl(lines(reverseBoundaries), async (filePath) => {
-      const messages = await loadClaudeChatMessages(filePath);
-      const page = await loadClaudeChatMessagePage(filePath, 2, 0);
-      return {
-        metadata: messages.map(({ trigger, preTokens, postTokens }) => ({
-          trigger, preTokens, postTokens,
-        })),
-        revision: page.revision,
-        fullRevision: transcriptRevision(messages),
-      };
-    });
-
-    const first = await load(false);
-    const second = await load(true);
-
-    expect(second.metadata).not.toEqual(first.metadata);
-    expect(second.revision).not.toBe(first.revision);
-    expect(first.revision).toBe(first.fullRevision);
-    expect(second.revision).toBe(second.fullRevision);
-  });
-
-  it('preserves compaction pairing with a one-message bounded page', async () => {
-    const lines = Array.from({ length: 200 }, (_, index) => [
-      JSON.stringify({
+  it('filters provider task notifications while preserving normal user messages', async () => {
+    const entries = [
+      {
         sessionId: 'session-1',
-        type: 'system',
-        subtype: 'compact_boundary',
-        timestamp: new Date(Date.UTC(2026, 1, 21, 10, 0, index * 2 + 1)).toISOString(),
-        compactMetadata: { trigger: index % 2 ? 'auto' : 'manual', preTokens: index },
-      }),
-      JSON.stringify({
+        type: 'queue-operation',
+        uuid: 'queue-1',
+        timestamp: '2026-07-21T14:00:00.000Z',
+        operation: 'enqueue',
+        content: 'do not duplicate this',
+      },
+      {
+        sessionId: 'session-1',
+        type: 'attachment',
+        uuid: 'task-attachment',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'task-notification',
+          prompt: '<task-notification>background task finished</task-notification>',
+        },
+      },
+      {
         sessionId: 'session-1',
         type: 'user',
-        isCompactSummary: true,
-        timestamp: new Date(Date.UTC(2026, 1, 21, 10, 0, index * 2)).toISOString(),
-        message: { role: 'user', content: `Summary: compaction ${index}` },
-      }),
-    ]).flat();
+        uuid: 'task-user',
+        timestamp: '2026-07-21T14:00:02.000Z',
+        origin: { kind: 'task-notification' },
+        message: { role: 'user', content: 'A task completed with ordinary-looking prose.' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'fallback-task-user',
+        timestamp: '2026-07-21T14:00:03.000Z',
+        message: {
+          role: 'user',
+          content: '<task-notification>fallback notification</task-notification>',
+        },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'normal-user',
+        timestamp: '2026-07-21T14:00:04.000Z',
+        message: { role: 'user', content: 'A task completed with ordinary-looking prose.' },
+      },
+    ];
 
-    await withTempJsonl(lines, async (filePath) => {
-      const full = await loadClaudeChatMessages(filePath);
-      const page = await loadClaudeChatMessagePage(filePath, 1, 0);
-      expect(page.messages).toEqual(full.slice(-1));
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+
+      expect(messages).toMatchObject([{
+        type: 'user-message',
+        content: 'A task completed with ordinary-looking prose.',
+      }]);
+      expect(getNativeMessageSource(messages[0])).toEqual({
+        entryId: 'normal-user',
+        lineNumber: 5,
+      });
+    });
+  });
+});
+
+describe('Claude steering history projection', () => {
+  it('preserves exact recognized steering text and bypasses provider-owned filters', async () => {
+    const spaced = '  keep boundary whitespace  ';
+    const filtered = 'Caveat: keep the existing fallback';
+    const entries = [
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'following-batch',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}${spaced}` },
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}${filtered}` },
+          ],
+        },
+      },
+      {
+        sessionId: 'session',
+        type: 'attachment',
+        uuid: 'inline-steer',
+        timestamp: '2026-07-21T14:00:02.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          prompt: [{
+            type: 'text',
+            text: `${CLAUDE_STEERING_PROMPT_PREFIX}<system-reminder>literal guidance</system-reminder>`,
+          }],
+        },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages.map((message) => message.content)).toEqual([
+        spaced,
+        filtered,
+        '<system-reminder>literal guidance</system-reminder>',
+      ]);
     });
   });
 
+  it('projects following-command batches and inline queued commands as separate inputs', async () => {
+    const entries = [
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'original',
+        timestamp: '2026-07-21T14:00:00.000Z',
+        message: { role: 'user', content: 'original prompt' },
+      },
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'following-batch',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}first steer` },
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}/second steer` },
+          ],
+        },
+      },
+      {
+        sessionId: 'session',
+        type: 'attachment',
+        uuid: 'inline-steer',
+        timestamp: '2026-07-21T14:00:02.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          prompt: [{
+            type: 'text',
+            text: `${CLAUDE_STEERING_PROMPT_PREFIX}inline steer`,
+          }],
+          timestamp: '2026-07-21T14:00:02.500Z',
+        },
+      },
+    ];
+    const original = structuredClone(entries);
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages.map((message) => [message.type, message.content])).toEqual([
+        ['user-message', 'original prompt'],
+        ['user-message', 'first steer'],
+        ['user-message', '/second steer'],
+        ['user-message', 'inline steer'],
+      ]);
+    });
+    expect(entries).toEqual(original);
+  });
+});
+
+describe('Claude JSONL microcompaction', () => {
+  it('renders a re-appended entry once and keeps the first occurrence identity', async () => {
+    // Microcompaction re-appends retained entries with their original uuids,
+    // differing only in parent rechaining. The first occurrence is canonical
+    // and later copies must not render again.
+    const entries = [
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'user-1',
+        parentUuid: null,
+        timestamp: '2026-07-21T14:00:00.000Z',
+        message: { role: 'user', content: 'keep me' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'assistant',
+        uuid: 'assistant-1',
+        parentUuid: 'user-1',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'user-1',
+        parentUuid: 'assistant-1',
+        timestamp: '2026-07-21T14:00:03.000Z',
+        message: { role: 'user', content: 'keep me' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'assistant',
+        uuid: 'assistant-1',
+        parentUuid: 'user-1',
+        timestamp: '2026-07-21T14:00:04.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages.map((message) => [message.type, message.content])).toEqual([
+        ['user-message', 'keep me'],
+        ['assistant-message', 'answer'],
+      ]);
+      // The rendered rows keep the first occurrence's native uuid; the
+      // provider re-append does not mint a second logical occurrence.
+      expect(getNativeMessageSource(messages[0])).toMatchObject({ entryId: 'user-1' });
+      expect(getNativeMessageSource(messages[1])).toMatchObject({ entryId: 'assistant-1' });
+    });
+  });
+});
+
+describe('Claude JSONL conversion', () => {
   it('preserves AskUserQuestion toolUseResult metadata from JSONL tool results', async () => {
     const lines = [
       JSON.stringify({

@@ -64,12 +64,12 @@ describe('scheduled prompt validation', () => {
 		expect(hasLeadingSlashCommand('/home/project is the path')).toBe(false);
 	});
 
-	it('normalizes an every-N-day definition with an inclusive end instant', () => {
+	it('normalizes an every-N-hour definition with an inclusive end instant', () => {
 		const definition = normalizeScheduledPromptDefinitionInput({
 			schedule: {
 				type: 'recurring',
 				firstRunAtUtc: '2030-01-02T09:00:00.000Z',
-				intervalDays: 2,
+				intervalHours: 2,
 				endAtUtc: '2030-01-10T09:00:00.000Z',
 			},
 			target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
@@ -78,7 +78,7 @@ describe('scheduled prompt validation', () => {
 		expect(definition?.schedule).toEqual({
 			type: 'recurring',
 			firstRunAtUtc: '2030-01-02T09:00:00.000Z',
-			intervalDays: 2,
+			intervalHours: 2,
 			endAtUtc: '2030-01-10T09:00:00.000Z',
 		});
 	});

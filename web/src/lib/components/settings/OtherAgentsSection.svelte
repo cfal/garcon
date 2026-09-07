@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { agentLabelFor } from '$lib/i18n/agent-labels';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import AgentCard from './AgentCard.svelte';
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 

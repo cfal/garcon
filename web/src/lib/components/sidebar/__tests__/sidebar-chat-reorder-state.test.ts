@@ -20,8 +20,10 @@ describe('SidebarChatReorderState', () => {
 				return visibleOrders;
 			},
 		});
+		expect(reorder.hasOverrides).toBe(false);
 
 		reorder.begin('normal', 'a');
+		expect(reorder.hasOverrides).toBe(true);
 		reorder.preview({
 			list: 'normal',
 			sourceChatId: 'a',
@@ -34,7 +36,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdAbove: 'c' },
+			placement: { kind: 'relative', referenceChatId: 'c', position: 'after' },
 			visibleOrder: ['b', 'c', 'a'],
 			sequence: 1,
 		});
@@ -42,6 +44,9 @@ describe('SidebarChatReorderState', () => {
 		visibleOrders = buildOrders(['b', 'c', 'a']);
 		reorder.reconcile();
 		expect(reorder.orderFor('normal')).toEqual(['b', 'c', 'a']);
+		expect(reorder.hasOverrides).toBe(true);
+		reorder.completeIfCurrent('normal', 1);
+		expect(reorder.hasOverrides).toBe(false);
 	});
 
 	it('returns a relative target for filtered top drops', () => {
@@ -64,7 +69,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'c',
-			target: { chatIdBelow: 'a' },
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'before' },
 			visibleOrder: ['c', 'a', 'b'],
 			sequence: 1,
 		});
@@ -90,7 +95,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'c',
-			target: { chatIdAbove: 'a' },
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'after' },
 			visibleOrder: ['a', 'c', 'b'],
 			sequence: 1,
 		});
@@ -125,7 +130,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdAbove: 'b' },
+			placement: { kind: 'relative', referenceChatId: 'b', position: 'after' },
 			visibleOrder: ['b', 'a', 'c'],
 			sequence: 1,
 		});
@@ -201,7 +206,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdAbove: 'c' },
+			placement: { kind: 'relative', referenceChatId: 'c', position: 'after' },
 			visibleOrder: ['b', 'c', 'a'],
 			sequence: 1,
 		});
@@ -226,7 +231,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdAbove: 'c' },
+			placement: { kind: 'relative', referenceChatId: 'c', position: 'after' },
 			visibleOrder: ['b', 'c', 'a', 'd'],
 			sequence: 1,
 		});
@@ -243,9 +248,117 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'b',
-			target: { chatIdAbove: 'a' },
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'after' },
 			visibleOrder: ['c', 'a', 'b', 'd'],
 			sequence: 2,
+		});
+	});
+
+	it('ignores an older completion while a newer optimistic move is pending', () => {
+		let visibleOrders = buildOrders(['a', 'b', 'c', 'd']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'a');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'a',
+			targetChatId: 'c',
+			closestEdge: 'bottom',
+		});
+		const first = reorder.finish('normal');
+		reorder.begin('normal', 'b');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'b',
+			targetChatId: 'a',
+			closestEdge: 'bottom',
+		});
+		const second = reorder.finish('normal');
+
+		if (!first || !second) throw new Error('expected optimistic reorder requests');
+		visibleOrders = buildOrders(first.visibleOrder);
+		reorder.reconcile();
+		reorder.completeIfCurrent('normal', first.sequence);
+		expect(reorder.orderFor('normal')).toEqual(second.visibleOrder);
+
+		visibleOrders = buildOrders(second.visibleOrder);
+		reorder.completeIfCurrent('normal', second.sequence);
+		expect(reorder.orderFor('normal')).toEqual(second.visibleOrder);
+	});
+
+	it('retires an older completion without cancelling an active drag', () => {
+		const visibleOrders = buildOrders(['a', 'b', 'c', 'd']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'a');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'a',
+			targetChatId: 'c',
+			closestEdge: 'bottom',
+		});
+		const first = reorder.finish('normal');
+		if (!first) throw new Error('expected first optimistic reorder request');
+
+		reorder.begin('normal', 'b');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'b',
+			targetChatId: 'a',
+			closestEdge: 'bottom',
+		});
+		reorder.completeIfCurrent('normal', first.sequence);
+
+		expect(reorder.activeList).toBe('normal');
+		expect(reorder.activeChatId).toBe('b');
+		expect(reorder.orderFor('normal')).toEqual(['c', 'a', 'b', 'd']);
+		expect(reorder.finish('normal')).toMatchObject({
+			chatId: 'b',
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'after' },
+		});
+	});
+
+	it('retires an older rollback without cancelling an active drag', () => {
+		const visibleOrders = buildOrders(['a', 'b', 'c', 'd']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'a');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'a',
+			targetChatId: 'c',
+			closestEdge: 'bottom',
+		});
+		const first = reorder.finish('normal');
+		if (!first) throw new Error('expected first optimistic reorder request');
+
+		reorder.begin('normal', 'b');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'b',
+			targetChatId: 'a',
+			closestEdge: 'bottom',
+		});
+		reorder.rollbackIfCurrent('normal', first.sequence, first.visibleOrder);
+
+		expect(reorder.activeList).toBe('normal');
+		expect(reorder.activeChatId).toBe('b');
+		expect(reorder.orderFor('normal')).toEqual(['c', 'a', 'b', 'd']);
+		expect(reorder.finish('normal')).toMatchObject({
+			chatId: 'b',
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'after' },
 		});
 	});
 
@@ -296,7 +409,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdAbove: 'b' },
+			placement: { kind: 'relative', referenceChatId: 'b', position: 'after' },
 			visibleOrder: ['b', 'a', 'c'],
 			sequence: 1,
 		});
@@ -309,10 +422,9 @@ describe('SidebarChatReorderState', () => {
 		reorder.reconcile();
 		expect(reorder.orderFor('normal')).toEqual(['b', 'a', 'c']);
 
+		visibleOrders = buildOrders(['c', 'b', 'a']);
 		reorder.completeIfCurrent('normal', request!.sequence);
-		visibleOrders = buildOrders(['b', 'a', 'c']);
-		reorder.reconcile();
-		expect(reorder.orderFor('normal')).toEqual(['b', 'a', 'c']);
+		expect(reorder.orderFor('normal')).toEqual(['c', 'b', 'a']);
 	});
 
 	it('uses the dragged chat id for filtered first-to-last moves', () => {
@@ -335,7 +447,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdAbove: 'c' },
+			placement: { kind: 'relative', referenceChatId: 'c', position: 'after' },
 			visibleOrder: ['b', 'c', 'a'],
 			sequence: 1,
 		});
@@ -359,7 +471,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'c',
-			target: { chatIdBelow: 'a' },
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'before' },
 			visibleOrder: ['c', 'a', 'b'],
 			sequence: 1,
 		});
@@ -385,7 +497,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'p2-b',
-			target: { chatIdBelow: 'p2-a' },
+			placement: { kind: 'relative', referenceChatId: 'p2-a', position: 'before' },
 			visibleOrder: ['p1-a', 'p1-b', 'p2-b', 'p2-a'],
 			sequence: 1,
 		});
@@ -411,7 +523,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'p2-a',
-			target: { chatIdAbove: 'p2-b' },
+			placement: { kind: 'relative', referenceChatId: 'p2-b', position: 'after' },
 			visibleOrder: ['p1-a', 'p2-b', 'p2-a', 'p1-b'],
 			sequence: 1,
 		});
@@ -455,7 +567,7 @@ describe('SidebarChatReorderState', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'p2-b',
-			target: { chatIdBelow: 'p2-a' },
+			placement: { kind: 'relative', referenceChatId: 'p2-a', position: 'before' },
 			visibleOrder: ['p1-a', 'p1-b', 'p2-b', 'p2-a'],
 			sequence: 1,
 		});

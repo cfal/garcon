@@ -10,11 +10,17 @@ import type {
 import {
 	FILE_SESSION_SOFT_LIMIT,
 	FileSessionRegistry,
+	type FileEditorRuntimeModule,
 	type FilePlacementResult,
 } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame';
 import { ApiError } from '$lib/api/client.js';
+import { ModuleImportError } from '$lib/utils/module-import-error.js';
+
+const testEditorRuntime: FileEditorRuntimeModule = await import(
+	'$lib/files/editor/code-editor-controller.svelte.js'
+);
 
 function identity(path: string): CanonicalFileIdentity {
 	return {
@@ -23,7 +29,7 @@ function identity(path: string): CanonicalFileIdentity {
 	};
 }
 
-function request(path: string, origin: PresentationHostId = 'main'): FileOpenRequest {
+function request(path: string, origin: PresentationHostId = 'window-main'): FileOpenRequest {
 	return {
 		fileRootPath: '/workspace',
 		relativePath: path,
@@ -43,6 +49,10 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
+function editorRuntime(): Promise<FileEditorRuntimeModule> {
+	return Promise.resolve(testEditorRuntime);
+}
+
 function createHarness(
 	options: {
 		placementResult?: FilePlacementResult;
@@ -50,6 +60,8 @@ function createHarness(
 		placements?: Partial<Record<FileRendererMode, DesktopPlacement>>;
 		onOpenError?: (request: FileOpenRequest, error: unknown) => void;
 		onPublish?: (registry: FileSessionRegistry) => void | Promise<void>;
+		loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
+		reloadApplication?: () => void;
 	} = {},
 ) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
@@ -91,7 +103,7 @@ function createHarness(
 	}));
 	const getDefaultPlacement = vi.fn(
 		(mode: FileRendererMode, _origin: PresentationHostId) =>
-			options.placements?.[mode] ?? 'dialog',
+			options.placements?.[mode] ?? ({ type: 'dialog' } as const),
 	);
 	const onOpenError = options.onOpenError ?? vi.fn();
 	const registry = new FileSessionRegistry({
@@ -114,6 +126,8 @@ function createHarness(
 		readText,
 		readContent,
 		saveText,
+		loadEditorRuntime: options.loadEditorRuntime,
+		reloadApplication: options.reloadApplication,
 		onOpenError,
 	});
 	return {
@@ -142,7 +156,7 @@ describe('FileSessionRegistry', () => {
 		await harness.registry.open({
 			...resolved,
 			mode: 'auto',
-			origin: 'main',
+			origin: 'window-main',
 			reason: 'user-open',
 		});
 
@@ -153,31 +167,44 @@ describe('FileSessionRegistry', () => {
 	});
 
 	it.each([
-		['src/file.ts', 'code', 'main', 'main'],
-		['assets/logo.png', 'image', 'sidebar', 'sidebar'],
-		['docs/README.md', 'markdown', 'dialog', 'dialog'],
+		['src/file.ts', 'code', 'window-main', { type: 'window', windowId: 'window-main' }],
+		['assets/logo.png', 'image', 'window-sidebar', { type: 'window', windowId: 'window-sidebar' }],
+		['docs/README.md', 'markdown', 'dialog', { type: 'dialog' }],
 	] as const)('forwards %s as %s from %s origin', async (path, mode, origin, expected) => {
 		const harness = createHarness({
-			placements: { code: 'main', image: 'sidebar', markdown: 'dialog' },
+			placements: {
+				code: { type: 'window', windowId: 'window-main' },
+				image: { type: 'window', windowId: 'window-sidebar' },
+				markdown: { type: 'dialog' },
+			},
 		});
 
 		await harness.registry.open(request(path, origin));
 
 		expect(harness.getDefaultPlacement).toHaveBeenCalledWith(mode, origin);
-		expect(harness.placementCalls[0]?.target).toBe(expected);
+		expect(harness.placementCalls[0]?.target).toEqual(expected);
 	});
 
 	it('uses an explicit desktop target instead of the configured default', async () => {
-		const harness = createHarness({ placements: { code: 'dialog' } });
+		const harness = createHarness({ placements: { code: { type: 'dialog' } } });
 
-		await harness.registry.open({ ...request('src/file.ts'), target: 'sidebar' });
+		await harness.registry.open({
+			...request('src/file.ts'),
+			target: { type: 'window', windowId: 'window-sidebar' },
+		});
 
 		expect(harness.getDefaultPlacement).not.toHaveBeenCalled();
-		expect(harness.placementCalls[0]?.target).toBe('sidebar');
+		expect(harness.placementCalls[0]?.target).toEqual({
+			type: 'window',
+			windowId: 'window-sidebar',
+		});
 	});
 
 	it('ignores desktop placement preferences while mobile', async () => {
-		const harness = createHarness({ isMobile: true, placements: { code: 'main' } });
+		const harness = createHarness({
+			isMobile: true,
+			placements: { code: { type: 'window', windowId: 'window-main' } },
+		});
 
 		await harness.registry.open(request('src/mobile.ts'));
 
@@ -199,9 +226,13 @@ describe('FileSessionRegistry', () => {
 
 	it('joins concurrent canonical aliases and applies the latest requested location', async () => {
 		const harness = createHarness();
-		const first = harness.registry.open({ ...request('src/file.ts', 'main'), line: 2, col: 3 });
+		const first = harness.registry.open({
+			...request('src/file.ts', 'window-main'),
+			line: 2,
+			col: 3,
+		});
 		const second = harness.registry.open({
-			...request('alias/src/file.ts', 'sidebar'),
+			...request('alias/src/file.ts', 'window-sidebar'),
 			line: 8,
 			col: 4,
 		});
@@ -211,7 +242,7 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.sessionCount).toBe(1);
 		expect(harness.placementCalls).toHaveLength(1);
 		expect(harness.getDefaultPlacement).toHaveBeenCalledOnce();
-		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'main');
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'window-main');
 		expect(harness.focusCalls).toEqual([firstSession?.id]);
 		expect(firstSession?.requestedLine).toBe(8);
 		expect(firstSession?.requestedColumn).toBe(4);
@@ -241,8 +272,9 @@ describe('FileSessionRegistry', () => {
 	it('reconfigures attached editors when the application theme changes', async () => {
 		const harness = createHarness();
 		const session = await harness.registry.open(request('src/theme.ts'));
-		if (!session?.editor) throw new Error('Expected a code editor session');
+		if (!session) throw new Error('Expected a code editor session');
 		await vi.waitFor(() => expect(session.loading).toBe(false));
+		if (!session.editor) throw new Error('Expected a loaded code editor');
 		const host = document.createElement('div');
 		document.body.append(host);
 		const lease = session.editor.attach(host);
@@ -263,9 +295,11 @@ describe('FileSessionRegistry', () => {
 
 	it('settles a loading code frame before attaching its editor after the read', async () => {
 		const read = deferred<{ content: string; path: string; revision: string }>();
+		const runtime = deferred<FileEditorRuntimeModule>();
 		const bridge = new SurfaceFrameBridge();
 		const attach = vi.fn();
 		const harness = createHarness({
+			loadEditorRuntime: () => runtime.promise,
 			async onPublish(registry) {
 				const session = registry.all[0];
 				if (!session) throw new Error('Expected a published file session');
@@ -282,25 +316,95 @@ describe('FileSessionRegistry', () => {
 			path: '/workspace/src/slow.ts',
 			revision: 'v1:loaded',
 		});
+		await Promise.resolve();
+		expect(opened?.loading).toBe(true);
+		expect(opened?.editor).toBeNull();
+		runtime.resolve(await editorRuntime());
 		await vi.waitFor(() => expect(opened?.loading).toBe(false));
 		bridge.provideRenderer({ attach, detach: vi.fn(), focusPrimary: vi.fn() });
 		await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
 		expect(opened?.content).toBe('loaded');
 	});
 
+	it('reports editor loading failures and retries with a fresh loader promise', async () => {
+		const loadEditorRuntime = vi.fn(editorRuntime);
+		loadEditorRuntime.mockRejectedValueOnce(new Error('Editor chunk unavailable'));
+		const harness = createHarness({ loadEditorRuntime });
+
+		const opened = await harness.registry.open(request('src/retry.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loadError).toBe('Editor chunk unavailable'));
+		expect(opened.loading).toBe(false);
+		expect(opened.editor).toBeNull();
+		expect(opened.loadErrorRequiresPageReload).toBe(false);
+
+		await harness.registry.reload(opened.id);
+
+		expect(loadEditorRuntime).toHaveBeenCalledTimes(2);
+		expect(opened.loadError).toBeNull();
+		expect(opened.editor).toBeTruthy();
+		expect(opened.content).toBe('initial');
+	});
+
+	it('reloads the page when a browser-cached editor module import fails', async () => {
+		const reloadApplication = vi.fn();
+		const loadEditorRuntime = vi
+			.fn<() => Promise<FileEditorRuntimeModule>>()
+			.mockRejectedValue(new ModuleImportError(new Error('Editor chunk unavailable')));
+		const harness = createHarness({ loadEditorRuntime, reloadApplication });
+
+		const opened = await harness.registry.open(request('src/reload-required.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loadError).toBe('Editor chunk unavailable'));
+		expect(opened.loadErrorRequiresPageReload).toBe(true);
+
+		await harness.registry.reload(opened.id);
+
+		expect(reloadApplication).toHaveBeenCalledOnce();
+		expect(loadEditorRuntime).toHaveBeenCalledOnce();
+	});
+
+	it('shares one successful editor runtime load across file sessions', async () => {
+		const loadEditorRuntime = vi.fn(editorRuntime);
+		const harness = createHarness({ loadEditorRuntime });
+
+		const first = await harness.registry.open(request('src/first-runtime.ts'));
+		const second = await harness.registry.open(request('src/second-runtime.ts'));
+		if (!first || !second) throw new Error('Expected file sessions');
+		await vi.waitFor(() => expect(first.loading || second.loading).toBe(false));
+
+		expect(loadEditorRuntime).toHaveBeenCalledOnce();
+		expect(first.editor).toBeTruthy();
+		expect(second.editor).toBeTruthy();
+	});
+
+	it('does not create an editor after destruction during runtime loading', async () => {
+		const runtime = deferred<FileEditorRuntimeModule>();
+		const harness = createHarness({ loadEditorRuntime: () => runtime.promise });
+		const opened = await harness.registry.open(request('src/disposed.ts'));
+		if (!opened) throw new Error('Expected file session');
+
+		harness.registry.destroy(opened.id);
+		runtime.resolve(await editorRuntime());
+
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		expect(opened.editor).toBeNull();
+		expect(harness.registry.get(opened.id)).toBeNull();
+	});
+
 	it('focuses an existing identity without moving or duplicating it', async () => {
 		const harness = createHarness();
-		const opened = await harness.registry.open(request('src/file.ts', 'main'));
+		const opened = await harness.registry.open(request('src/file.ts', 'window-main'));
 		await harness.registry.open({
-			...request('src/file.ts', 'sidebar'),
-			target: 'sidebar',
+			...request('src/file.ts', 'window-sidebar'),
+			target: { type: 'window', windowId: 'window-sidebar' },
 			line: 12,
 		});
 
 		expect(harness.registry.sessionCount).toBe(1);
 		expect(harness.placementCalls).toHaveLength(1);
 		expect(harness.getDefaultPlacement).toHaveBeenCalledOnce();
-		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'main');
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'window-main');
 		expect(harness.focusCalls).toEqual([opened?.id]);
 		expect(opened?.requestedLine).toBe(12);
 	});
@@ -318,15 +422,8 @@ describe('FileSessionRegistry', () => {
 				firstOverLimitPath,
 			),
 		);
-		harness.registry.resolveThreshold('review');
-		expect(harness.registry.openFilesVisible).toBe(true);
-		expect(harness.registry.thresholdRequest?.identity.normalizedRelativePath).toBe(
-			firstOverLimitPath,
-		);
-
 		const secondOverLimitPath = `src/file-${FILE_SESSION_SOFT_LIMIT + 1}.ts`;
 		const secondOverLimit = harness.registry.open(request(secondOverLimitPath));
-		harness.registry.hideOpenFiles();
 		harness.registry.resolveThreshold('open');
 		await expect(firstOverLimit).resolves.toBeTruthy();
 		await vi.waitFor(() =>
@@ -344,6 +441,7 @@ describe('FileSessionRegistry', () => {
 		const first = await harness.registry.open(request('src/first.ts'));
 		const second = await harness.registry.open(request('src/second.ts'));
 		if (!first || !second) throw new Error('Expected file sessions');
+		await vi.waitFor(() => expect(first.loading || second.loading).toBe(false));
 		first.dirty = true;
 		second.dirty = true;
 
@@ -762,19 +860,14 @@ describe('FileSessionRegistry', () => {
 		first.dirty = true;
 		second.content = 'second local';
 		second.dirty = true;
-		const conflict = () =>
-			new ApiError(409, 'File changed on disk', 'FILE_REVISION_CONFLICT');
+		const conflict = () => new ApiError(409, 'File changed on disk', 'FILE_REVISION_CONFLICT');
 		harness.saveText.mockRejectedValueOnce(conflict()).mockRejectedValueOnce(conflict());
 
 		const firstSave = harness.registry.save(first.id);
 		const secondSave = harness.registry.save(second.id);
-		await vi.waitFor(() =>
-			expect(harness.registry.overwriteRequest?.sessionId).toBe(first.id),
-		);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.sessionId).toBe(first.id));
 		harness.registry.resolveOverwrite('cancel');
-		await vi.waitFor(() =>
-			expect(harness.registry.overwriteRequest?.sessionId).toBe(second.id),
-		);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.sessionId).toBe(second.id));
 		harness.registry.resolveOverwrite('overwrite');
 
 		await expect(firstSave).resolves.toBe(false);
@@ -818,11 +911,13 @@ describe('FileSessionRegistry', () => {
 		await expect(save).resolves.toBe(false);
 	});
 
-	it('stores image revisions and swaps image content only after refresh succeeds', async () => {
-		const harness = createHarness();
+	it('stores image revisions without loading the editor and swaps content after refresh', async () => {
+		const loadEditorRuntime = vi.fn(editorRuntime);
+		const harness = createHarness({ loadEditorRuntime });
 		const opened = await harness.registry.open(request('assets/logo.png'));
 		if (!opened) throw new Error('Expected image session');
 		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		expect(loadEditorRuntime).not.toHaveBeenCalled();
 		const initialUrl = opened.imageObjectUrl;
 		expect(opened.loadedRevision).toBe('v1:image');
 		harness.readContent.mockResolvedValueOnce({
@@ -904,13 +999,11 @@ describe('FileSessionRegistry', () => {
 
 	it('retries a failed file read without replacing the session', async () => {
 		const harness = createHarness();
-		harness.readText
-			.mockRejectedValueOnce(new Error('Read failed'))
-			.mockResolvedValueOnce({
-				content: 'recovered',
-				path: '/workspace/file.ts',
-				revision: 'v1:recovered',
-			});
+		harness.readText.mockRejectedValueOnce(new Error('Read failed')).mockResolvedValueOnce({
+			content: 'recovered',
+			path: '/workspace/file.ts',
+			revision: 'v1:recovered',
+		});
 		const opened = await harness.registry.open(request('src/file.ts'));
 		if (!opened) throw new Error('Expected file session');
 		await vi.waitFor(() => expect(opened.loadError).toBe('Read failed'));

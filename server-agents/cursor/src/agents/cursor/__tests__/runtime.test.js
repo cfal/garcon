@@ -5,7 +5,6 @@ import {
   CursorAskQuestionToolUseMessage,
   CursorCreatePlanToolUseMessage,
   ErrorMessage,
-  PermissionRequestMessage,
 } from '@garcon/common/chat-types';
 import { AcpTransport } from '../../../acp/transport.js';
 import { AcpAgentRuntime } from '../../shared/acp-agent-runtime.js';
@@ -17,6 +16,7 @@ const TEST_CURSOR_CONFIG = {
   binary: () => 'cursor-agent',
   apiKey: () => null,
 };
+const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function deferred() {
   let resolve;
@@ -24,6 +24,41 @@ function deferred() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function noopOperation(runId = 'run-default') {
+  return { runId, publish() {} };
+}
+
+function collectOperation(runId) {
+  const events = [];
+  const waiters = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+        for (let i = waiters.length - 1; i >= 0; i -= 1) {
+          const waiter = waiters[i];
+          if (!waiter.predicate(event)) continue;
+          waiters.splice(i, 1);
+          waiter.resolve(event);
+        }
+      },
+    },
+    waitForEvent(predicate) {
+      const existing = events.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve) => waiters.push({ predicate, resolve }));
+    },
+  };
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
 }
 
 function option(id, currentValue, values, extra = {}) {
@@ -71,6 +106,8 @@ function createAcpHarness(options = {}) {
   const instanceWaiters = [];
 
   function createInstance() {
+    const instanceIndex = instances.length;
+    const sessionId = options.sessionIds?.[instanceIndex] ?? 'cursor-session';
     let stdoutController;
     let exitResolve;
     let promptRequestId = null;
@@ -136,7 +173,7 @@ function createAcpHarness(options = {}) {
         emit({
           jsonrpc: '2.0',
           id: message.id,
-          result: { sessionId: 'cursor-session', configOptions: configOptionsFromState(configState) },
+          result: { sessionId, configOptions: configOptionsFromState(configState) },
         });
         return;
       }
@@ -148,7 +185,9 @@ function createAcpHarness(options = {}) {
 
       if (message.method === 'session/set_config_option') {
         configState[message.params.configId] = message.params.value;
-        const mismatch = options.configMismatch?.configId === message.params.configId
+        const mismatchApplies = options.configMismatch?.instanceIndex === undefined
+          || options.configMismatch.instanceIndex === instanceIndex;
+        const mismatch = mismatchApplies && options.configMismatch?.configId === message.params.configId
           ? { [message.params.configId]: options.configMismatch.currentValue }
           : {};
         emit({
@@ -207,7 +246,7 @@ function createAcpHarness(options = {}) {
         emit({
           jsonrpc: '2.0',
           method: 'session/update',
-          params: { sessionId: 'cursor-session', update },
+          params: { sessionId, update },
         });
       },
       finishPrompt() {
@@ -301,6 +340,7 @@ function startRequest(overrides = {}) {
     model: 'default',
     permissionMode: 'default',
     thinkingMode: 'none',
+    operation: noopOperation(),
     ...overrides,
   };
 }
@@ -310,32 +350,12 @@ function createRuntimeHarness(options = {}) {
   const runtime = new AcpAgentRuntime(createCursorAcpPolicy(TEST_CURSOR_CONFIG), {
     converter: new CursorAcpEventConverter(),
     createTransport: acp.createTransport,
-  });
-  const messages = [];
-  const messageWaiters = [];
-
-  runtime.onMessages((_chatId, incoming) => {
-    messages.push(...incoming);
-    for (let i = messageWaiters.length - 1; i >= 0; i -= 1) {
-      const waiter = messageWaiters[i];
-      const match = messages.find(waiter.predicate);
-      if (!match) continue;
-      messageWaiters.splice(i, 1);
-      waiter.resolve(match);
-    }
+    logger: options.logger,
   });
 
   return {
     acp,
     runtime,
-    messages,
-    waitForMessage(predicate) {
-      const existing = messages.find(predicate);
-      if (existing) return Promise.resolve(existing);
-      return new Promise((resolve) => {
-        messageWaiters.push({ predicate, resolve });
-      });
-    },
   };
 }
 
@@ -356,11 +376,7 @@ describe('Cursor ACP runtime', () => {
 
   it('configures the selected Cursor model through ACP config options before prompting', async () => {
     const { acp, runtime } = createRuntimeHarness();
-    let methodsAtAbortable = [];
-    const onAbortable = mock(() => {
-      methodsAtAbortable = acp.writes.map((message) => message.method);
-    });
-    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable }));
+    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' }));
 
     const prompt = await acp.waitForClientMethod('session/prompt');
     const setConfigCalls = acp.writes.filter((message) => message.method === 'session/set_config_option');
@@ -375,26 +391,168 @@ describe('Cursor ACP runtime', () => {
     const methods = acp.writes.map((message) => message.method);
     expect(methods.indexOf('session/set_config_option')).toBeLessThan(methods.indexOf('session/prompt'));
     expect(prompt.params.config).toBeUndefined();
-    expect(onAbortable).toHaveBeenCalledTimes(1);
-    expect(methodsAtAbortable.at(-1)).toBe('session/prompt');
 
     acp.finishPrompt();
     runtime.shutdown();
   });
 
   it('fails before prompting when Cursor reports a model config mismatch', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness({
+    const { acp, runtime } = createRuntimeHarness({
       configMismatch: { configId: 'reasoning', currentValue: 'medium' },
     });
-    const onAbortable = mock(() => undefined);
-    await expect(runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable })))
+    const published = collectOperation('run-mismatch');
+    await expect(runtime.startSession(startRequest({
+      model: 'gpt-5.5-extra-high',
+      operation: published.operation,
+    })))
       .rejects.toThrow('Cursor did not apply requested model gpt-5.5-extra-high');
 
-    const error = await waitForMessage((message) => message instanceof ErrorMessage);
+    const error = publishedMessages(published.events)
+      .find((message) => message instanceof ErrorMessage);
     expect(error.content).toContain('Cursor did not apply requested model gpt-5.5-extra-high');
     expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
-    expect(onAbortable).not.toHaveBeenCalled();
 
+    runtime.shutdown();
+  });
+
+  it('[TLV5-L07.07-CURSOR-UNIT-01] keeps an established publisher when a fresh session fails before prompting', async () => {
+    const first = collectOperation('run-established');
+    const replacement = collectOperation('run-failed-replacement');
+    const { acp, runtime } = createRuntimeHarness({
+      sessionIds: ['cursor-established', 'cursor-replacement'],
+      configMismatch: {
+        instanceIndex: 1,
+        configId: 'reasoning',
+        currentValue: 'medium',
+      },
+    });
+    await runtime.startSession(startRequest({ operation: first.operation }));
+    const established = acp.instance(0);
+    await established.waitForClientMethod('session/prompt');
+    established.finishPrompt();
+    await first.waitForEvent((event) => event.type === 'run-ended');
+
+    await expect(runtime.startSession(startRequest({
+      model: 'gpt-5.5-extra-high',
+      operation: replacement.operation,
+    }))).rejects.toThrow('Cursor did not apply requested model gpt-5.5-extra-high');
+
+    established.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'still belongs to the established source' },
+    });
+    const late = await first.waitForEvent((event) => (
+      event.type === 'rows'
+      && JSON.stringify(event).includes('still belongs to the established source')
+    ));
+    expect(JSON.stringify(late)).toContain('still belongs to the established source');
+    expect(JSON.stringify(replacement.events)).not.toContain('still belongs to the established source');
+    runtime.shutdown();
+  });
+
+  it('[TLV5-L07.03-CURSOR-UNIT-01] binds each sequential prompt to its concrete publisher through source retirement', async () => {
+    const first = collectOperation('run-a');
+    const second = collectOperation('run-b');
+    const { acp, runtime } = createRuntimeHarness();
+    const started = await runtime.startSession(startRequest({ operation: first.operation }));
+    const client = acp.instance(0);
+    await client.waitForClientMethod('session/prompt');
+    client.finishPrompt();
+    await first.waitForEvent((event) => event.type === 'run-ended');
+
+    client.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'late A output' },
+    });
+    await first.waitForEvent((event) => (
+      event.type === 'rows' && JSON.stringify(event).includes('late A output')
+    ));
+
+    const nextTurn = runtime.runTurn(startRequest({
+      agentSessionId: started.agentSessionId,
+      command: 'next prompt',
+      operation: second.operation,
+    }));
+    await client.waitForWrite((message) => (
+      message.method === 'session/prompt'
+      && message.params.prompt[0]?.text === 'next prompt'
+    ));
+    client.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'B output' },
+    });
+    client.finishPrompt();
+    await nextTurn;
+
+    expect(first.events.map((event) => event.type)).toEqual(['run-ended', 'rows']);
+    expect(JSON.stringify(first.events)).not.toContain('B output');
+    expect(second.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
+    expect(JSON.stringify(second.events)).not.toContain('late A output');
+    runtime.shutdown();
+  });
+
+  it('[TLV5-L07.04-CURSOR-UNIT-01] rejects cross-chat native session collisions without rebinding the original source', async () => {
+    const first = collectOperation('run-chat-a');
+    const colliding = collectOperation('run-chat-b');
+    const { acp, runtime } = createRuntimeHarness({
+      sessionIds: ['shared-cursor-session', 'shared-cursor-session'],
+    });
+    await runtime.startSession(startRequest({
+      chatId: 'chat-a',
+      operation: first.operation,
+    }));
+    const original = acp.instance(0);
+    await original.waitForClientMethod('session/prompt');
+    original.finishPrompt();
+    await first.waitForEvent((event) => event.type === 'run-ended');
+
+    await expect(runtime.startSession(startRequest({
+      chatId: 'chat-b',
+      operation: colliding.operation,
+    }))).rejects.toThrow('already bound to another chat');
+
+    original.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'only chat A receives this' },
+    });
+    await first.waitForEvent((event) => (
+      event.type === 'rows' && JSON.stringify(event).includes('only chat A receives this')
+    ));
+    expect(colliding.events).toEqual([]);
+    runtime.shutdown();
+  });
+
+  it('[TLV5-L07.05-CURSOR-UNIT-01] logs and drops session updates without a native session identity', async () => {
+    const logger = {
+      debug: mock(),
+      info: mock(),
+      warn: mock(),
+      error: mock(),
+    };
+    const operation = collectOperation('run-named');
+    const { acp, runtime } = createRuntimeHarness({ logger });
+    await runtime.startSession(startRequest({ operation: operation.operation }));
+    await acp.waitForClientMethod('session/prompt');
+
+    acp.serverRequest({
+      method: 'session/update',
+      params: {
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { text: 'must be dropped' },
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(JSON.stringify(operation.events)).not.toContain('must be dropped');
+    expect(operation.events).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Dropped an ACP session update without its owning native session.',
+      { agentId: 'cursor', sessionId: 'cursor-session' },
+    );
+    acp.finishPrompt();
+    await operation.waitForEvent((event) => event.type === 'run-ended');
     runtime.shutdown();
   });
 
@@ -472,12 +630,13 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('ignores buffered updates from a retired ACP client after reconnect', async () => {
-    const { acp, runtime, messages } = createRuntimeHarness({ keepKilledStreamOpen: true });
+  it('[TLV5-L07.08-CURSOR-UNIT-01] ignores buffered updates from a retired ACP client after reconnect', async () => {
+    const { acp, runtime } = createRuntimeHarness({ keepKilledStreamOpen: true });
+    const first = collectOperation('run-a');
+    const second = collectOperation('run-b');
     const started = await runtime.startSession(startRequest({
       command: 'first message',
-      clientRequestId: 'req-a',
-      turnId: 'turn-a',
+      operation: first.operation,
     }));
     await acp.waitForClientMethod('session/prompt');
     const retired = acp.instance(0);
@@ -486,8 +645,7 @@ describe('Cursor ACP runtime', () => {
     const nextTurn = runtime.runTurn(startRequest({
       agentSessionId: started.agentSessionId,
       command: 'second message',
-      clientRequestId: 'req-b',
-      turnId: 'turn-b',
+      operation: second.operation,
     }));
     const restarted = await acp.waitForInstance(1);
     await restarted.waitForClientMethod('session/prompt');
@@ -507,18 +665,20 @@ describe('Cursor ACP runtime', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(messages.some((message) => message.content === 'late output from A')).toBe(false);
-    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(first.events).toEqual([]);
+    expect(second.events).toEqual([]);
 
     restarted.finishPrompt();
     await nextTurn;
+    expect(second.events.map((event) => event.type)).toEqual(['run-ended']);
     retired.close(143);
     runtime.shutdown();
   });
 
   it('emits standard ACP permission requests and responds with selected option outcomes', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness();
-    const started = await runtime.startSession(startRequest());
+    const { acp, runtime } = createRuntimeHarness();
+    const operation = collectOperation('run-1');
+    const started = await runtime.startSession(startRequest({ operation: operation.operation }));
 
     expect(started).toEqual({
       agentSessionId: 'cursor-session',
@@ -540,11 +700,18 @@ describe('Cursor ACP runtime', () => {
       },
     });
 
-    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
+    const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    const request = permission.lifecycle;
     expect(request.requestedTool).toBeInstanceOf(BashToolUseMessage);
     expect(request.requestedTool.command).toBe('echo hello');
-
-    runtime.resolvePermission(request.permissionRequestId, { allow: true });
+    expect(permission).toMatchObject({
+      runId: 'run-1',
+      lifecycle: {
+        kind: 'requested',
+        permissionOccurrenceId: request.permissionOccurrenceId,
+      },
+    });
+    await permission.decision.respond({ allow: true });
     const response = await acp.waitForWrite((message) => message.id === 'permission-1' && message.result);
     expect(response.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
@@ -554,9 +721,59 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
+  it('[TLV5-PERM.01-CURSOR-UNIT-01] [TLV5-PERM.04-CURSOR-UNIT-01] keeps reused ACP request ids bound to separate permission capabilities', async () => {
+    const { acp, runtime } = createRuntimeHarness();
+    const operation = collectOperation('run-1');
+    await runtime.startSession(startRequest({ operation: operation.operation }));
+    await acp.waitForClientMethod('session/prompt');
+    const request = () => acp.serverRequest({
+      id: 'permission-reused',
+      method: 'session/request_permission',
+      params: {
+        sessionId: 'cursor-session',
+        toolCall: {
+          toolCallId: 'tool-reused',
+          toolName: 'Bash',
+          rawInput: { command: 'echo hello' },
+        },
+        options: [{ optionId: 'allow-once' }, { optionId: 'reject-once' }],
+      },
+    });
+
+    request();
+    const first = await operation.waitForEvent((event) => event.type === 'permission');
+    request();
+    const second = await operation.waitForEvent((event) => (
+      event.type === 'permission'
+      && event.lifecycle.permissionOccurrenceId !== first.lifecycle.permissionOccurrenceId
+    ));
+
+    expect(first.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(second.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(first.lifecycle.permissionOccurrenceId).not.toBe('permission-reused');
+    expect(second.lifecycle.permissionOccurrenceId).not.toBe(
+      first.lifecycle.permissionOccurrenceId,
+    );
+    await first.decision.respond({ allow: true });
+    await expect(first.decision.respond({ allow: false }))
+      .rejects.toThrow('no longer pending');
+    await second.decision.respond({ allow: false });
+    expect(acp.writes.filter((message) => message.id === 'permission-reused')).toMatchObject([
+      { result: { outcome: { outcome: 'selected', optionId: 'allow-once' } } },
+      { result: { outcome: { outcome: 'selected', optionId: 'reject-once' } } },
+    ]);
+
+    acp.finishPrompt();
+    runtime.shutdown();
+  });
+
   it('auto-approves standard ACP permission requests in manual bypass without emitting a row', async () => {
-    const { acp, runtime, messages } = createRuntimeHarness();
-    await runtime.startSession(startRequest({ permissionMode: 'manualBypass' }));
+    const { acp, runtime } = createRuntimeHarness();
+    const published = collectOperation('run-bypass');
+    await runtime.startSession(startRequest({
+      permissionMode: 'manualBypass',
+      operation: published.operation,
+    }));
     await acp.waitForClientMethod('session/prompt');
 
     acp.serverRequest({
@@ -577,15 +794,16 @@ describe('Cursor ACP runtime', () => {
     expect(response.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
     });
-    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
 
     acp.finishPrompt();
     runtime.shutdown();
   });
 
   it('uses live manual bypass setting updates for subsequent ACP permission requests', async () => {
-    const { acp, runtime, messages } = createRuntimeHarness();
-    const started = await runtime.startSession(startRequest());
+    const { acp, runtime } = createRuntimeHarness();
+    const published = collectOperation('run-updated-bypass');
+    const started = await runtime.startSession(startRequest({ operation: published.operation }));
     await acp.waitForClientMethod('session/prompt');
 
     runtime.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
@@ -607,15 +825,16 @@ describe('Cursor ACP runtime', () => {
     expect(response.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
     });
-    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
 
     acp.finishPrompt();
     runtime.shutdown();
   });
 
   it('emits Cursor ask-question requests and forwards answered responses', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness();
-    await runtime.startSession(startRequest());
+    const { acp, runtime } = createRuntimeHarness();
+    const operation = collectOperation('run-1');
+    await runtime.startSession(startRequest({ operation: operation.operation }));
     await acp.waitForClientMethod('session/prompt');
 
     acp.serverRequest({
@@ -632,17 +851,16 @@ describe('Cursor ACP runtime', () => {
       },
     });
 
-    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
-    expect(request.requestedTool).toBeInstanceOf(CursorAskQuestionToolUseMessage);
-    expect(request.requestedTool.questions[0].prompt).toBe('Which mode?');
-
     const answered = {
       outcome: {
         outcome: 'answered',
         answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
       },
     };
-    runtime.resolvePermission(request.permissionRequestId, { allow: true, response: answered });
+    const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    expect(permission.lifecycle.requestedTool).toBeInstanceOf(CursorAskQuestionToolUseMessage);
+    expect(permission.lifecycle.requestedTool.questions[0].prompt).toBe('Which mode?');
+    await permission.decision.respond({ allow: true, response: answered });
 
     const response = await acp.waitForWrite((message) => message.id === 'question-1' && message.result);
     expect(response.result).toEqual(answered);
@@ -652,8 +870,9 @@ describe('Cursor ACP runtime', () => {
   });
 
   it('emits Cursor create-plan requests and can reject them', async () => {
-    const { acp, runtime, waitForMessage } = createRuntimeHarness();
-    await runtime.startSession(startRequest());
+    const { acp, runtime } = createRuntimeHarness();
+    const operation = collectOperation('run-1');
+    await runtime.startSession(startRequest({ operation: operation.operation }));
     await acp.waitForClientMethod('session/prompt');
 
     acp.serverRequest({
@@ -667,11 +886,10 @@ describe('Cursor ACP runtime', () => {
       },
     });
 
-    const request = await waitForMessage((message) => message instanceof PermissionRequestMessage);
-    expect(request.requestedTool).toBeInstanceOf(CursorCreatePlanToolUseMessage);
-    expect(request.requestedTool.plan).toBe('Do the work');
-
-    runtime.resolvePermission(request.permissionRequestId, { allow: false });
+    const permission = await operation.waitForEvent((event) => event.type === 'permission');
+    expect(permission.lifecycle.requestedTool).toBeInstanceOf(CursorCreatePlanToolUseMessage);
+    expect(permission.lifecycle.requestedTool.plan).toBe('Do the work');
+    await permission.decision.respond({ allow: false });
     const response = await acp.waitForWrite((message) => message.id === 'plan-1' && message.result);
     expect(response.result).toEqual({
       outcome: { outcome: 'rejected', reason: 'User rejected plan' },

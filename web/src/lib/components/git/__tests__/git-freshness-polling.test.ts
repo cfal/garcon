@@ -28,7 +28,7 @@ describe('git freshness polling', () => {
 		vi.useRealTimers();
 	});
 
-	it('polls on the configured interval without an immediate first tick', () => {
+	it('polls immediately and on the configured interval', async () => {
 		vi.useFakeTimers();
 		const checkFreshness = vi.fn();
 		const documentRef = makeDocumentRef('visible');
@@ -40,11 +40,14 @@ describe('git freshness polling', () => {
 			intervalMs: 15_000,
 		});
 
-		expect(checkFreshness).not.toHaveBeenCalled();
+		await vi.runAllTicks();
+		expect(checkFreshness).toHaveBeenCalledOnce();
+		expect(checkFreshness).toHaveBeenLastCalledWith('/project');
 		vi.advanceTimersByTime(14_999);
-		expect(checkFreshness).not.toHaveBeenCalled();
+		expect(checkFreshness).toHaveBeenCalledOnce();
 		vi.advanceTimersByTime(1);
-		expect(checkFreshness).toHaveBeenCalledWith('/project');
+		expect(checkFreshness).toHaveBeenCalledTimes(2);
+		expect(checkFreshness).toHaveBeenLastCalledWith('/project');
 
 		cleanup();
 	});

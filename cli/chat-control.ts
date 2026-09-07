@@ -1,0 +1,184 @@
+import crypto from 'node:crypto';
+import type {
+  AgentRunCommandRequest,
+  AgentStopCommandRequest,
+  AgentStopResponse,
+  AgentTurnCommandResponse,
+  SteerCommandRequest,
+  SteerCommandResponse,
+} from '@garcon/common/chat-command-contracts';
+import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
+import type { UserMessagePresentation } from '@garcon/common/chat-types';
+import { abortableDelay } from './abortable-delay.js';
+import { CliError } from './errors.js';
+import { GarconHttpError } from './garcon-client.js';
+import type { CliOutput } from './output.js';
+
+const MAX_CONTROL_DISPATCH_ATTEMPTS = 3;
+const CONTROL_STATE_RETRY_DELAY_MS = 50;
+
+export interface ChatControlClient {
+  getChatSnapshot(
+    chatId: string,
+    messageLimit: number,
+    signal?: AbortSignal,
+  ): Promise<ChatSnapshotResponse>;
+  runChat(
+    request: AgentRunCommandRequest,
+    signal?: AbortSignal,
+  ): Promise<AgentTurnCommandResponse>;
+  steerChat(
+    request: SteerCommandRequest,
+    signal?: AbortSignal,
+  ): Promise<SteerCommandResponse>;
+  stopChat(
+    request: AgentStopCommandRequest,
+    signal?: AbortSignal,
+  ): Promise<AgentStopResponse>;
+}
+
+export interface ChatControlDependencies {
+  createId?: () => string;
+  delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+}
+
+function hasDefinitiveConflictCode(error: unknown, code: string): error is GarconHttpError {
+  // Route switches require the definitive HTTP 409 conflict plus the exact code;
+  // an identical code on another status must propagate unchanged.
+  return error instanceof GarconHttpError
+    && error.status === 409
+    && error.errorCode === code;
+}
+
+// Only these two definitive 409 rejections prove that the steering identity did
+// not deliver the input, so the chat may now accept a normal run. Provider
+// delivery failures and capability rejections never authorize a route switch.
+function isSafeSteerStateFlip(error: unknown): boolean {
+  return hasDefinitiveConflictCode(error, 'STEER_TURN_UNAVAILABLE')
+    || hasDefinitiveConflictCode(error, 'STEER_TURN_CHANGED');
+}
+
+// Alternates between the run and steer endpoints for at most three logical
+// dispatch attempts, switching routes only after a server response that proves
+// the message was not delivered. The normal run request is allocated once and
+// reused byte-for-byte when returning to /run, because the server's pre-schedule
+// failure replay path resets an exact failed run identity.
+export async function sendChatAsync(
+  input: {
+    chatId: string;
+    content: string;
+    allowSteer: boolean;
+    userMessagePresentation?: UserMessagePresentation;
+  },
+  client: ChatControlClient,
+  output: CliOutput,
+  signal?: AbortSignal,
+  dependencies: ChatControlDependencies = {},
+): Promise<void> {
+  const createId = dependencies.createId ?? crypto.randomUUID;
+  const delay = dependencies.delay ?? abortableDelay;
+  const transcriptViewId = await currentTranscriptViewId(client, input.chatId, signal);
+  const runRequest: AgentRunCommandRequest = {
+    clientRequestId: createId(),
+    clientMessageId: createId(),
+    chatId: input.chatId,
+    transcriptViewId,
+    command: input.content,
+    ...(input.userMessagePresentation === undefined
+      ? {}
+      : { userMessagePresentation: input.userMessagePresentation }),
+  };
+  let operation: 'run' | 'steer' = 'run';
+  let lastStateFlip: GarconHttpError | undefined;
+
+  for (let attempt = 0; attempt < MAX_CONTROL_DISPATCH_ATTEMPTS; attempt += 1) {
+    try {
+      if (operation === 'run') {
+        const response = await client.runChat(runRequest, signal);
+        output.sent(response.chatId, 'new-turn', response.turnId);
+        return;
+      }
+
+      // A steer attempt gets a fresh identity; a later logical steer must never
+      // reuse the identity of a definitively rejected prior steer.
+      const request: SteerCommandRequest = {
+        clientRequestId: createId(),
+        clientMessageId: createId(),
+        chatId: input.chatId,
+        transcriptViewId,
+        content: input.content,
+        ...(input.userMessagePresentation === undefined
+          ? {}
+          : { userMessagePresentation: input.userMessagePresentation }),
+      };
+      const response = await client.steerChat(request, signal);
+      output.sent(response.chatId, 'steer', response.turnId);
+      return;
+    } catch (error) {
+      if (operation === 'run') {
+        if (!hasDefinitiveConflictCode(error, 'SESSION_BUSY')) throw error;
+        if (!input.allowSteer) {
+          throw new CliError(
+            'submission',
+            `chat ${input.chatId} cannot accept a new turn: ${error.message}; `
+              + 'wait for the active turn, pass --allow-steer to steer it, '
+              + 'or resolve paused or queued work in Garcon',
+            3,
+            { cause: error },
+          );
+        }
+        lastStateFlip = error as GarconHttpError;
+        operation = 'steer';
+      } else {
+        if (!isSafeSteerStateFlip(error)) throw error;
+        lastStateFlip = error as GarconHttpError;
+        operation = 'run';
+      }
+
+      if (attempt === MAX_CONTROL_DISPATCH_ATTEMPTS - 1) break;
+      await delay(CONTROL_STATE_RETRY_DELAY_MS, signal);
+    }
+  }
+
+  throw new CliError(
+    'submission',
+    `chat ${input.chatId} could not find a valid delivery route; the message was not sent after `
+      + `${MAX_CONTROL_DISPATCH_ATTEMPTS} attempts; inspect its active turn and paused or queued work `
+      + `in Garcon before retrying; last result: ${lastStateFlip?.message ?? 'execution state conflict'}`,
+    3,
+    { cause: lastStateFlip },
+  );
+}
+
+async function currentTranscriptViewId(
+  client: ChatControlClient,
+  chatId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const snapshot = await client.getChatSnapshot(chatId, 1, signal);
+  if (snapshot.transcript.availability !== 'available') {
+    throw new CliError(
+      'submission',
+      `chat ${chatId} transcript is unavailable; retry after transcript access is restored`,
+      3,
+    );
+  }
+  return snapshot.transcript.transcriptViewId;
+}
+
+export async function stopChat(
+  chatId: string,
+  client: ChatControlClient,
+  output: CliOutput,
+  signal?: AbortSignal,
+  dependencies: Pick<ChatControlDependencies, 'createId'> = {},
+): Promise<void> {
+  const response = await client.stopChat({
+    clientRequestId: (dependencies.createId ?? crypto.randomUUID)(),
+    chatId,
+  }, signal);
+  if (response.outcome === 'failed') {
+    throw new CliError('submission', `Garcon could not stop chat ${chatId}`, 3);
+  }
+  output.stopped(chatId, response.outcome);
+}

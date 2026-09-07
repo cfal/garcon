@@ -9,7 +9,11 @@
 	} from '$lib/context';
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import type { UpdateRemoteSettingsInput } from '$shared/settings';
+	import {
+		LocalSettingsStore,
+		type LocalSettingsSnapshot,
+	} from '$lib/stores/local-settings.svelte.js';
+	import { onDestroy, untrack } from 'svelte';
 
 	interface SettingsTestHostProps {
 		appShell: AppShellStore;
@@ -24,6 +28,40 @@
 		onLocalSet = () => undefined,
 		onLocalToggle = () => undefined,
 	}: SettingsTestHostProps = $props();
+	class SettingsLocalStore extends LocalSettingsStore {
+		#notifySet: (key: string, value: unknown) => void;
+		#notifyToggle: (key: string) => void;
+
+		constructor(
+			notifySet: (key: string, value: unknown) => void,
+			notifyToggle: (key: string) => void,
+		) {
+			super();
+			this.#notifySet = notifySet;
+			this.#notifyToggle = notifyToggle;
+		}
+
+		override set<K extends keyof LocalSettingsSnapshot>(
+			key: K,
+			value: LocalSettingsSnapshot[K],
+		): void {
+			super.set(key, value);
+			this.#notifySet(key, value);
+		}
+
+		override toggle(key: Parameters<LocalSettingsStore['toggle']>[0]): void {
+			this.#notifyToggle(key);
+			super.toggle(key);
+		}
+	}
+
+	const localSettings = new SettingsLocalStore(
+		(key, value) => onLocalSet(key, value),
+		(key) => onLocalToggle(key),
+	);
+	localSettings.chatMaxWidth = 'none';
+	localSettings.sidebarInactivityDuration = '3-days';
+	localSettings.hiddenToolTypes = [];
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -146,63 +184,9 @@
 		refresh: async () => {},
 	});
 
-	setAppShell({
-		get showSettings() {
-			return appShell.showSettings;
-		},
-		get settingsTab() {
-			return appShell.settingsTab;
-		},
-		setSettingsTab(tab: string) {
-			appShell.setSettingsTab(tab);
-		},
-		closeSettings() {
-			appShell.closeSettings();
-		},
-	} as never);
-	setRemoteSettings({
-		get hasSnapshot() {
-			return remoteSettings.hasSnapshot;
-		},
-		get snapshot() {
-			return remoteSettings.snapshot;
-		},
-		get error() {
-			return remoteSettings.error;
-		},
-		refreshInBackground() {
-			return remoteSettings.refreshInBackground();
-		},
-		update(patch: UpdateRemoteSettingsInput) {
-			return remoteSettings.update(patch);
-		},
-	} as never);
-	setLocalSettings({
-		theme: 'system',
-		colorblindMode: false,
-		overlayBackdropEffects: true,
-		hideChatListWhenGitInMain: false,
-		autoExpandTools: false,
-		showThinking: true,
-		hiddenToolTypes: [],
-		showQuickCommitTray: true,
-		autoScrollToBottom: true,
-		sendByShiftEnter: false,
-		chatMaxWidth: 'none',
-		textEditorOpenPlacement: 'source',
-		imageViewerOpenPlacement: 'source',
-		markdownViewerOpenPlacement: 'source',
-		set(key: string, value: unknown) {
-			onLocalSet(key, value);
-		},
-		toggle(key: string) {
-			onLocalToggle(key);
-		},
-		areToolTypesHidden() {
-			return false;
-		},
-		setToolTypesHidden() {},
-	} as never);
+	setAppShell(untrack(() => appShell));
+	setRemoteSettings(untrack(() => remoteSettings));
+	setLocalSettings(localSettings);
 	setModelCatalog({
 		version: 0,
 		apiProviderCatalog: [],
@@ -253,6 +237,8 @@
 			return null;
 		},
 	} as never);
+
+	onDestroy(() => localSettings.destroy());
 </script>
 
 <Settings />

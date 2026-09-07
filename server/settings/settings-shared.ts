@@ -1,5 +1,12 @@
 import type { FolderFilter, UiSettings } from './types.js';
-import { APP_TITLE_MAX_LENGTH } from '../../common/settings.js';
+import {
+  APP_TITLE_MAX_LENGTH,
+  normalizeAgentSwitchCompactionUiSettings,
+  normalizeChatTitleUiSettings,
+  normalizeCommitMessageUiSettings,
+  normalizePromptRefinementUiSettings,
+} from '../../common/settings.js';
+import { parseHiddenBashCommandPatterns } from '../../common/hidden-bash-command-patterns.js';
 
 function normalizeAppIdentitySettings(value: unknown): { title: string } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -22,15 +29,30 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
   if ('pinnedInsertPosition' in normalized) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
   }
-  const commitMessage = normalized.commitMessage;
-  if (commitMessage && typeof commitMessage === 'object' && !Array.isArray(commitMessage)) {
-    const nextCommitMessage = { ...(commitMessage as Record<string, unknown>) };
-    delete nextCommitMessage.enabled;
-    if (Object.keys(nextCommitMessage).length > 0) {
-      normalized.commitMessage = nextCommitMessage;
-    } else {
-      delete normalized.commitMessage;
-    }
+  if ('hiddenBashCommandPatterns' in normalized) {
+    const patterns = parseHiddenBashCommandPatterns(normalized.hiddenBashCommandPatterns);
+    if (patterns !== null) normalized.hiddenBashCommandPatterns = patterns;
+    else delete normalized.hiddenBashCommandPatterns;
+  }
+  if ('chatTitle' in normalized) {
+    const chatTitle = normalizeChatTitleUiSettings(normalized.chatTitle);
+    if (chatTitle) normalized.chatTitle = chatTitle;
+    else delete normalized.chatTitle;
+  }
+  if ('agentSwitchCompaction' in normalized) {
+    const compaction = normalizeAgentSwitchCompactionUiSettings(normalized.agentSwitchCompaction);
+    if (compaction) normalized.agentSwitchCompaction = compaction;
+    else delete normalized.agentSwitchCompaction;
+  }
+  if ('commitMessage' in normalized) {
+    const commitMessage = normalizeCommitMessageUiSettings(normalized.commitMessage);
+    if (commitMessage) normalized.commitMessage = commitMessage;
+    else delete normalized.commitMessage;
+  }
+  if ('promptRefinement' in normalized) {
+    const promptRefinement = normalizePromptRefinementUiSettings(normalized.promptRefinement);
+    if (promptRefinement) normalized.promptRefinement = promptRefinement;
+    else delete normalized.promptRefinement;
   }
   return normalized;
 }

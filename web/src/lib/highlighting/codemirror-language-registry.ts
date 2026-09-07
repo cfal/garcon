@@ -106,14 +106,18 @@ export async function loadCodeFenceLanguage(
 export async function loadLanguageExtension(
 	input: LoadLanguageExtensionInput,
 ): Promise<Extension[]> {
+	const loaded = await loadCodeMirrorLanguageForFile(input);
+	return loaded?.extensions ?? [];
+}
+
+export async function loadCodeMirrorLanguageForFile(
+	input: LoadLanguageExtensionInput,
+): Promise<LoadedCodeMirrorLanguage | null> {
 	const filePath = typeof input === 'string' ? input : input.filePath;
 	const explicitLanguage = typeof input === 'string' ? null : input.language;
 	const description =
 		matchEditorExplicitLanguage(explicitLanguage) ??
 		matchEditorFilename(filePath) ??
 		matchEditorFallback(filePath);
-	if (!description) return [];
-
-	const loaded = await loadDescription(description);
-	return loaded?.extensions ?? [];
+	return description ? loadDescription(description) : null;
 }

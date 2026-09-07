@@ -3,22 +3,30 @@ import { SNIPPET_EXPANDED_MAX_LENGTH } from '../../../common/snippets.ts';
 import { expandSnippetTemplate } from '../template.ts';
 
 describe('snippet template expansion', () => {
-  it('expands the two exact markers and preserves multiline arguments', () => {
+  it('expands all exact markers and preserves multiline arguments', () => {
     expect(
-      expandSnippetTemplate('Review {{arguments}} in {{project_path}}', {
-        arguments: 'API\ncontracts',
-        projectPath: '/repo',
-      }),
-    ).toBe('Review API\ncontracts in /repo');
+      expandSnippetTemplate(
+        'Chat {{chat_id}}: review {{arguments}} in {{project_path}}',
+        {
+          arguments: 'API\ncontracts',
+          projectPath: '/repo',
+          chatId: 'chat-a',
+        },
+      ),
+    ).toBe('Chat chat-a: review API\ncontracts in /repo');
   });
 
   it('keeps escaped, spaced, and unknown markers literal', () => {
     expect(
-      expandSnippetTemplate('\\{{arguments}} {{ arguments }} {{unknown}}', {
-        arguments: 'ignored',
-        projectPath: '/repo',
-      }),
-    ).toBe('{{arguments}} {{ arguments }} {{unknown}}');
+      expandSnippetTemplate(
+        '\\{{arguments}} \\{{chat_id}} {{ arguments }} {{unknown}}',
+        {
+          arguments: 'ignored',
+          projectPath: '/repo',
+          chatId: 'chat-a',
+        },
+      ),
+    ).toBe('{{arguments}} {{chat_id}} {{ arguments }} {{unknown}}');
   });
 
   it('is single-pass for marker-shaped replacement values', () => {
@@ -26,6 +34,7 @@ describe('snippet template expansion', () => {
       expandSnippetTemplate('{{arguments}}', {
         arguments: '{{project_path}}',
         projectPath: '/repo',
+        chatId: 'chat-a',
       }),
     ).toBe('{{project_path}}');
   });
@@ -35,6 +44,7 @@ describe('snippet template expansion', () => {
       expandSnippetTemplate('{{arguments}}{{arguments}}{{arguments}}', {
         arguments: 'x'.repeat(Math.floor(SNIPPET_EXPANDED_MAX_LENGTH / 2)),
         projectPath: '/repo',
+        chatId: 'chat-a',
       }),
     ).toThrow('Expanded snippet exceeds');
   });

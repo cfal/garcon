@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import {
   createClaudeNativePath,
+  prepareClaudeNativeSessionRelocation,
   resolveClaudeNativePath,
   sanitizeClaudeProjectPath,
 } from '../native-path.js';
@@ -45,11 +46,11 @@ describe('sanitizeClaudeProjectPath', () => {
   });
 
   it('uses Claude Code long-path truncation and hashing', () => {
-    const projectPath = `/${'a'.repeat(220)}`;
+    const projectPath = `/tmp/claude-long-hash-vector/${'a'.repeat(90)}/${'b'.repeat(90)}`;
     const sanitized = sanitizeClaudeProjectPath(projectPath);
 
     expect(sanitized).toBe(
-      `${projectPath.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 200)}-${Bun.hash(projectPath).toString(36)}`,
+      `${projectPath.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 200)}-m0kdax`,
     );
   });
 });
@@ -206,6 +207,238 @@ describe('resolveClaudeNativePath', () => {
     expect(logger.error).toHaveBeenCalledWith(
       'Claude transcript search found multiple files and refused to choose',
       expect.objectContaining({ agentSessionId: 'session-1' }),
+    );
+  });
+});
+
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function relocationFixture(options = {}) {
+  const rootDirectory = await temporaryDirectory();
+  const sourceConfigHome = path.join(rootDirectory, 'source-config');
+  const targetConfigHome = options.targetConfigHome
+    ?? sourceConfigHome;
+  const previousProjectPath = path.join(rootDirectory, 'project-a');
+  const nextProjectPath = path.join(rootDirectory, 'project-b');
+  await fs.mkdir(previousProjectPath, { recursive: true });
+  await fs.mkdir(nextProjectPath, { recursive: true });
+  const sourcePath = await createClaudeNativePath(
+    previousProjectPath,
+    'session-1',
+    { configHomeDir: sourceConfigHome },
+  );
+  await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+  await fs.writeFile(sourcePath, 'source transcript\n');
+  const sourceQueuePath = path.join(
+    path.dirname(sourcePath),
+    'session-1.queue.json',
+  );
+  const sourceSupportPath = path.join(
+    path.dirname(sourcePath),
+    'session-1',
+  );
+  await fs.writeFile(sourceQueuePath, '{"entries":[]}\n');
+  await fs.mkdir(path.join(sourceSupportPath, 'subagents'), { recursive: true });
+  await fs.writeFile(
+    path.join(sourceSupportPath, 'subagents', 'agent-1.jsonl'),
+    'subagent transcript\n',
+  );
+
+  return {
+    logger: createLogger(),
+    nextProjectPath,
+    previousProjectPath,
+    sourceConfigHome,
+    sourcePath,
+    sourceQueuePath,
+    sourceSupportPath,
+    targetConfigHome,
+  };
+}
+
+describe('prepareClaudeNativeSessionRelocation', () => {
+  it('copies all session artifacts before removing the source on commit', async () => {
+    const fixture = await relocationFixture();
+
+    const relocation = await prepareClaudeNativeSessionRelocation({
+      previousProjectPath: fixture.previousProjectPath,
+      nextProjectPath: fixture.nextProjectPath,
+      agentSessionId: 'session-1',
+      nativePath: fixture.sourcePath,
+      configHomeDir: fixture.targetConfigHome,
+      logger: fixture.logger,
+    });
+    const targetQueuePath = path.join(
+      path.dirname(relocation.nativePath),
+      'session-1.queue.json',
+    );
+    const targetSupportPath = path.join(
+      path.dirname(relocation.nativePath),
+      'session-1',
+    );
+
+    expect(await fs.readFile(relocation.nativePath, 'utf8')).toBe(
+      'source transcript\n',
+    );
+    expect(await fs.readFile(targetQueuePath, 'utf8')).toBe(
+      '{"entries":[]}\n',
+    );
+    expect(await fs.readFile(
+      path.join(targetSupportPath, 'subagents', 'agent-1.jsonl'),
+      'utf8',
+    )).toBe('subagent transcript\n');
+    expect(await pathExists(fixture.sourcePath)).toBe(true);
+
+    await relocation.commit();
+
+    expect(await pathExists(fixture.sourcePath)).toBe(false);
+    expect(await pathExists(fixture.sourceQueuePath)).toBe(false);
+    expect(await pathExists(fixture.sourceSupportPath)).toBe(false);
+    expect(await pathExists(relocation.nativePath)).toBe(true);
+  });
+
+  it('removes prepared destination artifacts on rollback', async () => {
+    const fixture = await relocationFixture();
+    const relocation = await prepareClaudeNativeSessionRelocation({
+      previousProjectPath: fixture.previousProjectPath,
+      nextProjectPath: fixture.nextProjectPath,
+      agentSessionId: 'session-1',
+      nativePath: fixture.sourcePath,
+      configHomeDir: fixture.targetConfigHome,
+      logger: fixture.logger,
+    });
+
+    await relocation.rollback();
+
+    expect(await pathExists(relocation.nativePath)).toBe(false);
+    expect(await pathExists(fixture.sourcePath)).toBe(true);
+    expect(await pathExists(fixture.sourceQueuePath)).toBe(true);
+    expect(await pathExists(fixture.sourceSupportPath)).toBe(true);
+  });
+
+  it('uses the current config home for the destination', async () => {
+    const rootDirectory = await temporaryDirectory();
+    const targetConfigHome = path.join(rootDirectory, 'current-config');
+    const fixture = await relocationFixture({ targetConfigHome });
+
+    const relocation = await prepareClaudeNativeSessionRelocation({
+      previousProjectPath: fixture.previousProjectPath,
+      nextProjectPath: fixture.nextProjectPath,
+      agentSessionId: 'session-1',
+      nativePath: fixture.sourcePath,
+      configHomeDir: targetConfigHome,
+      logger: fixture.logger,
+    });
+
+    expect(relocation.nativePath.startsWith(
+      path.join(targetConfigHome, 'projects'),
+    )).toBe(true);
+    await relocation.rollback();
+  });
+
+  it('replaces stale destination artifacts without merging them', async () => {
+    const fixture = await relocationFixture();
+    const targetPath = await createClaudeNativePath(
+      fixture.nextProjectPath,
+      'session-1',
+      { configHomeDir: fixture.targetConfigHome },
+    );
+    const targetSupportPath = path.join(path.dirname(targetPath), 'session-1');
+    await fs.mkdir(targetSupportPath, { recursive: true });
+    await fs.writeFile(targetPath, 'stale transcript\n');
+    await fs.writeFile(path.join(targetSupportPath, 'stale.txt'), 'stale\n');
+
+    const relocation = await prepareClaudeNativeSessionRelocation({
+      previousProjectPath: fixture.previousProjectPath,
+      nextProjectPath: fixture.nextProjectPath,
+      agentSessionId: 'session-1',
+      nativePath: fixture.sourcePath,
+      configHomeDir: fixture.targetConfigHome,
+      logger: fixture.logger,
+    });
+
+    expect(await fs.readFile(relocation.nativePath, 'utf8')).toBe(
+      'source transcript\n',
+    );
+    expect(await pathExists(path.join(targetSupportPath, 'stale.txt'))).toBe(
+      false,
+    );
+    await relocation.rollback();
+  });
+
+  it('returns a no-op relocation for the same canonical project', async () => {
+    const fixture = await relocationFixture();
+
+    const relocation = await prepareClaudeNativeSessionRelocation({
+      previousProjectPath: fixture.previousProjectPath,
+      nextProjectPath: fixture.previousProjectPath,
+      agentSessionId: 'session-1',
+      nativePath: fixture.sourcePath,
+      configHomeDir: fixture.targetConfigHome,
+      logger: fixture.logger,
+    });
+
+    await relocation.commit();
+    await relocation.rollback();
+    expect(relocation.nativePath).toBe(fixture.sourcePath);
+    expect(await pathExists(fixture.sourcePath)).toBe(true);
+  });
+
+  it('rejects missing and structurally unsafe source transcripts', async () => {
+    const rootDirectory = await temporaryDirectory();
+    const projectPath = path.join(rootDirectory, 'project');
+    await fs.mkdir(projectPath, { recursive: true });
+
+    await expect(prepareClaudeNativeSessionRelocation({
+      previousProjectPath: projectPath,
+      nextProjectPath: projectPath,
+      agentSessionId: 'missing-session',
+      nativePath: null,
+      configHomeDir: path.join(rootDirectory, 'config'),
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+
+    const unsafePath = path.join(rootDirectory, 'unsafe-session.jsonl');
+    await fs.writeFile(unsafePath, 'unsafe\n');
+    await expect(prepareClaudeNativeSessionRelocation({
+      previousProjectPath: projectPath,
+      nextProjectPath: projectPath,
+      agentSessionId: 'unsafe-session',
+      nativePath: unsafePath,
+      configHomeDir: path.join(rootDirectory, 'config'),
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+  });
+
+  it('rejects session IDs that could escape recursive artifact cleanup', async () => {
+    const rootDirectory = await temporaryDirectory();
+    const configHomeDir = path.join(rootDirectory, 'config');
+    const projectPath = path.join(rootDirectory, 'project');
+    const projectDirectory = path.join(configHomeDir, 'projects', 'source');
+    const siblingDirectory = path.join(configHomeDir, 'projects', 'sibling');
+    const unsafePath = path.join(projectDirectory, '...jsonl');
+    await fs.mkdir(projectPath, { recursive: true });
+    await fs.mkdir(projectDirectory, { recursive: true });
+    await fs.mkdir(siblingDirectory, { recursive: true });
+    await fs.writeFile(unsafePath, 'unsafe\n');
+    await fs.writeFile(path.join(siblingDirectory, 'retained.txt'), 'retained\n');
+
+    await expect(prepareClaudeNativeSessionRelocation({
+      previousProjectPath: projectPath,
+      nextProjectPath: projectPath,
+      agentSessionId: '..',
+      nativePath: unsafePath,
+      configHomeDir,
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+
+    expect(await pathExists(unsafePath)).toBe(true);
+    expect(await pathExists(path.join(siblingDirectory, 'retained.txt'))).toBe(
+      true,
     );
   });
 });

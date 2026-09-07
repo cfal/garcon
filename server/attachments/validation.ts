@@ -1,10 +1,19 @@
-import path from 'path';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
+import {
+  CHAT_FILE_ATTACHMENT_MIME_TYPES,
+  MAX_CHAT_ATTACHMENT_COUNT,
+  MAX_CHAT_ATTACHMENT_FILE_BYTES,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_CHAT_VIDEO_ATTACHMENT_FILE_BYTES,
+  chatAttachmentMimeType,
+  isVideoAttachmentMimeType,
+} from '../../common/attachments.js';
 
 export const MAX_ATTACHMENT_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
-export const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
-export const MAX_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
-export const MAX_ATTACHMENT_COUNT = 5;
+export const MAX_ATTACHMENT_TOTAL_BYTES = MAX_CHAT_ATTACHMENT_TOTAL_BYTES;
+export const MAX_ATTACHMENT_FILE_BYTES = MAX_CHAT_ATTACHMENT_FILE_BYTES;
+export const MAX_VIDEO_ATTACHMENT_FILE_BYTES = MAX_CHAT_VIDEO_ATTACHMENT_FILE_BYTES;
+export const MAX_ATTACHMENT_COUNT = MAX_CHAT_ATTACHMENT_COUNT;
 
 export const ALLOWED_ATTACHMENT_MIMES = new Set([
   'image/jpeg',
@@ -12,22 +21,9 @@ export const ALLOWED_ATTACHMENT_MIMES = new Set([
   'image/gif',
   'image/webp',
   'image/svg+xml',
-  'text/markdown',
-  'text/plain',
-  'application/pdf',
+  ...CHAT_FILE_ATTACHMENT_MIME_TYPES,
 ]);
 
-const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
-  '.gif': 'image/gif',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.markdown': 'text/markdown',
-  '.md': 'text/markdown',
-  '.pdf': 'application/pdf',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-};
 
 const DATA_URL_RE = /^data:([^;,]*);base64,([A-Za-z0-9+/]*={0,2})$/;
 const BASE64_CHARS_RE = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -54,10 +50,7 @@ export class AttachmentValidationError extends Error {
 }
 
 export function attachmentMimeTypeForUpload(file: Pick<UploadAttachmentFile, 'name' | 'type'>): string {
-  const declared = file.type.trim().toLowerCase();
-  if (declared) return declared;
-  const ext = path.extname(file.name).toLowerCase();
-  return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
+  return chatAttachmentMimeType(file);
 }
 
 export function validateAttachmentUploadBatch(
@@ -75,14 +68,14 @@ export function validateAttachmentUploadBatch(
   for (const file of files) {
     const mimeType = attachmentMimeTypeForUpload(file);
     assertAllowedAttachmentMime(mimeType);
-    assertAttachmentSize(file.size);
+    assertAttachmentSize(file.size, mimeType);
   }
 }
 
 export async function uploadedAttachmentFromFile(file: UploadAttachmentFile): Promise<UploadedAttachment> {
   const mimeType = attachmentMimeTypeForUpload(file);
   assertAllowedAttachmentMime(mimeType);
-  assertAttachmentSize(file.size);
+  assertAttachmentSize(file.size, mimeType);
   const buffer = Buffer.from(await file.arrayBuffer());
   return {
     name: file.name,
@@ -115,9 +108,18 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
       throw new AttachmentValidationError('Invalid attachment payload.');
     }
 
-    const dataMimeType = match[1].trim().toLowerCase();
-    const declaredMimeType = typeof attachment.mimeType === 'string'
+    const name = typeof attachment.name === 'string' && attachment.name.trim()
+      ? attachment.name
+      : `attachment-${index + 1}`;
+    const rawDataMimeType = match[1].trim().toLowerCase();
+    const rawDeclaredMimeType = typeof attachment.mimeType === 'string'
       ? attachment.mimeType.trim().toLowerCase()
+      : '';
+    const dataMimeType = rawDataMimeType
+      ? chatAttachmentMimeType({ name, type: rawDataMimeType })
+      : '';
+    const declaredMimeType = rawDeclaredMimeType
+      ? chatAttachmentMimeType({ name, type: rawDeclaredMimeType })
       : '';
     const mimeType = dataMimeType || declaredMimeType;
     if (dataMimeType && declaredMimeType && dataMimeType !== declaredMimeType) {
@@ -130,15 +132,12 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
       throw new AttachmentValidationError('Invalid attachment payload.');
     }
     const size = Buffer.byteLength(base64, 'base64');
-    assertAttachmentSize(size);
+    assertAttachmentSize(size, mimeType);
     totalBytes += size;
     if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
       throw new AttachmentValidationError('Total upload too large. Maximum combined size is 25MB.', 413);
     }
 
-    const name = typeof attachment.name === 'string' && attachment.name.trim()
-      ? attachment.name
-      : `attachment-${index + 1}`;
     return {
       data: `data:${mimeType};base64,${base64}`,
       name,
@@ -149,13 +148,21 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
 
 function assertAllowedAttachmentMime(mimeType: string): void {
   if (!ALLOWED_ATTACHMENT_MIMES.has(mimeType)) {
-    throw new AttachmentValidationError('Invalid file type. Only images, Markdown, text, and PDF files are allowed.');
+    throw new AttachmentValidationError(
+      'Invalid file type. Only images, videos, Markdown, text, and PDF files are allowed.',
+    );
   }
 }
 
-function assertAttachmentSize(size: number): void {
-  if (size > MAX_ATTACHMENT_FILE_BYTES) {
-    throw new AttachmentValidationError('File too large. Maximum file size is 10MB.', 413);
+function assertAttachmentSize(size: number, mimeType: string): void {
+  const maxBytes = isVideoAttachmentMimeType(mimeType)
+    ? MAX_VIDEO_ATTACHMENT_FILE_BYTES
+    : MAX_ATTACHMENT_FILE_BYTES;
+  if (size > maxBytes) {
+    throw new AttachmentValidationError(
+      `File too large. Maximum file size is ${maxBytes / (1024 * 1024)}MB.`,
+      413,
+    );
   }
 }
 

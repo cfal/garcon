@@ -1,54 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import path from 'path';
-import os from 'os';
-import { promises as fs } from 'fs';
-import { randomUUID } from 'crypto';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
-import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
-
-let workspaceDir = '';
-let queue;
-
-function createStateOnlyAgents() {
-  return {
-    runAgentTurn: mock(() => Promise.reject(new Error('state-only queue cannot run turns'))),
-    abortSession: mock(() => Promise.resolve(false)),
-    isChatRunning: mock(() => false),
-    waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
-  };
-}
-
-function createPendingInputs() {
-  return {
-    register: mock(() => Promise.resolve()),
-    discard: mock(() => true),
-    markFailed: mock(() => true),
-    markUnconfirmed: mock(() => true),
-  };
-}
-
-function createChatMessages() {
-  let seq = 0;
-  return {
-    appendMessages: mock((_chatId, messages) => {
-      const viewMessages = messages.map((message) => {
-        seq += 1;
-        return {
-          seq,
-          message,
-        };
-      });
-      return Promise.resolve({
-        generationId: 'generation-1',
-        messages: viewMessages,
-      });
-    }),
-  };
-}
-
-function emptyDrainOptions() {
-  return {};
-}
+import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
+import { DomainError, ProjectUnavailableError } from '../../lib/domain-error.ts';
 
 function deferred() {
   let resolve;
@@ -60,2349 +13,996 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-beforeEach(async () => {
-  workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
-  await fs.mkdir(workspaceDir, { recursive: true });
-  queue = new ChatExecutionCoordinator(
-    workspaceDir,
-    createStateOnlyAgents(),
-    createPendingInputs(),
-    createChatMessages(),
-    emptyDrainOptions,
-    () => true,
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error('Timed out waiting for coordinator state');
+}
+
+function rejectWhenExecutionAdmissionAborts(_chatId, _content, options) {
+  return new Promise((_resolve, reject) => {
+    const { signal } = options.executionAdmission;
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  });
+}
+
+function interAgentInput(content = 'message') {
+  return {
+    content: `<garcon-message>\n${content}\n</garcon-message>`,
+    transcriptViewId: 'view-1',
+    createdAt: '2026-08-29T00:00:00.000Z',
+    receipt: {
+      title: 'Inter-agent message',
+      content,
+      detail: { type: 'inter-agent-message-received', fromChatId: null },
+    },
+  };
+}
+
+function createFixture(overrides = {}) {
+  const events = [];
+  const queuedAdmission = overrides.queuedAdmission ?? (() => ({ inserted: true }));
+  const projection = {
+    admitInput: mock(async () => ({ inserted: true })),
+    hasMatchingInput: mock(async () => false),
+    admitQueuedInput: mock((...args) => {
+      events.push('transcript');
+      return queuedAdmission(...args);
+    }),
+    discardPreparedInput: mock(() => undefined),
+  };
+  const turnRunner = {
+    runAgentTurn: mock(async () => undefined),
+    captureSteerTarget: mock(() => null),
+    steerInput: mock(async () => ({ kind: 'declined' })),
+    submitGoalControl: mock(async () => false),
+    abortSession: mock(async () => false),
+    isChatRunning: mock(() => false),
+    ...overrides.turnRunner,
+  };
+  const appendControlReceipt = overrides.appendControlReceipt ?? mock(() => undefined);
+  const projectAdmission = overrides.projectAdmission ?? {
+    assertAvailable: mock(async () => undefined),
+  };
+  const coordinator = new ChatExecutionCoordinator(
+    '/unused',
+    turnRunner,
+    projection,
+    overrides.getDrainOptions ?? (() => ({
+      model: 'test-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    })),
+    overrides.chatExists ?? (() => true),
+    overrides.controlRepository
+      ?? new InMemoryChatExecutionControlRepository('server-instance-test'),
+    {
+      projectAdmission,
+      unsettledQueueReceiptKeys: () => new Set(),
+      appendControlReceipt,
+    },
   );
-});
+  return { coordinator, events, projection, turnRunner, appendControlReceipt, projectAdmission };
+}
 
-afterEach(async () => {
-  await fs.rm(workspaceDir, { recursive: true, force: true });
-});
+describe('ChatExecutionCoordinator', () => {
+  let coordinator;
 
-describe('queue invariants', () => {
-  it('does not create a pause on an empty queue', async () => {
-    const result = await queue.pauseChatQueue('123');
-    expect(result.entries).toHaveLength(0);
-    expect(result.pause).toBeNull();
+  beforeEach(() => {
+    ({ coordinator } = createFixture());
   });
 
-  it('clears the pause when the last queued entry is removed', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'hello');
-    await queue.pauseChatQueue('123');
-
-    const result = await queue.deleteChatQueueEntry('123', entry.id);
-    expect(result.control.entries).toHaveLength(0);
-    expect(result.control.pause).toBeNull();
+  afterEach(async () => {
+    coordinator.beginShutdown();
   });
 
-  it('returns defensive queue copies from reads', async () => {
-    await queue.createChatQueueEntry('123', 'hello');
+  it('excludes direct execution until a transcript snapshot is released', async () => {
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
 
-    const firstRead = await queue.readChatExecutionControl('123');
-    firstRead.entries[0].content = 'mutated externally';
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+    expect(() => coordinator.reserveDirectTurn('chat-1')).toThrow('already owns execution');
 
-    const secondRead = await queue.readChatExecutionControl('123');
-    expect(secondRead.entries[0].content).toBe('hello');
+    await coordinator.releaseTranscriptSnapshot(snapshot);
+    const direct = coordinator.reserveDirectTurn('chat-1');
+    await coordinator.releaseDirectTurn(direct);
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
-  it('clears in-memory state when deleting queue control', async () => {
-    await queue.createChatQueueEntry('123', 'hello');
-
-    await queue.deleteChatQueueFile('123');
-    const result = await queue.readChatExecutionControl('123');
-
-    expect(result.entries).toEqual([]);
-    expect(result.pause).toBeNull();
-  });
-
-  it('bumps version and updatedAt across queue mutations', async () => {
-    const first = await queue.createChatQueueEntry('123', 'hello');
-    const paused = await queue.pauseChatQueue('123');
-    const resumed = await queue.resumeChatQueue('123', paused.pause.id);
-
-    expect(first.control.version).toBe(1);
-    expect(typeof first.control.updatedAt).toBe('string');
-    expect(paused.version).toBe(2);
-    expect(typeof paused.updatedAt).toBe('string');
-    expect(resumed.version).toBe(3);
-    expect(typeof resumed.updatedAt).toBe('string');
-  });
-
-  it('does not persist or publish idempotent pause and resume no-ops', async () => {
-    await queue.createChatQueueEntry('123', 'hello');
-    const paused = await queue.pauseChatQueue('123');
-    const events = [];
-    queue.onExecutionControlUpdated((chatId, queueState) => events.push({ chatId, queueState }));
-
-    const duplicatePause = await queue.pauseChatQueue('123');
-    expect(duplicatePause.version).toBe(paused.version);
-    expect(events).toHaveLength(0);
-
-    const resumed = await queue.resumeChatQueue('123', paused.pause.id);
-    expect(events).toHaveLength(1);
-    events.length = 0;
-
-    const duplicateResume = await queue.resumeChatQueue('123', paused.pause.id);
-    expect(duplicateResume.version).toBe(resumed.version);
-    expect(events).toHaveLength(0);
-  });
-
-  it('rejects a stale resume when an automatic pause supersedes the rendered pause', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'hello');
-    const manual = await queue.pauseChatQueue('123');
-    const automatic = await queue.requeueAndPauseChat('123', entry.id, 'queued-turn-failed');
-
-    expect(automatic.pause.id).not.toBe(manual.pause.id);
-    await expect(queue.resumeChatQueue('123', manual.pause.id)).rejects.toMatchObject({
-      code: 'QUEUE_PAUSE_CHANGED',
-      control: expect.objectContaining({
-        pause: expect.objectContaining({ id: automatic.pause.id, kind: 'queued-turn-failed' }),
-      }),
+  it('defers a requested queue drain until a transcript snapshot is released', async () => {
+    const run = deferred();
+    const fixture = createFixture({
+      turnRunner: { runAgentTurn: mock(() => run.promise) },
     });
-    expect((await queue.readChatExecutionControl('123')).pause.id).toBe(automatic.pause.id);
+    coordinator = fixture.coordinator;
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+
+    await coordinator.triggerDrain('chat-1');
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+
+    const release = coordinator.releaseTranscriptSnapshot(snapshot);
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
+    run.resolve();
+    await release;
   });
 
-  it('serializes pause and pop so the queue-lock winner defines the dispatch boundary', async () => {
-    const pauseFirst = await queue.createChatQueueEntry('pause-first', 'first');
-    await queue.createChatQueueEntry('pause-first', 'second');
-
-    const [paused, blockedPop] = await Promise.all([
-      queue.pauseChatQueue('pause-first'),
-      queue.popNextChat('pause-first'),
-    ]);
-
-    expect(paused.pause).toMatchObject({ kind: 'manual' });
-    expect(blockedPop).toBeNull();
-    expect(paused.entries).toEqual([
-      expect.objectContaining({ id: pauseFirst.entry.id, status: 'queued' }),
-      expect.objectContaining({ status: 'queued' }),
-    ]);
-
-    const popFirst = await queue.createChatQueueEntry('pop-first', 'first');
-    const tail = await queue.createChatQueueEntry('pop-first', 'second');
-    const [popped, tailPaused] = await Promise.all([
-      queue.popNextChat('pop-first'),
-      queue.pauseChatQueue('pop-first'),
-    ]);
-
-    expect(popped.entry.id).toBe(popFirst.entry.id);
-    expect(tailPaused.pause).toMatchObject({ kind: 'manual' });
-    expect(tailPaused.entries).toEqual([
-      expect.objectContaining({ id: popFirst.entry.id, status: 'sending' }),
-      expect.objectContaining({ id: tail.entry.id, status: 'queued' }),
-    ]);
-  });
-
-  it('creates distinct FIFO entries for every input', async () => {
-    const first = await queue.createChatQueueEntry('123', 'first');
-    const second = await queue.createChatQueueEntry('123', 'second');
-
-    expect(second.control.entries.map((entry) => entry.content)).toEqual(['first', 'second']);
-    expect(second.entry.id).not.toBe(first.entry.id);
-    expect(second.control.entries.map((entry) => entry.revision)).toEqual([1, 1]);
-  });
-
-  it('replays queue command receipts without applying mutations twice', async () => {
-    const createCommand = {
-      key: 'queue-entry-create:123:req-create',
-      entryId: 'stable-entry-id',
-    };
-    const first = await queue.createChatQueueEntry('123', '  exact content\n', createCommand);
-    const createRetry = await queue.createChatQueueEntry('123', '  exact content\n', createCommand);
-
-    expect(first.duplicate).toBe(false);
-    expect(createRetry.duplicate).toBe(true);
-    expect(createRetry.entryId).toBe('stable-entry-id');
-    expect(createRetry.control.entries).toHaveLength(1);
-    expect(createRetry.control.entries[0].content).toBe('  exact content\n');
-    expect(createRetry.control.version).toBe(first.control.version);
-
-    const replaceCommand = {
-      key: 'queue-entry-replace:123:req-replace',
-      entryId: 'stable-entry-id',
-    };
-    const replaced = await queue.replaceChatQueueEntry('123', 'stable-entry-id', 'replacement', 1, replaceCommand);
-    const replaceRetry = await queue.replaceChatQueueEntry('123', 'stable-entry-id', 'replacement', 1, replaceCommand);
-    expect(replaceRetry.duplicate).toBe(true);
-    expect(replaceRetry.control.version).toBe(replaced.control.version);
-    expect(replaceRetry.control.entries[0].revision).toBe(2);
-
-    const deleteCommand = {
-      key: 'queue-entry-delete:123:req-delete',
-      entryId: 'stable-entry-id',
-    };
-    const deleted = await queue.deleteChatQueueEntry('123', 'stable-entry-id', deleteCommand);
-    const deleteRetry = await queue.deleteChatQueueEntry('123', 'stable-entry-id', deleteCommand);
-    expect(deleteRetry.duplicate).toBe(true);
-    expect(deleteRetry.control.version).toBe(deleted.control.version);
-    expect(deleteRetry.control.entries).toEqual([]);
-  });
-
-  it('replaces one entry without changing its identity or position', async () => {
-    const first = await queue.createChatQueueEntry('123', 'first');
-    const second = await queue.createChatQueueEntry('123', 'second');
-
-    const result = await queue.replaceChatQueueEntry('123', first.entry.id, 'edited', 1);
-
-    expect(result.entry).toMatchObject({
-      id: first.entry.id,
-      content: 'edited',
-      revision: 2,
+  it('[TLV5-L04.03-CORE-UNIT-01] keeps future-turn inputs out of the transcript until dequeue', async () => {
+    const provider = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(() => {
+          fixture.events.push('provider');
+          return provider.promise;
+        }),
+      },
     });
-    expect(result.control.entries.map((entry) => entry.id)).toEqual([first.entry.id, second.entry.id]);
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued input');
+    expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+
+    const drain = coordinator.triggerDrain('chat-1');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    expect(fixture.events).toEqual(['transcript', 'provider']);
+    expect(fixture.projection.admitQueuedInput.mock.calls[0][1].content).toBe('queued input');
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
+    provider.resolve();
+    await drain;
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
   });
 
-  it('dispatches the complete replacement when replace wins before pop', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'original');
-    await queue.replaceChatQueueEntry('123', entry.id, 'complete replacement', 1);
+  it('removes a committed duplicate without dispatching it again', async () => {
+    const fixture = createFixture({ queuedAdmission: () => ({ inserted: false }) });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'duplicate');
 
-    const popped = await queue.popNextChat('123');
+    await coordinator.triggerDrain('chat-1');
 
-    expect(popped.entry).toMatchObject({
-      id: entry.id,
-      content: 'complete replacement',
-      revision: 2,
-      status: 'sending',
+    expect(fixture.projection.admitQueuedInput).toHaveBeenCalledTimes(1);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+  });
+
+  it('does not restore a committed queue input when provider dispatch fails', async () => {
+    const fixture = createFixture({
+      turnRunner: { runAgentTurn: mock(async () => { throw new Error('launch failed'); }) },
     });
+    coordinator = fixture.coordinator;
+    const failures = [];
+    coordinator.onTurnFailed((chatId, message) => failures.push({ chatId, message }));
+    await coordinator.createChatQueueEntry('chat-1', 'retry later');
+
+    await coordinator.triggerDrain('chat-1');
+
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.entries).toEqual([]);
+    expect(control.pause).toBeNull();
+    expect(failures).toEqual([{ chatId: 'chat-1', message: 'launch failed' }]);
   });
 
-  it('rejects stale replacements with the current queue snapshot', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'first');
-    await queue.replaceChatQueueEntry('123', entry.id, 'edited elsewhere', 1);
-
-    await expect(queue.replaceChatQueueEntry('123', entry.id, 'stale draft', 1)).rejects.toMatchObject({
-      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
-      control: expect.objectContaining({
-        entries: [expect.objectContaining({ id: entry.id, revision: 2 })],
-      }),
+  it('pauses the remaining queue before releasing a failed queued turn', async () => {
+    const provider = deferred();
+    const fixture = createFixture({
+      turnRunner: { runAgentTurn: mock(() => provider.promise) },
     });
-  });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'failed head');
+    await coordinator.createChatQueueEntry('chat-1', 'queued tail');
 
-  it('allows exactly one of two concurrent replacements at the same revision', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'original');
+    const drain = coordinator.triggerDrain('chat-1');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId }, 'failed');
 
-    const results = await Promise.allSettled([
-      queue.replaceChatQueueEntry('123', entry.id, 'first editor', 1),
-      queue.replaceChatQueueEntry('123', entry.id, 'second editor', 1),
-    ]);
-
-    const fulfilled = results.filter((result) => result.status === 'fulfilled');
-    const rejected = results.filter((result) => result.status === 'rejected');
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0].reason).toMatchObject({
-      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
-      control: expect.objectContaining({
-        entries: [expect.objectContaining({ revision: 2 })],
-      }),
-    });
-  });
-
-  it('marks a popped entry as dispatched and rejects stale deletion by ID', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'first');
-    const popped = await queue.popNextChat('123');
-
-    expect(popped.control.recentlyDispatched).toEqual([expect.objectContaining({ entryId: entry.id })]);
-    await expect(queue.deleteChatQueueEntry('123', entry.id)).rejects.toMatchObject({
-      code: 'QUEUE_ENTRY_ALREADY_SENT',
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.entries.map((entry) => entry.content)).toEqual(['queued tail']);
+    expect(control.pause).toMatchObject({
+      kind: 'queued-turn-failed',
+      entryId: expect.any(String),
     });
 
-    const sent = await queue.removeSentChat('123', entry.id);
-    expect(sent.entries).toEqual([]);
-    expect(sent.recentlyDispatched).toEqual([expect.objectContaining({ entryId: entry.id })]);
+    provider.reject(new Error('provider failed'));
+    await drain;
   });
 
-  it('does not pop queued work while another entry remains sending', async () => {
-    const first = await queue.createChatQueueEntry('123', 'first');
-    const second = await queue.createChatQueueEntry('123', 'second');
-    const popped = await queue.popNextChat('123');
-
-    const blocked = await queue.popNextChat('123');
-    const current = await queue.readChatExecutionControl('123');
-
-    expect(popped.entry.id).toBe(first.entry.id);
-    expect(blocked).toBeNull();
-    expect(current.version).toBe(popped.control.version);
-    expect(current.entries).toEqual([
-      expect.objectContaining({ id: first.entry.id, status: 'sending' }),
-      expect.objectContaining({ id: second.entry.id, status: 'queued' }),
-    ]);
-  });
-
-  it('rejects replacement when pop wins the queue lock first', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'original');
-    await queue.popNextChat('123');
-
-    await expect(queue.replaceChatQueueEntry('123', entry.id, 'too late', 1)).rejects.toMatchObject({
-      code: 'QUEUE_ENTRY_ALREADY_SENT',
+  it('holds direct ownership until the matching run-ended signal', async () => {
+    const provider = deferred();
+    const fixture = createFixture({
+      turnRunner: { runAgentTurn: mock(() => provider.promise) },
     });
-  });
-
-  it('preserves the sending entry when clear removes the queued tail', async () => {
-    const first = await queue.createChatQueueEntry('123', 'first');
-    await queue.createChatQueueEntry('123', 'second');
-    await queue.popNextChat('123');
-
-    const cleared = await queue.clearChatQueue('123');
-
-    expect(cleared.entries).toEqual([expect.objectContaining({ id: first.entry.id, status: 'sending' })]);
-    expect(cleared.recentlyDispatched).toEqual([expect.objectContaining({ entryId: first.entry.id })]);
-    expect(cleared.pause).toBeNull();
-  });
-
-  it('restores a failed dispatch with the same revision and removes its sent marker', async () => {
-    const { entry } = await queue.createChatQueueEntry('123', 'first');
-    await queue.popNextChat('123');
-
-    const reset = await queue.requeueAndPauseChat('123', entry.id, 'queued-turn-failed');
-
-    expect(reset.entries[0]).toMatchObject({
-      id: entry.id,
-      status: 'queued',
-      revision: 1,
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const run = coordinator.runReservedTurn(reservation, 'work', {
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
     });
-    expect(reset.recentlyDispatched).toEqual([]);
-    expect(reset.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: entry.id });
+    provider.resolve();
+    await run;
+
+    expect(fixture.projection.discardPreparedInput).toHaveBeenCalledOnce();
+    expect(fixture.projection.discardPreparedInput).toHaveBeenCalledWith('chat-1', 'message-1');
+
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'other-turn' });
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'turn-1' });
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
-  it('requires execution dependencies at construction', () => {
-    expect(() => new ChatExecutionCoordinator(workspaceDir)).toThrow('ChatExecutionCoordinator requires an agent turn runner');
-  });
-});
+  it('preserves a direct-turn failure when the follow-on drain also fails', async () => {
+    const fixture = createFixture({
+      queuedAdmission: () => { throw new Error('transcript failed'); },
+      turnRunner: { runAgentTurn: mock(async () => { throw new Error('provider failed'); }) },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.triggerDrain('chat-1');
+    const failures = [];
+    coordinator.onTurnFailed((_chatId, message) => failures.push(message));
 
-describe('queue-updated event', () => {
-  it('emits on create', async () => {
-    const events = [];
-    queue.onExecutionControlUpdated((chatId, state) => events.push({ chatId, state }));
-
-    await queue.createChatQueueEntry('c1', 'hello');
-    expect(events).toHaveLength(1);
-    expect(events[0].chatId).toBe('c1');
-    expect(events[0].state.entries).toHaveLength(1);
-  });
-
-  it('emits on delete', async () => {
-    const { entry } = await queue.createChatQueueEntry('c1', 'hello');
-    const events = [];
-    queue.onExecutionControlUpdated((chatId, state) => events.push({ chatId, state }));
-
-    await queue.deleteChatQueueEntry('c1', entry.id);
-    expect(events).toHaveLength(1);
-    expect(events[0].state.entries).toHaveLength(0);
+    await expect(coordinator.runReservedTurn(reservation, 'work', { turnId: 'turn-1' }))
+      .rejects.toThrow('provider failed');
+    expect(failures).toEqual(['provider failed']);
   });
 
-  it('emits on clear', async () => {
-    await queue.createChatQueueEntry('c1', 'hello');
-    const events = [];
-    queue.onExecutionControlUpdated((chatId, state) => events.push({ chatId, state }));
+  it('releases direct ownership when the follow-on drain fails', async () => {
+    const fixture = createFixture({
+      queuedAdmission: () => { throw new Error('transcript failed'); },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.triggerDrain('chat-1');
 
-    await queue.clearChatQueue('c1');
-    expect(events).toHaveLength(1);
-    expect(events[0].state.entries).toHaveLength(0);
+    await expect(coordinator.releaseDirectTurn(reservation)).resolves.toBeUndefined();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
-  it('emits on pause', async () => {
-    await queue.createChatQueueEntry('c1', 'hello');
-    const events = [];
-    queue.onExecutionControlUpdated((chatId, state) => events.push({ chatId, state }));
-
-    await queue.pauseChatQueue('c1');
-    expect(events).toHaveLength(1);
-    expect(events[0].state.pause).not.toBeNull();
-  });
-
-  it('emits on resume', async () => {
-    await queue.createChatQueueEntry('c1', 'hello');
-    await queue.pauseChatQueue('c1');
-    const events = [];
-    queue.onExecutionControlUpdated((chatId, state) => events.push({ chatId, state }));
-
-    const paused = await queue.readChatExecutionControl('c1');
-    await queue.resumeChatQueue('c1', paused.pause.id);
-    expect(events).toHaveLength(1);
-    expect(events[0].state.pause).toBeNull();
-  });
-});
-
-describe('orchestration', () => {
-  let mockAgents;
-  let mockPendingInputs;
-  let mockChatMessages;
-  let mockDrainOptions;
-  let orchQueue;
-
-  beforeEach(async () => {
-    mockAgents = {
-      runAgentTurn: mock(() => Promise.resolve()),
-      abortSession: mock(() => Promise.resolve(true)),
-      isChatRunning: mock(() => false),
-      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
-    };
-    mockPendingInputs = {
-      register: mock(() => Promise.resolve()),
-      discard: mock(() => true),
-      markFailed: mock(() => true),
-      markUnconfirmed: mock(() => true),
-    };
-    mockChatMessages = createChatMessages();
-    mockDrainOptions = mock(() => ({
-      permissionMode: 'plan',
-      thinkingMode: 'low',
-      claudeThinkingMode: 'off',
-      ampAgentMode: 'deep',
-      model: 'persisted-model',
-    }));
-    orchQueue = new ChatExecutionCoordinator(
-      workspaceDir,
-      mockAgents,
-      mockPendingInputs,
-      mockChatMessages,
-      mockDrainOptions,
-      () => true,
+  it('delivers control steering without admitting or cleaning up user input', async () => {
+    const providerTarget = { providerTurnId: 'provider-turn-1' };
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => providerTarget),
+        steerInput: mock(async (_chatId, _content, _options, _target, prepare) => {
+          await prepare();
+          return { kind: 'accepted' };
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      'turn-1',
+      new AbortController().signal,
+      mock(() => undefined),
     );
+
+    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
+    const steerCall = fixture.turnRunner.steerInput.mock.calls[0];
+    expect(steerCall[0]).toBe('chat-1');
+    expect(steerCall[1]).toBe('<garcon-chat-id>1787836573296800</garcon-chat-id>');
+    expect(steerCall[2]).toEqual({
+      clientRequestId: expect.any(String),
+      clientMessageId: steerCall[2].clientRequestId,
+      transcriptViewId: 'view-1',
+    });
+    expect(steerCall[3]).toBe(providerTarget);
+    expect(steerCall[4]).toEqual(expect.any(Function));
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(fixture.projection.discardPreparedInput).not.toHaveBeenCalled();
+    await coordinator.releaseDirectTurn(reservation);
   });
 
-  describe('submit', () => {
-    it('rejects direct execution after shutdown admission closes', async () => {
-      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-direct' });
-      expect(orchQueue.beginShutdown()).toContain('c1');
-
-      await expect(orchQueue.runReservedTurn(
-        reservation,
-        'must not run',
-        { turnId: 'turn-direct' },
-      )).rejects.toThrow('server is shutting down');
-
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      await expect(orchQueue.waitForExecutionOwners()).resolves.toBeUndefined();
+  it('does not fall back after steering accepts without preparing delivery', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async () => ({ kind: 'accepted' })),
+      },
     });
-
-    it('returns a queued entry unsent when shutdown wins during provider preparation', async () => {
-      const preparationStarted = deferred();
-      const continuePreparation = deferred();
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, _command, options) => {
-        preparationStarted.resolve(options);
-        await continuePreparation.promise;
-        options.executionAdmission.signal.throwIfAborted();
-      });
-      const created = await orchQueue.createChatQueueEntry('c1', 'prepared input');
-      const drain = orchQueue.triggerDrain('c1');
-      const options = await preparationStarted.promise;
-
-      expect(orchQueue.beginShutdown()).toContain('c1');
-      continuePreparation.resolve();
-      await drain;
-      await orchQueue.waitForExecutionOwners();
-
-      expect(options.executionAdmission.signal.aborted).toBe(true);
-      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', options.clientRequestId);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [expect.objectContaining({ id: created.entry.id, status: 'queued' })],
-        pause: null,
-      });
-    });
-
-    it('releases a registered queue launch gate when shutdown aborts admission', async () => {
-      const registrationStarted = deferred();
-      const continueRegistration = deferred();
-      mockPendingInputs.register.mockImplementation(async () => {
-        registrationStarted.resolve();
-        await continueRegistration.promise;
-      });
-      const created = await orchQueue.createChatQueueEntry('c1', 'registered input');
-      const drain = orchQueue.triggerDrain('c1');
-      await registrationStarted.promise;
-
-      expect(orchQueue.beginShutdown()).toContain('c1');
-      continueRegistration.resolve();
-      await drain;
-      await orchQueue.waitForExecutionOwners();
-
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      expect(mockPendingInputs.discard).toHaveBeenCalledTimes(1);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [expect.objectContaining({ id: created.entry.id, status: 'queued' })],
-        pause: null,
-      });
-    });
-
-    it('preserves a started queued entry as completion-uncertain during shutdown', async () => {
-      const executionStarted = deferred();
-      const finishExecution = deferred();
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, _command, options) => {
-        options.executionAdmission.markStarted();
-        executionStarted.resolve(options);
-        await finishExecution.promise;
-      });
-      const created = await orchQueue.createChatQueueEntry('c1', 'started input');
-      const drain = orchQueue.triggerDrain('c1');
-      const options = await executionStarted.promise;
-
-      expect(orchQueue.beginShutdown()).toContain('c1');
-      await expect(orchQueue.abortForShutdown('c1')).resolves.toBe(true);
-      finishExecution.resolve();
-      await drain;
-      await orchQueue.waitForExecutionOwners();
-
-      const persisted = await orchQueue.readChatExecutionControl('c1');
-      expect(options.executionAdmission.signal.aborted).toBe(true);
-      expect(persisted.entries).toEqual([
-        expect.objectContaining({ id: created.entry.id, status: 'queued' }),
-      ]);
-      expect(persisted.pause).toMatchObject({
-        kind: 'completion-uncertain',
-        entryId: created.entry.id,
-      });
-    });
-
-    it('rejects a second direct reservation before either turn prepares transcript state', async () => {
-      const first = orchQueue.reserveDirectTurn('c1');
-
-      expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(
-        'Another chat turn already owns execution',
-      );
-      expect(mockPendingInputs.register).not.toHaveBeenCalled();
-
-      await orchQueue.releaseDirectTurn(first);
-      const second = orchQueue.reserveDirectTurn('c1');
-      await orchQueue.releaseDirectTurn(second);
-    });
-
-    it('cancels a direct reservation when its chat queue is deleted', async () => {
-      let chatExists = true;
-      const turnStarted = deferred();
-      const finishTurn = deferred();
-      const deletingQueue = new ChatExecutionCoordinator(
-        workspaceDir,
-        {
-          runAgentTurn: mock(async () => {
-            turnStarted.resolve();
-            await finishTurn.promise;
-          }),
-          abortSession: mock(async () => true),
-          isChatRunning: mock(() => false),
-          waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
-        },
-        createPendingInputs(),
-        createChatMessages(),
-        emptyDrainOptions,
-        () => chatExists,
-      );
-      const reservation = deletingQueue.reserveDirectTurn('deleted');
-      const turn = deletingQueue.runReservedTurn(reservation, 'running', {});
-      await turnStarted.promise;
-
-      chatExists = false;
-      await deletingQueue.deleteChatQueueFile('deleted');
-      finishTurn.resolve();
-
-      await expect(turn).resolves.toBeUndefined();
-      expect(deletingQueue.isChatExecutionReserved('deleted')).toBe(false);
-    });
-
-    it('reserves execution until a direct turn hands off to queued work', async () => {
-      const directStarted = deferred();
-      const finishDirect = deferred();
-      const lifecycle = [];
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        lifecycle.push(`run:${command}`);
-        if (command === 'direct') {
-          directStarted.resolve();
-          await finishDirect.promise;
-        }
-      });
-      orchQueue.onTurnSettled((_chatId, turn) => lifecycle.push(`settled:${turn?.turnId}`));
-
-      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-direct' });
-      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', { turnId: 'turn-direct' });
-      await directStarted.promise;
-      expect(orchQueue.isChatExecutionReserved('c1')).toBe(true);
-
-      await orchQueue.createChatQueueEntry('c1', 'queued');
-      await orchQueue.triggerDrain('c1');
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-
-      finishDirect.resolve();
-      await directTurn;
-
-      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
-      expect(lifecycle.slice(0, 3)).toEqual([
-        'run:direct',
-        'settled:turn-direct',
-        'run:queued',
-      ]);
-      expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('settles a released reservation that never reaches the runtime', async () => {
-      const settled = [];
-      orchQueue.onTurnSettled((chatId, turn) => settled.push({ chatId, turn }));
-      const reservation = orchQueue.reserveDirectTurn('c1', {
-        clientRequestId: 'req-prepared',
-        turnId: 'turn-prepared',
-      });
-
-      await orchQueue.releaseDirectTurn(reservation);
-
-      expect(settled).toEqual([{
-        chatId: 'c1',
-        turn: { clientRequestId: 'req-prepared', turnId: 'turn-prepared' },
-      }]);
-    });
-
-    it('keeps a nonblocking runtime attempt until its exact terminal event', async () => {
-      let running = false;
-      mockAgents.isChatRunning.mockImplementation(() => running);
-      const settled = [];
-      orchQueue.onTurnSettled((_chatId, turn) => settled.push(turn));
-      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-a' });
-
-      running = true;
-      await orchQueue.runReservedTurn(reservation, 'accepted by runtime', { turnId: 'turn-a' });
-      expect(settled).toEqual([]);
-
-      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-b' });
-      expect(settled).toEqual([]);
-      running = false;
-      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-a' });
-
-      expect(settled).toEqual([{ turnId: 'turn-a' }]);
-    });
-
-    it('retains a completed chat-start reservation until its nonblocking terminal event', async () => {
-      let running = false;
-      mockAgents.isChatRunning.mockImplementation(() => running);
-      const settled = [];
-      orchQueue.onTurnSettled((_chatId, turn) => settled.push(turn));
-      const reservation = orchQueue.reserveDirectTurn('c1', {
-        clientRequestId: 'req-start',
-        turnId: 'turn-start',
-      });
-
-      running = true;
-      await orchQueue.completeDirectTurn(reservation);
-
-      expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
-      expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(/owns execution/);
-      expect(settled).toEqual([]);
-
-      running = false;
-      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-start' });
-
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
-      expect(settled).toEqual([{
-        clientRequestId: 'req-start',
-        turnId: 'turn-start',
-      }]);
-    });
-
-    it('keeps nonblocking direct admission abortable until exact terminal settlement', async () => {
-      let running = false;
-      mockAgents.isChatRunning.mockImplementation(() => running);
-      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-starting' });
-
-      running = true;
-      await orchQueue.completeDirectTurn(reservation);
-      expect(reservation.executionAdmission.signal.aborted).toBe(false);
-
-      expect(orchQueue.beginShutdown()).toContain('c1');
-      expect(reservation.executionAdmission.signal.aborted).toBe(true);
-
-      running = false;
-      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-starting' });
-      await orchQueue.waitForExecutionOwners();
-    });
-
-    it('honors an interrupt drain request after an aborted direct turn releases execution', async () => {
-      const directStarted = deferred();
-      const finishDirect = deferred();
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'direct') {
-          directStarted.resolve();
-          await finishDirect.promise;
-        }
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        finishDirect.reject(new Error('aborted'));
-        return true;
-      });
-
-      const reservation = orchQueue.reserveDirectTurn('c1');
-      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
-      await directStarted.promise;
-      await orchQueue.createChatQueueEntry('c1', 'queued');
-      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
-
-      expect(await orchQueue.interruptActiveTurn('c1')).toBe(true);
-      await expect(directTurn).rejects.toThrow('aborted');
-      await idle;
-
-      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('retries an interrupt drain when the active turn finishes before abort is acknowledged', async () => {
-      const directStarted = deferred();
-      const finishDirect = deferred();
-      const queuedRan = deferred();
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'direct') {
-          directStarted.resolve();
-          await finishDirect.promise;
-        } else if (command === 'queued') {
-          queuedRan.resolve();
-        }
-      });
-
-      const reservation = orchQueue.reserveDirectTurn('c1');
-      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
-      await directStarted.promise;
-      await orchQueue.createChatQueueEntry('c1', 'queued');
-      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
-      mockAgents.abortSession.mockImplementation(async () => {
-        finishDirect.resolve();
-        await directTurn;
-        return false;
-      });
-
-      expect(await orchQueue.interruptActiveTurn('c1')).toBe(false);
-      await queuedRan.promise;
-      await idle;
-
-      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('retries an interrupt drain when abort throws after the active turn finishes', async () => {
-      const directStarted = deferred();
-      const finishDirect = deferred();
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'direct') {
-          directStarted.resolve();
-          await finishDirect.promise;
-        }
-      });
-
-      const reservation = orchQueue.reserveDirectTurn('c1');
-      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
-      await directStarted.promise;
-      await orchQueue.createChatQueueEntry('c1', 'queued after interrupt error');
-      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
-      mockAgents.abortSession.mockImplementation(async () => {
-        finishDirect.resolve();
-        await directTurn;
-        throw new Error('abort transport failed');
-      });
-
-      await expect(orchQueue.interruptActiveTurn('c1')).rejects.toThrow('abort transport failed');
-      await idle;
-
-      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(
-        2,
-        'c1',
-        'queued after interrupt error',
-        expect.any(Object),
-      );
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('runs agent turn with the given command', async () => {
-      await orchQueue.runReservedTurn(
-        orchQueue.reserveDirectTurn('c1'),
-        'hello',
-        { permissionMode: 'default' },
-      );
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
-        'c1',
-        'hello',
-        expect.objectContaining({
-          permissionMode: 'default',
-        }),
-      );
-    });
-
-    it('registers pending input for submitted turns', async () => {
-      await orchQueue.registerPendingUserInput('c1', 'hello', {
-        clientRequestId: 'request-1',
-        clientMessageId: 'message-1',
-        turnId: 'turn-1',
-      });
-      expect(mockPendingInputs.register).toHaveBeenCalledWith(
-        'c1',
-        'hello',
-        expect.objectContaining({
-          clientRequestId: 'request-1',
-          clientMessageId: 'message-1',
-          turnId: 'turn-1',
-          deliveryStatus: 'accepted',
-        }),
-      );
-    });
-
-    it('appends the accepted user message and emits chat messages', async () => {
-      const batches = [];
-      orchQueue.onChatMessages((chatId, generationId, messages, metadata) => {
-        batches.push({ chatId, generationId, messages, metadata });
-      });
-
-      await orchQueue.registerPendingUserInput('c1', 'hello', {
-        clientRequestId: 'req-1',
-        clientMessageId: 'msg-1',
-        turnId: 'turn-1',
-      });
-
-      expect(mockChatMessages.appendMessages).toHaveBeenCalledWith('c1', [
-        expect.objectContaining({
-          content: 'hello',
-          metadata: expect.objectContaining({
-            clientRequestId: 'req-1',
-            turnId: 'turn-1',
-            deliveryStatus: 'accepted',
-          }),
-        }),
-      ]);
-      expect(batches[0]).toMatchObject({
-        chatId: 'c1',
-        generationId: 'generation-1',
-        metadata: { clientRequestId: 'req-1', turnId: 'turn-1' },
-      });
-      expect(batches[0].messages[0].message.content).toBe('hello');
-    });
-
-    it('does not emit an empty chat message batch for an idempotent append', async () => {
-      mockChatMessages.appendMessages.mockResolvedValueOnce({
-        generationId: 'generation-1',
-        messages: [],
-      });
-      const emitted = mock();
-      orchQueue.onChatMessages(emitted);
-
-      await orchQueue.registerPendingUserInput('c1', 'already durable', {
-        clientRequestId: 'request-durable',
-        turnId: 'turn-durable',
-      });
-
-      expect(emitted).not.toHaveBeenCalled();
-    });
-
-    it('registers provided metadata for accepted REST turns', async () => {
-      await orchQueue.registerPendingUserInput('c1', 'hello', {
-        clientRequestId: 'req-1',
-        clientMessageId: 'msg-1',
-        turnId: 'turn-1',
-      });
-
-      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'hello', {
-        clientRequestId: 'req-1',
-        clientMessageId: 'msg-1',
-        turnId: 'turn-1',
-        images: undefined,
-        deliveryStatus: 'accepted',
-      });
-    });
-
-    it('does not register pending input when command is empty', async () => {
-      await orchQueue.registerPendingUserInput('c1', '', {});
-      expect(mockPendingInputs.register).not.toHaveBeenCalled();
-    });
-
-    it('reports queue activity while a queued turn is being prepared', async () => {
-      let releaseRegistration;
-      const registrationStarted = new Promise((resolve) => {
-        mockPendingInputs.register.mockImplementation(() => {
-          resolve();
-          return new Promise((release) => {
-            releaseRegistration = release;
-          });
-        });
-      });
-      await orchQueue.createChatQueueEntry('c1', 'queued msg');
-
-      const drain = orchQueue.triggerDrain('c1');
-      await registrationStarted;
-
-      expect(orchQueue.isChatDraining('c1')).toBe(true);
-      releaseRegistration();
-      await drain;
-      expect(orchQueue.isChatDraining('c1')).toBe(false);
-    });
-
-    it('propagates agent errors to caller', async () => {
-      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent fail'));
-
-      await expect(
-        orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'hello', {}),
-      ).rejects.toThrow('agent fail');
-    });
-
-    it('emits turn-failed with command identity when agent execution fails', async () => {
-      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent fail'));
-      const failures = [];
-      orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
-
-      await expect(
-        orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'hello', {
-          clientRequestId: 'req-1',
-          clientMessageId: 'msg-1',
-          turnId: 'turn-1',
-        }),
-      ).rejects.toThrow('agent fail');
-
-      expect(failures).toEqual([
-        {
-          chatId: 'c1',
-          error: 'agent fail',
-          options: {
-            clientRequestId: 'req-1',
-            clientMessageId: 'msg-1',
-            turnId: 'turn-1',
-          },
-        },
-      ]);
-    });
-
-    it('does not emit a delivery revision after accepted turns complete', async () => {
-      await orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'hello', {
-        clientRequestId: 'req-1',
-        clientMessageId: 'msg-1',
-        turnId: 'turn-1',
-      });
-
-      expect(mockChatMessages.appendMessages).not.toHaveBeenCalled();
-    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      'turn-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({ code: 'STEER_OUTCOME_UNKNOWN' });
+
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    await coordinator.releaseDirectTurn(reservation);
   });
 
-  describe('active input delivery', () => {
-    const activeInputOptions = (clientRequestId = 'request-active') => ({
-      clientRequestId,
-      clientMessageId: `${clientRequestId}-message`,
-      turnId: `${clientRequestId}-turn`,
-    });
-
-    it('persists input by default without offering it to a running agent', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
-
-      const result = await orchQueue.createChatQueueEntry('c1', 'scheduled input');
-
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-      expect(result.control.entries.map((entry) => entry.content)).toEqual(['scheduled input']);
-    });
-
-    it('rejects accepted active input without ledger identifiers', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
-
-      await expect(orchQueue.deliverActiveInput('c1', 'missing identity')).rejects.toMatchObject({
-        code: 'INTERNAL_ERROR',
-        status: 500,
-      });
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-    });
-
-    it('registers the user row before delivering active input to a running agent', async () => {
-      const order = [];
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockPendingInputs.register.mockImplementation(async () => {
-        order.push('registered');
-      });
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
-        order.push('delivered');
-        return true;
-      });
-
-      const result = await orchQueue.deliverActiveInput('c1', '/goal pause', {
-        ...activeInputOptions(),
-        clientMessageId: 'message-active',
-      });
-
-      expect(order).toEqual(['registered', 'delivered']);
-      expect(result).toBe(true);
-      expect(await orchQueue.readChatExecutionControl('c1')).toEqual(expect.objectContaining({ entries: [] }));
-      expect(mockAgents.submitActiveInput).toHaveBeenCalledWith(
-        'c1',
-        '/goal pause',
-        expect.objectContaining({
-          clientRequestId: 'request-active',
-          clientMessageId: 'message-active',
+  it('steers inter-agent control input to the active target before queue admission', async () => {
+    const providerTarget = { providerTurnId: 'provider-turn-1' };
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => providerTarget),
+        steerInput: mock(async (_chatId, _content, _options, _target, prepare) => {
+          await prepare();
+          return { kind: 'accepted' };
         }),
-        expect.any(Function),
-      );
+      },
     });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
 
-    it('preserves the active-input runner receiver', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async function (_chatId, _content, _options, beforeDelivery) {
-        expect(this).toBe(mockAgents);
-        await beforeDelivery();
-        return true;
-      });
+    await expect(coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput(),
+      new AbortController().signal,
+    )).resolves.toBe('delivered');
 
-      await expect(
-        orchQueue.deliverActiveInput('c1', 'receiver-safe', activeInputOptions()),
-      ).resolves.toBe(true);
-    });
-
-    it('persists input for running agents without active-input support', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
-
-      const result = await orchQueue.createChatQueueEntry('c1', 'wait for later');
-
-      expect(result.control.entries).toHaveLength(1);
-      expect(result.control.entries[0].content).toBe('wait for later');
-      expect(mockPendingInputs.register).not.toHaveBeenCalled();
-    });
-
-    it('reports unavailable active delivery without creating a queue entry', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => false);
-
-      const result = await orchQueue.deliverActiveInput('c1', 'race-safe input', activeInputOptions());
-
-      expect(result).toBe(false);
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-      expect(mockPendingInputs.register).not.toHaveBeenCalled();
-      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
-    });
-
-    it('does not deliver active input ahead of an older queued entry', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'older queued input');
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => true);
-
-      const delivered = await orchQueue.deliverActiveInput('c1', 'newer input');
-      const result = await orchQueue.createChatQueueEntry('c1', 'newer input');
-
-      expect(delivered).toBe(false);
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-      expect(result.control.entries.map((entry) => entry.content)).toEqual(['older queued input', 'newer input']);
-      expect(new Set(result.control.entries.map((entry) => entry.id)).size).toBe(2);
-    });
-
-    it('does not deliver active input ahead of a sending entry', async () => {
-      const older = await orchQueue.createChatQueueEntry('c1', 'older sending input');
-      await orchQueue.popNextChat('c1');
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => true);
-
-      const delivered = await orchQueue.deliverActiveInput('c1', 'newer input');
-      const result = await orchQueue.createChatQueueEntry('c1', 'newer input');
-
-      expect(delivered).toBe(false);
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-      expect(result.control.entries).toEqual([
-        expect.objectContaining({
-          id: older.entry.id,
-          status: 'sending',
-          content: 'older sending input',
-        }),
-        expect.objectContaining({ status: 'queued', content: 'newer input' }),
-      ]);
-    });
-
-    it('serializes concurrent creates into distinct FIFO entries', async () => {
-      await Promise.all([
-        orchQueue.createChatQueueEntry('c1', 'older input'),
-        orchQueue.createChatQueueEntry('c1', 'newer input'),
-      ]);
-
-      const entries = (await orchQueue.readChatExecutionControl('c1')).entries;
-      expect(entries.map((entry) => entry.content)).toEqual(['older input', 'newer input']);
-      expect(new Set(entries.map((entry) => entry.id)).size).toBe(2);
-    });
-
-    it('marks accepted input unconfirmed when live delivery throws', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
-        throw new Error('steer failed');
-      });
-
-      await expect(
-        orchQueue.deliverActiveInput('c1', 'accepted then failed', {
-          ...activeInputOptions('request-failed'),
-        }),
-      ).rejects.toMatchObject({
-        message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
-        cause: expect.objectContaining({ message: 'steer failed' }),
-        deliveryAccepted: true,
-        retryable: false,
-      });
-
-      expect(mockPendingInputs.register).toHaveBeenCalledTimes(1);
-      expect(mockPendingInputs.markUnconfirmed).toHaveBeenCalledWith('c1', 'request-failed');
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('marks a registered input failed when durable admission fails before live delivery', async () => {
-      let delivered = false;
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
-        delivered = true;
-        return true;
-      });
-
-      await expect(
-        orchQueue.deliverActiveInput(
-          'c1',
-          'not delivered',
-          activeInputOptions('request-admission-failed'),
-          async () => {
-            throw new Error('ledger scheduling failed');
-          },
-        ),
-      ).rejects.toMatchObject({
-        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
-        cause: expect.objectContaining({ message: 'ledger scheduling failed' }),
-        deliveryAccepted: false,
-        retryable: true,
-      });
-
-      expect(delivered).toBe(false);
-      expect(mockPendingInputs.markFailed).toHaveBeenCalledWith('c1', 'request-admission-failed');
-      expect(mockPendingInputs.markUnconfirmed).not.toHaveBeenCalled();
-    });
-
-    it('rolls back pending registration when transcript append fails before active delivery', async () => {
-      let delivered = false;
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockPendingInputs.register.mockResolvedValue({
-        clientRequestId: 'request-append-failed',
-      });
-      mockChatMessages.appendMessages.mockRejectedValue(new Error('chat append failed'));
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
-        delivered = true;
-        return true;
-      });
-
-      await expect(
-        orchQueue.deliverActiveInput('c1', 'must not deliver', {
-          ...activeInputOptions('request-append-failed'),
-        }),
-      ).rejects.toMatchObject({
-        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
-        cause: expect.objectContaining({ message: 'chat append failed' }),
-        deliveryAccepted: false,
-        retryable: true,
-      });
-
-      expect(delivered).toBe(false);
-      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', 'request-append-failed');
-      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('continues active delivery once after a post-commit chat listener fails', async () => {
-      let deliveries = 0;
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockPendingInputs.register.mockResolvedValue({
-        clientRequestId: 'request-listener-failed',
-      });
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
-        deliveries += 1;
-        return true;
-      });
-      orchQueue.onChatMessages(() => {
-        throw new Error('listener failed');
-      });
-
-      const result = await orchQueue.deliverActiveInput('c1', 'deliver despite listener', {
-        ...activeInputOptions('request-listener-failed'),
-      });
-
-      expect(result).toBe(true);
-      expect(deliveries).toBe(1);
-      expect(mockChatMessages.appendMessages).toHaveBeenCalledTimes(1);
-      expect(mockPendingInputs.discard).not.toHaveBeenCalled();
-      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
+    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+    expect(fixture.projectAdmission.assertAvailable).not.toHaveBeenCalled();
+    await coordinator.releaseDirectTurn(reservation);
   });
 
-  describe('turn interruption', () => {
-    it('calls turn runner abortSession', async () => {
-      await orchQueue.interruptActiveTurn('c1');
-      expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
-    });
-
-    it('emits session-stop-requested before abortSession', async () => {
-      const events = [];
-      mockAgents.abortSession.mockImplementation((chatId) => {
-        events.push(`abort:${chatId}`);
-        return Promise.resolve(true);
-      });
-      orchQueue.onSessionStopRequested((chatId) => events.push(`requested:${chatId}`));
-
-      await orchQueue.interruptActiveTurn('c1');
-
-      expect(events).toEqual(['requested:c1', 'abort:c1']);
-    });
-
-    it('includes reserved turn identity before runtime tracking begins', async () => {
-      const abortResult = deferred();
-      const requested = [];
-      mockAgents.abortSession.mockImplementation(() => abortResult.promise);
-      const reservation = orchQueue.reserveDirectTurn('c1', {
-        clientRequestId: 'req-a',
-        turnId: 'turn-a',
-      });
-      orchQueue.onSessionStopRequested((_chatId, _stopId, turn) => requested.push(turn));
-
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      expect(requested).toEqual([{ clientRequestId: 'req-a', turnId: 'turn-a' }]);
-
-      abortResult.resolve(false);
-      await interrupt;
-      await orchQueue.releaseDirectTurn(reservation);
-    });
-
-    it('emits session-stopped event', async () => {
-      const events = [];
-      orchQueue.onSessionStopped((chatId, success, intent) => events.push({ chatId, success, intent }));
-
-      await orchQueue.interruptActiveTurn('c1');
-      expect(events).toHaveLength(1);
-      expect(events[0]).toEqual({
-        chatId: 'c1',
-        success: true,
-        intent: 'interrupt-and-send',
-      });
-    });
-
-    it('identifies plain Stop in the session-stopped event', async () => {
-      const events = [];
-      orchQueue.onSessionStopped((chatId, success, intent) => events.push({ chatId, success, intent }));
-
-      await orchQueue.stopActiveTurn('c1');
-
-      expect(events).toEqual([{ chatId: 'c1', success: true, intent: 'stop' }]);
-    });
-
-    it('coalesces concurrent stop requests into one runtime abort lifecycle', async () => {
-      const abortResult = deferred();
-      const requested = [];
-      const stopped = [];
-      mockAgents.abortSession.mockImplementation(() => abortResult.promise);
-      orchQueue.onSessionStopRequested((chatId, stopId) => requested.push({ chatId, stopId }));
-      orchQueue.onSessionStopped((chatId, success, intent, stopId) => {
-        stopped.push({ chatId, success, intent, stopId });
-      });
-
-      const first = orchQueue.interruptActiveTurn('c1');
-      const second = orchQueue.interruptActiveTurn('c1');
-      abortResult.resolve(true);
-
-      await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
-      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
-      expect(requested).toEqual([{ chatId: 'c1', stopId: expect.any(String) }]);
-      expect(stopped).toEqual([{
-        chatId: 'c1',
-        success: true,
-        intent: 'interrupt-and-send',
-        stopId: requested[0].stopId,
-      }]);
-    });
-
-    it('drains queued entries after abort succeeds', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'pending');
-      const dispatched = new Promise((resolve) => {
-        orchQueue.onDispatching((chatId, entryId, content) => resolve({ chatId, entryId, content }));
-      });
-      const idle = new Promise((resolve) => {
-        orchQueue.onChatIdle((chatId) => resolve(chatId));
-      });
-
-      await orchQueue.interruptActiveTurn('c1');
-      const event = await dispatched;
-      await idle;
-
-      expect(event).toMatchObject({ chatId: 'c1', content: 'pending' });
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending', expect.any(Object));
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.entries).toHaveLength(0);
-      expect(result.pause).toBeNull();
-    });
-
-    it('allows the queued entry to drain when abort races checkChatIdle', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'queued during turn');
-      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
-      mockAgents.abortSession.mockImplementation(async () => {
-        await orchQueue.checkChatIdle('c1');
-        return true;
-      });
-
-      await orchQueue.interruptActiveTurn('c1');
-      await idle;
-
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued during turn', expect.any(Object));
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.entries).toHaveLength(0);
-      expect(result.pause).toBeNull();
-    });
-
-    it('leaves queued entries untouched when abort fails', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'pending');
-      mockAgents.abortSession.mockResolvedValue(false);
-
-      await orchQueue.interruptActiveTurn('c1');
-
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.entries).toHaveLength(1);
-      expect(result.pause).toBeNull();
-    });
-
-    it('pauses queued entries when Stop succeeds', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'pending');
-
-      const stopped = await orchQueue.stopActiveTurn('c1');
-
-      expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.entries).toHaveLength(1);
-      expect(result.pause).toMatchObject({ kind: 'manual' });
-      expect(stopped.control).toEqual(result);
-
-      await orchQueue.resumeChatQueue('c1', result.pause.id);
-      await orchQueue.triggerDrain('c1');
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending', expect.any(Object));
-    });
-
-    it('does not drain Stop when checkChatIdle races abortSession', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'queued during stop');
-      mockAgents.abortSession.mockImplementation(async () => {
-        await orchQueue.checkChatIdle('c1');
-        return true;
-      });
-
-      await orchQueue.stopActiveTurn('c1');
-
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.entries).toHaveLength(1);
-      expect(result.pause).toMatchObject({ kind: 'manual' });
-    });
-
-    it('waits for a registered queued turn to become abortable when Stop begins during registration', async () => {
-      const registrationStarted = deferred();
-      const releaseRegistration = deferred();
-      const stopRequested = deferred();
-      const stopPauseCommitted = deferred();
-      const turnStarted = deferred();
-      const runtimeAbortable = deferred();
-      const turnResult = deferred();
-      let didRequestStop = false;
-      mockPendingInputs.register.mockImplementation(async () => {
-        registrationStarted.resolve();
-        await releaseRegistration.promise;
-      });
-      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
-      mockAgents.runAgentTurn.mockImplementation(async () => {
-        turnStarted.resolve();
-        await turnResult.promise;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        turnResult.reject(new Error('runtime rejects aborted turns'));
-        return true;
-      });
-      orchQueue.onSessionStopRequested(() => {
-        didRequestStop = true;
-        stopRequested.resolve();
-      });
-      orchQueue.onExecutionControlUpdated((_chatId, updatedQueue) => {
-        if (updatedQueue.pause?.kind === 'manual') stopPauseCommitted.resolve();
-      });
-      await orchQueue.createChatQueueEntry('c1', 'preparing');
-      await orchQueue.createChatQueueEntry('c1', 'tail');
-      const drain = orchQueue.triggerDrain('c1');
-      await registrationStarted.promise;
-
-      const stop = orchQueue.stopActiveTurn('c1');
-      await stopPauseCommitted.promise;
-      await Promise.resolve();
-      expect(didRequestStop).toBe(false);
-      expect(mockAgents.abortSession).not.toHaveBeenCalled();
-
-      releaseRegistration.resolve();
-      await turnStarted.promise;
-      expect(didRequestStop).toBe(true);
-      expect(mockAgents.abortSession).not.toHaveBeenCalled();
-      runtimeAbortable.resolve(true);
-      await stopRequested.promise;
-      await expect(stop).resolves.toMatchObject({ stopped: true });
-      await drain;
-
-      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [{ content: 'tail', status: 'queued' }],
-        pause: { kind: 'manual' },
-      });
-    });
-
-    it('reports a genuine preparation failure before Stop can abort the runtime', async () => {
-      const registrationStarted = deferred();
-      const releaseRegistration = deferred();
-      const runtimeAbortable = deferred();
-      const failures = [];
-      mockPendingInputs.register.mockImplementation(async () => {
-        registrationStarted.resolve();
-        await releaseRegistration.promise;
-      });
-      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
-      mockAgents.runAgentTurn.mockRejectedValue(new Error('provider preparation failed'));
-      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
-      await orchQueue.createChatQueueEntry('c1', 'preparing');
-      const drain = orchQueue.triggerDrain('c1');
-      await registrationStarted.promise;
-
-      const stop = orchQueue.stopActiveTurn('c1');
-      releaseRegistration.resolve();
-      await expect(stop).resolves.toMatchObject({ stopped: false });
-      await drain;
-
-      expect(mockAgents.abortSession).not.toHaveBeenCalled();
-      expect(failures).toEqual(['provider preparation failed']);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [{ content: 'preparing', status: 'queued' }],
-        pause: { kind: 'queued-turn-failed' },
-      });
-    });
-
-    it('waits for an abortable runtime when Stop joins an interrupt during registration', async () => {
-      const registrationStarted = deferred();
-      const releaseRegistration = deferred();
-      const runtimeAbortable = deferred();
-      const turnResult = deferred();
-      const stopPauseCommitted = deferred();
-      mockPendingInputs.register.mockImplementation(async () => {
-        registrationStarted.resolve();
-        await releaseRegistration.promise;
-      });
-      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
-      mockAgents.runAgentTurn.mockImplementation(async () => {
-        await turnResult.promise;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        turnResult.reject(new Error('runtime rejects aborted turns'));
-        return true;
-      });
-      orchQueue.onExecutionControlUpdated((_chatId, updatedQueue) => {
-        if (updatedQueue.pause?.kind === 'manual') stopPauseCommitted.resolve();
-      });
-      await orchQueue.createChatQueueEntry('c1', 'preparing');
-      await orchQueue.createChatQueueEntry('c1', 'tail');
-      const drain = orchQueue.triggerDrain('c1');
-      await registrationStarted.promise;
-
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      const stop = orchQueue.stopActiveTurn('c1');
-      releaseRegistration.resolve();
-      await stopPauseCommitted.promise;
-      runtimeAbortable.resolve(true);
-      await expect(Promise.all([interrupt, stop])).resolves.toMatchObject([
-        true,
-        { stopped: true },
-      ]);
-      await drain;
-
-      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [{ content: 'tail', status: 'queued' }],
-        pause: { kind: 'manual' },
-      });
-    });
-
-    it('waits for an abortable runtime when deletion joins an interrupt during registration', async () => {
-      const registrationStarted = deferred();
-      const releaseRegistration = deferred();
-      const runtimeAbortable = deferred();
-      const turnResult = deferred();
-      mockPendingInputs.register.mockImplementation(async () => {
-        registrationStarted.resolve();
-        await releaseRegistration.promise;
-      });
-      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
-      mockAgents.runAgentTurn.mockImplementation(async () => {
-        await turnResult.promise;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        turnResult.reject(new Error('runtime rejects aborted turns'));
-        return true;
-      });
-      await orchQueue.createChatQueueEntry('c1', 'preparing');
-      const drain = orchQueue.triggerDrain('c1');
-      await registrationStarted.promise;
-
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      const deletion = orchQueue.abortForChatDeletion('c1');
-      releaseRegistration.resolve();
-      runtimeAbortable.resolve(true);
-      await expect(Promise.all([interrupt, deletion])).resolves.toEqual([true, true]);
-      await drain;
-
-      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-    });
-
-    it('treats a draining turn rejection caused by Stop as an expected abort', async () => {
-      const turnStarted = deferred();
-      const turnResult = deferred();
-      const failures = [];
-      mockAgents.runAgentTurn.mockImplementation(async () => {
-        turnStarted.resolve();
-        await turnResult.promise;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        turnResult.reject(new Error('runtime rejects aborted turns'));
-        return true;
-      });
-      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
-      await orchQueue.createChatQueueEntry('c1', 'currently dispatching');
-      const drain = orchQueue.triggerDrain('c1');
-      await turnStarted.promise;
-
-      const stopped = await orchQueue.stopActiveTurn('c1');
-      await drain;
-
-      expect(stopped.stopped).toBe(true);
-      expect(failures).toEqual([]);
-      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
-      expect((await orchQueue.readChatExecutionControl('c1'))).toMatchObject({
-        entries: [],
-        pause: null,
-      });
-    });
-
-    it('requeues a failed turn when the concurrent abort is not acknowledged', async () => {
-      const turnStarted = deferred();
-      const turnResult = deferred();
-      const abortStarted = deferred();
-      const abortAcknowledged = deferred();
-      const failures = [];
-      mockAgents.runAgentTurn.mockImplementation(async () => {
-        turnStarted.resolve();
-        await turnResult.promise;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        abortStarted.resolve();
-        return abortAcknowledged.promise;
-      });
-      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
-      await orchQueue.createChatQueueEntry('c1', 'failed during abort');
-      await orchQueue.createChatQueueEntry('c1', 'tail');
-      const drain = orchQueue.triggerDrain('c1');
-      await turnStarted.promise;
-
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      await abortStarted.promise;
-      turnResult.reject(new Error('provider process failed'));
-      await Promise.resolve();
-      abortAcknowledged.resolve(false);
-
-      await expect(interrupt).resolves.toBe(false);
-      await drain;
-      expect(failures).toEqual(['provider process failed']);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [
-          { content: 'failed during abort', status: 'queued' },
-          { content: 'tail', status: 'queued' },
-        ],
-        pause: { kind: 'queued-turn-failed' },
-      });
-    });
-
-    it('retains an acknowledged abort when a later stop fails before turn settlement', async () => {
-      const turnStarted = deferred();
-      const turnResult = deferred();
-      const failures = [];
-      let abortCount = 0;
-      mockAgents.runAgentTurn.mockImplementation(async () => {
-        turnStarted.resolve();
-        await turnResult.promise;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        abortCount += 1;
-        return abortCount === 1;
-      });
-      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
-      await orchQueue.createChatQueueEntry('c1', 'interrupted once');
-      const drain = orchQueue.triggerDrain('c1');
-      await turnStarted.promise;
-
-      await expect(orchQueue.interruptActiveTurn('c1')).resolves.toBe(true);
-      await expect(orchQueue.interruptActiveTurn('c1')).resolves.toBe(false);
-      turnResult.reject(new Error('runtime rejects the first acknowledged abort'));
-      await drain;
-
-      expect(failures).toEqual([]);
-      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('releases a registered queue attempt when stop-request publication fails', async () => {
-      const registrationStarted = deferred();
-      const continueRegistration = deferred();
-      const failures = [];
-      mockPendingInputs.register.mockImplementation(async () => {
-        registrationStarted.resolve();
-        await continueRegistration.promise;
-      });
-      orchQueue.onSessionStopRequested(() => {
-        throw new Error('stop lifecycle listener failed');
-      });
-      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
-      await orchQueue.createChatQueueEntry('c1', 'continue after listener failure');
-      const drain = orchQueue.triggerDrain('c1');
-      await registrationStarted.promise;
-
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      continueRegistration.resolve();
-      await expect(interrupt).rejects.toThrow('stop lifecycle listener failed');
-      await drain;
-
-      expect(mockAgents.abortSession).not.toHaveBeenCalled();
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
-        'c1',
-        'continue after listener failure',
-        expect.any(Object),
-      );
-      expect(failures).toEqual([]);
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('does not dispatch the successor before the interrupted stop is acknowledged', async () => {
-      const firstTurnStarted = deferred();
-      const firstTurnResult = deferred();
-      const abortAcknowledged = deferred();
-      let successorStarted = false;
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'interrupted') {
-          firstTurnStarted.resolve();
-          await firstTurnResult.promise;
-          return;
-        }
-        successorStarted = true;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        firstTurnResult.reject(new Error('runtime rejects aborted turns'));
-        await abortAcknowledged.promise;
-        return true;
-      });
-      await orchQueue.createChatQueueEntry('c1', 'interrupted');
-      await orchQueue.createChatQueueEntry('c1', 'successor');
-      const drain = orchQueue.triggerDrain('c1');
-      await firstTurnStarted.promise;
-
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      await Promise.resolve();
-      expect(successorStarted).toBe(false);
-
-      abortAcknowledged.resolve();
-      await interrupt;
-      await drain;
-      expect(successorStarted).toBe(true);
-    });
-
-    it('does not start a successor popped while an interrupt is awaiting acknowledgement', async () => {
-      const abortStarted = deferred();
-      const abortAcknowledged = deferred();
-      const successorStarted = deferred();
-      let successorDidStart = false;
-      let interrupt;
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'successor') {
-          successorDidStart = true;
-          successorStarted.resolve();
-        }
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        abortStarted.resolve();
-        await abortAcknowledged.promise;
-        return true;
-      });
-      orchQueue.onExecutionControlUpdated((chatId, queue) => {
-        const successor = queue.entries.find((entry) => entry.content === 'successor');
-        if (chatId === 'c1' && successor?.status === 'sending' && !interrupt) {
-          interrupt = orchQueue.interruptActiveTurn('c1');
-        }
-      });
-      await orchQueue.createChatQueueEntry('c1', 'completed');
-      await orchQueue.createChatQueueEntry('c1', 'successor');
-      await orchQueue.createChatQueueEntry('c1', 'tail');
-
-      const drain = orchQueue.triggerDrain('c1');
-      await abortStarted.promise;
-      await Promise.resolve();
-      expect(successorDidStart).toBe(false);
-
-      abortAcknowledged.resolve();
-      await interrupt;
-      await successorStarted.promise;
-      await drain;
-    });
-
-    it('returns a popped successor when the interrupt is not acknowledged', async () => {
-      const abortStarted = deferred();
-      const abortAcknowledged = deferred();
-      const successorReturned = deferred();
-      let successorStarted = false;
-      let successorWasSending = false;
-      let providerRunning = false;
-      let interrupt;
-      mockAgents.isChatRunning.mockImplementation(() => providerRunning);
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'successor') successorStarted = true;
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        providerRunning = true;
-        abortStarted.resolve();
-        return abortAcknowledged.promise;
-      });
-      orchQueue.onExecutionControlUpdated((chatId, control) => {
-        const successor = control.entries.find((entry) => entry.content === 'successor');
-        if (chatId === 'c1' && successor?.status === 'sending' && !interrupt) {
-          successorWasSending = true;
-          interrupt = orchQueue.interruptActiveTurn('c1');
-        }
-        if (chatId === 'c1' && successorWasSending && successor?.status === 'queued') {
-          successorReturned.resolve();
-        }
-      });
-      await orchQueue.createChatQueueEntry('c1', 'completed');
-      await orchQueue.createChatQueueEntry('c1', 'successor');
-
-      const drain = orchQueue.triggerDrain('c1');
-      await abortStarted.promise;
-      expect(successorStarted).toBe(false);
-      abortAcknowledged.resolve(false);
-      await expect(interrupt).resolves.toBe(false);
-      await successorReturned.promise;
-
-      expect(successorStarted).toBe(false);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [{ content: 'successor', status: 'queued' }],
-        pause: null,
-      });
-
-      providerRunning = false;
-      await orchQueue.checkChatIdle('c1');
-      await drain;
-      expect(successorStarted).toBe(true);
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
-    });
-
-    it('restores and pauses an entry popped while Stop is being prepared', async () => {
-      const abortStarted = deferred();
-      const abortAcknowledged = deferred();
-      let stop;
-      mockAgents.abortSession.mockImplementation(async () => {
-        abortStarted.resolve();
-        await abortAcknowledged.promise;
-        return true;
-      });
-      orchQueue.onExecutionControlUpdated((chatId, queue) => {
-        const successor = queue.entries.find((entry) => entry.content === 'successor');
-        if (chatId === 'c1' && successor?.status === 'sending' && !stop) {
-          stop = orchQueue.stopActiveTurn('c1');
-        }
-      });
-      await orchQueue.createChatQueueEntry('c1', 'completed');
-      await orchQueue.createChatQueueEntry('c1', 'successor');
-
-      const drain = orchQueue.triggerDrain('c1');
-      await abortStarted.promise;
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-
-      abortAcknowledged.resolve();
-      await stop;
-      await drain;
-
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [{ content: 'successor', status: 'queued' }],
-        pause: { kind: 'manual' },
-      });
-    });
-
-    it('honors Stop that joins an interrupt during the post-pop handoff', async () => {
-      const abortStarted = deferred();
-      const abortAcknowledged = deferred();
-      const stopPauseCommitted = deferred();
-      let interrupt;
-      mockAgents.abortSession.mockImplementation(async () => {
-        abortStarted.resolve();
-        await abortAcknowledged.promise;
-        return true;
-      });
-      orchQueue.onExecutionControlUpdated((chatId, queue) => {
-        const successor = queue.entries.find((entry) => entry.content === 'successor');
-        if (chatId === 'c1' && successor?.status === 'sending' && !interrupt) {
-          interrupt = orchQueue.interruptActiveTurn('c1');
-        }
-        if (chatId === 'c1' && queue.pause?.kind === 'manual') {
-          stopPauseCommitted.resolve();
-        }
-      });
-      await orchQueue.createChatQueueEntry('c1', 'completed');
-      await orchQueue.createChatQueueEntry('c1', 'successor');
-      await orchQueue.createChatQueueEntry('c1', 'tail');
-
-      const drain = orchQueue.triggerDrain('c1');
-      await abortStarted.promise;
-      const stop = orchQueue.stopActiveTurn('c1');
-      await stopPauseCommitted.promise;
-      await Promise.resolve();
-      abortAcknowledged.resolve();
-      await Promise.all([interrupt, stop, drain]);
-
-      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [
-          { content: 'successor', status: 'queued' },
-          { content: 'tail', status: 'queued' },
-        ],
-        pause: { kind: 'manual' },
-      });
-    });
-
-    it('does not apply a resolved interrupt to the next queued turn failure', async () => {
-      const firstTurnStarted = deferred();
-      const firstTurnResult = deferred();
-      const failures = [];
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'interrupted') {
-          firstTurnStarted.resolve();
-          await firstTurnResult.promise;
-          return;
-        }
-        throw new Error('next turn genuinely failed');
-      });
-      mockAgents.abortSession.mockImplementation(async () => {
-        firstTurnResult.resolve();
-        return true;
-      });
-      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
-      await orchQueue.createChatQueueEntry('c1', 'interrupted');
-      await orchQueue.createChatQueueEntry('c1', 'must remain queued');
-
-      const drain = orchQueue.triggerDrain('c1');
-      await firstTurnStarted.promise;
-      expect(await orchQueue.interruptActiveTurn('c1')).toBe(true);
-      await drain;
-
-      const queue = await orchQueue.readChatExecutionControl('c1');
-      expect(failures).toEqual(['next turn genuinely failed']);
-      expect(queue.entries).toMatchObject([{
-        content: 'must remain queued',
-        status: 'queued',
-      }]);
-      expect(queue.pause).toMatchObject({
-        kind: 'queued-turn-failed',
-        entryId: queue.entries[0].id,
-      });
-    });
-
-    it('keeps deletion suppression when deletion joins an interrupt', async () => {
-      const abortStarted = deferred();
-      const abortAcknowledged = deferred();
-      mockAgents.abortSession.mockImplementation(async () => {
-        abortStarted.resolve();
-        await abortAcknowledged.promise;
-        return true;
-      });
-      await orchQueue.createChatQueueEntry('c1', 'must not dispatch');
-
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      await abortStarted.promise;
-      const deletion = orchQueue.abortForChatDeletion('c1');
-      abortAcknowledged.resolve();
-      await Promise.all([interrupt, deletion]);
-      await Promise.resolve();
-
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toMatchObject([{
-        content: 'must not dispatch',
-        status: 'queued',
-      }]);
-    });
-
-    it('keeps deletion suppression when an interrupt joins deletion', async () => {
-      const abortStarted = deferred();
-      const abortAcknowledged = deferred();
-      let running = true;
-      mockAgents.isChatRunning.mockImplementation(() => running);
-      mockAgents.abortSession.mockImplementation(async () => {
-        abortStarted.resolve();
-        await abortAcknowledged.promise;
-        running = false;
-        return true;
-      });
-      await orchQueue.createChatQueueEntry('c1', 'must not dispatch');
-
-      const deletion = orchQueue.abortForChatDeletion('c1');
-      await abortStarted.promise;
-      const interrupt = orchQueue.interruptActiveTurn('c1');
-      abortAcknowledged.resolve();
-      await Promise.all([deletion, interrupt]);
-      await Promise.resolve();
-
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      expect((await orchQueue.readChatExecutionControl('c1')).entries).toMatchObject([{
-        content: 'must not dispatch',
-        status: 'queued',
-      }]);
-    });
-
-    it('waits for the exact execution attempt to retire before confirming deletion', async () => {
-      const turnStarted = deferred();
-      const releaseTurn = deferred();
-      let running = false;
-      mockAgents.isChatRunning.mockImplementation(() => running);
-      mockAgents.runAgentTurn.mockImplementation(async () => {
-        running = true;
-        turnStarted.resolve();
-        await releaseTurn.promise;
-        running = false;
-      });
-      mockAgents.abortSession.mockResolvedValue(true);
-      await orchQueue.createChatQueueEntry('c1', 'active turn');
-      const drain = orchQueue.triggerDrain('c1');
-      await turnStarted.promise;
-
-      let deletionSettled = false;
-      const deletion = orchQueue.abortForChatDeletion('c1').then((result) => {
-        deletionSettled = true;
-        return result;
-      });
-      await Promise.resolve();
-      expect(deletionSettled).toBe(false);
-
-      releaseTurn.resolve();
-      await expect(deletion).resolves.toBe(true);
-      await drain;
-      expect(mockAgents.isChatRunning('c1')).toBe(false);
-    });
-
-    it('releases deletion suppression when runtime retirement is rejected', async () => {
-      let running = true;
-      mockAgents.isChatRunning.mockImplementation(() => running);
-      mockAgents.abortSession.mockResolvedValue(false);
-
-      await expect(orchQueue.abortForChatDeletion('c1')).resolves.toBe(false);
-      running = false;
-      await orchQueue.createChatQueueEntry('c1', 'continue after failed deletion');
-      await orchQueue.triggerDrain('c1');
-
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
-        'c1',
-        'continue after failed deletion',
-        expect.any(Object),
-      );
-    });
-
-    it('retries queued work after deletion abort throws across terminal settlement', async () => {
-      const directStarted = deferred();
-      const finishDirect = deferred();
-      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
-        if (command === 'direct') {
-          directStarted.resolve();
-          await finishDirect.promise;
-        }
-      });
-
-      const reservation = orchQueue.reserveDirectTurn('c1');
-      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
-      await directStarted.promise;
-      await orchQueue.createChatQueueEntry('c1', 'continue after deletion error');
-      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
-      mockAgents.abortSession.mockImplementation(async () => {
-        finishDirect.resolve();
-        await directTurn;
-        throw new Error('abort transport failed');
-      });
-
-      await expect(orchQueue.abortForChatDeletion('c1')).rejects.toThrow('abort transport failed');
-      await idle;
-
-      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(
-        2,
-        'c1',
-        'continue after deletion error',
-        expect.any(Object),
-      );
-    });
-
-    it('clears deletion suppression when queue control is deleted', async () => {
-      const stopped = [];
-      orchQueue.onSessionStopped((chatId, success, intent) => stopped.push({ chatId, success, intent }));
-      await orchQueue.createChatQueueEntry('c1', 'old pending');
-      await orchQueue.abortForChatDeletion('c1');
-      await orchQueue.deleteChatQueueFile('c1');
-
-      await orchQueue.createChatQueueEntry('c1', 'new pending');
-      await orchQueue.checkChatIdle('c1');
-
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'new pending', expect.any(Object));
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.entries).toHaveLength(0);
-      expect(stopped).toEqual([]);
-    });
-  });
-
-  describe('triggerDrain', () => {
-    it('does not recreate queue control when its chat is deleted mid-drain', async () => {
-      let chatExists = true;
-      const turnStarted = deferred();
-      const finishTurn = deferred();
-      const turnRunner = {
-        runAgentTurn: mock(async () => {
-          turnStarted.resolve();
-          await finishTurn.promise;
+  it('queues inter-agent control input after a definitively rejected attempt settles', async () => {
+    let providerRunning = false;
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async () => {
+          throw new DomainError(
+            'STEER_TURN_CHANGED',
+            'The active turn changed before steering could be applied',
+            409,
+          );
         }),
-        abortSession: mock(() => Promise.resolve(true)),
-        isChatRunning: mock(() => false),
-        waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
-      };
-      const deletingQueue = new ChatExecutionCoordinator(
-        workspaceDir,
-        turnRunner,
-        createPendingInputs(),
-        createChatMessages(),
-        emptyDrainOptions,
-        () => chatExists,
-      );
-      await deletingQueue.createChatQueueEntry('deleted', 'queued');
-
-      const drain = deletingQueue.triggerDrain('deleted');
-      await turnStarted.promise;
-      chatExists = false;
-      await deletingQueue.deleteChatQueueFile('deleted');
-      finishTurn.reject(new Error('aborted for deletion'));
-      await drain;
-
-      expect((await deletingQueue.readChatExecutionControl('deleted')).entries).toEqual([]);
+        isChatRunning: mock(() => providerRunning),
+      },
     });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    providerRunning = true;
 
-    it('is a no-op when agent is running', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
-      await orchQueue.createChatQueueEntry('c1', 'queued');
+    const delivery = coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput(),
+      new AbortController().signal,
+    );
+    await waitFor(() => fixture.turnRunner.steerInput.mock.calls.length === 1);
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
 
-      await orchQueue.triggerDrain('c1');
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-    });
+    await coordinator.releaseDirectTurn(reservation);
+    await expect(delivery).resolves.toBe('queued');
 
-    it('drains queued entries when agent is idle', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'queued msg');
+    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
+      .toHaveLength(1);
+  });
 
-      const events = [];
-      orchQueue.onDispatching((chatId, entryId, content) => events.push({ chatId, entryId, content }));
-
-      await orchQueue.triggerDrain('c1');
-
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
-        'c1',
-        'queued msg',
-        expect.objectContaining({
-          permissionMode: 'plan',
-          thinkingMode: 'low',
-          claudeThinkingMode: 'off',
-          ampAgentMode: 'deep',
-          model: 'persisted-model',
-          clientRequestId: expect.any(String),
-          clientMessageId: expect.any(String),
-          turnId: expect.any(String),
+  it('drains queued inter-agent control input with a receipt and no user admission', async () => {
+    const provider = deferred();
+    const events = [];
+    const fixture = createFixture({
+      appendControlReceipt: mock(() => { events.push('receipt'); }),
+      turnRunner: {
+        runAgentTurn: mock(() => {
+          events.push('provider');
+          return provider.promise;
         }),
-      );
-      expect(events).toHaveLength(1);
-      expect(events[0].content).toBe('queued msg');
+      },
     });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput('queued message'),
+      new AbortController().signal,
+    )).resolves.toBe('queued');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    expect(events).toEqual(['receipt', 'provider']);
+    expect(fixture.appendControlReceipt).toHaveBeenCalledWith(
+      'chat-1',
+      expect.objectContaining({
+        content: '<garcon-message>\nqueued message\n</garcon-message>',
+        receipt: expect.objectContaining({ content: 'queued message' }),
+      }),
+    );
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+    const runOptions = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    expect(runOptions).toMatchObject({
+      transcriptViewId: 'view-1',
+      commandType: 'agent-run',
+      clientMessageId: expect.any(String),
+      turnId: expect.any(String),
+    });
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.controlEntries).toEqual([]);
+    expect(control.entries).toEqual([]);
+    expect(control.recentlyDispatched).toEqual([]);
+    expect(control.version).toBe(0);
+
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: runOptions.turnId });
+    provider.resolve();
+    await coordinator.waitForDispatches();
   });
 
-  describe('drain', () => {
-    it('emits dispatching for each entry', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'msg1');
-      // Second enqueue appends to existing entry since status is 'queued'.
-      // Use separate chats or pop the first to test sequential drain.
-      const events = [];
-      orchQueue.onDispatching((chatId, entryId, content) => events.push({ chatId, content }));
-
-      await orchQueue.triggerDrain('c1');
-      expect(events).toHaveLength(1);
-      expect(events[0].content).toBe('msg1');
+  it('queues inter-agent control input behind a shared pause without steering', async () => {
+    const controlRepository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const control = controlRepository.load('chat-1');
+    control.pause = {
+      id: 'pause-1',
+      kind: 'manual',
+      pausedAt: '2026-08-29T00:00:00.000Z',
+    };
+    controlRepository.save('chat-1', control);
+    const fixture = createFixture({
+      controlRepository,
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+      },
     });
+    coordinator = fixture.coordinator;
 
-    it('pauses on agent error with a queued-turn-failed reason', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'will fail');
-      const failures = [];
-      orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
+    await expect(coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput(),
+      new AbortController().signal,
+    )).resolves.toBe('queued');
 
-      mockAgents.runAgentTurn.mockRejectedValue(new Error('agent error'));
+    expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(fixture.projectAdmission.assertAvailable).not.toHaveBeenCalled();
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
+      .toHaveLength(1);
+  });
 
-      await orchQueue.triggerDrain('c1');
-
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.pause).toMatchObject({
-		kind: 'queued-turn-failed',
-		entryId: result.entries[0].id,
-	  });
-      expect(result.entries[0].status).toBe('queued');
-      expect(failures).toEqual([
-        {
-          chatId: 'c1',
-          error: 'agent error',
-          options: expect.objectContaining({
-            clientRequestId: expect.any(String),
-            clientMessageId: expect.any(String),
-            turnId: expect.any(String),
-            model: 'persisted-model',
-          }),
-        },
-      ]);
+  it('drains preserved control input after the public queue is cleared', async () => {
+    const provider = deferred();
+    const fixture = createFixture({
+      turnRunner: { runAgentTurn: mock(() => provider.promise) },
     });
+    coordinator = fixture.coordinator;
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    await coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput(),
+      new AbortController().signal,
+    );
 
-    it('pauses and requeues when pending input registration fails', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'will fail before dispatch');
-      const dispatches = [];
-      const failures = [];
-      orchQueue.onDispatching((chatId, entryId, content) => dispatches.push({ chatId, entryId, content }));
-      orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
-      mockPendingInputs.register.mockRejectedValueOnce(new Error('pending input failed'));
+    await coordinator.clearChatQueue('chat-1');
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
+      .toHaveLength(1);
 
-      await orchQueue.triggerDrain('c1');
+    const release = coordinator.releaseTranscriptSnapshot(snapshot);
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    await release;
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
+    provider.resolve();
+    await coordinator.waitForDispatches();
 
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(result.pause).toMatchObject({
-		kind: 'queued-turn-failed',
-		entryId: result.entries[0].id,
-	  });
-      expect(result.entries).toHaveLength(1);
-      expect(result.entries[0].status).toBe('queued');
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      expect(dispatches).toEqual([]);
-      expect(failures).toEqual([
-        {
-          chatId: 'c1',
-          error: 'pending input failed',
-          options: expect.objectContaining({
-            clientRequestId: expect.any(String),
-            clientMessageId: expect.any(String),
-            turnId: expect.any(String),
-            model: 'persisted-model',
-          }),
-        },
-      ]);
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
+  });
+
+  it('retains queued control input when receipt admission fails', async () => {
+    const failure = new Error('receipt append failed');
+    const fixture = createFixture({
+      appendControlReceipt: mock(() => { throw failure; }),
     });
+    coordinator = fixture.coordinator;
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    await coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput(),
+      new AbortController().signal,
+    );
 
-    it('pauses and requeues when queued turn option resolution fails', async () => {
-      const failingQueue = new ChatExecutionCoordinator(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, () => {
-        throw new Error('settings unavailable');
-      }, () => true);
-      await failingQueue.createChatQueueEntry('c1', 'will fail before registration');
-      const dispatches = [];
-      const failures = [];
-      failingQueue.onDispatching((chatId, entryId, content) => dispatches.push({ chatId, entryId, content }));
-      failingQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
+    await coordinator.releaseTranscriptSnapshot(snapshot);
+    await waitFor(() => !coordinator.ownsExecution('chat-1'));
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
+      .toHaveLength(1);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
 
-      await failingQueue.triggerDrain('c1');
-
-      const result = await failingQueue.readChatExecutionControl('c1');
-      expect(result.pause).toMatchObject({
-		kind: 'queued-turn-failed',
-		entryId: result.entries[0].id,
-	  });
-      expect(result.entries).toHaveLength(1);
-      expect(result.entries[0].status).toBe('queued');
-      expect(mockPendingInputs.register).not.toHaveBeenCalled();
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      expect(dispatches).toEqual([]);
-      expect(failures).toEqual([
-        {
-          chatId: 'c1',
-          error: 'settings unavailable',
-          options: {},
-        },
-      ]);
-    });
-
-    it('records completion-uncertain without requeueing an entry whose removal committed', async () => {
-      const first = await orchQueue.createChatQueueEntry('c1', 'first');
-      const second = await orchQueue.createChatQueueEntry('c1', 'second');
-      const failures = [];
-      let updateCount = 0;
-      orchQueue.onTurnFailed((chatId, error) => failures.push({ chatId, error }));
-      orchQueue.onExecutionControlUpdated(() => {
-        updateCount += 1;
-        if (updateCount === 2) throw new Error('publish after finalization failed');
-      });
-
-      await orchQueue.triggerDrain('c1');
-
-      const result = await orchQueue.readChatExecutionControl('c1');
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-      expect(result.entries).toEqual([
-        expect.objectContaining({ id: second.entry.id, status: 'queued' }),
-      ]);
-      expect(result.pause).toMatchObject({
-        kind: 'completion-uncertain',
-        entryId: first.entry.id,
-      });
-      expect(result.recentlyDispatched).toContainEqual(
-        expect.objectContaining({ entryId: first.entry.id }),
-      );
-      expect(failures).toEqual([]);
-    });
-
-    it('registers queued messages as pending input before dispatch', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'queued text');
-
-      await orchQueue.triggerDrain('c1');
-
-      expect(mockPendingInputs.register).toHaveBeenCalledWith(
-        'c1',
-        'queued text',
-        expect.objectContaining({
-          clientRequestId: expect.any(String),
-          clientMessageId: expect.any(String),
-          turnId: expect.any(String),
-          deliveryStatus: 'accepted',
+  it('continues the control lane after dispatch failure without pausing the user queue', async () => {
+    const second = deferred();
+    let calls = 0;
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(() => {
+          calls += 1;
+          if (calls === 1) throw new Error('control launch failed');
+          return second.promise;
         }),
-      );
+      },
     });
+    coordinator = fixture.coordinator;
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    await coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput('first'),
+      new AbortController().signal,
+    );
+    await coordinator.deliverInterAgentControlInput(
+      'chat-1',
+      interAgentInput('second'),
+      new AbortController().signal,
+    );
 
-    it('uses persisted chat settings instead of triggering turn overrides for drained queued turns', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'queued text');
+    const release = coordinator.releaseTranscriptSnapshot(snapshot);
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 2);
+    const secondOptions = fixture.turnRunner.runAgentTurn.mock.calls[1][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: secondOptions.turnId });
+    second.resolve();
+    await release;
 
-      await orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'active turn', {
-        clientRequestId: 'req-active',
-        clientMessageId: 'msg-active',
-        turnId: 'turn-active',
-        permissionMode: 'bypassPermissions',
-        thinkingMode: 'max',
-        claudeThinkingMode: 'on',
-        ampAgentMode: 'smart',
-        model: 'one-shot-model',
-      });
-
-      const activeTurnOptions = mockAgents.runAgentTurn.mock.calls[0]?.[2];
-      const queuedTurnOptions = mockAgents.runAgentTurn.mock.calls[1]?.[2];
-      expect(activeTurnOptions.permissionMode).toBe('bypassPermissions');
-      expect(activeTurnOptions.model).toBe('one-shot-model');
-      expect(queuedTurnOptions.permissionMode).toBe('plan');
-      expect(queuedTurnOptions.thinkingMode).toBe('low');
-      expect(queuedTurnOptions.claudeThinkingMode).toBe('off');
-      expect(queuedTurnOptions.ampAgentMode).toBe('deep');
-      expect(queuedTurnOptions.model).toBe('persisted-model');
-      expect(queuedTurnOptions.clientRequestId).toEqual(expect.any(String));
-      expect(queuedTurnOptions.clientMessageId).toEqual(expect.any(String));
-      expect(queuedTurnOptions.turnId).toEqual(expect.any(String));
-      expect(queuedTurnOptions.clientRequestId).not.toBe('req-active');
-      expect(queuedTurnOptions.clientMessageId).not.toBe('msg-active');
-      expect(queuedTurnOptions.turnId).not.toBe('turn-active');
-    });
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.controlEntries).toEqual([]);
+    expect(control.pause).toBeNull();
+    expect(fixture.appendControlReceipt).toHaveBeenCalledTimes(2);
   });
 
-  describe('chat-idle event', () => {
-    it('fires after drain completes with empty queue', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'msg');
-
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
-
-      await orchQueue.triggerDrain('c1');
-      expect(idleEvents).toHaveLength(1);
-      expect(idleEvents[0]).toBe('c1');
+  it('[TLV5-CHAT-ID-DISCOVERY.04-CORE-HIDDEN-RUN-UNIT-01] schedules a control turn without admitting user input', async () => {
+    const provider = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => null),
+        runAgentTurn: mock(() => provider.promise),
+      },
     });
+    coordinator = fixture.coordinator;
+    const onControlRun = mock(() => undefined);
 
-    it('fires after a direct turn drains to an empty queue', async () => {
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+    await coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      onControlRun,
+    );
 
-      await orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'hello', {});
-      expect(idleEvents).toHaveLength(1);
-      expect(idleEvents[0]).toBe('c1');
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    const runCall = fixture.turnRunner.runAgentTurn.mock.calls[0];
+    expect(runCall[0]).toBe('chat-1');
+    expect(runCall[1]).toBe('<garcon-chat-id>1787836573296800</garcon-chat-id>');
+    expect(runCall[2]).toMatchObject({
+      clientRequestId: expect.any(String),
+      clientMessageId: expect.any(String),
+      transcriptViewId: 'view-1',
+      turnId: expect.any(String),
+      commandType: 'agent-run',
     });
+    expect(onControlRun).toHaveBeenCalledWith(runCall[2].turnId);
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
 
-    it('does NOT fire when drain exits because agent is running', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'msg');
-      mockAgents.isChatRunning.mockReturnValue(true);
-
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
-
-      await orchQueue.triggerDrain('c1');
-      expect(idleEvents).toHaveLength(0);
-    });
-
-    it('does NOT fire when drain exits because the queue is paused', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'msg');
-      await orchQueue.pauseChatQueue('c1');
-
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
-
-      await orchQueue.triggerDrain('c1');
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      expect(idleEvents).toHaveLength(0);
-    });
+    const activeTarget = coordinator.captureSteerTarget('chat-1');
+    await coordinator.onAgentTurnTerminal('chat-1', activeTarget.identity);
+    provider.resolve();
+    await coordinator.waitForDispatches();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
-  describe('checkChatIdle', () => {
-    it('emits chat-idle when queue is empty and agent not running', async () => {
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+  it('rejects a hidden control run when the project is unavailable and releases ownership', async () => {
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const fixture = createFixture({
+      projectAdmission: {
+        assertAvailable: mock(async () => { throw unavailable; }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const onControlRun = mock(() => undefined);
 
-      await orchQueue.checkChatIdle('c1');
-      expect(idleEvents).toEqual(['c1']);
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      onControlRun,
+    )).rejects.toBe(unavailable);
+
+    expect(onControlRun).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('releases hidden control ownership when run options cannot be resolved', async () => {
+    const fixture = createFixture({
+      getDrainOptions: () => { throw new Error('session disappeared'); },
+    });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toThrow('session disappeared');
+
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    await coordinator.waitForExecutionOwners();
+  });
+
+  it('blocks hidden control delivery when pause state exists without entries', async () => {
+    const controlRepository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const control = controlRepository.load('chat-1');
+    control.pause = {
+      id: 'pause-1',
+      kind: 'manual',
+      pausedAt: '2026-08-29T00:00:00.000Z',
+    };
+    controlRepository.save('chat-1', control);
+    const fixture = createFixture({ controlRepository });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      message: 'Server control input is currently blocked',
     });
 
-    it('does NOT emit when agent is running', async () => {
-      mockAgents.isChatRunning.mockReturnValue(true);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
 
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+  it('blocks hidden control delivery while chat deletion is suppressing execution', async () => {
+    const fixture = createFixture();
+    coordinator = fixture.coordinator;
+    expect(await coordinator.abortForChatDeletion('chat-1')).toBe(true);
 
-      await orchQueue.checkChatIdle('c1');
-      expect(idleEvents).toHaveLength(0);
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      message: 'Server control input is currently blocked',
     });
 
-    it('drains a queued entry left by a turn that bypassed #drain', async () => {
-      // Models the chat-start path: the first turn runs via startSession (not
-      // runReservedTurn), a message is queued mid-turn, and the turn finishes.
-      // checkChatIdle must resume draining instead of leaving the entry stuck.
-      await orchQueue.createChatQueueEntry('c1', 'pending msg');
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    coordinator.rollbackChatDeletion('chat-1');
+  });
 
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+  it('blocks hidden control delivery after the chat leaves the registry', async () => {
+    const fixture = createFixture({ chatExists: () => false });
+    coordinator = fixture.coordinator;
 
-      await orchQueue.checkChatIdle('c1');
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({ code: 'SESSION_BUSY' });
 
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending msg', expect.any(Object));
-      const queue = await orchQueue.readChatExecutionControl('c1');
-      expect(queue.entries).toHaveLength(0);
-      expect(idleEvents).toEqual(['c1']);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('reports pending queue work after unsupported steering and releases ownership', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async () => {
+          throw new DomainError(
+            'OPERATION_UNSUPPORTED',
+            'This turn cannot be steered',
+            422,
+          );
+        }),
+      },
     });
+    coordinator = fixture.coordinator;
+    coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'queued work');
 
-    it('does NOT drain a queued entry while the queue is paused', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'pending msg');
-      await orchQueue.pauseChatQueue('c1');
+    const delivery = coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      'turn-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    );
+    await waitFor(() => fixture.turnRunner.steerInput.mock.calls.length === 1);
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'turn-1' });
 
-      const idleEvents = [];
-      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+    await expect(delivery).rejects.toMatchObject({ code: 'SESSION_BUSY' });
 
-      await orchQueue.checkChatIdle('c1');
+    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
 
-      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
-      expect(idleEvents).toHaveLength(0);
-      const queue = await orchQueue.readChatExecutionControl('c1');
-      expect(queue.entries).toHaveLength(1);
+  it('treats an accepted queued steer without preparation as an unknown outcome', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async () => ({ kind: 'accepted' })),
+      },
     });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const queued = await coordinator.createChatQueueEntry('chat-1', 'queued steer');
+    const target = coordinator.captureSteerTarget('chat-1');
+    const settlement = {
+      markScheduled: mock(async () => undefined),
+      settleSteerFailure: mock(async () => undefined),
+    };
+
+    const error = await coordinator.deliverAcceptedQueueEntrySteer({
+      command: {
+        key: 'queued-steer-command',
+        chatId: 'chat-1',
+        clientRequestId: 'queued-steer-request',
+        entryId: queued.entryId,
+      },
+      content: 'queued steer',
+      providerContent: 'queued steer',
+      clientMessageId: 'queued-steer-message',
+      transcriptViewId: 'view-1',
+      target,
+      expectedRevision: queued.entry.revision,
+      expectedReorderRevision: queued.control.reorderRevision,
+      settlement,
+    }).catch((failure) => failure);
+
+    expect(error).toMatchObject({
+      code: 'STEER_OUTCOME_UNKNOWN',
+      deliveryOutcome: 'unknown',
+    });
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.entries).toEqual([]);
+    expect(control.recentlyDispatched).toEqual([
+      expect.objectContaining({ entryId: queued.entryId, revision: queued.entry.revision }),
+    ]);
+    expect(settlement.settleSteerFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ entryId: queued.entryId }),
+      error,
+      'unknown',
+    );
+    await coordinator.releaseDirectTurn(reservation);
+  });
+
+  it('retires an interrupted run immediately and starts its queued successor', async () => {
+    const first = deferred();
+    const second = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock((_chatId, _content, options) => (
+          options.turnId === 'turn-1' ? first.promise : second.promise
+        )),
+        abortSession: mock(async () => true),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const settled = [];
+    coordinator.onTurnSettled((_chatId, turn) => settled.push(turn?.turnId));
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const firstRun = coordinator.runReservedTurn(reservation, 'first', { turnId: 'turn-1' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    await coordinator.createChatQueueEntry('chat-1', 'second');
+
+    await expect(coordinator.interruptActiveTurn('chat-1')).resolves.toBe('interrupt-requested');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 2);
+
+    expect(settled).toContain('turn-1');
+    expect(fixture.turnRunner.abortSession).toHaveBeenCalledWith('chat-1');
+    const successor = fixture.turnRunner.runAgentTurn.mock.calls[1][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: successor.turnId });
+    second.resolve();
+    await coordinator.waitForExecutionOwners();
+
+    first.resolve();
+    await firstRun;
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+  });
+
+  it('ignores a late provider rejection after interruption', async () => {
+    const first = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(() => first.promise),
+        abortSession: mock(async () => true),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const failures = [];
+    coordinator.onTurnFailed((_chatId, message) => failures.push(message));
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const run = coordinator.runReservedTurn(reservation, 'first', { turnId: 'turn-1' });
+
+    await coordinator.interruptActiveTurn('chat-1');
+    first.reject(new Error('late provider failure'));
+
+    await expect(run).rejects.toThrow('late provider failure');
+    expect(failures).toEqual([]);
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('pauses queued work for a plain Stop instead of draining it', async () => {
+    const first = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(() => first.promise),
+        abortSession: mock(async () => true),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const run = coordinator.runReservedTurn(reservation, 'first', { turnId: 'turn-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'keep queued');
+
+    const stopped = await coordinator.stopActiveTurn('chat-1');
+
+    expect(stopped.outcome).toBe('interrupt-requested');
+    expect(stopped.control.pause).toMatchObject({ kind: 'manual' });
+    expect(stopped.control.entries).toMatchObject([{ content: 'keep queued' }]);
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    first.resolve();
+    await run;
+  });
+
+  it('drains input requested while Stop suppression is active', async () => {
+    const first = deferred();
+    const second = deferred();
+    const abort = deferred();
+    let runCount = 0;
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(() => {
+          runCount += 1;
+          return runCount === 1 ? first.promise : second.promise;
+        }),
+        abortSession: mock(() => abort.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const firstRun = coordinator.runReservedTurn(reservation, 'first', { turnId: 'turn-1' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    const stop = coordinator.stopActiveTurn('chat-1');
+    await waitFor(() => fixture.turnRunner.abortSession.mock.calls.length === 1);
+    await coordinator.createChatQueueEntry('chat-1', 'queued while stopping');
+    await coordinator.triggerDrain('chat-1');
+
+    abort.resolve(true);
+    expect((await stop).control.pause).toBeNull();
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 2);
+
+    const secondOptions = fixture.turnRunner.runAgentTurn.mock.calls[1][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: secondOptions.turnId });
+    second.resolve();
+    await coordinator.waitForExecutionOwners();
+    first.resolve();
+    await firstRun;
+  });
+
+  it('stops a reserved turn before the provider run starts', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(rejectWhenExecutionAdmissionAborts),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const run = coordinator.runReservedTurn(reservation, 'work', { turnId: 'turn-1' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    const stopped = await coordinator.stopActiveTurn('chat-1');
+
+    expect(stopped.outcome).toBe('interrupt-requested');
+    expect(reservation.executionAdmission.signal.aborted).toBe(true);
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    await expect(run).rejects.toThrow('Turn interrupted by the user');
+  });
+
+  it('cancels reserved admission before waiting for provider interruption', async () => {
+    const abort = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        abortSession: mock(() => abort.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+
+    const stop = coordinator.stopActiveTurn('chat-1');
+    await waitFor(() => fixture.turnRunner.abortSession.mock.calls.length === 1);
+
+    expect(reservation.executionAdmission.signal.aborted).toBe(true);
+    abort.resolve(true);
+    expect((await stop).outcome).toBe('interrupt-requested');
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('stops a dequeued turn before the provider run starts', async () => {
+    const failures = [];
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(rejectWhenExecutionAdmissionAborts),
+      },
+    });
+    coordinator = fixture.coordinator;
+    coordinator.onTurnFailed((_chatId, message) => failures.push(message));
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const drain = coordinator.triggerDrain('chat-1');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+
+    const stopped = await coordinator.stopActiveTurn('chat-1');
+    await drain;
+
+    expect(stopped.outcome).toBe('interrupt-requested');
+    expect(options.executionAdmission.signal.aborted).toBe(true);
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    expect(failures).toEqual([]);
+  });
+
+  it('treats interruption while idle as a no-op', async () => {
+    const fixture = createFixture();
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.interruptActiveTurn('chat-1')).resolves.toBe('already-idle');
+
+    expect(fixture.turnRunner.abortSession).toHaveBeenCalledTimes(1);
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('coalesces simultaneous interruption requests around one provider abort', async () => {
+    const abort = deferred();
+    const fixture = createFixture({
+      turnRunner: { abortSession: mock(() => abort.promise) },
+    });
+    coordinator = fixture.coordinator;
+
+    const first = coordinator.interruptActiveTurn('chat-1');
+    const second = coordinator.interruptActiveTurn('chat-1');
+    abort.resolve(false);
+
+    await expect(Promise.all([first, second])).resolves.toEqual(['already-idle', 'already-idle']);
+    expect(fixture.turnRunner.abortSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears ephemeral queue and ownership state when a chat is deleted', async () => {
+    await coordinator.createChatQueueEntry('chat-1', 'discard me');
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-2');
+
+    await coordinator.deleteChatQueueFile('chat-1');
+    await coordinator.deleteChatQueueFile('chat-2');
+
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+    expect(coordinator.ownsExecution('chat-2')).toBe(false);
+    await coordinator.releaseTranscriptSnapshot(snapshot);
   });
 });

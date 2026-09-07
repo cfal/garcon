@@ -1,22 +1,28 @@
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as m from '$lib/paraglide/messages.js';
+import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
+
+type CommandMenuWorkspacePort = Pick<
+	WorkspaceCoordinator,
+	| 'isMobile'
+	| 'focusChat'
+	| 'openSingleton'
+	| 'focusMostRecentTerminalOrCreate'
+	| 'createTerminalInAvailableSpace'
+>;
 
 const mocks = vi.hoisted(() => ({
 	workspace: {
-		isMobile: false,
+		isMobile: false as boolean,
 		focusChat: vi.fn(),
-		focusMobileSingleton: vi.fn(),
-		openSingleton: vi.fn(),
+		openSingleton: vi.fn(async () => undefined),
 		focusMostRecentTerminalOrCreate: vi.fn(async () => undefined),
-		createTerminal: vi.fn(async () => undefined),
-	},
+		createTerminalInAvailableSpace: vi.fn(async () => 'terminal-new'),
+	} satisfies CommandMenuWorkspacePort,
 	terminals: {
 		listStatus: 'ready',
 		orderedSessions: [],
-	},
-	files: {
-		showOpenFiles: vi.fn(),
 	},
 	appShell: {
 		openNewChatDialog: vi.fn(),
@@ -43,7 +49,6 @@ vi.mock('$lib/context', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/context')>()),
 	getWorkspaceCoordinator: () => mocks.workspace,
 	getTerminalRegistry: () => mocks.terminals,
-	getFileSessions: () => mocks.files,
 	getAppShell: () => mocks.appShell,
 	getLocalSettings: () => mocks.localSettings,
 	getGhCapability: () => mocks.ghCapability,
@@ -60,19 +65,75 @@ afterEach(() => {
 });
 
 describe('CommandMenu', () => {
-	it('offers File Sessions on desktop', async () => {
+	it('exposes the keyboard-highlighted option through combobox semantics', async () => {
 		const { component } = render(CommandMenu);
 		component.toggle();
 
-		expect(await screen.findByText(m.file_session_open_files())).toBeTruthy();
+		const input = await screen.findByRole('combobox');
+		const listbox = screen.getByRole('listbox');
+		const options = screen.getAllByRole('option');
+
+		expect(input.getAttribute('aria-controls')).toBe(listbox.id);
+		expect(input.getAttribute('aria-expanded')).toBe('true');
+		expect(input.getAttribute('aria-activedescendant')).toBe(options[0]?.id);
+
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+		expect(input.getAttribute('aria-activedescendant')).toBe(options[1]?.id);
+		expect(options[1]?.getAttribute('aria-selected')).toBe('true');
 	});
 
-	it('hides File Sessions on mobile', async () => {
+	it('clears the active descendant when filtering returns no commands', async () => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		const input = await screen.findByRole('combobox');
+		await fireEvent.input(input, { target: { value: 'no matching command exists' } });
+
+		expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+		expect(screen.queryByRole('option')).toBeNull();
+	});
+
+	it.each([
+		['History', 'git-history'],
+		['Compare', 'git-compare'],
+		['Open chat map', 'chat-map'],
+	] as const)('opens standalone %s through generic desktop placement', async (label, kind) => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		await fireEvent.click(await screen.findByText(label));
+		expect(mocks.workspace.openSingleton).toHaveBeenCalledWith(kind);
+	});
+
+	it.each([
+		['History', 'git-history'],
+		['Compare', 'git-compare'],
+		['Open chat map', 'chat-map'],
+	] as const)('focuses standalone %s on mobile', async (label, kind) => {
 		mocks.workspace.isMobile = true;
 		const { component } = render(CommandMenu);
 		component.toggle();
 
-		await screen.findByRole('dialog');
-		expect(screen.queryByText(m.file_session_open_files())).toBeNull();
+		await fireEvent.click(await screen.findByText(label));
+		expect(mocks.workspace.openSingleton).toHaveBeenCalledWith(kind);
+	});
+
+	it('creates a new terminal using available workspace space', async () => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		await fireEvent.click(await screen.findByText(m.workspace_new_terminal()));
+		expect(mocks.workspace.createTerminalInAvailableSpace).toHaveBeenCalledWith(
+			'command-menu:new-terminal',
+		);
+	});
+
+	it('focuses the most recent terminal without a legacy host argument', async () => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		await fireEvent.click(await screen.findByText(m.command_switch_to_terminal()));
+		expect(mocks.workspace.focusMostRecentTerminalOrCreate).toHaveBeenCalledWith();
 	});
 });

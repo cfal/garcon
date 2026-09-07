@@ -2,13 +2,23 @@
 	import Markdown, { type MarkdownLinkNavigateEvent } from '$lib/components/chat/Markdown.svelte';
 	import { resolveFileLinkFromFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
-	import { getFileSessions, getLocalSettings } from '$lib/context';
-	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
+	import {
+		getFileSessions,
+		getLocalSettings,
+		getNotifications,
+		getWorkspaceLayout,
+	} from '$lib/context';
+	import { fileSurfaceId, type PresentationHostId } from '$lib/workspace/surface-types.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	let { session, presentation }: { session: FileSession; presentation: PresentationHostId } =
 		$props();
 	const files = getFileSessions();
 	const localSettings = getLocalSettings();
+	const notifications = getNotifications();
+	const workspaceLayout = getWorkspaceLayout();
+	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
 	let contentElement: HTMLDivElement;
 	const markdownFontSize = $derived(
 		Number.parseInt(localSettings.markdownViewerFontSize, 10) || 12,
@@ -17,13 +27,18 @@
 	$effect(() => {
 		const element = contentElement;
 		if (!element) return;
-		requestAnimationFrame(() => {
+		const frame = requestAnimationFrame(() => {
+			element.scrollLeft = session.markdownScrollLeft;
 			element.scrollTop = session.markdownScrollTop;
 		});
-		return () => {
-			session.markdownScrollTop = element.scrollTop;
-		};
+		// Scroll events persist offsets before detached browser elements report zero.
+		return () => cancelAnimationFrame(frame);
 	});
+
+	function captureScroll(element: HTMLDivElement): void {
+		session.markdownScrollLeft = element.scrollLeft;
+		session.markdownScrollTop = element.scrollTop;
+	}
 
 	function navigateFileLink(link: MarkdownLinkNavigateEvent): boolean {
 		if (link.kind !== 'file') return false;
@@ -32,24 +47,35 @@
 			sourceFilePath: session.relativePath,
 		});
 		if (!target) return false;
-		void files.open({
-			...target,
-			mode: 'auto',
-			origin: presentation,
-			reason: 'user-open',
-		});
+		void files
+			.open({
+				...target,
+				mode: 'auto',
+				origin: presentation,
+				reason: 'user-open',
+			})
+			.then((opened) => {
+				if (!opened || presentation !== 'dialog') return;
+				const dialogSurfaceId = workspaceLayout.snapshot.dialogFileSurfaceId;
+				if (!dialogSurfaceId || dialogSurfaceId === fileSurfaceId(opened.id)) return;
+				notifications.info(m.file_session_opened_in_another_view({ fileName: opened.fileName }), {
+					key: 'file-opened-behind-dialog',
+				});
+			});
 		return true;
 	}
 </script>
 
 <div
 	bind:this={contentElement}
+	{@attach primaryScrollRegion}
 	data-surface-primary
 	tabindex="-1"
 	role="region"
 	aria-label={session.fileName}
 	class="markdown-viewer-content h-full overflow-auto bg-background p-4 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-6"
 	style={`--markdown-viewer-font-size: ${markdownFontSize}px;`}
+	onscroll={(event) => captureScroll(event.currentTarget)}
 >
 	<Markdown
 		source={session.content}

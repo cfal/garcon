@@ -1,13 +1,30 @@
 import type { ForkTranscriptEntryContext } from '@garcon/server-agent-common/forking/fork-jsonl';
-import { normalizeCodexJsonlEntry } from './history-normalizer.js';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
+import { isRecord } from '@garcon/common/json';
+import { LegacyCodexProjection } from './legacy-history-projection.js';
+import {
+  projectCodexCodeModeCommands,
+  rewriteCodexCodeModeCommandPrefix,
+} from './code-mode-command-projection.js';
 
 export function rewriteCodexForkTranscriptEntry(
   entry: unknown,
   context: ForkTranscriptEntryContext,
+): unknown {
+  return rewriteCodexForkEntry(entry, context, new LegacyCodexProjection());
+}
+
+export function createCodexForkTranscriptRewriter(): (
+  entry: unknown,
+  context: ForkTranscriptEntryContext,
+) => unknown {
+  const projection = new LegacyCodexProjection();
+  return (entry, context) => rewriteCodexForkEntry(entry, context, projection);
+}
+
+function rewriteCodexForkEntry(
+  entry: unknown,
+  context: ForkTranscriptEntryContext,
+  projection: LegacyCodexProjection,
 ): unknown {
   if (!isRecord(entry)) {
     return entry;
@@ -15,7 +32,7 @@ export function rewriteCodexForkTranscriptEntry(
 
   const retainedMessageCount = context.retainedMessageCount;
   if (retainedMessageCount !== undefined) {
-    const normalized = normalizeCodexJsonlEntry(entry);
+    const normalized = projection.project(entry, {});
     const emittedCount = normalized
       ? normalized.canonical.length
         + normalized.fallbackUser.length
@@ -24,6 +41,8 @@ export function rewriteCodexForkTranscriptEntry(
       : 0;
     if (emittedCount > retainedMessageCount) {
       if (retainedMessageCount === 0) return { type: 'garcon_fork_filtered' };
+      const codeModePrefix = rewriteCodeModePrefix(entry, retainedMessageCount);
+      if (codeModePrefix) return codeModePrefix;
       if (
         retainedMessageCount === 1
         && entry.type === 'response_item'
@@ -54,5 +73,29 @@ export function rewriteCodexForkTranscriptEntry(
   return {
     ...entry,
     payload,
+  };
+}
+
+function rewriteCodeModePrefix(
+  entry: Record<string, unknown>,
+  retainedMessageCount: number,
+): Record<string, unknown> | null {
+  if (entry.type !== 'response_item' || !isRecord(entry.payload)) return null;
+  const payload = entry.payload;
+  if (
+    payload.type !== 'custom_tool_call'
+    || payload.name !== 'exec'
+    || typeof payload.input !== 'string'
+  ) return null;
+  const projection = projectCodexCodeModeCommands(payload.input);
+  if (!projection || retainedMessageCount >= projection.commands.length) return null;
+  return {
+    ...entry,
+    payload: {
+      ...payload,
+      input: rewriteCodexCodeModeCommandPrefix(
+        projection.commands.slice(0, retainedMessageCount),
+      ),
+    },
   };
 }

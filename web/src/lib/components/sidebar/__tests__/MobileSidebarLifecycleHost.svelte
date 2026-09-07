@@ -4,6 +4,7 @@
 	import {
 		setAppShell,
 		setLocalSettings,
+		setMinuteClock,
 		setModelCatalog,
 		setNotifications,
 		setReadReceiptOutbox,
@@ -11,13 +12,19 @@
 		setSidebarProjectCollapse,
 		setChatSessions,
 		setSidebarSearch,
-		setSplitLayout,
 	} from '$lib/context';
 	import {
 		createSidebarSearchStore,
 		type SidebarSearchStore,
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type {
+		SidebarChatGrouping,
+		SidebarChatItemLayout,
+		SidebarInactivityDuration,
+	} from '$lib/stores/local-settings.svelte';
+	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
+	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
 	interface MobileSidebarLifecycleHostProps {
 		chats?: ChatSessionRecord[];
@@ -25,9 +32,10 @@
 		sidebarSearch?: SidebarSearchStore;
 		initialOpen?: boolean;
 		autoLoadSavedSearches?: boolean;
-		sidebarGroupByProject?: boolean;
+		sidebarGrouping?: SidebarChatGrouping;
+		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
-		sidebarCompactChatItems?: boolean;
+		sidebarChatItemLayout?: SidebarChatItemLayout;
 		collapsedProjectKeys?: Set<string>;
 	}
 
@@ -37,9 +45,10 @@
 		sidebarSearch,
 		initialOpen = true,
 		autoLoadSavedSearches = true,
-		sidebarGroupByProject = true,
+		sidebarGrouping = 'project',
+		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
-		sidebarCompactChatItems = false,
+		sidebarChatItemLayout = 'default',
 		collapsedProjectKeys = new Set<string>(),
 	}: MobileSidebarLifecycleHostProps = $props();
 
@@ -54,6 +63,7 @@
 	function createDefaultSidebarSearchContext(): SidebarSearchStore {
 		return createSidebarSearchStore({
 			getTranscriptSearchEnabled: () => true,
+			getSearchResultSort: () => 'relevance',
 			getChats: () => chats,
 			getSelectedChatId: () => selectedChatId,
 			notifyError: (message) => notifications.error(message),
@@ -100,32 +110,38 @@
 
 	setNotifications(notifications as never);
 	setRemoteSettings({
-		snapshot: { features: { transcriptSearch: { enabled: true } } },
+		snapshot: {
+			features: {
+				transcriptSearch: { enabled: true },
+				agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+			},
+		},
 	} as never);
 	setLocalSettings({
-		get sidebarGroupByProject() {
-			return sidebarGroupByProject;
+		get sidebarGrouping() {
+			return sidebarGrouping;
+		},
+		get sidebarInactivityDuration() {
+			return sidebarInactivityDuration;
 		},
 		get sidebarGroupNestedProjectPaths() {
 			return sidebarGroupNestedProjectPaths;
 		},
-		get sidebarCompactChatItems() {
-			return sidebarCompactChatItems;
+		get sidebarChatItemLayout() {
+			return sidebarChatItemLayout;
 		},
-		toggle(
-			key: 'sidebarGroupByProject' | 'sidebarGroupNestedProjectPaths' | 'sidebarCompactChatItems',
-		) {
-			if (key === 'sidebarGroupByProject') {
-				sidebarGroupByProject = !sidebarGroupByProject;
+		toggle(_key: 'sidebarGroupNestedProjectPaths') {
+			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
+		},
+		set(key: 'sidebarGrouping' | 'sidebarChatItemLayout', value: string) {
+			if (key === 'sidebarGrouping') {
+				sidebarGrouping = value as SidebarChatGrouping;
 				return;
 			}
-			if (key === 'sidebarGroupNestedProjectPaths') {
-				sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
-				return;
-			}
-			sidebarCompactChatItems = !sidebarCompactChatItems;
+			sidebarChatItemLayout = value as SidebarChatItemLayout;
 		},
 	} as never);
+	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
 	setSidebarProjectCollapse({
 		get collapsedProjectKeys() {
 			return collapsedProjectKeys;
@@ -157,11 +173,7 @@
 		},
 	} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		startDrag() {},
-		endDrag() {},
-	} as never);
+	setWorkspaceWindowDndTestContext();
 
 	setChatSessions({
 		get selectedChat() {
@@ -198,6 +210,8 @@
 		onShareChat={() => {}}
 		onManageTags={() => {}}
 		onShowScheduledPrompts={() => {}}
+		onShowPreambles={() => {}}
 		onShowSettings={() => {}}
+		newWindowEdges={workspaceSplitAdmissions()}
 	/>
 {/if}

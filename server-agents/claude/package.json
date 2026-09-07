@@ -11,13 +11,10 @@
     "@garcon/server-agent-interface": "workspace:*",
     "bun-pty": "^0.4.10"
   },
-  "devDependencies": { "@types/bun": "^1.3.14", "typescript": "^6.0.3" },
+  "devDependencies": { "@types/bun": "^1.4.1", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "claude",
-    "standaloneEntrypoints": {
-      "transcript-index-source": "./src/transcript-index-source.ts"
-    },
     "preMainModules": [],
     "embeddedDependencyMetadata": []
   }

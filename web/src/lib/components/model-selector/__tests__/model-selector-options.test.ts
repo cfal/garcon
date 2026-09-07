@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import {
-	buildAgentOptions,
+	DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+} from '$shared/agents';
+import {
+	buildAgentGroups,
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
@@ -13,6 +18,11 @@ import {
 	shouldShowSourceLabelForAgent,
 	shouldShowSourcePickerForAgent,
 } from '../model-selector-options';
+import {
+	findModelForSelection,
+	modelValueForSelection,
+	resolveModelSelection,
+} from '../../../../test/model-catalog';
 
 const claudeModels: ModelOption[] = [
 	{ value: 'opus', label: 'Opus', supportsImages: true },
@@ -83,10 +93,10 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getAgent: (id: string) => ({
 			id,
 			label: id === 'codex' ? 'Cached Codex' : 'Cached Claude',
-				description: '',
-				supportsFork: true,
-				supportsUpdateProjectPath: true,
-				supportsImages: true,
+			description: '',
+			supportsFork: true,
+			supportsUpdateProjectPath: true,
+			supportsImages: true,
 			acceptsApiProviderEndpoints: true,
 			supportedProtocols: id === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 			defaultModel: id === 'codex' ? 'gpt-5.5' : 'opus',
@@ -94,36 +104,12 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getAgentLabel: (id: string) => (id === 'codex' ? 'Codex' : 'Claude'),
 		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
 		getDefaultModel: (agentId: string) => modelsByAgent[agentId]?.[0]?.value ?? '',
-		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) => {
-			const models = modelsByAgent[agentId] ?? [];
-			if (endpointId) {
-				const selected = models.find(
-					(entry) =>
-						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
-				);
-				if (selected) return selected;
-			}
-			return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
-		},
-		selectionFor: (agentId: string, model: string) => {
-			const selected = (modelsByAgent[agentId] ?? []).find(
-				(entry) => entry.value === model || entry.rawModel === model,
-			);
-			return {
-				model: selected?.rawModel ?? model,
-				apiProviderId: selected?.apiProviderId ?? null,
-				modelEndpointId: selected?.endpointId ?? null,
-				modelProtocol: selected?.protocol ?? null,
-			};
-		},
-		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = (modelsByAgent[agentId] ?? []).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			);
-			return selected?.value ?? model;
-		},
+		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
+			findModelForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
+		selectionFor: (agentId: string, model: string) =>
+			resolveModelSelection(modelsByAgent[agentId] ?? [], model),
+		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) =>
+			modelValueForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
 		findEndpoint: (endpointId: string) => {
 			if (endpointId === 'acme-anthropic') {
 				return {
@@ -155,17 +141,14 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 }
 
 function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
-	const models = Array.from(
-		{ length: count },
-		(_, index): ModelOption => ({
-			value: `acme-openai:model-${index}`,
-			label: `Acme: Model ${index}`,
-			rawModel: `model-${index}`,
-			apiProviderId: 'acme',
-			endpointId: 'acme-openai',
-			protocol: 'openai-compatible',
-		}),
-	);
+	const models = Array.from({ length: count }, (_, index): ModelOption => ({
+		value: `acme-openai:model-${index}`,
+		label: `Acme: Model ${index}`,
+		rawModel: `model-${index}`,
+		apiProviderId: 'acme',
+		endpointId: 'acme-openai',
+		protocol: 'openai-compatible',
+	}));
 
 	return {
 		getModels: () => models,
@@ -212,7 +195,41 @@ describe('model selector options', () => {
 	it('uses catalog display labels instead of raw cached metadata for agent options', () => {
 		const catalog = makeCatalog();
 
-		expect(buildAgentOptions(catalog).map((option) => option.label)).toEqual(['Claude', 'Codex']);
+		expect(buildAgentGroups(catalog)[0]?.options.map((option) => option.label)).toEqual([
+			'Claude',
+			'Codex',
+		]);
+	});
+
+	it('groups direct agents first with fixed order and short labels', () => {
+		const catalog = makeCatalog();
+		const groups = buildAgentGroups(catalog, [
+			DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+			'codex',
+			DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+			'claude',
+			DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		]);
+
+		expect(groups.map((group) => group.id)).toEqual(['direct', 'agents']);
+		expect(groups.map((group) => group.label)).toEqual(['Direct', 'Agents']);
+		expect(groups[0]?.options.map((option) => option.label)).toEqual([
+			'Chat Completions',
+			'Responses',
+			'Anthropic',
+		]);
+		expect(groups[1]?.options.map((option) => option.label)).toEqual(['Codex', 'Claude']);
+	});
+
+	it('omits empty agent groups', () => {
+		const catalog = makeCatalog();
+
+		expect(buildAgentGroups(catalog, ['claude']).map((group) => group.id)).toEqual(['agents']);
+		expect(
+			buildAgentGroups(catalog, [DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]).map(
+				(group) => group.id,
+			),
+		).toEqual(['direct']);
 	});
 
 	it('groups native and endpoint-backed models into source options', () => {
@@ -225,7 +242,7 @@ describe('model selector options', () => {
 
 	it('hides a single native source when it only repeats the agent label', () => {
 		const catalog = makeNativeOnlyCatalog('amp', 'Amp', [
-			{ value: 'amp-smart', label: 'Amp Smart' },
+			{ value: 'medium', label: 'Amp Medium' },
 		]);
 		const sources = buildModelSources(catalog, 'amp');
 

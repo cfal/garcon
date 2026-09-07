@@ -28,18 +28,25 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 const testChats = new Map();
 const normalChatIds = [];
 const registry = {
   getChat: mock((chatId) => testChats.get(chatId)),
+  hasChat: mock((chatId) => testChats.has(chatId)),
   addChat: mock((chat) => {
-    testChats.set(chat.id, chat);
+    testChats.set(chat.id, {
+      carryOverSegments: [],
+      nativeSeedReceipt: null,
+      carryOverMigrationQuarantine: null,
+      ...chat,
+    });
     return true;
   }),
   updateChat: mock(() => undefined),
   removeChat: mock((chatId) => testChats.delete(chatId)),
+  flush: mock(() => Promise.resolve(undefined)),
   listAllChats: mock(() => ({})),
 };
 
@@ -59,8 +66,10 @@ const settings = {
   getPinnedChatIds: mock(() => []),
   getNormalChatIds: mock(() => [...normalChatIds]),
   getArchivedChatIds: mock(() => []),
-  reorderWindow: mock(() => Promise.resolve({ success: true })),
-  reorderRelative: mock(() => Promise.resolve({ success: true })),
+  reorderChat: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+  })),
 };
 
 const queue = {
@@ -93,38 +102,43 @@ const queue = {
     }
   }),
 };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
   getModels: mock(() => Promise.resolve([])),
   isAgentSessionRunning: mock(() => false),
   hasAgent: mock(() => true),
+  assertExecutionModeSelectionSupported: mock(() => undefined),
   supportsFork: mock(() => true),
   supportsImages: mock(() => false),
   modelSupportsImages: mock(() => Promise.resolve(false)),
 };
 
 const commandLedger = createRouteCommandLedger('chats-start');
-const pendingInputs = createRoutePendingInputs();
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const routes = createChatRoutes({
   registry,
   settings,
   queue,
-  pathCache,
+  processing: { phase: mock(() => null) },
   metadata,
   chatViews,
   agents,
-	pendingInputs,
 	chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -133,8 +147,6 @@ const routes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
-		pathCache,
 		chatListProjector,
   }),
 });
@@ -154,7 +166,7 @@ describe('POST /api/v1/chats/start', () => {
     settings.removeFromAllOrderLists.mockClear();
     settings.recordChatStartup.mockClear();
     metadata.addNewChatMetadata.mockClear();
-    chatViews.getOrCreatePage.mockClear();
+    chatViews.page.mockClear();
     queue.registerPendingUserInput.mockClear();
     queue.reserveDirectTurn.mockClear();
     queue.releaseDirectTurn.mockClear();
@@ -172,10 +184,11 @@ describe('POST /api/v1/chats/start', () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 
-  it('records startup recents before starting the agent session', async () => {
+  it('records startup recents after the agent session starts', async () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-a',
       clientMessageId: 'msg-start-a',
       chatId: CHAT_ID,
@@ -194,19 +207,19 @@ describe('POST /api/v1/chats/start', () => {
 	    expect(response.status).toBe(202);
 	    expect(body.success).toBe(true);
 	    expect(body.commandType).toBe('chat-start');
-    expect(settings.recordChatStartup).toHaveBeenCalledWith({
+    expect(settings.recordChatStartup).toHaveBeenCalledTimes(1);
+    expect(settings.recordChatStartup).toHaveBeenCalledWith(expect.objectContaining({
       agentId: 'codex',
-      projectPath,
       model: 'gpt-5.4',
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
       permissionMode: 'acceptEdits',
       thinkingMode: 'medium',
-      agentSettingsById: {
-        codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
-      },
-    });
+      agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+    }));
+    expect(settings.recordChatStartup.mock.invocationCallOrder[0])
+      .toBeGreaterThan(agents.startSession.mock.invocationCallOrder[0]);
 	    expect(agents.startSession).toHaveBeenCalledWith(CHAT_ID, 'hello', expect.objectContaining({
 	      projectPath,
 	      clientRequestId: 'req-start-a',
@@ -224,10 +237,104 @@ describe('POST /api/v1/chats/start', () => {
     expect(queue.releaseDirectTurn).not.toHaveBeenCalled();
   });
 
-  it('keeps the attempted defaults even when agent startup fails', async () => {
+  it('keeps a successfully started chat when startup preference recording fails', async () => {
+    const chatId = '1783725900000112';
+    const projectPath = path.join(testBasePath, 'project-preference-failure');
+    await fs.mkdir(projectPath, { recursive: true });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
+      clientRequestId: 'req-start-preference-failure',
+      clientMessageId: 'msg-start-preference-failure',
+      chatId,
+      agentId: 'codex',
+      projectPath,
+      model: 'gpt-5.4',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'medium',
+      agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      command: 'hello',
+    }));
+    settings.recordChatStartup.mockImplementationOnce(() => Promise.reject(new Error('settings unavailable')));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.success).toBe(true);
+    expect(testChats.has(chatId)).toBe(true);
+    expect(registry.removeChat).not.toHaveBeenCalled();
+    expect(settings.removeFromAllOrderLists).not.toHaveBeenCalled();
+    expect(queue.completeDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.failDirectTurn).not.toHaveBeenCalled();
+  });
+
+  it('accepts a scalar parent ID and records server-authored delegation parentage', async () => {
+    const parentChatId = '1783725900000099';
+    const childChatId = '1783725900000110';
+    const projectPath = path.join(testBasePath, 'delegated-project');
+    await fs.mkdir(projectPath, { recursive: true });
+    testChats.set(parentChatId, { id: parentChatId, projectPath });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'cli',
+      clientRequestId: 'req-start-delegated',
+      clientMessageId: 'msg-start-delegated',
+      chatId: childChatId,
+      parentChatId,
+      agentId: 'claude',
+      projectPath,
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+      command: 'review the parent',
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(registry.addChat).toHaveBeenCalledWith(expect.objectContaining({
+      id: childChatId,
+      parentChat: { chatId: parentChatId, relation: 'delegation' },
+    }));
+    expect(body.chat.parentChat).toEqual({ chatId: parentChatId, relation: 'delegation' });
+  });
+
+  it('rejects a nonexistent parent before creating the child', async () => {
+    const projectPath = path.join(testBasePath, 'missing-parent-project');
+    await fs.mkdir(projectPath, { recursive: true });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'cli',
+      clientRequestId: 'req-start-missing-parent',
+      clientMessageId: 'msg-start-missing-parent',
+      chatId: '1783725900000111',
+      parentChatId: '1783725900000098',
+      agentId: 'claude',
+      projectPath,
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+      command: 'review missing work',
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body).toMatchObject({
+      error: 'Parent chat not found: 1783725900000098',
+      errorCode: 'SESSION_NOT_FOUND',
+    });
+    expect(registry.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('discards the attempted defaults when agent startup fails', async () => {
     const projectPath = path.join(testBasePath, 'project-b');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-b',
       clientMessageId: 'msg-start-b',
       chatId: '1783725900000101',
@@ -246,19 +353,7 @@ describe('POST /api/v1/chats/start', () => {
 
     expect(response.status).toBe(500);
     expect(body.error).toBe('Internal server error');
-    expect(settings.recordChatStartup).toHaveBeenCalledWith({
-      agentId: 'claude',
-      projectPath,
-      model: 'opus',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      permissionMode: 'default',
-      thinkingMode: 'none',
-      agentSettingsById: {
-        claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
-      },
-    });
+    expect(settings.recordChatStartup).not.toHaveBeenCalled();
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1783725900000101');
     expect(queue.failDirectTurn).toHaveBeenCalledTimes(1);
   });
@@ -267,6 +362,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-c');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-c',
       clientMessageId: 'msg-start-c',
       chatId: '1783725900000102',
@@ -295,6 +391,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-d');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-d',
       clientMessageId: 'msg-start-d',
       chatId: '1783725900000103',
@@ -331,12 +428,10 @@ describe('POST /api/v1/chats/start', () => {
     expect(settings.recordChatStartup).toHaveBeenCalledWith(expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'none',
-      agentSettingsById: {
-        claude: {
-          ownerId: 'claude',
-          schemaVersion: 1,
-          values: { vendorOption: 'sometimes' },
-        },
+      agentSettings: {
+        ownerId: 'claude',
+        schemaVersion: 1,
+        values: { vendorOption: 'sometimes' },
       },
     }));
   });
@@ -345,6 +440,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-e');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-e',
       clientMessageId: 'msg-start-e',
       chatId: '1783725900000104',
@@ -367,6 +463,7 @@ describe('POST /api/v1/chats/start', () => {
     await fs.mkdir(projectPath, { recursive: true });
     agents.hasAgent.mockImplementation((agentId) => agentId !== 'unknown-provider');
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-f',
       clientMessageId: 'msg-start-f',
       chatId: '1783725900000105',
@@ -406,7 +503,7 @@ describe('POST /api/v1/chats/start', () => {
   });
 
   it('requires request and message identity', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: CHAT_ID }));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ origin: 'interactive', chatId: CHAT_ID }));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
     const body = await response.json();
@@ -418,6 +515,7 @@ describe('POST /api/v1/chats/start', () => {
 
   it('rejects oversized numeric chat IDs before persistence', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-oversized',
       clientMessageId: 'msg-oversized',
       chatId: '178372590000007231252',

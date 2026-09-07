@@ -1,7 +1,9 @@
 <script lang="ts">
-	import FolderRoot from '@lucide/svelte/icons/folder-root';
+	import FolderCode from '@lucide/svelte/icons/folder-code';
+	import House from '@lucide/svelte/icons/house';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Search from '@lucide/svelte/icons/search';
+	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import Input from '$lib/components/ui/input/input.svelte';
 	import ResponsiveSurfaceActions, {
@@ -10,8 +12,9 @@
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeMenuContent from './FileTreeMenuContent.svelte';
+	import type { FileTreeViewMode } from './file-tree-view-profile.js';
 
-	let { store }: { store: FileTreeStore } = $props();
+	let { store, viewMode }: { store: FileTreeStore; viewMode: FileTreeViewMode } = $props();
 	let root = $state<HTMLElement | null>(null);
 	let filterInput = $state<HTMLInputElement | null>(null);
 
@@ -33,6 +36,13 @@
 		store.openFilter();
 	}
 
+	const homeUnavailable = $derived(Boolean(store.retainedResponse && !store.homeDirectory));
+	const homeTitle = $derived.by(() => {
+		if (!store.retainedResponse) return m.filetree_home();
+		if (homeUnavailable) return m.filetree_home_unavailable();
+		return store.isAtHome ? m.filetree_already_at_home() : m.filetree_home();
+	});
+
 	const actions = $derived.by<ResponsiveSurfaceAction[]>(() => [
 		{
 			id: 'filter-files',
@@ -41,7 +51,15 @@
 			onclick: toggleFilter,
 			disabled: store.navigation.kind !== 'ready',
 			priority: 0,
-			showLabel: true,
+		},
+		{
+			id: 'home',
+			label: homeUnavailable ? m.filetree_home_unavailable() : m.filetree_home(),
+			title: homeTitle,
+			icon: House,
+			onclick: () => void store.goToHome(),
+			disabled: !store.homeDirectory || store.isAtHome || store.isNavigationLoading,
+			priority: 1,
 		},
 		{
 			id: 'chat-project',
@@ -49,11 +67,10 @@
 			title: store.isAtChatProject
 				? m.filetree_already_at_chat_project()
 				: m.filetree_go_to_chat_project(),
-			icon: FolderRoot,
+			icon: FolderCode,
 			onclick: () => void store.goToChatProject(),
 			disabled: store.isAtChatProject || store.isNavigationLoading,
-			priority: 1,
-			showLabel: true,
+			priority: 2,
 		},
 		{
 			id: 'refresh-files',
@@ -62,7 +79,7 @@
 			onclick: () => void store.refresh(),
 			disabled: store.isNavigationLoading || !store.readyResponse,
 			busy: store.isRefreshing,
-			priority: 2,
+			priority: 3,
 			iconClass: store.isRefreshing ? 'animate-spin' : undefined,
 		},
 	]);
@@ -74,16 +91,21 @@
 </script>
 
 {#snippet fileMenu(overflowActions: readonly ResponsiveSurfaceAction[])}
-	<FileTreeMenuContent {overflowActions} {store} />
+	<FileTreeMenuContent {overflowActions} {store} {viewMode} />
 {/snippet}
 
-<div bind:this={root} class="shrink-0 border-b border-border bg-card" data-file-tree-toolbar>
+<div bind:this={root} class="shrink-0 border-b border-border bg-background" data-file-tree-toolbar>
 	<div
 		role="toolbar"
 		aria-label={m.filetree_actions()}
 		class="flex min-h-11 min-w-0 items-center px-2 py-1.5"
 	>
-		<ResponsiveSurfaceActions {actions} menuLabel={m.filetree_actions()} menuContent={fileMenu} />
+		<ResponsiveSurfaceActions
+			{actions}
+			menuLabel={m.filetree_actions()}
+			menuContent={fileMenu}
+			menuIcon={Settings}
+		/>
 	</div>
 
 	{#if store.filterOpen}

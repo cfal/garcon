@@ -1,14 +1,14 @@
 import { GitDomainError } from './git-types.js';
-import {
-  COMMIT_MESSAGE_ERROR_MAP,
-  isCommitMessageErrorCode,
-} from './commit-message.js';
+import { COMMIT_MESSAGE_ERROR_MAP, isCommitMessageErrorCode } from './commit-message.js';
 import { createDiffEngine } from './diff-engine.js';
 import { createCommitHistoryOperations } from './commit-history.js';
+import { createComparisonOperations } from './comparison.js';
 import { createPorcelainOperations } from './porcelain.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
 import { createQuickSummaryOperations } from './quick-summary.js';
+import { GitReviewDocumentRegistry } from './review-document-registry.js';
+import { createReviewDocumentOperations } from './review-document-service.js';
 import type { ClassifiedGitError, CreateGitServiceOptions, GitService } from './types.js';
 import { createLogger } from '../lib/log.js';
 
@@ -28,19 +28,34 @@ function gitDomainErrorToResponse(error: GitDomainError): Response {
   if (code === 'INVALID_INPUT') return Response.json({ error: error.message }, { status: 400 });
   if (code === 'NOT_REPO') return Response.json({ error: error.message }, { status: 400 });
   if (code === 'AUTH_FAILED') return Response.json({ error: error.message }, { status: 401 });
+  if (code === 'SERVICE_BUSY') {
+    return Response.json(
+      { error: error.message, errorCode: code, retryable: true },
+      { status: 503 },
+    );
+  }
   return Response.json({ error: error.message }, { status: 500 });
 }
 
 function classifiedGitErrorToResponse(classified: ClassifiedGitError): Response {
-  const body: { error: string; details?: unknown } = { error: classified.message };
+  const body: { error: string; details?: unknown } = {
+    error: classified.message,
+  };
   if (classified.details) body.details = classified.details;
   return Response.json(body, { status: classified.status });
 }
 
-export function createGitService({ agents, classifyGitError }: CreateGitServiceOptions): GitService {
+export function createGitService({
+  agents,
+  classifyGitError,
+  assertProjectPathAllowed,
+}: CreateGitServiceOptions): GitService {
   const status = createStatusOperations(agents);
-  const diff = createDiffEngine();
-  const commitHistory = createCommitHistoryOperations();
+  const reviewRegistry = new GitReviewDocumentRegistry();
+  const diff = createDiffEngine(reviewRegistry);
+  const commitHistory = createCommitHistoryOperations(reviewRegistry);
+  const comparison = createComparisonOperations(reviewRegistry, assertProjectPathAllowed);
+  const reviewDocuments = createReviewDocumentOperations(reviewRegistry);
   const porcelain = createPorcelainOperations();
   const worktrees = createWorktreeOperations();
   const quickSummary = createQuickSummaryOperations();
@@ -49,6 +64,8 @@ export function createGitService({ agents, classifyGitError }: CreateGitServiceO
     ...status,
     ...diff,
     ...commitHistory,
+    ...comparison,
+    ...reviewDocuments,
     ...porcelain,
     ...worktrees,
     ...quickSummary,

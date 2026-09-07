@@ -1,11 +1,11 @@
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import { getLocale } from '$lib/paraglide/runtime.js';
-import { buildThinkingModeOptions } from '$lib/execution/thinking-mode-options';
+import { buildThinkingModeOptions } from '$lib/agents/thinking-mode-options';
 import { normalizeThinkingMode, type ThinkingMode } from '$shared/chat-modes';
 import type {
 	FilteredModelRowsResult,
-	AgentSelectorOption,
+	AgentSelectorGroup,
 	ModelSelectorChange,
 	ModelSelectorMode,
 	ModelSelectorRecentOption,
@@ -14,7 +14,7 @@ import type {
 	ModelSourceOption,
 } from './model-selector-types';
 import {
-	buildAgentOptions,
+	buildAgentGroups,
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
@@ -32,6 +32,7 @@ interface ModelSelectorStateOptions {
 	get mode(): ModelSelectorMode;
 	get recents(): ModelSelectorRecentOption[];
 	get preferRecentsOnOpen(): boolean;
+	get selectableAgentIds(): readonly SessionAgentId[] | undefined;
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
 }
 
@@ -70,6 +71,7 @@ export class ModelSelectorState {
 	draftModelValue = $state<string | null>(null);
 	draftThinkingMode = $state<ThinkingMode | null>(null);
 	contentPane = $state<ModelSelectorContentPane>('browse');
+	#draftTargetChanged = false;
 
 	readonly #options: ModelSelectorStateOptions;
 	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
@@ -89,7 +91,9 @@ export class ModelSelectorState {
 	}
 
 	get effortSelectionEnabled(): boolean {
-		return this.mode.effort === 'select';
+		return (
+			this.mode.effort === 'select' && this.modelCatalog.getThinkingModes(this.agentId).length > 1
+		);
 	}
 
 	get thinkingMode(): ThinkingMode {
@@ -98,7 +102,8 @@ export class ModelSelectorState {
 	}
 
 	get thinkingModeOptions() {
-		return buildThinkingModeOptions();
+		const supported = new Set(this.modelCatalog.getThinkingModes(this.agentId));
+		return buildThinkingModeOptions().filter((option) => supported.has(option.id));
 	}
 
 	get selectedThinkingModeLabel(): string {
@@ -113,13 +118,18 @@ export class ModelSelectorState {
 		return this.#options.modelCatalog;
 	}
 
-	get agentOptions(): AgentSelectorOption[] {
-		return buildAgentOptions(this.modelCatalog);
+	get selectableAgentIds(): readonly SessionAgentId[] {
+		return this.#options.selectableAgentIds ?? this.modelCatalog.getSelectableAgents();
+	}
+
+	get agentGroups(): AgentSelectorGroup[] {
+		return buildAgentGroups(this.modelCatalog, this.selectableAgentIds);
 	}
 
 	get recentOptions(): ModelSelectorRecentOption[] {
 		if (this.mode.surface !== 'composer' || this.mode.agent !== 'select') return [];
-		return this.#options.recents;
+		const selectable = new Set(this.selectableAgentIds);
+		return this.#options.recents.filter((recent) => selectable.has(recent.agentId));
 	}
 
 	get isRecentsPaneActive(): boolean {
@@ -458,8 +468,10 @@ export class ModelSelectorState {
 	}
 
 	selectAgent(agentId: SessionAgentId): void {
+		if (!this.isAgentSelectable(agentId)) return;
 		this.showBrowsePane();
 		if (agentId === this.agentId) return;
+		this.#draftTargetChanged = true;
 		const sources = this.sourcesFor(agentId);
 		const currentSourceKey = this.sourceKey;
 		const source = sources.find((entry) => entry.key === currentSourceKey) ?? sources[0] ?? null;
@@ -472,6 +484,7 @@ export class ModelSelectorState {
 	selectSource(sourceKey: string): void {
 		this.showBrowsePane();
 		if (sourceKey === this.sourceKey) return;
+		this.#draftTargetChanged = true;
 		const source = this.sources.find((entry) => entry.key === sourceKey) ?? null;
 		const modelValue = this.#committedModelValueFor(this.agentId, source?.key ?? null);
 		this.query = '';
@@ -481,6 +494,7 @@ export class ModelSelectorState {
 
 	selectModel(modelValue: string): void {
 		this.showBrowsePane();
+		this.#draftTargetChanged = true;
 		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
 		if (!this.effortSelectionEnabled) {
@@ -497,7 +511,9 @@ export class ModelSelectorState {
 	}
 
 	selectRecent(recent: ModelSelectorRecentOption): void {
+		if (!this.isAgentSelectable(recent.agentId)) return;
 		if (this.effortSelectionEnabled) {
+			this.#draftTargetChanged = true;
 			this.#setDraftSelection(
 				recent.agentId,
 				recent.modelValue,
@@ -518,12 +534,13 @@ export class ModelSelectorState {
 	}
 
 	emit(agentId: SessionAgentId, modelValue: string, thinkingMode?: ThinkingMode): void {
+		if (!this.isAgentSelectable(agentId)) return;
 		let next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
 		if (!next) return;
 		const effortOnlyChange =
 			agentId === this.value.agentId &&
 			modelValue === currentModelValue(this.modelCatalog, this.value);
-		if (effortOnlyChange && this.value.modelEndpointId && !next.modelEndpointId) {
+		if (effortOnlyChange && this.value.modelEndpointId && !this.#draftTargetChanged) {
 			next = {
 				...next,
 				model: this.value.model,
@@ -536,6 +553,10 @@ export class ModelSelectorState {
 			...next,
 			...(this.effortSelectionEnabled ? { thinkingMode: normalizeThinkingMode(thinkingMode) } : {}),
 		});
+	}
+
+	isAgentSelectable(agentId: SessionAgentId): boolean {
+		return this.#options.selectableAgentIds?.includes(agentId) ?? true;
 	}
 
 	#commitDraftSelection(): void {
@@ -554,6 +575,7 @@ export class ModelSelectorState {
 	}
 
 	#startDraftFromValue(): void {
+		this.#draftTargetChanged = false;
 		const agentId = this.value.agentId;
 		const modelValue = currentModelValue(this.modelCatalog, this.value);
 		this.#setDraftSelection(
@@ -590,6 +612,7 @@ export class ModelSelectorState {
 	}
 
 	#clearDraft(): void {
+		this.#draftTargetChanged = false;
 		this.draftAgentId = null;
 		this.draftModelValue = null;
 		this.activeSourceKey = null;

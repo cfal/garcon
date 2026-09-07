@@ -8,21 +8,24 @@ import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+import { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
+import { LocalGitComparisonPreferences } from '$lib/git/review/git-comparison-preferences.js';
+import { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
 import type {
 	FileOpenPlacementPreference,
 	LocalSettingsStore,
 } from '$lib/stores/local-settings.svelte.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
-import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+import { createPullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
 import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
-import { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
+import { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import { parsePersistedWorkspaceLayout } from './layout-schema.js';
 import { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { TransientLayerRegistry } from './transient-layers.svelte.js';
@@ -33,9 +36,21 @@ import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
+import { WorkspaceWindowDndController } from './window-dnd.svelte.js';
+import { WorkspaceHostGeometryState } from './workspace-host-geometry.svelte.js';
+import { ProjectResolutionStore } from './project-resolution-store.svelte.js';
+import {
+	floorWorkspacePixels,
+	resolveWorkspacePartitionRatioBounds,
+	resolveWorkspaceSplitAdmission,
+	type WorkspacePartitionRatioBoundsResolver,
+	type WorkspaceSplitAdmissionResolver,
+} from './window-geometry-policy.js';
+import { computeWindowRects } from './window-tree.js';
 import {
 	singletonSurfaceId,
 	type DesktopPlacement,
+	type WorkspaceWindowId,
 	type PresentationHostId,
 	type WorkspaceLayoutReader,
 } from './surface-types.js';
@@ -44,6 +59,7 @@ export function resolveConfiguredFilePlacement(
 	settings: LocalSettingsStore,
 	mode: FileRendererMode,
 	origin: PresentationHostId,
+	defaultWindowId: WorkspaceWindowId,
 ): DesktopPlacement {
 	const preference: FileOpenPlacementPreference = (() => {
 		switch (mode) {
@@ -56,8 +72,13 @@ export function resolveConfiguredFilePlacement(
 		}
 	})();
 
-	if (preference !== 'source') return preference;
-	return origin === 'mobile' ? 'main' : origin;
+	const originWindowId: WorkspaceWindowId | null =
+		origin === 'mobile' || origin === 'dialog' ? null : origin;
+	if (preference === 'dialog') return { type: 'dialog' };
+	if (preference === 'new-window') {
+		return { type: 'new-window', anchorWindowId: originWindowId ?? defaultWindowId };
+	}
+	return { type: 'window', windowId: originWindowId ?? defaultWindowId };
 }
 
 export interface WorkspaceRootDependencies {
@@ -80,16 +101,21 @@ export interface WorkspaceServices {
 	restore: ReturnType<typeof parsePersistedWorkspaceLayout>;
 	layout: WorkspaceLayoutReader;
 	context: ReturnType<typeof createWorkspaceContextStore>;
+	projectResolution: ProjectResolutionStore;
 	terminals: TerminalRegistry;
-	chatInteractionGate: ChatInteractionGate;
+	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
 	surfaceFrames: SurfaceFrameRegistry;
 	gitQuickSummary: GitQuickSummaryStore;
 	gitMutations: GitMutationCoordinator;
 	gitBranchActions: GitBranchSelectorState;
+	gitReviewDisplay: GitReviewDisplaySettingsStore;
+	gitViews: GitViewLauncher;
 	singletonSurfaces: SingletonSurfaceRegistry;
 	files: FileSessionRegistry;
 	coordinator: WorkspaceCoordinator;
+	windowDnd: WorkspaceWindowDndController;
+	hostGeometry: WorkspaceHostGeometryState;
 	shortcuts: WorkspaceShortcutDispatcher;
 	destroy(): void;
 }
@@ -110,7 +136,40 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			});
 		},
 	});
-	const context = createWorkspaceContextStore(deps.chatSessions, deps.modelCatalog);
+	const bindingRefreshes = new Map<string, Promise<void>>();
+	const projectResolution = new ProjectResolutionStore(undefined, (target) => {
+		if (deps.chatSessions.byId[target.chatId]?.projectPath !== target.projectPath) return;
+		if (bindingRefreshes.has(target.chatId)) return;
+		const refresh = (async () => {
+			try {
+				await deps.chatSessions.quietRefreshChats();
+			} catch {
+				// Resolution feedback remains authoritative when metadata refresh fails.
+			}
+		})();
+		bindingRefreshes.set(target.chatId, refresh);
+		void refresh.then(() => {
+			if (bindingRefreshes.get(target.chatId) === refresh) {
+				bindingRefreshes.delete(target.chatId);
+			}
+		});
+	});
+	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged(
+		(chatId, projectPath) => {
+			if (projectPath === null) projectResolution.removeChatTargets(chatId);
+			else projectResolution.markObsoleteChatTargets(chatId, projectPath);
+		},
+	);
+	for (const chat of deps.chatSessions.orderedChats) {
+		if (chat.status !== 'draft') {
+			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath);
+		}
+	}
+	const context = createWorkspaceContextStore(
+		deps.chatSessions,
+		deps.modelCatalog,
+		projectResolution,
+	);
 	let placement: WorkspaceCoordinator | null = null;
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
@@ -130,16 +189,62 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		},
 		onSuccessfulList: (terminalIds) => terminalLayoutBinding?.handleSuccessfulList(terminalIds),
 	});
-	const chatInteractionGate = new ChatInteractionGate();
-	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
+	const workspaceInteractionGate = new WorkspaceInteractionGate();
+	const hostGeometry: WorkspaceHostGeometryState = new WorkspaceHostGeometryState({
+		getSnapshot: () => layout.snapshot,
+		getIsMobile: () => deps.appShell.isMobile,
+		onResizeSettled: async (): Promise<boolean> => {
+			try {
+				return (await placement?.fitWindowsToHost(() => hostGeometry.size)) ?? true;
+			} catch (error) {
+				deps.notifications.error(
+					error instanceof Error ? error.message : m.workspace_open_failed(),
+				);
+				return true;
+			}
+		},
+	});
+	const resolveSplitAdmission: WorkspaceSplitAdmissionResolver = (snapshot, request) =>
+		resolveWorkspaceSplitAdmission({
+			snapshot,
+			hostSize: hostGeometry.size,
+			...request,
+		});
+	const resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver = (
+		snapshot,
+		partitionId,
+	) => {
+		const entry = computeWindowRects(snapshot.desktopRoot).partitions.find(
+			(candidate) => candidate.partition.id === partitionId,
+		);
+		if (!entry) return null;
+		const size = hostGeometry.size;
+		let partitionAxisPixels: number | null = null;
+		if (size) {
+			const horizontal = entry.partition.direction === 'horizontal';
+			const boundsFraction = horizontal ? entry.bounds.width : entry.bounds.height;
+			const hostPixels = horizontal ? size.width : size.height;
+			partitionAxisPixels = floorWorkspacePixels(boundsFraction, hostPixels);
+		}
+		return {
+			currentRatio: entry.partition.ratio,
+			bounds: resolveWorkspacePartitionRatioBounds({
+				partition: entry.partition,
+				partitionAxisPixels,
+			}),
+		};
+	};
+	const windowDnd = new WorkspaceWindowDndController(layout, resolveSplitAdmission);
+	const unregisterWorkspaceInteraction = workspaceInteractionGate.register({
+		cancelApplicationDrag: () => windowDnd.endDrag(),
+	});
+	const transientLayers = new TransientLayerRegistry(workspaceInteractionGate);
 	const surfaceFrames = new SurfaceFrameRegistry();
 	const gitQuickSummary = new GitQuickSummaryStore();
 	const gitMutations = new GitMutationCoordinator({
-		onChanged: async (effectiveProjectKey) => {
+		onChanged: async (effectiveProjectKey, projectPath) => {
 			gitProjectInvalidations.markChanged(effectiveProjectKey);
-			if (context.currentProject?.effectiveProjectKey === effectiveProjectKey) {
-				await gitQuickSummary.refresh('invalidation');
-			}
+			await gitQuickSummary.refreshFor(projectPath, 'invalidation');
 		},
 		onInvalidationError: (error, _effectiveProjectKey, projectPath) => {
 			deps.notifications.error(
@@ -150,20 +255,29 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			);
 		},
 	});
-	const gitBranchActions = new GitBranchSelectorState({
-		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-		runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
-			gitMutations.run({
-				surfaceId,
-				effectiveProjectKey,
-				projectPath,
-				execute,
-				didMutate: (result) => result.success,
-			}),
-	});
+	const createGitBranchSelector = () =>
+		new GitBranchSelectorState({
+			openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
+			runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
+				gitMutations.run({
+					surfaceId,
+					effectiveProjectKey,
+					projectPath,
+					execute,
+					didMutate: (result) => result.success,
+				}),
+		});
+	const gitBranchActions = createGitBranchSelector();
+	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
+	const comparisonPreferences = new LocalGitComparisonPreferences();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
 		createCommit: () =>
 			new CommitController({
+				createGitBranchSelector,
+				gitMutations,
+				invalidationVersion: (effectiveProjectKey) =>
+					gitProjectInvalidations.version(effectiveProjectKey),
+				reviewDisplay: gitReviewDisplay,
 				runMutation: (request) =>
 					gitMutations.run({
 						surfaceId: singletonSurfaceId('commit'),
@@ -174,13 +288,16 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			createPullRequestsStore({
 				notifyError: (message) => deps.notifications.error(message),
 			}),
-		gitBranchActions,
+		createGitBranchSelector,
 		gitMutations,
-		getCurrentEffectiveProjectKey: () => context.currentProject?.effectiveProjectKey ?? null,
+		invalidationVersion: (effectiveProjectKey) =>
+			gitProjectInvalidations.version(effectiveProjectKey),
+		reviewDisplay: gitReviewDisplay,
+		comparisonPreferences,
 	});
 	const domainBindings = new WorkspaceDomainBindings({
 		workspaceContext: context,
-		chatSessions: deps.chatSessions,
+		projectResolution,
 		ghCapability: deps.ghCapability,
 		localSettings: deps.localSettings,
 		singletons: singletonSurfaces,
@@ -191,7 +308,12 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		getIsMobile: () => deps.appShell.isMobile,
 		getDefaultPlacement: (mode, origin) =>
-			resolveConfiguredFilePlacement(deps.localSettings, mode, origin),
+			resolveConfiguredFilePlacement(
+				deps.localSettings,
+				mode,
+				origin,
+				placement?.defaultWindowId ?? 'window-main',
+			),
 		getEditorSettings: () => ({
 			get wordWrap() {
 				return deps.localSettings.codeEditorWordWrap;
@@ -222,17 +344,24 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		arbiter: new WorkspaceTransitionArbiter(layout, layout),
 		terminals,
 		workspaceContext: context,
+		projectResolution,
 		appShell: deps.appShell,
-		chatInteractionGate,
+		workspaceInteractionGate,
 		transientLayers,
 		files,
 		singletons: singletonSurfaces,
 		gitMutations,
 		surfaceFrames,
-		onLayoutChanged: (snapshot) => persistence.schedule(snapshot),
+		resolveSplitAdmission,
+		resolvePartitionRatioBounds,
+		onLayoutChanged: (snapshot) => {
+			hostGeometry.layoutPublished();
+			persistence.schedule(snapshot);
+		},
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
 		getRouteIdentity: deps.getRouteIdentity,
 	});
+	const gitViews = new GitViewLauncher(coordinator, singletonSurfaces);
 	placement = coordinator;
 	terminalLayoutBinding = new TerminalLayoutBinding({
 		restoreSource: restore.source,
@@ -251,24 +380,32 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		appShell: deps.appShell,
 		navigation: deps.navigation,
 		files,
+		localSettings: deps.localSettings,
 	});
 
 	return {
 		restore,
 		layout,
 		context,
+		projectResolution,
 		terminals,
-		chatInteractionGate,
+		workspaceInteractionGate,
 		transientLayers,
 		surfaceFrames,
 		gitQuickSummary,
 		gitMutations,
 		gitBranchActions,
+		gitReviewDisplay,
+		gitViews,
 		singletonSurfaces,
 		files,
 		coordinator,
+		windowDnd,
+		hostGeometry,
 		shortcuts,
 		destroy() {
+			windowDnd.endDrag();
+			unregisterWorkspaceInteraction();
 			domainBindings.destroy();
 			terminalLayoutBinding?.destroy();
 			terminals.destroy();
@@ -276,6 +413,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			singletonSurfaces.destroy();
 			gitQuickSummary.destroy();
 			gitBranchActions.destroy();
+			stopProjectPathBinding();
+			projectResolution.destroy();
 			persistence.destroy();
 		},
 	};

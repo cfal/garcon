@@ -2,21 +2,39 @@
 	// New-chat form used inside the NewChatDialog. Delegates state management
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
-		CHAT_ATTACHMENT_ACCEPT,
+		chatAttachmentAccept,
 		isImageAttachment,
+		isSupportedChatAttachment,
+		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import {
+		applySnippetTriggerReplacement,
+		findSnippetTrigger,
+	} from '$lib/chat/composer/snippet-trigger.js';
+	import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
+	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
+	import {
+		promptEditorSelectionFromTextarea,
+		restorePromptEditorSelection,
+		type PromptEditorSelection,
+	} from '$lib/prompt-editor/prompt-editor-selection.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
+	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
+	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
+	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
+	import NewChatPreamblePicker from '../preambles/NewChatPreamblePicker.svelte';
+	import NewChatPreambleSummary from '../preambles/NewChatPreambleSummary.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';
 	import {
@@ -26,8 +44,10 @@
 		getRemoteSettings,
 		getChatSessions,
 		getNotifications,
+		getPreambles,
 		getSnippets,
 		getTransientLayers,
+		getWorkspaceLayout,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
@@ -37,6 +57,8 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Check from '@lucide/svelte/icons/check';
 	import FileText from '@lucide/svelte/icons/file-text';
+	import FileVideo from '@lucide/svelte/icons/file-video';
+	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type {
@@ -50,13 +72,18 @@
 	} from '$lib/chat/composer/slash-commands.js';
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
-	import type { Snippet } from '$shared/snippets';
+	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
+	import { createClientChatId } from '$shared/client-chat-id';
+	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
+	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
+	import { NewChatComposerEditorState } from './new-chat-composer-editor-state.svelte.js';
+	import { NewChatPromptRefinementController } from './new-chat-prompt-refinement-controller.js';
 
 	interface Props {
 		prefill?: string;
-		onStartChat: (config: NewChatConfig) => void;
+		onStartChat: (config: NewChatConfig, chatId: ChatId) => void;
 		onCancel?: () => void;
 	}
 
@@ -68,9 +95,32 @@
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
+	const preamblesCatalog = getPreambles();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
-	const form = new NewChatFormState(modelCatalog, remoteSettings);
+	const workspaceLayout = getWorkspaceLayout();
+	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
+	const newChatAgentIds = $derived.by(() => {
+		const allAgentIds = modelCatalog.getSelectableAgents();
+		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
+	});
+	const form = new NewChatFormState({
+		modelCatalog,
+		remoteSettings,
+		get selectableAgentIds() {
+			return newChatAgentIds;
+		},
+	});
+	const canAttachImages = $derived(modelCatalog.supportsImages(form.agentId, form.modelValue));
+	const fileAttachmentMimeTypes = $derived(
+		modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	);
+	const attachmentSupport = $derived({
+		allowImages: canAttachImages,
+		fileMimeTypes: fileAttachmentMimeTypes,
+	});
+	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
+	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -81,21 +131,55 @@
 			snippetExpansion.cancel();
 			return true;
 		},
-		restoreFocus: () => void restoreTextareaFocus(),
+		restoreFocus: returnTextareaFocus,
 	});
 
 	let isMobile = $state(false);
+	let preamblePickerOpen = $state(false);
 	let pendingTextareaFocus = $state(true);
+	let prospectiveChatId = $state<ChatId | null>(null);
+	let observedPreambleCatalogRevision: number | null = null;
+	let refreshedPreambleCatalogRevision: number | null = null;
+	let observedPreambleInvalidationVersion = preamblesCatalog.invalidationVersion;
+	const initialContentReady = $derived(form.settingsLoaded);
+	const preambleSummaryLoading = $derived(
+		form.trimmedPath.length > 0 &&
+			(form.validationStatus === 'idle' ||
+				form.validationStatus === 'checking' ||
+				form.preambles.previewLoading),
+	);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
 	);
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
+	let textareaFocusTimer: ReturnType<typeof setTimeout> | null = null;
 	let expansionProjectPath = '';
 	let snippetInteractionGeneration = $state(0);
 	const snippetInteractionKey = $derived(
 		`${snippetInteractionGeneration}\u0000${form.trimmedPath}`,
+	);
+
+	const snippetPalette = new SnippetPaletteTriggerState();
+	const composerEditor = new NewChatComposerEditorState();
+	const promptRefinement = new NewChatPromptRefinementController({
+		form,
+		notifications,
+		transientLayers,
+		editor: composerEditor,
+		get textarea() {
+			return textareaRef;
+		},
+		get startBlocked() {
+			return !initialContentReady || snippetExpansion.pending;
+		},
+		closePromptSurfaces: () => snippetPalette.dismiss(),
+		resizeTextarea: autoResizeTextarea,
+	});
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const promptTransformStatus = $derived(
+		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
 	);
 
 	function canFocusTextarea(): boolean {
@@ -105,12 +189,18 @@
 	}
 
 	function reseed(): void {
+		if (textareaFocusTimer) clearTimeout(textareaFocusTimer);
 		snippetExpansion.cancel();
+		promptRefinement.abort();
+		prospectiveChatId = null;
+		composerEditor.reset();
 		snippetInteractionGeneration += 1;
+		snippetPalette.reset();
 		form.reseed(prefill);
 		pendingTextareaFocus = true;
-		setTimeout(() => {
-			if (textareaRef && form.settingsLoaded) {
+		textareaFocusTimer = setTimeout(() => {
+			textareaFocusTimer = null;
+			if (textareaRef && initialContentReady) {
 				if (prefill) {
 					textareaRef.setSelectionRange(0, 0);
 					textareaRef.scrollTop = 0;
@@ -144,9 +234,43 @@
 		form.validateAllModelsAgainstLive();
 	});
 
+	$effect(() => {
+		const selectableAgentIds = newChatAgentIds;
+		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
+	});
+
+	// Keeps the preview at or ahead of the loaded catalog without refetching its first match.
+	$effect(() => {
+		const revision = preamblesCatalog.snapshot?.revision;
+		const previewRevision = form.preambles.preview?.catalogRevision;
+		if (revision === undefined) return;
+
+		const revisionChanged =
+			observedPreambleCatalogRevision !== null && revision !== observedPreambleCatalogRevision;
+		observedPreambleCatalogRevision = revision;
+		const previewIsStale = previewRevision !== undefined && previewRevision < revision;
+		if (!revisionChanged && !previewIsStale) return;
+		if (refreshedPreambleCatalogRevision === revision) return;
+		refreshedPreambleCatalogRevision = revision;
+		untrack(() => form.preambles.catalogChanged());
+	});
+
+	$effect(() => {
+		const invalidationVersion = preamblesCatalog.invalidationVersion;
+		if (invalidationVersion === observedPreambleInvalidationVersion) return;
+		observedPreambleInvalidationVersion = invalidationVersion;
+		if (preamblesCatalog.hasLoaded) return;
+		untrack(() => form.preambles.catalogChanged());
+	});
+
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
-		if (form.validationStatus === 'valid' && !form.showBrowser && canFocusTextarea()) {
+		if (
+			initialContentReady &&
+			form.validationStatus === 'valid' &&
+			!form.showBrowser &&
+			canFocusTextarea()
+		) {
 			textareaRef?.focus();
 		}
 	});
@@ -154,7 +278,7 @@
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
 	$effect(() => {
-		if (!pendingTextareaFocus || !form.settingsLoaded || form.showBrowser || !canFocusTextarea())
+		if (!pendingTextareaFocus || !initialContentReady || form.showBrowser || !canFocusTextarea())
 			return;
 		if (!textareaRef) return;
 		if (prefill) {
@@ -178,37 +302,46 @@
 			expansionProjectPath = projectPath;
 			snippetExpansion.cancel();
 		}
-		form.validatePath();
+		untrack(() => form.validatePath());
 	});
 
 	onDestroy(() => {
+		if (textareaFocusTimer) clearTimeout(textareaFocusTimer);
 		snippetExpansion.cancel();
+		promptRefinement.destroy();
 		form.revokeAllImageUrls();
 	});
 
 	function openImagePicker(): void {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		imageInputRef?.click();
 	}
 
 	function handleImageInputChange(event: Event): void {
 		const input = event.target as HTMLInputElement;
+		if (promptTransformPending) {
+			input.value = '';
+			return;
+		}
 		if (!input.files) return;
-		form.addImages(Array.from(input.files));
+		form.addImages(Array.from(input.files), attachmentSupport);
 		input.value = '';
 	}
 
 	function handleMessagePaste(event: ClipboardEvent): void {
-		if (snippetExpansion.pending) return;
+		if (promptRefinement.pending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const pastedImages: File[] = [];
 		for (const item of items) {
 			if (!item.type.startsWith('image/')) continue;
 			const file = item.getAsFile();
-			if (file) pastedImages.push(file);
+			if (file && isSupportedChatAttachment(file, attachmentSupport)) pastedImages.push(file);
 		}
-		if (pastedImages.length > 0) form.addImages(pastedImages);
+		if (pastedImages.length > 0) {
+			snippetExpansion.cancel();
+			form.addImages(pastedImages, attachmentSupport);
+		}
 	}
 
 	function autoResizeTextarea(): void {
@@ -217,26 +350,74 @@
 		textareaRef.style.height = `${textareaRef.scrollHeight}px`;
 	}
 
+	function handleMessageInput(event: Event): void {
+		const input = event.currentTarget as HTMLTextAreaElement;
+		if (promptRefinement.pending) {
+			input.value = form.firstMessage;
+			return;
+		}
+		if (snippetExpansion.pending) snippetExpansion.cancel();
+		form.firstMessage = input.value;
+		autoResizeTextarea();
+		if ((event as InputEvent).isComposing) return;
+		snippetPalette.updateDetectedTrigger(
+			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
+			input.value,
+		);
+	}
+
 	function snippetErrorDetail(error: unknown): string {
 		if (error instanceof ApiError) return error.details || error.message;
 		return error instanceof Error ? error.message : String(error);
 	}
 
-	async function restoreTextareaFocus(caret?: number): Promise<void> {
+	function returnTextareaFocus(): void {
+		textareaRef?.focus({ preventScroll: true });
+	}
+
+	async function settleTextareaAfterSnippet(caret?: number): Promise<void> {
 		await tick();
 		if (caret !== undefined) textareaRef?.setSelectionRange(caret, caret);
 		autoResizeTextarea();
-		textareaRef?.focus();
 	}
 
-	async function focusPendingSnippetExpansion(): Promise<void> {
+	function openExpandedEditor(): void {
+		if (promptTransformPending || !textareaRef) return;
+		snippetPalette.dismiss();
+		const selection = promptEditorSelectionFromTextarea(textareaRef);
+		textareaRef.focus({ preventScroll: true });
+		composerEditor.show(selection);
+	}
+
+	async function closeExpandedEditor(): Promise<void> {
+		const selection = composerEditor.selection;
+		composerEditor.close();
 		await tick();
-		if (snippetExpansion.pending) textareaRef?.focus();
+		if (!textareaRef) return;
+		restorePromptEditorSelection(textareaRef, selection);
+		autoResizeTextarea();
+		textareaRef.focus({ preventScroll: true });
+	}
+
+	function handleExpandedTextChange(text: string): void {
+		if (promptTransformPending || !composerEditor.open || form.firstMessage === text) return;
+		form.firstMessage = text;
+	}
+
+	function handleExpandedSelectionChange(selection: PromptEditorSelection): void {
+		composerEditor.updateSelection(selection);
+	}
+
+	function ensureProspectiveChatId(): ChatId {
+		if (!prospectiveChatId) prospectiveChatId = createClientChatId();
+		return prospectiveChatId;
 	}
 
 	function expansionContext() {
 		const projectPath = form.trimmedPath;
-		if (projectPath) return { type: 'project' as const, projectPath };
+		if (projectPath) {
+			return { type: 'new-chat' as const, chatId: ensureProspectiveChatId(), projectPath };
+		}
 		notifications.error(m.chat_new_chat_errors_project_path_required());
 		return null;
 	}
@@ -244,26 +425,24 @@
 	async function insertSnippet(
 		snippet: Snippet,
 		argumentsText: string,
+		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (snippetExpansion.pending || !textareaRef) return 'cancelled';
+		if (promptTransformPending || !textareaRef) return 'cancelled';
 		const context = expansionContext();
 		if (!context) {
-			await restoreTextareaFocus();
+			await settleTextareaAfterSnippet();
 			return 'cancelled';
 		}
 		const sourceText = form.firstMessage;
 		const projectPath = context.projectPath;
-		const start = textareaRef.selectionStart;
-		const end = textareaRef.selectionEnd;
+		const start = range?.start ?? textareaRef.selectionStart;
+		const end = range?.end ?? textareaRef.selectionEnd;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: snippet.shortName,
-					arguments: argumentsText,
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.run({
+				shortName: snippet.shortName,
+				arguments: { type: 'value', value: argumentsText },
+				context,
+			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (
 				result.response.snippetId !== snippet.id ||
@@ -271,7 +450,7 @@
 			) {
 				void snippets.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
-				await restoreTextareaFocus();
+				await settleTextareaAfterSnippet();
 				return 'cancelled';
 			}
 			if (
@@ -280,14 +459,19 @@
 				form.firstMessage !== sourceText
 			)
 				return 'cancelled';
-			form.firstMessage =
-				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
-			await restoreTextareaFocus(start + result.response.expandedText.length);
+			const replacement = range
+				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
+				: {
+						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
+						caret: start + result.response.expandedText.length,
+					};
+			form.firstMessage = replacement.text;
+			await settleTextareaAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreTextareaFocus();
+			await settleTextareaAfterSnippet();
 			return 'failed';
 		}
 	}
@@ -295,19 +479,17 @@
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
+		if (promptTransformPending) return;
 		const context = expansionContext();
 		if (!context) return;
 		const sourceText = form.firstMessage;
 		const projectPath = context.projectPath;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: command.shortName,
-					arguments: command.arguments,
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.run({
+				shortName: command.shortName,
+				arguments: command.arguments,
+				context,
+			});
 			if (result.kind !== 'expanded') return;
 			if (
 				form.trimmedPath !== projectPath ||
@@ -316,11 +498,11 @@
 			)
 				return;
 			form.firstMessage = result.response.expandedText;
-			await restoreTextareaFocus(result.response.expandedText.length);
+			await settleTextareaAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreTextareaFocus();
+			await settleTextareaAfterSnippet();
 		}
 	}
 
@@ -331,7 +513,7 @@
 	}
 
 	function handleSubmit(): void {
-		if (!form.canSubmit || snippetExpansion.pending) return;
+		if (!form.canSubmit || promptTransformPending) return;
 		const command = parseSnippetCommand(form.firstMessage);
 		if (command.kind === 'invalid') {
 			notifications.error(
@@ -342,26 +524,35 @@
 			return;
 		}
 		if (command.kind === 'valid') {
+			returnTextareaFocus();
 			void expandSnippetInvocation(command);
 			return;
 		}
 		const config = form.buildConfig();
-		if (config) onStartChat(config);
+		if (config) onStartChat(config, ensureProspectiveChatId());
+	}
+
+	function shouldSubmitMessageOnEnter(event: KeyboardEvent): boolean {
+		return (
+			event.key === 'Enter' &&
+			shouldSubmitOnEnter({
+				sendByShiftEnter: localSettings.sendByShiftEnter,
+				shiftKey: event.shiftKey,
+				ctrlKey: event.ctrlKey,
+				metaKey: event.metaKey,
+				isComposing: event.isComposing,
+				isMobile,
+			})
+		);
 	}
 
 	function handleKeyDown(e: KeyboardEvent): void {
-		if (snippetExpansion.pending) return;
-		if (
-			e.key === 'Enter' &&
-			shouldSubmitOnEnter({
-				sendByShiftEnter: localSettings.sendByShiftEnter,
-				shiftKey: e.shiftKey,
-				ctrlKey: e.ctrlKey,
-				metaKey: e.metaKey,
-				isComposing: e.isComposing,
-				isMobile,
-			})
-		) {
+		const submitOnEnter = shouldSubmitMessageOnEnter(e);
+		if (promptTransformPending) {
+			if (submitOnEnter) e.preventDefault();
+			return;
+		}
+		if (submitOnEnter) {
 			if (!form.canSubmit) return;
 			e.preventDefault();
 			handleSubmit();
@@ -369,8 +560,15 @@
 		if (e.key === 'Escape' && onCancel) {
 			e.preventDefault();
 			e.stopPropagation();
-			onCancel();
+			cancelForm();
 		}
+	}
+
+	function cancelForm(): void {
+		snippetExpansion.cancel();
+		promptRefinement.abort();
+		composerEditor.close();
+		onCancel?.();
 	}
 
 	const permissionOptions = $derived(buildPermissionOptions(form.permissionModes));
@@ -383,32 +581,40 @@
 	const modelSelectorValue = $derived({
 		agentId: form.agentId,
 		model: form.modelValue,
+		...(form.modelSelectionTarget ?? {}),
 	});
 	const recentSelectorOptions = $derived.by(() =>
 		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
 	);
 	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
+	const displayedFormError = $derived(form.modelSelectionError ?? form.error);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
+		if (!newChatAgentIds.includes(next.agentId)) return;
 		form.selectAgent(next.agentId);
-		form.handleModelChange(next.modelValue);
+		form.selectModel(next.modelValue, next);
 	}
 </script>
 
-<div class="p-2 sm:p-4" {@attach snippetExpansion.pending && snippetExpansionLayer}>
+<div
+	class="min-w-0 p-2 sm:p-4"
+	{@attach snippetExpansion.pending && snippetExpansionLayer}
+	{@attach promptRefinement.pending && !composerEditor.open && promptRefinement.layerAttachment}
+>
 	<div class="relative">
 		<div
-			class="space-y-6"
-			class:invisible={!form.settingsLoaded}
-			class:pointer-events-none={!form.settingsLoaded}
-			aria-hidden={!form.settingsLoaded}
+			data-slot="new-chat-form-content"
+			class:invisible={!initialContentReady}
+			class:pointer-events-none={!initialContentReady}
+			inert={!initialContentReady}
+			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
 				<div class="relative">
 					<div class="flex gap-2">
-						<div class="relative flex-1">
+						<div class="relative min-w-0 flex-1">
 							<input
 								id="project-path-input"
 								type="text"
@@ -471,7 +677,7 @@
 						{#if onCancel}
 							<button
 								type="button"
-								onclick={onCancel}
+								onclick={cancelForm}
 								class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
 								title={m.editor_actions_close()}
 								aria-label={m.editor_actions_close()}
@@ -535,44 +741,72 @@
 					onClose={() => (form.showTagInput = false)}
 				/>
 
-				{#if form.error}
-					<p class="text-sm text-destructive">{form.error}</p>
+				<NewChatPreambleSummary
+					preview={form.preambles.preview}
+					loading={preambleSummaryLoading}
+					configurable={form.preambles.configurable}
+					retryable={form.validationStatus === 'valid'}
+					onEdit={() => (preamblePickerOpen = true)}
+					onRetry={() => void form.preambles.refreshPreview()}
+				/>
+
+				<NewChatPreamblePicker
+					open={preamblePickerOpen}
+					choice={form.preambles.choice}
+					defaultsIds={(form.preambles.preview?.eligiblePreambles ?? []).map((entry) => entry.id)}
+					previewLoading={form.preambles.previewLoading}
+					canLoadAutomaticPreview={form.preambles.canLoadAutomaticPreview}
+					canonicalProjectPath={form.preambles.canonicalProjectPath || form.trimmedPath}
+					projection={form.preambles.preview}
+					onClose={() => (preamblePickerOpen = false)}
+					onApplyExplicit={(ids) => form.preambles.setExplicit(ids)}
+					onApplyDefaults={() => form.preambles.resetToDefaults()}
+					onLoadAutomaticPreview={() => form.preambles.loadAutomaticPreview()}
+					onRefreshPreview={() => form.preambles.refreshPreview()}
+				/>
+
+				{#if displayedFormError}
+					<p class="text-sm text-destructive">{displayedFormError}</p>
 				{/if}
 			</div>
 
 			<div
-				class="relative min-h-[120px] border border-border rounded-lg"
-				aria-busy={snippetExpansion.pending}
+				data-slot="new-chat-composer"
+				class="relative mt-3 min-h-[120px] border border-border rounded-lg"
+				aria-busy={promptTransformPending}
 			>
 				<input
 					bind:this={imageInputRef}
 					type="file"
-					accept={CHAT_ATTACHMENT_ACCEPT}
+					accept={attachmentAccept}
 					multiple
+					disabled={promptTransformPending}
 					class="hidden"
 					onchange={handleImageInputChange}
 				/>
 				<textarea
 					bind:this={textareaRef}
-					bind:value={form.firstMessage}
+					value={form.firstMessage}
 					onkeydown={handleKeyDown}
-					oninput={autoResizeTextarea}
+					oninput={handleMessageInput}
 					onpaste={handleMessagePaste}
 					placeholder={form.placeholder}
-					readonly={snippetExpansion.pending}
-					aria-busy={snippetExpansion.pending}
+					readonly={promptRefinement.pending}
+					aria-busy={promptTransformPending}
 					class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
 					rows="2"></textarea>
 
 				<ComposerBottomBar
-					canAttachImages={modelCatalog.supportsImages(form.agentId, form.modelValue)}
-					{snippetInteractionKey}
+					canAttachImages={canAttachAttachments}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					onInsertSnippet={insertSnippet}
-					onEditSnippets={editSnippets}
-					onRequestComposerFocus={() => void restoreTextareaFocus()}
-					isPromptTransformPending={snippetExpansion.pending}
+					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
+					onOpenExpandedEditor={openExpandedEditor}
+					onRefinePrompt={() => promptRefinement.handleAction()}
+					canRefinePrompt={promptRefinement.canStart}
+					isPromptRefinementPending={promptRefinement.pending}
+					isPromptTransformPending={promptTransformPending}
+					{promptTransformStatus}
 					{permissionOptions}
 					selectedPermission={form.permissionMode}
 					onPermissionSelect={(mode) => {
@@ -583,11 +817,10 @@
 					onThinkingSelect={(mode) => {
 						form.setThinkingMode(mode);
 					}}
-					canSend={form.canSubmit}
+					canSend={form.canSubmit && !promptTransformPending}
 					onSend={handleSubmit}
 					sendTitle={m.chat_new_chat_start_session()}
 					{sendButtonClass}
-					mobileRightGroupFullRow={true}
 				>
 					{#snippet agentSettings()}
 						<AgentSettingsControls
@@ -603,15 +836,46 @@
 							onChange={handleModelSelectorChange}
 							recents={recentSelectorOptions}
 							{preferRecentsOnOpen}
+							selectableAgentIds={newChatAgentIds}
 							align="end"
 							side="bottom"
 						/>
 					{/snippet}
 				</ComposerBottomBar>
+
+				<ComposerSnippetPalette
+					open={snippetPalette.isOpen}
+					onOpenChange={(nextOpen) => {
+						// The hidden trigger remains available to the chained insertion.
+						if (!nextOpen) snippetPalette.hide();
+					}}
+					initialQuery={snippetPalette.initialQuery}
+					interactionKey={snippetInteractionKey}
+					contextHint={form.trimmedPath ? null : m.snippets_palette_context_hint()}
+					onInsert={async (snippet, argumentsText) => {
+						const trigger = snippetPalette.trigger;
+						const result = await insertSnippet(snippet, argumentsText, trigger);
+						if (result === 'inserted') snippetPalette.complete();
+						else if (result !== 'failed' || !snippetTemplateUsesArguments(snippet.template)) {
+							snippetPalette.dismiss();
+						}
+						return result;
+					}}
+					onCancelled={() => {
+						const caret = snippetPalette.trigger?.end;
+						snippetPalette.dismiss();
+						void settleTextareaAfterSnippet(caret);
+					}}
+					onReturnFocus={returnTextareaFocus}
+					onEditSnippets={() => {
+						snippetPalette.dismiss();
+						editSnippets();
+					}}
+				/>
 			</div>
 
 			{#if form.attachedImages.length > 0}
-				<div class="p-2 bg-muted/40 rounded-lg">
+				<div data-slot="new-chat-attachments" class="mt-6 p-2 bg-muted/40 rounded-lg">
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
 							<div class="relative group">
@@ -626,7 +890,11 @@
 										<div
 											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
 										>
-											<FileText class="h-5 w-5" aria-hidden="true" />
+											{#if isVideoChatAttachment(file)}
+												<FileVideo class="h-5 w-5" aria-hidden="true" />
+											{:else}
+												<FileText class="h-5 w-5" aria-hidden="true" />
+											{/if}
 											<span class="w-full truncate text-center text-[10px] leading-tight"
 												>{file.name}</span
 											>
@@ -638,8 +906,10 @@
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
 									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-									onclick={() => form.removeImage(idx)}
-									disabled={snippetExpansion.pending}
+									onclick={() => {
+										if (!promptTransformPending) form.removeImage(idx);
+									}}
+									disabled={promptTransformPending}
 								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
@@ -650,7 +920,7 @@
 			{/if}
 		</div>
 
-		{#if !form.settingsLoaded}
+		{#if !initialContentReady}
 			<div class="absolute inset-0 flex items-center justify-center">
 				<div
 					role="status"
@@ -678,5 +948,27 @@
 			void form.loadWorktrees();
 		}}
 		onClose={() => form.closeWorktreeModal()}
+	/>
+{/if}
+
+{#if composerEditor.open}
+	{#snippet expandedEditorHeaderStatus()}
+		<ComposerAttachmentBadge count={form.attachedImages.length} />
+	{/snippet}
+	<PromptEditorDialog
+		title={m.chat_composer_expanded_editor_title()}
+		editorLabel={m.chat_composer_expanded_editor_label()}
+		text={form.firstMessage}
+		selection={composerEditor.selection}
+		focusRequestId={composerEditor.focusRequestId}
+		readOnly={promptTransformPending}
+		surfaceId={newChatSurfaceId}
+		headerStatus={expandedEditorHeaderStatus}
+		canRefinePrompt={promptRefinement.canStart}
+		isPromptRefinementPending={promptRefinement.pending}
+		onTextChange={handleExpandedTextChange}
+		onSelectionChange={handleExpandedSelectionChange}
+		onRefinePrompt={() => promptRefinement.handleAction()}
+		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}

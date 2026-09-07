@@ -1,13 +1,47 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import * as m from '$lib/paraglide/messages.js';
+import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
+	it('offers one move-to-window control for the dialog file', async () => {
+		const onMove = vi.fn();
+		render(FileDialogHostTestHost, { request: 'file', onMove });
+		const moveButtons = await screen.findAllByRole('button', {
+			name: m.file_session_move_to_window(),
+		});
+		expect(moveButtons).toHaveLength(1);
+		expect(moveButtons[0].querySelector('.lucide-panel-left')).toBeTruthy();
+
+		await fireEvent.click(moveButtons[0]);
+		expect(onMove).toHaveBeenCalledWith('window-main');
+	});
+
+	it('reports a failed move to the destination window', async () => {
+		const notifications = createNotificationsStore();
+		render(FileDialogHostTestHost, {
+			request: 'file',
+			moveError: new Error('Destination window is no longer available'),
+			notifications,
+		});
+
+		await fireEvent.click(
+			await screen.findByRole('button', { name: m.file_session_move_to_window() }),
+		);
+
+		await waitFor(() => expect(notifications.items).toHaveLength(1));
+		expect(notifications.items[0]).toMatchObject({
+			tone: 'error',
+			message: 'Destination window is no longer available',
+		});
+	});
+
 	it('overrides the shared responsive width cap in restored and maximized layouts', async () => {
 		const rendered = render(FileDialogHostTestHost, { request: 'file' });
 		const dialog = await screen.findByRole('dialog');
 
+		expect(dialog.dataset.workspaceSurfaceId).toMatch(/^file:/);
 		expect(dialog.classList.contains('sm:max-w-none')).toBe(true);
 		expect(dialog.classList.contains('sm:max-w-lg')).toBe(false);
 
@@ -21,6 +55,14 @@ describe('FileDialogHost', () => {
 		rendered.unmount();
 	});
 
+	it('keeps one dialog-owned Close control', async () => {
+		const rendered = render(FileDialogHostTestHost, { request: 'file' });
+		await screen.findByRole('dialog');
+
+		expect(await screen.findAllByRole('button', { name: m.file_session_close() })).toHaveLength(1);
+		rendered.unmount();
+	});
+
 	it('does not open the desktop file dialog on mobile', () => {
 		const rendered = render(FileDialogHostTestHost, { request: 'file', isMobile: true });
 
@@ -28,25 +70,16 @@ describe('FileDialogHost', () => {
 		rendered.unmount();
 	});
 
-	it('does not present File Sessions on mobile', () => {
-		const rendered = render(FileDialogHostTestHost, {
-			request: 'open-files',
-			isMobile: true,
-		});
-
-		expect(screen.queryByRole('dialog')).toBeNull();
-		rendered.unmount();
-	});
-
-	it('omits File Sessions recovery from the mobile threshold dialog', async () => {
+	it('limits file-threshold decisions to cancel or opening anyway', async () => {
 		const rendered = render(FileDialogHostTestHost, {
 			request: 'threshold',
-			isMobile: true,
 		});
 
 		await screen.findByRole('dialog');
-		expect(screen.queryByRole('button', { name: m.file_session_review_open() })).toBeNull();
-		expect(screen.getByRole('button', { name: m.file_session_open_anyway() })).toBeTruthy();
+		expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+			m.file_session_cancel(),
+			m.file_session_open_anyway(),
+		]);
 		rendered.unmount();
 	});
 

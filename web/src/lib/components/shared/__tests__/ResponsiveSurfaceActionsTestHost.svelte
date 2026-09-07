@@ -6,6 +6,8 @@
 		type ResponsiveSurfaceAction,
 	} from '../ResponsiveSurfaceActions.svelte';
 
+	let { leadingContent = false }: { leadingContent?: boolean } = $props();
+
 	const actions: ResponsiveSurfaceAction[] = [
 		{
 			id: 'filter',
@@ -40,4 +42,13 @@
 	<span>Preferences</span>
 {/snippet}
 
-<ResponsiveSurfaceActions {actions} menuLabel="File browser actions" menuContent={menu} />
+{#snippet leadingMenuContent()}
+	<span data-leading-menu-content>Diff options</span>
+{/snippet}
+
+<ResponsiveSurfaceActions
+	{actions}
+	menuLabel="File browser actions"
+	menuContent={leadingContent ? undefined : menu}
+	menuLeadingContent={leadingContent ? leadingMenuContent : undefined}
+/>

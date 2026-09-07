@@ -32,7 +32,7 @@ export interface CronRuntime {
 }
 
 export const bunCronRuntime: CronRuntime = {
-  schedule: (expression, handler) => Bun.cron(expression, handler),
+  schedule: (expression, handler) => Bun.cron(expression, handler, { tz: 'UTC' }),
 };
 
 export function cronExpressionForUtcInstant(iso: string): string {
@@ -80,7 +80,11 @@ export interface ScheduleInResult {
   snapshot: ScheduledPromptsSnapshot;
 }
 
-export class ScheduledPromptScheduler extends EventEmitter {
+interface ScheduledPromptSchedulerEvents {
+  invalidated: [reason: ScheduledPromptsInvalidationReason];
+}
+
+export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedulerEvents> {
   readonly #jobs = new Map<string, Bun.CronJob>();
   readonly #lock = new KeyedPromiseLock();
   #reconciliationJob: Bun.CronJob | null = null;
@@ -92,7 +96,10 @@ export class ScheduledPromptScheduler extends EventEmitter {
       runLog: ScheduledPromptRunLog;
       dispatcher: ScheduledPromptDispatcher;
       chats: Pick<IChatRegistry, 'getChat'>;
-      agents: Pick<AgentRegistryServiceContract, 'hasAgent'>;
+      agents: Pick<
+        AgentRegistryServiceContract,
+        'hasAgent' | 'assertExecutionModeSelectionSupported'
+      >;
       cron?: CronRuntime;
     },
   ) {
@@ -245,6 +252,10 @@ export class ScheduledPromptScheduler extends EventEmitter {
     if (!this.deps.agents.hasAgent(definition.target.agentId)) {
       throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
     }
+    this.deps.agents.assertExecutionModeSelectionSupported(definition.target.agentId, {
+      permissionMode: definition.target.permissionMode,
+      thinkingMode: definition.target.thinkingMode,
+    });
     try {
       const resolved = await assertRealWithinProjectBase(definition.target.projectPath);
       if (!(await fs.stat(resolved)).isDirectory()) throw new Error('Project path is not a directory');
@@ -291,7 +302,7 @@ export class ScheduledPromptScheduler extends EventEmitter {
           ? { type: 'once', nextRunAt: definition.schedule.runAtUtc }
           : {
               type: 'recurring',
-              intervalDays: definition.schedule.intervalDays,
+              intervalHours: definition.schedule.intervalHours,
               nextRunAt: definition.schedule.firstRunAtUtc,
               endAt: definition.schedule.endAtUtc,
             },

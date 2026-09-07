@@ -1,7 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import CodexAgentIntegration from '../index.js';
 
-function createHost() {
+function createHost(root = '/tmp/garcon-codex-integration-test') {
   return {
     agentId: 'codex',
     logger: {
@@ -11,12 +14,12 @@ function createHost() {
       error: mock(() => undefined),
     },
     storage: {
-      rootDirectory: '/tmp/garcon-codex-integration-test',
-      directory: mock(() => Promise.resolve('/tmp/garcon-codex-integration-test/search')),
+      rootDirectory: root,
+      directory: mock(() => Promise.resolve(join(root, 'search'))),
+      claimLegacyWorkspaceDirectory: mock(() => Promise.resolve({ moved: 0, skipped: 0 })),
     },
     environment: { get: mock(() => undefined) },
     apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },
-    carryOver: { load: mock(() => Promise.reject(new Error('not used'))) },
   };
 }
 
@@ -26,17 +29,17 @@ describe('CodexAgentIntegration', () => {
     const integration = new CodexAgentIntegration(host);
 
     expect(CodexAgentIntegration.integrationId).toBe('codex');
-    expect(CodexAgentIntegration.apiVersion).toBe(2);
-    expect(CodexAgentIntegration.transcriptIndex.apiVersion).toBe(1);
+    expect(CodexAgentIntegration.apiVersion).toBe(5);
     expect(integration.descriptor.id).toBe('codex');
-    expect(integration.execution.submitActiveInput).toBeDefined();
-    expect(integration.execution.compact).toBeDefined();
-    expect(integration.execution.respondToPermission).toBeDefined();
-    expect(integration.execution.prepareProjectPathUpdate).toBeUndefined();
+    expect(integration.steering?.steer).toBeDefined();
+    expect(integration.goals?.submitControl).toBeDefined();
+    expect(integration.compaction?.compact).toBeDefined();
+    expect(integration).not.toHaveProperty('permissionDecisions');
+    expect(integration.projectPathUpdates).toBeNull();
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
-      supportsAtMessage: true,
-      supportsWhileRunning: true,
+      fork: expect.any(Function),
+      discard: expect.any(Function),
     });
     expect(integration.auth).toBeDefined();
     expect(integration.commands).toBeDefined();
@@ -72,4 +75,135 @@ describe('CodexAgentIntegration', () => {
       },
     });
   });
+
+  it('[TLV5-ADOPT.08-CODEX-NATIVE-UNIT-01] rejects incomplete selected records and recognized content payloads before retry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-native-import-'));
+    const nativePath = join(root, 'rollout.jsonl');
+    const sessionMetadata = JSON.stringify({
+      type: 'session_meta',
+      timestamp: '2026-08-16T00:00:00.000Z',
+      payload: { id: 'thread-1', history_mode: 'legacy' },
+    });
+    const incompleteMessage = JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-08-16T00:00:01.000Z',
+      payload: { type: 'message', role: 'assistant' },
+    });
+    await writeFile(nativePath, `${sessionMetadata}\n${incompleteMessage}\n`, 'utf8');
+    const integration = new CodexAgentIntegration(createHost(root));
+    const reference = nativeChat(integration, nativePath);
+
+    try {
+      await expect(importedRows(integration.nativeHistoryImport, reference)).rejects.toThrow();
+
+      const malformedPartShapes = [
+        ['null part', null],
+        ['primitive part', 17],
+        ['array part', []],
+        ['part type missing', {}],
+        ['part type empty', { type: '' }],
+        ['part type non-string', { type: 17 }],
+      ];
+      const invalidParts = [
+        ...['user', 'developer', 'assistant'].flatMap((role) => malformedPartShapes.map(
+          ([label, part]) => [`${role} ${label}`, role, part],
+        )),
+        ['user input_text missing', 'user', { type: 'input_text' }],
+        ['user input_text non-string', 'user', { type: 'input_text', text: 17 }],
+        ['developer input_text missing', 'developer', { type: 'input_text' }],
+        ['developer input_text non-string', 'developer', { type: 'input_text', text: 17 }],
+        ['output_text missing', 'assistant', { type: 'output_text' }],
+        ['output_text non-string', 'assistant', { type: 'output_text', text: false }],
+        ['text missing', 'assistant', { type: 'text' }],
+        ['text non-string', 'assistant', { type: 'text', text: null }],
+      ];
+      const invalidContents = [
+        ...invalidParts.map(([label, role, part]) => [label, role, [part]]),
+        [
+          'recognized part before malformed part',
+          'assistant',
+          [{ type: 'output_text', text: 'recognized assistant content' }, {}],
+        ],
+        [
+          'malformed part before recognized part',
+          'assistant',
+          [{}, { type: 'output_text', text: 'recognized assistant content' }],
+        ],
+      ];
+      const outcomes = [];
+      for (const [label, role, content] of invalidContents) {
+        const message = JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-08-16T00:00:01.000Z',
+          payload: { type: 'message', role, content },
+        });
+        await writeFile(nativePath, `${sessionMetadata}\n${message}\n`, 'utf8');
+        try {
+          await importedRows(integration.nativeHistoryImport, reference);
+          outcomes.push([label, 'fulfilled']);
+        } catch {
+          outcomes.push([label, 'rejected']);
+        }
+      }
+
+      const validEmptyMessages = [
+        ['user', { type: 'input_text', text: '' }],
+        ['user', { type: 'future-housekeeping', payload: { retained: true } }],
+        ['developer', { type: 'input_text', text: '' }],
+        ['developer', { type: 'future-housekeeping', payload: { retained: true } }],
+        ['assistant', { type: 'output_text', text: '' }],
+        ['assistant', { type: 'text', text: '' }],
+        ['assistant', { type: 'future-housekeeping', payload: { retained: true } }],
+      ].map(([role, part], index) => JSON.stringify({
+        type: 'response_item',
+        timestamp: `2026-08-16T00:00:0${index + 1}.000Z`,
+        payload: { type: 'message', role, content: [part] },
+      }));
+      validEmptyMessages.push(...['user', 'developer', 'assistant'].map((role, index) => JSON.stringify({
+        type: 'response_item',
+        timestamp: `2026-08-16T00:00:1${index}.000Z`,
+        payload: { type: 'message', role, content: [] },
+      })));
+      await writeFile(
+        nativePath,
+        `${sessionMetadata}\n${validEmptyMessages.join('\n')}\n`,
+        'utf8',
+      );
+      await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
+
+      await writeFile(nativePath, `${sessionMetadata}\n`, 'utf8');
+      await expect(importedRows(integration.nativeHistoryImport, reference)).resolves.toEqual([]);
+      expect(outcomes).toEqual(invalidContents.map(([label]) => [label, 'rejected']));
+    } finally {
+      await integration.lifecycle.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
+
+function nativeChat(integration, nativePath) {
+  return {
+    chatId: 'codex-native-import',
+    agentId: 'codex',
+    agentSessionId: 'thread-1',
+    projectPath: '/tmp',
+    model: 'gpt-5.4',
+    nativeSession: {
+      ownerId: 'codex',
+      schemaVersion: 1,
+      value: { path: nativePath, agentSessionId: 'thread-1' },
+    },
+    carryOverRevision: '',
+    nativeSeedReceipt: null,
+    settings: integration.settings.defaults(),
+  };
+}
+
+async function importedRows(importer, chat) {
+  const rows = [];
+  for await (const batch of importer.load({
+    chat,
+    signal: new AbortController().signal,
+  })) rows.push(...batch);
+  return rows;
+}

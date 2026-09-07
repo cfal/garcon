@@ -15,9 +15,7 @@ const emptySnapshot = { revision: 0, snippets: [] };
 
 async function call(handler, body, method) {
   parseJsonBody.mockResolvedValueOnce(body);
-  const response = await handler(
-    new Request('http://localhost/test', { method }),
-  );
+  const response = await handler(new Request('http://localhost/test', { method }));
   return { response, body: await response.json() };
 }
 
@@ -27,7 +25,6 @@ function service() {
     create: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
     update: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
     remove: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
-    reorder: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
     expand: mock(() =>
       Promise.resolve({
         success: true,
@@ -52,7 +49,11 @@ describe('snippet routes', () => {
     );
     expect(await get.json()).toEqual(emptySnapshot);
 
-    const definition = { shortName: 'review', template: 'Review' };
+    const definition = {
+      shortName: 'review',
+      template: 'Review',
+      defaultArguments: '',
+    };
     const created = await call(
       routes['/api/v1/snippets'].POST,
       { expectedRevision: 0, snippet: definition },
@@ -69,21 +70,17 @@ describe('snippet routes', () => {
     });
   });
 
-  it('forwards exact expansion requests', async () => {
+  it('forwards omitted and explicit-empty expansion requests exactly', async () => {
     const snippets = service();
     const routes = createSnippetRoutes(snippets);
-    const request = {
+    const omittedRequest = {
       shortName: 'review',
-      arguments: 'contracts',
-      context: { type: 'chat', chatId: 'chat-a' },
+      arguments: { type: 'default' },
+      context: { type: 'chat', chatId: '1787471053739199' },
     };
-    const result = await call(
-      routes['/api/v1/snippets/expand'].POST,
-      request,
-      'POST',
-    );
+    const result = await call(routes['/api/v1/snippets/expand'].POST, omittedRequest, 'POST');
     expect(result.response.status).toBe(200);
-    expect(snippets.expand).toHaveBeenCalledWith(request);
+    expect(snippets.expand).toHaveBeenCalledWith(omittedRequest);
     expect(result.body).toEqual({
       success: true,
       snippetId: 'snippet-a',
@@ -92,6 +89,42 @@ describe('snippet routes', () => {
       contextProjectPath: '/repo',
       expandedText: 'Review',
     });
+
+    const explicitEmptyRequest = {
+      shortName: 'review',
+      arguments: { type: 'value', value: '' },
+      context: {
+        type: 'new-chat',
+        chatId: '1787471053739200',
+        projectPath: '/repo',
+      },
+    };
+    await call(routes['/api/v1/snippets/expand'].POST, explicitEmptyRequest, 'POST');
+    expect(snippets.expand).toHaveBeenLastCalledWith(explicitEmptyRequest);
+  });
+
+  it('preserves validation envelopes for pre-default and malformed argument variants', async () => {
+    const snippets = service();
+    snippets.expand.mockRejectedValue(
+      new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Invalid snippet request', 400),
+    );
+    const routes = createSnippetRoutes(snippets);
+
+    for (const argumentsInput of ['', { type: 'unknown' }]) {
+      const result = await call(
+        routes['/api/v1/snippets/expand'].POST,
+        {
+          shortName: 'review',
+          arguments: argumentsInput,
+          context: { type: 'chat', chatId: '1787471053739199' },
+        },
+        'POST',
+      );
+      expect(result.response.status).toBe(400);
+      expect(result.body).toMatchObject({
+        errorCode: 'SNIPPET_VALIDATION_FAILED',
+      });
+    }
   });
 
   it('preserves domain error status, code, and retryability', async () => {
@@ -105,7 +138,7 @@ describe('snippet routes', () => {
       {
         expectedRevision: 1,
         id: 'snippet-a',
-        snippet: { shortName: 'review', template: 'x' },
+        snippet: { shortName: 'review', template: 'x', defaultArguments: '' },
       },
       'PUT',
     );
@@ -114,17 +147,5 @@ describe('snippet routes', () => {
       errorCode: 'SNIPPET_REVISION_CONFLICT',
       retryable: true,
     });
-  });
-
-  it('rejects malformed reorder shells before the service', async () => {
-    const snippets = service();
-    const routes = createSnippetRoutes(snippets);
-    const result = await call(
-      routes['/api/v1/snippets/reorder'].PUT,
-      { expectedRevision: 1, orderedSnippetIds: ['a', 2] },
-      'PUT',
-    );
-    expect(result.response.status).toBe(400);
-    expect(snippets.reorder).not.toHaveBeenCalled();
   });
 });

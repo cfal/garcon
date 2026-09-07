@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
+import type { ConversationDisclosureStatePort } from '../../ConversationFeedItemState.svelte.js';
 import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
@@ -70,6 +71,22 @@ describe('ChatToolEventRenderer', () => {
 		expect(onFileOpen).toHaveBeenCalledWith('/workspace/other/README.md');
 	});
 
+	it('resolves explicit chat links without autolinking bare IDs in rich tool text', () => {
+		const chatId = '1788592720180699';
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new ExitPlanModeToolUseMessage(
+				'',
+				'tool-chat-link',
+				`${chatId} [Open target](/chat/${chatId})`,
+			),
+			mode: 'input',
+			resolveChatReference: () => ({ title: 'Target chat', isCurrent: false }),
+		});
+
+		expect(screen.getByRole('link', { name: 'Open target' })).toBeTruthy();
+		expect(container.querySelectorAll('[data-chat-reference-id]')).toHaveLength(1);
+	});
+
 	it('forces Edit open when autoExpandTools is enabled even with defaultOpen=false', () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new EditToolUseMessage(
@@ -84,6 +101,131 @@ describe('ChatToolEventRenderer', () => {
 		});
 
 		expect(screen.getByText('const a = 2;')).toBeTruthy();
+	});
+
+	it('elides an expanded Edit whose diff exceeds the work budget', () => {
+		const oldContent = Array.from({ length: 501 }, (_, index) => `old-${index}`).join('\n');
+		const newContent = Array.from({ length: 501 }, (_, index) => `new-${index}`).join('\n');
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-large-diff',
+				'/tmp/example.ts',
+				oldContent,
+				newContent,
+			),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Changes are too large to render inline.')).toBeTruthy();
+		expect(screen.queryByText('old-500')).toBeNull();
+	});
+
+	it('delegates controlled disclosure changes to the virtual row owner', async () => {
+		const disclosureState = {
+			open: vi.fn(() => true),
+			setOpen: vi.fn(),
+		} satisfies ConversationDisclosureStatePort;
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-controlled',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			disclosureState,
+		});
+
+		const trigger = screen.getByRole('button', { name: /example\.ts/i });
+		expect(trigger.getAttribute('aria-expanded')).toBe('true');
+		await fireEvent.click(trigger);
+		expect(disclosureState.setOpen).toHaveBeenCalledWith(
+			'tool-input',
+			'tool-controlled',
+			false,
+			false,
+		);
+	});
+
+	it('exposes separate file-open and disclosure buttons for Edit', async () => {
+		const onFileOpen = vi.fn();
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-accessible',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			onFileOpen,
+		});
+
+		const fileButton = screen.getByRole('button', { name: 'example.ts' });
+		const disclosureButton = screen.getByRole('button', { name: 'Expand' });
+		expect(disclosureButton.tabIndex).toBe(0);
+		expect(disclosureButton.getAttribute('aria-expanded')).toBe('false');
+		expect(disclosureButton.getAttribute('aria-controls')).toBe('tool-body-tool-accessible');
+		expect(disclosureButton.querySelector('button')).toBeNull();
+
+		await fireEvent.click(fileButton);
+		expect(onFileOpen).toHaveBeenCalledWith('/tmp/example.ts', {
+			old_string: 'const a = 1;',
+			new_string: 'const a = 2;',
+		});
+		expect(screen.queryByText('const a = 2;')).toBeNull();
+
+		await fireEvent.click(disclosureButton);
+		expect(screen.getByText('const a = 2;')).toBeTruthy();
+		expect(disclosureButton.getAttribute('aria-expanded')).toBe('true');
+	});
+
+	it('reserves no header gap or body slot while an Edit row is collapsed', async () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-collapsed-gap',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			onFileOpen: () => {},
+		});
+
+		const disclosureButton = screen.getByRole('button', { name: 'Expand' });
+		const card = disclosureButton.closest('article');
+		expect(card).toBeTruthy();
+		expect(disclosureButton.closest('div.mb-2')).toBeNull();
+		expect(card!.querySelector('#tool-body-tool-collapsed-gap')).toBeNull();
+
+		await fireEvent.click(disclosureButton);
+		expect(disclosureButton.closest('div.mb-2')).toBeTruthy();
+		expect(screen.getByText('const a = 2;')).toBeTruthy();
+	});
+
+	it('spans the whole header row with the disclosure toggle while the title keeps its own action', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-row-click',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			onFileOpen: () => {},
+		});
+
+		const rowToggle = screen.getByRole('button', { name: 'Expand' });
+		expect(rowToggle.className).toContain('absolute inset-0');
+		expect(screen.getByText('Edit').className).toContain('pointer-events-none');
+		expect(screen.getByRole('button', { name: 'example.ts' }).className).not.toContain(
+			'absolute inset-0',
+		);
 	});
 
 	it('renders streaming Edit without diff as non-expandable single row', () => {
@@ -223,7 +365,7 @@ describe('ChatToolEventRenderer', () => {
 		expect(container.childElementCount).toBe(0);
 	});
 
-	it('highlights Bash in place without adding code-block layout', async () => {
+	it('renders Bash as a highlighted shell command on the shared card surface', async () => {
 		const command = 'if true; then echo "ready"; fi';
 		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new BashToolUseMessage('', 'bash-1', command),
@@ -231,14 +373,28 @@ describe('ChatToolEventRenderer', () => {
 		});
 
 		const code = container.querySelector('code.code-highlight');
-		expect(code?.textContent).toBe(command);
+		expect(code?.textContent).toBe(`$ ${command}`);
 		expect(code?.classList.contains('text-xs')).toBe(true);
 		expect(code?.classList.contains('font-mono')).toBe(true);
 		expect(code?.classList.contains('block')).toBe(true);
+		expect(code?.classList.contains('leading-[1.25]')).toBe(true);
 		expect(code?.classList.contains('whitespace-pre-wrap')).toBe(true);
 		expect(code?.classList.contains('break-all')).toBe(true);
+		expect(code?.querySelector('span')?.classList.contains('w-5')).toBe(true);
+
+		const card = code?.closest('article');
+		expect(card?.classList.contains('rounded-xl')).toBe(true);
+		expect(card?.classList.contains('border')).toBe(true);
+		expect(card?.classList.contains('shadow-sm')).toBe(true);
+		expect(card?.classList.contains('bg-chat-bash-row')).toBe(true);
+		expect(card?.classList.contains('px-3')).toBe(true);
+		expect(card?.classList.contains('py-2')).toBe(true);
 		expect(container.querySelector('.markdown-code-block')).toBeNull();
 		expect(container.querySelector('pre')).toBeNull();
+		expect(container.querySelector('button')).toBeNull();
+		expect(screen.queryByText('Bash')).toBeNull();
+		expect(container.children).toHaveLength(1);
+		expect(container.firstElementChild?.classList.contains('my-0.5')).toBe(true);
 
 		await waitFor(
 			() => {
@@ -247,7 +403,7 @@ describe('ChatToolEventRenderer', () => {
 			},
 			{ timeout: 5_000 },
 		);
-		expect(code?.textContent).toBe(command);
+		expect(code?.textContent).toBe(`$ ${command}`);
 	});
 
 	it('highlights unknown tool inputs as JSON within the existing details view', async () => {
@@ -317,37 +473,41 @@ describe('tool result and jump behavior', () => {
 		const toolResult = {
 			content: { filenames: ['a.ts', 'b.ts'], numFiles: 2 },
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-1', '**/*.ts'),
-			toolResult,
-			mode: 'input',
-		});
+			render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-1', '**/*.ts'),
+				toolResult,
+				mode: 'input',
+				resultAnchorId: 'tool-result-generation-1:23',
+			});
 
 		const jumpLink = screen.getByLabelText('Jump to results');
 		expect(jumpLink).toBeTruthy();
-		expect(jumpLink.getAttribute('href')).toBe('#tool-result-tool-glob-1');
+		expect(jumpLink.getAttribute('href')).toBe('#tool-result-generation-1:23');
+		expect(document.querySelector('[data-chat-tool-result-placeholder]')).toBeNull();
 	});
 
-	it('does not render jump link for Glob when toolResult is absent', () => {
-		render(ChatToolEventRenderer, {
+	it('reserves the result-link geometry before a Glob result arrives', () => {
+		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new GlobToolUseMessage('', 'tool-glob-2', '**/*.ts'),
 			mode: 'input',
 		});
 
 		expect(screen.queryByLabelText('Jump to results')).toBeNull();
+		expect(container.querySelector('[data-chat-tool-result-placeholder]')).toBeTruthy();
 	});
 
-	it('renders result section with anchor id for Glob tool result', () => {
+		it('renders a Glob result as its own anchored row', () => {
 		const toolResult = {
 			content: { filenames: ['src/a.ts', 'src/b.ts'], numFiles: 2 },
 		};
-		const { container } = render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-3', '**/*.ts'),
-			toolResult,
-			mode: 'input',
-		});
+			const { container } = render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-3', '**/*.ts'),
+				toolResult,
+				mode: 'result',
+				resultAnchorId: 'tool-result-generation-1:25',
+			});
 
-		const anchor = container.querySelector('#tool-result-tool-glob-3');
+			const anchor = container.querySelector('[id="tool-result-generation-1:25"]');
 		expect(anchor).toBeTruthy();
 	});
 
@@ -355,10 +515,10 @@ describe('tool result and jump behavior', () => {
 		const toolResult = {
 			content: { filenames: ['one.ts'], numFiles: 1 },
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-4', '*.ts'),
-			toolResult,
-			mode: 'input',
+			render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-4', '*.ts'),
+				toolResult,
+				mode: 'result',
 			autoExpandTools: true,
 		});
 
@@ -369,10 +529,10 @@ describe('tool result and jump behavior', () => {
 		const toolResult = {
 			content: { filenames: ['a.ts', 'b.ts', 'c.ts'], numFiles: 3 },
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GlobToolUseMessage('', 'tool-glob-5', '*.ts'),
-			toolResult,
-			mode: 'input',
+			render(ChatToolEventRenderer, {
+				toolMessage: new GlobToolUseMessage('', 'tool-glob-5', '*.ts'),
+				toolResult,
+				mode: 'result',
 			autoExpandTools: true,
 		});
 
@@ -387,10 +547,10 @@ describe('tool result and jump behavior', () => {
 				totalMatches: 5,
 			},
 		};
-		render(ChatToolEventRenderer, {
-			toolMessage: new GrepToolUseMessage('', 'tool-grep-1', 'needle', 'src'),
-			toolResult,
-			mode: 'input',
+			render(ChatToolEventRenderer, {
+				toolMessage: new GrepToolUseMessage('', 'tool-grep-1', 'needle', 'src'),
+				toolResult,
+				mode: 'result',
 			autoExpandTools: true,
 		});
 

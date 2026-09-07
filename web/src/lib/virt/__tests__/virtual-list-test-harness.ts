@@ -1,0 +1,225 @@
+import { VirtualListController } from '../virtual-list-controller.svelte';
+import type { VirtualListEnvironment } from '../virtual-list-environment';
+import type { VirtualTransactionRecord } from '../virtual-list-types';
+
+class TestResizeObserver implements ResizeObserver {
+	readonly observed = new Set<Element>();
+	readonly observedBoxes = new Map<Element, ResizeObserverBoxOptions | undefined>();
+
+	constructor(private readonly callback: ResizeObserverCallback) {}
+
+	observe(target: Element, options?: ResizeObserverOptions): void {
+		this.observed.add(target);
+		this.observedBoxes.set(target, options?.box);
+	}
+
+	unobserve(target: Element): void {
+		this.observed.delete(target);
+		this.observedBoxes.delete(target);
+	}
+
+	disconnect(): void {
+		this.observed.clear();
+		this.observedBoxes.clear();
+	}
+
+	emit(target: Element, height: number): void {
+		const size = { inlineSize: 100, blockSize: height } satisfies ResizeObserverSize;
+		this.callback(
+			[
+				{
+					target,
+					contentRect: target.getBoundingClientRect(),
+					borderBoxSize: [size],
+					contentBoxSize: [size],
+					devicePixelContentBoxSize: [size],
+				} satisfies ResizeObserverEntry,
+			],
+			this,
+		);
+	}
+}
+
+class TestEnvironment implements VirtualListEnvironment {
+	readonly microtasks: Array<() => void> = [];
+	readonly frames = new Map<number, FrameRequestCallback>();
+	readonly timers = new Map<number, { callback: () => void; dueAt: number }>();
+	observer!: TestResizeObserver;
+	#nextHandle = 1;
+	#time = 0;
+
+	now(): number {
+		return this.#time++;
+	}
+
+	queueMicrotask(callback: () => void): void {
+		this.microtasks.push(callback);
+	}
+
+	setTimeout(callback: () => void, delayMs: number): number {
+		const handle = this.#nextHandle++;
+		this.timers.set(handle, { callback, dueAt: this.#time + delayMs });
+		return handle;
+	}
+
+	clearTimeout(handle: number): void {
+		this.timers.delete(handle);
+	}
+
+	requestAnimationFrame(callback: FrameRequestCallback): number {
+		const handle = this.#nextHandle++;
+		this.frames.set(handle, callback);
+		return handle;
+	}
+
+	cancelAnimationFrame(handle: number): void {
+		this.frames.delete(handle);
+	}
+
+	createResizeObserver(callback: ResizeObserverCallback): ResizeObserver {
+		this.observer = new TestResizeObserver(callback);
+		return this.observer;
+	}
+
+	flushMicrotasks(): void {
+		while (this.microtasks.length > 0) this.microtasks.shift()?.();
+	}
+
+	flushFrames(): void {
+		const frames = [...this.frames.values()];
+		this.frames.clear();
+		for (const frame of frames) frame(this.now());
+	}
+
+	advanceTime(milliseconds: number): void {
+		this.#time += milliseconds;
+		for (const [handle, timer] of [...this.timers]) {
+			if (timer.dueAt > this.#time) continue;
+			this.timers.delete(handle);
+			timer.callback();
+		}
+	}
+}
+
+export function createVirtualListHarness(options?: {
+	viewportSize?: number;
+	initialViewportSize?: number;
+	overscan?: number;
+	measurementAnchor?: 'geometric' | 'end';
+	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;
+}) {
+	const environment = new TestEnvironment();
+	const records: VirtualTransactionRecord[] = [];
+	let viewportSize = options?.viewportSize ?? 100;
+	let leadingOffset = 0;
+	let physicalScrollTop = 0;
+	let scrollHeightOverride: number | null = null;
+	let writes = 0;
+	const controller = new VirtualListController({
+		overscan: options?.overscan ?? 1,
+		measurementAnchor: options?.measurementAnchor ?? 'geometric',
+		initialViewportSize: options?.initialViewportSize ?? viewportSize,
+		measureElement: options?.measureElement,
+		environment,
+		onTransaction: (record) => records.push(record),
+	});
+	const viewport = document.createElement('div');
+	const sizer = document.createElement('div');
+	viewport.append(sizer);
+	document.body.append(viewport);
+
+	Object.defineProperties(viewport, {
+		clientHeight: { get: () => viewportSize },
+		scrollHeight: {
+			get: () =>
+				scrollHeightOverride ??
+				Math.max(viewportSize, leadingOffset + controller.snapshot.sizerSize),
+		},
+		scrollTop: {
+			get: () => physicalScrollTop,
+			set: (value: number) => {
+				writes += 1;
+				const maximum = Math.max(0, viewport.scrollHeight - viewportSize);
+				physicalScrollTop = Math.max(0, Math.min(value, maximum));
+				viewport.dispatchEvent(new Event('scroll'));
+			},
+		},
+	});
+	viewport.getBoundingClientRect = () => rect(0, viewportSize);
+	sizer.getBoundingClientRect = () =>
+		rect(leadingOffset - physicalScrollTop, controller.snapshot.sizerSize);
+
+	let detachViewportAttachment = controller.viewport(viewport);
+	const detachSizer = controller.sizer(sizer);
+	if (viewportSize > 0) environment.observer.emit(viewport, viewportSize);
+	environment.flushMicrotasks();
+
+	return {
+		controller,
+		environment,
+		records,
+		sizer,
+		viewport,
+		get writes() {
+			return writes;
+		},
+		setLeadingOffset(value: number) {
+			leadingOffset = value;
+		},
+		setPhysicalScrollTop(value: number) {
+			physicalScrollTop = value;
+			viewport.dispatchEvent(new Event('scroll'));
+		},
+		setPhysicalScrollTopSilently(value: number) {
+			physicalScrollTop = value;
+		},
+		setPhysicalScrollHeight(value: number | null) {
+			scrollHeightOverride = value;
+		},
+		setViewportSize(value: number) {
+			viewportSize = value;
+			environment.observer.emit(viewport, value);
+		},
+		setViewportSizeSilently(value: number) {
+			viewportSize = value;
+		},
+		emitViewportResize() {
+			environment.observer.emit(viewport, viewportSize);
+		},
+		detachViewport() {
+			detachViewportAttachment?.();
+			detachViewportAttachment = undefined;
+		},
+		attachViewport() {
+			detachViewportAttachment = controller.viewport(viewport);
+			if (viewportSize > 0) environment.observer.emit(viewport, viewportSize);
+		},
+		mountItem(key: string, size: number) {
+			const element = document.createElement('div');
+			Object.defineProperty(element, 'offsetHeight', { get: () => size });
+			sizer.append(element);
+			const detach = controller.item(key)(element);
+			return { element, detach };
+		},
+		destroy() {
+			detachSizer?.();
+			detachViewportAttachment?.();
+			controller.destroy();
+			viewport.remove();
+		},
+	};
+}
+
+function rect(top: number, height: number): DOMRect {
+	return {
+		x: 0,
+		y: top,
+		width: 100,
+		height,
+		top,
+		right: 100,
+		bottom: top + height,
+		left: 0,
+		toJSON: () => ({}),
+	};
+}

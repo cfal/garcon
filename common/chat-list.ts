@@ -1,10 +1,14 @@
 import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { AgentSettingsEnvelope } from './agent-integration.js';
+import type { ChatProcessingPhase } from './chat-types.js';
+import type { ParentChatRef } from './chat-parentage.js';
 
 export interface ChatListEntry {
   id: string;
+  parentChat: ParentChatRef | null;
   agentId: string;
+  agentOwnershipEpoch: string;
   model: string | null;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -14,7 +18,6 @@ export interface ChatListEntry {
   agentSettings: AgentSettingsEnvelope;
   title: string;
   projectPath: string;
-  effectiveProjectKey: string;
   orderGroup: ChatOrderGroup;
   tags: string[];
   activity: {
@@ -29,6 +32,9 @@ export interface ChatListEntry {
   isPinned: boolean;
   isArchived: boolean;
   isActive: boolean;
+  isProcessing: boolean;
+  processingPhase: ChatProcessingPhase | null;
+  canReloadFromNativeHistory: boolean;
   isUnread: boolean;
 }
 

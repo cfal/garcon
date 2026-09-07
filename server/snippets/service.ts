@@ -7,7 +7,6 @@ import {
   type CreateSnippetRequest,
   type ExpandSnippetRequest,
   type ExpandSnippetResponse,
-  type ReorderSnippetsRequest,
   type RemoveSnippetRequest,
   type Snippet,
   type SnippetExpansionContext,
@@ -16,18 +15,12 @@ import {
   type UpdateSnippetRequest,
 } from '../../common/snippets.js';
 import type { IChatRegistry } from '../chats/store.js';
-import {
-  assertRealWithinProjectBase,
-  isProjectBoundaryError,
-} from '../lib/path-boundary.js';
+import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { SnippetDomainError } from './errors.js';
 import { SnippetStore } from './store.js';
 import { expandSnippetTemplate, SnippetExpansionError } from './template.js';
 
-function projectPathAccessError(
-  error: unknown,
-  projectPath: string,
-): SnippetDomainError | null {
+function projectPathAccessError(error: unknown, projectPath: string): SnippetDomainError | null {
   const code =
     error && typeof error === 'object' && 'code' in error
       ? (error as NodeJS.ErrnoException).code
@@ -103,7 +96,11 @@ interface SnippetServiceDeps {
   now?: () => Date;
 }
 
-export class SnippetService extends EventEmitter {
+interface SnippetServiceEvents {
+  invalidated: [reason: SnippetsInvalidationReason];
+}
+
+export class SnippetService extends EventEmitter<SnippetServiceEvents> {
   constructor(private readonly deps: SnippetServiceDeps) {
     super();
   }
@@ -152,15 +149,6 @@ export class SnippetService extends EventEmitter {
     return this.snapshot();
   }
 
-  async reorder(request: ReorderSnippetsRequest): Promise<SnippetsSnapshot> {
-    await this.deps.store.reorder(
-      request.orderedSnippetIds,
-      request.expectedRevision,
-    );
-    this.#emitInvalidated('reordered');
-    return this.snapshot();
-  }
-
   async expand(request: ExpandSnippetRequest): Promise<ExpandSnippetResponse> {
     const input = normalizeExpandSnippetRequest(request);
     if (!input) throw this.#validationError();
@@ -172,13 +160,17 @@ export class SnippetService extends EventEmitter {
         404,
       );
     }
-    const { contextProjectPath, resolvedProjectPath } =
-      await this.#resolveProjectPath(input.context);
+    const argumentsText =
+      input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
+    const { contextProjectPath, resolvedProjectPath } = await this.#resolveProjectPath(
+      input.context,
+    );
     let expandedText: string;
     try {
       expandedText = expandSnippetTemplate(snippet.template, {
-        arguments: input.arguments,
+        arguments: argumentsText,
         projectPath: resolvedProjectPath,
+        chatId: input.context.chatId,
       });
     } catch (error) {
       if (error instanceof SnippetExpansionError) {
@@ -206,12 +198,10 @@ export class SnippetService extends EventEmitter {
     contextProjectPath: string;
     resolvedProjectPath: string;
   }> {
-    if (context.type === 'project') {
+    if (context.type === 'new-chat') {
       return {
         contextProjectPath: context.projectPath,
-        resolvedProjectPath: await this.deps.projectPaths.resolve(
-          context.projectPath,
-        ),
+        resolvedProjectPath: await this.deps.projectPaths.resolve(context.projectPath),
       };
     }
     const chat = this.deps.chats.getChat(context.chatId);
@@ -225,18 +215,12 @@ export class SnippetService extends EventEmitter {
     }
     return {
       contextProjectPath,
-      resolvedProjectPath: await this.deps.projectPaths.resolve(
-        contextProjectPath,
-      ),
+      resolvedProjectPath: await this.deps.projectPaths.resolve(contextProjectPath),
     };
   }
 
   #validationError(): SnippetDomainError {
-    return new SnippetDomainError(
-      'SNIPPET_VALIDATION_FAILED',
-      'Snippet is invalid',
-      400,
-    );
+    return new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Snippet is invalid', 400);
   }
 
   #emitInvalidated(reason: SnippetsInvalidationReason): void {

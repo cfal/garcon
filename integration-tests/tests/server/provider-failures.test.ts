@@ -7,33 +7,52 @@ import { countUserContent, userMessages } from '../../support/chat-assertions.js
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('provider failures', () => {
-  test('reports HTTP, SSE, empty-stream, and truncated-stream failures honestly', async () => {
+  test('records HTTP, SSE, empty-stream, and truncated-stream failures honestly', async () => {
     await withIntegrationFixture('provider-failure-modes', async (fixture) => {
       const chatId = fixture.newChatId();
       const failures = [
         {
           content: 'http-401',
-          configure: () => fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'http-401' }, 401, 'unauthorized'),
+          configure: () => fixture.fakeProviders.openAi.failNextHttp(
+            { lastUserText: 'http-401' },
+            401,
+            'unauthorized',
+          ),
         },
         {
           content: 'http-429',
-          configure: () => fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'http-429' }, 429, 'rate limited'),
+          configure: () => fixture.fakeProviders.openAi.failNextHttp(
+            { lastUserText: 'http-429' },
+            429,
+            'rate limited',
+          ),
         },
         {
           content: 'http-500',
-          configure: () => fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'http-500' }, 500, 'upstream failed'),
+          configure: () => fixture.fakeProviders.openAi.failNextHttp(
+            { lastUserText: 'http-500' },
+            500,
+            'upstream failed',
+          ),
         },
         {
           content: 'sse-error',
-          configure: () => fixture.fakeProviders.openAi.failNextStream({ lastUserText: 'sse-error' }, 'stream failed'),
+          configure: () => fixture.fakeProviders.openAi.failNextStream(
+            { lastUserText: 'sse-error' },
+            'stream failed',
+          ),
         },
         {
           content: 'empty-stream',
-          configure: () => fixture.fakeProviders.openAi.respondEmptyNext({ lastUserText: 'empty-stream' }),
+          configure: () => fixture.fakeProviders.openAi.respondEmptyNext(
+            { lastUserText: 'empty-stream' },
+          ),
         },
         {
           content: 'truncated-stream',
-          configure: () => fixture.fakeProviders.openAi.truncateNextStream({ lastUserText: 'truncated-stream' }),
+          configure: () => fixture.fakeProviders.openAi.truncateNextStream(
+            { lastUserText: 'truncated-stream' },
+          ),
         },
       ];
 
@@ -58,8 +77,7 @@ describe('provider failures', () => {
               clientRequestId,
               clientMessageId,
             });
-        expect(accepted).toMatchObject({ status: 'accepted', clientRequestId });
-        expect(accepted.turnId).toBeString();
+
         const terminal = await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
           afterIndex: cursor,
         });
@@ -70,35 +88,32 @@ describe('provider failures', () => {
           turnId: accepted.turnId,
         });
         expect((terminal as AgentRunFailedMessage).error).toBeString();
+
         const transcript = await fixture.client.getMessages(chatId);
         expect(countUserContent(transcript.messages, failure.content)).toBe(1);
-        const failedUser = userMessages(transcript.messages).find((message) =>
-          message.content === failure.content);
-        expect(failedUser?.metadata).toMatchObject({
-          clientRequestId,
-          turnId: accepted.turnId,
-        });
-        expect(transcript.pendingUserInputs).toEqual([]);
-        const events = fixture.client.eventsSince(cursor);
-        expect(events).toContainEqual(expect.objectContaining({
-          type: 'pending-user-input-updated',
-          input: expect.objectContaining({
-            chatId,
-            clientRequestId,
+        expect(userMessages(transcript.messages).find((message) =>
+          message.content === failure.content)?.metadata).toMatchObject({
             clientMessageId,
-            turnId: accepted.turnId,
-          }),
-        }));
-        const clearedIndex = events.findIndex((event) =>
-          event.type === 'pending-user-input-cleared'
-          && event.clientRequestId === clientRequestId
-          && event.reason === 'persisted');
+          });
+        expect(userMessages(transcript.messages).find((message) =>
+          message.content === failure.content)?.metadata?.clientRequestId).toBeUndefined();
+        expect(userMessages(transcript.messages).find((message) =>
+          message.content === failure.content)?.metadata?.turnId).toBeUndefined();
+        expect(transcript.resendCandidates).toEqual([]);
+
+        const events = fixture.client.eventsSince(cursor);
+        const userIndex = events.findIndex((event) =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'user-message'
+            && entry.message.content === failure.content));
         const terminalIndex = events.findIndex((event) =>
           event.type === 'agent-run-failed'
-          && event.clientRequestId === clientRequestId
+          && event.chatId === chatId
           && event.turnId === accepted.turnId);
-        expect(clearedIndex).toBeGreaterThanOrEqual(0);
-        expect(terminalIndex).toBeGreaterThan(clearedIndex);
+        expect(userIndex).toBeGreaterThanOrEqual(0);
+        expect(terminalIndex).toBeGreaterThan(userIndex);
       }
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(failures.length);
     });
@@ -117,20 +132,21 @@ describe('provider failures', () => {
         projectPath: fixture.dirs.project,
         agent: fixture.directAgents.openAi,
       });
-      expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId)).type).toBe('agent-run-finished');
-      const transcript = await fixture.client.getMessages(chatId);
-      expect(transcript.messages.find((entry) => entry.message.type === 'assistant-message')?.message).toMatchObject({
+      expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId)).type)
+        .toBe('agent-run-finished');
+      expect((await fixture.client.getMessages(chatId)).messages.find((entry) =>
+        entry.message.type === 'assistant-message')?.message).toMatchObject({
         type: 'assistant-message',
         content: 'valid-after-malformed',
       });
     });
   });
 
-  test('pauses queued work and gives an edited retry a new delivery identity', async () => {
+  test('removes a failed queue entry and pauses its undispatched successor', async () => {
     await withIntegrationFixture('queued-provider-failure', async (fixture) => {
       const chatId = fixture.newChatId();
       const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-a' });
-      await fixture.client.startDirectChat({
+      const first = await fixture.client.startDirectChat({
         chatId,
         content: 'failure-a',
         projectPath: fixture.dirs.project,
@@ -139,9 +155,14 @@ describe('provider failures', () => {
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'failure-b');
       await fixture.client.enqueueNew(chatId, 'failure-c');
-      fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'failure-b' }, 500, 'queued turn failed');
+      fixture.fakeProviders.openAi.failNextHttp(
+        { lastUserText: 'failure-b' },
+        500,
+        'queued turn failed',
+      );
       const failureCursor = fixture.client.markEvents();
       heldA.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId, { afterIndex: failureCursor });
 
       const failed = await fixture.client.waitForEvent(
         (event): event is AgentRunFailedMessage =>
@@ -151,117 +172,54 @@ describe('provider failures', () => {
       );
       expect(failed.error).toContain('500');
       await fixture.client.waitForEvent(
-        (event): event is ChatExecutionControlUpdatedMessage => event.type === 'chat-execution-control-updated'
+        (event): event is ChatExecutionControlUpdatedMessage =>
+          event.type === 'chat-execution-control-updated'
           && event.chatId === chatId
           && event.control.queue.pause?.kind === 'queued-turn-failed',
         'queued failure pause',
         { afterIndex: failureCursor },
       );
-      const failureEvents = fixture.client.events().slice(failureCursor);
-      const failedPending = failureEvents.find((event) =>
-        event.type === 'pending-user-input-updated'
-        && event.input.content === 'failure-b');
-      if (failedPending?.type !== 'pending-user-input-updated') {
-        throw new Error('Missing failed queued input identity.');
-      }
-      if (!failed.turnId || !failed.clientRequestId) {
-        throw new Error('Missing failed queued delivery identity.');
-      }
-      expect(failedPending.input.clientRequestId).toBe(failed.clientRequestId);
-      expect(failedPending.input.turnId).toBe(failed.turnId);
-      expect(failedPending.input.clientMessageId).toBeString();
-      const pauseEventIndex = failureEvents.findIndex((event) => (
-        event.type === 'chat-execution-control-updated'
-        && event.chatId === chatId
-        && event.control.queue.pause?.kind === 'queued-turn-failed'
-      ));
-      const terminalEventIndex = failureEvents.findIndex((event) => (
-        event.type === 'agent-run-failed' && event.chatId === chatId
-      ));
-      expect(pauseEventIndex).toBeGreaterThanOrEqual(0);
-      expect(terminalEventIndex).toBeGreaterThan(pauseEventIndex);
-      expect(failed.clientRequestId).toBeString();
-      const queue = (await fixture.client.getExecutionControl(chatId)).queue;
-      expect(queue.pause).toMatchObject({
+
+      const paused = await fixture.client.getExecutionControl(chatId);
+      expect(paused.queue.pause).toMatchObject({
         kind: 'queued-turn-failed',
         entryId: queuedB.entryId,
       });
-      expect(queue.entries.map((entry) => entry.content)).toEqual(['failure-b', 'failure-c']);
-      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
-        'failure-a',
-        'failure-b',
-      ]);
+      expect(paused.queue.entries.map((entry) => entry.content)).toEqual(['failure-c']);
+      expect(countUserContent((await fixture.client.getMessages(chatId)).messages, 'failure-b'))
+        .toBe(1);
 
-      const failedEntry = queue.entries.find((entry) => entry.id === queuedB.entryId);
-      if (!failedEntry) throw new Error('Failed queue entry was not retained.');
-      const replaced = await fixture.client.replaceQueued({
-        clientRequestId: crypto.randomUUID(),
-        chatId,
-        entryId: failedEntry.id,
-        content: 'failure-b-edited',
-        expectedRevision: failedEntry.revision,
-      });
-      const editedEntry = replaced.control.queue.entries.find((entry) => entry.id === failedEntry.id);
-      expect(editedEntry).toMatchObject({
-        content: 'failure-b-edited',
-        revision: failedEntry.revision + 1,
-      });
-
-		const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-b-edited' });
-		const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-c' });
-		await fixture.client.resumeQueue(chatId, replaced.control.queue.pause!.id);
-      const editedRequest = await heldEdited.received;
-      expect(editedRequest.body.messages.map((message) => message.content)).toEqual([
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-c' });
+      const resumeCursor = fixture.client.markEvents();
+      await fixture.client.resumeQueue(chatId, paused.queue.pause!.id);
+      const requestC = await heldC.received;
+      expect(requestC.body.messages.map((message) => message.content)).toEqual([
         'failure-a',
         'echo:failure-a',
         'failure-b',
-        'failure-b-edited',
-      ]);
-      heldEdited.releaseEcho();
-      await heldC.received;
-      const pendingC = (await fixture.client.getMessages(chatId)).pendingUserInputs.find(
-        (input) => input.content === 'failure-c',
-      );
-      if (!pendingC) throw new Error('Missing pending identity for failure-c.');
-      expect(pendingC.clientRequestId).toBeString();
-      expect(pendingC.clientMessageId).toBeString();
-      expect(pendingC.turnId).toBeString();
-      const pendingCTurnId = pendingC.turnId;
-      const completionCursor = fixture.client.markEvents();
-      heldC.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, pendingCTurnId, {
-        afterIndex: completionCursor,
-      });
-
-		expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
-		expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
-        'failure-a',
-        'failure-b',
-        'failure-b-edited',
         'failure-c',
       ]);
-      const transcript = await fixture.client.getMessages(chatId);
-      for (const content of ['failure-a', 'failure-b', 'failure-b-edited', 'failure-c']) {
-        expect(countUserContent(transcript.messages, content)).toBe(1);
-      }
-      const failedUser = transcript.messages.find((entry) =>
-        entry.message.type === 'user-message' && entry.message.content === 'failure-b');
-      const editedUser = transcript.messages.find((entry) =>
-        entry.message.type === 'user-message' && entry.message.content === 'failure-b-edited');
-      const failedRequestId = failedUser?.message.type === 'user-message'
-        ? failedUser.message.metadata?.clientRequestId
-        : undefined;
-      const editedRequestId = editedUser?.message.type === 'user-message'
-        ? editedUser.message.metadata?.clientRequestId
-        : undefined;
-      expect(failedRequestId).toBeString();
-      expect(editedRequestId).toBeString();
-      expect(editedRequestId).not.toBe(failedRequestId);
+      const committedC = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        'failure-c',
+        { afterIndex: resumeCursor },
+      );
+      heldC.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(committedC) + 1,
+      });
+
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+        'failure-a',
+        'failure-b',
+        'failure-c',
+      ]);
     });
   });
 
-  test('finishes failed-turn recovery before dispatching or settling its queued successor', async () => {
-    await withIntegrationFixture('failed-turn-successor-fence', async (fixture) => {
+  test('commits a failed turn before dispatching its queued successor', async () => {
+    await withIntegrationFixture('failed-turn-successor-order', async (fixture) => {
       const chatId = fixture.newChatId();
       const failedTurn = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-fence-a' });
       await fixture.client.startDirectChat({
@@ -284,35 +242,22 @@ describe('provider failures', () => {
       );
       expect(failed.error).toContain('failed predecessor');
       await successor.received;
-
-      const events = fixture.client.events().slice(cursor);
-      const failedIndex = events.findIndex((event) => (
-        event.type === 'agent-run-failed' && event.chatId === chatId
-      ));
-      const dispatchIndex = events.findIndex((event) => (
-        event.type === 'queue-dispatching' && event.chatId === chatId
-      ));
-      expect(failedIndex).toBeGreaterThanOrEqual(0);
-      expect(dispatchIndex).toBeGreaterThan(failedIndex);
-      const inFlight = await fixture.client.getMessages(chatId);
-      const successorInput = inFlight.pendingUserInputs.find(
-        (input) => input.content === 'failure-fence-b',
+      const committed = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        'failure-fence-b',
+        { afterIndex: cursor },
       );
-      if (!successorInput) throw new Error('Missing pending successor identity.');
-      expect(successorInput.deliveryStatus).toBe('accepted');
-      expect(successorInput.clientRequestId).toBeString();
-      expect(successorInput.clientMessageId).toBeString();
-      expect(successorInput.turnId).toBeString();
-      const successorTurnId = successorInput.turnId;
+      const events = fixture.client.eventsSince(cursor);
+      expect(events.findIndex((event) => event === failed)).toBeLessThan(
+        events.findIndex((event) => event === committed),
+      );
 
-      const terminalCursor = fixture.client.markEvents();
       successor.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, successorTurnId, {
-        afterIndex: terminalCursor,
+      await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(committed) + 1,
       });
-      const settled = await fixture.client.getMessages(chatId);
-      expect(countUserContent(settled.messages, 'failure-fence-b')).toBe(1);
-      expect(settled.pendingUserInputs).toEqual([]);
+      expect(countUserContent((await fixture.client.getMessages(chatId)).messages, 'failure-fence-b'))
+        .toBe(1);
     });
   });
 
@@ -320,9 +265,12 @@ describe('provider failures', () => {
     await withIntegrationFixture('provider-failure-chat-isolation', async (fixture) => {
       const failedChat = fixture.newChatId();
       const healthyChat = fixture.newChatId();
-      fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'isolated-failure' }, 500, 'boom');
+      fixture.fakeProviders.openAi.failNextHttp(
+        { lastUserText: 'isolated-failure' },
+        500,
+        'boom',
+      );
       const healthy = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'isolated-healthy' });
-
       const failed = await fixture.client.startDirectChat({
         chatId: failedChat,
         content: 'isolated-failure',
@@ -336,33 +284,24 @@ describe('provider failures', () => {
         agent: fixture.directAgents.openAi,
       });
       await healthy.received;
-      expect((await fixture.client.waitForTurnTerminal(failedChat, failed.turnId)).type).toBe('agent-run-failed');
-      const reconnect = await fixture.client.reconnectState([failedChat, healthyChat]);
-      expect(reconnect.processing).toEqual({ outcome: 'snapshot', runningChatIds: [healthyChat] });
-      expect((await fixture.client.getMessages(healthyChat)).pendingUserInputs).toHaveLength(1);
+      expect((await fixture.client.waitForTurnTerminal(failedChat, failed.turnId)).type)
+        .toBe('agent-run-failed');
+      expect((await fixture.client.reconnectState([failedChat, healthyChat])).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId: healthyChat, phase: 'running' }],
+      });
 
-      const completionCursor = fixture.client.markEvents();
+      const cursor = fixture.client.markEvents();
       healthy.releaseEcho();
-      expect((await fixture.client.waitForTurnTerminal(healthyChat, healthyAccepted.turnId)).type).toBe(
-        'agent-run-finished',
-      );
-      expect((await fixture.client.getMessages(healthyChat)).pendingUserInputs).toEqual([]);
-      const completionEvents = fixture.client.events().slice(completionCursor);
-      const terminalIndex = completionEvents.findIndex((event) =>
-        event.type === 'agent-run-finished' && event.chatId === healthyChat);
-      const assistantIndex = completionEvents.findIndex((event) =>
-        event.type === 'chat-messages'
-        && event.chatId === healthyChat
-        && event.messages.some((entry) => entry.message.type === 'assistant-message'));
-      const persistedIndex = completionEvents.findIndex((event) =>
-        event.type === 'pending-user-input-cleared'
-        && event.chatId === healthyChat
-        && event.clientRequestId === healthyAccepted.clientRequestId
-        && event.reason === 'persisted');
-      expect(assistantIndex).toBeGreaterThanOrEqual(0);
-      expect(persistedIndex).toBeGreaterThanOrEqual(0);
-      expect(terminalIndex).toBeGreaterThan(assistantIndex);
-      expect(terminalIndex).toBeGreaterThan(persistedIndex);
+      expect((await fixture.client.waitForTurnTerminal(
+        healthyChat,
+        healthyAccepted.turnId,
+        { afterIndex: cursor },
+      )).type).toBe('agent-run-finished');
+      expect(countUserContent(
+        (await fixture.client.getMessages(healthyChat)).messages,
+        'isolated-healthy',
+      )).toBe(1);
     });
   });
 });

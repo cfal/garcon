@@ -1,38 +1,63 @@
 import crypto from 'crypto';
+import type {
+  QueueEntryPlacement,
+  SteerDeliveryOutcome,
+} from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import type {
-  ChatImage,
-  ChatMessage,
   ChatStopIntent,
-  UserMessageDeliveryStatus,
+  ChatStopOutcome,
+  UserMessagePresentation,
 } from '../../common/chat-types.ts';
-import type { ChatViewMessage } from '../../common/chat-view.ts';
-import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/session-types.ts';
+import type {
+  AgentGoalControlHandoff,
+  AgentSteerResult,
+  AgentSteerTarget,
+} from '@garcon/server-agent-interface';
+import type {
+  AgentExecutionCommandType,
+  AgentExecutionAdmission,
+  AgentSteerOptions,
+  RunAgentTurnOptions,
+} from '../agents/session-types.ts';
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
+  type StoredControlInputEntry,
 } from './control-state.ts';
 import { DomainError } from '../lib/domain-error.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.ts';
+import type { QueueExecutionAttempt } from './execution-attempt.ts';
 import type {
   QueueCommandIdentity,
   TransitionContext,
   TransitionRejection,
 } from './chat-execution-control-transitions.ts';
 
-export type PendingUserInputRegistrationOptions = Pick<
+export type UserInputAdmissionOptions = Pick<
   RunAgentTurnOptions,
-  'clientRequestId' | 'clientMessageId' | 'turnId' | 'images'
+  | 'clientRequestId'
+  | 'clientMessageId'
+  | 'transcriptViewId'
+  | 'turnId'
+  | 'images'
+  | 'excludedResendOrdinals'
 > & {
-  deliveryStatus?: UserMessageDeliveryStatus;
+  commandType?: AgentExecutionCommandType | 'steer' | 'goal-control';
+  createdAt?: string; userMessagePresentation?: UserMessagePresentation;
 };
 
 export class QueueEntryMutationError extends DomainError {
   readonly control: StoredChatExecutionControlState;
 
   constructor(
-    code: 'QUEUE_ENTRY_NOT_FOUND' | 'QUEUE_ENTRY_ALREADY_SENT' | 'QUEUE_ENTRY_REVISION_CONFLICT',
+    code:
+      | 'QUEUE_ENTRY_NOT_FOUND'
+      | 'QUEUE_ENTRY_ALREADY_SENT'
+      | 'QUEUE_ENTRY_IN_FLIGHT'
+      | 'QUEUE_ENTRY_REVISION_CONFLICT'
+      | 'QUEUE_ENTRY_REORDER_CONFLICT',
     message: string,
     control: StoredChatExecutionControlState,
   ) {
@@ -59,7 +84,7 @@ export interface QueueCommandMutationResult {
 }
 
 export interface StopActiveTurnResult {
-  stopped: boolean;
+  outcome: ChatStopOutcome;
   control: StoredChatExecutionControlState;
 }
 
@@ -88,19 +113,31 @@ export interface CommandSettlementPort {
   ): Promise<void>;
   settleQueueMutation(command: AcceptedExecutionCommand, entryId: string): Promise<void>;
   settleQueueMutationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
-  settleActiveInput(command: AcceptedExecutionCommand): Promise<void>;
-  settleActiveInputFailure(
+  settleGoalControl(command: AcceptedExecutionCommand): Promise<void>;
+  settleGoalControlFailure(
     command: AcceptedExecutionCommand,
     error: unknown,
     deliveryAccepted: boolean,
   ): Promise<void>;
+  settleSteerSuccess(command: AcceptedExecutionCommand, turnId: string): Promise<void>;
+  settleSteerFailure(
+    command: AcceptedExecutionCommand,
+    error: unknown,
+    deliveryOutcome?: SteerDeliveryOutcome,
+  ): Promise<void>;
   settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
+  settleDuplicateInput(command: AcceptedExecutionCommand): Promise<void>;
 }
 
 export interface DirectInputPreparation {
-  operation: 'chat-start' | 'fork-run';
-  prepare(): Promise<void>;
+  operation: 'chat-start' | 'fork-run' | 'agent-handoff';
+  prepare(context: DirectInputPreparationContext): Promise<void>;
   compensate(): Promise<void>;
+}
+
+export interface DirectInputPreparationContext {
+  readonly signal: AbortSignal;
+  assertAdmissionActive(): void;
 }
 
 export interface AcceptedDirectInput {
@@ -109,8 +146,10 @@ export interface AcceptedDirectInput {
   options: RunAgentTurnOptions;
   settlement: CommandSettlementPort;
   preparation?: DirectInputPreparation;
-  dispatch?: (admission: AgentExecutionAdmission) => Promise<void>;
+  dispatch?: (admission: AgentExecutionAdmission) => Promise<void>; userMessagePresentation?: UserMessagePresentation;
 }
+
+export type DirectInputScheduleOutcome = 'scheduled' | 'duplicate';
 
 export interface AcceptedDirectOperation {
   command: AcceptedExecutionCommand;
@@ -121,11 +160,17 @@ export interface AcceptedDirectOperation {
 export interface AcceptedQueueCreate {
   command: AcceptedExecutionCommand & { entryId: string };
   content: string;
+  clientMessageId: string;
+  transcriptViewId: string;
+  excludedResendOrdinals?: readonly number[];
   settlement: CommandSettlementPort;
 }
 
-export interface AcceptedQueueReplace extends AcceptedQueueCreate {
+export interface AcceptedQueueReplace {
+  command: AcceptedExecutionCommand & { entryId: string };
+  content: string;
   expectedRevision: number;
+  settlement: CommandSettlementPort;
 }
 
 export interface AcceptedQueueDelete {
@@ -133,16 +178,63 @@ export interface AcceptedQueueDelete {
   settlement: CommandSettlementPort;
 }
 
-export interface AcceptedActiveInput {
+export interface AcceptedQueueMove {
   command: AcceptedExecutionCommand & { entryId: string };
-  content: string;
+  targetEntryId: string;
+  placement: QueueEntryPlacement;
+  expectedReorderRevision: number;
+  expectedSourceRevision: number;
+  expectedTargetRevision: number;
   settlement: CommandSettlementPort;
 }
 
-export interface AcceptedActiveInputOutcome {
+export interface AcceptedGoalControl {
+  command: AcceptedExecutionCommand & { entryId: string };
+  content: string;
+  clientMessageId: string;
+  transcriptViewId: string;
+  settlement: CommandSettlementPort;
+}
+
+export interface AcceptedGoalControlOutcome {
   delivery: 'active' | 'queued';
   entryId?: string;
   control: StoredChatExecutionControlState;
+}
+
+export interface CapturedSteerTarget {
+  readonly attempt: QueueExecutionAttempt;
+  readonly identity: Readonly<TurnIdentity> & { readonly turnId: string };
+  readonly providerTarget: AgentSteerTarget | null;
+}
+
+export type ServerControlInput = Omit<StoredControlInputEntry, 'id'>;
+
+export type ServerControlDisposition = 'delivered' | 'queued';
+
+export interface AcceptedSteerInput {
+  command: AcceptedExecutionCommand;
+  content: string;
+  providerContent: string;
+  clientMessageId: string;
+  transcriptViewId: string;
+  target: CapturedSteerTarget;
+  settlement: CommandSettlementPort; userMessagePresentation?: UserMessagePresentation;
+}
+
+export interface AcceptedQueueEntrySteer extends AcceptedSteerInput {
+  command: AcceptedExecutionCommand & { entryId: string };
+  expectedRevision: number;
+  expectedReorderRevision: number;
+}
+
+export interface AcceptedQueueEntrySteerOutcome extends AcceptedSteerOutcome {
+  control: StoredChatExecutionControlState;
+}
+
+export interface AcceptedSteerOutcome {
+  turnId: string;
+  duplicate: boolean;
 }
 
 export interface DirectTurnReservation {
@@ -151,86 +243,67 @@ export interface DirectTurnReservation {
   readonly executionAdmission: AgentExecutionAdmission;
 }
 
+export interface TranscriptSnapshotReservation {
+  readonly chatId: string;
+  readonly reservationId: string;
+}
+
 export interface AgentTurnRunnerPort {
   runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  submitActiveInput?(
+  captureSteerTarget(chatId: string): AgentSteerTarget | null;
+  steerInput(
+    chatId: string,
+    input: string,
+    options: AgentSteerOptions,
+    target: AgentSteerTarget | null,
+    prepareDelivery: () => Promise<void>,
+  ): Promise<AgentSteerResult>;
+  submitGoalControl(
     chatId: string,
     command: string,
     options: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
+    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
   ): Promise<boolean>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
-  waitUntilTurnAbortable(
-    chatId: string,
-    turn: TurnIdentity,
-    signal?: AbortSignal,
-  ): Promise<boolean>;
 }
 
-export interface PendingInputsPort {
-  register(
-    chatId: string,
-    content: string,
-    options?: {
-      clientRequestId?: string;
-      clientMessageId?: string;
-      turnId?: string;
-      images?: ChatImage[];
-      deliveryStatus?: UserMessageDeliveryStatus;
-    },
-  ): Promise<unknown>;
-  discard(chatId: string, clientRequestId: string): boolean;
-  markFailed(chatId: string, clientRequestId: string): boolean;
-  markUnconfirmed(chatId: string, clientRequestId: string): boolean;
-}
-
-export interface ChatMessagesPort {
-  appendMessages(
-    chatId: string,
-    messages: ChatMessage[],
-  ): Promise<{ generationId: string; messages: ChatViewMessage[] }>;
+export interface ProjectAdmissionPort {
+  assertAvailable(chatId: string): Promise<void>;
 }
 
 export type ExecutionControlUpdatedCallback = (
   chatId: string,
   control: StoredChatExecutionControlState,
 ) => void;
-export type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
-export type SessionStopRequestedCallback = (
-  chatId: string,
-  stopId: string,
-  turn: TurnIdentity | undefined,
-) => void;
 export type SessionStoppedCallback = (
   chatId: string,
-  success: boolean,
+  outcome: ChatStopOutcome,
   intent: ChatStopIntent,
-  stopId: string,
 ) => void;
 export type ChatIdleCallback = (chatId: string) => void;
+export type ProjectUnavailableCallback = (
+  chatId: string,
+  error: import('../lib/domain-error.ts').ProjectUnavailableError,
+) => void;
+export type ProcessingInvalidatedCallback = (chatId: string) => void;
 export type TurnFailedCallback = (
   chatId: string,
   errorMessage: string,
   options: RunAgentTurnOptions,
 ) => void;
 export type TurnSettledCallback = (chatId: string, turn: TurnIdentity | undefined) => void;
-export type ChatMessagesCallback = (
-  chatId: string,
-  generationId: string,
-  messages: ChatViewMessage[],
-  metadata?: { clientRequestId?: string; turnId?: string },
-) => void;
 export type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
 export type ChatExistsResolver = (chatId: string) => boolean;
 
-export interface SessionStopInFlight {
-  intent: ChatStopIntent;
-  stopId: string;
-  promise: Promise<boolean>;
-  resolve(success: boolean): void;
-  reject(error: unknown): void;
-  started: boolean;
+export interface ChatExecutionCoordinatorEvents {
+  'execution-control-updated': Parameters<ExecutionControlUpdatedCallback>;
+  'session-stopped': Parameters<SessionStoppedCallback>;
+  'chat-idle': Parameters<ChatIdleCallback>;
+  'project-unavailable': Parameters<ProjectUnavailableCallback>;
+  'turn-failed': Parameters<TurnFailedCallback>;
+  'turn-settled': Parameters<TurnSettledCallback>;
+  'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
 }
 
 export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
@@ -238,22 +311,35 @@ export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
 // Accepted-command surface consumed by the command service and route handlers.
 export interface ChatExecutionCommands {
   deleteChatQueueFile(chatId: string): Promise<void>;
-  scheduleDirectInput(input: AcceptedDirectInput): Promise<void>;
+  scheduleDirectInput(input: AcceptedDirectInput): Promise<DirectInputScheduleOutcome>;
   runInitialInput(input: AcceptedDirectInput): Promise<void>;
   scheduleDirectOperation(input: AcceptedDirectOperation): Promise<void>;
   enqueueAccepted(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult>;
   replaceAccepted(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult>;
   deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult>;
-  deliverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
-  recoverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
+  moveAccepted(input: AcceptedQueueMove): Promise<QueueCommandMutationResult>;
+  captureSteerTarget(chatId: string): CapturedSteerTarget | null;
+  deliverAcceptedSteer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome>;
+  deliverAcceptedQueueEntrySteer(
+    input: AcceptedQueueEntrySteer,
+  ): Promise<AcceptedQueueEntrySteerOutcome>;
+  recoverQueueEntrySteer(chatId: string, entryId: string): Promise<StoredChatExecutionControlState>;
+  deliverAcceptedGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
-  interruptActiveTurn(chatId: string): Promise<boolean>;
+  interruptActiveTurn(chatId: string): Promise<ChatStopOutcome>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
+  rollbackChatDeletion(chatId: string): void;
+  reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
+  replaceTurnWithTranscriptSnapshotReservation(
+    chatId: string,
+    turn: TurnIdentity,
+  ): TranscriptSnapshotReservation | null;
+  releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void>;
   waitForDispatches(): Promise<void>;
-  isChatExecutionReserved(chatId: string): boolean;
-  hasChatExecutionOwner(chatId: string): boolean;
+  ownsExecution(chatId: string): boolean;
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
   clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
+  discardPendingChatInput(chatId: string): Promise<StoredChatExecutionControlState>;
   pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
   resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
   resumeAndDrain(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
@@ -274,18 +360,21 @@ export interface ChatExecutionLifecycle {
 // Read-only surface consumed by WebSocket and route handlers.
 export interface ChatExecutionQueries {
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
-  isChatDraining(chatId: string): boolean;
+  ownsExecution(chatId: string): boolean;
+  isChatTurnReserved(chatId: string): boolean;
+  getTurnReservedChatIds(): string[];
+  isChatStopInFlight(chatId: string): boolean;
 }
 
 // Full composition-root surface: the facets plus the direct-turn and low-level
 // queue operations that no external consumer needs through a facet.
 export interface ChatExecutionService
   extends ChatExecutionCommands, ChatExecutionLifecycle, ChatExecutionQueries {
-  registerPendingUserInput(
+  admitUserInput(
     chatId: string,
     command: string,
-    options: PendingUserInputRegistrationOptions,
-  ): Promise<void>;
+    options: UserInputAdmissionOptions,
+  ): Promise<boolean>;
   reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
   assertDirectTurnReservationActive(reservation: DirectTurnReservation): void;
   releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;
@@ -297,7 +386,6 @@ export interface ChatExecutionService
     options: RunAgentTurnOptions,
   ): Promise<void>;
   triggerDrain(chatId: string): Promise<void>;
-  hasAppliedQueueCreateCommand(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
   createChatQueueEntry(
     chatId: string,
     content: string,
@@ -315,7 +403,19 @@ export interface ChatExecutionService
     entryId: string,
     command?: QueueCommandIdentity,
   ): Promise<QueueCommandMutationResult>;
-  deliverActiveInput(
+  moveChatQueueEntry(
+    chatId: string,
+    input: {
+      entryId: string;
+      targetEntryId: string;
+      placement: QueueEntryPlacement;
+      expectedReorderRevision: number;
+      expectedSourceRevision: number;
+      expectedTargetRevision: number;
+    },
+    command?: QueueCommandIdentity,
+  ): Promise<QueueCommandMutationResult & { rebased: boolean | null }>;
+  deliverGoalControlInput(
     chatId: string,
     content: string,
     options?: RunAgentTurnOptions,
@@ -351,6 +451,12 @@ export function transitionError(
   control: StoredChatExecutionControlState,
 ): DomainError {
   switch (rejection.code) {
+    case 'IDEMPOTENCY_CONFLICT':
+      return new DomainError(
+        'IDEMPOTENCY_CONFLICT',
+        `Client message ${rejection.clientMessageId} was already queued with different content`,
+        409,
+      );
     case 'QUEUE_ENTRY_NOT_FOUND':
       return new QueueEntryMutationError(
         rejection.code,
@@ -363,13 +469,31 @@ export function transitionError(
         'This queued message has already been sent',
         control,
       );
+    case 'QUEUE_ENTRY_IN_FLIGHT':
+      return new QueueEntryMutationError(
+        rejection.code,
+        'This queued message is already being steered',
+        control,
+      );
     case 'QUEUE_ENTRY_REVISION_CONFLICT':
       return new QueueEntryMutationError(
         rejection.code,
         'This queued message changed before it could be saved',
         control,
       );
+    case 'QUEUE_ENTRY_REORDER_CONFLICT':
+      return new QueueEntryMutationError(
+        rejection.code,
+        'The queue order changed before the item could be moved',
+        control,
+      );
     case 'QUEUE_PAUSE_CHANGED':
       return new QueuePauseChangedError(control);
+    case 'CONTROL_INPUT_QUEUE_FULL':
+      return new DomainError(
+        'CONTROL_INPUT_QUEUE_FULL',
+        'The inter-agent control input lane is full',
+        409,
+      );
   }
 }

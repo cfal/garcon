@@ -2,279 +2,475 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
+import type { TranscriptWatermark } from '../ledger/contracts.js';
+import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
+import { isEmptyEarlierJournal, isJournalV5 } from './agent-ownership-journal-format.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
-import type { ChatCarryOverStore } from './chat-carryover-store.js';
+import { createLogger } from '../lib/log.js';
+import { DomainError } from '../lib/domain-error.js';
 import type {
   ChatRegistryEntry,
-  ChatRegistryPatch,
   ChatRegistryResolvedEntry,
   IChatRegistry,
 } from './store.js';
+import { carryOverRevision } from './carryover-segments.js';
+import type { TranscriptLedgerService } from '../ledger/service.js';
+import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 
-const JOURNAL_VERSION = 1;
+const logger = createLogger('chats:ownership-journal');
+export const AGENT_OWNERSHIP_JOURNAL_VERSION = 5 as const;
+const DEFAULT_RELEASE_TIMEOUT_MS = 30_000;
 
-interface TransferIntent {
-  readonly id: string;
-  readonly kind: 'transfer';
+export interface AgentHandoffIntent {
+  readonly version: 5;
+  readonly operationId: string;
+  readonly clientRequestId: string;
+  readonly submittedTargetHash: string;
+  readonly kind: 'handoff';
   readonly chatId: string;
-  readonly oldReference: AgentChatReference;
-  readonly oldEpoch: string;
-  readonly targetAgentId: string;
-  readonly targetEpoch: string;
+  readonly phase: 'commit-decided' | 'registry-committed';
+  readonly source: {
+    readonly agentId: string;
+    readonly agentOwnershipEpoch: string;
+  };
+  readonly target: {
+    readonly execution: ResolvedAgentHandoffTarget;
+    readonly agentOwnershipEpoch: string;
+  };
+  readonly watermark: TranscriptWatermark;
   readonly createdAt: string;
 }
 
-interface DeleteIntent {
-  readonly id: string;
+export interface DeleteIntentV2 {
+  readonly version: 2;
+  readonly operationId: string;
   readonly kind: 'delete';
   readonly chatId: string;
-  readonly oldReference: AgentChatReference;
-  readonly oldEpoch: string;
+  readonly phase: 'prepared' | 'registry-removed';
+  readonly sourceEpoch: string | null;
+  readonly releaseReferences: readonly AgentChatReference[];
   readonly createdAt: string;
 }
 
-type OwnershipIntent = TransferIntent | DeleteIntent;
+export interface AgentOwnershipJournalFileV5 {
+  readonly version: typeof AGENT_OWNERSHIP_JOURNAL_VERSION;
+  readonly ownershipIntents: readonly (AgentHandoffIntent | DeleteIntentV2)[];
+}
 
-interface PersistedJournal {
-  readonly version: typeof JOURNAL_VERSION;
-  readonly intents: readonly OwnershipIntent[];
+export function emptyOwnershipJournalV5(): AgentOwnershipJournalFileV5 {
+  return { version: AGENT_OWNERSHIP_JOURNAL_VERSION, ownershipIntents: [] };
 }
 
 export class AgentOwnershipJournal {
   readonly #filePath: string;
   readonly #registry: IChatRegistry;
-  readonly #carryOver: ChatCarryOverStore;
   readonly #integrations: IntegrationRegistry;
-  #intents: OwnershipIntent[] = [];
+  readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
+  readonly #releaseTimeoutMs: number;
+  #journal: AgentOwnershipJournalFileV5 = emptyOwnershipJournalV5();
+  #deletePromise: Promise<void> = Promise.resolve();
+  #providerCleanupPromise: Promise<void> = Promise.resolve();
+  #mutationPromise: Promise<void> = Promise.resolve();
 
   constructor(options: {
     workspaceDir: string;
     registry: IChatRegistry;
-    carryOver: ChatCarryOverStore;
     integrations: IntegrationRegistry;
+    ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
+    releaseTimeoutMs?: number;
   }) {
     this.#filePath = path.join(options.workspaceDir, 'agent-ownership-journal.json');
     this.#registry = options.registry;
-    this.#carryOver = options.carryOver;
     this.#integrations = options.integrations;
+    this.#ledger = options.ledger;
+    this.#releaseTimeoutMs = options.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS;
+    if (!Number.isSafeInteger(this.#releaseTimeoutMs) || this.#releaseTimeoutMs < 1) {
+      throw new Error('Ownership cleanup release timeout must be a positive integer');
+    }
   }
 
   async initialize(): Promise<void> {
-    this.#intents = await this.#load();
-    const referencedEpochs = new Set(
-      this.#intents.flatMap((intent) => intent.kind === 'transfer' ? [intent.targetEpoch] : []),
-    );
-    for (const chat of Object.values(this.#registry.listAllChats())) {
-      referencedEpochs.add(chat.agentOwnershipEpoch);
-    }
-    await this.#carryOver.pruneOrphanedStaged(referencedEpochs);
-
-    for (const intent of [...this.#intents]) {
-      const current = this.#registry.getChat(intent.chatId);
-      if (intent.kind === 'transfer') {
-        if (matchesOldOwner(current, intent)) {
-          await this.#carryOver.discardStaged(intent.chatId, intent.targetEpoch);
-          await this.#remove(intent.id);
-          continue;
-        }
-        if (current?.agentId === intent.targetAgentId && current.agentOwnershipEpoch === intent.targetEpoch) {
-          await this.#finishTransfer(intent);
-          continue;
-        }
-      } else {
-        if (matchesOldOwner(current, intent)) {
-          await this.#remove(intent.id);
-          continue;
-        }
-        if (!current) {
-          await this.#finishDelete(intent);
-          continue;
-        }
+    this.#journal = await this.#load();
+    for (const intent of [...this.#journal.ownershipIntents]) {
+      if (intent.kind !== 'delete') continue;
+      try {
+        await this.#recoverDelete(intent);
+      } catch (error) {
+        logger.warn('Ownership recovery retained an inconsistent delete intent', {
+          chatId: intent.chatId,
+          operationId: intent.operationId,
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
-      throw new Error(`Agent ownership journal integrity failure for chat ${intent.chatId}`);
     }
-    await this.#carryOver.promoteCommittedStaged();
   }
 
   hasPending(chatId: string): boolean {
-    return this.#intents.some((intent) => intent.chatId === chatId);
+    return this.#journal.ownershipIntents.some((intent) => intent.chatId === chatId);
   }
 
-  async transfer(options: {
-    chatId: string;
-    source: ChatRegistryEntry;
-    targetAgentId: string;
-    patch: ChatRegistryPatch;
-    carryOverSegment: {
-      agentId: string;
-      model: string;
-      messages: import('@garcon/common/chat-types').ChatMessage[];
-    } | null;
-  }): Promise<ChatRegistryResolvedEntry> {
-    this.#assertAvailable(options.chatId);
-    const sourceIntegration = this.#integrations.require(options.source.agentId);
-    const oldReference = toAgentChatReference(
-      sourceIntegration,
-      options.chatId,
-      options.source,
-      this.#carryOver.getRevision(options.chatId),
+  roots(): ReadonlySet<string> {
+    return new Set();
+  }
+
+  pendingHandoffs(): readonly AgentHandoffIntent[] {
+    return this.#journal.ownershipIntents.filter(
+      (intent): intent is AgentHandoffIntent => intent.kind === 'handoff',
     );
-    const targetEpoch = crypto.randomUUID();
-    await this.#carryOver.stageTransfer({
+  }
+
+  findHandoff(chatId: string, clientRequestId: string): AgentHandoffIntent | null {
+    return this.#journal.ownershipIntents.find((intent): intent is AgentHandoffIntent => (
+      intent.kind === 'handoff'
+      && intent.chatId === chatId
+      && intent.clientRequestId === clientRequestId
+    )) ?? null;
+  }
+
+  async decideHandoff(options: {
+    readonly operationId: string;
+    readonly clientRequestId: string;
+    readonly submittedTargetHash: string;
+    readonly chatId: string;
+    readonly source: Pick<ChatRegistryEntry, 'agentId' | 'agentOwnershipEpoch'>;
+    readonly target: ResolvedAgentHandoffTarget;
+    readonly targetAgentOwnershipEpoch: string;
+    readonly watermark: TranscriptWatermark;
+  }): Promise<AgentHandoffIntent> {
+    const intent: AgentHandoffIntent = {
+      version: 5,
+      operationId: options.operationId,
+      clientRequestId: options.clientRequestId,
+      submittedTargetHash: options.submittedTargetHash,
+      kind: 'handoff',
       chatId: options.chatId,
-      targetEpoch,
-      ownerId: options.targetAgentId,
-      segment: options.carryOverSegment,
-    });
-    const intent: TransferIntent = {
-      id: crypto.randomUUID(),
-      kind: 'transfer',
-      chatId: options.chatId,
-      oldReference,
-      oldEpoch: options.source.agentOwnershipEpoch,
-      targetAgentId: options.targetAgentId,
-      targetEpoch,
+      phase: 'commit-decided',
+      source: {
+        agentId: options.source.agentId,
+        agentOwnershipEpoch: options.source.agentOwnershipEpoch,
+      },
+      target: {
+        execution: structuredClone(options.target),
+        agentOwnershipEpoch: options.targetAgentOwnershipEpoch,
+      },
+      watermark: structuredClone(options.watermark),
       createdAt: new Date().toISOString(),
     };
-    try {
-      await this.#append(intent);
-    } catch (error) {
-      await this.#carryOver.discardStaged(options.chatId, targetEpoch);
-      throw error;
-    }
+    await this.#mutate((current) => {
+      const existing = current.ownershipIntents.find(
+        (candidate) => candidate.operationId === options.operationId,
+      );
+      if (existing) {
+        if (existing.kind === 'handoff' && sameHandoffDecision(existing, intent)) {
+          return { journal: current, result: existing };
+        }
+        throw new DomainError(
+          'IDEMPOTENCY_CONFLICT',
+          'The handoff operation was decided with different inputs.',
+          409,
+        );
+      }
+      assertAvailable(current, options.chatId);
+      return {
+        journal: {
+          ...current,
+          ownershipIntents: [...current.ownershipIntents, intent],
+        },
+        result: intent,
+      };
+    });
+    return this.#requireHandoff(options.operationId);
+  }
 
-    let updated: ChatRegistryResolvedEntry | null;
-    try {
-      updated = await this.#registry.updateChat(options.chatId, {
-        ...options.patch,
-        agentId: options.targetAgentId,
-        agentSessionId: null,
-        nativeSession: null,
-        agentOwnershipEpoch: targetEpoch,
-      }, { flush: true });
-    } catch (error) {
-      const current = this.#registry.getChat(options.chatId);
-      if (matchesOldOwner(current, intent)) {
-        await this.#carryOver.discardStaged(options.chatId, targetEpoch);
-        await this.#remove(intent.id);
-        throw error;
-      }
-      if (matchesTargetOwner(current, intent)) {
-        await this.#finishTransfer(intent);
-        return { id: options.chatId, ...current };
-      }
-      throw error;
+  async applyHandoffDecision(operationId: string): Promise<ChatRegistryResolvedEntry> {
+    let intent = this.#requireHandoff(operationId);
+    const current = this.#registry.getChat(intent.chatId);
+    if (current && matchesHandoffTarget(current, intent)) {
+      return { id: intent.chatId, ...current };
     }
-    if (!updated) {
-      const current = this.#registry.getChat(options.chatId);
-      if (matchesOldOwner(current, intent)) {
-        await this.#carryOver.discardStaged(options.chatId, targetEpoch);
-        await this.#remove(intent.id);
-      }
-      throw new Error(`Session not found: ${options.chatId}`);
+    if (!current || !matchesHandoffSource(current, intent)) {
+      throw new DomainError(
+        'STALE_CHAT_OWNERSHIP',
+        `Agent handoff ownership changed for ${intent.chatId}.`,
+        409,
+      );
     }
-    await this.#finishTransfer(intent);
+    const execution = intent.target.execution;
+    const updated = await this.#registry.updateChat(intent.chatId, {
+      agentId: execution.agentId,
+      model: execution.model,
+      apiProviderId: execution.apiProviderId,
+      modelEndpointId: execution.modelEndpointId,
+      modelProtocol: execution.modelProtocol,
+      permissionMode: execution.permissionMode,
+      thinkingMode: execution.thinkingMode,
+      agentSettingsById: {
+        ...current.agentSettingsById,
+        [execution.agentId]: execution.agentSettings,
+      },
+      agentSessionId: null,
+      nativeSession: null,
+      nativeSeedReceipt: null,
+      carryOverSegments: [],
+      carryOverMigrationQuarantine: null,
+      ...createPreambleBoundaryBinding('agent-switch', intent.target.agentOwnershipEpoch),
+    }, { flush: true });
+    if (!updated) throw new Error(`Session not found: ${intent.chatId}`);
+
+    if (intent.phase !== 'registry-committed') {
+      intent = { ...intent, phase: 'registry-committed' };
+      await this.#replaceIntent(intent);
+    }
     return updated;
   }
 
-  async delete(chatId: string): Promise<void> {
-    this.#assertAvailable(chatId);
-    const source = this.#registry.getChat(chatId);
-    if (!source) return;
-    const integration = this.#integrations.require(source.agentId);
-    const intent: DeleteIntent = {
-      id: crypto.randomUUID(),
-      kind: 'delete',
-      chatId,
-      oldReference: toAgentChatReference(
-        integration,
+  async completeHandoff(operationId: string): Promise<void> {
+    const intent = this.#requireHandoff(operationId);
+    if (!matchesHandoffTarget(this.#registry.getChat(intent.chatId), intent)) {
+      throw new Error(`Cannot complete handoff before target ownership is installed: ${operationId}`);
+    }
+    await this.#removeIntent(operationId);
+  }
+
+  delete(chatId: string): Promise<void> {
+    return this.#scheduleDeleteWork(() => this.#deleteNow(chatId));
+  }
+
+  waitForProviderCleanup(): Promise<void> {
+    return this.#providerCleanupPromise;
+  }
+
+  async #deleteNow(chatId: string): Promise<void> {
+    const current = this.#registry.getChat(chatId);
+    const intent = await this.#mutate((journal) => {
+      assertAvailable(journal, chatId, 'SESSION_BUSY');
+      if (!current) return { journal, result: null };
+      const reference = toAgentChatReference(
+        this.#integrations.require(current.agentId),
         chatId,
-        source,
-        this.#carryOver.getRevision(chatId),
-      ),
-      oldEpoch: source.agentOwnershipEpoch,
-      createdAt: new Date().toISOString(),
-    };
-    await this.#append(intent);
+        current,
+        carryOverRevision(current.carryOverSegments, current.carryOverMigrationQuarantine),
+      );
+      const prepared: DeleteIntentV2 = {
+        version: 2,
+        operationId: crypto.randomUUID(),
+        kind: 'delete',
+        chatId,
+        phase: 'prepared',
+        sourceEpoch: current.agentOwnershipEpoch,
+        releaseReferences: [reference],
+        createdAt: new Date().toISOString(),
+      };
+      return {
+        journal: {
+          ...journal,
+          ownershipIntents: [...journal.ownershipIntents, prepared],
+        },
+        result: prepared,
+      };
+    });
+    if (!intent) return;
     this.#registry.removeChat(chatId);
     await this.#registry.flush();
-    await this.#finishDelete(intent);
-  }
-
-  async #finishTransfer(intent: TransferIntent): Promise<void> {
-    await this.#release(intent.oldReference, 'transferred');
-    await this.#carryOver.promoteStaged(intent.chatId, intent.targetEpoch);
-    await this.#remove(intent.id);
-  }
-
-  async #finishDelete(intent: DeleteIntent): Promise<void> {
-    await this.#release(intent.oldReference, 'deleted');
-    this.#carryOver.clear(intent.chatId);
-    await this.#carryOver.flush();
-    await this.#remove(intent.id);
-  }
-
-  async #release(reference: AgentChatReference, reason: 'deleted' | 'transferred'): Promise<void> {
-    await this.#integrations.require(reference.agentId).transcript.release({
-      chat: reference,
-      reason,
-      signal: new AbortController().signal,
+    const removed = { ...intent, phase: 'registry-removed' as const };
+    await this.#replaceIntent(removed);
+    // The provider-neutral ledger must be removed before delete resolves. Only
+    // provider/native release is detached, so same-id recreation is safe.
+    this.#ledger.deleteChat(chatId);
+    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed)).catch((error) => {
+      logger.warn('Delete cleanup scheduling failed', {
+        chatId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     });
   }
 
-  #assertAvailable(chatId: string): void {
-    if (this.hasPending(chatId)) throw new Error(`Agent ownership change is pending for ${chatId}`);
-  }
-
-  async #append(intent: OwnershipIntent): Promise<void> {
-    const next = [...this.#intents, intent];
-    await this.#save(next);
-    this.#intents = next;
-  }
-
-  async #remove(id: string): Promise<void> {
-    const next = this.#intents.filter((intent) => intent.id !== id);
-    await this.#save(next);
-    this.#intents = next;
-  }
-
-  async #load(): Promise<OwnershipIntent[]> {
-    try {
-      const value = JSON.parse(await fs.readFile(this.#filePath, 'utf8')) as PersistedJournal;
-      if (value.version !== JOURNAL_VERSION || !Array.isArray(value.intents)) {
-        throw new Error('Invalid agent ownership journal');
+  async #recoverDelete(intent: DeleteIntentV2): Promise<void> {
+    const current = this.#registry.getChat(intent.chatId);
+    if (current) {
+      if (intent.sourceEpoch !== current.agentOwnershipEpoch) {
+        throw new Error(`Agent delete journal integrity failure for chat ${intent.chatId}`);
       }
-      return [...value.intents];
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      throw error;
+      this.#registry.removeChat(intent.chatId);
+      await this.#registry.flush();
+    }
+    const removed = { ...intent, phase: 'registry-removed' as const };
+    await this.#replaceIntent(removed);
+    this.#ledger.deleteChat(intent.chatId);
+    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed)).catch((error) => {
+      logger.warn('Recovered delete cleanup failed', {
+        chatId: intent.chatId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  async #finishDelete(intent: DeleteIntentV2): Promise<void> {
+    let remaining = [...intent.releaseReferences];
+    for (const reference of [...remaining]) {
+      const integration = this.#integrations.get(reference.agentId);
+      if (!integration) continue;
+      try {
+        await this.#releaseTranscript(integration, {
+          chat: reference,
+          reason: 'deleted',
+        });
+      } catch (error) {
+        logger.warn('Delete cleanup release failed', {
+          chatId: intent.chatId,
+          agentId: reference.agentId,
+          errorCode: errorCode(error),
+        });
+        continue;
+      }
+      remaining = remaining.filter((candidate) => candidate !== reference);
+      if (remaining.length > 0) {
+        await this.#replaceIntent({ ...intent, releaseReferences: remaining });
+      }
+    }
+    if (remaining.length === 0) await this.#removeIntent(intent.operationId);
+  }
+
+  #requireHandoff(operationId: string): AgentHandoffIntent {
+    const intent = this.#journal.ownershipIntents.find((candidate): candidate is AgentHandoffIntent => (
+      candidate.kind === 'handoff' && candidate.operationId === operationId
+    ));
+    if (!intent) throw new Error(`Agent handoff intent not found: ${operationId}`);
+    return intent;
+  }
+
+  async #replaceIntent(intent: AgentHandoffIntent | DeleteIntentV2): Promise<void> {
+    await this.#mutate((current) => ({
+      ...current,
+      ownershipIntents: current.ownershipIntents.map((candidate) => (
+        candidate.operationId === intent.operationId ? intent : candidate
+      )),
+    }));
+  }
+
+  async #removeIntent(operationId: string): Promise<void> {
+    await this.#mutate((current) => ({
+      ...current,
+      ownershipIntents: current.ownershipIntents.filter(
+        (intent) => intent.operationId !== operationId,
+      ),
+    }));
+  }
+
+  #scheduleDeleteWork<T>(work: () => Promise<T>): Promise<T> {
+    const operation = this.#deletePromise.catch(() => undefined).then(work);
+    this.#deletePromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  #scheduleProviderCleanup<T>(work: () => Promise<T>): Promise<T> {
+    const operation = this.#providerCleanupPromise.catch(() => undefined).then(work);
+    this.#providerCleanupPromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async #releaseTranscript(
+    integration: ReturnType<IntegrationRegistry['require']>,
+    request: { readonly chat: AgentChatReference; readonly reason: 'deleted' },
+  ): Promise<void> {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        const error = new Error('Provider transcript release timed out');
+        error.name = 'AbortError';
+        reject(error);
+      }, this.#releaseTimeoutMs);
+    });
+    try {
+      await Promise.race([
+        integration.nativeSessions?.release({
+          ...request,
+          chat: request.chat,
+          signal: controller.signal,
+        }),
+        deadline,
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }
 
-  async #save(intents: readonly OwnershipIntent[]): Promise<void> {
-    await writeJsonFileAtomic(this.#filePath, {
-      version: JOURNAL_VERSION,
-      intents,
-    } satisfies PersistedJournal);
+  #mutate<T>(
+    mutation: (current: AgentOwnershipJournalFileV5) =>
+      | AgentOwnershipJournalFileV5
+      | { journal: AgentOwnershipJournalFileV5; result: T },
+  ): Promise<T> {
+    const operation = this.#mutationPromise.catch(() => undefined).then(async () => {
+      const outcome = mutation(this.#journal);
+      const journal = 'journal' in outcome ? outcome.journal : outcome;
+      const result = 'journal' in outcome ? outcome.result : undefined as T;
+      if (journal !== this.#journal) {
+        await writeJsonFileAtomic(this.#filePath, journal, { mode: 0o600 });
+        this.#journal = journal;
+      }
+      return result;
+    });
+    this.#mutationPromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async #load(): Promise<AgentOwnershipJournalFileV5> {
+    try {
+      const value: unknown = JSON.parse(await fs.readFile(this.#filePath, 'utf8'));
+      if (isJournalV5(value)) return value;
+      if (isEmptyEarlierJournal(value)) return emptyOwnershipJournalV5();
+      throw new Error('Invalid agent ownership journal');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyOwnershipJournalV5();
+      throw error;
+    }
   }
 }
 
-function matchesOldOwner(
-  current: ChatRegistryEntry | null,
-  intent: OwnershipIntent,
-): boolean {
-  return current?.agentId === intent.oldReference.agentId
-    && current.agentOwnershipEpoch === intent.oldEpoch
-    && current.agentSessionId === intent.oldReference.agentSessionId
-    && JSON.stringify(current.nativeSession) === JSON.stringify(intent.oldReference.nativeSession);
+function sameHandoffDecision(left: AgentHandoffIntent, right: AgentHandoffIntent): boolean {
+  return left.clientRequestId === right.clientRequestId
+    && left.submittedTargetHash === right.submittedTargetHash
+    && left.chatId === right.chatId
+    && left.source.agentId === right.source.agentId
+    && left.source.agentOwnershipEpoch === right.source.agentOwnershipEpoch
+    && left.target.agentOwnershipEpoch === right.target.agentOwnershipEpoch
+    && JSON.stringify(left.target.execution) === JSON.stringify(right.target.execution)
+    && left.watermark.viewId === right.watermark.viewId
+    && left.watermark.ordinal === right.watermark.ordinal;
 }
 
-function matchesTargetOwner(
+function matchesHandoffSource(
   current: ChatRegistryEntry | null,
-  intent: TransferIntent,
-): current is ChatRegistryEntry {
-  return current?.agentId === intent.targetAgentId
-    && current.agentOwnershipEpoch === intent.targetEpoch;
+  intent: AgentHandoffIntent,
+): boolean {
+  return current?.agentId === intent.source.agentId
+    && current.agentOwnershipEpoch === intent.source.agentOwnershipEpoch;
+}
+
+export function matchesHandoffTarget(
+  current: ChatRegistryEntry | null,
+  intent: AgentHandoffIntent,
+): boolean {
+  return current?.agentId === intent.target.execution.agentId
+    && current.agentOwnershipEpoch === intent.target.agentOwnershipEpoch;
+}
+
+function assertAvailable(
+  journal: AgentOwnershipJournalFileV5,
+  chatId: string,
+  code: 'AGENT_HANDOFF_REQUIRES_IDLE' | 'SESSION_BUSY' = 'AGENT_HANDOFF_REQUIRES_IDLE',
+): void {
+  if (!journal.ownershipIntents.some((intent) => intent.chatId === chatId)) return;
+  throw new DomainError(code, `Agent ownership change is pending for ${chatId}.`, 409, true);
+}
+
+function errorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    return error.code;
+  }
+  return error instanceof Error ? error.name : 'UNKNOWN';
 }

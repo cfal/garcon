@@ -1,5 +1,4 @@
 import { untrack } from 'svelte';
-import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
@@ -7,10 +6,14 @@ import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.sv
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
+import type {
+	ProjectResolutionLease,
+	ProjectResolutionStore,
+} from './project-resolution-store.svelte.js';
 
 interface WorkspaceDomainBindingsDeps {
 	workspaceContext: WorkspaceContextStore;
-	chatSessions: ChatSessionsStore;
+	projectResolution: ProjectResolutionStore;
 	ghCapability: GhCapabilityStore;
 	localSettings: LocalSettingsStore;
 	singletons: SingletonSurfaceRegistry;
@@ -25,6 +28,34 @@ export class WorkspaceDomainBindings {
 		let lastCommitInvalidationKey = '';
 		// Bindings run for the application lifetime, so every sink tolerates absent pre-auth context.
 		this.#destroyEffects = $effect.root(() => {
+			const currentTargetKey = $derived.by(() => {
+				const target = deps.workspaceContext.currentTarget;
+				return target ? deps.projectResolution.lifecycleKey(target) : null;
+			});
+
+			$effect(() => {
+				if (!currentTargetKey) return;
+				const target = untrack(() => deps.workspaceContext.currentTarget);
+				if (!target) return;
+				const lease = untrack(() => deps.projectResolution.retain(target));
+				return () => lease.release();
+			});
+
+			$effect(() => {
+				if (!currentTargetKey) return;
+				const hasDemand =
+					deps.singletons.hasVisibleProjectSurface || deps.localSettings.showQuickCommitTray;
+				if (!hasDemand) return;
+				const target = untrack(() => deps.workspaceContext.currentTarget);
+				if (!target) return;
+				const lease: ProjectResolutionLease = untrack(() => {
+					const retained = deps.projectResolution.retain(target);
+					void retained.resolve();
+					return retained;
+				});
+				return () => lease.release();
+			});
+
 			$effect(() => {
 				deps.singletons.setProjectState(deps.workspaceContext.projectState);
 			});
@@ -38,9 +69,7 @@ export class WorkspaceDomainBindings {
 
 			$effect(() => {
 				const projectState = deps.workspaceContext.projectState;
-				const processing = deps.chatSessions.selectedChat?.isProcessing ?? false;
 				deps.gitQuickSummary.setEnabled(deps.localSettings.showQuickCommitTray);
-				deps.gitQuickSummary.setProcessing(processing);
 				if (projectState.kind === 'resolving') {
 					untrack(() => deps.gitBranchActions.closeNewBranchDialog());
 					return;
@@ -53,7 +82,6 @@ export class WorkspaceDomainBindings {
 					deps.gitQuickSummary.summaryFor(projectPath)?.branch,
 					currentProject?.effectiveProjectKey ?? null,
 				);
-				return untrack(() => deps.gitQuickSummary.startPolling());
 			});
 
 			$effect(() => {

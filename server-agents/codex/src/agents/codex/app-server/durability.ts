@@ -6,6 +6,14 @@ export interface MaterializedThreadOptions {
   pollIntervalMs?: number;
 }
 
+export async function accessibleThreadPath(
+  threads: ReadonlyMap<string, CodexThread>,
+  agentSessionId: string,
+): Promise<string | null> {
+  const nativePath = threads.get(agentSessionId)?.path ?? null;
+  return nativePath && await fileExists(nativePath) ? nativePath : null;
+}
+
 export async function waitForMaterializedThread(
   thread: Pick<CodexThread, 'id' | 'path'>,
   {

@@ -1,28 +1,50 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
+import { buildThreadResumeParams } from '../../../server-agents/codex/src/agents/codex/app-server/request-builders.js';
+import { projectCodexCodeModeCommands } from '../../../server-agents/codex/src/agents/codex/code-mode-command-projection.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('Codex fork at message', () => {
-  test('preserves a selected prefix when suppressed native entries are filtered', async () => {
+  test('preserves resumable Code Mode prefixes across forks and reforks', async () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
     const sourceAgentSessionId = randomUUID();
     let sourceNativePath = '';
+    let forkParamsLogPath = '';
+    const serverEnvironment = {
+      GARCON_CODEX_CLI: fileURLToPath(new URL(
+        '../../support/fake-codex-app-server.ts',
+        import.meta.url,
+      )),
+      PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+      INTEGRATION_CODEX_FORK_JSONL: '1',
+      INTEGRATION_CODEX_FORK_PARAMS_LOG: '',
+    };
 
     await withIntegrationFixture('codex-fork-at-message', async (fixture) => {
       const source = await fixture.client.getMessages(sourceChatId);
-      expect(source.messages.map((entry) => [entry.seq, entry.message.type])).toEqual([
-        [1, 'user-message'],
-        [2, 'assistant-message'],
+      expect(source.messages.map((entry) => [entry.ordinal, entry.message.type])).toEqual([
+        [2, 'user-message'],
+        [3, 'exec-tool-use'],
+        [4, 'bash-tool-use'],
+        [5, 'tool-result'],
+        [6, 'tool-result'],
+        [7, 'bash-tool-use'],
+        [8, 'bash-tool-use'],
+        [9, 'tool-result'],
+        [10, 'assistant-message'],
       ]);
 
       const targetChatId = fixture.newChatId();
       const fork = await fixture.client.forkChat({
         sourceChatId,
         chatId: targetChatId,
-        upToSeq: 2,
+        transcriptViewId: source.transcriptViewId,
+        upToOrdinal: source.messages.at(-1)!.ordinal,
       });
       expect(fork.chat.id).toBe(targetChatId);
 
@@ -30,17 +52,125 @@ describe('Codex fork at message', () => {
       expect(forked.messages.map((entry) => entry.message))
         .toEqual(source.messages.map((entry) => entry.message));
 
+      const secondTargetChatId = fixture.newChatId();
+      const secondFork = await fixture.client.forkChat({
+        sourceChatId: targetChatId,
+        chatId: secondTargetChatId,
+      });
+      expect(secondFork.chat.id).toBe(secondTargetChatId);
+      const secondForked = await fixture.client.getMessages(secondTargetChatId);
+      expect(secondForked.messages.map((entry) => entry.message))
+        .toEqual(source.messages.map((entry) => entry.message));
+
       const registry = JSON.parse(
         await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
       ) as {
-        sessions: Record<string, { nativeSession: { value: { path: string } } }>;
+        sessions: Record<string, {
+          nativeSession: { value: { path: string; agentSessionId: string } };
+        }>;
       };
-      const targetNativePath = registry.sessions[targetChatId]!.nativeSession.value.path;
+      const targetNative = registry.sessions[targetChatId]!.nativeSession.value;
+      const targetNativePath = targetNative.path;
+      const forkParams = (await readFile(forkParamsLogPath, 'utf8'))
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.parse(line)) as Array<{ threadId?: string; path?: string }>;
+      expect(forkParams).toHaveLength(1);
+      expect(forkParams[0]).toMatchObject({
+        threadId: targetNative.agentSessionId,
+        path: targetNativePath,
+      });
+      expect(forkParams[0]?.path).not.toBe(sourceNativePath);
       const targetLines = (await readFile(targetNativePath, 'utf8')).trimEnd().split('\n');
-      expect(JSON.parse(targetLines[1]!)).toEqual({ type: 'garcon_fork_filtered' });
+      expect(targetLines.some((line) => line.includes('garcon_fork_filtered'))).toBe(false);
+      expect(JSON.parse(targetLines[1]!)).toMatchObject({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user' },
+      });
+      expect(targetLines.some((line) => line.includes('"name":"exec"'))).toBe(true);
+      expect(targetLines.some((line) => line.includes('"name":"wait"'))).toBe(true);
       expect(targetNativePath).not.toBe(sourceNativePath);
+      expect(basename(targetNativePath)).toMatch(
+        /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[0-9a-f-]{36}\.jsonl$/,
+      );
+
+      const codex = new CodexAppServerClient({
+        env: {
+          HOME: fixture.dirs.home,
+          CODEX_HOME: join(fixture.dirs.home, '.codex'),
+        },
+      });
+      try {
+        const resumed = await codex.resumeThread(buildThreadResumeParams({
+          agentSessionId: targetNative.agentSessionId,
+          nativePath: targetNativePath,
+          model: 'gpt-5.6-sol',
+          projectPath: fixture.dirs.project,
+          permissionMode: 'default',
+        }));
+        expect(resumed.thread).toMatchObject({
+          id: targetNative.agentSessionId,
+          path: targetNativePath,
+        });
+      } finally {
+        codex.shutdown();
+      }
+
+      await fixture.restartGarcon();
+      const reloaded = await fixture.client.getMessages(targetChatId);
+      expect(reloaded.messages.map((entry) => entry.message))
+        .toEqual(source.messages.map((entry) => entry.message));
+      expect(reloaded.messages.some((entry) => entry.message.type === 'exec-tool-use')).toBe(true);
+      expect(reloaded.messages.some((entry) => entry.message.type === 'wait-tool-use')).toBe(false);
+
+      const partialChatId = fixture.newChatId();
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: partialChatId,
+        transcriptViewId: source.transcriptViewId,
+        upToOrdinal: source.messages[5]!.ordinal,
+      });
+      const partial = await fixture.client.getMessages(partialChatId);
+      expect(partial.messages.map((entry) => entry.message))
+        .toEqual(source.messages.slice(0, 6).map((entry) => entry.message));
+
+      const partialRegistry = JSON.parse(
+        await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
+      ) as {
+        sessions: Record<string, {
+          nativeSession: { value: { path: string; agentSessionId: string } };
+        }>;
+      };
+      const partialNativePath = partialRegistry.sessions[partialChatId]!.nativeSession.value.path;
+      const partialLines = (await readFile(partialNativePath, 'utf8')).trimEnd().split('\n');
+      const projectedEntry = partialLines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((entry) => (
+          entry.type === 'response_item'
+          && typeof entry.payload === 'object'
+          && entry.payload !== null
+          && (entry.payload as Record<string, unknown>).call_id === 'projected-exec'
+        ));
+      const projectedPayload = projectedEntry?.payload as Record<string, unknown> | undefined;
+      expect(projectCodexCodeModeCommands(String(projectedPayload?.input))).toEqual({
+        commands: ['printf "first;command\\n"'],
+      });
+
+      const reforkChatId = fixture.newChatId();
+      await fixture.client.forkChat({
+        sourceChatId: partialChatId,
+        chatId: reforkChatId,
+        transcriptViewId: partial.transcriptViewId,
+        upToOrdinal: partial.messages.at(-1)!.ordinal,
+      });
+      const reforked = await fixture.client.getMessages(reforkChatId);
+      expect(reforked.messages.map((entry) => entry.message))
+        .toEqual(partial.messages.map((entry) => entry.message));
     }, {
+      serverEnvironment,
       async prepareWorkspace(directories) {
+        forkParamsLogPath = join(directories.root, 'codex-fork-params.log');
+        serverEnvironment.INTEGRATION_CODEX_FORK_PARAMS_LOG = forkParamsLogPath;
         sourceNativePath = join(
           directories.home,
           '.codex',
@@ -56,7 +186,16 @@ describe('Codex fork at message', () => {
           JSON.stringify({
             timestamp,
             type: 'session_meta',
-            payload: { id: sourceAgentSessionId, cwd: directories.project },
+            payload: {
+              id: sourceAgentSessionId,
+              timestamp,
+              cwd: directories.project,
+              originator: 'codex_cli_rs',
+              cli_version: '0.142.2',
+              source: 'cli',
+              model_provider: 'openai',
+              history_mode: 'legacy',
+            },
           }),
           JSON.stringify({
             timestamp,
@@ -76,6 +215,88 @@ describe('Codex fork at message', () => {
             timestamp,
             type: 'response_item',
             payload: {
+              type: 'custom_tool_call',
+              name: 'exec',
+              call_id: 'outer-exec',
+              input: 'text("sanitized fixture")',
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'function_call',
+              name: 'exec_command',
+              call_id: 'inner-command',
+              arguments: JSON.stringify({ cmd: 'pwd', workdir: directories.project }),
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'function_call_output',
+              call_id: 'inner-command',
+              output: directories.project,
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'custom_tool_call_output',
+              call_id: 'outer-exec',
+              output: 'completed',
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'custom_tool_call',
+              name: 'exec',
+              call_id: 'projected-exec',
+              input: [
+                'const results = await Promise.all([',
+                '  tools.exec_command({cmd: \'printf "first;command\\\\n"\'}),',
+                '  tools.exec_command({cmd: \'printf "second command\\\\n"\'}),',
+                ']);',
+                'results.forEach(result => text(result.output));',
+              ].join('\n'),
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'custom_tool_call_output',
+              call_id: 'projected-exec',
+              output: 'first command\nsecond command',
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'function_call',
+              name: 'wait',
+              call_id: 'outer-wait',
+              arguments: JSON.stringify({ cell_id: 'sanitized-cell', yield_time_ms: 100 }),
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'function_call_output',
+              call_id: 'outer-wait',
+              output: 'completed',
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
               type: 'message',
               role: 'assistant',
               content: [{ type: 'output_text', text: 'world' }],
@@ -88,7 +309,7 @@ describe('Codex fork at message', () => {
           JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
         );
         await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 3,
+          version: 5,
           sessions: {
             [sourceChatId]: {
               agentId: 'codex',
@@ -113,10 +334,13 @@ describe('Codex fork at message', () => {
               lastReadAt: null,
               permissionMode: 'default',
               thinkingMode: 'none',
+              carryOverSegments: [],
+              nativeSeedReceipt: null,
+              carryOverMigrationQuarantine: null,
             },
           },
         }));
       },
     });
-  });
+  }, 15_000);
 });

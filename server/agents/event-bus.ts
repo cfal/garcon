@@ -1,73 +1,94 @@
 import type {
-  AgentExecutionEvent,
-  AgentOperationIdentity,
+  AgentGoalControlHandoff,
 } from '@garcon/server-agent-interface';
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentExecutionCommandType } from './session-types.js';
-import type { AgentDirectory } from './directory.js';
 import { createLogger } from '../lib/log.js';
-import { matchesTurnIdentity } from '../lib/turn-identity.js';
+import { matchesTurnIdentity, type TurnReceiptOwner } from '../lib/turn-identity.js';
+import type { LedgerRunEndedRow } from '../ledger/contracts.js';
+import { dispatchListenersSequentially } from './listener-dispatch.js';
 
 const logger = createLogger('agents:event-bus');
 
 export interface TurnEventMetadata {
   clientRequestId?: string;
+  clientMessageId?: string;
   commandType?: AgentExecutionCommandType;
   upstreamRequestId?: string;
   turnId?: string;
+  agentOwnershipEpoch?: string;
+  turnOwner?: TurnReceiptOwner;
+  entryIds?: readonly string[];
 }
 
-interface AbortableTurnWaiter {
-  turn: TurnEventMetadata;
-  resolve: (isAbortable: boolean) => void;
-  signal?: AbortSignal;
-  onAbort: () => void;
-}
+export type AgentRunCompletionOutcome = 'finished' | 'interrupted';
 
 export class AgentEventBus {
   readonly #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
-  readonly #abortableTurnByChatId = new Map<string, TurnEventMetadata>();
-  readonly #abortableWaiters = new Map<string, Set<AbortableTurnWaiter>>();
-  readonly #messageListeners = new Set<(chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void>();
-  readonly #processingListeners = new Set<(chatId: string, processing: boolean) => void>();
-  readonly #sessionListeners = new Set<(chatId: string) => void>();
-  readonly #finishedListeners = new Set<(chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void>();
-  readonly #failedListeners = new Set<(chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void>();
-
-  constructor(directory: AgentDirectory) {
-    for (const integration of directory.list()) {
-      integration.execution.subscribe((event) => this.#dispatch(event));
-    }
-  }
+  readonly #settledTurnByChatId = new Map<string, TurnEventMetadata>();
+  readonly #sessionListeners = new Set<(chatId: string) => void | Promise<void>>();
+  readonly #finishedListeners = new Set<(
+    chatId: string,
+    exitCode: number,
+    metadata: TurnEventMetadata | undefined,
+    outcome: AgentRunCompletionOutcome,
+  ) => void | Promise<void>>();
+  readonly #failedListeners = new Set<(
+    chatId: string,
+    errorMessage: string,
+    errorCode: string,
+    metadata?: TurnEventMetadata,
+  ) => void | Promise<void>>();
 
   trackTurn(chatId: string, opts: TurnEventMetadata): void {
     if (!opts.clientRequestId && !opts.commandType && !opts.turnId) {
       this.clearTurn(chatId);
       return;
     }
-    if (this.#turnMetadataByChatId.has(chatId)) {
-      logger.warn('agents: overwriting in-flight turn metadata for chat', chatId);
+    const turn = turnMetadata(opts);
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (active && !matchesTurnIdentity(active, turn)) {
+      throw new Error(`Cannot track a new turn while chat ${chatId} has an active turn`);
     }
-    const turn = {
-      ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
-      ...(opts.commandType ? { commandType: opts.commandType } : {}),
-      ...(opts.turnId ? { turnId: opts.turnId } : {}),
+    this.#setTurn(chatId, turn);
+  }
+
+  handoffTurn(
+    chatId: string,
+    predecessor: TurnEventMetadata | undefined,
+    successor: TurnEventMetadata,
+    downstream: AgentGoalControlHandoff,
+  ): AgentGoalControlHandoff {
+    const next = turnMetadata(successor);
+    const validate = () => {
+      const active = this.#turnMetadataByChatId.get(chatId);
+      if (!sameTurnIdentity(active, predecessor)) {
+        throw new Error(`Cannot hand off turn for chat ${chatId} after its active turn changed`);
+      }
     };
-    const abortable = this.#abortableTurnByChatId.get(chatId);
-    if (abortable && !matchesTurnIdentity(turn, abortable)) {
-      this.#abortableTurnByChatId.delete(chatId);
-    }
-    this.#turnMetadataByChatId.set(chatId, turn);
+    validate();
+    return {
+      validate: () => {
+        validate();
+        downstream.validate();
+      },
+      commit: () => {
+        this.#setTurn(chatId, next);
+        downstream.commit();
+      },
+    };
   }
 
   clearTurn(chatId: string): void {
     this.#turnMetadataByChatId.delete(chatId);
-    this.#clearAbortability(chatId);
+    this.#settledTurnByChatId.delete(chatId);
   }
 
   settleTurn(chatId: string, turn: TurnEventMetadata): void {
     const active = this.#turnMetadataByChatId.get(chatId);
-    if (active && matchesTurnIdentity(active, turn)) this.clearTurn(chatId);
+    if (active && matchesTurnIdentity(active, turn)) {
+      this.#turnMetadataByChatId.delete(chatId);
+      this.#settledTurnByChatId.set(chatId, active);
+    }
   }
 
   getActiveTurn(chatId: string): TurnEventMetadata | undefined {
@@ -75,101 +96,112 @@ export class AgentEventBus {
     return metadata ? { ...metadata } : undefined;
   }
 
-  markTurnAbortable(chatId: string, turn: TurnEventMetadata): void {
-    const active = this.#turnMetadataByChatId.get(chatId);
-    if (!active || !matchesTurnIdentity(active, turn)) return;
-    const abortable = { ...turn };
-    this.#abortableTurnByChatId.set(chatId, abortable);
-    for (const waiter of [...(this.#abortableWaiters.get(chatId) ?? [])]) {
-      if (matchesTurnIdentity(waiter.turn, abortable)) this.#settleAbortableWaiter(chatId, waiter, true);
-    }
-  }
-
-  waitUntilTurnAbortable(chatId: string, turn: TurnEventMetadata, signal?: AbortSignal): Promise<boolean> {
-    const abortable = this.#abortableTurnByChatId.get(chatId);
-    if (abortable && matchesTurnIdentity(turn, abortable)) return Promise.resolve(true);
-    if (signal?.aborted) return Promise.resolve(false);
-    return new Promise<boolean>((resolve) => {
-      const waiter: AbortableTurnWaiter = {
-        turn: { ...turn },
-        resolve,
-        signal,
-        onAbort: () => this.#settleAbortableWaiter(chatId, waiter, false),
-      };
-      const waiters = this.#abortableWaiters.get(chatId) ?? new Set();
-      waiters.add(waiter);
-      this.#abortableWaiters.set(chatId, waiters);
-      signal?.addEventListener('abort', waiter.onAbort, { once: true });
-    });
-  }
-
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void): void {
-    this.#messageListeners.add(cb);
-  }
-
-  onProcessing(cb: (chatId: string, processing: boolean) => void): void {
-    this.#processingListeners.add(cb);
-  }
-
-  onSessionCreated(cb: (chatId: string) => void): void {
+  onSessionCreated(cb: (chatId: string) => void | Promise<void>): void {
     this.#sessionListeners.add(cb);
   }
 
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
+  onFinished(
+    cb: (
+      chatId: string,
+      exitCode: number,
+      metadata: TurnEventMetadata | undefined,
+      outcome: AgentRunCompletionOutcome,
+    ) => void | Promise<void>,
+  ): void {
     this.#finishedListeners.add(cb);
   }
 
-  onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
+  onFailed(
+    cb: (
+      chatId: string,
+      errorMessage: string,
+      errorCode: string,
+      metadata?: TurnEventMetadata,
+    ) => void | Promise<void>,
+  ): void {
     this.#failedListeners.add(cb);
   }
 
-  #dispatch(event: AgentExecutionEvent): void {
-    const metadata = operationMetadata(event.operation);
-    const active = this.#turnMetadataByChatId.get(event.chatId);
-    if (!active || !matchesTurnIdentity(active, metadata)) {
-      logger.warn(`agents: ignored ${event.type} for a non-active turn`, event.chatId);
+  async publishSession(chatId: string): Promise<void> {
+    await this.#dispatch('session', chatId, this.#sessionListeners, chatId);
+  }
+
+  async publishRunEnded(chatId: string, runId: string, row: LedgerRunEndedRow): Promise<void> {
+    const metadata = this.#terminalMetadata(chatId, runId);
+    if (!metadata) return;
+    this.#settledTurnByChatId.delete(chatId);
+    this.#turnMetadataByChatId.delete(chatId);
+    if (row.outcome === 'failed') {
+      const message = row.error?.message ?? row.error?.code ?? 'Agent run failed';
+      const code = row.error?.code ?? 'INTERNAL_ERROR';
+      await this.#dispatch(
+        'failed terminal',
+        chatId,
+        this.#failedListeners,
+        chatId,
+        message,
+        code,
+        metadata,
+      );
       return;
     }
-    switch (event.type) {
-      case 'messages':
-        for (const listener of this.#messageListeners) listener(event.chatId, [...event.messages], metadata);
-        return;
-      case 'processing':
-        for (const listener of this.#processingListeners) listener(event.chatId, event.processing);
-        return;
-      case 'session-created':
-        for (const listener of this.#sessionListeners) listener(event.chatId);
-        return;
-      case 'finished':
-        this.#clearAbortability(event.chatId);
-        for (const listener of this.#finishedListeners) listener(event.chatId, event.exitCode, metadata);
-        return;
-      case 'failed':
-        this.#clearAbortability(event.chatId);
-        for (const listener of this.#failedListeners) listener(event.chatId, event.error.message, metadata);
-    }
+    await this.#dispatch(
+      'finished terminal',
+      chatId,
+      this.#finishedListeners,
+      chatId,
+      0,
+      metadata,
+      row.outcome,
+    );
   }
 
-  #clearAbortability(chatId: string): void {
-    this.#abortableTurnByChatId.delete(chatId);
-    for (const waiter of [...(this.#abortableWaiters.get(chatId) ?? [])]) {
-      this.#settleAbortableWaiter(chatId, waiter, false);
-    }
+  async #dispatch<Args extends readonly unknown[]>(
+    event: string,
+    chatId: string,
+    listeners: Iterable<(...args: Args) => void | Promise<void>>,
+    ...args: Args
+  ): Promise<void> {
+    await dispatchListenersSequentially(listeners, args, (error) => {
+      logger.error('Agent event listener failed', {
+        chatId,
+        event,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
-  #settleAbortableWaiter(chatId: string, waiter: AbortableTurnWaiter, isAbortable: boolean): void {
-    waiter.signal?.removeEventListener('abort', waiter.onAbort);
-    const waiters = this.#abortableWaiters.get(chatId);
-    waiters?.delete(waiter);
-    if (waiters?.size === 0) this.#abortableWaiters.delete(chatId);
-    waiter.resolve(isAbortable);
+  #setTurn(chatId: string, turn: TurnEventMetadata): void {
+    this.#settledTurnByChatId.delete(chatId);
+    this.#turnMetadataByChatId.set(chatId, turn);
   }
+
+  #terminalMetadata(chatId: string, runId: string): TurnEventMetadata | null {
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (active?.turnId === runId) return active;
+    const settled = this.#settledTurnByChatId.get(chatId);
+    if (settled?.turnId === runId) return settled;
+    logger.warn('Ignored ledger terminal for a non-active turn', { chatId, runId });
+    return null;
+  }
+
 }
 
-function operationMetadata(operation: AgentOperationIdentity): TurnEventMetadata {
+function turnMetadata(opts: TurnEventMetadata): TurnEventMetadata {
   return {
-    commandType: operation.commandType,
-    ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
-    turnId: operation.turnId,
+    ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
+    ...(opts.commandType ? { commandType: opts.commandType } : {}),
+    ...(opts.turnId ? { turnId: opts.turnId } : {}),
+    ...(opts.clientMessageId ? { clientMessageId: opts.clientMessageId } : {}),
+    ...(opts.upstreamRequestId ? { upstreamRequestId: opts.upstreamRequestId } : {}),
+    ...(opts.agentOwnershipEpoch ? { agentOwnershipEpoch: opts.agentOwnershipEpoch } : {}),
+    ...(opts.turnOwner ? { turnOwner: opts.turnOwner } : {}),
   };
+}
+
+function sameTurnIdentity(
+  left: TurnEventMetadata | undefined,
+  right: TurnEventMetadata | undefined,
+): boolean {
+  return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
 }

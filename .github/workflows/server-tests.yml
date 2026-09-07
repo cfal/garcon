@@ -24,15 +24,47 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: canary
 
       - name: Install server dependencies
         working-directory: server
         run: bun install --frozen-lockfile
 
+      - name: Type-check server and provider agents
+        run: bun run typecheck:server
+
       - name: Run server tests
-        shell: bash
-        run: |
-          while IFS= read -r test_file; do
-            bun test "$test_file"
-          done < <(find server -path '*/__tests__/*.test.js' | sort)
+        run: bun run test:server
+
+  transcript-search-scale-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install server dependencies
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Compile Paraglide messages
+        working-directory: web
+        run: bun run i18n:compile
+
+      - name: Run transcript search scale gate
+        run: bun run test:search-gate

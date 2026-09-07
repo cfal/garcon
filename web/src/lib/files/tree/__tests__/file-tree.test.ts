@@ -43,18 +43,27 @@ function entry(
 function response(
 	directoryPath = '/workspace/project',
 	entries: FileTreeEntry[] = [],
+	homeDirectoryPath: string | null = '/workspace',
 ): FileTreeResponse {
+	function breadcrumbsForPath(targetPath: string) {
+		const relativePath = targetPath === '/workspace' ? '' : targetPath.slice('/workspace/'.length);
+		const segments = relativePath ? relativePath.split('/') : [];
+		let breadcrumbPath = '/workspace';
+		const breadcrumbs = [{ name: 'workspace', path: breadcrumbPath }];
+		for (const segment of segments) {
+			breadcrumbPath += `/${segment}`;
+			breadcrumbs.push({ name: segment, path: breadcrumbPath });
+		}
+		return breadcrumbs;
+	}
 	const relativePath =
 		directoryPath === '/workspace' ? '' : directoryPath.slice('/workspace/'.length);
-	const segments = relativePath ? relativePath.split('/') : [];
-	let breadcrumbPath = '/workspace';
-	const breadcrumbs = [{ name: 'workspace', path: breadcrumbPath }];
-	for (const segment of segments) {
-		breadcrumbPath += `/${segment}`;
-		breadcrumbs.push({ name: segment, path: breadcrumbPath });
-	}
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory:
+			homeDirectoryPath === null
+				? null
+				: { path: homeDirectoryPath, breadcrumbs: breadcrumbsForPath(homeDirectoryPath) },
 		directory: {
 			path: directoryPath,
 			relativePath,
@@ -62,7 +71,7 @@ function response(
 				directoryPath === '/workspace'
 					? null
 					: directoryPath.slice(0, directoryPath.lastIndexOf('/')) || '/',
-			breadcrumbs,
+			breadcrumbs: breadcrumbsForPath(directoryPath),
 		},
 		entries,
 	};
@@ -292,13 +301,54 @@ describe('FileTreeStore', () => {
 		await tick();
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/workspace/project', effectiveProjectKey: null },
+			context: { chatId: 'draft', projectPath: '/workspace/project' },
 		});
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
 
 		store.setProjectState(availableProject('/workspace/other', '/workspace/other', 'chat-2'));
 		await tick();
 		expect(store.currentDirectoryPath).toBe('/workspace/other');
+		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([
+		{
+			label: 'unchecked',
+			projectState: {
+				kind: 'unchecked' as const,
+				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+			},
+		},
+		{
+			label: 'unavailable',
+			projectState: {
+				kind: 'unavailable' as const,
+				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+				reason: 'not-found' as const,
+			},
+		},
+	])('blocks file requests while project identity is $label', async ({ projectState }) => {
+		vi.mocked(filesApi.getTree)
+			.mockImplementationOnce(
+				(_request, options) =>
+					new Promise((_resolve, reject) => {
+						options?.signal?.addEventListener('abort', () =>
+							reject(new DOMException('aborted', 'AbortError')),
+						);
+					}),
+			)
+			.mockResolvedValueOnce(response('/workspace/project'));
+		store.setProjectState(availableProject());
+		store.activate();
+		expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+		store.setProjectState(projectState);
+		store.deactivate();
+		store.activate();
+		expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+		store.setProjectState(availableProject());
+		await tick();
 		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
 	});
 
@@ -335,6 +385,24 @@ describe('FileTreeStore', () => {
 		);
 	});
 
+	it('keeps focus on the parent row so repeated upward navigation works', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project/src'))
+			.mockResolvedValueOnce(response('/workspace/project'))
+			.mockResolvedValueOnce(response('/workspace'));
+		store.setProjectState(availableProject('/workspace/project/src'));
+		store.activate();
+		await tick();
+
+		await store.goToParent();
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
+
+		await store.goToParent();
+		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
+	});
+
 	it('navigates to parent and directly back to the chat project', async () => {
 		vi.mocked(filesApi.getTree)
 			.mockResolvedValueOnce(response('/workspace/project'))
@@ -349,6 +417,76 @@ describe('FileTreeStore', () => {
 		expect(store.isAtChatProject).toBe(false);
 		await store.goToChatProject();
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
+	});
+
+	it('navigates to the literal Home directory and no-ops once it arrives', async () => {
+		const homePath = '/workspace/users/me';
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [], homePath))
+			.mockResolvedValueOnce(response(homePath, [], homePath));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		expect(store.isAtHome).toBe(false);
+		const navigation = store.goToHome();
+		expect(store.navigation).toMatchObject({
+			kind: 'loading',
+			target: {
+				path: homePath,
+				label: 'me',
+				breadcrumbs: [
+					{ name: 'workspace', path: '/workspace' },
+					{ name: 'users', path: '/workspace/users' },
+					{ name: 'me', path: homePath },
+				],
+				reason: 'home',
+			},
+		});
+		await navigation;
+
+		expect(store.currentDirectoryPath).toBe(homePath);
+		expect(store.isAtHome).toBe(true);
+		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
+		const callCount = vi.mocked(filesApi.getTree).mock.calls.length;
+		await store.goToHome();
+		expect(filesApi.getTree).toHaveBeenCalledTimes(callCount);
+	});
+
+	it('navigates Home from an error using the retained Home target', async () => {
+		const src = entry('src', 'directory');
+		const homePath = '/workspace/users/me';
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [src], homePath))
+			.mockRejectedValueOnce(new Error('Directory unavailable'))
+			.mockResolvedValueOnce(response(homePath, [], homePath));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		await store.enterDirectory(src);
+		expect(store.navigation.kind).toBe('error');
+		expect(store.homeDirectory?.path).toBe(homePath);
+
+		await store.goToHome();
+
+		expect(store.currentDirectoryPath).toBe(homePath);
+		expect(store.isAtHome).toBe(true);
+	});
+
+	it('leaves Home unavailable without treating the file root as Home', async () => {
+		vi.mocked(filesApi.getTree).mockResolvedValueOnce(response('/workspace', [], null));
+		store.setProjectState(availableProject('/workspace'));
+		store.activate();
+		await tick();
+
+		expect(store.homeDirectory).toBeNull();
+		expect(store.isAtHome).toBe(false);
+		const callCount = vi.mocked(filesApi.getTree).mock.calls.length;
+
+		await store.goToHome();
+
+		expect(filesApi.getTree).toHaveBeenCalledTimes(callCount);
 	});
 
 	it('restores row focus after breadcrumb navigation', async () => {
@@ -380,14 +518,20 @@ describe('FileTreeStore', () => {
 		expect(sortEntries).toHaveBeenCalledTimes(callsAfterMaterialization);
 	});
 
-	it('persists breadcrumb and optional-column defaults and changes', () => {
+	it('persists breadcrumb, icon, view, and optional-column preferences', () => {
 		expect(store.showBreadcrumbs).toBe(true);
+		expect(store.showIcons).toBe(true);
+		expect(store.viewPreference).toBe('responsive');
 		expect(store.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 
 		store.setShowBreadcrumbs(false);
+		store.setShowIcons(false);
+		store.setAlwaysUseDetailedRows(true);
 		store.setColumnVisible('permissions', true);
 
 		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs)).toBe('false');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowIcons)).toBe('false');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeViewPreference)).toBe('always-details');
 		expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility) ?? '')).toEqual({
 			size: true,
 			modified: true,
@@ -397,23 +541,30 @@ describe('FileTreeStore', () => {
 
 	it('loads valid preferences and ignores malformed values', () => {
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs, 'false');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowIcons, 'false');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewPreference, 'always-details');
 		mockStorage.set(
 			LOCAL_STORAGE_KEYS.fileTreeColumnVisibility,
 			JSON.stringify({ size: false, modified: true, permissions: true }),
 		);
 		const loaded = new FileTreeStore();
 		expect(loaded.showBreadcrumbs).toBe(false);
+		expect(loaded.showIcons).toBe(false);
+		expect(loaded.viewPreference).toBe('always-details');
 		expect(loaded.visibleColumnKeys).toEqual(['name', 'modified', 'permissions']);
 
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility, '{bad');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowIcons, 'sometimes');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewPreference, 'tiles');
 		const malformed = new FileTreeStore();
+		expect(malformed.viewPreference).toBe('responsive');
+		expect(malformed.showIcons).toBe(true);
 		expect(malformed.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 	});
 
 	it('resets hidden active sorting and resizes only adjacent visible columns', () => {
 		store.setColumnVisible('permissions', true);
-		store.setSortKey('size');
-		store.setSortDirection('desc');
+		store.setSort('size', 'desc');
 		store.setColumnVisible('size', false);
 		expect(store.sortKey).toBe('name');
 		expect(store.sortDirection).toBe('asc');
@@ -428,5 +579,19 @@ describe('FileTreeStore', () => {
 		expect(resized.permissions).toBe(DEFAULT_FILE_TREE_COLUMN_WIDTHS.permissions);
 		expect(resized.name).toBeGreaterThan(DEFAULT_FILE_TREE_COLUMN_WIDTHS.name);
 		expect(resized.modified).toBeLessThan(DEFAULT_FILE_TREE_COLUMN_WIDTHS.modified);
+	});
+
+	it('selects only visible sort keys and starts a new key ascending', () => {
+		store.setSort('name', 'desc');
+
+		store.selectSortKey('modified');
+		expect(store.sortKey).toBe('modified');
+		expect(store.sortDirection).toBe('asc');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortKey)).toBe('modified');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortDirection)).toBe('asc');
+
+		store.selectSortKey('permissions');
+		store.selectSortKey('invalid');
+		expect(store.sortKey).toBe('modified');
 	});
 });

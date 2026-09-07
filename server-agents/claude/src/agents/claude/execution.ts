@@ -1,133 +1,111 @@
 import crypto from 'node:crypto';
-import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type { ClaudeThinkingMode } from '@garcon/common/chat-modes';
 import {
   AgentIntegrationError,
-  type AgentExecution,
-  type AgentExecutionContext,
   type AgentHost,
   type AgentLogger,
+  type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
-import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
+import {
+  runtimeOperation,
+  type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
+  type AgentRuntimeExecutionContext,
+} from '@garcon/server-agent-common/execution/runtime-events';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import {
   buildClaudeEndpointRuntime,
   buildClaudeHostEnvironment,
 } from './endpoint-runtime.js';
-import { createClaudeNativePath } from './native-path.js';
-import { claudeEventMetadata } from './runtime-types.js';
+import {
+  createClaudeNativePath,
+  prepareClaudeNativeSessionRelocation,
+} from './native-path.js';
 import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
 
-export class ClaudeExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
-  readonly #operations = new AgentOperationTracker();
-
+export class ClaudeExecution implements AgentRuntimeExecution {
   constructor(
     private readonly host: AgentHost,
     private readonly runtime: ClaudeCliRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
     private readonly logger: AgentLogger,
     private readonly config: ClaudeConfig,
+  ) {}
+
+  async start(
+    request: Parameters<AgentRuntimeExecution['start']>[0],
+    publish: AgentRuntimePublisher,
   ) {
-    runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({ type: 'messages', chatId, messages, operation });
+    request.admission.signal.throwIfAborted();
+    const envOverrides = await this.#endpointEnvironment(request);
+    const agentSessionId = crypto.randomUUID();
+    const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
+      configHomeDir: envOverrides?.CLAUDE_CONFIG_DIR,
+      logger: this.logger,
     });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
-    });
-    runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
-    });
-    runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({
-        type: 'failed',
-        chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
-      });
-      this.#operations.finish(chatId, operation);
-    });
-  }
-
-  async start(request: Parameters<AgentExecution['start']>[0]) {
-    this.#operations.register(request.chatId, request.operation);
-    try {
-      request.admission.signal.throwIfAborted();
-      const envOverrides = await this.#endpointEnvironment(request);
-      const agentSessionId = crypto.randomUUID();
-      const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
-        configHomeDir: envOverrides?.CLAUDE_CONFIG_DIR,
-        logger: this.logger,
-      });
-      request.admission.signal.throwIfAborted();
-      const runtimeRequest = {
-        ...executionFields(request),
+    request.admission.signal.throwIfAborted();
+    const runtimeRequest = {
+      ...executionFields(request),
+      agentSessionId,
+      command: `${request.carriedContext?.prefix ?? ''}${request.prompt}`,
+      images: request.attachments,
+      envOverrides,
+      operation: runtimeOperation(request.runId, publish),
+      onSessionActivated: () => undefined,
+    };
+    const established = {
+      agentSessionId,
+      nativeSession: this.nativeSessions.encode({
+        path: nativePath,
         agentSessionId,
-        command: request.carryOver.length > 0
-          ? `${renderTranscriptSeed([...request.carryOver])}\n\n${request.prompt}`
-          : request.prompt,
-        images: request.attachments,
-        envOverrides,
-      };
-      void this.runtime.startClaudeCliSession(runtimeRequest).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error('Claude session start failed', {
-          chatId: request.chatId,
-          error: message,
-        });
-        this.runtime.failClaudeInternalSession(
-          agentSessionId,
-          request.chatId,
-          message,
-          claudeEventMetadata(runtimeRequest, 'chat-start'),
-        );
-      });
-      const session = {
-        agentSessionId,
-        nativeSession: this.nativeSessions.encode({
-          path: nativePath,
-          agentSessionId,
-          modelEndpointId: request.endpoint?.endpointId ?? null,
-        }),
-      };
-      this.#events.emit({
-        type: 'session-created',
+        modelEndpointId: request.endpoint?.endpointId ?? null,
+      }),
+      nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, agentSessionId),
+    };
+    let resolveActivation!: () => void;
+    let rejectActivation!: (error: unknown) => void;
+    const activation = new Promise<void>((resolve, reject) => {
+      resolveActivation = resolve;
+      rejectActivation = reject;
+    });
+    runtimeRequest.onSessionActivated = () => {
+      publish({ type: 'session', session: established });
+      resolveActivation();
+    };
+    void this.runtime.startClaudeCliSession(runtimeRequest).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('Claude session start failed', {
         chatId: request.chatId,
-        session,
-        operation: request.operation,
+        error: message,
       });
-      return session;
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+      this.runtime.failClaudeInternalSession(
+        agentSessionId,
+        request.chatId,
+        message,
+        runtimeRequest.operation,
+      );
+      rejectActivation(error);
+    });
+    await activation;
+    return established;
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
-    this.#operations.register(request.chatId, request.operation);
-    try {
-      await this.runtime.runClaudeTurn({
-        ...executionFields(request),
-        agentSessionId: request.agentSessionId,
-        command: request.prompt,
-        images: request.attachments,
-        nativePath: this.nativeSessions.decode(request.nativeSession).path,
-        envOverrides: await this.#endpointEnvironment(request),
-      });
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+  async resume(
+    request: Parameters<AgentRuntimeExecution['resume']>[0],
+    publish: AgentRuntimePublisher,
+  ): Promise<void> {
+    await this.runtime.runClaudeTurn({
+      ...executionFields(request),
+      agentSessionId: request.agentSessionId,
+      command: request.prompt,
+      images: request.attachments,
+      nativePath: this.nativeSessions.decode(request.nativeSession).path,
+      envOverrides: await this.#endpointEnvironment(request),
+      operation: runtimeOperation(request.runId, publish),
+    });
   }
 
   async abort(agentSessionId: string): Promise<boolean> {
@@ -148,7 +126,7 @@ export class ClaudeExecution implements AgentExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
   ): Promise<void> {
     this.runtime.setInternalPermissionMode(agentSessionId, configuration.permissionMode);
     this.runtime.setInternalThinkingMode(agentSessionId, configuration.thinkingMode);
@@ -158,32 +136,45 @@ export class ClaudeExecution implements AgentExecution {
     );
   }
 
-  async respondToPermission(
-    permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentExecution['respondToPermission']>>[1],
-  ): Promise<void> {
-    this.runtime.resolveInternalToolApproval(permissionRequestId, decision);
-  }
-
   async prepareProjectPathUpdate(
-    request: Parameters<NonNullable<AgentExecution['prepareProjectPathUpdate']>>[0],
-  ): Promise<void> {
+    request: Parameters<import('@garcon/server-agent-interface').AgentProjectPathUpdates['prepare']>[0],
+  ): Promise<AgentProjectPathUpdatePreparation | void> {
     request.signal.throwIfAborted();
+    const agentSessionId = request.chat.agentSessionId;
+    if (!agentSessionId) return;
+
     const native = this.nativeSessions.decode(request.chat.nativeSession);
     await this.runtime.prepareClaudeProjectPathUpdate({
       chatId: request.chat.chatId,
-      agentSessionId: request.chat.agentSessionId,
+      agentSessionId,
       previousProjectPath: request.chat.projectPath,
       nextProjectPath: request.nextProjectPath,
       nativePath: native.path,
     });
+    request.signal.throwIfAborted();
+
+    const relocation = await prepareClaudeNativeSessionRelocation({
+      previousProjectPath: request.chat.projectPath,
+      nextProjectPath: request.nextProjectPath,
+      agentSessionId,
+      nativePath: native.path,
+      configHomeDir: this.config.configHomeDir() ?? undefined,
+      logger: this.logger,
+    });
+
+    return {
+      nativeSession: this.nativeSessions.encode({
+        path: relocation.nativePath,
+        agentSessionId,
+        modelEndpointId: native.modelEndpointId,
+      }),
+      commit: relocation.commit,
+      rollback: relocation.rollback,
+    };
   }
 
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
-    return this.#events.subscribe(listener);
-  }
 
-  async #endpointEnvironment(request: AgentExecutionContext) {
+  async #endpointEnvironment(request: AgentRuntimeExecutionContext) {
     const endpoint = await resolveAgentEndpoint(
       this.host,
       request.endpoint,
@@ -203,7 +194,7 @@ export class ClaudeExecution implements AgentExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContext) {
+function executionFields(request: AgentRuntimeExecutionContext) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
@@ -211,14 +202,10 @@ function executionFields(request: AgentExecutionContext) {
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
     claudeThinkingMode: claudeThinkingMode(request.settings.values.claudeThinkingMode),
-    clientRequestId: request.operation.clientRequestId ?? undefined,
-    clientMessageId: request.operation.clientMessageId ?? undefined,
-    turnId: request.operation.turnId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    onAbortable: () => request.admission.markAbortable(),
   };
 }
 

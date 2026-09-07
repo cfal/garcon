@@ -1,5 +1,14 @@
 import type { HttpErrorResponse } from './http-error.js';
 
+export interface UpdateChatTitleRequest {
+  chatId: string;
+  title: string;
+}
+
+export interface UpdateChatTitleResponse {
+  success: true;
+}
+
 export interface GenerateChatTitleRequest {
   chatId: string;
   message: string;

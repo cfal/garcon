@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CompactionMessage } from '$shared/chat-types';
 import CompactionRow from '../CompactionRow.svelte';
 
@@ -36,5 +36,30 @@ describe('CompactionRow', () => {
 		});
 
 		expect(screen.queryByText(/tokens/)).toBeNull();
+	});
+
+	it('supports caller-owned disclosure state for virtual remounts', async () => {
+		const onOpenChange = vi.fn();
+		render(CompactionRow, {
+			message: new CompactionMessage(TS, 'manual', 'Persisted summary'),
+			open: true,
+			onOpenChange,
+		});
+
+		expect(screen.getByText('Persisted summary')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide summary' }));
+		expect(onOpenChange).toHaveBeenCalledWith(false);
+	});
+
+	it('resolves explicit chat links without autolinking bare IDs in summaries', () => {
+		const chatId = '1788592720180699';
+		const { container } = render(CompactionRow, {
+			message: new CompactionMessage(TS, 'manual', `${chatId} [Open target](/chat/${chatId})`),
+			open: true,
+			resolveChatReference: () => ({ title: 'Target chat', isCurrent: false }),
+		});
+
+		expect(screen.getByRole('link', { name: 'Open target' })).toBeTruthy();
+		expect(container.querySelectorAll('[data-chat-reference-id]')).toHaveLength(1);
 	});
 });

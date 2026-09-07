@@ -1,7 +1,6 @@
 import type {
   CreateSnippetRequest,
   ExpandSnippetRequest,
-  ReorderSnippetsRequest,
   RemoveSnippetRequest,
   SnippetsMutationResponse,
   UpdateSnippetRequest,
@@ -106,38 +105,6 @@ export default function createSnippetRoutes(
     }
   }
 
-  async function putOrder(body: ReorderSnippetsRequest): Promise<Response> {
-    const revision = expectedRevision(body?.expectedRevision);
-    const ids = Array.isArray(body?.orderedSnippetIds)
-      ? body.orderedSnippetIds.filter(
-          (id): id is string => typeof id === 'string',
-        )
-      : null;
-    if (
-      revision === null ||
-      !ids ||
-      ids.length !== body.orderedSnippetIds.length
-    ) {
-      return jsonError(
-        'expectedRevision and orderedSnippetIds are required',
-        400,
-        'SNIPPET_VALIDATION_FAILED',
-      );
-    }
-    try {
-      const snapshot = await snippets.reorder({
-        expectedRevision: revision,
-        orderedSnippetIds: ids,
-      });
-      return Response.json({
-        success: true,
-        snapshot,
-      } satisfies SnippetsMutationResponse);
-    } catch (error) {
-      return snippetError(error);
-    }
-  }
-
   async function postExpand(body: ExpandSnippetRequest): Promise<Response> {
     try {
       return Response.json(await snippets.expand(body));
@@ -153,7 +120,6 @@ export default function createSnippetRoutes(
       PUT: withJsonBody(putSnippet),
       DELETE: withJsonBody(deleteSnippet),
     },
-    '/api/v1/snippets/reorder': { PUT: withJsonBody(putOrder) },
     '/api/v1/snippets/expand': { POST: withJsonBody(postExpand) },
   };
 }

@@ -1,11 +1,23 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import type { ChatQueueState, QueueEntry, QueuePause } from '$lib/types/chat';
+	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
+	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
+	import {
+		promptEditorSelectionFromTextarea,
+		restorePromptEditorSelection,
+	} from '$lib/prompt-editor/prompt-editor-selection.js';
+	import { getNotifications, getTransientLayers } from '$lib/context';
 	import { ApiError } from '$lib/api/client.js';
+	import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
+	import { errorMessage } from '$lib/utils/error-message.js';
 	import QueuedInputEditorPanel from './QueuedInputEditorPanel.svelte';
 	import QueuedInputRow from './QueuedInputRow.svelte';
+	import { QueuedInputRefinementController } from './queued-input-refinement-controller.js';
+	import { isQueuedInputDragData } from './queued-input-dnd.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Pause from '@lucide/svelte/icons/pause';
@@ -19,23 +31,69 @@
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 		onDelete: (entryId: string) => Promise<void>;
+		onMove: (
+			source: QueueEntry,
+			target: QueueEntry,
+			placement: QueueEntryPlacement,
+			reorderRevision: number,
+		) => Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
 	}
 
-	let { open, queue, editor, onClose, onCreate, onReplace, onDelete, onPause, onResume }: Props =
-		$props();
+	let {
+		open,
+		queue,
+		editor,
+		onClose,
+		onCreate,
+		onReplace,
+		onDelete,
+		onMove,
+		onPause,
+		onResume,
+	}: Props = $props();
+	const notifications = getNotifications();
+	const transientLayers = getTransientLayers();
+	const expandedEditor = new PromptEditorDialogState();
+	// Lives at dialog lifetime so a pending refinement survives the draft card
+	// relocating from its inline row to the departed-draft recovery slot.
+	const refinement = new QueuedInputRefinementController({
+		get editor() {
+			return editor;
+		},
+		expandedEditor,
+		notifications,
+		transientLayers,
+		get textarea() {
+			return editorTextarea;
+		},
+		get startBlocked() {
+			return !open;
+		},
+	});
+	let editorTextarea = $state<HTMLTextAreaElement | null>(null);
 	let listContainer: HTMLDivElement | null = $state(null);
 	let listHeading: HTMLHeadingElement | null = $state(null);
 	let deletingIds = $state<Set<string>>(new Set());
 	let rowErrors = $state<Record<string, string>>({});
 	let queueMutation = $state<'idle' | 'pausing' | 'resuming'>('idle');
 	let queueMutationError = $state<string | null>(null);
+	let movingEntryId = $state<string | null>(null);
+	let moveError = $state<string | null>(null);
+	let moveAnnouncement = $state('');
+	let dragEnabled = $state(false);
+	let moveFocusFrame: number | null = null;
 
 	const entries = $derived(queue?.entries ?? []);
 	const queuedCount = $derived(entries.length);
 	const editorOpen = $derived(editor.phase !== 'closed');
+	const refinementPending = $derived(refinement.pending);
+	// A live entry edits in place inside the list; a departed draft (sent or
+	// removed) is recovered above the list without a stale queue position.
+	const editorInline = $derived(editorOpen && editor.liveEntry !== null);
 	const pause = $derived(queue?.pause ?? null);
+	const queueSteering = $derived(queue?.steeringEntryId != null);
 	const pauseDetail = $derived(pause ? queuePauseDetail(pause) : null);
 	const affectedEntryRemoved = $derived(
 		Boolean(
@@ -45,6 +103,24 @@
 			!entries.some((entry) => entry.id === pause.entryId),
 		),
 	);
+	const movesBlocked = $derived(
+		editorOpen || deletingIds.size > 0 || movingEntryId !== null || queueSteering,
+	);
+
+	onMount(() => {
+		if (typeof window.matchMedia !== 'function') return;
+		const media = window.matchMedia('(hover: hover) and (pointer: fine)');
+		const updateDragCapability = () => (dragEnabled = media.matches);
+		updateDragCapability();
+		media.addEventListener('change', updateDragCapability);
+		return () => media.removeEventListener('change', updateDragCapability);
+	});
+
+	onDestroy(() => {
+		if (moveFocusFrame !== null) cancelAnimationFrame(moveFocusFrame);
+		refinement.destroy();
+		expandedEditor.close();
+	});
 
 	$effect(() => {
 		const liveIds = new Set(entries.map((entry) => entry.id));
@@ -59,10 +135,38 @@
 		}
 	});
 
-	function errorMessage(error: unknown): string {
-		if (error instanceof ApiError || error instanceof Error) return error.message;
-		return String(error);
-	}
+	$effect(() => {
+		if (!listContainer || !dragEnabled || entries.length === 0) return;
+		let disposed = false;
+		let cleanup: (() => void) | undefined;
+		const frame = requestAnimationFrame(() => {
+			if (
+				!listContainer ||
+				listContainer.scrollHeight <= listContainer.clientHeight
+			) {
+				return;
+			}
+			void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
+				if (
+					disposed ||
+					!listContainer ||
+					listContainer.scrollHeight <= listContainer.clientHeight
+				) {
+					return;
+				}
+				cleanup = module.autoScrollForElements({
+					element: listContainer,
+					canScroll: ({ source }) => isQueuedInputDragData(source.data),
+					getAllowedAxis: () => 'vertical',
+				});
+			});
+		});
+		return () => {
+			disposed = true;
+			cancelAnimationFrame(frame);
+			cleanup?.();
+		};
+	});
 
 	function queuePauseDetail(value: QueuePause): string | null {
 		switch (value.kind) {
@@ -82,18 +186,20 @@
 	}
 
 	function beginEdit(entry: QueueEntry): void {
-		if (editorOpen || editor.mutation !== 'idle') return;
+		if (editorOpen || editor.mutation !== 'idle' || queueSteering) return;
 		editor.begin(entry);
 	}
 
 	function closeEditor(restoreEntryId: string | null = editor.entryId): void {
+		refinement.abort();
+		expandedEditor.close();
 		editor.close();
 		if (!restoreEntryId) return;
 		void tick().then(() => {
 			const editButton = [
 				...(listContainer?.querySelectorAll<HTMLButtonElement>('[data-queue-edit-id]') ?? []),
 			].find((button) => button.dataset.queueEditId === restoreEntryId);
-			if (editButton) {
+			if (editButton && !editButton.disabled) {
 				editButton.focus();
 				return;
 			}
@@ -101,11 +207,32 @@
 		});
 	}
 
+	function openExpandedEditor(): void {
+		if (editor.mutation !== 'idle' || refinement.pending || !editorTextarea) return;
+		const selection = promptEditorSelectionFromTextarea(editorTextarea);
+		editorTextarea.focus({ preventScroll: true });
+		expandedEditor.show(selection);
+	}
+
+	async function closeExpandedEditor(): Promise<void> {
+		const selection = expandedEditor.selection;
+		expandedEditor.close();
+		await tick();
+		if (!open || !editorTextarea) return;
+		restorePromptEditorSelection(editorTextarea, selection);
+		editorTextarea.focus({ preventScroll: true });
+	}
+
+	function handleExpandedTextChange(text: string): void {
+		if (!open || refinement.pending || editor.mutationBlocked || editor.draft === text) return;
+		editor.draft = text;
+	}
+
 	async function mutateQueueControl(
 		mutation: Exclude<typeof queueMutation, 'idle'>,
 		action: () => Promise<void>,
 	): Promise<void> {
-		if (queueMutation !== 'idle') return;
+		if (queueMutation !== 'idle' || queueSteering) return;
 		queueMutation = mutation;
 		queueMutationError = null;
 		try {
@@ -118,7 +245,7 @@
 	}
 
 	async function deleteEntry(entryId: string): Promise<void> {
-		if (deletingIds.has(entryId)) return;
+		if (deletingIds.has(entryId) || queueSteering) return;
 		deletingIds = new Set([...deletingIds, entryId]);
 		const nextErrors = { ...rowErrors };
 		delete nextErrors[entryId];
@@ -139,12 +266,121 @@
 			deletingIds = nextDeleting;
 		}
 	}
+
+	function moveFailureMessage(error: unknown): string {
+		if (error instanceof CommandOutcomeUnknownError) return m.chat_queue_move_unknown();
+		if (error instanceof ApiError) {
+			if (
+				error.errorCode === 'QUEUE_ENTRY_REORDER_CONFLICT' ||
+				error.errorCode === 'QUEUE_ENTRY_REVISION_CONFLICT'
+			) {
+				return m.chat_queue_move_conflict();
+			}
+			if (
+				error.errorCode === 'QUEUE_ENTRY_ALREADY_SENT' ||
+				error.errorCode === 'QUEUE_ENTRY_NOT_FOUND'
+			) {
+				return m.chat_queue_move_departed();
+			}
+		}
+		return errorMessage(error);
+	}
+
+	async function moveRelative(
+		sourceEntryId: string,
+		targetEntryId: string,
+		placement: QueueEntryPlacement,
+	): Promise<void> {
+		if (movesBlocked || !queue) return;
+		const source = entries.find((entry) => entry.id === sourceEntryId);
+		const target = entries.find((entry) => entry.id === targetEntryId);
+		if (!source || !target) {
+			moveError = m.chat_queue_move_conflict();
+			return;
+		}
+
+		movingEntryId = source.id;
+		moveError = null;
+		moveAnnouncement = '';
+		try {
+			await onMove(source, target, placement, queue.reorderRevision);
+			moveAnnouncement = m.chat_queue_move_success();
+		} catch (error) {
+			moveError = moveFailureMessage(error);
+		} finally {
+			if (movingEntryId === source.id) movingEntryId = null;
+		}
+	}
+
+	async function moveEntry(entryId: string, delta: -1 | 1): Promise<void> {
+		const sourceIndex = entries.findIndex((entry) => entry.id === entryId);
+		if (sourceIndex < 0) {
+			moveError = m.chat_queue_move_conflict();
+			return;
+		}
+		const target = entries[sourceIndex + delta];
+		if (!target) return;
+		await moveRelative(entryId, target.id, delta === -1 ? 'before' : 'after');
+	}
+
+	function focusMoveButton(
+		entryId: string,
+		preferredDirection?: 'up' | 'down',
+	): void {
+		const buttons = [
+			...(listContainer?.querySelectorAll<HTMLButtonElement>('[data-queue-move-id]') ?? []),
+		].filter((button) => button.dataset.queueMoveId === entryId && !button.disabled);
+		const preferredButton = preferredDirection
+			? buttons.find((button) => button.dataset.queueMoveDirection === preferredDirection)
+			: undefined;
+		const button = preferredButton ?? buttons[0];
+		if (button) {
+			button.focus();
+			return;
+		}
+		listHeading?.focus();
+	}
+
+	function scheduleMoveFocus(
+		entryId: string,
+		preferredDirection?: 'up' | 'down',
+	): void {
+		if (moveFocusFrame !== null) cancelAnimationFrame(moveFocusFrame);
+		moveFocusFrame = requestAnimationFrame(() => {
+			moveFocusFrame = null;
+			focusMoveButton(entryId, preferredDirection);
+		});
+	}
+
+	async function dropEntry(
+		sourceEntryId: string,
+		targetEntryId: string,
+		placement: QueueEntryPlacement,
+	): Promise<void> {
+		await moveRelative(sourceEntryId, targetEntryId, placement);
+		await tick();
+		focusMoveButton(sourceEntryId);
+	}
 </script>
 
 {#snippet failed(error: unknown)}
 	<div class="border-b border-border px-5 py-4 text-sm text-destructive">
 		{m.chat_queue_item_render_failed({ detail: errorMessage(error) })}
 	</div>
+{/snippet}
+
+{#snippet editorPanel()}
+	<QueuedInputEditorPanel
+		{editor}
+		bind:textarea={editorTextarea}
+		canRefinePrompt={refinement.canStart}
+		isPromptRefinementPending={refinementPending}
+		{onCreate}
+		{onReplace}
+		onExpand={openExpandedEditor}
+		onRefinePrompt={() => refinement.handleAction()}
+		onClose={closeEditor}
+	/>
 {/snippet}
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
@@ -178,7 +414,7 @@
 					<button
 						type="button"
 						onclick={() => void mutateQueueControl('resuming', () => onResume(pause.id))}
-						disabled={queueMutation !== 'idle'}
+						disabled={queueMutation !== 'idle' || queueSteering}
 						class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					>
 						{#if queueMutation === 'resuming'}
@@ -194,7 +430,7 @@
 					<button
 						type="button"
 						onclick={() => void mutateQueueControl('pausing', onPause)}
-						disabled={queueMutation !== 'idle'}
+						disabled={queueMutation !== 'idle' || queueSteering}
 						class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					>
 						{#if queueMutation === 'pausing'}
@@ -209,16 +445,25 @@
 			{#if queueMutationError}
 				<p class="mt-2 text-sm text-destructive" role="alert">{queueMutationError}</p>
 			{/if}
+			{#if moveError}
+				<p class="mt-2 text-sm text-destructive" role="alert">{moveError}</p>
+			{/if}
+			<p class="sr-only" aria-live="polite" aria-atomic="true">{moveAnnouncement}</p>
 		</Dialog.Header>
 
-		{#if editorOpen}
-			<QueuedInputEditorPanel {editor} {onCreate} {onReplace} onClose={closeEditor} />
-		{/if}
-
-		<div bind:this={listContainer} class="min-h-0 flex-1 overflow-y-auto">
+		<div
+			bind:this={listContainer}
+			class="min-h-0 flex-1 overflow-y-auto"
+			{@attach refinementPending && !expandedEditor.open && refinement.layerAttachment}
+		>
 			<h3 bind:this={listHeading} tabindex="-1" class="sr-only" data-queue-list-heading>
 				{m.chat_queue_dialog_title()}
 			</h3>
+			{#if editorOpen && !editorInline}
+				<div class="border-b border-border bg-muted/30 px-5 py-4 sm:px-6">
+					{@render editorPanel()}
+				</div>
+			{/if}
 			{#if entries.length === 0}
 				<div
 					class="flex min-h-40 items-center justify-center px-5 py-10 text-center text-sm text-muted-foreground"
@@ -226,24 +471,66 @@
 					{m.chat_queue_empty()}
 				</div>
 			{:else}
-				<div class="divide-y divide-border">
+				<ol class="divide-y divide-border">
 					{#each entries as entry, index (entry.id)}
 						<svelte:boundary {failed}>
-							<QueuedInputRow
-								{entry}
-								position={index + 1}
-								error={rowErrors[entry.id]}
-								deleting={deletingIds.has(entry.id)}
-								editDisabled={editorOpen || deletingIds.has(entry.id)}
-								deleteDisabled={deletingIds.has(entry.id) ||
-									(editor.entryId === entry.id && editor.mutation !== 'idle')}
-								onEdit={beginEdit}
-								onDelete={(entryId) => void deleteEntry(entryId)}
-							/>
+							{#if editorInline && editor.entryId === entry.id}
+								<li class="flex items-start gap-3 px-5 py-4 sm:px-6">
+									<span class="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+										{index + 1}
+									</span>
+									<div class="min-w-0 flex-1">
+										{@render editorPanel()}
+									</div>
+								</li>
+							{:else}
+								<QueuedInputRow
+									{entry}
+									position={index + 1}
+									error={rowErrors[entry.id]}
+									steering={queue?.steeringEntryId === entry.id}
+									deleting={deletingIds.has(entry.id)}
+									editDisabled={editorOpen ||
+										queueSteering ||
+										deletingIds.has(entry.id) ||
+										movingEntryId === entry.id}
+									deleteDisabled={deletingIds.has(entry.id) ||
+										queueSteering ||
+										(editor.entryId === entry.id && editor.mutation !== 'idle') ||
+										movingEntryId === entry.id}
+									movePending={movingEntryId === entry.id}
+									moveBlocked={movesBlocked}
+									canMoveUp={index > 0}
+									canMoveDown={index < entries.length - 1}
+									dragEnabled={dragEnabled && !queueSteering}
+									onEdit={beginEdit}
+									onDelete={(entryId) => void deleteEntry(entryId)}
+									onMove={moveEntry}
+									onMoveSettled={scheduleMoveFocus}
+									onDrop={dropEntry}
+								/>
+							{/if}
 						</svelte:boundary>
 					{/each}
-				</div>
+				</ol>
 			{/if}
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
+
+{#if open && expandedEditor.open}
+	<PromptEditorDialog
+		title={m.chat_queue_expanded_editor_title()}
+		editorLabel={m.chat_queue_expanded_editor_label()}
+		text={editor.draft}
+		selection={expandedEditor.selection}
+		focusRequestId={expandedEditor.focusRequestId}
+		readOnly={refinementPending || editor.mutationBlocked || editor.mutation !== 'idle'}
+		canRefinePrompt={refinement.canStart}
+		isPromptRefinementPending={refinementPending}
+		onTextChange={handleExpandedTextChange}
+		onSelectionChange={(selection) => expandedEditor.updateSelection(selection)}
+		onRefinePrompt={() => refinement.handleAction()}
+		onClose={() => void closeExpandedEditor()}
+	/>
+{/if}

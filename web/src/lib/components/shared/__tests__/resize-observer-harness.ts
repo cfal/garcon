@@ -26,6 +26,15 @@ export class ResizeObserverHarness implements ResizeObserver {
 			candidate.observed.has(target),
 		);
 		if (!observer) throw new Error('No ResizeObserver is watching the target element.');
+		ResizeObserverHarness.emitFrom(observer, target, width, height);
+	}
+
+	static emitFrom(
+		observer: ResizeObserverHarness,
+		target: Element,
+		width: number,
+		height = 0,
+	): void {
 		const contentRect = {
 			x: 0,
 			y: 0,

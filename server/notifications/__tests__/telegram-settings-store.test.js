@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { CorruptStateFileError, QUARANTINE_INFIX } from '../../lib/json-file-store.ts';
 import { TelegramSettingsStore } from '../telegram-settings-store.ts';
 
 describe('TelegramSettingsStore', () => {
@@ -42,6 +43,37 @@ describe('TelegramSettingsStore', () => {
     const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
     expect(raw.telegram.botToken).toBe('bot-token');
     expect(raw.telegram.botUsername).toBe('garcon_bot');
+  });
+
+  it('does not publish Telegram mutations that fail to persist', async () => {
+    const store = new TelegramSettingsStore(filePath);
+    await store.init();
+    const rename = spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk full'));
+
+    try {
+      await expect(store.setBotToken(
+        'bot-token',
+        { id: 123, username: 'garcon_bot', firstName: 'Garcon' },
+      )).rejects.toThrow('disk full');
+    } finally {
+      rename.mockRestore();
+    }
+
+    expect(store.isConfigured).toBe(false);
+    expect(store.getBotToken()).toBe('');
+    expect(store.getPublicStatus().botTokenAvailable).toBe(false);
+  });
+
+  it('quarantines corrupt settings without overwriting the bot token', async () => {
+    const corruptBytes = '{"version":2,"telegram":{"botToken":"bot-secret"}}';
+    await fs.writeFile(filePath, corruptBytes, { mode: 0o600 });
+
+    await expect(new TelegramSettingsStore(filePath).init()).rejects.toBeInstanceOf(CorruptStateFileError);
+
+    const [quarantineName] = (await fs.readdir(tmpDir)).filter((entry) =>
+      entry.startsWith(`notifications.json${QUARANTINE_INFIX}`));
+    expect(await fs.readFile(path.join(tmpDir, quarantineName), 'utf8')).toBe(corruptBytes);
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('clears all Telegram settings with the bot token', async () => {

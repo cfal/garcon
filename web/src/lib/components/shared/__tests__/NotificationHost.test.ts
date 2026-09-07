@@ -14,6 +14,8 @@ describe('NotificationHost', () => {
 
 		render(NotificationHost, { notifications });
 
+		const region = screen.getByRole('region', { name: 'Notifications' });
+		expect(region.getAttribute('aria-live')).toBeNull();
 		expect(screen.getByRole('alert').textContent).toContain('Delete failed');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));
@@ -53,14 +55,20 @@ describe('NotificationHost', () => {
 		expect(screen.getByRole('alert').textContent).toContain('Connection lost');
 	});
 
-	it('uses the provided desktop left offset', () => {
+	it('uses the provided desktop inline-start offset', () => {
 		const notifications = new NotificationsStore();
 		notifications.info('Saved');
 
-		const { container } = render(NotificationHost, { notifications, desktopLeftPx: 336 });
+		const { container } = render(NotificationHost, {
+			notifications,
+			desktopInlineStartPx: 336,
+		});
 
 		expect(container.querySelector('section')?.getAttribute('style')).toContain(
-			'--notification-left-desktop: 336px',
+			'--notification-inline-start-desktop: 336px',
+		);
+		expect(container.querySelector('section')?.classList).toContain(
+			'sm:start-[var(--notification-inline-start-desktop)]',
 		);
 	});
 });

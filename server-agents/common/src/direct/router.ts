@@ -1,7 +1,5 @@
 import type { ApiProtocol } from '@garcon/common/api-providers';
-import type { ChatMessage } from '@garcon/common/chat-types';
-import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import crypto from 'node:crypto';
 import {
   AnthropicCompatibleChatRuntime,
   runAnthropicCompatibleSingleQuery,
@@ -23,53 +21,17 @@ import type {
   DirectStartedSession,
   DirectStartRequest,
 } from './runtime-types.js';
-import type { DirectSessionPaths } from './session-paths.js';
-
-type DirectEventCallbacks = {
-  messages: Set<(
-    chatId: string,
-    messages: ChatMessage[],
-    metadata?: RuntimeEventMetadata,
-  ) => void>;
-  processing: Set<(chatId: string, isProcessing: boolean) => void>;
-  sessionCreated: Set<(chatId: string) => void>;
-  finished: Set<(
-    chatId: string,
-    exitCode: number,
-    metadata?: RuntimeEventMetadata,
-  ) => void>;
-  failed: Set<(
-    chatId: string,
-    errorMessage: string,
-    metadata?: RuntimeEventMetadata,
-  ) => void>;
-};
+import type { DirectSessionStore } from './session-store.js';
 
 export interface DirectCompatibleRuntime {
   startSession(request: DirectStartRequest): Promise<DirectStartedSession>;
   runTurn(request: DirectResumeRequest): Promise<void>;
   abort(agentSessionId: string): boolean;
   isRunning(agentSessionId: string): boolean;
+  forgetSession(agentSessionId: string): void;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   startPurgeTimer(): void;
   shutdown?(): void;
-  onMessages(callback: (
-    chatId: string,
-    messages: ChatMessage[],
-    metadata?: RuntimeEventMetadata,
-  ) => void): void;
-  onProcessing(callback: (chatId: string, isProcessing: boolean) => void): void;
-  onSessionCreated(callback: (chatId: string) => void): void;
-  onFinished(callback: (
-    chatId: string,
-    exitCode: number,
-    metadata?: RuntimeEventMetadata,
-  ) => void): void;
-  onFailed(callback: (
-    chatId: string,
-    errorMessage: string,
-    metadata?: RuntimeEventMetadata,
-  ) => void): void;
 }
 
 export interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRuntime> {
@@ -87,37 +49,32 @@ export class DirectEndpointRouterRuntime<
   TRuntime extends DirectCompatibleRuntime,
 > {
   readonly #runtimes = new Map<string, TRuntime>();
-  readonly #sessionEndpointIds = new Map<string, string>();
+  readonly #sessionRuntimeKeys = new Map<string, string>();
   #purgeTimersStarted = false;
-  readonly #callbacks: DirectEventCallbacks = {
-    messages: new Set(),
-    processing: new Set(),
-    sessionCreated: new Set(),
-    finished: new Set(),
-    failed: new Set(),
-  };
 
   constructor(private readonly config: DirectEndpointRouterConfig<TRuntime>) {}
 
   async startSession(request: DirectStartRequest): Promise<DirectStartedSession> {
     const runtime = this.#runtimeFor(request.endpoint);
     const started = await runtime.startSession(request);
-    this.#sessionEndpointIds.set(
+    this.#sessionRuntimeKeys.set(
       started.agentSessionId,
-      request.endpoint.selection.endpointId,
+      directEndpointFingerprint(request.endpoint),
     );
     return started;
   }
 
   async runTurn(request: DirectResumeRequest): Promise<void> {
-    let runtime = this.#runtimeForSession(request.agentSessionId);
-    if (!runtime) {
-      runtime = this.#runtimeFor(request.endpoint);
-      this.#sessionEndpointIds.set(
-        request.agentSessionId,
-        request.endpoint.selection.endpointId,
-      );
+    const runtimeKey = directEndpointFingerprint(request.endpoint);
+    const previousRuntimeKey = this.#sessionRuntimeKeys.get(request.agentSessionId);
+    if (previousRuntimeKey && previousRuntimeKey !== runtimeKey) {
+      this.#runtimes.get(previousRuntimeKey)?.forgetSession(request.agentSessionId);
     }
+    const runtime = this.#runtimeFor(request.endpoint);
+    this.#sessionRuntimeKeys.set(
+      request.agentSessionId,
+      runtimeKey,
+    );
     await runtime.runTurn(request);
   }
 
@@ -154,45 +111,13 @@ export class DirectEndpointRouterRuntime<
     this.#purgeTimersStarted = false;
     for (const runtime of this.#runtimes.values()) runtime.shutdown?.();
     this.#runtimes.clear();
-    this.#sessionEndpointIds.clear();
-  }
-
-  onMessages(callback: (
-    chatId: string,
-    messages: ChatMessage[],
-    metadata?: RuntimeEventMetadata,
-  ) => void): void {
-    this.#callbacks.messages.add(callback);
-  }
-
-  onProcessing(callback: (chatId: string, isProcessing: boolean) => void): void {
-    this.#callbacks.processing.add(callback);
-  }
-
-  onSessionCreated(callback: (chatId: string) => void): void {
-    this.#callbacks.sessionCreated.add(callback);
-  }
-
-  onFinished(callback: (
-    chatId: string,
-    exitCode: number,
-    metadata?: RuntimeEventMetadata,
-  ) => void): void {
-    this.#callbacks.finished.add(callback);
-  }
-
-  onFailed(callback: (
-    chatId: string,
-    errorMessage: string,
-    metadata?: RuntimeEventMetadata,
-  ) => void): void {
-    this.#callbacks.failed.add(callback);
+    this.#sessionRuntimeKeys.clear();
   }
 
   #runtimeForSession(agentSessionId: string): TRuntime | null {
-    const endpointId = this.#sessionEndpointIds.get(agentSessionId);
-    if (endpointId) {
-      const runtime = this.#runtimes.get(endpointId);
+    const runtimeKey = this.#sessionRuntimeKeys.get(agentSessionId);
+    if (runtimeKey) {
+      const runtime = this.#runtimes.get(runtimeKey);
       if (runtime) return runtime;
     }
     for (const runtime of this.#runtimes.values()) {
@@ -203,12 +128,11 @@ export class DirectEndpointRouterRuntime<
 
   #runtimeFor(endpoint: DirectEndpointRuntime): TRuntime {
     this.#validateEndpoint(endpoint);
-    const endpointId = endpoint.selection.endpointId;
-    const existing = this.#runtimes.get(endpointId);
+    const runtimeKey = directEndpointFingerprint(endpoint);
+    const existing = this.#runtimes.get(runtimeKey);
     if (existing) return existing;
     const runtime = this.config.createRuntime(endpoint);
-    this.#attachForwarders(runtime);
-    this.#runtimes.set(endpointId, runtime);
+    this.#runtimes.set(runtimeKey, runtime);
     if (this.#purgeTimersStarted) runtime.startPurgeTimer();
     return runtime;
   }
@@ -221,36 +145,11 @@ export class DirectEndpointRouterRuntime<
     }
   }
 
-  #attachForwarders(runtime: TRuntime): void {
-    runtime.onMessages((chatId, messages, metadata) => {
-      for (const callback of this.#callbacks.messages) {
-        callback(chatId, messages, metadata);
-      }
-    });
-    runtime.onProcessing((chatId, processing) => {
-      for (const callback of this.#callbacks.processing) callback(chatId, processing);
-    });
-    runtime.onSessionCreated((chatId) => {
-      for (const callback of this.#callbacks.sessionCreated) callback(chatId);
-    });
-    runtime.onFinished((chatId, exitCode, metadata) => {
-      for (const callback of this.#callbacks.finished) {
-        callback(chatId, exitCode, metadata);
-      }
-    });
-    runtime.onFailed((chatId, message, metadata) => {
-      for (const callback of this.#callbacks.failed) {
-        callback(chatId, message, metadata);
-      }
-    });
-  }
 }
 
 export interface DirectRuntimeFamilyOptions {
-  readonly runtimeId: string;
   readonly runtimeLabel: string;
-  readonly sessionPaths: DirectSessionPaths;
-  readonly logger?: AgentLogger;
+  readonly sessions: DirectSessionStore;
 }
 
 export function createDirectOpenAiChatRuntime(
@@ -304,29 +203,15 @@ export function createDirectAnthropicRuntime(
   });
 }
 
-function endpointModels(endpoint: DirectEndpointRuntime) {
-  return [{
-    value: endpoint.selection.model,
-    label: endpoint.selection.model,
-  }];
-}
-
 export function buildDirectOpenAiConfig(args: DirectRuntimeFamilyOptions & {
   readonly endpoint: DirectEndpointRuntime;
 }): OpenAiCompatibleChatRuntimeConfig {
   return {
-    runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
-    fallbackModels: endpointModels(args.endpoint),
+    sessions: args.sessions,
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
-      args.endpoint.selection.endpointId,
-      sessionId,
-    ),
-    logger: args.logger,
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
@@ -338,17 +223,13 @@ export function buildDirectOpenAiResponsesConfig(args: DirectRuntimeFamilyOption
   readonly endpoint: DirectEndpointRuntime;
 }): OpenAiCompatibleResponsesRuntimeConfig {
   return {
-    runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
-    fallbackModels: endpointModels(args.endpoint),
+    endpointId: args.endpoint.selection.endpointId,
+    endpointFingerprint: directEndpointFingerprint(args.endpoint),
+    sessions: args.sessions,
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
-      args.endpoint.selection.endpointId,
-      sessionId,
-    ),
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
@@ -360,16 +241,28 @@ export function buildDirectAnthropicConfig(args: DirectRuntimeFamilyOptions & {
   readonly endpoint: DirectEndpointRuntime;
 }): AnthropicCompatibleChatRuntimeConfig {
   return {
-    runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
-    fallbackModels: endpointModels(args.endpoint),
+    sessions: args.sessions,
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
-      args.endpoint.selection.endpointId,
-      sessionId,
-    ),
   };
+}
+
+export function directEndpointFingerprint(endpoint: DirectEndpointRuntime): string {
+  const headers = Object.entries(endpoint.selection.headers ?? {})
+    .map(([name, value]) => [name.toLowerCase(), value] as const)
+    .sort(([left], [right]) => left.localeCompare(right));
+  const route = {
+    endpointId: endpoint.selection.endpointId,
+    protocol: endpoint.selection.protocol,
+    baseUrl: endpoint.selection.baseUrl.replace(/\/+$/, ''),
+    headersDigest: digest(JSON.stringify(headers)),
+    credentialDigest: digest(endpoint.credential ?? ''),
+  };
+  return digest(JSON.stringify(route));
+}
+
+function digest(value: string): string {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 }

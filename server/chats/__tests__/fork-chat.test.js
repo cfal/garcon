@@ -1,8 +1,19 @@
 import { describe, expect, it, mock } from 'bun:test';
-
+import { UserMessage, AssistantMessage, ErrorMessage } from '../../../common/chat-types.js';
 import { forkChatFileCopy } from '../fork-chat.js';
+import { transcriptViewId } from '../../ledger/contracts.js';
+import { createPreamblePrefix } from '../../../common/preamble-prefix.js';
 
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 function sourceSession(overrides = {}) {
   return {
@@ -11,10 +22,7 @@ function sourceSession(overrides = {}) {
     agentSessionId: 'source-native',
     nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'source-native' } },
     agentOwnershipEpoch: 'source-epoch',
-    agentSettingsById: {
-      test: envelope('test', { mode: 'careful' }),
-      other: envelope('other', { retained: true }),
-    },
+    agentSettingsById: { test: envelope('test', { mode: 'careful' }) },
     model: 'model-a',
     apiProviderId: 'provider-a',
     modelEndpointId: 'endpoint-a',
@@ -23,6 +31,12 @@ function sourceSession(overrides = {}) {
     tags: ['review'],
     permissionMode: 'acceptEdits',
     thinkingMode: 'high',
+    carryOverSegments: [],
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
+    preambleSelection: { revision: 3, orderedPreambleIds: ['3502b645-222b-49d2-ac39-1c91f9fb1174'] },
+    parentChat: null,
     ...overrides,
   };
 }
@@ -45,6 +59,27 @@ function makeDeps(overrides = {}) {
     }),
     flush: mock(async () => undefined),
   };
+  const targetViews = new Set();
+  const rows = overrides.rows ?? [
+    userRow(1, 'first'),
+    providerRow(2, 'answer'),
+    userRow(3, 'second'),
+  ];
+  const ledger = {
+    currentView: mock((chatId) => targetViews.has(chatId)
+      ? { viewId: `view-${chatId}`, contentStartOrdinal: 1 }
+      : chatId === 'source-chat'
+        ? { viewId: 'source-view', contentStartOrdinal: 1 }
+        : null),
+    highWatermark: mock(() => ({ viewId: transcriptViewId('source-view'), ordinal: rows.length })),
+    rowsThrough: mock((_chatId, watermark) => rows.slice(0, watermark.ordinal)),
+    initializeChat: mock((chatId, drafts, contentStartOrdinal) => {
+      targetViews.add(chatId);
+      return { viewId: `view-${chatId}`, drafts, contentStartOrdinal };
+    }),
+    deleteChat: mock((chatId) => targetViews.delete(chatId)),
+    ...overrides.ledger,
+  };
   const settings = {
     getChatName: mock(() => 'Source title'),
     ensureInNormal: mock(async () => undefined),
@@ -57,122 +92,48 @@ function makeDeps(overrides = {}) {
     getChatMetadata: mock(() => ({ firstMessage: 'First prompt' })),
     addNewChatMetadata: mock(() => undefined),
   };
-  const carryOver = {
-    stageFork: mock(async () => undefined),
-    promoteStaged: mock(async () => undefined),
-    discardStaged: mock(async () => undefined),
-  };
   const ownership = overrides.ownership ?? {
     delete: mock(async (chatId) => {
       sessions.delete(chatId);
+      ledger.deleteChat(chatId);
     }),
   };
   const forkAgentSession = overrides.forkAgentSession ?? mock(async () => ({
-    agentSessionId: 'target-native',
-    nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
+    kind: 'materialized',
+    session: {
+      agentSessionId: 'target-native',
+      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
+      nativeSeedReceipt: null,
+    },
   }));
   return {
+    signal: new AbortController().signal,
     registry,
     settings,
     metadata,
-    carryOver,
+    ledger,
     ownership,
     forkAgentSession,
+    discardForkedAgentSession: overrides.discardForkedAgentSession
+      ?? mock(async () => undefined),
+    readForkedNativeHistory: overrides.readForkedNativeHistory ?? mock(async () => null),
     sessions,
   };
 }
 
 describe('forkChatFileCopy', () => {
-  it('stages the exact combined cutoff and activates it under the target ownership epoch', async () => {
-    const deps = makeDeps();
-
-    const result = await forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      upToSequence: 3,
-      ...deps,
+  it('[TLV5-FORK.05-CORE-UNIT-01] builds the frozen target ledger before registering the chat', async () => {
+    const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
+    const order = [];
+    deps.ledger.initializeChat.mockImplementation((...args) => {
+      order.push('ledger');
+      return { viewId: 'target-view', args };
     });
-
-    expect(result).toEqual({
-      sourceChatId: 'source-chat',
-      chatId: 'target-chat',
-      agentId: 'test',
-      agentSessionId: 'target-native',
-      sourceNextForkOrdinal: 1,
-      rollback: expect.any(Function),
+    deps.registry.addChat.mockImplementation((entry) => {
+      order.push('registry');
+      deps.sessions.set(entry.id, entry);
+      return true;
     });
-    expect(deps.carryOver.stageFork).toHaveBeenCalledWith({
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      targetEpoch: expect.any(String),
-      ownerId: 'test',
-      ownerModel: 'model-a',
-      upToSequence: 3,
-    });
-    expect(deps.forkAgentSession).toHaveBeenCalledWith({
-      sourceSession: expect.objectContaining({
-        agentId: 'test',
-        agentSessionId: 'source-native',
-        agentOwnershipEpoch: 'source-epoch',
-      }),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      messageSequence: 3,
-    });
-    const target = deps.sessions.get('target-chat');
-    expect(target).toMatchObject({
-      agentId: 'test',
-      agentSessionId: 'target-native',
-      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
-      agentOwnershipEpoch: expect.any(String),
-      agentSettingsById: {
-        test: envelope('test', { mode: 'careful' }),
-        other: envelope('other', { retained: true }),
-      },
-      model: 'model-a',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'high',
-    });
-    expect(deps.registry.flush).toHaveBeenCalled();
-    expect(deps.carryOver.promoteStaged).toHaveBeenCalledWith(
-      'target-chat',
-      target.agentOwnershipEpoch,
-    );
-    expect(deps.settings.setSessionName).toHaveBeenCalledWith('target-chat', 'Source title (1)');
-    expect(deps.metadata.addNewChatMetadata).toHaveBeenCalledWith('target-chat', 'First prompt');
-  });
-
-  it('discards inactive carry-over when the integration fork fails', async () => {
-    const failure = new Error('native fork failed');
-    const deps = makeDeps({ forkAgentSession: mock(async () => { throw failure; }) });
-
-    await expect(forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    })).rejects.toBe(failure);
-
-    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith('target-chat', expect.any(String));
-    expect(deps.registry.addChat).not.toHaveBeenCalled();
-  });
-
-  it('discards inactive carry-over when the integration returns no target', async () => {
-    const deps = makeDeps({ forkAgentSession: mock(async () => null) });
-
-    await expect(forkChatFileCopy({
-      sourceSession: deps.sessions.get('source-chat'),
-      sourceChatId: 'source-chat',
-      targetChatId: 'target-chat',
-      ...deps,
-    })).rejects.toThrow('Failed to create fork target');
-
-    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith('target-chat', expect.any(String));
-  });
-
-  it('uses and advances the persisted source fork ordinal', async () => {
-    const deps = makeDeps({ source: sourceSession({ nextForkOrdinal: 4 }) });
 
     await forkChatFileCopy({
       sourceSession: deps.sessions.get('source-chat'),
@@ -181,12 +142,614 @@ describe('forkChatFileCopy', () => {
       ...deps,
     });
 
-    expect(deps.settings.setSessionName).toHaveBeenCalledWith('target-chat', 'Source title (4)');
-    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(5);
-    expect(deps.sessions.get('target-chat').nextForkOrdinal).toBe(1);
+    expect(order).toEqual(['ledger', 'registry']);
+    expect(deps.ledger.initializeChat).toHaveBeenCalledWith(
+      'target-chat',
+      [expect.objectContaining({ kind: 'user-input' }),
+        expect.objectContaining({ kind: 'provider-row' }),
+        expect.objectContaining({ kind: 'user-input' })],
+      4,
+    );
+    expect(deps.sessions.get('target-chat')).toMatchObject({
+      agentSessionId: null,
+      carryOverSegments: [],
+      parentChat: {
+        chatId: 'source-chat',
+        relation: 'fork',
+        transcriptViewId: 'source-view',
+        ordinal: 3,
+      },
+    });
   });
 
-  it('rolls back every durable target side effect idempotently', async () => {
+  it('rolls back a standalone fork cancelled while the target registry flushes', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const flushEntered = deferred();
+    const releaseFlush = deferred();
+    const deps = makeDeps({
+      source: sourceSession({ agentSessionId: null, nativeSession: null }),
+    });
+    deps.registry.flush.mockImplementation(async () => {
+      flushEntered.resolve();
+      await releaseFlush.promise;
+    });
+    const outcome = forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+      signal: controller.signal,
+    }).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error }),
+    );
+
+    await flushEntered.promise;
+    controller.abort(reason);
+    releaseFlush.resolve();
+
+    await expect(outcome).resolves.toEqual({ status: 'rejected', error: reason });
+    expect(deps.sessions.has('target-chat')).toBe(false);
+    expect(deps.ledger.currentView('target-chat')).toBeNull();
+    expect(deps.settings.removeFromAllOrderLists).toHaveBeenCalledWith('target-chat');
+    expect(deps.settings.removeSessionName).toHaveBeenCalledWith('target-chat');
+  });
+
+  it('copies only rows through the selected ordinal', async () => {
+    const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    });
+
+    expect(deps.ledger.rowsThrough).toHaveBeenCalledWith('source-chat', {
+      viewId: 'source-view',
+      ordinal: 2,
+    });
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
+    expect(deps.sessions.get('target-chat').parentChat).toEqual({
+      chatId: 'source-chat',
+      relation: 'fork',
+      transcriptViewId: 'source-view',
+      ordinal: 2,
+    });
+  });
+
+  it('does not fork the current native session for a point in the frozen prefix', async () => {
+    const deps = makeDeps({
+      ledger: {
+        currentView: mock((chatId) => chatId === 'source-chat'
+          ? { viewId: 'source-view', contentStartOrdinal: 3 }
+          : null),
+      },
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    });
+
+    expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
+  });
+
+  it('resolves a core-authored row to the provider row before it', async () => {
+    const deps = makeDeps();
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 3,
+      ...deps,
+    });
+
+    // Row 3 is a user input with no provider identity, so the point resolves back to the
+    // provider row at ordinal 2 rather than asking the user about a handoff fork.
+    expect(deps.forkAgentSession).toHaveBeenCalledTimes(1);
+    expect(deps.forkAgentSession.mock.calls[0][0]).toMatchObject({
+      messageOrdinal: 3,
+      providerMeta: { native: true },
+    });
+    // Three frozen conversational rows plus the session the integration handed back.
+    const drafts = deps.ledger.initializeChat.mock.calls[0][1];
+    expect(drafts).toHaveLength(4);
+    expect(drafts.at(-1)).toMatchObject({ kind: "session" });
+  });
+
+  it('resolves a presentation-only provider error to the preceding conversational row', async () => {
+    const deps = makeDeps({
+      rows: [
+        userRow(1, 'first'),
+        providerRow(2, 'answer'),
+        providerErrorRow(3, 'visible failure'),
+      ],
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 3,
+      ...deps,
+    });
+
+    expect(deps.forkAgentSession.mock.calls[0][0]).toMatchObject({
+      messageOrdinal: 3,
+      providerMeta: { native: true },
+    });
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({
+        kind: 'provider-row',
+        message: expect.objectContaining({ type: 'assistant-message' }),
+      }),
+      expect.objectContaining({ kind: 'session' }),
+    ]);
+  });
+
+  it('materializes a native session while retaining the ledger prefix', async () => {
+    const deps = makeDeps();
+
+    const result = await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    });
+
+    expect(result.agentSessionId).toBe('target-native');
+    expect(deps.forkAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+      messageOrdinal: 2,
+      providerMeta: { native: true },
+    }));
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({ kind: 'provider-row' }),
+      expect.objectContaining({ kind: 'session' }),
+    ]);
+    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(3);
+  });
+
+  it('discards a materialized native fork when admission closes before target creation', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const forkAgentSession = mock(async ({ signal }) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort(reason);
+      return {
+        kind: 'materialized',
+        session: {
+          agentSessionId: 'cancelled-native',
+          nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'cancelled-native' } },
+          nativeSeedReceipt: null,
+        },
+      };
+    });
+    const discardForkedAgentSession = mock(async () => undefined);
+    const deps = makeDeps({ forkAgentSession, discardForkedAgentSession });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+      signal: controller.signal,
+    })).rejects.toBe(reason);
+
+    expect(discardForkedAgentSession).toHaveBeenCalledWith('test', expect.objectContaining({
+      agentSessionId: 'cancelled-native',
+    }));
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('preserves admission cancellation when the native fork operation rejects', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => {
+        controller.abort(reason);
+        throw new Error('provider fork failed');
+      }),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+      signal: controller.signal,
+    })).rejects.toBe(reason);
+
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('preserves admission cancellation before translating an unmaterialized fork', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => {
+        controller.abort(reason);
+        return { kind: 'unmaterialized' };
+      }),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      allowHandoffFork: false,
+      ...deps,
+      signal: controller.signal,
+    })).rejects.toBe(reason);
+
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('[TLV5-FORK.01-CORE-UNIT-01] hands the facet an uncorrelated provider row rather than an older settled one', async () => {
+    const streamed = { ...providerRow(3, 'streaming'), providerMeta: null };
+    const deps = makeDeps({ rows: [userRow(1, 'first'), providerRow(2, 'answer'), streamed] });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 3,
+      ...deps,
+    });
+
+    // Resolving back to row 2 would fork from a point the user did not choose; the empty
+    // identity has to reach the integration so it can refuse.
+    expect(deps.forkAgentSession.mock.calls[0][0]).toMatchObject({
+      messageOrdinal: 3,
+      providerMeta: null,
+    });
+  });
+
+  it('[TLV5-FORK.02-CORE-UNIT-01] does not silently substitute a handoff fork for an unmaterialized whole-chat fork', async () => {
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      allowHandoffFork: false,
+      ...deps,
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      status: 409,
+      retryable: true,
+    });
+
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('[TLV5-FORK.04-CORE-UNIT-01] uses an unmaterialized whole-chat fork only after handoff-fork consent', async () => {
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
+    });
+
+    const result = await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      allowHandoffFork: true,
+      ...deps,
+    });
+
+    expect(result.agentSessionId).toBeNull();
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({ kind: 'provider-row' }),
+      expect.objectContaining({ kind: 'user-input' }),
+    ]);
+    expect(deps.sessions.get('target-chat').parentChat).toMatchObject({ relation: 'fork' });
+  });
+
+  it('records the immediate source when forking a fork', async () => {
+    const deps = makeDeps({
+      source: sourceSession({
+        agentSessionId: null,
+        nativeSession: null,
+        parentChat: {
+          chatId: 'root-chat',
+          relation: 'fork',
+          transcriptViewId: 'root-view',
+          ordinal: 2,
+        },
+      }),
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    });
+
+    expect(deps.sessions.get('target-chat').parentChat.chatId).toBe('source-chat');
+  });
+
+  it('retries an unmaterialized fork as native when the provider later materializes it', async () => {
+    let attempt = 0;
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => {
+        attempt += 1;
+        if (attempt === 1) return { kind: 'unmaterialized' };
+        return {
+          kind: 'materialized',
+          session: {
+            agentSessionId: 'target-native-after-retry',
+            nativeSession: {
+              ownerId: 'test',
+              schemaVersion: 1,
+              value: { id: 'target-native-after-retry' },
+            },
+            nativeSeedReceipt: null,
+          },
+        };
+      }),
+    });
+    const request = {
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      allowHandoffFork: false,
+      ...deps,
+    };
+
+    await expect(forkChatFileCopy(request)).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      status: 409,
+      retryable: true,
+    });
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+
+    const result = await forkChatFileCopy(request);
+
+    expect(result.agentSessionId).toBe('target-native-after-retry');
+    expect(deps.forkAgentSession).toHaveBeenCalledTimes(2);
+    expect(deps.ledger.initializeChat).toHaveBeenCalledOnce();
+    expect(deps.registry.addChat).toHaveBeenCalledOnce();
+  });
+
+  it('[TLV5-FORK.03-CORE-UNIT-01] seeds a native fork from the forked session instead of the source rows', async () => {
+    const imported = [
+      { kind: 'user-input', at: '2026-08-07T12:00:00.000Z', detail: { clientMessageId: null, message: {}, attachments: [], steer: false }, providerMeta: { native: 'imported' } },
+      { kind: 'provider-row', at: '2026-08-07T12:00:01.000Z', message: {}, providerMeta: { native: 'imported' } },
+    ];
+    const deps = makeDeps({ readForkedNativeHistory: mock(async () => imported) });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    });
+
+    expect(deps.readForkedNativeHistory).toHaveBeenCalledWith(expect.objectContaining({
+      targetChatId: 'target-chat',
+      fork: expect.objectContaining({ agentSessionId: 'target-native' }),
+      signal: deps.signal,
+    }));
+    // Rows below the source content start are earlier-agent history no provider ever held,
+    // so they survive alongside the imported current binding.
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'session' }),
+      ...imported,
+    ]);
+    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(1);
+  });
+
+  it('passes selected current-binding preamble evidence to native fork import', async () => {
+    const application = createPreamblePrefix({
+      contents: ['private preamble body'],
+    });
+    const boundary = { kind: 'new-chat', ownershipEpoch: 'source-epoch' };
+    const notice = {
+      kind: 'notice',
+      viewId: transcriptViewId('source-view'),
+      ordinal: 1,
+      at: '2026-08-07T12:00:00.000Z',
+      message: 'Preambles applied',
+      detail: {
+        type: 'preamble-application',
+        preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
+      },
+      providerMeta: null,
+    };
+    const input = userRow(2, 'visible prompt');
+    input.detail.preambleBoundary = boundary;
+    input.detail.preamblePrefixReceipt = application.receipt;
+    const readForkedNativeHistory = mock(async () => []);
+    const deps = makeDeps({ rows: [notice, input], readForkedNativeHistory });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    });
+
+    expect(readForkedNativeHistory).toHaveBeenCalledWith(expect.objectContaining({
+      preambleEvidence: [{
+        receipt: application.receipt,
+        boundary,
+        preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
+        requiresNativeOccurrence: false,
+      }],
+    }));
+    expect(deps.sessions.get('target-chat').pendingPreambleBoundary).toEqual({
+      kind: 'fork',
+      ownershipEpoch: deps.sessions.get('target-chat').agentOwnershipEpoch,
+    });
+  });
+
+  for (const native of [true, false]) {
+    it(`rejects a ${native ? 'native' : 'handoff'} fork cutoff between a preamble notice and input`, async () => {
+      const application = createPreamblePrefix({
+        contents: ['private preamble body'],
+      });
+      const notice = {
+        kind: 'notice',
+        viewId: transcriptViewId('source-view'),
+        ordinal: 1,
+        at: '2026-08-07T12:00:00.000Z',
+        message: 'Preambles applied',
+        detail: {
+          type: 'preamble-application',
+          preambles: [{ id: PREAMBLE_ID, title: 'Repository rules' }],
+        },
+        providerMeta: null,
+      };
+      const input = userRow(2, 'visible prompt');
+      input.detail.preambleBoundary = { kind: 'new-chat', ownershipEpoch: 'source-epoch' };
+      input.detail.preamblePrefixReceipt = application.receipt;
+      const deps = makeDeps({
+        rows: [notice, input],
+        ...(native
+          ? {}
+          : { source: sourceSession({ agentSessionId: null, nativeSession: null }) }),
+      });
+
+      await expect(forkChatFileCopy({
+        sourceSession: deps.sessions.get('source-chat'),
+        sourceChatId: 'source-chat',
+        targetChatId: 'target-chat',
+        upToOrdinal: 1,
+        ...deps,
+      })).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        status: 422,
+      });
+
+      expect(deps.forkAgentSession).not.toHaveBeenCalled();
+      expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+      expect(deps.registry.addChat).not.toHaveBeenCalled();
+    });
+  }
+
+  it('keeps earlier-agent history below the content start when seeding natively', async () => {
+    const imported = [
+      { kind: 'provider-row', at: '2026-08-07T12:00:01.000Z', message: {}, providerMeta: { native: 'imported' } },
+    ];
+    const deps = makeDeps({
+      readForkedNativeHistory: mock(async () => imported),
+      ledger: {
+        currentView: mock((chatId) => (chatId === 'source-chat'
+          ? { viewId: 'source-view', contentStartOrdinal: 2 }
+          : null)),
+      },
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    });
+
+    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+      expect.objectContaining({ kind: 'user-input' }),
+      expect.objectContaining({ kind: 'session' }),
+      ...imported,
+    ]);
+    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(2);
+  });
+
+  it('[TLV5-ADOPT.08-NATIVE-FORK-CORE-UNIT-01] discards a native fork when its selected history cannot be read', async () => {
+    const deps = makeDeps({
+      readForkedNativeHistory: mock(async () => { throw new Error('history unreadable'); }),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+    })).rejects.toThrow('history unreadable');
+
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+    expect(deps.forkAgentSession).toHaveBeenCalledOnce();
+    expect(deps.readForkedNativeHistory).toHaveBeenCalledOnce();
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
+    expect(deps.sessions.has('target-chat')).toBe(false);
+  });
+
+  it('preserves admission cancellation when native seeding rejects', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const deps = makeDeps({
+      readForkedNativeHistory: mock(async () => {
+        controller.abort(reason);
+        throw new Error('history unreadable');
+      }),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 2,
+      ...deps,
+      signal: controller.signal,
+    })).rejects.toBe(reason);
+
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects a point beyond the ledger watermark before creating artifacts', async () => {
+    const deps = makeDeps();
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToOrdinal: 4,
+      ...deps,
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
+
+    expect(deps.forkAgentSession).not.toHaveBeenCalled();
+    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+  });
+
+  it('deletes an orphan target ledger when registry publication fails', async () => {
+    const deps = makeDeps();
+    deps.registry.addChat.mockReturnValue(false);
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    })).rejects.toThrow('Chat ID collision');
+
+    expect(deps.ledger.deleteChat).toHaveBeenCalledWith('target-chat');
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back registry, ledger, presentation, and native artifacts once', async () => {
     const deps = makeDeps({ source: sourceSession({ nextForkOrdinal: 3 }) });
     const result = await forkChatFileCopy({
       sourceSession: deps.sessions.get('source-chat'),
@@ -195,8 +758,6 @@ describe('forkChatFileCopy', () => {
       ...deps,
     });
 
-    expect(deps.sessions.get('target-chat')).toBeDefined();
-    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(4);
     await result.rollback();
     await result.rollback();
 
@@ -205,13 +766,16 @@ describe('forkChatFileCopy', () => {
     expect(deps.ownership.delete).toHaveBeenCalledOnce();
     expect(deps.settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
     expect(deps.settings.removeSessionName).toHaveBeenCalledOnce();
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
   });
 
-  it('rolls back through integration ownership when target setup fails', async () => {
-    const failure = new Error('settings failed');
-    const deps = makeDeps({
-      source: sourceSession({ nextForkOrdinal: 3 }),
-      settings: { setSessionName: mock(async () => { throw failure; }) },
+  it('preserves admission cancellation when target finalization rejects', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const deps = makeDeps();
+    deps.registry.flush.mockImplementation(async () => {
+      controller.abort(reason);
+      throw new Error('registry flush failed');
     });
 
     await expect(forkChatFileCopy({
@@ -219,10 +783,47 @@ describe('forkChatFileCopy', () => {
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
       ...deps,
-    })).rejects.toBe(failure);
+      signal: controller.signal,
+    })).rejects.toBe(reason);
 
-    expect(deps.ownership.delete).toHaveBeenCalledWith('target-chat');
-    expect(deps.sessions.get('target-chat')).toBeUndefined();
-    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(3);
+    expect(deps.sessions.has('target-chat')).toBe(false);
+    expect(deps.ledger.currentView('target-chat')).toBeNull();
+    expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
   });
 });
+
+function userRow(ordinal, content) {
+  const message = new UserMessage('2026-08-07T12:00:00.000Z', content);
+  return {
+    kind: 'user-input',
+    viewId: transcriptViewId('source-view'),
+    ordinal,
+    at: message.timestamp,
+    detail: { clientMessageId: `message-${ordinal}`, message, attachments: [], steer: false },
+    providerMeta: null,
+  };
+}
+
+function providerRow(ordinal, content) {
+  const message = new AssistantMessage('2026-08-07T12:00:00.000Z', content);
+  return {
+    kind: 'provider-row',
+    viewId: transcriptViewId('source-view'),
+    ordinal,
+    at: message.timestamp,
+    message,
+    providerMeta: { native: true },
+  };
+}
+
+function providerErrorRow(ordinal, content) {
+  const message = new ErrorMessage('2026-08-07T12:00:00.000Z', content);
+  return {
+    kind: 'provider-row',
+    viewId: transcriptViewId('source-view'),
+    ordinal,
+    at: message.timestamp,
+    message,
+    providerMeta: { native: 'error' },
+  };
+}

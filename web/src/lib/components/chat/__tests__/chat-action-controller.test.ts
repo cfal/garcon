@@ -13,14 +13,14 @@ vi.mock('$lib/api/chats', () => ({
 	deleteChat: vi.fn(),
 	forkChat: vi.fn(),
 	getChatDetails: vi.fn(),
-	reorderChatsQuick: vi.fn(),
+	reorderChat: vi.fn(),
 	setChatTags: vi.fn(),
 	toggleArchive: vi.fn(),
 	togglePinned: vi.fn(),
 	updateChatProjectPath: vi.fn(),
 }));
 
-vi.mock('$lib/chat/sessions/client-chat-id.js', () => ({
+vi.mock('$shared/client-chat-id', () => ({
 	createClientChatId: () => 'fork-chat-id',
 }));
 
@@ -28,8 +28,6 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/repo',
-		effectiveProjectKey: '/workspace/repo',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
@@ -43,10 +41,14 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 
@@ -60,7 +62,6 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		title: 'Fork',
 		projectPath: '/workspace/repo',
-		effectiveProjectKey: '/workspace/repo',
 		orderGroup: 'normal',
 		tags: [],
 		activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
@@ -68,22 +69,39 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		isPinned: false,
 		isArchived: false,
 		isActive: false,
+		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return { promise, resolve, reject };
 }
 
 function createHarness(
 	options: {
 		chats?: ChatSessionRecord[];
+		displayedChatIds?: readonly string[];
 		selectedChatId?: string | null;
 		onReloadChat?: (chatId: string) => Promise<void> | void;
 	} = {},
 ) {
 	const chats = options.chats ?? [makeChat()];
-	const selectedChatId =
+	let selectedChatId =
 		options.selectedChatId === undefined ? (chats[0]?.id ?? null) : options.selectedChatId;
 	const callbacks = {
+		projectPathRevision: vi.fn(() => 0),
 		onQuietRefresh: vi.fn(async () => undefined),
 		onSelectChat: vi.fn(),
 		onNewChat: vi.fn(),
@@ -95,18 +113,45 @@ function createHarness(
 		requestComposerFocus: vi.fn(),
 		requestSidebarRecenter: vi.fn(),
 	};
+	const pendingArchiveIds = new Set<string>();
+	function startArchiveMutation(chatIds: readonly string[]) {
+		const admittedIds = chatIds.filter((chatId) => !pendingArchiveIds.has(chatId));
+		for (const chatId of admittedIds) pendingArchiveIds.add(chatId);
+		const completion = (async () => {
+			try {
+				await Promise.all(admittedIds.map((chatId) => chatsApi.toggleArchive(chatId)));
+				await callbacks.onQuietRefresh();
+			} finally {
+				for (const chatId of admittedIds) pendingArchiveIds.delete(chatId);
+			}
+		})();
+		return { chatIds: admittedIds, completion };
+	}
 	const deps = {
 		get chats() {
 			return chats;
 		},
+		get displayedChatIds() {
+			return options.displayedChatIds ?? chats.map((chat) => chat.id);
+		},
 		get selectedChatId() {
 			return selectedChatId;
 		},
+		isArchiveMutationPending: (chatId: string) => pendingArchiveIds.has(chatId),
+		startArchivingChats: startArchiveMutation,
+		startUnarchivingChats: startArchiveMutation,
 		...callbacks,
 		onReloadChat: options.onReloadChat,
 	} satisfies ChatActionControllerDeps;
 
-	return { controller: new ChatActionController(deps), callbacks };
+	return {
+		controller: new ChatActionController(deps),
+		callbacks,
+		chats,
+		setSelectedChatId(chatId: string | null) {
+			selectedChatId = chatId;
+		},
+	};
 }
 
 beforeEach(() => {
@@ -138,29 +183,81 @@ describe('ChatActionController', () => {
 		expect(alreadyPinned.callbacks.requestSidebarRecenter).not.toHaveBeenCalled();
 	});
 
-	it('selects the next neighbor when archiving the selected chat', async () => {
+	it('selects the next neighbor before archiving and never reapplies that selection', async () => {
 		const chats = [
 			makeChat({ id: 'first' }),
 			makeChat({ id: 'selected' }),
 			makeChat({ id: 'next' }),
 		];
-		const { controller, callbacks } = createHarness({ chats, selectedChatId: 'selected' });
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
+		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const { controller, callbacks, setSelectedChatId } = createHarness({
+			chats,
+			selectedChatId: 'selected',
+		});
+
+		const completion = controller.toggleArchive('selected');
+
+		expect(chatsApi.toggleArchive).toHaveBeenCalledWith('selected');
+		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+		expect(callbacks.onSelectChat).toHaveBeenCalledWith('next');
+		expect(callbacks.onNewChat).not.toHaveBeenCalled();
+
+		setSelectedChatId('manually-selected');
+		archive.resolve({ success: true, isArchived: true });
+		await completion;
+
+		expect(callbacks.onQuietRefresh).toHaveBeenCalledOnce();
+		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+	});
+
+	it('selects an adjacent chat from the displayed recent-activity order', async () => {
+		const { controller, callbacks } = createHarness({
+			chats: [
+				makeChat({ id: 'selected' }),
+				makeChat({ id: 'manual-order-neighbor' }),
+				makeChat({ id: 'recent-order-neighbor' }),
+			],
+			displayedChatIds: ['manual-order-neighbor', 'selected', 'recent-order-neighbor'],
+			selectedChatId: 'selected',
+		});
 
 		await controller.toggleArchive('selected');
 
-		expect(chatsApi.toggleArchive).toHaveBeenCalledWith('selected');
-		expect(callbacks.onQuietRefresh).toHaveBeenCalledOnce();
-		expect(callbacks.onSelectChat).toHaveBeenCalledWith('next');
-		expect(callbacks.onNewChat).not.toHaveBeenCalled();
+		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+		expect(callbacks.onSelectChat).toHaveBeenCalledWith('recent-order-neighbor');
 	});
 
 	it('creates a new chat when archiving the only selected chat', async () => {
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
+		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
 		const { controller, callbacks } = createHarness();
 
-		await controller.toggleArchive('chat-1');
+		const completion = controller.toggleArchive('chat-1');
 
 		expect(callbacks.onNewChat).toHaveBeenCalledOnce();
 		expect(callbacks.onSelectChat).not.toHaveBeenCalled();
+
+		archive.resolve({ success: true, isArchived: true });
+		await completion;
+		expect(callbacks.onNewChat).toHaveBeenCalledOnce();
+	});
+
+	it('ignores a duplicate archive while the first mutation is pending', async () => {
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
+		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const { controller, callbacks } = createHarness({
+			chats: [makeChat({ id: 'selected' }), makeChat({ id: 'next' })],
+			selectedChatId: 'selected',
+		});
+
+		const firstCompletion = controller.toggleArchive('selected');
+		await controller.toggleArchive('selected');
+
+		expect(chatsApi.toggleArchive).toHaveBeenCalledOnce();
+		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+		archive.resolve({ success: true, isArchived: true });
+		await firstCompletion;
 	});
 
 	it('recenters an archived selected chat after restoring it', async () => {
@@ -175,15 +272,35 @@ describe('ChatActionController', () => {
 		expect(callbacks.onNewChat).not.toHaveBeenCalled();
 	});
 
-	it('reports mutation failures without applying selection side effects', async () => {
+	it('does not recenter after unarchive when the user selects another chat', async () => {
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
+		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const { controller, callbacks, setSelectedChatId } = createHarness({
+			chats: [makeChat({ isArchived: true })],
+			selectedChatId: 'chat-1',
+		});
+
+		const completion = controller.toggleArchive('chat-1');
+		setSelectedChatId('manually-selected');
+		archive.resolve({ success: true, isArchived: false });
+		await completion;
+
+		expect(callbacks.requestSidebarRecenter).not.toHaveBeenCalled();
+	});
+
+	it('retains immediate archive navigation when the mutation fails', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		vi.mocked(chatsApi.toggleArchive).mockRejectedValueOnce(new Error('offline'));
-		const { controller, callbacks } = createHarness();
+		const { controller, callbacks } = createHarness({
+			chats: [makeChat({ id: 'selected' }), makeChat({ id: 'next' })],
+			selectedChatId: 'selected',
+		});
 
-		await controller.toggleArchive('chat-1');
+		await controller.toggleArchive('selected');
 
 		expect(callbacks.notifyError).toHaveBeenCalledWith(m.notifications_archive_chat_failed());
-		expect(callbacks.onSelectChat).not.toHaveBeenCalled();
+		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
+		expect(callbacks.onSelectChat).toHaveBeenCalledWith('next');
 		expect(callbacks.onNewChat).not.toHaveBeenCalled();
 	});
 
@@ -217,6 +334,11 @@ describe('ChatActionController', () => {
 			lastActivityAt: null,
 			agentSessionId: 'session-1',
 			transcriptSource: null,
+			carryOver: {
+				revision: 'carry-v1:0',
+				archivedMessageCount: 0,
+				segments: [],
+			},
 		});
 
 		await controller.loadDetails('chat-1', dialogs);
@@ -238,14 +360,13 @@ describe('ChatActionController', () => {
 		});
 	});
 
-	it('updates tags and publishes the normalized project identity returned by the server', async () => {
+	it('updates tags and publishes the normalized project path returned by the server', async () => {
 		vi.mocked(chatsApi.updateChatProjectPath).mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
 			projectPath: '/workspace/canonical',
 			effectiveProjectKey: '/workspace/canonical',
 			previousProjectPath: '/workspace/repo',
-			previousEffectiveProjectKey: '/workspace/repo',
 		});
 		const { controller, callbacks } = createHarness();
 
@@ -260,8 +381,114 @@ describe('ChatActionController', () => {
 		});
 		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
 			projectPath: '/workspace/canonical',
-			effectiveProjectKey: '/workspace/canonical',
 		});
+	});
+
+	it('does not apply a PATCH result after a newer WebSocket path', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
+		const { controller, callbacks, chats } = createHarness();
+		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		chats[0] = makeChat({ projectPath: '/workspace/newer' });
+		pending.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/requested',
+			effectiveProjectKey: '/workspace/requested',
+			previousProjectPath: '/workspace/repo',
+		});
+
+		await update;
+
+		expect(callbacks.onProjectPathUpdated).not.toHaveBeenCalled();
+	});
+
+	it('applies a PATCH result idempotently after the same WebSocket path', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
+		const { controller, callbacks, chats } = createHarness();
+		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		chats[0] = makeChat({ projectPath: '/workspace/requested' });
+		pending.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/requested',
+			effectiveProjectKey: '/workspace/requested',
+			previousProjectPath: '/workspace/repo',
+		});
+
+		await update;
+
+		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
+			projectPath: '/workspace/requested',
+		});
+	});
+
+	it('does not apply a PATCH result after an observed A/B/A binding sequence', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
+		const { controller, callbacks, chats } = createHarness();
+		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		chats[0] = makeChat({ projectPath: '/workspace/temporary' });
+		callbacks.projectPathRevision.mockReturnValue(1);
+		chats[0] = makeChat({ projectPath: '/workspace/repo' });
+		callbacks.projectPathRevision.mockReturnValue(2);
+		pending.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/requested',
+			effectiveProjectKey: '/workspace/requested',
+			previousProjectPath: '/workspace/repo',
+		});
+
+		await update;
+
+		expect(callbacks.onProjectPathUpdated).not.toHaveBeenCalled();
+	});
+
+	it('lets a second project-path request supersede the first', async () => {
+		const first = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		const second = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath)
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const { controller, callbacks } = createHarness();
+		const firstUpdate = controller.updateProjectPath('chat-1', '/workspace/first');
+		const secondUpdate = controller.updateProjectPath('chat-1', '/workspace/second');
+		second.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/second',
+			effectiveProjectKey: '/workspace/second',
+			previousProjectPath: '/workspace/repo',
+		});
+		await secondUpdate;
+		first.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/workspace/first',
+			effectiveProjectKey: '/workspace/first',
+			previousProjectPath: '/workspace/repo',
+		});
+		await firstUpdate;
+
+		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledOnce();
+		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
+			projectPath: '/workspace/second',
+		});
+	});
+
+	it('rejects project-path updates without a current binding', async () => {
+		const missing = createHarness({ chats: [] });
+		const empty = createHarness({ chats: [makeChat({ projectPath: '' })] });
+
+		await expect(missing.controller.updateProjectPath('chat-1', '/workspace/new')).rejects.toThrow(
+			m.sidebar_project_path_errors_update_failed(),
+		);
+		await expect(empty.controller.updateProjectPath('chat-1', '/workspace/new')).rejects.toThrow(
+			m.sidebar_project_path_errors_update_failed(),
+		);
+		expect(chatsApi.updateChatProjectPath).not.toHaveBeenCalled();
 	});
 
 	it('upserts and selects a server-confirmed fork', async () => {

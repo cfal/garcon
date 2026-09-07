@@ -17,6 +17,9 @@ function makeSession(overrides = {}) {
     model: 'opus',
     permissionMode: 'default',
     thinkingMode: 'none',
+    carryOverSegments: [],
+    carryOverMigrationQuarantine: null,
+    parentChat: null,
     ...overrides,
   };
 }
@@ -55,15 +58,8 @@ function makeDeps() {
           lastMessage: 'Latest line',
         })),
       },
-      agents: { isAgentSessionRunning: mock(() => true) },
-      pathCache: {
-        resolveProjectPath: mock(() =>
-          Promise.resolve({
-            available: true,
-            effectiveProjectKey: '/real/project',
-          }),
-        ),
-      },
+      processing: { phase: mock(() => 'running') },
+      canReloadFromNativeHistory: mock(() => true),
     },
   };
 }
@@ -72,61 +68,115 @@ describe('ChatListProjector', () => {
   it('projects the complete canonical list entry for list and command paths', async () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);
-    const statuses = new Map([
-      [
-        '/alias',
-        {
-          available: true,
-          effectiveProjectKey: '/real/project',
-        },
-      ],
-    ]);
-
-    const many = await projector.buildMany([[CHAT_ID, session]], statuses);
-    const one = await projector.buildOne(CHAT_ID);
+    const many = projector.buildMany([[CHAT_ID, session]]);
+    const one = projector.buildOne(CHAT_ID);
 
     expect(one).toEqual(many.get(CHAT_ID));
     expect(one).toMatchObject({
       id: CHAT_ID,
-      effectiveProjectKey: '/real/project',
+      parentChat: null,
       orderGroup: 'normal',
       isPinned: false,
       isArchived: false,
       isActive: true,
+      isProcessing: true,
+      processingPhase: 'running',
+      canReloadFromNativeHistory: true,
       title: 'First line',
     });
   });
 
-  it('uses pinned, normal, archived precedence for corrupt overlap', async () => {
+  it('projects immutable child parentage without changing the summary', () => {
+    const parentChat = Object.freeze({
+      chatId: '1783725900000800',
+      relation: 'fork',
+      transcriptViewId: 'view-a',
+      ordinal: 4,
+    });
+    const { deps, session } = makeDeps();
+    session.parentChat = parentChat;
+
+    const projector = new ChatListProjector(deps);
+    const many = projector.buildMany([[CHAT_ID, session]]);
+
+    expect(projector.buildOne(CHAT_ID)?.parentChat).toBe(parentChat);
+    expect(many.get(CHAT_ID)?.parentChat).toBe(parentChat);
+    expect(projector.buildSummary(CHAT_ID)?.chat).not.toHaveProperty('parentChat');
+  });
+
+  it('builds a path-independent normalized summary', () => {
+    const { deps, session } = makeDeps();
+    session.tags = ['Review Needed', 'cli', 'review-needed'];
+    session.modelProtocol = 'anthropic-messages';
+    const projector = new ChatListProjector(deps);
+
+    expect(projector.buildSummary(CHAT_ID)).toEqual({
+      chat: {
+        id: CHAT_ID,
+        agentId: 'claude',
+        agentOwnershipEpoch: 'epoch-1',
+        carryOverRevision: 'carry-v1:0',
+        model: 'opus',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: 'anthropic-messages',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        title: 'First line',
+        projectPath: '/alias',
+        tags: ['cli', 'review-needed'],
+        canReloadFromNativeHistory: true,
+        activity: {
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastActivityAt: '2026-01-02T00:00:00.000Z',
+        },
+      },
+      processingPhase: 'running',
+    });
+    expect(deps.processing.phase).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns no summary for an unknown chat', () => {
+    const { deps } = makeDeps();
+    deps.registry.getChat.mockReturnValue(null);
+
+    expect(new ChatListProjector(deps).buildSummary(CHAT_ID)).toBeNull();
+    expect(deps.processing.phase).not.toHaveBeenCalled();
+  });
+
+  it('uses the default title when the first message starts with a blank line', () => {
+    const { deps } = makeDeps();
+    deps.metadata.getChatMetadata.mockReturnValue({
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastActivity: '2026-01-02T00:00:00.000Z',
+      firstMessage: '\nFirst visible line',
+      lastMessage: 'Latest line',
+    });
+
+    expect(new ChatListProjector(deps).buildSummary(CHAT_ID)?.chat.title).toBe(
+      'New Session',
+    );
+  });
+
+  it('uses pinned, normal, archived precedence for corrupt overlap', () => {
     const { deps } = makeDeps();
     deps.settings.getPinnedChatIds.mockReturnValue([CHAT_ID]);
     deps.settings.getArchivedChatIds.mockReturnValue([CHAT_ID]);
     const projector = new ChatListProjector(deps);
 
-    const entry = await projector.buildOne(CHAT_ID);
+    const entry = projector.buildOne(CHAT_ID);
 
     expect(entry?.orderGroup).toBe('pinned');
     expect(entry?.isPinned).toBe(true);
     expect(entry?.isArchived).toBe(false);
   });
 
-  it('omits unavailable sessions', async () => {
+  it('includes sessions without resolving their project paths', () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);
 
-    const entries = await projector.buildMany(
-      [[CHAT_ID, session]],
-      new Map([
-        [
-          '/alias',
-          {
-            available: false,
-            effectiveProjectKey: null,
-          },
-        ],
-      ]),
-    );
+    const entries = projector.buildMany([[CHAT_ID, session]]);
 
-    expect(entries.size).toBe(0);
+    expect(entries.get(CHAT_ID)?.projectPath).toBe('/alias');
   });
 });

@@ -2,13 +2,14 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn.js';
-	import type { ChatSearchIndexStatus } from '$shared/chat-search';
+	import type { ChatSearchIndexStatus, TranscriptSearchStatusV1 } from '$shared/chat-search';
 
 	interface SidebarTranscriptSearchStatusProps {
 		enabled: boolean;
 		loading?: boolean;
 		indexing?: boolean;
 		index?: ChatSearchIndexStatus | null;
+		status?: TranscriptSearchStatusV1 | null;
 		error?: string | null;
 		onRetry?: () => void;
 	}
@@ -18,16 +19,34 @@
 		loading = false,
 		indexing = false,
 		index = null,
+		status = null,
 		error = null,
 		onRetry = () => {},
 	}: SidebarTranscriptSearchStatusProps = $props();
 
 	let statusText = $derived.by(() => {
 		if (loading) return m.sidebar_search_transcript_searching();
-		if (indexing && index && index.pendingChatCount > 0) {
+		if (status?.phase === 'rebuilding') {
+			const resync = status.resync;
+			if (resync && resync.completedChats < resync.totalChats) {
+				return m.sidebar_search_indexing_progress({
+					done: resync.completedChats,
+					total: resync.totalChats,
+				});
+			}
+			return resync
+				? m.sidebar_search_finalizing()
+				: m.sidebar_search_updating();
+		}
+		if (indexing && status?.phase === 'degraded') return m.sidebar_search_restarting();
+		if (status?.phase === 'opening') return m.sidebar_search_updating();
+		const remaining = index
+			? index.pendingChatCount + index.unindexedChatCount
+			: 0;
+		if (indexing && index && remaining > 0) {
 			return m.sidebar_search_transcript_indexing_progress({
 				indexed: index.indexedChatCount,
-				pending: index.pendingChatCount,
+				pending: remaining,
 			});
 		}
 		if (indexing) return m.sidebar_search_transcript_indexing();
@@ -52,8 +71,11 @@
 				: m.sidebar_search_transcript_unsupported_plural({ count: index.unsupportedChatCount })
 			: '',
 	);
+	let truncatedText = $derived(
+		index?.resultsTruncated ? m.sidebar_search_results_truncated() : '',
+	);
 	let fullStatusText = $derived(
-		[statusText, failedText, unsupportedText].filter(Boolean).join(' '),
+		[statusText, failedText, unsupportedText, truncatedText].filter(Boolean).join(' '),
 	);
 </script>
 
@@ -82,6 +104,9 @@
 				{/if}
 				{#if unsupportedText}
 					<span> {unsupportedText}</span>
+				{/if}
+				{#if truncatedText}
+					<span> {truncatedText}</span>
 				{/if}
 			</span>
 		{/if}

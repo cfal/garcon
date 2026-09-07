@@ -3,9 +3,15 @@ import os from 'os';
 import path from 'path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import { GPT_6_ASTRA_MODEL } from '@garcon/common/models';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type { ThreadInjectItemsParams } from './protocol.js';
+import type {
+  CodexThreadSettings,
+  CodexThreadSettingsSandboxPolicy,
+  ThreadSettingsUpdateParams,
+} from './protocol.js';
 import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
 
 // Matches a leading "/<name>" skill token with optional trailing arguments,
@@ -27,6 +33,25 @@ interface CodexSandboxSettings {
   approvalPolicy: CodexApprovalPolicy;
 }
 
+export interface CodexThreadSettingsTarget {
+  readonly model: string;
+  // Represents provider-owned Default as null because Codex reports the effective concrete effort.
+  readonly effort: string | null;
+  readonly approvalPolicy: CodexApprovalPolicy;
+  readonly approvalsReviewer: 'user';
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly permissionMode: PermissionMode;
+}
+
+export interface CodexConfirmedThreadSettings {
+  readonly model: string;
+  readonly effort: string | null;
+  readonly approvalPolicy: unknown;
+  readonly approvalsReviewer: string;
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly permissionMode: PermissionMode;
+}
+
 const CODEX_SANDBOX: Record<string, CodexSandboxSettings> = {
   default: { sandbox: 'workspace-write', approvalPolicy: 'never' },
   acceptEdits: { sandbox: 'workspace-write', approvalPolicy: 'never' },
@@ -43,6 +68,10 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'application/pdf': '.pdf',
   'text/markdown': '.md',
   'text/plain': '.txt',
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/webm': '.webm',
+  'video/x-matroska': '.mkv',
 };
 
 export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandboxSettings {
@@ -50,15 +79,123 @@ export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandb
   return CODEX_SANDBOX[effectivePermissionMode] ?? CODEX_SANDBOX.default;
 }
 
-// Preserves the established interactive mapping. One-shot generation owns its
-// stricter exact-effort mapping in run-single-query.ts.
-export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
+export function codexThreadSettingsTarget(configuration: {
+  readonly model: string;
+  readonly permissionMode: PermissionMode;
+  readonly thinkingMode: ThinkingMode;
+}): CodexThreadSettingsTarget {
+  const { sandbox, approvalPolicy } = codexSandboxSettings(configuration.permissionMode);
+  return {
+    model: configuration.model,
+    effort: mapThinkingModeToCodexEffort(configuration.thinkingMode, configuration.model) ?? null,
+    approvalPolicy,
+    approvalsReviewer: 'user',
+    sandboxPolicy: sandbox === 'danger-full-access'
+      ? { type: 'dangerFullAccess' }
+      : {
+          type: 'workspaceWrite',
+          writableRoots: [],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+    permissionMode: configuration.permissionMode,
+  };
+}
+
+export function buildThreadSettingsUpdateParams(
+  threadId: string,
+  target: CodexThreadSettingsTarget,
+): ThreadSettingsUpdateParams {
+  return {
+    threadId,
+    model: target.model,
+    approvalPolicy: target.approvalPolicy,
+    approvalsReviewer: target.approvalsReviewer,
+    sandboxPolicy: target.sandboxPolicy,
+    ...(target.effort !== null ? { effort: target.effort } : {}),
+  };
+}
+
+export function threadSettingsMatch(
+  settings: CodexConfirmedThreadSettings,
+  target: CodexThreadSettingsTarget,
+): boolean {
+  // Accepts any confirmed effort when Codex owns the Default omitted from the update.
+  return settings.model === target.model
+    && (target.effort === null || settings.effort === target.effort)
+    && settings.approvalPolicy === target.approvalPolicy
+    && settings.approvalsReviewer === target.approvalsReviewer
+    && sandboxPolicyMatches(settings.sandboxPolicy, target.sandboxPolicy);
+}
+
+export function threadSettingsTargetFromSnapshot(
+  settings: CodexThreadSettings,
+  currentPermissionMode: PermissionMode,
+): CodexConfirmedThreadSettings {
+  const permissionMode = permissionModeFromSettings(settings, currentPermissionMode);
+  return {
+    model: settings.model,
+    effort: settings.effort,
+    approvalPolicy: settings.approvalPolicy,
+    approvalsReviewer: settings.approvalsReviewer,
+    sandboxPolicy: normalizeSandboxPolicy(settings.sandboxPolicy),
+    permissionMode,
+  };
+}
+
+function permissionModeFromSettings(
+  settings: CodexThreadSettings,
+  current: PermissionMode,
+): PermissionMode {
+  if (settings.sandboxPolicy.type === 'dangerFullAccess') return 'bypassPermissions';
+  if (settings.approvalPolicy === 'on-request') return 'manualBypass';
+  return current === 'manualBypass' || current === 'bypassPermissions' ? 'default' : current;
+}
+
+function normalizeSandboxPolicy(
+  sandboxPolicy: CodexThreadSettingsSandboxPolicy,
+): CodexThreadSettingsSandboxPolicy {
+  if (sandboxPolicy.type === 'dangerFullAccess') return { type: 'dangerFullAccess' };
+  if (sandboxPolicy.type !== 'workspaceWrite') return sandboxPolicy;
+  return {
+    type: 'workspaceWrite',
+    writableRoots: [],
+    networkAccess: sandboxPolicy.networkAccess ?? false,
+    excludeTmpdirEnvVar: sandboxPolicy.excludeTmpdirEnvVar ?? false,
+    excludeSlashTmp: sandboxPolicy.excludeSlashTmp ?? false,
+  };
+}
+
+function sandboxPolicyMatches(
+  left: CodexThreadSettingsSandboxPolicy,
+  right: CodexThreadSettingsSandboxPolicy,
+): boolean {
+  if (left.type !== right.type) return false;
+  if (left.type !== 'workspaceWrite' || right.type !== 'workspaceWrite') return true;
+  return (left.networkAccess ?? false) === (right.networkAccess ?? false)
+    && (left.excludeTmpdirEnvVar ?? false) === (right.excludeTmpdirEnvVar ?? false)
+    && (left.excludeSlashTmp ?? false) === (right.excludeSlashTmp ?? false);
+}
+
+// Preserves xhigh compatibility for older models while allowing models that
+// advertise max reasoning to receive that effort explicitly.
+export function mapThinkingModeToCodexEffort(
+  thinkingMode: ThinkingMode | undefined,
+  model?: string,
+): string | undefined {
   switch (thinkingMode) {
+    // Leaves provider defaults unset so Codex can honor config and model catalog defaults.
+    case 'none': return undefined;
     case 'low': return 'low';
     case 'medium': return 'medium';
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
-    case 'max': return 'xhigh';
+    case 'max': return model === GPT_6_ASTRA_MODEL
+      || model === 'gpt-5.6'
+      || model?.startsWith('gpt-5.6-')
+      ? 'max'
+      : 'xhigh';
     case 'ultra': return 'ultra';
     default: return undefined;
   }
@@ -92,13 +229,16 @@ function appendCommonThreadParams(
 export function buildThreadStartParams(request: CodexStartRequest): Record<string, unknown> {
   return appendCommonThreadParams({
     ephemeral: false,
+    historyMode: 'paginated',
   }, request);
 }
 
 export function buildInjectedContextItems(context: string): ThreadInjectItemsParams['items'] {
+  // Keeps provider-owned context distinct from user turns while Codex persists it for later model requests.
+  // https://github.com/openai/codex/blob/e363b08c9175ac1cbe5893615dd2cb9ddf95043b/codex-rs/app-server/tests/suite/v2/thread_inject_items.rs#L27-L83
   return [{
     type: 'message',
-    role: 'user',
+    role: 'developer',
     content: [{ type: 'input_text', text: context }],
   }];
 }
@@ -121,6 +261,7 @@ export function buildThreadForkParams(sourceSession: {
   model?: string | null;
   projectPath: string;
   codexConfig?: CodexProviderConfig;
+  lastTurnId?: string | null;
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId: sourceSession.agentSessionId,
@@ -129,7 +270,9 @@ export function buildThreadForkParams(sourceSession: {
     ephemeral: false,
     excludeTurns: true,
   };
+  if (sourceSession.nativePath) params.path = sourceSession.nativePath;
   if (sourceSession.codexConfig?.config) params.config = sourceSession.codexConfig.config;
+  if (sourceSession.lastTurnId) params.lastTurnId = sourceSession.lastTurnId;
   return params;
 }
 
@@ -155,7 +298,7 @@ export function buildTurnStartParams(request: {
     model: request.model,
   };
   if (request.clientMessageId) params.clientUserMessageId = request.clientMessageId;
-  const effort = mapThinkingModeToCodexEffort(request.thinkingMode);
+  const effort = mapThinkingModeToCodexEffort(request.thinkingMode, request.model);
   if (effort) params.effort = effort;
   return params;
 }
@@ -224,19 +367,24 @@ export async function writeAttachmentsToTempFiles(images?: readonly AgentAttachm
   const imagePaths: string[] = [];
   const filePaths: string[] = [];
 
-  for (let i = 0; i < images.length; i++) {
-    const attachment = images[i];
-    const parts = parseAttachmentDataUrl(attachment.data);
-    if (!parts) continue;
+  try {
+    for (let i = 0; i < images.length; i++) {
+      const attachment = images[i];
+      const parts = parseAttachmentDataUrl(attachment.data);
+      if (!parts) continue;
 
-    const mimeType = attachmentMimeType(attachment);
-    const ext = MIME_EXTENSIONS[mimeType];
-    if (!ext) continue;
-    const prefix = isImageAttachment(attachment) ? 'image' : 'attachment';
-    const filePath = path.join(tmpDir, `${prefix}-${i}${ext}`);
-    await fs.writeFile(filePath, Buffer.from(parts.base64, 'base64'));
-    if (isImageAttachment(attachment)) imagePaths.push(filePath);
-    else filePaths.push(filePath);
+      const mimeType = attachmentMimeType(attachment);
+      const ext = MIME_EXTENSIONS[mimeType];
+      if (!ext) continue;
+      const prefix = isImageAttachment(attachment) ? 'image' : 'attachment';
+      const filePath = path.join(tmpDir, `${prefix}-${i}${ext}`);
+      await fs.writeFile(filePath, Buffer.from(parts.base64, 'base64'));
+      if (isImageAttachment(attachment)) imagePaths.push(filePath);
+      else filePaths.push(filePath);
+    }
+  } catch (error) {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
   }
 
   return {

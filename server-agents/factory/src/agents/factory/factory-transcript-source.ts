@@ -2,13 +2,11 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
   findFactorySessionFileBySessionId,
-  getFactoryPreviewFromSessionPath,
   loadFactoryChatMessages,
 } from './history-loader.js';
 
 interface FactoryTranscriptSourceDeps {
   findSessionFileBySessionId: typeof findFactorySessionFileBySessionId;
-  getPreviewFromSessionPath: typeof getFactoryPreviewFromSessionPath;
   loadFromPath: typeof loadFactoryChatMessages;
 }
 
@@ -23,7 +21,6 @@ export interface FactoryTranscriptReference {
 
 export interface FactoryTranscriptReader {
   loadMessages(session: FactoryTranscriptReference): Promise<ChatMessage[]>;
-  getPreview(session: FactoryTranscriptReference): Promise<unknown>;
   resolveNativePath(session: FactoryTranscriptReference): Promise<string | null>;
 }
 
@@ -39,12 +36,11 @@ export function createFactoryTranscriptSource(
 ): FactoryTranscriptReader {
   const deps: FactoryTranscriptSourceDeps = {
     findSessionFileBySessionId: findFactorySessionFileBySessionId,
-    getPreviewFromSessionPath: (sessionPath) => getFactoryPreviewFromSessionPath(
+    loadFromPath: (sessionPath) => loadFactoryChatMessages(
       sessionPath,
-      {},
       logger,
+      { throwOnError: true },
     ),
-    loadFromPath: (sessionPath) => loadFactoryChatMessages(sessionPath, logger),
     ...overrides,
   };
 
@@ -53,12 +49,6 @@ export function createFactoryTranscriptSource(
       const nativePath = getFactoryNativePath(session);
       if (!nativePath) return [];
       return deps.loadFromPath(nativePath);
-    },
-
-    async getPreview(session: FactoryTranscriptReference): Promise<unknown> {
-      const nativePath = getFactoryNativePath(session);
-      if (!nativePath) return null;
-      return deps.getPreviewFromSessionPath(nativePath);
     },
 
     async resolveNativePath(session: FactoryTranscriptReference): Promise<string | null> {

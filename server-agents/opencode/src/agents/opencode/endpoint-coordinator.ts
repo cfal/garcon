@@ -1,6 +1,8 @@
-import { AgentTranscriptIndexError, type AgentLogger } from '@garcon/server-agent-interface';
+import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
 import {
   createOpenCodeRequestScope,
+  isOpenCodeNotFoundResult,
+  openCodeResultErrorMessage,
   throwOpenCodeResultError,
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
@@ -8,28 +10,38 @@ import {
 
 interface OpenCodeEndpointInstance {
   readonly client: unknown;
-  readonly baseUrl?: string;
+}
+
+interface OpenCodeClientLease {
+  readonly client: any;
+  release(): void;
 }
 
 interface OpenCodeEndpointCoordinatorOptions {
   readonly assertAvailable: () => void;
   readonly ensureUnlocked: () => Promise<OpenCodeEndpointInstance>;
-  readonly closeInstance: () => void;
-  readonly hasRunningSessions: () => boolean;
   readonly logger: AgentLogger;
+  readonly onActivity: () => void;
 }
 
 type ScopedSessionRequest = <T>(
   label: string,
   scope: OpenCodeRequestScope,
   operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
+  control?: { signal?: AbortSignal; timeoutMs?: number | null },
+) => Promise<T>;
+
+type OpenCodeRequest = <T>(
+  label: string,
+  operation: (signal: AbortSignal) => Promise<T>,
+  control?: { signal?: AbortSignal; timeoutMs?: number | null },
 ) => Promise<T>;
 
 export class OpenCodeEndpointCoordinator {
   readonly #options: OpenCodeEndpointCoordinatorOptions;
   #requestLeases = 0;
   #turnAdmissions = 0;
-  #refreshPromise: Promise<string> | null = null;
+  readonly #protectedNativeWork = new Set<Promise<unknown>>();
   #transitionTail: Promise<void> = Promise.resolve();
 
   constructor(options: OpenCodeEndpointCoordinatorOptions) {
@@ -52,111 +64,226 @@ export class OpenCodeEndpointCoordinator {
     }
   }
 
-  async withClientLease<T>(operation: (client: any) => Promise<T>): Promise<T> {
-    let client: any;
-    await this.runTransition(async () => {
+  async withClientLease<T>(
+    operation: (client: any) => Promise<T>,
+    admissionSignal?: AbortSignal,
+  ): Promise<T> {
+    const pendingLease = this.runTransition(async (): Promise<OpenCodeClientLease> => {
+      admissionSignal?.throwIfAborted();
       this.#options.assertAvailable();
-      client = (await this.#options.ensureUnlocked()).client;
+      const client = (await this.#options.ensureUnlocked()).client;
+      admissionSignal?.throwIfAborted();
       this.#requestLeases += 1;
+      this.#options.onActivity();
+      let released = false;
+      return {
+        client,
+        release: () => {
+          if (released) return;
+          released = true;
+          this.#requestLeases -= 1;
+          this.#options.onActivity();
+        },
+      };
     });
+    let lease: OpenCodeClientLease;
     try {
-      return await operation(client);
+      lease = admissionSignal
+        ? await waitForPromiseOrAbort(pendingLease, admissionSignal)
+        : await pendingLease;
+      admissionSignal?.throwIfAborted();
+    } catch (error) {
+      void pendingLease.then((lateLease) => lateLease.release(), () => undefined);
+      throw error;
+    }
+    try {
+      return await operation(lease.client);
     } finally {
-      this.#requestLeases -= 1;
+      lease.release();
     }
   }
 
   requestStarted(): void {
     this.#requestLeases += 1;
+    this.#options.onActivity();
   }
 
   requestFinished(): void {
     this.#requestLeases -= 1;
+    this.#options.onActivity();
   }
 
   turnAdmissionStarted(): void {
     this.#turnAdmissions += 1;
+    this.#options.onActivity();
   }
 
   turnAdmissionFinished(): void {
     this.#turnAdmissions -= 1;
+    this.#options.onActivity();
   }
 
-  async getTranscriptEndpoint(signal: AbortSignal): Promise<string> {
-    signal.throwIfAborted();
-    const instance = await this.runTransition(() => this.#options.ensureUnlocked());
-    signal.throwIfAborted();
-    if (!instance.baseUrl) throw new Error('OpenCode server did not expose a base URL');
-    return instance.baseUrl;
+  runProtectedNativeFork<T>(operation: () => Promise<T>): Promise<T> {
+    return this.#trackProtectedNativeWork(operation);
   }
 
-  refreshTranscriptEndpoint(failedBaseUrl: string, signal: AbortSignal): Promise<string> {
-    if (this.#refreshPromise) return this.#refreshPromise;
-    const refresh = this.runTransition(async () => {
-      signal.throwIfAborted();
-      const current = await this.#options.ensureUnlocked();
-      const baseUrl = current.baseUrl;
-      if (!baseUrl) throw new Error('OpenCode server did not expose a base URL');
-      if (baseUrl !== failedBaseUrl) return baseUrl;
-      if (await endpointHealthy(baseUrl, signal)) return baseUrl;
-      if (this.#options.hasRunningSessions() || !this.idle) {
-        throw new AgentTranscriptIndexError({
-          kind: 'agent-transcript-index-failure',
-          code: 'SOURCE_ENDPOINT_IN_USE',
-          retryable: true,
-          refreshSource: true,
-        });
+  runProtectedNativeCleanup<T>(operation: () => Promise<T>): Promise<T> {
+    return this.#trackProtectedNativeWork(operation);
+  }
+
+  #trackProtectedNativeWork<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = operation();
+    this.#protectedNativeWork.add(pending);
+    void pending.then(
+      () => this.#protectedNativeWork.delete(pending),
+      () => this.#protectedNativeWork.delete(pending),
+    );
+    return pending;
+  }
+
+  async waitForProtectedNativeWork(
+    timeoutMs: number,
+    retainedDeletionCount: () => number,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let pendingOperations = 0;
+    while (this.#protectedNativeWork.size > 0) {
+      const remainingMs = Math.max(0, deadline - Date.now());
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      const completed = await Promise.race([
+        Promise.allSettled([...this.#protectedNativeWork]).then(() => true),
+        new Promise<false>((resolve) => {
+          timeout = setTimeout(() => resolve(false), remainingMs);
+          timeout.unref?.();
+        }),
+      ]);
+      if (timeout) clearTimeout(timeout);
+      if (!completed) {
+        pendingOperations = this.#protectedNativeWork.size;
+        break;
       }
-      this.#options.closeInstance();
-      const replacement = await this.#options.ensureUnlocked();
-      signal.throwIfAborted();
-      if (!replacement.baseUrl) throw new Error('OpenCode server did not expose a base URL');
-      return replacement.baseUrl;
-    }).finally(() => {
-      if (this.#refreshPromise === refresh) this.#refreshPromise = null;
-    });
-    this.#refreshPromise = refresh;
-    return refresh;
+    }
+    const retainedDeletions = retainedDeletionCount();
+    if (pendingOperations > 0 || retainedDeletions > 0) {
+      this.#options.logger.warn('OpenCode shutdown abandoned native session cleanup', {
+        pendingOperations,
+        retainedDeletions,
+        timeoutMs,
+      });
+    }
   }
 
   async forkSession(
     sourceSessionId: string,
-    projectPath: string | null | undefined,
+    options: { projectPath?: string | null; messageId?: string; signal?: AbortSignal },
     runScopedRequest: ScopedSessionRequest,
+    discardCancelledFork: (
+      client: any,
+      forkedSessionId: string,
+      scope: OpenCodeRequestScope,
+    ) => Promise<void>,
   ): Promise<string> {
     const sessionID = sourceSessionId.trim();
     if (!sessionID) throw new Error('Cannot fork OpenCode session: missing source session id');
-    const scope = createOpenCodeRequestScope(projectPath);
-    const result: any = await this.withClientLease((client) => runScopedRequest(
-      'OpenCode session fork',
-      scope,
-      (signal, requestScope) => client.session.fork(
-        withOpenCodeRequestScope({ sessionID }, requestScope),
-        { signal },
-      ),
-    ));
-    throwOpenCodeResultError(result, 'OpenCode session fork failed');
-    const forkedSessionId = typeof result?.data?.id === 'string' ? result.data.id.trim() : '';
-    if (!forkedSessionId) throw new Error('OpenCode session fork did not return a session id');
+    const scope = createOpenCodeRequestScope(options.projectPath);
+    const forkedSessionId = await this.withClientLease(async (client) => {
+      options.signal?.throwIfAborted();
+      let result: any;
+      try {
+        result = await runScopedRequest(
+          'OpenCode session fork',
+          scope,
+          (signal, requestScope) => client.session.fork(
+            withOpenCodeRequestScope({
+              sessionID,
+              ...(options.messageId ? { messageID: options.messageId } : {}),
+            }, requestScope),
+            { signal },
+          ),
+          { timeoutMs: null },
+        );
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        throw error;
+      }
+      const forkedSessionId = typeof result?.data?.id === 'string' ? result.data.id.trim() : '';
+      if (options.signal?.aborted) {
+        if (forkedSessionId) await discardCancelledFork(client, forkedSessionId, scope);
+        options.signal.throwIfAborted();
+      }
+      // A source session the provider cannot return has no native fork position;
+      // the typed source-level refusal keeps the handoff-fork consent flow
+      // reachable instead of dead-ending the request in an untyped failure.
+      if (isOpenCodeNotFoundResult(result)) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'The OpenCode source session is unavailable',
+          true,
+          { nativeForkReason: 'source-missing' },
+        );
+      }
+      if (result?.error) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          openCodeResultErrorMessage(result, 'OpenCode session fork failed'),
+          true,
+        );
+      }
+      if (!forkedSessionId) throw new Error('OpenCode session fork did not return a session id');
+      return forkedSessionId;
+    }, options.signal);
     this.#options.logger.info('OpenCode session forked', { sourceSessionId: sessionID, forkedSessionId });
     return forkedSessionId;
   }
+
+  async moveSession(
+    agentSessionId: string,
+    directory: string,
+    signal: AbortSignal,
+    runRequest: OpenCodeRequest,
+  ): Promise<void> {
+    const sessionID = agentSessionId.trim();
+    const destination = directory.trim();
+    if (!sessionID) throw new Error('Cannot move OpenCode session: missing session id');
+    if (!destination) throw new Error('Cannot move OpenCode session: missing destination directory');
+    signal.throwIfAborted();
+
+    await this.withClientLease(async (client) => {
+      if (typeof client.experimental?.controlPlane?.moveSession !== 'function') {
+        throw new AgentIntegrationError(
+          'OPERATION_UNSUPPORTED',
+          'This OpenCode version does not support project path updates',
+          false,
+        );
+      }
+      const result = await runRequest(
+        'OpenCode session move',
+        (requestSignal) => client.experimental.controlPlane.moveSession({
+          sessionID,
+          destination: { directory: destination },
+        }, { signal: requestSignal }),
+        { signal },
+      );
+      throwOpenCodeResultError(result, 'OpenCode session move failed');
+    });
+  }
 }
 
-async function endpointHealthy(baseUrl: string, signal: AbortSignal): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2_000);
-  timeout.unref?.();
-  const abort = () => controller.abort(signal.reason);
-  signal.addEventListener('abort', abort, { once: true });
-  try {
-    await fetch(baseUrl, { signal: controller.signal });
-    return true;
-  } catch {
-    signal.throwIfAborted();
-    return false;
-  } finally {
-    clearTimeout(timeout);
-    signal.removeEventListener('abort', abort);
-  }
+function waitForPromiseOrAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      settle();
+    };
+    const onAbort = () => finish(() => reject(signal.reason));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+    if (signal.aborted) onAbort();
+  });
 }

@@ -3,17 +3,18 @@
 // All dependencies are injected via the constructor.
 
 import { sendWebSocketJson } from './utils.js';
-import { publishWebSocketPayload } from './transport.js';
 import {
   ReconnectStateMessage,
   WsFaultMessage,
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
-  ChatGenerationResetMessage,
   ChatReloadedMessage,
   WsPongMessage,
 } from '../../common/ws-events.ts';
-import type { ClientRequestErrorCode, ReconnectProcessingResult } from '../../common/ws-events.ts';
+import type {
+  ChatProcessingSnapshotResult,
+  ClientRequestErrorCode,
+} from '../../common/ws-events.ts';
 import {
   parseClientWsMessage,
   ChatSubscribeRequest,
@@ -23,58 +24,70 @@ import {
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
-import type { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { isDomainError } from '../lib/domain-error.js';
-import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import type { ChatReplayResult } from '../../common/chat-view.js';
+import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
+import type {
+  ResendCandidate,
+  TranscriptReplayResult,
+} from '../../common/chat-view.js';
+import type { ChatTransientFeedSnapshot } from '../../common/chat-transient-feed.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coordinator.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
+import {
+  StaleTranscriptViewError,
+  InvalidTranscriptReplayRequestError,
+  transcriptViewId,
+  type TranscriptViewId,
+} from '../ledger/index.js';
 
 const logger = createLogger('ws:chat');
 
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
 
-type AgentRegistryDep = Pick<
-  AgentRegistryServiceContract,
-  'getRunningChatIdsSnapshot'
->;
-
-type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 type QueueDep = Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
-  readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
+  readReplay(
+    chatId: string,
+    viewId: TranscriptViewId,
+    afterOrdinal: number,
+    throughOrdinal?: number,
+  ): Promise<TranscriptReplayResult>;
+  resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
 };
+// Serves the manual reload as a fresh view over the authoritative ledger.
+type TranscriptReload = (chatId: string) => Promise<import('../../common/chat-view.js').TranscriptPage>;
 
 type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Promise<void> | void;
 type ChatIdRequest = { type: string; chatId?: string | null };
 
 interface ChatHandlerDeps {
-  agents: AgentRegistryDep;
+  serverInstanceId: string;
+  processing: Pick<ChatProcessingActivity, 'phase' | 'snapshot'>;
   chatViews: ChatViewsDep;
-  nativeReloader: NativeReloaderDep;
+  transcriptReload: TranscriptReload;
   queue: QueueDep;
-  pendingInputs: PendingInputsDep;
+  transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   registry: IChatRegistry;
 }
 
 const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
+const MAX_TRANSCRIPT_REPLAY_FRAME_BYTES = 1024 * 1024;
 
-function readReconnectProcessingResult(
-  agents: AgentRegistryDep,
-): ReconnectProcessingResult {
+function readProcessingSnapshot(
+  processing: Pick<ChatProcessingActivity, 'snapshot'>,
+): ChatProcessingSnapshotResult {
   try {
     return {
       outcome: 'snapshot',
-      runningChatIds: agents.getRunningChatIdsSnapshot(),
+      chats: processing.snapshot(),
     };
   } catch (error: unknown) {
     logger.warn(
-      'reconnect processing snapshot unavailable:',
+      'processing snapshot unavailable:',
       error instanceof Error ? error.message : String(error),
     );
     return { outcome: 'unavailable' };
@@ -87,11 +100,87 @@ class WebSocketWriter {
     this.#ws = ws;
   }
   send(data: unknown): void {
-    sendWebSocketJson(this.#ws, data);
+    if (!sendWebSocketJson(this.#ws, data)) {
+      throw new WebSocketResponseDroppedError();
+    }
   }
-  publish(data: unknown): void {
-    publishWebSocketPayload(this.#ws, 'chat', JSON.stringify(data));
+}
+
+class WebSocketResponseDroppedError extends Error {
+  override readonly name = 'WebSocketResponseDroppedError';
+
+  constructor() {
+    super('WebSocket response was not accepted by the socket');
   }
+}
+
+class TranscriptReplayFrameLimitError extends Error {
+  override readonly name = 'TranscriptReplayFrameLimitError';
+
+  constructor() {
+    super('A transcript replay row exceeds the WebSocket response limit');
+  }
+}
+
+interface ChatSubscribedPageInput {
+  readonly clientRequestId: string;
+  readonly chatId: string;
+  readonly replay: TranscriptReplayResult;
+  readonly resendCandidates: ResendCandidate[];
+  readonly transientFeed: ChatTransientFeedSnapshot;
+}
+
+function chatSubscribedPage(
+  input: ChatSubscribedPageInput,
+  messageCount: number,
+): ChatSubscribedMessage {
+  const { replay } = input;
+  const nextAfterOrdinal = messageCount === replay.messages.length
+    ? replay.nextAfterOrdinal
+    : replay.messages[messageCount]!.ordinal - 1;
+  return new ChatSubscribedMessage(
+    input.clientRequestId,
+    input.chatId,
+    replay.transcriptViewId,
+    replay.messages.slice(0, messageCount),
+    replay.firstOrdinal,
+    nextAfterOrdinal,
+    nextAfterOrdinal,
+    replay.throughOrdinal,
+    nextAfterOrdinal < replay.throughOrdinal,
+    input.resendCandidates,
+    input.transientFeed,
+  );
+}
+
+function serializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function fitChatSubscribedPage(input: ChatSubscribedPageInput): ChatSubscribedMessage {
+  const complete = chatSubscribedPage(input, input.replay.messages.length);
+  if (serializedBytes(complete) <= MAX_TRANSCRIPT_REPLAY_FRAME_BYTES) return complete;
+
+  const afterOrdinal = input.replay.firstOrdinal - 1;
+  let lower = 0;
+  let upper = input.replay.messages.length - 1;
+  let fitted: ChatSubscribedMessage | null = null;
+  while (lower <= upper) {
+    const messageCount = Math.floor((lower + upper) / 2);
+    const candidate = chatSubscribedPage(input, messageCount);
+    if (candidate.nextAfterOrdinal <= afterOrdinal && candidate.hasMore) {
+      lower = messageCount + 1;
+      continue;
+    }
+    if (serializedBytes(candidate) <= MAX_TRANSCRIPT_REPLAY_FRAME_BYTES) {
+      fitted = candidate;
+      lower = messageCount + 1;
+    } else {
+      upper = messageCount - 1;
+    }
+  }
+  if (!fitted) throw new TranscriptReplayFrameLimitError();
+  return fitted;
 }
 
 interface RequestErrorParams {
@@ -110,28 +199,39 @@ function reloadErrorCode(error: unknown): ClientRequestErrorCode {
   return 'HISTORY_LOAD_FAILED';
 }
 
+function replayErrorCode(error: unknown): ClientRequestErrorCode {
+  if (error instanceof StaleTranscriptViewError) return 'STALE_TRANSCRIPT_VIEW';
+  if (error instanceof InvalidTranscriptReplayRequestError) {
+    return 'REQUEST_VALIDATION_FAILED';
+  }
+  return 'HISTORY_LOAD_FAILED';
+}
+
 export class ChatHandler {
-  #agents: AgentRegistryDep;
+  #serverInstanceId: string;
+  #processing: Pick<ChatProcessingActivity, 'phase' | 'snapshot'>;
   #chatViews: ChatViewsDep;
-  #nativeReloader: NativeReloaderDep;
+  #transcriptReload: TranscriptReload;
   #queue: QueueDep;
-  #pendingInputs: PendingInputsDep;
+  #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
   constructor({
-    agents,
+    serverInstanceId,
+    processing,
     chatViews,
-    nativeReloader,
+    transcriptReload,
     queue,
-    pendingInputs,
+    transientFeeds,
     registry,
   }: ChatHandlerDeps) {
-    this.#agents = agents;
+    this.#serverInstanceId = serverInstanceId;
+    this.#processing = processing;
     this.#chatViews = chatViews;
-    this.#nativeReloader = nativeReloader;
+    this.#transcriptReload = transcriptReload;
     this.#queue = queue;
-    this.#pendingInputs = pendingInputs;
+    this.#transientFeeds = transientFeeds;
     this.#registry = registry;
     this.#requestHandlers = this.#createRequestHandlers();
   }
@@ -185,13 +285,15 @@ export class ChatHandler {
           }
         },
       );
-      const processing = readReconnectProcessingResult(this.#agents);
+      const processing = readProcessingSnapshot(this.#processing);
       writer.send(new ReconnectStateMessage(
         processing,
         controlResults,
+        this.#serverInstanceId,
         data.clientRequestId ?? undefined,
       ));
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       logger.error(
         'reconnect state query failed:',
         error instanceof Error ? error.message : String(error),
@@ -216,12 +318,23 @@ export class ChatHandler {
       data.clientRequestId,
       data.sentAt,
       new Date().toISOString(),
+      readProcessingSnapshot(this.#processing),
+      this.#serverInstanceId,
     ));
   }
 
-  async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
+  async #handleChatSubscribe(
+    data: ChatSubscribeRequest,
+    chatId: string,
+    writer: WebSocketWriter,
+  ): Promise<void> {
     const clientRequestId = data.clientRequestId;
-    if (!clientRequestId) return;
+    if (!clientRequestId) {
+      // The client is waiting on a correlated answer it can never receive otherwise.
+      logger.warn('ws: chat-subscribe arrived without a client request id', { chatId });
+      writer.send(new WsFaultMessage('chat-subscribe requires a clientRequestId'));
+      return;
+    }
     const requestType = 'chat-subscribe';
     try {
       const session = this.#registry.getChat(chatId);
@@ -234,34 +347,42 @@ export class ChatHandler {
         });
         return;
       }
-      const replay = this.#chatViews.readReplay(chatId, data.generationId, data.afterSeq);
-      if (!replay) {
-        writer.send(new ChatSubscribedMessage(
-          clientRequestId,
-          chatId,
-          null,
-          'snapshot-required',
-          [],
-          0,
-          this.#pendingInputs.listForTransport(chatId),
-        ));
-        return;
-      }
-      writer.send(new ChatSubscribedMessage(
+      const viewId = transcriptViewId(data.transcriptViewId);
+      const replay = data.throughOrdinal === undefined
+        ? await this.#chatViews.readReplay(chatId, viewId, data.afterOrdinal)
+        : await this.#chatViews.readReplay(
+            chatId,
+            viewId,
+            data.afterOrdinal,
+            data.throughOrdinal,
+          );
+      const response = fitChatSubscribedPage({
         clientRequestId,
         chatId,
-        replay.generationId,
-        replay.mode,
-        replay.messages,
-        replay.lastSeq,
-        this.#pendingInputs.listForTransport(chatId),
-      ));
+        replay,
+        resendCandidates: this.#processing.phase(chatId) === null
+          ? [...this.#chatViews.resendCandidates(chatId)]
+          : [],
+        transientFeed: this.#transientFeeds.snapshot({
+          chatId,
+          transcriptViewId: replay.transcriptViewId,
+        }),
+      });
+      writer.send(response);
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
-        code: 'HISTORY_LOAD_FAILED',
+        code: replayErrorCode(error),
         message: (error as Error).message || 'Failed to replay chat messages',
-        retryable: true, chatId,
+        retryable: isDomainError(error)
+          ? error.retryable
+          : !(
+              error instanceof StaleTranscriptViewError
+              || error instanceof InvalidTranscriptReplayRequestError
+              || error instanceof TranscriptReplayFrameLimitError
+            ),
+        chatId,
       });
     }
   }
@@ -281,23 +402,20 @@ export class ChatHandler {
         });
         return;
       }
-      const reload = await this.#nativeReloader.reloadFromNative(chatId, 'manual-reload');
+      const reload = await this.#transcriptReload(chatId);
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,
-        reload.generationId,
+        reload.transcriptViewId,
         reload.messages,
-        reload.lastSeq,
-        reload.pageOldestSeq,
+        reload.lastOrdinal,
+        reload.pageOldestOrdinal,
+        reload.pageNewestOrdinal,
+        reload.nextBeforeOrdinal,
         reload.hasMore,
       ));
-      writer.publish(new ChatGenerationResetMessage(
-        chatId,
-        reload.generationId,
-        'manual-reload',
-        reload.lastSeq,
-      ));
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       const message = (error as Error).message || 'Failed to reload chat';
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
@@ -342,13 +460,43 @@ export class ChatHandler {
   async #handleMessage(ws: WS, rawData: unknown): Promise<void> {
     const writer = new WebSocketWriter(ws);
     try {
-      const data = parseClientWsMessage(rawData as Record<string, unknown>);
-      if (!data) return;
+      const raw = rawData as Record<string, unknown>;
+      const data = parseClientWsMessage(raw);
+      if (!data) {
+        this.#handleMalformedRequest(raw, writer);
+        return;
+      }
       await this.#requestHandlers[data.type](data, writer);
     } catch (error: unknown) {
+      if (error instanceof WebSocketResponseDroppedError) throw error;
       logger.error('ws: chat error:', (error as Error).message);
       writer.send(new WsFaultMessage((error as Error).message));
     }
+  }
+
+  #handleMalformedRequest(data: Record<string, unknown>, writer: WebSocketWriter): void {
+    if (data?.type !== 'chat-subscribe') return;
+    const clientRequestId = typeof data.clientRequestId === 'string' && data.clientRequestId
+      ? data.clientRequestId
+      : null;
+    const chatId = typeof data.chatId === 'string' && data.chatId ? data.chatId : null;
+    if (!clientRequestId) {
+      logger.warn('ws: chat-subscribe arrived without a client request id', { chatId });
+      writer.send(new WsFaultMessage('chat-subscribe requires a clientRequestId'));
+      return;
+    }
+    if (!chatId) {
+      this.#sendMissingSessionError(writer, 'chat-subscribe');
+      return;
+    }
+    this.#sendRequestError(writer, {
+      clientRequestId,
+      requestType: 'chat-subscribe',
+      code: 'REQUEST_VALIDATION_FAILED',
+      message: 'Invalid chat-subscribe request',
+      retryable: false,
+      chatId,
+    });
   }
 
   #sendMissingSessionError(writer: WebSocketWriter, type: string): void {

@@ -300,7 +300,7 @@ export class CursorAcpEventConverter implements AcpEventConverter {
     const params = asObject(request.params);
 
     if (request.method === 'cursor/ask_question') {
-      const toolId = cursorToolCallId(params, `cursor-question-${String(request.requestId)}`);
+      const toolId = cursorToolCallId(params, request.permissionOccurrenceId);
       return {
         tool: new CursorAskQuestionToolUseMessage(
           context.timestamp,
@@ -314,7 +314,7 @@ export class CursorAcpEventConverter implements AcpEventConverter {
     }
 
     if (request.method === 'cursor/create_plan') {
-      const toolId = cursorToolCallId(params, `cursor-plan-${String(request.requestId)}`);
+      const toolId = cursorToolCallId(params, request.permissionOccurrenceId);
       return {
         tool: new CursorCreatePlanToolUseMessage(
           context.timestamp,

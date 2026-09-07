@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	// Compact single-line tool display with action buttons.
 	// Renders as a card surface instead of a rail/border-l treatment.
 
@@ -26,7 +27,6 @@
 		};
 		resultId?: string;
 		toolResult?: Record<string, unknown>;
-		toolId?: string;
 	}
 
 	const DEFAULT_SCHEME = {
@@ -49,21 +49,29 @@
 		colorScheme = DEFAULT_SCHEME,
 		resultId,
 		toolResult,
-		toolId,
 	}: OneLineDisplayProps = $props();
 
 	let copied = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function handleAction() {
 		if (action === 'copyValue' && value) {
 			const didCopy = await copyToClipboard(value);
 			if (!didCopy) return;
 			copied = true;
-			setTimeout(() => (copied = false), 2000);
+			if (copyTimer) clearTimeout(copyTimer);
+			copyTimer = setTimeout(() => {
+				copied = false;
+				copyTimer = null;
+			}, 2000);
 		} else if (onAction) {
 			onAction();
 		}
 	}
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 
 	let isTerminal = $derived(style === 'terminal');
 	let displayName = $derived(value.split('/').pop() || value);
@@ -107,6 +115,17 @@
 	>
 		{@render copyIcon()}
 	</button>
+{/snippet}
+
+{#snippet resultJumpIcon()}
+	<svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<path
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			stroke-width="2"
+			d="M19 9l-7 7-7-7"
+		/>
+	</svg>
 {/snippet}
 
 <div class="group my-0.5">
@@ -172,19 +191,20 @@
 						</div>
 						{#if toolResult}
 							<a
-								href="#tool-result-{toolId}"
+								href={resultId ? `#${resultId}` : undefined}
 								class="flex-shrink-0 text-[11px] text-primary hover:text-primary/80 transition-colors flex items-center gap-0.5 mt-0.5"
 								aria-label={m.chat_tool_display_jump_to_results()}
 							>
-								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M19 9l-7 7-7-7"
-									/>
-								</svg>
+								{@render resultJumpIcon()}
 							</a>
+						{:else}
+							<span
+								class="invisible mt-0.5 flex flex-shrink-0 items-center gap-0.5 text-[11px]"
+								data-chat-tool-result-placeholder
+								aria-hidden="true"
+							>
+								{@render resultJumpIcon()}
+							</span>
 						{/if}
 					</div>
 					{#if secondary}

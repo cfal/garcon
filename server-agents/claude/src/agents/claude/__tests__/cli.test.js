@@ -1,7 +1,261 @@
 import { describe, it, expect } from 'bun:test';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages } from '../claude-cli.js';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  ClaudeTurnState,
+  claudeBackgroundTaskCount,
+  claudeProviderSessionState,
+  claudeResultFailureMessage,
+} from '../cli-protocol.js';
 import { convertClaudePermissionTool } from '../permission-tool-converter.js';
 import { AskUserQuestionToolUseMessage, BashToolUseMessage, ExitPlanModeToolUseMessage } from '@garcon/common/chat-types';
+import {
+  CLAUDE_STEERING_PROMPT_PREFIX,
+  buildClaudeInitialUserContent,
+  buildClaudeSteeringUserContent,
+  buildClaudeUserInputFrame,
+  claudeSteeringInputsFromNativeContent,
+} from '../user-input.js';
+import { ClaudeTurnSteeringState } from '../steering.js';
+
+describe('Claude SDK user input', () => {
+  it('builds the existing stream-json user frame', () => {
+    expect(JSON.parse(buildClaudeUserInputFrame({
+      content: 'hello',
+      sessionId: 'session-1',
+      uuid: 'input-1',
+    }))).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'hello' },
+      parent_tool_use_id: null,
+      session_id: 'session-1',
+      uuid: 'input-1',
+    });
+  });
+
+  it('keeps image, document, and text attachment content in canonical order', () => {
+    const text = Buffer.from('notes').toString('base64');
+    expect(buildClaudeInitialUserContent('prompt', [
+      {
+        kind: 'image',
+        name: 'screen.png',
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,aW1hZ2U=',
+      },
+      {
+        kind: 'image',
+        name: 'spec.pdf',
+        mimeType: 'application/pdf',
+        data: 'data:application/pdf;base64,cGRm',
+      },
+      {
+        kind: 'image',
+        name: 'notes.txt',
+        mimeType: 'text/plain',
+        data: `data:text/plain;base64,${text}`,
+      },
+    ])).toEqual([
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' },
+      },
+      {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: 'cGRm' },
+        title: 'spec.pdf',
+      },
+      {
+        type: 'text',
+        text: 'prompt\n\n<attached-file name="notes.txt" mime="text/plain">\nnotes\n\n</attached-file>',
+      },
+    ]);
+  });
+
+  it('preserves the content-block shape when a rich attachment has invalid data', () => {
+    expect(buildClaudeInitialUserContent('prompt', [{
+      kind: 'image',
+      name: 'broken.png',
+      mimeType: 'image/png',
+      data: 'not-a-data-url',
+    }])).toEqual([{ type: 'text', text: 'prompt' }]);
+  });
+
+  it('builds an explicit next-priority steering frame with literal slash input', () => {
+    expect(JSON.parse(buildClaudeUserInputFrame({
+      content: buildClaudeSteeringUserContent('/review the failing test'),
+      sessionId: 'session-1',
+      uuid: 'native-steer-1',
+      priority: 'next',
+    }))).toEqual({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: `${CLAUDE_STEERING_PROMPT_PREFIX}/review the failing test`,
+        }],
+      },
+      parent_tool_use_id: null,
+      session_id: 'session-1',
+      uuid: 'native-steer-1',
+      priority: 'next',
+    });
+  });
+
+  it('extracts only complete provider-owned steering block arrays', () => {
+    const content = [
+      { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}first` },
+      { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}/second` },
+    ];
+    expect(claudeSteeringInputsFromNativeContent(content)).toEqual(['first', '/second']);
+    expect(claudeSteeringInputsFromNativeContent('first')).toBeNull();
+    expect(claudeSteeringInputsFromNativeContent([
+      content[0],
+      { type: 'text', text: 'ordinary' },
+    ])).toBeNull();
+  });
+});
+
+describe('ClaudeTurnSteeringState', () => {
+  it('holds idempotent delivery reservations', () => {
+    const steering = new ClaudeTurnSteeringState();
+    const release = steering.reserveDelivery();
+    expect(steering.blocksIdleSettlement).toBe(true);
+    expect(steering.reservationCount).toBe(1);
+    release();
+    release();
+    expect(steering.blocksIdleSettlement).toBe(false);
+    expect(steering.reservationCount).toBe(0);
+  });
+
+  it('tracks queued, started, replay, and terminal lifecycle idempotently', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.rememberProviderIdle();
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'queued',
+    })).toEqual({ kind: 'queued', uuid: 'steer-1' });
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'started',
+    })).toMatchObject({ kind: 'started', uuid: 'steer-1', source: 'lifecycle' });
+    expect(steering.hasDeferredIdle).toBe(true);
+    expect(steering.activeCount).toBe(1);
+    expect(steering.observe({
+      type: 'user',
+      uuid: 'steer-1',
+      isReplay: true,
+    })).toBeNull();
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'completed',
+    })).toEqual({
+      kind: 'terminal',
+      uuid: 'steer-1',
+      phase: 'after-start',
+      state: 'completed',
+    });
+    expect(steering.blocksIdleSettlement).toBe(false);
+  });
+
+  it('accepts queued replay as a start fallback', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'queued',
+    });
+    expect(steering.observe({
+      type: 'user',
+      uuid: 'steer-1',
+      isReplay: true,
+    })).toMatchObject({ kind: 'started', source: 'replay' });
+    expect(steering.activeCount).toBe(1);
+  });
+
+  it('keeps deferred idle fenced when one of several native inputs starts', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.markSubmitted('steer-2');
+    steering.rememberProviderIdle();
+    steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'queued',
+    });
+    steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'started',
+    });
+
+    expect(steering.hasDeferredIdle).toBe(true);
+    expect(steering.activeCount).toBe(1);
+    expect(steering.submittedCount).toBe(1);
+  });
+
+  it('rejects replay without prior queue acceptance', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    expect(steering.observe({
+      type: 'user',
+      uuid: 'steer-1',
+      isReplay: true,
+    })).toEqual({ kind: 'duplicate-replay', uuid: 'steer-1' });
+    expect(steering.blocksIdleSettlement).toBe(false);
+  });
+
+  it('reports terminal lifecycle before start and keeps other inputs fenced', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.markSubmitted('steer-2');
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'discarded',
+    })).toEqual({
+      kind: 'terminal',
+      uuid: 'steer-1',
+      phase: 'before-start',
+      state: 'discarded',
+    });
+    expect(steering.submittedCount).toBe(1);
+    expect(steering.blocksIdleSettlement).toBe(true);
+  });
+
+  it('intersects interrupt receipts with owned native UUIDs', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('cancelled');
+    steering.markSubmitted('survivor');
+    expect(steering.observeInterruptReceipt({
+      cancelled: ['cancelled', 'provider-owned'],
+      stillQueued: ['survivor'],
+    })).toEqual({ cancelledCount: 1, stillQueuedCount: 1 });
+    expect(steering.submittedCount).toBe(1);
+  });
+
+  it('bounds deferred idle only while native work remains', async () => {
+    const steering = new ClaudeTurnSteeringState();
+    let timedOut = 0;
+    const release = steering.reserveDelivery();
+    steering.deferIdle(() => timedOut += 1, 1);
+    await Bun.sleep(5);
+    expect(timedOut).toBe(0);
+
+    steering.markSubmitted('steer-1');
+    release();
+    steering.deferIdle(() => timedOut += 1, 1);
+    await Bun.sleep(5);
+    expect(timedOut).toBe(1);
+    steering.clear();
+    expect(steering.blocksIdleSettlement).toBe(false);
+  });
+});
 
 describe('buildClaudeCLIArgs', () => {
 
@@ -15,7 +269,7 @@ describe('buildClaudeCLIArgs', () => {
     expect(buildClaudeCLIArgs({ thinkingMode: 'none', prompt: 'hi' })).not.toContain('--effort');
   });
 
-  it('does not forward Claude thinking mode unless the CLI supports the legacy flag', () => {
+  it('does not forward the removed Claude thinking flag', () => {
     for (const claudeThinkingMode of ['auto', 'on', 'off']) {
       const args = buildClaudeCLIArgs({ claudeThinkingMode, prompt: 'hi' });
 
@@ -24,16 +278,6 @@ describe('buildClaudeCLIArgs', () => {
       expect(args).not.toContain('enabled');
       expect(args).not.toContain('disabled');
     }
-  });
-
-  it('maps Claude thinking modes to legacy --thinking values on old CLIs', () => {
-    const legacy = (claudeThinkingMode) =>
-      buildClaudeCLIArgs({ claudeThinkingMode, prompt: 'hi', supportsLegacyThinkingFlag: true });
-
-    expect(legacy('auto')).toContain('--thinking');
-    expect(legacy('auto')).toContain('adaptive');
-    expect(legacy('on')).toContain('enabled');
-    expect(legacy('off')).toContain('disabled');
   });
 
   it('includes stream-json session flags and effort for sessions', () => {
@@ -49,39 +293,27 @@ describe('buildClaudeCLIArgs', () => {
       '--print',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
+      '--replay-user-messages',
       '--verbose',
       '--model', 'sonnet',
       '--permission-mode', 'acceptEdits',
       '--permission-prompt-tool', 'stdio',
       '--effort', 'medium',
-      '--session-id', 'session-1',
+      '--session-id=session-1',
       '-p', '',
     ]);
   });
 
-  it('appends legacy --thinking to stream-json sessions on old CLIs', () => {
-    expect(buildClaudeCLIArgs({
-      model: 'sonnet',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
-      claudeThinkingMode: 'off',
-      sessionId: 'session-1',
+  it('passes session identifiers with inline values', () => {
+    const args = buildClaudeCLIArgs({
+      resumeSessionId: 'session-1',
       prompt: '',
       streamJson: true,
-      supportsLegacyThinkingFlag: true,
-    })).toEqual([
-      '--print',
-      '--output-format', 'stream-json',
-      '--input-format', 'stream-json',
-      '--verbose',
-      '--model', 'sonnet',
-      '--permission-mode', 'acceptEdits',
-      '--permission-prompt-tool', 'stdio',
-      '--effort', 'medium',
-      '--thinking', 'disabled',
-      '--session-id', 'session-1',
-      '-p', '',
-    ]);
+    });
+
+    expect(args).toContain('--resume=session-1');
+    expect(args).not.toContain('--resume');
+    expect(args).not.toContain('session-1');
   });
 
   it('starts manual bypass as normal Claude mode with stdio permission prompts', () => {
@@ -113,6 +345,25 @@ describe('buildClaudeCLIArgs', () => {
 describe('convertCLIMessageToChatMessages', () => {
   it('returns empty array for non-assistant messages', () => {
     expect(convertCLIMessageToChatMessages({ type: 'system', content: [] })).toEqual([]);
+  });
+
+  it('attaches the record uuid and rendered ordinal as the native identity', () => {
+    const result = convertCLIMessageToChatMessages({
+      type: 'assistant',
+      uuid: 'uuid-live-1',
+      content: [
+        { type: 'thinking', thinking: 'reason' },
+        { type: 'text', text: 'answer' },
+      ],
+    });
+    expect(result).toHaveLength(2);
+    expect(getNativeMessageRevisionSource(result[0])).toEqual({ entryId: 'uuid-live-1', withinSourceOrdinal: 0 });
+    expect(getNativeMessageRevisionSource(result[1])).toEqual({ entryId: 'uuid-live-1', withinSourceOrdinal: 1 });
+    const withoutUuid = convertCLIMessageToChatMessages({
+      type: 'assistant',
+      content: [{ type: 'text', text: 'answer' }],
+    });
+    expect(getNativeMessageRevisionSource(withoutUuid[0])).toBeNull();
   });
 
   it('converts text to assistant-message', () => {
@@ -158,6 +409,49 @@ describe('convertCLIMessageToChatMessages', () => {
     expect(result[0].type).toBe('tool-result');
     expect(result[0].toolId).toBe('tool-1');
     expect(result[0].isError).toBe(false);
+  });
+
+  it('converts real CLI user-frame tool results without replaying user text', () => {
+    const msg = {
+      type: 'user',
+      uuid: 'user-1',
+      isReplay: true,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'do not render this prompt again' },
+          {
+            type: 'tool_result',
+            tool_use_id: 'tool-1',
+            content: 'command output',
+            is_error: false,
+          },
+        ],
+      },
+      tool_use_result: {
+        stdout: 'command output',
+        stderr: '',
+        interrupted: false,
+      },
+    };
+
+    const result = convertCLIMessageToChatMessages(msg);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: 'tool-result',
+      toolId: 'tool-1',
+      isError: false,
+      content: {
+        raw: 'command output',
+        toolUseResult: {
+          stdout: 'command output',
+          stderr: '',
+          interrupted: false,
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('do not render this prompt again');
   });
 
   it('converts all content types from a single assistant message', () => {
@@ -303,6 +597,139 @@ describe('convertCLIMessageToChatMessages', () => {
     const msg = { type: 'assistant', content: [] };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('claudeResultFailureMessage', () => {
+  it('does not expose Claude internal execution diagnostics', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'error_during_execution',
+      terminal_reason: 'aborted_streaming',
+      is_error: true,
+      errors: [
+        '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null',
+      ],
+    })).toBe('Claude CLI turn failed: error_during_execution');
+  });
+
+  it('prefers error list prose over the result text', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      errors: ['The run exceeded its turn limit.'],
+      result: 'API Error: 500',
+    })).toBe('The run exceeded its turn limit.');
+  });
+
+  it('uses the result text for an API failure labelled subtype success', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: 'API Error: 529 overloaded',
+    })).toBe('API Error: 529 overloaded');
+  });
+
+  it('never labels a failure with the success subtype', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      terminal_reason: 'api_error',
+    })).toBe('Claude CLI turn failed: api_error');
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      api_error_status: 529,
+    })).toBe('Claude CLI turn failed: unknown error (API status 529)');
+  });
+});
+
+describe('Claude provider run boundaries', () => {
+  it('decodes only recognized session state events', () => {
+    expect(claudeProviderSessionState({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'running',
+    })).toBe('running');
+    expect(claudeProviderSessionState({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'idle',
+    })).toBe('idle');
+    expect(claudeProviderSessionState({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'future-state',
+    })).toBeNull();
+    expect(claudeProviderSessionState({
+      type: 'assistant',
+      subtype: 'session_state_changed',
+      state: 'idle',
+    })).toBeNull();
+  });
+
+  it('decodes background task snapshots as a level count', () => {
+    expect(claudeBackgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [{ task_id: 'one' }, { task_id: 'two' }],
+    })).toBe(2);
+    expect(claudeBackgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [],
+    })).toBe(0);
+    expect(claudeBackgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: 'malformed',
+    })).toBeNull();
+  });
+
+  it('treats later results as continuations of the accepted input', () => {
+    const turn = new ClaudeTurnState('input-1');
+    turn.observeInput({
+      type: 'command_lifecycle',
+      command_uuid: 'input-1',
+      state: 'started',
+    });
+    expect(turn.correlateResult({
+      type: 'result',
+      user_message_uuid: 'another-input',
+    })).toBe('mismatched');
+
+    const inputResult = { type: 'result', user_message_uuid: 'input-1', is_error: false };
+    expect(turn.correlateResult(inputResult)).toBe('input');
+    turn.addOutputMessages(1, true);
+    turn.recordAcceptedResult(inputResult);
+
+    expect(turn.correlateResult({
+      type: 'result',
+      user_message_uuid: 'provider-owned-continuation',
+    })).toBe('continuation');
+  });
+
+  it('keeps a background continuation fenced through its completion turn', () => {
+    const turn = new ClaudeTurnState('input-1', 1);
+    turn.observeInput({
+      type: 'command_lifecycle',
+      command_uuid: 'input-1',
+      state: 'started',
+    });
+    turn.recordAcceptedResult({
+      type: 'result',
+      user_message_uuid: 'input-1',
+      is_error: false,
+    });
+    expect(turn.backgroundContinuationPending).toBe(true);
+
+    turn.observeBackgroundTaskCount(0);
+    turn.recordAcceptedResult({ type: 'result', is_error: false });
+    expect(turn.backgroundContinuationPending).toBe(false);
   });
 });
 

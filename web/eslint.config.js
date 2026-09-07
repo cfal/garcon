@@ -20,9 +20,13 @@ export default defineConfig(
 	},
 	js.configs.recommended,
 	ts.configs.recommended,
+	svelte.configs['flat/recommended'],
 	eslintConfigPrettier,
-	svelte.configs.prettier,
+	svelte.configs['flat/prettier'],
 	{
+		linterOptions: {
+			reportUnusedDisableDirectives: 'error',
+		},
 		languageOptions: {
 			ecmaVersion: 'latest',
 			sourceType: 'module',
@@ -32,6 +36,10 @@ export default defineConfig(
 			},
 		},
 		rules: {
+			// Domain state replaces plain collections; SvelteMap and SvelteSet would alter effect tracking.
+			'svelte/prefer-svelte-reactivity': 'off',
+			// The SPA has no base path, and dynamic external URLs must remain untouched.
+			'svelte/no-navigation-without-resolve': 'off',
 			'@typescript-eslint/no-unused-vars': [
 				'error',
 				{
@@ -102,7 +110,6 @@ export default defineConfig(
 		files: ['**/*.svelte'],
 		rules: {
 			'@typescript-eslint/no-unused-expressions': 'off',
-			'@typescript-eslint/no-unused-vars': 'off',
 		},
 	},
 	{

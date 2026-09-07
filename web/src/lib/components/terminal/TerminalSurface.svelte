@@ -2,13 +2,16 @@
 	import { untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Square from '@lucide/svelte/icons/square';
 	import X from '@lucide/svelte/icons/x';
 	import { getLocalSettings, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
-	import { terminalSurfaceId, type HostId } from '$lib/workspace/surface-types';
+	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
+	import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 	import type { TerminalToolbarKey } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { ApiError } from '$lib/api/client.js';
@@ -16,18 +19,25 @@
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import TerminalSettingsMenu from './TerminalSettingsMenu.svelte';
+	import TerminalRenameDialog from './TerminalRenameDialog.svelte';
+	import type {
+		TerminalSurfaceRegistryPort,
+		TerminalSurfaceWorkspacePort,
+	} from './terminal-surface-ports.js';
 
 	let {
 		terminalId,
 		host,
-		visible = true,
+		terminals: providedTerminals,
+		workspace: providedWorkspace,
 	}: {
 		terminalId: string;
-		host: HostId | 'mobile';
-		visible?: boolean;
+		host: WorkspaceWindowId | 'mobile';
+		terminals?: TerminalSurfaceRegistryPort;
+		workspace?: TerminalSurfaceWorkspacePort;
 	} = $props();
-	const terminals = getTerminalRegistry();
-	const workspace = getWorkspaceCoordinator();
+	const terminals = untrack(() => providedTerminals) ?? getTerminalRegistry();
+	const workspace = untrack(() => providedWorkspace) ?? getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
 	const frame = getSurfaceFrameBridge();
 	let terminalHost = $state<HTMLDivElement | null>(null);
@@ -35,9 +45,11 @@
 	let lease: number | null = null;
 	let observer: ResizeObserver | null = null;
 	let actionError = $state<string | null>(null);
+	let renameDialogOpen = $state(false);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
-	let runtime = $state<ReturnType<typeof terminals.ensureRuntime> | null>(null);
+	let runtime = $state<Awaited<ReturnType<typeof terminals.ensureRuntime>> | null>(null);
+	let runtimeTerminalId = $state<string | null>(null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [
@@ -52,12 +64,20 @@
 				priority: 0,
 			},
 			{
+				id: 'rename',
+				label: m.terminal_rename(),
+				icon: Pencil,
+				onclick: () => (renameDialogOpen = true),
+				disabled: !session,
+				priority: 1,
+			},
+			{
 				id: 'terminate',
 				label: m.terminal_terminate(),
 				icon: Square,
 				onclick: () => void terminateTerminal(),
 				disabled: !session || workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId)),
-				priority: 1,
+				priority: 2,
 				variant: 'destructive',
 			},
 		];
@@ -71,7 +91,7 @@
 				label: m.terminal_reattach(),
 				icon: RefreshCw,
 				onclick: () => terminals.reattach(terminalId),
-				priority: 2,
+				priority: 3,
 			});
 		}
 		actions.push({
@@ -80,7 +100,7 @@
 			icon: Clipboard,
 			onclick: () => void runtime?.pasteFromClipboard(),
 			disabled: !runtime,
-			priority: 3,
+			priority: 4,
 		});
 		return actions;
 	});
@@ -95,13 +115,32 @@
 
 	$effect(() => {
 		const currentTerminalId = terminalId;
+		let cancelled = false;
 		if (!session) {
+			runtimeTerminalId = null;
 			runtime = null;
 			return;
 		}
+		if (untrack(() => runtimeTerminalId) !== currentTerminalId) {
+			runtimeTerminalId = currentTerminalId;
+			runtime = null;
+		}
 		// Creates the retained third-party runtime after render rather than from a template derivation.
-		const nextRuntime = untrack(() => terminals.ensureRuntime(currentTerminalId));
-		if (untrack(() => runtime) !== nextRuntime) runtime = nextRuntime;
+		void untrack(() => terminals.ensureRuntime(currentTerminalId))
+			.then((nextRuntime) => {
+				if (
+					cancelled ||
+					terminalId !== currentTerminalId ||
+					untrack(() => runtimeTerminalId) !== currentTerminalId
+				) {
+					return;
+				}
+				if (untrack(() => runtime) !== nextRuntime) runtime = nextRuntime;
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	function attachmentLabel(
@@ -119,9 +158,12 @@
 	function placementLabel(itemTerminalId: string): string | null {
 		const surfaceId = terminalSurfaceId(itemTerminalId);
 		const snapshot = workspace.layout.snapshot;
-		if (snapshot.main.order.includes(surfaceId)) return m.workspace_main_view();
-		if (snapshot.sidebar.order.includes(surfaceId)) return m.workspace_sidebar_view();
-		return null;
+		const windowId = windowIdOfSurface(snapshot.desktopRoot, surfaceId);
+		if (!windowId) return null;
+		const index = collectWindowNodes(snapshot.desktopRoot).findIndex(
+			(workspaceWindow) => workspaceWindow.id === windowId,
+		);
+		return m.workspace_window_number({ number: index + 1 });
 	}
 
 	$effect(() => {
@@ -189,6 +231,15 @@
 		}
 	}
 
+	async function closeTerminal(): Promise<void> {
+		actionError = null;
+		try {
+			await workspace.closeSurface(terminalSurfaceId(terminalId));
+		} catch (error) {
+			actionError = error instanceof Error ? error.message : m.terminal_unavailable();
+		}
+	}
+
 	function toggleInputModifier(modifier: 'ctrl' | 'alt'): void {
 		runtime?.inputControls.toggleModifier(modifier);
 	}
@@ -199,63 +250,63 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col bg-background text-foreground">
-	<div
-		class="surface-toolbar flex h-10 shrink-0 items-center gap-2 border-b border-border px-2"
-		style="container-name: surface-toolbar; container-type: inline-size;"
-	>
-		<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-			<select
-				bind:this={sessionPicker}
-				class="min-w-24 max-w-56 truncate rounded-md border border-border bg-background px-2 py-1 text-xs"
-				value={terminalId}
-				onchange={(event) => selectTerminal(event.currentTarget.value)}
-				aria-label={m.terminal_session()}
-			>
-				{#each terminals.orderedSessions as item (item.metadata.terminalId)}
-					{@const placement = placementLabel(item.metadata.terminalId)}
-					<option value={item.metadata.terminalId}>
-						{m.terminal_session_status({
-							number: item.metadata.displaySequence,
-							status: item.metadata.processStatus,
-						})}{placement ? ` - ${placement}` : ''}
-					</option>
-				{/each}
-			</select>
-			{#if session}
-				<span
-					class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-					title={m.terminal_initial_working_directory({
-						path: session.metadata.initialWorkingDirectory,
-					})}
+	{#if host === 'mobile'}
+		<div
+			class="surface-toolbar flex h-10 shrink-0 items-center gap-2 border-b border-border px-2"
+			style="container-name: surface-toolbar; container-type: inline-size;"
+		>
+			<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+				<select
+					bind:this={sessionPicker}
+					class="min-w-24 max-w-56 truncate rounded-md border border-border bg-background px-2 py-1 text-xs"
+					value={terminalId}
+					onchange={(event) => selectTerminal(event.currentTarget.value)}
+					aria-label={m.terminal_session()}
 				>
-					{m.terminal_initial_working_directory({
-						path: session.metadata.initialWorkingDirectory,
-					})}
-				</span>
-				<span class="shrink-0 text-[11px] text-muted-foreground"
-					>{attachmentLabel(session.attachmentState)}</span
-				>
-			{/if}
-		</div>
-		<ResponsiveSurfaceActions
-			actions={toolbarActions}
-			menuLabel={m.workspace_surface_actions()}
-			class="max-w-28"
-		/>
-		<TerminalSettingsMenu />
-		{#if host === 'mobile'}
+					{#each terminals.orderedSessions as item (item.metadata.terminalId)}
+						{@const placement = placementLabel(item.metadata.terminalId)}
+						<option value={item.metadata.terminalId}>
+							{m.terminal_session_status({
+								name: terminalDisplayName(item.metadata),
+								status: item.metadata.processStatus,
+							})}{placement ? ` - ${placement}` : ''}
+						</option>
+					{/each}
+				</select>
+				{#if session}
+					<span
+						class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+						title={m.terminal_initial_working_directory({
+							path: session.metadata.initialWorkingDirectory,
+						})}
+					>
+						{m.terminal_initial_working_directory({
+							path: session.metadata.initialWorkingDirectory,
+						})}
+					</span>
+					<span class="shrink-0 text-[11px] text-muted-foreground"
+						>{attachmentLabel(session.attachmentState)}</span
+					>
+				{/if}
+			</div>
+			<ResponsiveSurfaceActions
+				actions={toolbarActions}
+				menuLabel={m.workspace_surface_actions()}
+				class="max-w-28"
+			/>
+			<TerminalSettingsMenu />
 			<button
 				type="button"
 				class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-				onclick={() => void workspace.closeSurface(terminalSurfaceId(terminalId))}
+				onclick={() => void closeTerminal()}
 				disabled={workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId))}
 				aria-label={m.terminal_close_tab()}
 				title={m.terminal_close_tab()}
 			>
 				<X class="h-4 w-4" />
 			</button>
-		{/if}
-	</div>
+		</div>
+	{/if}
 	{#if actionError}
 		<div
 			class="border-b border-status-error-border bg-status-error px-3 py-1.5 text-xs text-status-error-foreground"
@@ -274,6 +325,18 @@
 			</div>
 		</div>
 	{:else}
+		{#if session.runtimeError}
+			<div
+				class="flex shrink-0 items-center justify-between gap-3 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"
+			>
+				<span class="truncate">{session.runtimeError}</span>
+				<button
+					type="button"
+					class="shrink-0 rounded-md border border-status-error-border px-2 py-1 hover:bg-accent"
+					onclick={() => terminals.reattach(terminalId)}>{m.common_retry()}</button
+				>
+			</div>
+		{/if}
 		{#if session.replayTruncatedAt}
 			<div class="border-b border-border bg-muted px-3 py-1 text-xs text-muted-foreground">
 				{m.terminal_earlier_output_unavailable()}
@@ -311,6 +374,12 @@
 		{/if}
 	{/if}
 </div>
+
+<TerminalRenameDialog
+	terminal={host === 'mobile' && renameDialogOpen ? (session?.metadata ?? null) : null}
+	onClose={() => (renameDialogOpen = false)}
+	onRename={(selectedTerminalId, title) => terminals.rename(selectedTerminalId, title)}
+/>
 
 <style>
 	.mobile-terminal-host :global(.xterm) {

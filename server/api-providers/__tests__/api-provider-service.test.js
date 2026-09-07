@@ -93,7 +93,7 @@ describe('ApiProviderService', () => {
 
     const discovered = await service.discoverModels({
       protocol: 'openai-compatible',
-      baseUrl: endpoint.baseUrl,
+      baseUrl: 'https://api.acme.test/alternate/v1',
       endpointId: endpoint.id,
       modelDiscovery: 'openai-models',
     });
@@ -102,9 +102,127 @@ describe('ApiProviderService', () => {
       success: true,
       models: [{ value: 'acme/model', label: 'Acme Model' }],
     });
-    expect(fetchMock).toHaveBeenCalledWith('https://api.acme.test/v1/models', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('https://api.acme.test/alternate/v1/models', expect.objectContaining({
       headers: { Authorization: 'Bearer sk-acme-secret' },
     }));
+  });
+
+  it('requires an explicit API key when stored provider references target a different origin', async () => {
+    const { service } = await tempService();
+    const created = await service.create(openAiInput());
+    const endpoint = created.endpoints[0];
+    const fetchMock = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    globalThis.fetch = fetchMock;
+
+    const endpointResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://untrusted.example/v1',
+      endpointId: endpoint.id,
+      modelDiscovery: 'openai-models',
+    });
+    const providerResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://untrusted.example/v1',
+      apiProviderId: created.id,
+      modelDiscovery: 'openai-models',
+    });
+
+    expect(endpointResult).toEqual({
+      success: false,
+      error: 'Enter the API key for this base URL before fetching models.',
+    });
+    expect(providerResult).toEqual(endpointResult);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://untrusted.example/v1',
+      endpointId: endpoint.id,
+      apiKey: 'replacement-secret',
+      modelDiscovery: 'openai-models',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://untrusted.example/v1/models', expect.objectContaining({
+      headers: { Authorization: 'Bearer replacement-secret' },
+    }));
+  });
+
+  it('discovers models after changing the origin of a keyless endpoint', async () => {
+    const { service } = await tempService();
+    const created = await service.create(openAiInput({
+      endpoint: {
+        baseUrl: 'http://localhost:11434/v1',
+        apiKey: '',
+        modelDiscovery: 'ollama-tags',
+      },
+    }));
+    const fetchMock = mock(() => Promise.resolve(new Response(JSON.stringify({
+      models: [{ name: 'qwen3' }],
+    }), { status: 200 })));
+    globalThis.fetch = fetchMock;
+
+    const endpointResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://192.168.1.5:11434/v1',
+      endpointId: created.endpoints[0].id,
+      modelDiscovery: 'ollama-tags',
+    });
+    const providerResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://192.168.1.5:11434/v1',
+      apiProviderId: created.id,
+      modelDiscovery: 'ollama-tags',
+    });
+
+    expect(endpointResult).toEqual({
+      success: true,
+      models: [{ value: 'qwen3', label: 'qwen3 (local)', isLocal: true }],
+    });
+    expect(providerResult).toEqual(endpointResult);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://192.168.1.5:11434/api/tags',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('does not require or send stored keys for Ollama discovery after changing origins', async () => {
+    const { service } = await tempService();
+    const created = await service.create(openAiInput({
+      endpoint: {
+        baseUrl: 'http://localhost:11434/v1',
+        apiKey: 'stored-secret',
+        modelDiscovery: 'ollama-tags',
+      },
+    }));
+    const fetchMock = mock(() => Promise.resolve(new Response(JSON.stringify({
+      models: [{ name: 'qwen3' }],
+    }), { status: 200 })));
+    globalThis.fetch = fetchMock;
+
+    const endpointResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://192.168.1.5:11434/v1',
+      endpointId: created.endpoints[0].id,
+      modelDiscovery: 'ollama-tags',
+    });
+    const providerResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://192.168.1.5:11434/v1',
+      apiProviderId: created.id,
+      modelDiscovery: 'ollama-tags',
+    });
+
+    expect(endpointResult).toEqual({
+      success: true,
+      models: [{ value: 'qwen3', label: 'qwen3 (local)', isLocal: true }],
+    });
+    expect(providerResult).toEqual(endpointResult);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, options] of fetchMock.mock.calls) {
+      expect(url).toBe('http://192.168.1.5:11434/api/tags');
+      expect(options).not.toHaveProperty('headers');
+    }
   });
 
   it('discovers models from bare-array OpenAI-compatible responses', async () => {

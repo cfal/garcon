@@ -1,28 +1,41 @@
 import os from 'node:os';
+import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
+import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import { CODEX_MODELS } from '@garcon/common/models';
+import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
-  type AgentForkRequest,
+  type AgentNativeForkRequest,
   type AgentHost,
   type AgentIntegration,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
-import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
+import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createCodexConfig, type CodexConfig } from './config.js';
 import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
 import { CodexExecution } from './agents/codex/execution.js';
-import { rewriteCodexForkTranscriptEntry } from './agents/codex/fork-transcript.js';
+import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
+import {
+  createCodexForking,
+  isCodexThreadNotFound,
+} from './agents/codex/codex-forking.js';
+import { createCodexForkTargetPath } from './agents/codex/fork-target-path.js';
+import { inspectCodexHistoryProfile } from './agents/codex/history-profile.js';
+import { createCodexNativeEvidence } from './agents/codex/transcript.js';
 import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
@@ -31,6 +44,7 @@ import { CodexAppServerClient } from './agents/codex/app-server/client.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
+import { createCodexNativeActivityProbe } from './agents/codex/native-activity.js';
 
 const CODEX_DESCRIPTOR = {
   id: 'codex',
@@ -52,26 +66,28 @@ const CODEX_DESCRIPTOR = {
 
 export default class CodexAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'codex';
-  static readonly apiVersion = 2 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 1,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'codex',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
+  static readonly apiVersion = 5 as const;
   readonly descriptor = CODEX_DESCRIPTOR;
+  readonly attachments = {
+    fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
+  } as const;
   readonly execution;
-  readonly transcript;
+  readonly legacyHistoryImport;
+  readonly nativeHistoryImport;
+  readonly nativeActivity;
+  readonly nativeSessions;
+  readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
+  readonly projectPathUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands: NonNullable<AgentIntegration['commands']>;
+  readonly compaction: NonNullable<AgentIntegration['compaction']>;
   readonly forking;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
+  readonly goals: NonNullable<AgentIntegration['goals']>;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
@@ -110,8 +126,41 @@ export default class CodexAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    this.execution = new CodexExecution(host, runtime, nativeSessions, config);
-    this.transcript = createCodexTranscript(runtime, nativeSessions);
+    const execution = new CodexExecution(host, runtime, nativeSessions, config);
+    this.sessionConfiguration = {
+      apply: (agentSessionId, configuration, previousConfiguration) => (
+        execution.applySessionConfiguration(agentSessionId, configuration, previousConfiguration)
+      ),
+    };
+    const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);
+    this.nativeSessions = nativeEvidence;
+    const producer = createAgentProducerAdapter(execution, logger);
+    this.execution = producer.execution;
+    this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
+    this.nativeActivity = createCodexNativeActivityProbe(nativeSessions);
+    // Codex compacts natively through its app-server; the execution object owns
+    // the call, the facet advertises that it exists.
+    this.compaction = {
+      compact: async (request) => (
+        await producer.runExisting(
+          request,
+          (runtimeRequest, publish) => execution.compact(runtimeRequest, publish),
+        )
+      ).handle,
+    };
+    this.steering = {
+      captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
+      steer: (request) => runtime.steer(request),
+    };
+    this.goals = {
+      submitControl: async (request) => (
+        await producer.runExisting(
+          request,
+          (runtimeRequest, publish) => execution.submitGoalControl(runtimeRequest, publish),
+        )
+      ).value,
+    };
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CODEX_MODELS.DEFAULT,
@@ -140,18 +189,60 @@ export default class CodexAgentIntegration implements AgentIntegration {
         return skillDiscovery.commands(projectPath);
       },
     };
-    this.forking = createJsonlForking({
-      host,
-      supportsWhileRunning: true,
-      transcript: this.transcript,
+    const journalForking = createJsonlNativeForking({
+      nativeEvidence,
       nativeSessions,
-      rewriteEntry: rewriteCodexForkTranscriptEntry,
-      forkWholeSession: (request) => forkWholeCodexSession(
+      createTargetPath: createCodexForkTargetPath,
+      createRewriteEntry: createCodexForkTranscriptRewriter,
+      allowUnmaterializedWholeSession: true,
+      forkWholeSession: (request) => forkCodexNativeSession(
         request,
         host,
         runtime,
         nativeSessions,
         config,
+      ),
+    });
+    this.forking = createCodexForking({
+      journal: journalForking,
+      resolveProfile: async (request) => {
+        let reference = request.source.nativeSession;
+        let source = nativeSessions.decode(reference);
+        if (!source.path) {
+          reference = await nativeEvidence.resolveNativeSession({
+            chat: request.source,
+            signal: request.signal,
+          });
+          source = nativeSessions.decode(reference);
+        }
+        if (!source.path) {
+          if (!request.point) return null;
+          throw transcriptUnavailableForFork();
+        }
+        if (!await codexRolloutHasContent(source.path)) {
+          if (!request.point) return null;
+          throw transcriptUnavailableForFork();
+        }
+        return inspectCodexHistoryProfile({
+          nativePath: source.path,
+          expectedThreadId: request.source.agentSessionId ?? source.agentSessionId,
+          signal: request.signal,
+        });
+      },
+      forkPaginatedWhole: (request) => forkCodexNativeSession(
+        request,
+        host,
+        runtime,
+        nativeSessions,
+        config,
+      ),
+      forkPaginatedPoint: (request, lastTurnId) => forkCodexNativeSession(
+        request,
+        host,
+        runtime,
+        nativeSessions,
+        config,
+        lastTurnId,
       ),
     });
     this.endpoints = {
@@ -189,8 +280,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
           return await runSingleQuery(request.prompt, {
             projectPath: request.projectPath,
             model: request.model,
+            ...singleQueryRuntimeOptions(request),
             permissionMode: 'default',
-            thinkingMode: 'none',
             envOverrides: buildCodexHostEnvironment(config),
             codexConfig: endpointRuntime?.codexConfig,
           });
@@ -202,97 +293,21 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
-        runtime.shutdown();
+        await runtime.shutdown();
         login.stop();
-        skillDiscovery.clear();
+        await skillDiscovery.clear();
       },
     });
   }
 }
 
-function createCodexTranscript(
-  runtime: CodexAppServerRuntime,
-  nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
-): AgentTranscript {
-  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const native = nativeSessions.decode(chat.nativeSession);
-    return {
-      projectPath: chat.projectPath,
-      model: chat.model,
-      agentSessionId: chat.agentSessionId ?? native.agentSessionId,
-      nativePath: native.path,
-    };
-  };
-  const loadMessages = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
-    runtime.loadMessages(reference(chat))
-  );
-  const resolvePath = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const value = reference(chat);
-    return value.nativePath ?? runtime.resolveNativePath(value);
-  };
-  const resolveIndexSource = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const nativePath = await resolvePath(chat);
-    return nativePath ? {
-      ownerId: 'codex',
-      schemaVersion: 1,
-      value: { nativePath },
-    } as const : null;
-  };
-  return {
-    async resolveNativeSession({ chat, signal }) {
-      signal.throwIfAborted();
-      const current = nativeSessions.decode(chat.nativeSession);
-      const agentSessionId = chat.agentSessionId ?? current.agentSessionId;
-      if (!agentSessionId) return null;
-      const nativePath = await runtime.resolveNativePath(reference(chat));
-      return nativeSessions.encode({
-        path: nativePath,
-        agentSessionId,
-        modelEndpointId: current.modelEndpointId,
-      });
-    },
-    async load({ chat, signal }) {
-      signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async loadPage({ chat, page, signal }) {
-      signal.throwIfAborted();
-      return runtime.loadMessagePage(reference(chat), page);
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      return normalizeCodexPreview(await runtime.getPreview(reference(chat)));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async describeSource({ chat, signal }) {
-      signal.throwIfAborted();
-      const nativePath = await resolvePath(chat);
-      return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
-    },
-    async release({ signal }) {
-      signal.throwIfAborted();
-    },
-  };
-}
-
-async function forkWholeCodexSession(
-  request: AgentForkRequest,
+async function forkCodexNativeSession(
+  request: AgentNativeForkRequest,
   host: AgentHost,
   runtime: CodexAppServerRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
   config: CodexConfig,
+  lastTurnId?: string,
 ) {
   const source = nativeSessions.decode(request.source.nativeSession);
   const endpoint = await resolveAgentEndpoint(host, request.endpoint, request.admission.signal);
@@ -304,16 +319,26 @@ async function forkWholeCodexSession(
       false,
     );
   }
-  const result = await runtime.forkSession({
-    sourceSession: {
-      projectPath: request.source.projectPath,
-      model: request.source.model,
-      agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
-      nativePath: source.path,
-    },
-    envOverrides: buildCodexHostEnvironment(config),
-    codexConfig: endpointRuntime?.codexConfig,
-  });
+  if (source.path && !await codexRolloutHasContent(source.path)) return null;
+  let result;
+  try {
+    result = await runtime.forkSession({
+      sourceSession: {
+        projectPath: request.source.projectPath,
+        model: request.source.model,
+        agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
+        nativePath: source.path,
+      },
+      envOverrides: buildCodexHostEnvironment(config),
+      codexConfig: endpointRuntime?.codexConfig,
+      lastTurnId: lastTurnId ?? null,
+    });
+  } catch (error) {
+    // A never-persisted thread cannot fork natively; the JSONL path resolves it
+    // to an unmaterialized child without weakening any other app-server failure.
+    if (isCodexThreadNotFound(error)) return null;
+    throw error;
+  }
   if (!result) return null;
   return {
     agentSessionId: result.agentSessionId,
@@ -322,22 +347,28 @@ async function forkWholeCodexSession(
       agentSessionId: result.agentSessionId,
       modelEndpointId: request.endpoint?.endpointId ?? source.modelEndpointId,
     }),
+    nativeSeedReceipt: retargetNativeSeedReceipt(
+      request.source.nativeSeedReceipt,
+      result.agentSessionId,
+    ),
   };
 }
 
-function normalizeCodexPreview(value: unknown) {
-  const preview = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  if (!preview || typeof preview.firstMessage !== 'string') return null;
-  return {
-    firstMessage: preview.firstMessage,
-    lastMessage: typeof preview.lastMessage === 'string'
-      ? preview.lastMessage
-      : preview.firstMessage,
-    createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
-    lastActivity: typeof preview.lastActivity === 'string' ? preview.lastActivity : null,
-  };
+async function codexRolloutHasContent(nativePath: string): Promise<boolean> {
+  try {
+    return (await stat(nativePath)).size > 0;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function transcriptUnavailableForFork(): AgentIntegrationError {
+  return new AgentIntegrationError(
+    'TRANSCRIPT_UNAVAILABLE',
+    'Source native transcript is unavailable',
+    false,
+  );
 }
 
 async function spawnCodexLoginPty(

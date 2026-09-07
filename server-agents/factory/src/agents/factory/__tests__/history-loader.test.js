@@ -3,10 +3,12 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  getNativeMessageRevisionSource,
+  getNativeMessageSource,
+} from '@garcon/server-agent-common/shared/native-message-source';
 import {
   findFactorySessionFileBySessionId,
-  getFactoryPreviewFromSessionPath,
   loadFactoryChatMessages,
 } from '../history-loader.js';
 
@@ -119,14 +121,31 @@ describe('factory history loader', () => {
     expect(messages[5].content).toBe('Done.');
     expect(getNativeMessageSource(messages[2])).toMatchObject({ lineNumber: 3 });
     expect(getNativeMessageSource(messages[4])).toMatchObject({ lineNumber: 4 });
+    expect(messages.map((message) => getNativeMessageRevisionSource(message)?.withinSourceOrdinal))
+      .toEqual([0, 1, 2, 0, 1, 0]);
+  });
 
-    const preview = await getFactoryPreviewFromSessionPath(sessionPath);
-    expect(preview).toEqual({
-      createdAt: '2026-03-29T00:59:00.000Z',
-      firstMessage: 'Continue with the review.',
-      lastActivity: '2026-03-29T01:00:02.000Z',
-      lastMessage: 'Done.',
+  it('keeps malformed native transcript content out of diagnostics', async () => {
+    const privateContent = 'private-factory-history-content';
+    const sessionPath = path.join(tmpDir, 'malformed-session.jsonl');
+    const diagnostics = [];
+    await writeJsonl(sessionPath, [
+      `{${privateContent}`,
+      {
+        type: 'message',
+        timestamp: '2026-03-29T01:00:00.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'visible response' }] },
+      },
+    ]);
+
+    await loadFactoryChatMessages(sessionPath, {
+      debug(...args) { diagnostics.push(args); },
+      info(...args) { diagnostics.push(args); },
+      warn(...args) { diagnostics.push(args); },
+      error(...args) { diagnostics.push(args); },
     });
+
+    expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
   it('finds Factory session files under FACTORY_HOME_OVERRIDE', async () => {

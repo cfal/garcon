@@ -8,6 +8,7 @@ const CHAT_ID = '1783725900000800';
 function createFixture() {
   const registry = {
     getChat: mock(() => undefined),
+    hasChat: mock((chatId) => registry.getChat(chatId) != null),
     addChat: mock(() => undefined),
     updateChat: mock(() => undefined),
     removeChat: mock(() => true),
@@ -24,24 +25,14 @@ function createFixture() {
     ensureInNormal: mock(() => Promise.resolve(undefined)),
     togglePin: mock(() => Promise.resolve({ isPinned: true })),
     toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-    reorderWindow: mock(() => Promise.resolve({ success: true })),
-    reorderRelative: mock(() => Promise.resolve({ success: true })),
+  reorderChat: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+  })),
   };
   const queue = {
     abortForChatDeletion: mock(() => Promise.resolve(false)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
-  };
-  const pathCache = {
-    resolveProjectPath: mock((projectPath) => Promise.resolve({
-      available: true,
-      effectiveProjectKey: projectPath,
-    })),
-    resolveProjectPaths: mock((projectPaths) => Promise.resolve(new Map(
-      projectPaths.map((projectPath) => [projectPath, {
-        available: true,
-        effectiveProjectKey: projectPath,
-      }]),
-    ))),
   };
   const metadata = {
     addNewChatMetadata: mock(() => undefined),
@@ -49,11 +40,12 @@ function createFixture() {
     getChatMetadata: mock(() => null),
   };
   const chatViews = {
-    getOrCreatePage: mock(() => Promise.resolve({
+    page: mock(() => Promise.resolve({
+      transcriptViewId: 'view-1',
       messages: [],
-      generationId: 'generation-1',
-      lastSeq: 0,
-      pageOldestSeq: 0,
+      lastOrdinal: 0,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 0,
       hasMore: false,
     })),
   };
@@ -61,31 +53,22 @@ function createFixture() {
     startSession: mock(() => undefined),
     isAgentSessionRunning: mock(() => false),
   };
-  const pendingInputs = {
-    register: mock(() => Promise.resolve(undefined)),
-    reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
-    reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
-    listForChat: mock(() => []),
-    hasInFlightForChat: mock(() => false),
-    clearChat: mock(() => undefined),
-  };
   const lastSelectedChat = new InMemoryLastSelectedChatState();
-  const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+  const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
   const routes = createChatRoutes({
     registry,
     settings,
     queue,
-    pathCache,
+    processing: { phase: mock(() => null) },
     metadata,
     chatViews,
     agents,
-    pendingInputs,
     chatListProjector,
     commandService: {},
     lastSelectedChat,
   });
 
-  return { agents, lastSelectedChat, metadata, pathCache, registry, routes, settings };
+  return { agents, lastSelectedChat, metadata, registry, routes, settings };
 }
 
 function chatEntry(projectPath = '/proj') {
@@ -98,6 +81,9 @@ function chatEntry(projectPath = '/proj') {
       value: { id: 'test-session' },
     },
     agentOwnershipEpoch: 'epoch-1',
+    carryOverSegments: [],
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
     agentSettingsById: {
       'test-agent': {
         ownerId: 'test-agent',
@@ -132,20 +118,14 @@ describe('last selected chat routes', () => {
     expect(body.sessions).toHaveLength(1);
   });
 
-  it('returns null when remembered chat is path-filtered but keeps memory', async () => {
+  it('returns a remembered chat even when its project path is unavailable', async () => {
     fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
     fixture.registry.listAllChats.mockImplementation(() => ({ [CHAT_ID]: chatEntry('/missing') }));
-	fixture.pathCache.resolveProjectPaths.mockImplementation((projectPaths) => Promise.resolve(new Map(
-		projectPaths.map((projectPath) => [projectPath, {
-			available: false,
-			effectiveProjectKey: null,
-		}]),
-	)));
 
     const response = await fixture.routes['/api/v1/chats'].GET();
     const body = await response.json();
 
-    expect(body.lastSelectedChatId).toBeNull();
+    expect(body.lastSelectedChatId).toBe(CHAT_ID);
     expect(fixture.lastSelectedChat.getLastSelectedChatId()).toBe(CHAT_ID);
   });
 

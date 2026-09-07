@@ -12,26 +12,32 @@
 
 	interface ShareChatDialogProps {
 		chatId: string | null;
-		chatTitle: string;
 		onClose: () => void;
 	}
 
-	let { chatId, chatTitle, onClose }: ShareChatDialogProps = $props();
+	let { chatId, onClose }: ShareChatDialogProps = $props();
 
 	let dialogOpen = $derived(chatId !== null);
 	let isLoading = $state(false);
 	let shareUrl = $state<string | null>(null);
-	let shareToken = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let copied = $state(false);
 	let isRevoking = $state(false);
 	let showRevokeConfirm = $state(false);
+	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+	let copyGeneration = 0;
+
+	function clearCopyResetTimer(): void {
+		if (copyResetTimer) clearTimeout(copyResetTimer);
+		copyResetTimer = null;
+	}
 
 	// Triggers share creation when chatId changes.
 	$effect(() => {
 		if (!chatId) {
+			copyGeneration += 1;
+			clearCopyResetTimer();
 			shareUrl = null;
-			shareToken = null;
 			error = null;
 			copied = false;
 			isRevoking = false;
@@ -39,6 +45,10 @@
 			return;
 		}
 		createOrUpdateShare(chatId);
+		return () => {
+			copyGeneration += 1;
+			clearCopyResetTimer();
+		};
 	});
 
 	// Always calls shareChat which creates or updates the snapshot with
@@ -50,7 +60,6 @@
 			const result = await shareChat(id);
 			if (result.success) {
 				shareUrl = window.location.origin + result.shareUrl;
-				shareToken = result.shareToken;
 			} else {
 				error = m.share_dialog_error();
 			}
@@ -63,13 +72,16 @@
 
 	async function handleCopyLink(event: MouseEvent) {
 		if (!shareUrl) return;
+		const generation = ++copyGeneration;
 		const container = (event.currentTarget as HTMLElement)?.closest('[role="dialog"]') ?? undefined;
 		const didCopy = await copyToClipboard(shareUrl, container);
-		if (!didCopy) return;
+		if (!didCopy || generation !== copyGeneration) return;
 
 		copied = true;
-		setTimeout(() => {
+		clearCopyResetTimer();
+		copyResetTimer = setTimeout(() => {
 			copied = false;
+			copyResetTimer = null;
 		}, 2000);
 	}
 
@@ -79,7 +91,6 @@
 		try {
 			await revokeShare(chatId);
 			shareUrl = null;
-			shareToken = null;
 			showRevokeConfirm = false;
 			onClose();
 		} catch {

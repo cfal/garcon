@@ -1,5 +1,5 @@
-// Owns repository status, branch and remote metadata, view state, and
-// repository actions used by the Git surface.
+// Owns repository status, branch and remote metadata, and repository actions
+// used by the Git surface.
 
 import * as m from '$lib/paraglide/messages.js';
 import {
@@ -21,7 +21,11 @@ import {
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
-import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
+
+export interface GitRepositoryControllerOptions {
+	branches: GitBranchSelectorState;
+	surfaceId: string;
+}
 
 const EMPTY_STATUS: GitStatus = {
 	branch: '',
@@ -43,7 +47,6 @@ export class GitRepositoryController {
 	isCommitting = $state(false);
 	wrapText = $state(true);
 	showLegend = $state(false);
-	activeView = $state<'changes' | 'history'>('changes');
 	remoteStatus = $state<GitRemoteStatus | null>(null);
 	isFetching = $state(false);
 	isPulling = $state(false);
@@ -59,9 +62,11 @@ export class GitRepositoryController {
 	private statusGeneration = 0;
 	private remoteStatusGeneration = 0;
 	private readonly branchSelector: GitBranchSelectorState;
+	private readonly surfaceId: string;
 
-	constructor(branchSelector: GitBranchSelectorState) {
-		this.branchSelector = branchSelector;
+	constructor(options: GitRepositoryControllerOptions) {
+		this.branchSelector = options.branches;
+		this.surfaceId = options.surfaceId;
 	}
 
 	get currentBranch(): string {
@@ -107,7 +112,7 @@ export class GitRepositoryController {
 	openNewBranchDialog(projectPath: string, effectiveProjectKey: string): void {
 		this.branchSelector.openNewBranchDialog(
 			projectPath,
-			singletonSurfaceId('git'),
+			this.surfaceId,
 			effectiveProjectKey,
 		);
 	}
@@ -170,14 +175,6 @@ export class GitRepositoryController {
 		}
 	}
 
-	async fetchBranches(projectPath: string): Promise<void> {
-		await this.branchSelector.fetchBranches(projectPath);
-	}
-
-	async fetchRefs(projectPath: string, query = ''): Promise<void> {
-		await this.branchSelector.fetchRefs(projectPath, query);
-	}
-
 	async fetchRemoteStatus(projectPath: string): Promise<void> {
 		const contextGeneration = this.captureContext(projectPath);
 		if (contextGeneration === null) return;
@@ -204,12 +201,10 @@ export class GitRepositoryController {
 
 	refreshAll(projectPath: string): void {
 		this.fetchGitStatus(projectPath);
-		this.fetchBranches(projectPath);
 		this.fetchRemoteStatus(projectPath);
 	}
 
 	refreshDeferredMetadata(projectPath: string): void {
-		this.fetchBranches(projectPath);
 		this.fetchRemoteStatus(projectPath);
 	}
 
@@ -226,11 +221,6 @@ export class GitRepositoryController {
 		this.projectPath = projectPath;
 		this.statusGeneration += 1;
 		this.remoteStatusGeneration += 1;
-		this.branchSelector.resetForProject(
-			projectPath,
-			options.currentBranch ?? '',
-			options.effectiveProjectKey ?? projectPath,
-		);
 		this.gitStatus = null;
 		this.remoteStatus = null;
 		this.commitMessage = '';
@@ -338,7 +328,7 @@ export class GitRepositoryController {
 			projectPath,
 			branch,
 			refKind,
-			singletonSurfaceId('git'),
+			this.surfaceId,
 			effectiveProjectKey,
 		);
 		if (ok)

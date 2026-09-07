@@ -9,10 +9,37 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const distDir = path.resolve(repoRoot, 'web', 'build');
 const executableDir = path.resolve(repoRoot, 'dist');
 const executableTargets = {
-  'linux-x64': { bunTarget: 'bun-linux-x64-baseline', outputName: 'garcon-linux-x64' },
-  'darwin-arm64': { bunTarget: 'bun-darwin-arm64', outputName: 'garcon-darwin-arm64' },
-  'windows-x64': { bunTarget: 'bun-windows-x64-baseline', outputName: 'garcon-windows-x64.exe' },
+  'linux-x64': {
+    bunTarget: 'bun-linux-x64-baseline',
+    executablePathEnvironment: 'GARCON_BUN_COMPILE_LINUX_X64_EXECUTABLE',
+    outputName: 'garcon-linux-x64',
+    cliOutputName: 'garcon-cli-linux-x64',
+  },
+  'darwin-arm64': {
+    bunTarget: 'bun-darwin-arm64',
+    executablePathEnvironment: 'GARCON_BUN_COMPILE_DARWIN_ARM64_EXECUTABLE',
+    outputName: 'garcon-darwin-arm64',
+    cliOutputName: 'garcon-cli-darwin-arm64',
+  },
+  'windows-x64': {
+    bunTarget: 'bun-windows-x64-baseline',
+    executablePathEnvironment: 'GARCON_BUN_COMPILE_WINDOWS_X64_EXECUTABLE',
+    outputName: 'garcon-windows-x64.exe',
+  },
 };
+
+export function compileOptionsForTarget(targetId, outfile, environment = process.env) {
+  const target = executableTargets[targetId];
+  if (!target) throw new Error(`Unsupported executable target "${targetId}".`);
+  const configuredExecutablePath = environment[target.executablePathEnvironment]?.trim();
+  return {
+    target: target.bunTarget,
+    outfile,
+    ...(configuredExecutablePath
+      ? { executablePath: path.resolve(configuredExecutablePath) }
+      : {}),
+  };
+}
 
 async function listFilesRecursive(directory) {
   const files = [];
@@ -57,39 +84,27 @@ function createVirtualMainEntrypoint(
   assetsEntrypoint,
   serverMainPath,
   preMainModules,
-  searchAssets,
+  transcriptSearchWorkers,
 ) {
   const entrypointUrl = (entry) => {
     const relativePath = toPosixPath(path.relative(repoRoot, entry.filePath));
     if (relativePath.startsWith('../')) {
-      throw new Error(`Standalone entrypoint is outside the compile root: ${entry.filePath}`);
+      throw new Error(`Transcript search Worker is outside the compile root: ${entry.filePath}`);
     }
     return `new URL(${JSON.stringify(`./${relativePath}`)}, import.meta.url).href`;
   };
   const workerUrl = (name) => {
-    const entry = searchAssets.entries.find((candidate) => (
-      candidate.kind === 'worker' && candidate.name === name
-    ));
+    const entry = transcriptSearchWorkers.entries.find((candidate) => candidate.name === name);
     if (!entry) throw new Error(`Missing transcript search ${name} Worker entrypoint.`);
     return entrypointUrl(entry);
   };
-  const integrationEntries = searchAssets.entries
-    .filter((entry) => entry.kind === 'integration')
-    .reduce((byIntegration, entry) => {
-      byIntegration[entry.integrationId] ??= {};
-      byIntegration[entry.integrationId][entry.name] = entrypointUrl(entry);
-      return byIntegration;
-    }, {});
   const manifestExpression = `{
     mode: 'compiled',
     apiVersion: 1,
     workers: {
       indexer: ${workerUrl('indexer')},
       reader: ${workerUrl('reader')},
-    },
-    integrations: {${Object.entries(integrationEntries).map(([integrationId, entries]) => (
-      `${JSON.stringify(integrationId)}:{${Object.entries(entries).map(([name, variable]) => `${JSON.stringify(name)}:${variable}`).join(',')}}`
-    )).join(',')}}
+    }
   }`;
   return [
     `import '${assetsEntrypoint}';`,
@@ -102,38 +117,13 @@ function createVirtualMainEntrypoint(
   ].join('\n');
 }
 
-async function bundleStandaloneEntrypoints(contributions) {
-  // Bun preserves paths relative to the compile root for standalone entrypoints.
-  const directory = await fs.mkdtemp(path.join(repoRoot, 'node_modules', '.garcon-agent-entrypoints-'));
-  const files = [];
+async function bundleTranscriptSearchWorkers() {
+  // Bun preserves paths relative to the compile root for Worker entrypoints.
+  const directory = await fs.mkdtemp(
+    path.join(repoRoot, 'node_modules', '.garcon-transcript-search-workers-'),
+  );
   const entries = [];
   try {
-    for (const contribution of contributions) {
-      for (const [name, entrypoint] of Object.entries(contribution.standaloneEntrypoints)) {
-        const result = await Bun.build({
-          entrypoints: [entrypoint],
-          target: 'bun',
-          format: 'esm',
-          minify: true,
-        });
-        if (!result.success || result.outputs.length !== 1) {
-          for (const log of result.logs) console.error(log);
-          throw new Error(`Agent standalone entrypoint bundle failed: ${entrypoint}`);
-        }
-        const filePath = path.join(
-          directory,
-          `${contribution.integrationId}-${name}.js`,
-        );
-        await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
-        files.push(filePath);
-        entries.push({
-          kind: 'integration',
-          integrationId: contribution.integrationId,
-          name,
-          filePath,
-        });
-      }
-    }
     for (const [name, entrypoint] of Object.entries({
       indexer: path.join(repoRoot, 'server-agents/common/src/search/indexer-main.ts'),
       reader: path.join(repoRoot, 'server-agents/common/src/search/reader-main.ts'),
@@ -145,17 +135,16 @@ async function bundleStandaloneEntrypoints(contributions) {
       }
       const filePath = path.join(directory, `transcript-search-${name}.js`);
       await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
-      files.push(filePath);
-      entries.push({ kind: 'worker', name, filePath });
+      entries.push({ name, filePath });
     }
-    return { directory, files, entries };
+    return { directory, entries };
   } catch (error) {
     await fs.rm(directory, { recursive: true, force: true });
     throw error;
   }
 }
 
-async function buildExecutable(targetId, embeddedFiles, contributions, searchAssets) {
+async function buildExecutable(targetId, embeddedFiles, contributions, transcriptSearchWorkers) {
   const assetsEntrypoint = '__garcon_embed_static_assets__.js';
   const mainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
@@ -173,9 +162,9 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
   const result = await Bun.build({
     entrypoints: [
       mainEntrypoint,
-      ...searchAssets.entries.map((entry) => entry.filePath),
+      ...transcriptSearchWorkers.entries.map((entry) => entry.filePath),
     ],
-    compile: { target: target.bunTarget, outfile: outFile },
+    compile: compileOptionsForTarget(targetId, outFile),
     naming: { asset: '[dir]/[name].[ext]' },
     files: {
       [assetsEntrypoint]: assetImports.join('\n'),
@@ -183,7 +172,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
         assetsEntrypoint,
         serverMainPath,
         contributions.flatMap((contribution) => contribution.preMainModules),
-        searchAssets,
+        transcriptSearchWorkers,
       ),
     },
   });
@@ -194,21 +183,39 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
   console.log(`Compiled ${target.outputName} with ${embeddedFiles.length} embedded assets.`);
 }
 
+async function buildCliExecutable(targetId) {
+  const target = executableTargets[targetId];
+  if (!target.cliOutputName) return;
+  const outFile = path.resolve(executableDir, target.cliOutputName);
+  const result = await Bun.build({
+    entrypoints: [path.join(repoRoot, 'cli', 'main.ts')],
+    compile: compileOptionsForTarget(targetId, outFile),
+  });
+  if (!result.success) {
+    for (const log of result.logs) console.error(log);
+    throw new Error('CLI executable build failed.');
+  }
+  console.log(`Compiled ${target.cliOutputName}.`);
+}
+
 async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
   const embeddedFiles = await collectEmbeddedAssetInputs();
   const contributions = await collectAgentBuildContributions({ repoRoot });
-  const agentAssets = await bundleStandaloneEntrypoints(contributions);
+  const transcriptSearchWorkers = await bundleTranscriptSearchWorkers();
   try {
     for (const targetId of targetIds) {
-      await buildExecutable(targetId, embeddedFiles, contributions, agentAssets);
+      await buildExecutable(targetId, embeddedFiles, contributions, transcriptSearchWorkers);
+      await buildCliExecutable(targetId);
     }
   } finally {
-    await fs.rm(agentAssets.directory, { recursive: true, force: true });
+    await fs.rm(transcriptSearchWorkers.directory, { recursive: true, force: true });
   }
 }
 
-run().catch((error) => {
-  console.error(error.message ?? error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  run().catch((error) => {
+    console.error(error.message ?? error);
+    process.exit(1);
+  });
+}

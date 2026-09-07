@@ -4,8 +4,8 @@ import type { ExpandSnippetRequest, ExpandSnippetResponse } from '$shared/snippe
 
 const request: ExpandSnippetRequest = {
 	shortName: 'review',
-	arguments: 'the API',
-	context: { type: 'project', projectPath: '/repo' },
+	arguments: { type: 'value', value: 'the API' },
+	context: { type: 'new-chat', chatId: '1787471053739199', projectPath: '/repo' },
 };
 
 const response: ExpandSnippetResponse = {
@@ -64,6 +64,31 @@ describe('SnippetExpansionController', () => {
 		resolve(response);
 
 		expect(await running).toEqual({ kind: 'cancelled' });
+	});
+
+	it('owns and cancels preparation before expansion starts', async () => {
+		let resolvePreparation!: (value: {
+			request: ExpandSnippetRequest;
+			prepared: string;
+		}) => void;
+		let preparationSignal!: AbortSignal;
+		const expand = vi.fn();
+		const controller = new SnippetExpansionController({ expand });
+		const running = controller.runPrepared('review', (signal) => {
+			preparationSignal = signal;
+			return new Promise<{ request: ExpandSnippetRequest; prepared: string }>((resolve) => {
+				resolvePreparation = resolve;
+			});
+		});
+
+		expect(controller.pending).toBe(true);
+		expect(controller.pendingShortName).toBe('review');
+		controller.cancel();
+		expect(preparationSignal.aborted).toBe(true);
+		resolvePreparation({ request, prepared: 'context' });
+
+		expect(await running).toEqual({ kind: 'cancelled' });
+		expect(expand).not.toHaveBeenCalled();
 	});
 
 	it('clears pending state and propagates expansion errors', async () => {

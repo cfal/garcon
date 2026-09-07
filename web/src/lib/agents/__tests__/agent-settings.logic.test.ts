@@ -4,7 +4,7 @@ import {
 	createEmptyAgentSettings,
 	normalizeAgentSettings,
 	withAgentSetting,
-} from '../agent-settings';
+} from '$shared/agent-settings';
 
 const effort = {
 	key: 'effort',

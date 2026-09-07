@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	getGitStatus,
-	getGitDiff,
 	gitCommit,
 	gitCheckout,
 	gitCheckoutRef,
@@ -16,7 +15,7 @@ import {
 	gitDiscard,
 	gitDeleteUntracked,
 	getGitWorkbenchSnapshot,
-	getGitWorkbenchFingerprint,
+	getGitWorkingTreeFingerprint,
 	getGitQuickSummary,
 	getGitReviewFileBodies,
 	getGitHistoryCommits,
@@ -34,6 +33,11 @@ import {
 	gitRemoveWorktree,
 	gitRevertCommit,
 } from '../git';
+import {
+	getGitComparisonFileBodies,
+	getGitComparisonFreshness,
+	getGitComparisonSnapshot,
+} from '../git-comparison';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -80,22 +84,24 @@ describe('git API contract', () => {
 		expect(url).toContain('project=%2Fproject');
 	});
 
-	it('getGitDiff calls GET with project and file params', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ diff: '+ line' }));
-
-		const result = await getGitDiff('/project', 'a.txt');
-
-		expect(result.diff).toBe('+ line');
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('file=a.txt');
-	});
-
 	it('gitCommit sends POST with project, message, files', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				output: 'committed',
+				commitScope: 'selected-files',
+				indexSynchronized: false,
+			}),
+		);
 
 		const result = await gitCommit('/project', 'fix bug', ['a.txt', 'b.txt']);
 
-		expect(result.success).toBe(true);
+		expect(result).toEqual({
+			success: true,
+			output: 'committed',
+			commitScope: 'selected-files',
+			indexSynchronized: false,
+		});
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/commit');
 		expect(opts.method).toBe('POST');
@@ -144,23 +150,55 @@ describe('git API contract', () => {
 	});
 
 	it('getGitRefs calls GET with project param', async () => {
+		const controller = new AbortController();
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				refs: [
-					{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
-					{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+					{
+						name: 'main',
+						ref: 'refs/heads/main',
+						kind: 'local-branch',
+						updatedAt: '2026-08-18T12:00:00.000Z',
+						isCurrent: true,
+					},
+					{
+						name: 'origin/main',
+						ref: 'refs/remotes/origin/main',
+						kind: 'remote-branch',
+						updatedAt: '2026-08-18T12:00:00.000Z',
+					},
 				],
 			}),
 		);
 
-		const result = await getGitRefs('/project', { query: 'origin/main', limit: 50 });
+		const result = await getGitRefs('/project', {
+			query: 'origin/main',
+			limit: 50,
+			sort: { key: 'updated', direction: 'desc' },
+			signal: controller.signal,
+		});
 
 		expect(result.refs[1].name).toBe('origin/main');
-		const [url] = fetchMock.mock.calls[0];
+		const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
 		expect(url).toContain('/api/v1/git/refs');
 		expect(url).toContain('project=%2Fproject');
 		expect(url).toContain('query=origin%2Fmain');
 		expect(url).toContain('limit=50');
+		expect(url).toContain('sort=updated');
+		expect(url).toContain('direction=desc');
+		expect(request.signal?.aborted).toBe(false);
+		controller.abort();
+		expect(request.signal?.aborted).toBe(true);
+	});
+
+	it('getGitRefs sends the default sort pair', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ refs: [] }));
+
+		await getGitRefs('/project');
+
+		const [url] = fetchMock.mock.calls[0] as [string];
+		expect(url).toContain('sort=name');
+		expect(url).toContain('direction=asc');
 	});
 
 	it('getRemoteStatus calls GET with project param', async () => {
@@ -323,7 +361,7 @@ describe('git API contract', () => {
 		expect(body.bodyCandidateCount).toBe(8);
 	});
 
-	it('getGitWorkbenchFingerprint posts the current workbench fingerprint request', async () => {
+	it('getGitWorkingTreeFingerprint posts the current Working Tree fingerprint request', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({
 			status: 'ready',
 			project: '/project',
@@ -332,7 +370,7 @@ describe('git API contract', () => {
 			changedPathCount: 2,
 		}));
 
-		const result = await getGitWorkbenchFingerprint('/project');
+		const result = await getGitWorkingTreeFingerprint('/project');
 
 		expect(result.status).toBe('ready');
 		if (result.status === 'ready') {
@@ -340,7 +378,7 @@ describe('git API contract', () => {
 			expect(result.changedPathCount).toBe(2);
 		}
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/workbench/fingerprint');
+		expect(url).toBe('/api/v1/git/working-tree/fingerprint');
 		expect(opts.method).toBe('POST');
 		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
 	});
@@ -540,20 +578,21 @@ describe('git API contract', () => {
 		});
 
 	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),
+		);
 
 		await getGitReviewFileBodies('/project', 'doc', ['a.ts', 'b.ts'], 'staged', 3);
 
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/review-document/files');
+		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(opts.method).toBe('POST');
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
 			project: '/project',
 			documentId: 'doc',
 			files: ['a.ts', 'b.ts'],
-			mode: 'staged',
-			context: 3,
+			purpose: 'prefetch',
 		});
 	});
 
@@ -617,26 +656,112 @@ describe('git API contract', () => {
 	});
 
 	it('getGitCommitFileBodies posts commit file body requests', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),
+		);
 		const controller = new AbortController();
 
-		await getGitCommitFileBodies('/project', 'doc', 'abc', ['a.ts'], {
+		await getGitCommitFileBodies('/project', 'doc', 'abc', [{ path: 'renamed.ts', originalPath: 'a.ts' }], {
 			parent: null,
 			context: 4,
 			signal: controller.signal,
 		});
 
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/history/commit/files');
+		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
 			project: '/project',
 			documentId: 'doc',
-			commit: 'abc',
-			parent: null,
-			context: 4,
-			files: ['a.ts'],
+			files: ['renamed.ts'],
+			purpose: 'prefetch',
+		});
+	});
+
+	it('getGitComparisonSnapshot posts typed comparison endpoints', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'working-tree-changing',
+			project: '/project',
+			message: 'The Working Tree is changing.',
+		}));
+		const controller = new AbortController();
+
+		await getGitComparisonSnapshot(
+			'/project',
+			{ kind: 'revision', revision: 'main' },
+			{ kind: 'working-tree' },
+			'direct',
+			{ context: 7, bodyCandidateCount: 4, signal: controller.signal },
+		);
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/comparisons/snapshot');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			from: { kind: 'revision', revision: 'main' },
+			to: { kind: 'working-tree' },
+			mode: 'direct',
+			context: 7,
+			bodyCandidateCount: 4,
+		});
+	});
+
+	it('getGitComparisonFileBodies posts frozen endpoint identity and rename paths', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'stale',
+			documentId: 'comparison-doc',
+			changedPaths: ['new.ts'],
+			message: 'The Working Tree changed.',
+		}));
+
+		const result = await getGitComparisonFileBodies(
+			'/project',
+			'comparison-doc',
+			'from-hash',
+			{ kind: 'working-tree', fingerprint: 'v1:old' },
+			[{ path: 'new.ts', originalPath: 'old.ts' }],
+			{ context: 3 },
+		);
+
+		expect(result.status).toBe('stale');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/review-documents/files');
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			documentId: 'comparison-doc',
+			files: ['new.ts'],
+			purpose: 'prefetch',
+		});
+	});
+
+	it('getGitComparisonFreshness posts frozen labels and resolved identities', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'ready',
+				project: '/project',
+				changedEndpoints: ['to'],
+				fromHash: 'a'.repeat(40),
+				to: { kind: 'revision', hash: 'c'.repeat(40) },
+			}),
+		);
+		const controller = new AbortController();
+
+		await getGitComparisonFreshness(
+			'/project',
+			{ kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
+			{ kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
+			{ signal: controller.signal },
+		);
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/comparisons/freshness');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			from: { kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
+			to: { kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
 		});
 	});
 

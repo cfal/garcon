@@ -1,4 +1,4 @@
-// Builds the chat prompts sent to the coding agent from the pull request pane.
+// Builds the chat prompts sent to the coding agent from the Pull Requests view.
 // Keeps the "hand a PR entity to the agent" phrasing in one place.
 
 import type { PullRequestDetail, PullRequestThread } from '$lib/api/pull-requests';

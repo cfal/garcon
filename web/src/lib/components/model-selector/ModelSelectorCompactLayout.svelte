@@ -159,7 +159,39 @@
 	}
 </script>
 
-<div data-slot="model-selector-compact" class="flex h-full min-h-0 flex-col">
+{#snippet agentGroups()}
+	{#each selector.agentGroups as group (group.id)}
+		<div
+			data-slot="model-selector-agent-group"
+			data-group={group.id}
+			class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+		>
+			{group.label}
+		</div>
+		<div class="space-y-1">
+			{#each group.options as option (option.value)}
+				<button
+					type="button"
+					class={cn(
+						'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+						option.value === selector.agentId && 'bg-accent text-accent-foreground',
+					)}
+					aria-pressed={option.value === selector.agentId}
+					onclick={() => handleAgentSelect(option.value)}
+				>
+					<span class="min-w-0 flex-1">
+						<span class="block truncate font-medium">{option.label}</span>
+						{#if option.description}
+							<span class="block truncate text-xs text-muted-foreground">{option.description}</span>
+						{/if}
+					</span>
+				</button>
+			{/each}
+		</div>
+	{/each}
+{/snippet}
+
+<div data-slot="model-selector-compact" class="flex h-full min-h-0 min-w-0 max-w-full flex-col">
 	<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3">
 		<div class="min-w-0 flex-1">
 			<div
@@ -195,26 +227,7 @@
 						</span>
 					</button>
 				{/if}
-				{#each selector.agentOptions as option (option.value)}
-					<button
-						type="button"
-						class={cn(
-							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							option.value === selector.agentId && 'bg-accent text-accent-foreground',
-						)}
-						aria-pressed={option.value === selector.agentId}
-						onclick={() => handleAgentSelect(option.value)}
-					>
-						<span class="min-w-0 flex-1">
-							<span class="block truncate font-medium">{option.label}</span>
-							{#if option.description}
-								<span class="block truncate text-xs text-muted-foreground"
-									>{option.description}</span
-								>
-							{/if}
-						</span>
-					</button>
-				{/each}
+				{@render agentGroups()}
 			</div>
 		{:else if pane === 'recent'}
 			<div
@@ -242,26 +255,7 @@
 			<div
 				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
 			>
-				{#each selector.agentOptions as option (option.value)}
-					<button
-						type="button"
-						class={cn(
-							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							option.value === selector.agentId && 'bg-accent text-accent-foreground',
-						)}
-						aria-pressed={option.value === selector.agentId}
-						onclick={() => handleAgentSelect(option.value)}
-					>
-						<span class="min-w-0 flex-1">
-							<span class="block truncate font-medium">{option.label}</span>
-							{#if option.description}
-								<span class="block truncate text-xs text-muted-foreground"
-									>{option.description}</span
-								>
-							{/if}
-						</span>
-					</button>
-				{/each}
+				{@render agentGroups()}
 			</div>
 		{:else if pane === 'source'}
 			<div
@@ -340,7 +334,7 @@
 
 	<footer
 		data-slot="model-selector-compact-footer"
-		class="flex min-h-12 shrink-0 items-center gap-2 border-t border-border px-2"
+		class="flex min-h-12 min-w-0 shrink-0 items-center gap-2 border-t border-border px-2"
 	>
 		{#if previousPane}
 			<button
@@ -352,7 +346,7 @@
 				{m.model_selector_back()}
 			</button>
 		{/if}
-		<div class="ml-auto flex items-center gap-2">
+		<div class="ml-auto flex min-w-0 items-center gap-2">
 			<button
 				type="button"
 				class="inline-flex h-8 items-center rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"

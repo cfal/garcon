@@ -6,6 +6,7 @@
 	import { getModelCatalog } from '$lib/context';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { SessionAgentId } from '$lib/types/app';
 	import { ModelSelectorState } from './model-selector-state.svelte';
 	import ModelSelectorColumnsLayout from './ModelSelectorColumnsLayout.svelte';
 	import ModelSelectorCompactLayout from './ModelSelectorCompactLayout.svelte';
@@ -22,6 +23,7 @@
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
 		recents?: ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
+		selectableAgentIds?: readonly SessionAgentId[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -35,6 +37,7 @@
 		onChange,
 		recents = [],
 		preferRecentsOnOpen = false,
+		selectableAgentIds,
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -58,6 +61,9 @@
 		},
 		get preferRecentsOnOpen() {
 			return preferRecentsOnOpen;
+		},
+		get selectableAgentIds() {
+			return selectableAgentIds;
 		},
 		onChange: (next) => onChange(next),
 	});
@@ -179,7 +185,7 @@
 		<Dialog.Content
 			bind:ref={contentNode}
 			class={cn(
-				'top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] overflow-hidden p-0 sm:w-full',
+				'safe-viewport-dialog top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] overflow-hidden p-0',
 				contentClass,
 			)}
 			showCloseButton={false}
@@ -210,6 +216,7 @@
 			{align}
 			{side}
 			sideOffset={8}
+			collisionPadding={8}
 			class={cn(
 				contentWidthClass,
 				contentHeightClass,

@@ -1,5 +1,6 @@
 <!-- Browser-stored settings. All values render immediately from persisted storage. -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import MoonIcon from '@lucide/svelte/icons/moon';
@@ -8,14 +9,22 @@
 	import {
 		FILE_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
+		SIDEBAR_INACTIVITY_DURATION_VALUES,
 		isChatMaxWidth,
 		isFileOpenPlacement,
+		isSidebarInactivityDuration,
 		type ChatMaxWidth,
 		type FileOpenPlacementPreference,
+		type SidebarInactivityDuration,
 		type ThemeMode,
 	} from '$lib/stores/local-settings.svelte.js';
-	import { getLocalSettings } from '$lib/context';
+	import {
+		SNIPPET_TRIGGER_MAX_LENGTH,
+		snippetTriggerValidationError,
+	} from '$lib/chat/composer/snippet-trigger.js';
+	import { getAppShell, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import CompletionSoundSettings from './CompletionSoundSettings.svelte';
 
 	interface SettingRowOptions {
 		disabled?: boolean;
@@ -23,6 +32,7 @@
 	}
 
 	const ls = getLocalSettings();
+	const appShell = getAppShell();
 	const chatMaxWidthOptions: Array<{ value: ChatMaxWidth; label: () => string }> = [
 		{ value: 'none', label: m.settings_chat_max_width_none },
 		{ value: 'large', label: m.settings_chat_max_width_large },
@@ -30,7 +40,8 @@
 		{ value: 'small', label: m.settings_chat_max_width_small },
 	];
 	const hideableToolGroupLabels = {
-		commands: m.settings_chat_hidden_tool_commands,
+		bash: m.settings_chat_hidden_tool_bash,
+		exec: m.settings_chat_hidden_tool_exec,
 		'file-reads': m.settings_chat_hidden_tool_file_reads,
 		'file-changes': m.settings_chat_hidden_tool_file_changes,
 		web: m.settings_chat_hidden_tool_web,
@@ -40,12 +51,21 @@
 	type FilePlacementSettingKey =
 		'textEditorOpenPlacement' | 'imageViewerOpenPlacement' | 'markdownViewerOpenPlacement';
 	const fileOpenPlacementLabels: Record<FileOpenPlacementPreference, () => string> = {
-		source: m.settings_file_open_placement_source,
+		'same-window': m.settings_file_open_placement_source,
+		'new-window': m.settings_file_open_placement_new_window,
 		dialog: m.settings_file_open_placement_dialog,
-		main: m.settings_file_open_placement_main,
-		sidebar: m.settings_file_open_placement_sidebar,
 	};
-
+	const sidebarInactivityDurationLabels: Record<SidebarInactivityDuration, () => string> = {
+		'2-days': m.settings_sidebar_inactivity_duration_2_days,
+		'3-days': m.settings_sidebar_inactivity_duration_3_days,
+		'4-days': m.settings_sidebar_inactivity_duration_4_days,
+		'5-days': m.settings_sidebar_inactivity_duration_5_days,
+		'1-week': m.settings_sidebar_inactivity_duration_1_week,
+		'2-weeks': m.settings_sidebar_inactivity_duration_2_weeks,
+		'1-month': m.settings_sidebar_inactivity_duration_1_month,
+		'2-months': m.settings_sidebar_inactivity_duration_2_months,
+		'3-months': m.settings_sidebar_inactivity_duration_3_months,
+	};
 	function setTheme(mode: ThemeMode) {
 		ls.set('theme', mode);
 	}
@@ -58,6 +78,39 @@
 
 	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
 		if (isFileOpenPlacement(value)) ls.set(key, value);
+	}
+
+	function setSidebarInactivityDuration(value: string): void {
+		if (isSidebarInactivityDuration(value)) {
+			ls.set('sidebarInactivityDuration', value);
+		}
+	}
+
+	let snippetTriggerDraft = $state(ls.snippetTrigger);
+	let snippetTriggerError = $state<string | null>(null);
+
+	// Keeps the draft aligned with externally applied values (other tabs).
+	$effect(() => {
+		const stored = ls.snippetTrigger;
+		untrack(() => {
+			if (stored !== snippetTriggerDraft && snippetTriggerError === null) {
+				snippetTriggerDraft = stored;
+			}
+		});
+	});
+
+	function commitSnippetTrigger(): void {
+		const error = snippetTriggerValidationError(snippetTriggerDraft);
+		if (error === null) {
+			ls.set('snippetTrigger', snippetTriggerDraft);
+			snippetTriggerDraft = ls.snippetTrigger;
+			snippetTriggerError = null;
+			return;
+		}
+		snippetTriggerError =
+			error === 'format'
+				? m.settings_snippet_trigger_error_format()
+				: m.settings_snippet_trigger_error_charset();
 	}
 </script>
 
@@ -96,7 +149,7 @@
 		</label>
 		<select
 			id={`local-${key}`}
-			class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-sm text-foreground"
+			class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
 			{value}
 			onchange={(event) =>
 				setFileOpenPlacement(key, (event.currentTarget as HTMLSelectElement).value)}
@@ -144,16 +197,40 @@
 		</div>
 
 		<div class="px-4">
-			<div class="flex items-center justify-between gap-4 py-2">
+			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
 				<select
-					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
+					class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
 					aria-label={m.settings_chat_max_width()}
 					value={ls.chatMaxWidth}
 					onchange={(event) => setChatMaxWidth((event.currentTarget as HTMLSelectElement).value)}
 				>
 					{#each chatMaxWidthOptions as option (option.value)}
 						<option value={option.value}>{option.label()}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="flex items-center justify-between gap-4 py-2">
+				<div class="min-w-0">
+					<label
+						class="text-sm font-medium text-foreground"
+						for="local-sidebar-inactivity-duration"
+					>
+						{m.settings_sidebar_inactivity_duration()}
+					</label>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.settings_sidebar_inactivity_duration_description()}
+					</p>
+				</div>
+				<select
+					id="local-sidebar-inactivity-duration"
+					class="w-28 shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+					value={ls.sidebarInactivityDuration}
+					onchange={(event) =>
+						setSidebarInactivityDuration((event.currentTarget as HTMLSelectElement).value)}
+				>
+					{#each SIDEBAR_INACTIVITY_DURATION_VALUES as duration (duration)}
+						<option value={duration}>{sidebarInactivityDurationLabels[duration]()}</option>
 					{/each}
 				</select>
 			</div>
@@ -166,16 +243,26 @@
 				() => ls.toggle('overlayBackdropEffects'),
 				{ description: m.settings_overlay_backdrop_effects_description() },
 			)}
-			{@render settingRow(
-				m.settings_workspace_hide_chat_list_for_git(),
-				ls.hideChatListWhenGitInMain,
-				() => ls.toggle('hideChatListWhenGitInMain'),
-			)}
 			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
 				ls.toggle('autoExpandTools'),
 			)}
+			{@render settingRow(
+				m.settings_chat_always_expand_cli_messages(),
+				ls.alwaysExpandCliMessages,
+				() => ls.toggle('alwaysExpandCliMessages'),
+				{ description: m.settings_chat_always_expand_cli_messages_description() },
+			)}
 			{@render settingRow(m.settings_chat_show_thinking(), ls.showThinking, () =>
 				ls.toggle('showThinking'),
+			)}
+			{@render settingRow(
+				m.settings_chat_allow_direct_chats(),
+				ls.allowDirectChats,
+				() => ls.toggle('allowDirectChats'),
+				{ description: m.settings_chat_allow_direct_chats_description() },
+			)}
+			{@render settingRow(m.settings_chat_reduce_motion(), ls.reduceMotion, () =>
+				ls.toggle('reduceMotion'),
 			)}
 			<div class="py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_hidden_tools()}</div>
@@ -195,9 +282,41 @@
 			{@render settingRow(m.settings_chat_auto_scroll_to_bottom(), ls.autoScrollToBottom, () =>
 				ls.toggle('autoScrollToBottom'),
 			)}
-			{@render settingRow(m.settings_chat_send_by_shift_enter(), ls.sendByShiftEnter, () =>
-				ls.toggle('sendByShiftEnter'),
-			)}
+			<div class="flex items-center justify-between gap-4 py-2">
+				<div class="min-w-0">
+					<label class="text-sm font-medium text-foreground" for="local-snippet-trigger">
+						{m.settings_snippet_trigger_label()}
+					</label>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.settings_snippet_trigger_description()}
+					</p>
+					{#if snippetTriggerError}
+						<p id="local-snippet-trigger-error" class="mt-0.5 text-xs text-destructive">
+							{snippetTriggerError}
+						</p>
+					{/if}
+				</div>
+				<input
+					id="local-snippet-trigger"
+					type="text"
+					maxlength={SNIPPET_TRIGGER_MAX_LENGTH}
+					bind:value={snippetTriggerDraft}
+					aria-invalid={snippetTriggerError !== null}
+					aria-describedby={snippetTriggerError ? 'local-snippet-trigger-error' : undefined}
+					autocapitalize="off"
+					spellcheck="false"
+					oninput={() => (snippetTriggerError = null)}
+					onblur={commitSnippetTrigger}
+					onkeydown={(event) => {
+						if (event.key === 'Enter') {
+							event.preventDefault();
+							commitSnippetTrigger();
+						}
+					}}
+					class="w-24 shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-center font-mono text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+				/>
+			</div>
+			<CompletionSoundSettings />
 			<div class="mt-2 border-t border-border pb-1 pt-2">
 				<h3 class="py-2 text-sm font-medium text-foreground">{m.settings_file_opening()}</h3>
 				{@render fileOpenPlacementRow(
@@ -215,6 +334,19 @@
 					'markdownViewerOpenPlacement',
 					ls.markdownViewerOpenPlacement,
 				)}
+			</div>
+			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
+				<div class="min-w-0">
+					<div class="text-sm font-medium text-foreground">
+						{m.onboarding_setup_wizard_label()}
+					</div>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.onboarding_restart_wizard_hint()}
+					</p>
+				</div>
+				<Button variant="outline" size="sm" onclick={() => appShell.openOnboardingWizard()}>
+					{m.onboarding_restart_wizard()}
+				</Button>
 			</div>
 		</div>
 	</div>

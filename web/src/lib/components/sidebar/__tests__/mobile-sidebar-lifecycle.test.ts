@@ -18,8 +18,6 @@ function createChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
 		id: 'chat-1',
 		projectPath: '/tmp/project',
-		effectiveProjectKey: '/tmp/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
@@ -33,12 +31,16 @@ function createChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: 'Preview',
 		tags: [],
 		firstMessage: 'First',
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 
@@ -101,6 +103,7 @@ describe('mobile sidebar lifecycle', () => {
 		const chats = [createChat({ id: 'unread-chat', title: 'Unread chat', isUnread: true })];
 		const sidebarSearch = createSidebarSearchStore({
 			getTranscriptSearchEnabled: () => true,
+			getSearchResultSort: () => 'relevance',
 			getChats: () => chats,
 			getSelectedChatId: () => null,
 			notifyError: vi.fn(),
@@ -126,6 +129,7 @@ describe('mobile sidebar lifecycle', () => {
 		const chats = [createChat({ id: 'chat-1', title: 'Chat one' })];
 		const sidebarSearch = createSidebarSearchStore({
 			getTranscriptSearchEnabled: () => false,
+			getSearchResultSort: () => 'relevance',
 			getChats: () => chats,
 			getSelectedChatId: () => null,
 			notifyError: vi.fn(),
@@ -151,6 +155,7 @@ describe('mobile sidebar lifecycle', () => {
 		const chats = [createChat({ id: 'chat-1', title: 'Chat one' })];
 		const sidebarSearch = createSidebarSearchStore({
 			getTranscriptSearchEnabled: () => false,
+			getSearchResultSort: () => 'relevance',
 			getChats: () => chats,
 			getSelectedChatId: () => null,
 			notifyError: vi.fn(),

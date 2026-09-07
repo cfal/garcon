@@ -2,11 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
 import type { GitWorkbenchTarget } from '$lib/git/workbench/git-workbench-types.js';
+import { emptyGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitWorkbenchTestHost from './GitWorkbenchTestHost.svelte';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 function makeTarget(): GitWorkbenchTarget {
 	return {
@@ -36,6 +38,7 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		stagedFiles: [],
 		stagedFileNodes: [],
 		setTreePaneWidth: vi.fn(),
+		previewTreePaneWidth: vi.fn(),
 		toggleDirCollapsed: vi.fn(),
 		firstVisibleFileInDirectory: vi.fn(() => null),
 		previousVisibleFile: vi.fn(() => null),
@@ -44,9 +47,10 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		stagedFileCount: () => 0,
 	};
 	const review = {
-		virtualRows: [],
-		fileRowIndex: new Map<string, number>(),
+		rowSource: emptyGitVirtualReviewRowSource(),
 		scrollRequest: null,
+		summary: null,
+		fileBodies: {},
 	};
 	const selection = {
 		selectedLineKeys: new Set<string>(),
@@ -74,16 +78,14 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		isFilePending: () => false,
 		isDirectoryPending: () => false,
 	};
-	const commit = {
-		isCreatingInitialCommit: false,
+	const initialCommit = {
+		isCreating: false,
+		create: vi.fn(),
 	};
 	const drafts = {
-		reviewModalOpen: false,
-		reviewComments: [],
-		reviewSummary: '',
-		commentsByFile: {},
 		commentComposer: {
 			open: false,
+			focusPending: false,
 			filePath: '',
 			side: 'after',
 			line: 0,
@@ -91,12 +93,13 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 			severity: 'note',
 		},
 		openCommentComposer: vi.fn(),
-		finalizeReviewToAgent: vi.fn(),
-		buildFinalizedReviewMessage: vi.fn(),
-		updateDraftComment: vi.fn(),
-		removeDraftComment: vi.fn(),
-		commitCommentComposer: vi.fn(),
+		markCommentComposerFocused: vi.fn(),
+		setCommentBody: vi.fn(),
+		setCommentSeverity: vi.fn(),
+		appendComment: vi.fn(),
 		closeCommentComposer: vi.fn(),
+		commentFeedback: null,
+		commentError: null,
 	};
 	const porcelain = {
 		inspectorView: 'none',
@@ -110,25 +113,13 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		review,
 		selection,
 		staging,
-		commit,
+		initialCommit,
 		drafts,
 		porcelain,
 		lastError: null,
 		repositoryError: null,
 		isInitialLoadPending: false,
 		isExternallyStale: false,
-		reviewModalOpen: false,
-		reviewComments: [],
-		reviewSummary: '',
-		commentsByFile: {},
-		commentComposer: {
-			open: false,
-			filePath: '',
-			side: 'after',
-			line: 0,
-			body: '',
-			severity: 'note',
-		},
 		pendingDiscardFile: null,
 		setTarget: vi.fn().mockResolvedValue(undefined),
 		selectFile: vi.fn().mockResolvedValue(undefined),
@@ -137,7 +128,7 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		setActiveTab: vi.fn(),
 		setHideGenerated: vi.fn(),
 		setHideOtherTabFiles: vi.fn(),
-		handleVisibleReviewRows: vi.fn(),
+		handleReviewBodyDemand: vi.fn(),
 		dismissError: vi.fn(),
 	} as unknown as GitWorkbenchStore;
 }
@@ -147,17 +138,19 @@ describe('GitWorkbench', () => {
 
 	beforeEach(() => {
 		restoreResizeObserver = installResizeObserverHarness();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
 
 	afterEach(() => {
 		restoreResizeObserver();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
 
 	it('shows an initial loading state before the store adopts the rendered target', () => {
 		render(GitWorkbenchTestHost, {
 			props: {
 				target: makeTarget(),
-				isMobile: false,
+				presentation: 'window-main',
 				wb: makeWorkbenchStub(),
 				diffFontSize: 12,
 			},
@@ -167,12 +160,12 @@ describe('GitWorkbench', () => {
 		expect(screen.queryByText('No changed files')).toBeNull();
 	});
 
-	it('switches wide, compact, and narrow layouts from host width without a viewport change', async () => {
+	it('uses tabs whenever the host is too narrow for the side-by-side layout', async () => {
 		const target = makeTarget();
 		const { container } = render(GitWorkbenchTestHost, {
 			props: {
 				target,
-				isMobile: false,
+				presentation: 'window-main',
 				wb: makeWorkbenchStub(target),
 				diffFontSize: 12,
 			},
@@ -184,23 +177,29 @@ describe('GitWorkbench', () => {
 		ResizeObserverHarness.emit(workbench, 1_100);
 		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('wide'));
 		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
-		const diffSurface = container.querySelector('[data-git-virtual-diff-root]');
+		screen.getByRole('button', { name: 'Hide file tree' });
+		expect(container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
+		const diffSurface = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
 		expect(diffSurface).toBeTruthy();
+		expect(diffSurface?.dataset.workspaceScrollRegion).toBe('primary');
+		expect(
+			container.querySelector<HTMLElement>('[data-git-files-pane] [data-workspace-scroll-region]')
+				?.dataset.workspaceScrollRegion,
+		).toBe('contextual');
 
 		ResizeObserverHarness.emit(workbench, 700);
-		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('compact'));
+		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('narrow'));
 		expect(container.querySelector('[data-git-tree-resizer]')).toBeNull();
+		expect(container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
-		expect(screen.getByRole('button', { name: 'Show changed files' })).toBeTruthy();
-		await fireEvent.click(screen.getByRole('button', { name: 'Show changed files' }));
-		expect(screen.getByRole('complementary', { name: 'Changed files' })).toBeTruthy();
+		expect(container.querySelector('[data-git-segmented-navigation]')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Diff' })).toBeTruthy();
 
 		ResizeObserverHarness.emit(workbench, 480);
 		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('narrow'));
 		expect(container.querySelector('[data-git-segmented-navigation]')).toBeTruthy();
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
-		expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Diff' })).toBeTruthy();
 
 		const filesPane = container.querySelector('[data-git-files-pane]');
 		const diffPane = container.querySelector('[data-git-diff-pane]');
@@ -216,5 +215,76 @@ describe('GitWorkbench', () => {
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(diffPane?.getAttribute('aria-hidden')).toBe('true');
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
+	});
+
+	it('hides and restores the file tree in the wide layout', async () => {
+		const target = makeTarget();
+		const { container } = render(GitWorkbenchTestHost, {
+			props: {
+				target,
+				presentation: 'window-main',
+				wb: makeWorkbenchStub(target),
+				diffFontSize: 12,
+			},
+		});
+		const workbench = container.querySelector<HTMLElement>('[data-git-workbench]');
+		expect(workbench).toBeTruthy();
+		if (!workbench) return;
+
+		ResizeObserverHarness.emit(workbench, 1_100);
+		await waitFor(() => expect(workbench.dataset.gitLayout).toBe('wide'));
+
+		const panes = container.querySelector<HTMLElement>('[data-git-wide-layout]');
+		const filesPane = container.querySelector<HTMLElement>('[data-git-files-pane]');
+		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }));
+
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(filesPane?.hasAttribute('inert')).toBe(true);
+		expect(panes?.style.gridTemplateColumns).toBe('0px minmax(0,1fr)');
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeNull();
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible)).toBe('false');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show file tree' }));
+
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
+	});
+
+	it('omits duplicate window chrome on desktop and mobile', async () => {
+		const target = makeTarget();
+		const sidebar = render(GitWorkbenchTestHost, {
+			props: {
+				target,
+				presentation: 'window-sidebar',
+				wb: makeWorkbenchStub(target),
+				diffFontSize: 12,
+			},
+		});
+		const sidebarWorkbench = sidebar.container.querySelector<HTMLElement>('[data-git-workbench]');
+		expect(sidebarWorkbench).toBeTruthy();
+		if (!sidebarWorkbench) return;
+		ResizeObserverHarness.emit(sidebarWorkbench, 1_100);
+		await waitFor(() => expect(sidebarWorkbench.dataset.gitLayout).toBe('wide'));
+		expect(sidebar.container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
+
+		sidebar.unmount();
+		const mobile = render(GitWorkbenchTestHost, {
+			props: {
+				target,
+				presentation: 'mobile',
+				wb: makeWorkbenchStub(target),
+				diffFontSize: 12,
+			},
+		});
+		const mobileWorkbench = mobile.container.querySelector<HTMLElement>('[data-git-workbench]');
+		expect(mobileWorkbench).toBeTruthy();
+		if (!mobileWorkbench) return;
+		ResizeObserverHarness.emit(mobileWorkbench, 1_100);
+		await waitFor(() => expect(mobileWorkbench.dataset.gitLayout).toBe('narrow'));
+		expect(mobile.container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
 	});
 });

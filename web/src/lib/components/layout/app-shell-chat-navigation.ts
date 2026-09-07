@@ -11,3 +11,20 @@ export function resolveAdjacentChatId(input: {
 	if (index < 0) return null;
 	return order[index + offset] ?? null;
 }
+
+export function shouldSynchronizeFocusedChat(input: {
+	focusedWindowId: string;
+	focusedChatId: string | null;
+	focusedChatExists: boolean;
+	selectedChatId: string | null;
+	pendingChatTarget: string | null;
+	pendingWindowId: string | null;
+}): boolean {
+	if (input.focusedChatId === null || !input.focusedChatExists) return false;
+	if (input.focusedChatId === input.selectedChatId) return false;
+	if (input.pendingChatTarget === null) return true;
+	return (
+		input.pendingWindowId !== input.focusedWindowId &&
+		input.pendingChatTarget !== input.focusedChatId
+	);
+}

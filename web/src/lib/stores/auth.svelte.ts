@@ -6,11 +6,36 @@ import {
 	login as apiLogin,
 	register as apiRegister,
 	getUser,
-	logout as apiLogout,
 	type AuthUser,
 } from '$lib/api/auth.js';
 import { getAuthToken, setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
+
+const AUTH_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000] as const;
+
+function isAuthoritativeAuthRejection(err: unknown): boolean {
+	return err instanceof ApiError && (err.status === 401 || err.status === 403);
+}
+
+function isRetryableAuthError(err: unknown): boolean {
+	if (!(err instanceof ApiError)) return true;
+	const apiError = err as ApiError;
+	return apiError.retryable || apiError.status === 429 || apiError.status >= 500;
+}
+
+async function retryAuthRequest<T>(request: () => Promise<T>): Promise<T> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt <= AUTH_RETRY_DELAYS_MS.length; attempt += 1) {
+		try {
+			return await request();
+		} catch (err) {
+			lastError = err;
+			if (!isRetryableAuthError(err) || attempt === AUTH_RETRY_DELAYS_MS.length) throw err;
+			await new Promise((resolve) => setTimeout(resolve, AUTH_RETRY_DELAYS_MS[attempt]));
+		}
+	}
+	throw lastError;
+}
 
 /** Maps API errors to user-facing messages based on HTTP status. */
 function describeAuthError(err: unknown): string {
@@ -21,7 +46,7 @@ function describeAuthError(err: unknown): string {
 		if (err.status >= 500) return m.auth_errors_server();
 		return err.message;
 	}
-	if (err instanceof Error) return err.message;
+	if (err instanceof Error) return m.auth_errors_network();
 	return m.auth_errors_network();
 }
 
@@ -31,11 +56,14 @@ export interface AuthResult {
 }
 
 export class AuthStore {
+	private statusCheck: Promise<void> | null = null;
+	private authMutationVersion = 0;
 	token = $state<string | null>(null);
 	user = $state<AuthUser | null>(null);
 	isLoading = $state(true);
 	needsSetup = $state(false);
 	authDisabled = $state(false);
+	isUnavailable = $state(false);
 	error = $state<string | null>(null);
 	isAuthenticated = $derived(this.authDisabled || (!!this.token && !!this.user));
 
@@ -45,11 +73,26 @@ export class AuthStore {
 
 	/** Queries the server for auth status and validates any stored token. */
 	async checkAuthStatus(): Promise<void> {
+		if (this.statusCheck) return this.statusCheck;
+		const check = this.performAuthStatusCheck();
+		this.statusCheck = check;
+		try {
+			await check;
+		} finally {
+			if (this.statusCheck === check) this.statusCheck = null;
+		}
+	}
+
+	private async performAuthStatusCheck(): Promise<void> {
+		const authMutationVersion = this.authMutationVersion;
+		const isCurrent = () => this.authMutationVersion === authMutationVersion;
 		try {
 			this.isLoading = true;
+			this.isUnavailable = false;
 			this.error = null;
 
-			const status = await getAuthStatus();
+			const status = await retryAuthRequest(getAuthStatus);
+			if (!isCurrent()) return;
 			this.authDisabled = Boolean(status.authDisabled);
 
 			if (this.authDisabled) {
@@ -72,10 +115,13 @@ export class AuthStore {
 
 			if (this.token) {
 				try {
-					const data = await getUser();
+					const data = await retryAuthRequest(getUser);
+					if (!isCurrent()) return;
 					this.user = data.user;
-				} catch {
-					// Token is invalid or expired
+				} catch (err) {
+					if (!isCurrent()) return;
+					if (!isAuthoritativeAuthRejection(err)) throw err;
+					// The server authoritatively rejected the token.
 					clearAuthToken();
 					this.token = null;
 					this.user = null;
@@ -84,7 +130,9 @@ export class AuthStore {
 				this.user = null;
 			}
 		} catch (err) {
+			if (!isCurrent()) return;
 			console.error('[AuthStore] Auth status check failed:', err);
+			this.isUnavailable = true;
 			this.error = describeAuthError(err);
 		} finally {
 			this.isLoading = false;
@@ -102,8 +150,11 @@ export class AuthStore {
 				};
 			}
 			const data = await apiLogin(username, password);
+			this.authMutationVersion += 1;
 			this.token = data.token;
 			this.user = data.user;
+			this.isLoading = false;
+			this.isUnavailable = false;
 			setAuthToken(data.token);
 			return { success: true };
 		} catch (err: unknown) {
@@ -124,30 +175,18 @@ export class AuthStore {
 				};
 			}
 			const data = await apiRegister(username, password);
+			this.authMutationVersion += 1;
 			this.token = data.token;
 			this.user = data.user;
 			this.needsSetup = false;
+			this.isLoading = false;
+			this.isUnavailable = false;
 			setAuthToken(data.token);
 			return { success: true };
 		} catch (err: unknown) {
 			const message = describeAuthError(err);
 			this.error = message;
 			return { success: false, error: message };
-		}
-	}
-
-	/** Clears local auth state and notifies the server. */
-	logout(): void {
-		const hadToken = !!this.token;
-		if (this.authDisabled) return;
-		this.token = null;
-		this.user = null;
-		clearAuthToken();
-
-		if (hadToken) {
-			apiLogout().catch((err: unknown) => {
-				console.error('Logout endpoint error:', err);
-			});
 		}
 	}
 }

@@ -20,8 +20,6 @@ import {
   createRouteChatListProjector,
   createRouteCommandLedger,
   createRouteCommandService,
-  createRoutePathCache,
-  createRoutePendingInputs,
 } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000400';
@@ -44,12 +42,16 @@ function chatEntry(overrides = {}) {
     },
     projectPath: '/proj',
     tags: [],
+    carryOverSegments: [],
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
     ...overrides,
   };
 }
 
 const registry = {
   getChat: mock(() => undefined),
+  hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
   updateChat: mock(() => undefined),
   removeChat: mock(() => undefined),
@@ -67,18 +69,26 @@ const settings = {
   ensureInNormal: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-  reorderWindow: mock(() => Promise.resolve({ success: true })),
-  reorderRelative: mock(() => Promise.resolve({ success: true })),
+  reorderChat: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+  })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -87,24 +97,21 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-read');
-const pendingInputs = createRoutePendingInputs();
 const chatListProjector = createRouteChatListProjector({
   registry,
   settings,
   metadata,
   agents,
-  pathCache,
 });
 
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
-  pathCache,
+  processing: { phase: mock(() => null) },
   metadata,
   chatViews,
   agents,
-  pendingInputs,
   chatListProjector,
   commandService: createRouteCommandService({
     registry,
@@ -113,8 +120,6 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-    pendingInputs,
-    pathCache,
     chatListProjector,
   }),
 });
@@ -446,6 +451,15 @@ describe('GET /api/v1/chats/details', () => {
       projectPath: '/proj',
       agentSessionId: 'agent-session-100',
       transcriptSource: { kind: 'filesystem-path', value: '/tmp/transcript.jsonl' },
+      carryOverSegments: [{
+        id: '11111111-1111-4111-8111-111111111111',
+        agentId: 'claude',
+        model: 'opus',
+        capturedAt: '2026-02-20T09:00:00.000Z',
+        storedMessageCount: 12,
+        visibleMessageCount: 7,
+        trailingHandoff: { agentId: 'codex', model: 'gpt' },
+      }],
     });
     metadata.getChatMetadata.mockReturnValue({
       firstMessage: 'First line\nSecond line',
@@ -467,7 +481,24 @@ describe('GET /api/v1/chats/details', () => {
       lastActivityAt: '2026-02-21T11:00:00.000Z',
       agentSessionId: 'agent-session-100',
       transcriptSource: { kind: 'filesystem-path', value: '/tmp/transcript.jsonl' },
+      carryOver: {
+        revision: expect.stringMatching(/^carry-v5:/),
+        archivedMessageCount: 8,
+        segments: [{
+          id: '11111111-1111-4111-8111-111111111111',
+          agentId: 'claude',
+          model: 'opus',
+          capturedAt: '2026-02-20T09:00:00.000Z',
+          storedMessageCount: 12,
+          visibleMessageCount: 7,
+          truncated: true,
+          trailingHandoff: { agentId: 'codex', model: 'gpt' },
+        }],
+      },
     });
+    expect(JSON.stringify(body.carryOver)).not.toContain('/tmp/transcript.jsonl');
+    expect(body.carryOver.segments[0]).not.toHaveProperty('messages');
+    expect(body.carryOver.segments[0]).not.toHaveProperty('nativeSession');
   });
 
   it('returns 400 when chatId is missing', async () => {
@@ -497,6 +528,8 @@ describe('GET /api/v1/chats/details', () => {
       agentId: 'test-agent',
       projectPath: '/proj',
       agentSessionId: null,
+      carryOverSegments: [],
+      carryOverMigrationQuarantine: null,
     });
     metadata.getChatMetadata.mockReturnValue(null);
 
@@ -514,6 +547,11 @@ describe('GET /api/v1/chats/details', () => {
       lastActivityAt: null,
       agentSessionId: null,
       transcriptSource: null,
+      carryOver: {
+        revision: 'carry-v1:0',
+        archivedMessageCount: 0,
+        segments: [],
+      },
     });
   });
 });

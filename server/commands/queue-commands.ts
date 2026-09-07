@@ -1,16 +1,20 @@
 import crypto from 'crypto';
 import type {
-  ActiveInputCommandRequest,
-  ActiveInputCommandResponse,
+  GoalControlCommandRequest,
+  GoalControlCommandResponse,
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryDeleteResponse,
+  QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
 } from '../../common/chat-command-contracts.js';
 import { QueueEntryMutationError } from '../chat-execution/chat-execution-coordinator.js';
-import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
+import {
+  hasPendingTurnInput,
+  toClientChatExecutionControlState,
+} from '../chat-execution/control-state.ts';
 import type { CommandLedgerRecord } from './command-ledger.js';
 import {
   CommandSupport,
@@ -31,21 +35,21 @@ export class QueueCommands {
   async submitQueueEntryCreate(input: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
     this.support.requireChat(input.chatId);
     this.support.assertContent(input.content);
-    return this.support.withChatMutationLock(input.chatId, () => this.submitQueueEntryCreateLocked(input));
+    return this.support.withChatMutationLock(input.chatId, async () => {
+      await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
+      return this.submitQueueEntryCreateLocked(input);
+    });
   }
 
   async submitQueueEntryReplace(input: QueueEntryReplaceCommandRequest): Promise<QueueEntryCommandResponse> {
     this.support.requireChat(input.chatId);
     this.support.assertContent(input.content);
-    if (!input.entryId.trim()) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
-    }
+    const entryId = this.support.requireQueueEntryId(input.entryId);
     if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
       throw new CommandValidationError('VALIDATION_FAILED', 'expectedRevision must be a positive integer');
     }
     return this.support.withChatMutationLock(input.chatId, async () => {
       const content = input.content;
-      const entryId = input.entryId.trim();
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-replace',
         chatId: input.chatId,
@@ -95,11 +99,8 @@ export class QueueCommands {
 
   async submitQueueEntryDelete(input: QueueEntryDeleteCommandRequest): Promise<QueueEntryDeleteResponse> {
     this.support.requireChat(input.chatId);
-    if (!input.entryId.trim()) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
-    }
+    const entryId = this.support.requireQueueEntryId(input.entryId);
     return this.support.withChatMutationLock(input.chatId, async () => {
-      const entryId = input.entryId.trim();
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-delete',
         chatId: input.chatId,
@@ -140,18 +141,105 @@ export class QueueCommands {
     });
   }
 
-  async submitActiveInput(input: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse> {
+  async submitQueueEntryMove(
+    input: QueueEntryMoveCommandRequest,
+  ): Promise<QueueEntryCommandResponse> {
+    this.support.requireChat(input.chatId);
+    const entryId = this.support.requireQueueEntryId(input.entryId);
+    const targetEntryId = this.support.requireQueueEntryId(input.targetEntryId, 'targetEntryId');
+    if (entryId === targetEntryId) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        'entryId and a different targetEntryId are required',
+      );
+    }
+    if (input.placement !== 'before' && input.placement !== 'after') {
+      throw new CommandValidationError('VALIDATION_FAILED', 'placement must be before or after');
+    }
+    if (
+      !Number.isSafeInteger(input.expectedReorderRevision)
+      || input.expectedReorderRevision < 0
+      || !Number.isSafeInteger(input.expectedSourceRevision)
+      || input.expectedSourceRevision < 1
+      || !Number.isSafeInteger(input.expectedTargetRevision)
+      || input.expectedTargetRevision < 1
+    ) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'Move revisions are invalid');
+    }
+
+    return this.support.withChatMutationLock(input.chatId, async () => {
+      const ledger = await this.deps.ledger.accept({
+        commandType: 'queue-entry-move',
+        chatId: input.chatId,
+        clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
+        payload: {
+          chatId: input.chatId,
+          entryId,
+          targetEntryId,
+          placement: input.placement,
+          expectedReorderRevision: input.expectedReorderRevision,
+          expectedSourceRevision: input.expectedSourceRevision,
+          expectedTargetRevision: input.expectedTargetRevision,
+        },
+        entryId,
+      });
+      this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+      const recoveringAcceptedCommand = ledger.kind === 'duplicate'
+        && ledger.record.status === 'accepted';
+      if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+        await this.throwRecordedQueueMutationFailure(ledger.record);
+        return {
+          ...commandResultFromRecord(ledger.record, 'duplicate'),
+          entryId: ledger.record.entryId ?? entryId,
+          control: toClientChatExecutionControlState(
+            await this.deps.queue.readChatExecutionControl(input.chatId),
+          ),
+        };
+      }
+
+      const result = await this.deps.queue.moveAccepted({
+        command: {
+          key: ledger.record.key,
+          chatId: input.chatId,
+          clientRequestId: ledger.record.clientRequestId,
+          entryId,
+        },
+        targetEntryId,
+        placement: input.placement,
+        expectedReorderRevision: input.expectedReorderRevision,
+        expectedSourceRevision: input.expectedSourceRevision,
+        expectedTargetRevision: input.expectedTargetRevision,
+        settlement: this.support.settlement,
+      });
+      return {
+        ...commandResultFromRecord(
+          ledger.record,
+          recoveringAcceptedCommand || result.duplicate ? 'duplicate' : 'accepted',
+        ),
+        entryId,
+        control: toClientChatExecutionControlState(result.control),
+      };
+    });
+  }
+
+  async submitGoalControl(input: GoalControlCommandRequest): Promise<GoalControlCommandResponse> {
     this.support.requireChat(input.chatId);
     this.support.assertContent(input.content);
     return this.support.withChatMutationLock(input.chatId, async () => {
+      await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
       const content = input.content;
       const preparedEntryId = crypto.randomUUID();
       const turnId = crypto.randomUUID();
       const ledger = await this.deps.ledger.accept({
-        commandType: 'active-input',
+        commandType: 'goal-control',
         chatId: input.chatId,
         clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
-        payload: { chatId: input.chatId, content },
+        payload: {
+          chatId: input.chatId,
+          transcriptViewId: input.transcriptViewId,
+          clientMessageId: input.clientMessageId,
+          content,
+        },
         entryId: preparedEntryId,
         turnId,
       });
@@ -161,26 +249,18 @@ export class QueueCommands {
           this.support.throwRecordedExecutionFailure(ledger.record);
         }
         if (ledger.record.status === 'accepted') {
-          const outcome = await this.deps.queue.recoverAcceptedActiveInput({
-            command: {
-              key: ledger.record.key,
-              chatId: input.chatId,
-              clientRequestId: ledger.record.clientRequestId,
-              turnId: ledger.record.turnId ?? turnId,
-              entryId: ledger.record.entryId ?? preparedEntryId,
-            },
-            content,
-            settlement: this.support.settlement,
-          });
           return {
             ...commandResultFromRecord(ledger.record, 'duplicate'),
-            delivery: outcome.delivery,
-            ...(outcome.entryId ? { entryId: outcome.entryId } : {}),
-            control: toClientChatExecutionControlState(outcome.control),
+            commandType: 'goal-control',
+            delivery: 'active',
+            control: toClientChatExecutionControlState(
+              await this.deps.queue.readChatExecutionControl(input.chatId),
+            ),
           };
         }
         return {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
+          commandType: 'goal-control',
           delivery: ledger.record.entryId ? 'queued' : 'active',
           ...(ledger.record.entryId ? { entryId: ledger.record.entryId } : {}),
           control: toClientChatExecutionControlState(
@@ -189,7 +269,7 @@ export class QueueCommands {
         };
       }
 
-      const outcome = await this.deps.queue.deliverAcceptedActiveInput({
+      const outcome = await this.deps.queue.deliverAcceptedGoalControl({
         command: {
           key: ledger.record.key,
           chatId: input.chatId,
@@ -198,10 +278,13 @@ export class QueueCommands {
           entryId: ledger.record.entryId ?? preparedEntryId,
         },
         content,
+        clientMessageId: input.clientMessageId,
+        transcriptViewId: input.transcriptViewId,
         settlement: this.support.settlement,
       });
       return {
         ...commandResultFromRecord(ledger.record),
+        commandType: 'goal-control',
         delivery: outcome.delivery,
         ...(outcome.entryId ? { entryId: outcome.entryId } : {}),
         control: toClientChatExecutionControlState(outcome.control),
@@ -218,10 +301,12 @@ export class QueueCommands {
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
       }
-      const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
-        || this.deps.queue.isChatExecutionReserved(chatId);
+      const transcriptViewId = input.transcriptViewId
+        ?? await this.deps.agents.currentTranscriptViewId(chatId);
+      await this.support.assertCurrentTranscriptView(chatId, transcriptViewId);
+      const busy = this.deps.queue.ownsExecution(chatId);
       const control = await this.deps.queue.readChatExecutionControl(chatId);
-      const queueBlocksDirectRun = control.entries.length > 0
+      const queueBlocksDirectRun = hasPendingTurnInput(control)
         || control.pause !== null;
       if ((busy || queueBlocksDirectRun) && input.busyBehavior === 'skip') {
         return { type: 'skipped-busy', chatId };
@@ -231,11 +316,14 @@ export class QueueCommands {
           chatId,
           content: command,
           clientRequestId: input.clientRequestId,
+          clientMessageId: input.clientMessageId,
+          transcriptViewId,
         });
         return { type: 'queued', chatId, entryId: result.entryId };
       }
       await this.support.submitHttpRun({
         chatId,
+        transcriptViewId,
         command,
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
@@ -259,7 +347,13 @@ export class QueueCommands {
       commandType: 'queue-entry-create',
       chatId: input.chatId,
       clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
-      payload: { chatId: input.chatId, content },
+      payload: {
+        chatId: input.chatId,
+        transcriptViewId: input.transcriptViewId,
+        clientMessageId: input.clientMessageId,
+        excludedResendOrdinals: input.excludedResendOrdinals,
+        content,
+      },
       entryId: preparedEntryId,
     });
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
@@ -282,6 +376,9 @@ export class QueueCommands {
         entryId: ledger.record.entryId ?? preparedEntryId,
       },
       content,
+      clientMessageId: input.clientMessageId,
+      transcriptViewId: input.transcriptViewId,
+      excludedResendOrdinals: input.excludedResendOrdinals,
       settlement: this.support.settlement,
     });
     return {
@@ -318,7 +415,9 @@ export class QueueCommands {
     if (
       record.errorCode !== 'QUEUE_ENTRY_NOT_FOUND'
       && record.errorCode !== 'QUEUE_ENTRY_ALREADY_SENT'
+      && record.errorCode !== 'QUEUE_ENTRY_IN_FLIGHT'
       && record.errorCode !== 'QUEUE_ENTRY_REVISION_CONFLICT'
+      && record.errorCode !== 'QUEUE_ENTRY_REORDER_CONFLICT'
     ) {
       return;
     }

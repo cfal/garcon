@@ -1,151 +1,110 @@
 import { promises as fs } from 'node:fs';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { JsonObject } from '@garcon/common/json';
+import { retargetNativeSeedReceiptIfPreserved } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
   getNativeMessageRevisionSource,
-  orderedTranscriptDigest,
-  type AgentForkRequest,
-  type AgentForking,
-  type AgentHost,
-  type AgentStartedSession,
-  type AgentTranscript,
+  type AgentNativeFork,
+  type AgentNativeForkOutcome,
+  type AgentNativeForkRequest,
+  type AgentEstablishedSession,
+  type NativeMessageSource,
 } from '@garcon/server-agent-interface';
+import { hasNodeErrorCode } from '../lib/errors.js';
+import type { AgentNativeEvidenceSource } from '../native-session/evidence-source.js';
 import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
 import {
   forkJsonlTranscript,
+  JsonlSourcePrefixChangedError,
+  type ForkJsonlRequest,
   type ForkTranscriptEntryContext,
 } from './fork-jsonl.js';
 
-export interface JsonlForkingOptions {
-  readonly host: Pick<AgentHost, 'carryOver'>;
-  readonly supportsWhileRunning: boolean;
-  readonly transcript: Pick<AgentTranscript, 'load' | 'revision' | 'resolveNativeSession'>;
+export interface JsonlNativeForkingOptions {
+  readonly nativeEvidence: Pick<AgentNativeEvidenceSource, 'load' | 'resolveNativeSession'>;
   readonly nativeSessions: PathNativeSessionCodec;
-  readonly rewriteEntry?: (
+  readonly rewriteEntry?: (entry: unknown, context: ForkTranscriptEntryContext) => unknown;
+  readonly createRewriteEntry?: () => (
     entry: unknown,
     context: ForkTranscriptEntryContext,
   ) => unknown;
   readonly forkWholeSession?: (
-    request: AgentForkRequest,
-  ) => Promise<AgentStartedSession | null>;
+    request: AgentNativeForkRequest,
+  ) => Promise<AgentEstablishedSession | null>;
+  readonly transformEntries?: ForkJsonlRequest['transformEntries'];
+  readonly createTargetPath?: ForkJsonlRequest['createTargetPath'];
+  readonly allowUnmaterializedWholeSession?: boolean;
+  readonly semanticDigest?: (messages: readonly ChatMessage[]) => string;
 }
 
-export function createJsonlForking(options: JsonlForkingOptions): AgentForking {
+export function createJsonlNativeForking(options: JsonlNativeForkingOptions): AgentNativeFork {
   return {
-    supportsAtMessage: true,
-    supportsWhileRunning: options.supportsWhileRunning,
     async fork(request) {
       request.admission.signal.throwIfAborted();
-      if (!request.point && options.forkWholeSession) {
+      if (!request.providerMeta && options.forkWholeSession) {
         const result = await options.forkWholeSession(request);
-        if (result) return result;
+        if (result) return { kind: 'materialized', session: result };
       }
-      return forkJsonlAtPoint(options, request);
+      return forkJsonlAtProviderPoint(options, request);
+    },
+    async discard(session, signal) {
+      signal.throwIfAborted();
+      const native = options.nativeSessions.decode(session.nativeSession);
+      if (!native.path) return;
+      await fs.rm(native.path, { force: true });
     },
   };
 }
 
-async function forkJsonlAtPoint(
-  options: JsonlForkingOptions,
-  request: AgentForkRequest,
-): Promise<AgentStartedSession> {
+async function forkJsonlAtProviderPoint(
+  options: JsonlNativeForkingOptions,
+  request: AgentNativeForkRequest,
+): Promise<AgentNativeForkOutcome> {
   const resolvedReference = await resolveSourceReference(options, request);
   const sourceNative = options.nativeSessions.decode(resolvedReference);
-  const sourceAgentSessionId = request.source.agentSessionId
-    ?? sourceNative.agentSessionId;
+  const sourceAgentSessionId = request.source.agentSessionId ?? sourceNative.agentSessionId;
   const sourcePath = sourceNative.path;
   if (!sourceAgentSessionId || !sourcePath) {
-    throw new AgentIntegrationError(
-      'TRANSCRIPT_UNAVAILABLE',
-      'Source native transcript is unavailable',
-      false,
-    );
+    if (!request.providerMeta && options.allowUnmaterializedWholeSession && !sourceAgentSessionId) {
+      return { kind: 'unmaterialized' };
+    }
+    throw transcriptUnavailable('Source native transcript is unavailable');
   }
 
-  let cutoffLine: number | null = null;
-  let leadingLineCount = 0;
-  let retainedMessageCounts: ReadonlyMap<number, number> | undefined;
-  let expectedForkDigest: string | null = null;
-  if (request.point) {
-    if (request.point.sourceRevision.carryOver !== request.source.carryOverRevision) {
-      throw sourceRevisionChanged();
-    }
-    const carryOver = await options.host.carryOver.load({
-      chatId: request.source.chatId,
-      expectedRevision: request.point.sourceRevision.carryOver,
-      currentAgentId: request.source.agentId,
-      currentModel: request.source.model,
-      signal: request.admission.signal,
-    }).catch(() => {
-      throw sourceRevisionChanged();
-    });
-    const native = await options.transcript.load({
-      chat: request.source,
-      signal: request.admission.signal,
-    });
-    if (native.revision !== request.point.sourceRevision.native) {
-      throw sourceRevisionChanged();
-    }
-    const nativeSequence = Math.max(
-      0,
-      request.point.messageSequence - carryOver.messages.length,
-    );
-    if (nativeSequence > native.messages.length) {
-      throw new AgentIntegrationError(
-        'TRANSCRIPT_UNAVAILABLE',
-        'Fork message is outside the source transcript',
-        false,
-      );
-    }
-    const sourceLines = native.messages
-      .map((message) => getNativeMessageRevisionSource(message)?.lineNumber)
-      .filter((line): line is number => line !== undefined);
-    leadingLineCount = sourceLines.length > 0
-      ? Math.max(0, Math.min(...sourceLines) - 1)
-      : 0;
-    const retainedMessages = native.messages.slice(0, nativeSequence);
-    expectedForkDigest = forkTranscriptDigest(retainedMessages);
-    const retainedCounts = new Map<number, number>();
-    for (const message of retainedMessages) {
-      const sourcePosition = getNativeMessageRevisionSource(message);
-      if (!sourcePosition?.lineNumber) {
-        throw new AgentIntegrationError(
-          'TRANSCRIPT_UNAVAILABLE',
-          'The selected transcript prefix has no provider-native fork position',
-          false,
-        );
-      }
-      retainedCounts.set(
-        sourcePosition.lineNumber,
-        (retainedCounts.get(sourcePosition.lineNumber) ?? 0) + 1,
-      );
-    }
-    retainedMessageCounts = retainedCounts;
-    cutoffLine = nativeSequence === 0 ? 0 : Math.max(...retainedCounts.keys());
-  }
-
+  const point = request.providerMeta
+    ? await resolveProviderPoint(options, request)
+    : null;
   const result = await forkJsonlTranscript({
     sourcePath,
     sourceAgentSessionId,
-    cutoffLine,
-    leadingLineCount,
-    retainedMessageCounts,
-    rewriteEntry: options.rewriteEntry,
+    cutoffLine: point?.lineNumber ?? null,
+    allowUnmaterializedWholeSession:
+      !request.providerMeta && options.allowUnmaterializedWholeSession === true,
+    ...(point
+      ? { retainedMessageCounts: new Map([[point.lineNumber, point.retainedMessageCount]]) }
+      : {}),
+    rewriteEntry: options.createRewriteEntry?.() ?? options.rewriteEntry,
+    transformEntries: options.transformEntries,
+    createTargetPath: options.createTargetPath,
+  }).catch((error) => {
+    if (error instanceof JsonlSourcePrefixChangedError) throw sourceRevisionChanged();
+    throw error;
   });
-  const nativeSession = options.nativeSessions.encode({
-    path: result.nativePath,
-    agentSessionId: result.agentSessionId,
-    modelEndpointId: request.endpoint?.endpointId ?? sourceNative.modelEndpointId,
-  });
+  if (result.kind === 'unmaterialized') {
+    if (request.providerMeta) throw new Error('A message-point fork cannot remain unmaterialized');
+    return result;
+  }
 
-  if (request.point) {
-    try {
-      const current = await options.transcript.revision({
-        chat: request.source,
-        signal: request.admission.signal,
-      });
-      if (current !== request.point.sourceRevision.native) throw sourceRevisionChanged();
-      const forked = await options.transcript.load({
+  try {
+    const nativeSession = options.nativeSessions.encode({
+      path: result.nativePath,
+      agentSessionId: result.agentSessionId,
+      modelEndpointId: request.endpoint?.endpointId ?? sourceNative.modelEndpointId,
+    });
+    let forkedMessages: readonly ChatMessage[] | null = null;
+    if (result.expectedSemanticDigest !== undefined || request.source.nativeSeedReceipt) {
+      const forked = await options.nativeEvidence.load({
         chat: {
           chatId: request.chatId,
           agentId: request.source.agentId,
@@ -154,42 +113,120 @@ async function forkJsonlAtPoint(
           model: request.model,
           nativeSession,
           carryOverRevision: '',
+          nativeSeedReceipt: null,
           settings: request.settings,
         },
         signal: request.admission.signal,
       });
-      if (forkTranscriptDigest(forked.messages) !== expectedForkDigest) {
-        throw new AgentIntegrationError(
-          'TRANSCRIPT_UNAVAILABLE',
-          'The provider-native fork did not preserve the selected message prefix',
-          false,
-        );
+      forkedMessages = forked.messages;
+      if (
+        result.expectedSemanticDigest !== undefined
+        && options.semanticDigest?.(forked.messages) !== result.expectedSemanticDigest
+      ) {
+        throw transcriptUnavailable('The provider-native fork did not preserve its selected prefix');
       }
-    } catch (error) {
-      await fs.rm(result.nativePath, { force: true }).catch(() => undefined);
-      throw error;
     }
+    return {
+      kind: 'materialized',
+      session: {
+        agentSessionId: result.agentSessionId,
+        nativeSession,
+        nativeSeedReceipt: retargetNativeSeedReceiptIfPreserved(
+          request.source.nativeSeedReceipt,
+          result.agentSessionId,
+          forkedMessages ?? [],
+        ),
+      },
+    };
+  } catch (error) {
+    await fs.rm(result.nativePath, { force: true }).catch(() => undefined);
+    throw error;
   }
-  return { agentSessionId: result.agentSessionId, nativeSession };
 }
 
-function forkTranscriptDigest(messages: readonly ChatMessage[]): string {
-  return orderedTranscriptDigest(messages.map((message, index) => ({
-    seq: index + 1,
-    message,
-  })));
+async function resolveProviderPoint(
+  options: JsonlNativeForkingOptions,
+  request: AgentNativeForkRequest,
+): Promise<{ readonly lineNumber: number; readonly retainedMessageCount: number }> {
+  const expected = request.providerMeta;
+  if (!expected) throw missingNativePoint();
+  const native = await options.nativeEvidence.load({
+    chat: request.source,
+    signal: request.admission.signal,
+  }).catch((error) => {
+    // A source file the provider has not written yet holds no native
+    // positions; the typed source-level refusal keeps the retry and
+    // handoff-consent flow instead of surfacing a raw filesystem error.
+    if (hasNodeErrorCode(error, 'ENOENT')) throw missingNativeSource();
+    throw error;
+  });
+  for (const message of native.messages) {
+    const source = getNativeMessageRevisionSource(message);
+    if (!source || !matchesProviderMeta(source, expected)) continue;
+    const lineNumber = positiveSafeInteger(source.lineNumber);
+    if (lineNumber === null) break;
+    return {
+      lineNumber,
+      retainedMessageCount: (nonNegativeSafeInteger(source.withinSourceOrdinal) ?? 0) + 1,
+    };
+  }
+  throw missingNativePoint();
+}
+
+function matchesProviderMeta(
+  source: NativeMessageSource,
+  expected: JsonObject,
+): boolean {
+  let compared = false;
+  for (const key of ['entryId', 'lineNumber', 'byteOffset', 'withinSourceOrdinal'] as const) {
+    const value = expected[key];
+    if (value === undefined) continue;
+    compared = true;
+    if (source[key] !== value) return false;
+  }
+  return compared;
 }
 
 async function resolveSourceReference(
-  options: JsonlForkingOptions,
-  request: AgentForkRequest,
+  options: JsonlNativeForkingOptions,
+  request: AgentNativeForkRequest,
 ) {
   const current = options.nativeSessions.decode(request.source.nativeSession);
   if (current.path) return request.source.nativeSession;
-  return options.transcript.resolveNativeSession({
+  return options.nativeEvidence.resolveNativeSession({
     chat: request.source,
     signal: request.admission.signal,
   });
+}
+
+function positiveSafeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function nonNegativeSafeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function missingNativeSource(): AgentIntegrationError {
+  return new AgentIntegrationError(
+    'TRANSCRIPT_UNAVAILABLE',
+    'The source native transcript is unavailable',
+    true,
+    { nativeForkReason: 'source-missing' },
+  );
+}
+
+export function missingNativePoint(): AgentIntegrationError {
+  return new AgentIntegrationError(
+    'TRANSCRIPT_UNAVAILABLE',
+    'The selected ledger row has no provider-native fork position',
+    true,
+    { nativeForkReason: 'not-settled' },
+  );
+}
+
+function transcriptUnavailable(message: string): AgentIntegrationError {
+  return new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', message, false);
 }
 
 function sourceRevisionChanged(): AgentIntegrationError {

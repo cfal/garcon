@@ -19,7 +19,10 @@ vi.mock('$lib/ws/drain', () => ({
 function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
 	return {
 		version: 1,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
@@ -65,7 +68,13 @@ describe('RemoteSettingsRouter', () => {
 
 	it('applies settings-changed snapshots to the remote settings store', () => {
 		const store = { applySnapshot: vi.fn() };
-		const snapshot = makeSnapshot({ version: 2, ui: { pinnedInsertPosition: 'bottom' } });
+		const snapshot = makeSnapshot({
+			version: 2,
+			ui: {
+				pinnedInsertPosition: 'bottom',
+				hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }],
+			},
+		});
 		drain.mockReturnValue([{ data: { type: 'settings-changed', settings: snapshot } }]);
 		const router = new RemoteSettingsRouter({} as never, store as never);
 

@@ -12,13 +12,24 @@
 	interface Props {
 		projectPath: string;
 		isVisible: boolean;
+		projectPending?: boolean;
+		projectUnavailable?: boolean;
 		query: string;
 		onSelect: (filePath: string) => void;
 		onClose: () => void;
 		position?: { top: number; left: number };
 	}
 
-	let { projectPath, isVisible, query, onSelect, onClose, position }: Props = $props();
+	let {
+		projectPath,
+		isVisible,
+		projectPending = false,
+		projectUnavailable = false,
+		query,
+		onSelect,
+		onClose,
+		position,
+	}: Props = $props();
 	const transientLayers = getTransientLayers();
 	const layerId = allocateTransientLayerId('file-mention');
 
@@ -29,22 +40,24 @@
 	let loadFailed = $state(false);
 
 	let fetchedForProject = '';
+	let activeLoad: AbortController | null = null;
 
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when projectPath changes.
 	$effect(() => {
 		if (!projectPath || !isVisible) return;
 		if (fetchedForProject === projectPath) return;
-		fetchedForProject = projectPath;
 		isLoading = true;
 		loadFailed = false;
 
 		const controller = new AbortController();
+		activeLoad = controller;
 
 		getFileList({ projectPath }, { signal: controller.signal })
 			.then((files) => {
 				if (!controller.signal.aborted) {
 					allFiles = files;
+					fetchedForProject = projectPath;
 				}
 			})
 			.catch((err) => {
@@ -55,12 +68,17 @@
 				}
 			})
 			.finally(() => {
-				if (!controller.signal.aborted) {
-					isLoading = false;
-				}
+				if (activeLoad !== controller) return;
+				activeLoad = null;
+				isLoading = false;
 			});
 
-		return () => controller.abort();
+		return () => {
+			controller.abort();
+			if (activeLoad !== controller) return;
+			activeLoad = null;
+			isLoading = false;
+		};
 	});
 
 	function normalizeSlashes(value: string): string {
@@ -92,6 +110,7 @@
 
 	// Filters files by query (case-insensitive), capped at 10 results.
 	let filteredFiles = $derived.by(() => {
+		if (!projectPath || projectPending || projectUnavailable || isLoading || loadFailed) return [];
 		if (!query) return selectableFiles.slice(0, 10);
 
 		const lowerQuery = query.toLowerCase();
@@ -176,11 +195,11 @@
 		style:left={position ? `${position.left}px` : undefined}
 	>
 		<ul bind:this={listElement} class="max-h-[200px] overflow-y-auto py-1" role="listbox">
-			{#if isLoading}
+			{#if isLoading || projectPending}
 				<li class="px-3 py-2 text-sm text-muted-foreground">
 					{m.filetree_loading()}
 				</li>
-			{:else if loadFailed}
+			{:else if loadFailed || projectUnavailable}
 				<li class="px-3 py-2 text-sm text-muted-foreground">
 					{m.filetree_check_project_path()}
 				</li>

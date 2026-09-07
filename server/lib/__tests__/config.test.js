@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import path from 'path';
 import {
+  getHomeDirectoryPath,
   getPort,
   initializeServerConfig,
   resetServerConfigForTests,
@@ -12,6 +14,7 @@ const originalPort = process.env.GARCON_PORT;
 const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
 const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
 const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
+const originalHome = process.env.HOME;
 
 afterEach(() => {
   resetServerConfigForTests();
@@ -35,6 +38,11 @@ afterEach(() => {
     delete process.env.GARCON_DISABLE_AUTH;
   } else {
     process.env.GARCON_DISABLE_AUTH = originalDisableAuth;
+  }
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
   }
 });
 
@@ -91,12 +99,30 @@ describe('getPort', () => {
     expect(() => initializeServerConfig()).toThrow('Invalid GARCON_MAX_WS_CLIENTS value');
   });
 
+  it('parses the explicit carryover rollback startup flag', () => {
+    process.argv = [...originalArgv, '--rollback-carryover-migration'];
+
+    expect(initializeServerConfig().rollbackCarryOverMigration).toBe(true);
+  });
+
   it('rejects negative websocket client limits during initialization', () => {
     process.env.GARCON_MAX_WS_CLIENTS = '-1';
 
     expect(() => initializeServerConfig()).toThrow('non-negative integer');
   });
 
+});
+
+describe('getHomeDirectoryPath', () => {
+  it('resolves and freezes the server process HOME', () => {
+    process.env.HOME = 'configured-home';
+    const expected = path.resolve('configured-home');
+
+    initializeServerConfig();
+    process.env.HOME = 'changed-home';
+
+    expect(getHomeDirectoryPath()).toBe(expected);
+  });
 });
 
 describe('isAuthDisabled', () => {

@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { compactChat, forkChat, forkRunChat } from '$lib/api/chats.js';
+import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
+import { ApiError } from '$lib/api/client.js';
+import { AssistantMessage } from '$shared/chat-types';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
 	ConversationSlashCommandService,
 	type ConversationSlashCommandDeps,
@@ -13,8 +16,11 @@ vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
+	selfHandoffRunChat: vi.fn(),
 	runChat: vi.fn(),
-	sendActiveInput: vi.fn(),
+	steerChat: vi.fn(),
+	steerQueuedEntry: vi.fn(),
+	submitGoalControl: vi.fn(),
 	startChat: vi.fn(),
 }));
 
@@ -25,6 +31,7 @@ vi.mock('$lib/api/scheduled-prompts.js', () => ({
 const mockCompactChat = vi.mocked(compactChat);
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
+const mockSelfHandoffRunChat = vi.mocked(selfHandoffRunChat);
 const mockScheduleChatPrompt = vi.mocked(scheduleChatPrompt);
 
 function deferred<T>() {
@@ -41,8 +48,6 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
@@ -59,17 +64,23 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 
 function createServerEntry(id: string) {
 	return {
 		id,
+		parentChat: null,
 		agentId: 'claude',
+		agentOwnershipEpoch: 'epoch-1',
 		model: 'sonnet',
 		permissionMode: 'default' as const,
 		thinkingMode: 'none' as const,
@@ -84,33 +95,98 @@ function createServerEntry(id: string) {
 		isPinned: false,
 		isArchived: false,
 		isActive: false,
+		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 	};
 }
 
 function createDeps(chat = createChat()) {
-	const composerState: ConversationSlashCommandDeps['composerState'] = {
-		inputText: 'original command',
-		images: [],
-		clearAfterSubmit: vi.fn(() => {
-			composerState.inputText = '';
-			composerState.images = [];
-		}),
-		saveDraft: vi.fn(),
-	};
-	const appendLocalNotice = vi.fn();
-	const deps = {
-		sessions: {
-			selectedChatId: chat.id,
-			byId: { [chat.id]: chat },
-			renameChat: vi.fn().mockResolvedValue(true),
-			upsertServerChat: vi.fn(),
-			setSelectedChatId: vi.fn(),
+	const cursor = { transcriptViewId: 'view-1', lastOrdinal: 9 };
+	let inputText = 'original command';
+	let images: File[] = [];
+	let contentRevision = 0;
+	const restoreDraftIfRevision = vi.fn(
+		(_chatId: string, expectedRevision: number, text: string, restoredImages: readonly File[]) => {
+			if (contentRevision !== expectedRevision) return false;
+			inputText = text;
+			images = [...restoredImages];
+			contentRevision += 2;
+			return true;
 		},
+	);
+	const composerState = {
+		get inputText() {
+			return inputText;
+		},
+		set inputText(value: string) {
+			inputText = value;
+			contentRevision += 1;
+		},
+		get images() {
+			return images;
+		},
+		set images(value: File[]) {
+			images = value;
+			contentRevision += 1;
+		},
+		get contentRevision() {
+			return contentRevision;
+		},
+		clearAfterSubmit: vi.fn(() => {
+			inputText = '';
+			images = [];
+			contentRevision += 2;
+			return contentRevision;
+		}),
+		restoreDraftIfRevision,
+	};
+	let noticeRevision = 0;
+	const appendLocalNotice = vi.fn((_noticeType: LocalNoticeType, _content: string) => {
+		noticeRevision += 1;
+	});
+	const appendLocalNoticeForChat = vi.fn(
+		(_chatId: string, noticeType: LocalNoticeType, content: string) =>
+			appendLocalNotice(noticeType, content),
+	);
+	const noticeRevisionForChat = vi.fn(() => noticeRevision);
+	const clearLocalNoticesForChat = vi.fn();
+	const sessions = {
+		selectedChatId: chat.id,
+		byId: { [chat.id]: chat },
+		renameChat: vi.fn().mockResolvedValue(true),
+		moveChatToBoundary: vi.fn().mockResolvedValue({
+			success: true,
+			chatId: chat.id,
+			orderGroup: 'normal',
+			changed: true,
+		}),
+		setChatTags: vi.fn(async (chatId: string, tags: string[]) => {
+			const current = sessions.byId[chatId];
+			if (!current) return false;
+			sessions.byId[chatId] = { ...current, tags };
+			return true;
+		}),
+		upsertServerChat: vi.fn(),
+		setSelectedChatId: vi.fn(),
+	};
+	const deps = {
+		sessions,
 		chatState: {
 			activeChatId: chat.id,
+			entries: [
+				{
+					ordinal: 9,
+					message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'selected reply'),
+				},
+			],
 			isUserScrolledUp: true,
+			getCursor: vi.fn(() => cursor),
 			appendLocalNotice,
+			appendLocalNoticeForChat,
+			noticeRevisionForChat,
+			clearLocalNoticesForChat,
 		},
 		composerState,
 		agentState: { model: 'sonnet' },
@@ -119,24 +195,120 @@ function createDeps(chat = createChat()) {
 			setCurrentChatId: vi.fn(),
 		},
 		modelCatalog: {
-			selectionFor: vi.fn((_agentId, model) => ({
-				model,
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			})),
+			selectionFor: vi.fn(
+				(_agentId, model): ReturnType<ConversationSlashCommandDeps['modelCatalog']['selectionFor']> => ({
+					model,
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				}),
+			),
 			supportsFork: vi.fn(() => false),
 			supportsForkWhileRunning: vi.fn(() => false),
+			supportsSteering: vi.fn(() => false),
+			supportsGoals: vi.fn(() => false),
 		},
 		navigation: { navigateToChat: vi.fn() },
+		refetchTranscript: vi.fn().mockResolvedValue(undefined),
+		confirmHandoffFork: vi.fn().mockResolvedValue(true),
 		scrollToBottom: vi.fn(),
 	} satisfies ConversationSlashCommandDeps;
-	return { deps, composerState, appendLocalNotice };
+	return {
+		deps,
+		composerState,
+		appendLocalNotice,
+		appendLocalNoticeForChat,
+		noticeRevisionForChat,
+		clearLocalNoticesForChat,
+		cursor,
+	};
 }
 
 describe('ConversationSlashCommandService', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+	});
+
+	it('routes supported steering before queue policy despite a stale processing projection', () => {
+		const { deps } = createDeps(
+			createChat({
+				agentId: 'codex',
+				isProcessing: false,
+			}),
+		);
+		deps.modelCatalog.supportsSteering.mockReturnValue(true);
+
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: 'chat-1',
+			chat: deps.sessions.byId['chat-1'],
+			text: '/steer Focus on the failing assertion',
+			images: [],
+			ownsComposer: true,
+			handoffPending: false,
+		});
+
+		expect(result).toEqual({ kind: 'steer', content: 'Focus on the failing assertion' });
+	});
+
+	it('rejects steering when the capability is absent or attachments are present', () => {
+		const { deps, appendLocalNotice } = createDeps(createChat({ agentId: 'codex' }));
+		const service = new ConversationSlashCommandService(deps);
+		const input = {
+			chatId: 'chat-1',
+			chat: deps.sessions.byId['chat-1'],
+			text: '/steer Focus here',
+			images: [] as File[],
+			ownsComposer: true,
+			handoffPending: false,
+		};
+
+		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'/steer is not supported by this agent.',
+		);
+
+		deps.modelCatalog.supportsSteering.mockReturnValue(true);
+		input.images = [new File(['image'], 'capture.png', { type: 'image/png' })];
+		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Remove attachments before steering the active turn.',
+		);
+
+		input.images = [];
+		input.handoffPending = true;
+		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Wait for the current work and queued messages to finish before handing this chat to another agent.',
+		);
+	});
+
+	it('keeps active goal controls distinct from ordinary goal submissions', () => {
+		const chat = createChat({ agentId: 'codex', isProcessing: true });
+		const { deps } = createDeps(chat);
+		deps.modelCatalog.supportsGoals.mockReturnValue(true);
+		const service = new ConversationSlashCommandService(deps);
+		const input = {
+			chatId: 'chat-1',
+			chat,
+			text: '/goal pause',
+			images: [],
+			ownsComposer: true,
+			handoffPending: false,
+		};
+
+		expect(service.dispatchSubmission(input)).toEqual({
+			kind: 'goal-control',
+			content: '/goal pause',
+		});
+
+		chat.isProcessing = false;
+		expect(service.dispatchSubmission(input)).toEqual({
+			kind: 'continue',
+			content: '/goal pause',
+		});
 	});
 
 	it('restores rename text and attachments when rename fails', async () => {
@@ -155,7 +327,525 @@ describe('ConversationSlashCommandService', () => {
 
 		expect(composerState.inputText).toBe('original command');
 		expect(composerState.images).toEqual([image]);
-		expect(composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
+	});
+
+	it('does not overwrite text entered while a failed rename is pending', async () => {
+		const { deps, composerState } = createDeps();
+		const pending = deferred<boolean>();
+		deps.sessions.renameChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitRenameCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'Renamed chat',
+			[],
+			true,
+		);
+		composerState.inputText = 'replacement draft';
+
+		pending.resolve(false);
+		await expect(submission).resolves.toBe('rejected');
+
+		expect(composerState.inputText).toBe('replacement draft');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
+	});
+
+	it('does not restore a failed rename after a type-delete cycle', async () => {
+		const { deps, composerState } = createDeps();
+		const pending = deferred<boolean>();
+		deps.sessions.renameChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitRenameCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'Renamed chat',
+			[],
+			true,
+		);
+		composerState.inputText = 'temporary draft';
+		composerState.inputText = '';
+
+		pending.resolve(false);
+		await expect(submission).resolves.toBe('rejected');
+
+		expect(composerState.inputText).toBe('');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
+	});
+
+	it('restores a failed rename to its source draft after switching chats', async () => {
+		const { deps, composerState } = createDeps();
+		const pending = deferred<boolean>();
+		deps.sessions.renameChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitRenameCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'Renamed chat',
+			[],
+			true,
+		);
+		deps.sessions.selectedChatId = 'chat-2';
+
+		pending.resolve(false);
+		await expect(submission).resolves.toBe('rejected');
+
+		expect(composerState.inputText).toBe('original command');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
+	});
+
+	it('claims a busy move command, clears immediately, and appends its source notice', async () => {
+		const chat = createChat({ isProcessing: true, processingPhase: 'running' });
+		const { deps, composerState, appendLocalNotice } = createDeps(chat);
+		composerState.inputText = '/move top';
+		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id,
+			chat,
+			text: '/move top',
+			images: [],
+			ownsComposer: true,
+			handoffPending: false,
+		});
+
+		expect(dispatch.kind).toBe('handled');
+		expect(composerState.clearAfterSubmit).toHaveBeenCalledWith(chat.id);
+		expect(composerState.inputText).toBe('');
+		expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith(chat.id, 'top');
+		pending.resolve({ success: true, chatId: chat.id, orderGroup: 'normal', changed: true });
+		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+		await expect(dispatch.outcome).resolves.toBe('accepted');
+
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'info',
+			'Moved this chat to the top of its section in Manual order.',
+		);
+		expect(deps.chatState.isUserScrolledUp).toBe(false);
+		expect(deps.scrollToBottom).toHaveBeenCalledOnce();
+		expect(mockScheduleChatPrompt).not.toHaveBeenCalled();
+	});
+
+	it('reports an unchanged bottom boundary without sending the command onward', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		deps.sessions.moveChatToBoundary.mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			orderGroup: 'archived',
+			changed: false,
+		});
+
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: 'chat-1',
+			chat: deps.sessions.byId['chat-1'],
+			text: '/MOVE BOTTOM ',
+			images: [],
+			ownsComposer: true,
+			handoffPending: false,
+		});
+
+		expect(dispatch.kind).toBe('handled');
+		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+		await expect(dispatch.outcome).resolves.toBe('accepted');
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'info',
+			'This chat is already at the bottom of its section in Manual order.',
+		);
+	});
+
+	it('rejects move arguments, drafts, and attachments before clearing or mutating', async () => {
+		for (const input of [
+			{ text: '/move top later', chat: createChat(), images: [] },
+			{ text: '/move top', chat: createChat({ status: 'draft' }), images: [] },
+			{
+				text: '/move bottom',
+				chat: createChat(),
+				images: [new File(['image'], 'test.png', { type: 'image/png' })],
+			},
+		]) {
+			const { deps, composerState } = createDeps(input.chat);
+			const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: input.chat.id,
+				chat: input.chat,
+				text: input.text,
+				images: input.images,
+				ownsComposer: true,
+				handoffPending: false,
+			});
+
+			expect(dispatch.kind).toBe('handled');
+			if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+			await expect(dispatch.outcome).resolves.toBe('rejected');
+			expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
+			expect(deps.sessions.moveChatToBoundary).not.toHaveBeenCalled();
+		}
+	});
+
+	it('restores a failed move only while the source composer remains untouched', async () => {
+		const { deps, composerState } = createDeps();
+		composerState.inputText = '/move top';
+		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+
+		const result = await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(composerState.inputText).toBe('/move top');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
+	});
+
+	it('does not restore a failed move over newly entered text', async () => {
+		const { deps, composerState } = createDeps();
+		composerState.inputText = '/move top';
+		const pending = deferred<null>();
+		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			true,
+		);
+		composerState.inputText = 'new draft';
+
+		pending.resolve(null);
+		await submission;
+
+		expect(composerState.inputText).toBe('new draft');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
+	});
+
+	it('does not restore an older failed command after a newer submission clears the composer', async () => {
+		const { deps, composerState } = createDeps();
+		const first = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		const second = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		deps.sessions.moveChatToBoundary
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const service = new ConversationSlashCommandService(deps);
+
+		composerState.inputText = '/move top';
+		const firstSubmission = service.submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			true,
+		);
+		composerState.inputText = '/move bottom';
+		const secondSubmission = service.submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'bottom' },
+			[],
+			true,
+		);
+
+		first.resolve(null);
+		await expect(firstSubmission).resolves.toBe('rejected');
+		expect(composerState.inputText).toBe('');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
+
+		second.resolve({ success: true, chatId: 'chat-1', orderGroup: 'normal', changed: true });
+		await expect(secondSubmission).resolves.toBe('accepted');
+		expect(composerState.inputText).toBe('');
+	});
+
+	it('does not restore or append a notice after switching away from the source chat', async () => {
+		const { deps, composerState, appendLocalNotice } = createDeps();
+		composerState.inputText = '/move bottom';
+		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const service = new ConversationSlashCommandService(deps);
+		const submission = service.submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'bottom' },
+			[],
+			true,
+		);
+		deps.sessions.selectedChatId = 'chat-2';
+		deps.chatState.activeChatId = 'chat-2';
+
+		pending.resolve({ success: true, chatId: 'chat-1', orderGroup: 'normal', changed: true });
+		await expect(submission).resolves.toBe('accepted');
+
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.scrollToBottom).not.toHaveBeenCalled();
+		expect(composerState.inputText).toBe('');
+	});
+
+	it('does not clear or restore a composer the source submission does not own', async () => {
+		const { deps, composerState } = createDeps();
+		composerState.inputText = 'other chat draft';
+		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+
+		await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			false,
+		);
+
+		expect(composerState.inputText).toBe('other chat draft');
+		expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
+	});
+
+	it('adds normalized unique tags without resending existing tags', async () => {
+		const chat = createChat({ tags: ['existing', 'review'] });
+		const { deps, composerState, appendLocalNotice } = createDeps(chat);
+		composerState.inputText = '/tag add existing Urgent urgent';
+
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id,
+			chat,
+			text: composerState.inputText,
+			images: [],
+			ownsComposer: true,
+			handoffPending: false,
+		});
+
+		expect(dispatch.kind).toBe('handled');
+		if (dispatch.kind !== 'handled') throw new Error('tag command was not handled');
+		await expect(dispatch.outcome).resolves.toBe('accepted');
+		expect(deps.sessions.setChatTags).toHaveBeenCalledWith(chat.id, [
+			'existing',
+			'review',
+			'urgent',
+		]);
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: urgent.');
+		expect(composerState.inputText).toBe('');
+	});
+
+	it('accepts adding only existing tags without issuing a mutation', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps, appendLocalNotice } = createDeps(chat);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['existing'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('accepted');
+		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Tags are already up to date.');
+	});
+
+	it('serializes overlapping tag additions and rebases the second mutation', async () => {
+		const chat = createChat();
+		const { deps, composerState, appendLocalNotice } = createDeps(chat);
+		const first = deferred<boolean>();
+		deps.sessions.setChatTags
+			.mockImplementationOnce(async (chatId, tags) => {
+				const updated = await first.promise;
+				if (updated) deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return updated;
+			})
+			.mockImplementationOnce(async (chatId, tags) => {
+				deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return true;
+			});
+		const service = new ConversationSlashCommandService(deps);
+
+		composerState.inputText = '/tag add alpha';
+		const addAlpha = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['alpha'] },
+			[],
+			true,
+		);
+		composerState.inputText = '/tag add beta';
+		const addBeta = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['beta'] },
+			[],
+			true,
+		);
+
+		await Promise.resolve();
+		expect(deps.sessions.setChatTags).toHaveBeenCalledTimes(1);
+		first.resolve(true);
+		await expect(Promise.all([addAlpha, addBeta])).resolves.toEqual(['accepted', 'accepted']);
+		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['alpha', 'beta']);
+		expect(deps.sessions.byId[chat.id].tags).toEqual(['alpha', 'beta']);
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: alpha.');
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: beta.');
+	});
+
+	it('rebases a queued tag removal after an overlapping addition', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps } = createDeps(chat);
+		const first = deferred<boolean>();
+		deps.sessions.setChatTags
+			.mockImplementationOnce(async (chatId, tags) => {
+				const updated = await first.promise;
+				if (updated) deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return updated;
+			})
+			.mockImplementationOnce(async (chatId, tags) => {
+				deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return true;
+			});
+		const service = new ConversationSlashCommandService(deps);
+
+		const addition = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+		const removal = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'rm', tags: ['existing'] },
+			[],
+			true,
+		);
+
+		first.resolve(true);
+		await expect(Promise.all([addition, removal])).resolves.toEqual(['accepted', 'accepted']);
+		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['urgent']);
+		expect(deps.sessions.byId[chat.id].tags).toEqual(['urgent']);
+	});
+
+	it('continues a queued tag mutation after the preceding mutation fails', async () => {
+		const chat = createChat();
+		const { deps, composerState } = createDeps(chat);
+		const first = deferred<boolean>();
+		deps.sessions.setChatTags.mockImplementationOnce(() => first.promise);
+		const service = new ConversationSlashCommandService(deps);
+
+		composerState.inputText = '/tag add alpha';
+		const addAlpha = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['alpha'] },
+			[],
+			true,
+		);
+		composerState.inputText = '/tag add beta';
+		const addBeta = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['beta'] },
+			[],
+			true,
+		);
+
+		first.resolve(false);
+		await expect(Promise.all([addAlpha, addBeta])).resolves.toEqual(['rejected', 'accepted']);
+		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['beta']);
+		expect(deps.sessions.byId[chat.id].tags).toEqual(['beta']);
+		expect(composerState.inputText).toBe('');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
+	});
+
+	it('removes existing tags and ignores requested tags that are absent', async () => {
+		const chat = createChat({ tags: ['existing', 'urgent'] });
+		const { deps, appendLocalNotice } = createDeps(chat);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'rm', tags: ['existing', 'missing'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('accepted');
+		expect(deps.sessions.setChatTags).toHaveBeenCalledWith(chat.id, ['urgent']);
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Removed tags: existing.');
+	});
+
+	it('accepts removing only absent tags without issuing a mutation', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps, appendLocalNotice } = createDeps(chat);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'rm', tags: ['missing'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('accepted');
+		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Tags are already up to date.');
+	});
+
+	it('rejects invalid tag syntax and attachments before clearing or mutating', async () => {
+		for (const input of [
+			{ text: '/tag add', images: [] },
+			{
+				text: '/tag add urgent',
+				images: [new File(['image'], 'test.png', { type: 'image/png' })],
+			},
+		]) {
+			const { deps, composerState } = createDeps();
+			const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: 'chat-1',
+				chat: deps.sessions.byId['chat-1'],
+				text: input.text,
+				images: input.images,
+				ownsComposer: true,
+				handoffPending: false,
+			});
+
+			expect(dispatch.kind).toBe('handled');
+			if (dispatch.kind !== 'handled') throw new Error('tag command was not handled');
+			await expect(dispatch.outcome).resolves.toBe('rejected');
+			expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
+			expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		}
+	});
+
+	it('restores a failed tag command while its composer remains untouched', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps, composerState } = createDeps(chat);
+		composerState.inputText = '/tag add urgent';
+		deps.sessions.setChatTags.mockResolvedValueOnce(false);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(composerState.inputText).toBe('/tag add urgent');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
+	});
+
+	it('leaves a similar slash token for ordinary submission', () => {
+		const { deps } = createDeps();
+
+		expect(
+			new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: 'chat-1',
+				chat: deps.sessions.byId['chat-1'],
+				text: '/move-to-top',
+				images: [],
+				ownsComposer: true,
+				handoffPending: false,
+			}),
+		).toEqual({
+			kind: 'continue',
+			content: '/move-to-top',
+		});
 	});
 
 	it('deduplicates an in-flight schedule and restores a failed command', async () => {
@@ -189,7 +879,7 @@ describe('ConversationSlashCommandService', () => {
 		pending.reject(new Error('storage unavailable'));
 		await Promise.all([first, second]);
 		expect(composerState.inputText).toBe('original command');
-		expect(composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
 		expect(appendLocalNotice).toHaveBeenCalledWith(
 			'error',
 			expect.stringContaining('storage unavailable'),
@@ -239,7 +929,7 @@ describe('ConversationSlashCommandService', () => {
 		);
 
 		expect(composerState.inputText).toBe('original command');
-		expect(composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
 		expect(appendLocalNotice).toHaveBeenCalledWith(
 			'error',
 			expect.stringContaining('compact unavailable'),
@@ -254,6 +944,7 @@ describe('ConversationSlashCommandService', () => {
 			commandType: 'fork-run',
 			clientRequestId: 'request-1',
 			chatId: 'chat-2',
+			turnId: 'turn-1',
 			status: 'accepted',
 			acceptedAt: '2026-07-14T00:00:00.000Z',
 			chat: forked,
@@ -276,6 +967,89 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
 	});
 
+	it('preserves stale endpoint routing when a fork model is absent from the catalog', async () => {
+		const chat = createChat({
+			model: 'gpt-stale',
+			apiProviderId: 'stale',
+			modelEndpointId: 'stale_openai',
+			modelProtocol: 'openai-compatible',
+		});
+		const { deps } = createDeps(chat);
+		deps.modelCatalog.selectionFor.mockReturnValueOnce(null);
+		mockForkRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'request-1',
+			chatId: 'chat-2',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-14T00:00:00.000Z',
+			chat: createServerEntry('chat-2'),
+		});
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			chat.id,
+			chat,
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
+			model: 'gpt-stale',
+			apiProviderId: 'stale',
+			modelEndpointId: 'stale_openai',
+			modelProtocol: 'openai-compatible',
+		}));
+	});
+
+	it('asks before a fork run falls back and repeats it with the same command identities', async () => {
+		const { deps } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkRunChat
+			.mockRejectedValueOnce(
+				new ApiError(
+					409,
+					'The native fork is not materialized yet',
+					'TRANSCRIPT_NOT_YET_PERSISTED',
+					undefined,
+					true,
+				),
+			)
+			.mockResolvedValueOnce({
+				success: true,
+				commandType: 'fork-run',
+				clientRequestId: 'request-1',
+				chatId: 'chat-2',
+				turnId: 'turn-1',
+				status: 'accepted',
+				acceptedAt: '2026-07-14T00:00:00.000Z',
+				chat: forked,
+			});
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(deps.confirmHandoffFork).toHaveBeenCalledOnce();
+		expect(mockForkRunChat).toHaveBeenCalledTimes(2);
+		const first = mockForkRunChat.mock.calls[0]![0];
+		const confirmed = mockForkRunChat.mock.calls[1]![0];
+		expect(first).not.toHaveProperty('allowHandoffFork');
+		expect(confirmed).toEqual({ ...first, allowHandoffFork: true });
+		expect(confirmed).toMatchObject({
+			clientRequestId: first.clientRequestId,
+			clientMessageId: first.clientMessageId,
+			chatId: first.chatId,
+		});
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
+	});
+
 	it('retries an ambiguous fork response with the same command identity', async () => {
 		const { deps } = createDeps();
 		const forked = createServerEntry('chat-2');
@@ -286,6 +1060,7 @@ describe('ConversationSlashCommandService', () => {
 				commandType: 'fork-run',
 				clientRequestId: 'request-1',
 				chatId: 'chat-2',
+				turnId: 'turn-1',
 				status: 'duplicate',
 				acceptedAt: '2026-07-14T00:00:00.000Z',
 				chat: forked,
@@ -319,14 +1094,158 @@ describe('ConversationSlashCommandService', () => {
 		expect(mockForkRunChat).toHaveBeenCalledTimes(2);
 		expect(mockForkRunChat.mock.calls[1][0]).toEqual(mockForkRunChat.mock.calls[0][0]);
 		expect(composerState.inputText).toBe('');
-		expect(composerState.saveDraft).not.toHaveBeenCalled();
+		expect(composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
 		expect(appendLocalNotice).toHaveBeenCalledWith(
 			'error',
 			'Could not confirm whether the fork was created. Check the chat list before trying again.',
 		);
 	});
 
-	it('forks without a message and preserves the requested sequence', async () => {
+	it('clears the forking progress notice through its captured revision on success', async () => {
+		const { deps, appendLocalNotice, noticeRevisionForChat, clearLocalNoticesForChat } =
+			createDeps();
+		mockForkRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'request-1',
+			chatId: 'chat-2',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-14T00:00:00.000Z',
+			chat: createServerEntry('chat-2'),
+		});
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(appendLocalNotice).toHaveBeenCalledWith('progress', 'Forking chat...');
+		expect(noticeRevisionForChat).toHaveBeenCalledWith('chat-1');
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('keeps the failure notice appended after the forking progress notice', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockForkRunChat.mockRejectedValueOnce(
+			new ApiError(409, 'Chat is running', 'CHAT_RUNNING', undefined, true),
+		);
+
+		const outcome = await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('rejected');
+		expect(appendLocalNotice).toHaveBeenCalledTimes(2);
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Failed to fork chat: Chat is running',
+		);
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('clears the forking progress notice when the handoff fork confirmation is declined', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockForkRunChat.mockRejectedValueOnce(
+			new ApiError(
+				409,
+				'The transcript is not written yet',
+				'TRANSCRIPT_NOT_YET_PERSISTED',
+				undefined,
+				true,
+			),
+		);
+		deps.confirmHandoffFork.mockResolvedValueOnce(false);
+
+		const outcome = await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('rejected');
+		expect(appendLocalNotice).toHaveBeenCalledTimes(1);
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('clears the forking progress notice after a bare fork settles', async () => {
+		const { deps, clearLocalNoticesForChat } = createDeps();
+		mockForkChat.mockResolvedValueOnce({ success: true, chat: createServerEntry('chat-2') });
+
+		const outcome = await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('accepted');
+		expect(mockForkChat).toHaveBeenCalledWith({
+			sourceChatId: 'chat-1',
+			chatId: expect.stringMatching(/^\d+$/),
+		});
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('clears the handoff progress notice through its captured revision on success', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockSelfHandoffRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'request-1',
+			chatId: 'chat-2',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-14T00:00:00.000Z',
+			chat: createServerEntry('chat-2'),
+		});
+
+		await new ConversationSlashCommandService(deps).submitHandoffCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'take over here',
+			[],
+			true,
+		);
+
+		expect(appendLocalNotice).toHaveBeenCalledWith('progress', 'Continuing in a new chat...');
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('keeps the handoff failure notice appended after the progress notice', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockSelfHandoffRunChat.mockRejectedValueOnce(
+			new ApiError(409, 'Chat is running', 'CHAT_RUNNING', undefined, true),
+		);
+
+		const outcome = await new ConversationSlashCommandService(deps).submitHandoffCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'take over here',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('rejected');
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Failed to hand off chat: Chat is running',
+		);
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('forks without a message and preserves the requested ordinal', async () => {
 		const { deps } = createDeps();
 		const forked = createServerEntry('chat-2');
 		mockForkChat.mockResolvedValueOnce({ success: true, chat: forked });
@@ -336,10 +1255,141 @@ describe('ConversationSlashCommandService', () => {
 		expect(mockForkChat).toHaveBeenCalledWith({
 			sourceChatId: 'chat-1',
 			chatId: expect.stringMatching(/^\d+$/),
-			upToSeq: 9,
+			upToOrdinal: 9,
+			transcriptViewId: 'view-1',
 		});
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('chat-2');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('forks from the explicitly supplied panel transcript', async () => {
+		const { deps } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkChat.mockResolvedValueOnce({ success: true, chat: forked });
+		const panelTranscript = {
+			entries: [
+				{
+					ordinal: 4,
+					message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'panel reply'),
+				},
+			],
+			getCursor: () => ({ transcriptViewId: 'view-panel', lastOrdinal: 4 }),
+		};
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 4, {
+			transcript: panelTranscript,
+		});
+
+		expect(mockForkChat).toHaveBeenCalledWith({
+			sourceChatId: 'chat-1',
+			chatId: expect.stringMatching(/^\d+$/),
+			upToOrdinal: 4,
+			transcriptViewId: 'view-panel',
+		});
+	});
+
+	it('refetches, remaps, and retries a stale fork point once', async () => {
+		const { deps, cursor, appendLocalNotice } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkChat
+			.mockRejectedValueOnce(
+				new ApiError(409, 'The view changed', 'STALE_TRANSCRIPT_VIEW', undefined, true),
+			)
+			.mockResolvedValueOnce({ success: true, chat: forked });
+		deps.refetchTranscript.mockImplementationOnce(async () => {
+			cursor.transcriptViewId = 'view-2';
+			cursor.lastOrdinal = 12;
+			deps.chatState.entries = [
+				{
+					ordinal: 12,
+					message: new AssistantMessage('2026-07-29T01:00:00.000Z', 'selected reply'),
+				},
+			];
+		});
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(2);
+		expect(mockForkChat.mock.calls[0]?.[0]).toMatchObject({
+			upToOrdinal: 9,
+			transcriptViewId: 'view-1',
+		});
+		expect(mockForkChat.mock.calls[1]?.[0]).toMatchObject({
+			chatId: mockForkChat.mock.calls[0]?.[0].chatId,
+			upToOrdinal: 12,
+			transcriptViewId: 'view-2',
+		});
+		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('preserves the stale fork error when the view refetch fails', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		mockForkChat.mockRejectedValueOnce(
+			new ApiError(409, 'The original stale view', 'STALE_TRANSCRIPT_VIEW', undefined, true),
+		);
+		deps.refetchTranscript.mockRejectedValueOnce(
+			new ApiError(409, 'Chat is running', 'CHAT_RUNNING', undefined, true),
+		);
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(1);
+		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			'Failed to fork chat: The original stale view',
+		);
+	});
+
+	it('asks before forking a point the provider has not persisted, then repeats it with consent', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkChat
+			.mockRejectedValueOnce(
+				new ApiError(
+					409,
+					'The transcript is not written yet',
+					'TRANSCRIPT_NOT_YET_PERSISTED',
+					undefined,
+					true,
+				),
+			)
+			.mockResolvedValueOnce({ success: true, chat: forked });
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(deps.confirmHandoffFork).toHaveBeenCalledTimes(1);
+		expect(mockForkChat).toHaveBeenCalledTimes(2);
+		expect(mockForkChat.mock.calls[0]?.[0]).not.toHaveProperty('allowHandoffFork');
+		expect(mockForkChat.mock.calls[1]?.[0]).toMatchObject({
+			chatId: mockForkChat.mock.calls[0]?.[0].chatId,
+			upToOrdinal: 9,
+			allowHandoffFork: true,
+		});
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('leaves the chat untouched when the handoff fork is declined', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		deps.confirmHandoffFork.mockResolvedValueOnce(false);
+		mockForkChat.mockRejectedValueOnce(
+			new ApiError(
+				409,
+				'The transcript is not written yet',
+				'TRANSCRIPT_NOT_YET_PERSISTED',
+				undefined,
+				true,
+			),
+		);
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(1);
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
 	});
 });

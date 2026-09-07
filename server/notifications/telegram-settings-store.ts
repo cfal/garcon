@@ -6,12 +6,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { randomBytes } from 'crypto';
 import { getConfigDir } from '../config.js';
-import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { TelegramBotIdentity, TelegramResolvedRecipient } from './telegram.js';
-import { createLogger } from '../lib/log.js';
-
-const logger = createLogger('notifications:telegram-settings-store');
 
 const TELEGRAM_LINK_TTL_MS = 10 * 60 * 1000;
 const TELEGRAM_SETTINGS_WRITE_LOCK_KEY = 'telegram-settings';
@@ -88,11 +85,14 @@ function hasActivePendingLink(telegram: TelegramSecrets): boolean {
 }
 
 function normalizeSnapshot(value: unknown): NotificationSecretsSnapshot {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return emptySnapshot();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Notification state must be a JSON object');
+  }
   const raw = value as Record<string, unknown>;
-  const telegram = raw.telegram && typeof raw.telegram === 'object' && !Array.isArray(raw.telegram)
-    ? raw.telegram as Record<string, unknown>
-    : {};
+  if (raw.version !== 1 || !raw.telegram || typeof raw.telegram !== 'object' || Array.isArray(raw.telegram)) {
+    throw new TypeError('Notification state must use version 1 with a telegram object');
+  }
+  const telegram = raw.telegram as Record<string, unknown>;
   return {
     version: 1,
     telegram: {
@@ -114,7 +114,11 @@ function defaultStorePath(): string {
   return path.join(getConfigDir(), 'notifications.json');
 }
 
-export class TelegramSettingsStore extends EventEmitter {
+interface TelegramSettingsStoreEvents {
+  changed: [];
+}
+
+export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEvents> {
   #filePath: string;
   #snapshot: NotificationSecretsSnapshot = emptySnapshot();
   #writeLock = new KeyedPromiseLock();
@@ -185,8 +189,8 @@ export class TelegramSettingsStore extends EventEmitter {
       snapshot.telegram.pendingLinkCode = '';
       snapshot.telegram.pendingLinkCreatedAt = '';
       snapshot.telegram.updateOffset = null;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -195,8 +199,8 @@ export class TelegramSettingsStore extends EventEmitter {
     await this.#withLock(async () => {
       const snapshot = await this.#read();
       snapshot.telegram = emptySnapshot().telegram;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -211,8 +215,8 @@ export class TelegramSettingsStore extends EventEmitter {
       snapshot.telegram.pendingLinkCode = randomBytes(16).toString('hex');
       snapshot.telegram.pendingLinkCreatedAt = new Date().toISOString();
       url = linkUrl(snapshot.telegram.botUsername, snapshot.telegram.pendingLinkCode);
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
     return url ?? '';
@@ -227,8 +231,8 @@ export class TelegramSettingsStore extends EventEmitter {
       snapshot.telegram.pendingLinkCode = '';
       snapshot.telegram.pendingLinkCreatedAt = '';
       snapshot.telegram.updateOffset = recipient.nextOffset;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -241,8 +245,8 @@ export class TelegramSettingsStore extends EventEmitter {
       snapshot.telegram.chatId = '';
       snapshot.telegram.pendingLinkCode = '';
       snapshot.telegram.pendingLinkCreatedAt = '';
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -251,8 +255,8 @@ export class TelegramSettingsStore extends EventEmitter {
     await this.#withLock(async () => {
       const snapshot = await this.#read();
       snapshot.telegram.updateOffset = updateOffset;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -262,14 +266,11 @@ export class TelegramSettingsStore extends EventEmitter {
   }
 
   async #read(): Promise<NotificationSecretsSnapshot> {
-    try {
-      const raw = await fs.readFile(this.#filePath, 'utf8');
-      return normalizeSnapshot(JSON.parse(raw));
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptySnapshot();
-      logger.warn('notifications: invalid notifications.json, using empty notification secrets:', (error as Error).message);
-      return emptySnapshot();
-    }
+    return readJsonStateFile({
+      filePath: this.#filePath,
+      empty: emptySnapshot,
+      normalize: normalizeSnapshot,
+    });
   }
 
   async #write(snapshot: NotificationSecretsSnapshot): Promise<void> {

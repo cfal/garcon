@@ -213,10 +213,12 @@
 		</div>
 		<div class="max-h-96 overflow-y-auto">
 			{#if diff}
+				<!-- eslint-disable svelte/no-at-html-tags -- formatDiff escapes source text before adding presentation spans. -->
 				<pre
 					class="text-xs font-mono p-2 {wrapText
 						? 'whitespace-pre-wrap'
 						: 'whitespace-pre overflow-x-auto'}">{@html formatDiff(diff)}</pre>
+				<!-- eslint-enable svelte/no-at-html-tags -->
 			{/if}
 		</div>
 	</div>

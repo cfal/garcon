@@ -11,7 +11,6 @@ function makeConversationUi(
 		pendingViewChat: null,
 		setPendingViewChat: vi.fn(),
 		setPendingPermissionRequests: vi.fn(),
-		clearPendingPermissionRequests: vi.fn(),
 		...overrides,
 	};
 }
@@ -23,12 +22,7 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		setCurrentChatId: vi.fn(),
 		appendLocalNotice: vi.fn(),
 		conversationUi: makeConversationUi(),
-		markTurnRunning: vi.fn(),
-		clearTurnStatus: vi.fn(),
-		markChatsAsCompleted: vi.fn(),
 		startupCoordinator: new StartupCoordinator(),
-		onChatProcessing: vi.fn(),
-		onChatNotProcessing: vi.fn(),
 		onExternalChatCreated: vi.fn(),
 		getPendingChatId: vi.fn().mockReturnValue(null),
 		setPendingChatId: vi.fn(),
@@ -100,12 +94,12 @@ describe('handleChatCreated', () => {
 
 		const result = updater([
 			{
-				permissionRequestId: 'r1',
+				permissionOccurrenceId: 'incarnation-1',
 				requestedTool: { type: 'bash-tool-use', toolId: 't1' },
 				chatId: '',
 			},
 			{
-				permissionRequestId: 'r2',
+				permissionOccurrenceId: 'incarnation-2',
 				requestedTool: { type: 'read-tool-use', toolId: 't2' },
 				chatId: 'existing',
 			},

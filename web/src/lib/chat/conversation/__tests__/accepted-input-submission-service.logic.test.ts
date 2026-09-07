@@ -7,8 +7,11 @@ function transport(overrides: Partial<AcceptedInputTransport> = {}): AcceptedInp
 		start: vi.fn(),
 		run: vi.fn(),
 		fork: vi.fn(),
+		selfHandoff: vi.fn(),
 		enqueue: vi.fn(),
-		active: vi.fn(),
+		steer: vi.fn(),
+		steerQueuedEntry: vi.fn(),
+		goalControl: vi.fn(),
 		...overrides,
 	};
 }
@@ -73,6 +76,7 @@ describe('AcceptedInputSubmissionService', () => {
 
 		const submission = service.run({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			command: 'hello',
 			permissionMode: 'default',
 			thinkingMode: 'none',
@@ -92,31 +96,128 @@ describe('AcceptedInputSubmissionService', () => {
 		expect(createId).toHaveBeenCalledTimes(2);
 	});
 
-	it('uses one request identity for queued and active submissions', async () => {
-		const enqueue = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
-		const active = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
-		const createId = vi.fn().mockReturnValueOnce('queue-1').mockReturnValueOnce('active-1');
+	it('adds handoff-fork consent without changing the logical command identities', async () => {
+		const fork = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
 		const service = new AcceptedInputSubmissionService(
-			transport({ enqueue, active }),
+			transport({ fork }),
+			vi.fn().mockReturnValueOnce('request-fork').mockReturnValueOnce('message-fork'),
+		);
+		const submission = service.fork({
+			sourceChatId: 'chat-1',
+			chatId: 'chat-2',
+			command: 'continue',
+		});
+
+		await submission.submit();
+		await submission.submitWithHandoffFork();
+
+		expect(fork).toHaveBeenCalledTimes(2);
+		expect(fork.mock.calls[0]?.[0]).toEqual({
+			sourceChatId: 'chat-1',
+			chatId: 'chat-2',
+			command: 'continue',
+			clientRequestId: 'request-fork',
+			clientMessageId: 'message-fork',
+		});
+		expect(fork.mock.calls[1]?.[0]).toEqual({
+			...fork.mock.calls[0]?.[0],
+			allowHandoffFork: true,
+		});
+	});
+
+	it('uses stable request and message identities for queued and goal-control submissions', async () => {
+		const enqueue = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
+		const goalControl = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
+		const createId = vi.fn()
+			.mockReturnValueOnce('queue-request')
+			.mockReturnValueOnce('queue-message')
+			.mockReturnValueOnce('goal-request')
+			.mockReturnValueOnce('goal-message');
+		const service = new AcceptedInputSubmissionService(
+			transport({ enqueue, goalControl }),
 			createId,
 		);
 
-		const queued = service.enqueue({ chatId: 'chat-1', content: 'later' });
-		const activeInput = service.active({ chatId: 'chat-1', content: 'now' });
+		const queued = service.enqueue({ chatId: 'chat-1', transcriptViewId: 'view-1', content: 'later' });
+		const goal = service.goalControl({ chatId: 'chat-1', transcriptViewId: 'view-1', content: '/goal pause' });
 		await queued.submit();
-		await activeInput.submit();
+		await goal.submit();
 
-		expect(queued).toMatchObject({ clientRequestId: 'queue-1' });
-		expect(activeInput).toMatchObject({ clientRequestId: 'active-1' });
+		expect(queued).toMatchObject({ clientRequestId: 'queue-request', clientMessageId: 'queue-message' });
+		expect(goal).toMatchObject({ clientRequestId: 'goal-request', clientMessageId: 'goal-message' });
 		expect(enqueue).toHaveBeenCalledWith({
 			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			content: 'later',
-			clientRequestId: 'queue-1',
+			clientRequestId: 'queue-request',
+			clientMessageId: 'queue-message',
 		});
-		expect(active).toHaveBeenCalledWith({
+		expect(goalControl).toHaveBeenCalledWith({
 			chatId: 'chat-1',
-			content: 'now',
-			clientRequestId: 'active-1',
+			transcriptViewId: 'view-1',
+			content: '/goal pause',
+			clientRequestId: 'goal-request',
+			clientMessageId: 'goal-message',
+		});
+	});
+
+	it('creates both steering identities before submission', async () => {
+		const steer = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
+		const createId = vi.fn().mockReturnValueOnce('request-1').mockReturnValueOnce('message-1');
+		const service = new AcceptedInputSubmissionService(transport({ steer }), createId);
+
+		const submission = service.steer({ chatId: 'chat-1', transcriptViewId: 'view-1', content: 'focus here' });
+
+		expect(submission).toMatchObject({
+			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
+		});
+		await submission.submit();
+		expect(steer).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			content: 'focus here',
+			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
+		});
+	});
+
+	it('retries queued steering with the same request identity and queue observation', async () => {
+		const requests: unknown[] = [];
+		const steerQueuedEntry = vi
+			.fn()
+			.mockImplementationOnce(async (request) => {
+				requests.push(request);
+				throw new TypeError('connection closed');
+			})
+			.mockImplementationOnce(async (request) => {
+				requests.push(request);
+				return { success: true, status: 'duplicate' };
+			});
+		const createId = vi.fn().mockReturnValueOnce('request-1');
+		const service = new AcceptedInputSubmissionService(transport({ steerQueuedEntry }), createId);
+
+		const submission = service.steerQueuedEntry({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			entryId: 'entry-1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+		});
+
+		expect(submission).toMatchObject({
+			clientRequestId: 'request-1',
+		});
+		await expect(submission.submit()).resolves.toMatchObject({ status: 'duplicate' });
+		expect(requests).toHaveLength(2);
+		expect(requests[0]).toBe(requests[1]);
+		expect(requests[0]).toEqual({
+			chatId: 'chat-1',
+			entryId: 'entry-1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+			clientRequestId: 'request-1',
+			transcriptViewId: 'view-1',
 		});
 	});
 });

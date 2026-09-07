@@ -22,7 +22,11 @@ function normalizedProjectBase(): string {
 
 function isWithinResolvedRoot(rootPath: string, targetPath: string): boolean {
   const relative = path.relative(rootPath, targetPath);
-  return relative === '' || (relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative));
+  return relative === '' || (
+    relative !== '..'
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative)
+  );
 }
 
 function isMissingPathError(error: unknown): boolean {
@@ -30,8 +34,18 @@ function isMissingPathError(error: unknown): boolean {
     error
       && typeof error === 'object'
       && 'code' in error
-      && ((error as { code?: unknown }).code === 'ENOENT' || (error as { code?: unknown }).code === 'ENOTDIR'),
+      && (error as { code?: unknown }).code === 'ENOENT',
   );
+}
+
+async function isAbsentPathEntry(targetPath: string): Promise<boolean> {
+  try {
+    await fs.lstat(targetPath);
+    return false;
+  } catch (error) {
+    if (isMissingPathError(error)) return true;
+    throw error;
+  }
 }
 
 async function realpathClosestExistingAncestor(targetPath: string): Promise<{
@@ -49,6 +63,7 @@ async function realpathClosestExistingAncestor(targetPath: string): Promise<{
       };
     } catch (error) {
       if (!isMissingPathError(error)) throw error;
+      if (!(await isAbsentPathEntry(candidate))) throw error;
       const parent = path.dirname(candidate);
       if (parent === candidate) throw error;
       missingSegments.push(path.basename(candidate));

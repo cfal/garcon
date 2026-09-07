@@ -6,7 +6,7 @@ import {
 	updateApiProvider,
 	type ApiProviderInput,
 } from '$lib/api/api-providers.js';
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte.js';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import { apiProviderTemplate, type ApiProviderTemplateId } from '$shared/api-provider-templates';
 import {

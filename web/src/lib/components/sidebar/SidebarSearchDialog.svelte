@@ -10,11 +10,26 @@
 	import Save from '@lucide/svelte/icons/save';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
+	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuGroup,
+		DropdownMenuGroupHeading,
+		DropdownMenuRadioGroup,
+		DropdownMenuRadioItem,
+		DropdownMenuTrigger,
+	} from '$lib/components/ui/dropdown-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import { bodyPortal } from './body-portal-attachment';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
+	import type {
+		ChatSearchIndexStatus,
+		ChatSearchResult,
+		ChatSearchSort,
+		TranscriptSearchStatusV1,
+	} from '$shared/chat-search';
 
 	interface SidebarSearchDialogProps {
 		open: boolean;
@@ -26,7 +41,20 @@
 		transcriptSearchLoading?: boolean;
 		transcriptSearchIndexing?: boolean;
 		transcriptSearchIndex?: ChatSearchIndexStatus | null;
+		transcriptSearchStatus?: TranscriptSearchStatusV1 | null;
 		transcriptSearchError?: string | null;
+		sort?: ChatSearchSort;
+		showTranscriptPagination?: boolean;
+		hasMoreTranscriptResults?: boolean;
+		loadingMoreTranscriptResults?: boolean;
+		transcriptSearchPageError?: string | null;
+		transcriptSearchRevalidating?: boolean;
+		transcriptSearchRevalidationError?: string | null;
+		transcriptSearchLimitReached?: boolean;
+		transcriptSearchAnnouncement?: string;
+		transcriptSearchAnnouncementVersion?: number;
+		resultsResetVersion?: number;
+		revalidationVersion?: number;
 		currentTime: Date;
 		highlightedIndex: number;
 		onQueryChange: (query: string) => void;
@@ -36,8 +64,12 @@
 		onOpenManager: () => void;
 		onHighlightChange: (index: number) => void;
 		onRetryTranscriptSearch?: () => void;
+		onSortChange?: (sort: ChatSearchSort) => void;
+		onLoadMoreTranscriptResults?: () => Promise<void> | void;
+		onRetryTranscriptSearchRevalidation?: () => Promise<void> | void;
 		onClose: () => void;
 		showSavedSearchActions?: boolean;
+		reduceMotion?: boolean;
 		overlayClass?: string;
 		backdropTreatment?: 'standard' | 'interaction-only';
 		contentRole?: 'dialog' | 'presentation';
@@ -57,7 +89,20 @@
 		transcriptSearchLoading = false,
 		transcriptSearchIndexing = false,
 		transcriptSearchIndex = null,
+		transcriptSearchStatus = null,
 		transcriptSearchError = null,
+		sort = 'relevance',
+		showTranscriptPagination = false,
+		hasMoreTranscriptResults = false,
+		loadingMoreTranscriptResults = false,
+		transcriptSearchPageError = null,
+		transcriptSearchRevalidating = false,
+		transcriptSearchRevalidationError = null,
+		transcriptSearchLimitReached = false,
+		transcriptSearchAnnouncement = '',
+		transcriptSearchAnnouncementVersion = 0,
+		resultsResetVersion = 0,
+		revalidationVersion = 0,
 		currentTime,
 		highlightedIndex,
 		onQueryChange,
@@ -67,8 +112,12 @@
 		onOpenManager,
 		onHighlightChange,
 		onRetryTranscriptSearch = () => {},
+		onSortChange,
+		onLoadMoreTranscriptResults,
+		onRetryTranscriptSearchRevalidation,
 		onClose,
 		showSavedSearchActions = true,
+		reduceMotion = false,
 		overlayClass,
 		backdropTreatment = 'standard',
 		contentRole = 'dialog',
@@ -76,6 +125,7 @@
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let dialogRef = $state<HTMLDivElement | null>(null);
 	let helpDialogOpen = $state(false);
 	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
@@ -94,7 +144,59 @@
 		onQueryChange(target.value);
 	}
 
+	function sortLabel(value: ChatSearchSort): string {
+		switch (value) {
+			case 'relevance':
+				return m.sidebar_search_sort_relevance();
+			case 'activity':
+				return m.sidebar_search_sort_activity();
+			case 'created':
+				return m.sidebar_search_sort_created();
+		}
+	}
+
+	function moveHighlight(offset: -1 | 1) {
+		if (filteredChats.length === 0) return;
+		const currentIndex = Math.min(Math.max(highlightedIndex, 0), filteredChats.length - 1);
+		const nextIndex = Math.min(Math.max(currentIndex + offset, 0), filteredChats.length - 1);
+		onHighlightChange(nextIndex);
+		highlightRevealVersion += 1;
+		const canPrefetchTranscriptResults =
+			hasMoreTranscriptResults && !transcriptSearchPageError && !transcriptSearchRevalidationError;
+		if (offset > 0 && canPrefetchTranscriptResults && nextIndex >= filteredChats.length - 8) {
+			void onLoadMoreTranscriptResults?.();
+		}
+	}
+
+	function isVisibleFocusableElement(element: HTMLElement): boolean {
+		if (element.hidden) return false;
+		const style = window.getComputedStyle(element);
+		return style.display !== 'none' && style.visibility !== 'hidden';
+	}
+
+	function trapDialogFocus(e: KeyboardEvent): boolean {
+		if (contentRole !== 'dialog' || e.key !== 'Tab' || !dialogRef) return false;
+		const focusable = Array.from(
+			dialogRef.querySelectorAll<HTMLElement>(
+				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+			),
+		).filter(isVisibleFocusableElement);
+		if (focusable.length === 0) {
+			e.preventDefault();
+			return true;
+		}
+		const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+		const atBoundary =
+			currentIndex === -1 ||
+			(e.shiftKey ? currentIndex === 0 : currentIndex === focusable.length - 1);
+		if (!atBoundary) return false;
+		e.preventDefault();
+		focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
+		return true;
+	}
+
 	function handleDialogKeydown(e: KeyboardEvent) {
+		if (trapDialogFocus(e)) return;
 		const key = e.key.toLowerCase();
 
 		if ((e.ctrlKey || e.metaKey) && key === 's') {
@@ -104,17 +206,15 @@
 			return;
 		}
 
-		if (e.ctrlKey && key === 'j') {
+		if ((e.target === inputRef && key === 'arrowdown') || (e.ctrlKey && key === 'j')) {
 			e.preventDefault();
-			onHighlightChange(Math.min(highlightedIndex + 1, filteredChats.length - 1));
-			highlightRevealVersion += 1;
+			moveHighlight(1);
 			return;
 		}
 
-		if (e.ctrlKey && key === 'k') {
+		if ((e.target === inputRef && key === 'arrowup') || (e.ctrlKey && key === 'k')) {
 			e.preventDefault();
-			onHighlightChange(Math.max(highlightedIndex - 1, 0));
-			highlightRevealVersion += 1;
+			moveHighlight(-1);
 			return;
 		}
 
@@ -163,6 +263,7 @@
 		class={cn(
 			overlayFrameClass,
 			backdropTreatment === 'standard' && 'transient-backdrop',
+			reduceMotion && 'sidebar-reduce-motion',
 			overlayClass,
 		)}
 		role="presentation"
@@ -184,6 +285,7 @@
 			onclick={handleContainerClick}
 		>
 			<div
+				bind:this={dialogRef}
 				data-slot="search-dialog-content"
 				class={cn(
 					'flex min-w-0 flex-col overflow-hidden bg-background shadow-2xl',
@@ -243,6 +345,37 @@
 						</div>
 
 						<div class="flex items-center gap-2">
+							{#if onSortChange}
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										class="inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground sm:h-9 sm:w-auto sm:flex-none sm:shrink-0 sm:justify-start sm:px-2.5"
+									>
+										<ArrowUpDown class="h-3.5 w-3.5 shrink-0" />
+										<span class="truncate">{sortLabel(sort)}</span>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end">
+										<DropdownMenuGroup>
+											<DropdownMenuGroupHeading>
+												{m.sidebar_search_sort_heading()}
+											</DropdownMenuGroupHeading>
+											<DropdownMenuRadioGroup
+												value={sort}
+												onValueChange={(value) => onSortChange(value as ChatSearchSort)}
+											>
+												<DropdownMenuRadioItem value="relevance">
+													{m.sidebar_search_sort_relevance()}
+												</DropdownMenuRadioItem>
+												<DropdownMenuRadioItem value="activity">
+													{m.sidebar_search_sort_activity()}
+												</DropdownMenuRadioItem>
+												<DropdownMenuRadioItem value="created">
+													{m.sidebar_search_sort_created()}
+												</DropdownMenuRadioItem>
+											</DropdownMenuRadioGroup>
+										</DropdownMenuGroup>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							{/if}
 							<Button
 								variant="ghost"
 								class="h-11 min-w-0 flex-1 gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:h-9 sm:w-9 sm:flex-none sm:shrink-0"
@@ -294,6 +427,7 @@
 					loading={transcriptSearchLoading}
 					indexing={transcriptSearchIndexing}
 					index={transcriptSearchIndex}
+					status={transcriptSearchStatus}
 					error={transcriptSearchError}
 					onRetry={onRetryTranscriptSearch}
 				/>
@@ -304,8 +438,21 @@
 					{currentTime}
 					{highlightedIndex}
 					{highlightRevealVersion}
+					{resultsResetVersion}
+					{revalidationVersion}
+					{showTranscriptPagination}
+					{hasMoreTranscriptResults}
+					{loadingMoreTranscriptResults}
+					{transcriptSearchPageError}
+					{transcriptSearchRevalidating}
+					{transcriptSearchRevalidationError}
+					{transcriptSearchLimitReached}
+					{transcriptSearchAnnouncement}
+					{transcriptSearchAnnouncementVersion}
 					{onSelectChat}
 					{onHighlightChange}
+					{onLoadMoreTranscriptResults}
+					{onRetryTranscriptSearchRevalidation}
 				/>
 			</div>
 		</div>
@@ -330,6 +477,12 @@
 					>
 				</div>
 				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
+						>title:X</code
+					>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_title()}</span>
+				</div>
+				<div class="flex gap-3">
 					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">tag:X</code
 					>
 					<span class="text-muted-foreground">{m.sidebar_search_legend_tag()}</span>
@@ -351,6 +504,10 @@
 						>status:X</code
 					>
 					<span class="text-muted-foreground">{m.sidebar_search_legend_status()}</span>
+				</div>
+				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">is:X</code>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_order_group()}</span>
 				</div>
 				<div class="flex gap-3">
 					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"

@@ -1,18 +1,17 @@
-// Wraps OpenCode SDK API calls to match the interface expected by
-// the metadata and chat event loaders. Reads session history and
-// preview data via the SDK rather than JSONL files.
-//
-// Both exported functions accept a getClient callback: () => Promise<client>.
-// The composition root binds this to the OpenCodeRuntime instance.
-
 import {
   UserMessage,
   AssistantMessage,
+  CompactionMessage,
+  ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
+  type ChatImage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
+import path from 'node:path';
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
+import { normalizeOpenCodeToolResultContent } from './tool-result-converter.js';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
@@ -23,7 +22,6 @@ import {
   isOpenCodeNotFoundResult,
   openCodeResultErrorMessage,
   withOpenCodeRequestScope,
-  type OpenCodeRequestScope,
 } from './sdk-result.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
@@ -33,19 +31,19 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
   error() {},
 });
 
-const PREVIEW_TAIL_MESSAGE_LIMIT = 20;
-
 interface OpenCodeSession {
-  title?: string;
-  time?: {
-    created?: string | number | Date;
-    updated?: string | number | Date;
-  };
+  directory?: string;
 }
 
 export interface OpenCodeMessage {
   info?: {
+    id?: string;
     role?: string;
+    mode?: string;
+    agent?: string;
+    summary?: boolean;
+    error?: unknown;
+    finish?: string;
     time?: {
       created?: string | number | Date;
     };
@@ -55,7 +53,10 @@ export interface OpenCodeMessage {
 
 interface OpenCodeClient {
   session: {
-    get(args: { sessionID: string; directory?: string }): Promise<{ data?: OpenCodeSession | null }>;
+    get(
+      args: { sessionID: string; directory?: string },
+      options?: { signal?: AbortSignal },
+    ): Promise<{ data?: OpenCodeSession | null }>;
     messages(
       args: { sessionID: string; limit?: number; directory?: string },
       options?: { signal?: AbortSignal },
@@ -70,14 +71,19 @@ export interface OpenCodeHistoryLoadOptions {
   signal?: AbortSignal;
   throwOnError?: boolean;
   logger?: AgentLogger;
+  limit?: number;
 }
 
-interface OpenCodePreview {
-  firstMessage: string;
-  lastMessage: string;
-  lastActivity: string | null;
-  createdAt: string | null;
+export class OpenCodeTranscriptNotFoundError extends Error {
+  constructor() {
+    super('OpenCode transcript session not found');
+    this.name = 'OpenCodeTranscriptNotFoundError';
+  }
 }
+
+type OpenCodeStoredMessagesResult =
+  | { readonly kind: 'found'; readonly messages: OpenCodeMessage[] }
+  | { readonly kind: 'not-found' };
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -91,119 +97,121 @@ function dateToIso(value: string | number | Date | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-async function callWithDirectoryFallback<T>(
-  label: string,
-  scope: OpenCodeRequestScope,
-  operation: (scope: OpenCodeRequestScope) => Promise<T>,
-  logger: AgentLogger,
-): Promise<{ result: T; scope: OpenCodeRequestScope }> {
-  const result = await operation(scope);
-  if (!scope.directory || !isOpenCodeNotFoundResult(result)) return { result, scope };
-
-  const fallbackScope: OpenCodeRequestScope = {};
-  const fallbackResult = await operation(fallbackScope);
-  if (!isOpenCodeNotFoundResult(fallbackResult)) {
-    logger.warn('OpenCode request missed the scoped directory; loaded without it', {
-      label,
-      directory: scope.directory,
-    });
-  }
-  return { result: fallbackResult, scope: fallbackScope };
-}
-
-// Returns preview metadata for a session (title, last message, etc.).
-export async function getOpenCodePreviewFromSessionId(
-  sessionId: string | null | undefined,
-  getClient: OpenCodeClientGetter,
-  options: OpenCodeHistoryLoadOptions = {},
-): Promise<OpenCodePreview | null> {
-  const logger = options.logger ?? SILENT_LOGGER;
-  if (!sessionId) {
-    logger.error('OpenCode preview fetch requires a session ID');
-    return null;
-  }
-  try {
-    const client = await getClient();
-    const initialScope = createOpenCodeRequestScope(options.directory);
-    const { result, scope } = await callWithDirectoryFallback(
-      'preview fetch',
-      initialScope,
-      (requestScope) => client.session.get(withOpenCodeRequestScope({ sessionID: sessionId }, requestScope)),
-      logger,
-    );
-    if (isOpenCodeNotFoundResult(result)) return null;
-    if (hasOpenCodeResultError(result)) {
-      logger.warn('OpenCode preview fetch failed', {
-        sessionId,
-        error: openCodeResultErrorMessage(result, 'OpenCode preview fetch failed'),
-      });
-      return null;
-    }
-    const session = result.data;
-    if (!session) return null;
-    const { result: messageResult } = await callWithDirectoryFallback(
-      'preview message fetch',
-      scope,
-      (requestScope) => client.session.messages(withOpenCodeRequestScope({
-        sessionID: sessionId,
-        limit: PREVIEW_TAIL_MESSAGE_LIMIT,
-      }, requestScope)),
-      logger,
-    );
-    if (isOpenCodeNotFoundResult(messageResult)) return null;
-    if (hasOpenCodeResultError(messageResult)) {
-      logger.warn('OpenCode preview message fetch failed', {
-        sessionId,
-        error: openCodeResultErrorMessage(messageResult, 'OpenCode preview message fetch failed'),
-      });
-      return null;
-    }
-    const messages = Array.isArray(messageResult.data) ? messageResult.data : [];
-    let lastMessage = '';
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      const info = message.info || {};
-      if (info.role === 'user') {
-        const text = extractTextFromParts(message.parts || []);
-        lastMessage = text.trim();
-      } else if (info.role === 'assistant') {
-        const parts = Array.isArray(message.parts) ? message.parts : [];
-        for (const rawPart of parts) {
-          const part = asRecord(rawPart);
-          if (part.type === 'text') {
-            const text = typeof part.text === 'string' ? part.text.trim() : '';
-            lastMessage = text || '';
-          }
-        }
-      }
-      if (lastMessage) break;
-    }
-
-    return {
-      // TODO: this is incorrect, we should be returning the first user message instead of the generated title.
-      // TODO: is there a way to disable OpenCode title generation?
-      firstMessage: session.title || 'Unknown OpenCode Session',
-      lastMessage,
-      lastActivity: dateToIso(session.time?.updated),
-      createdAt: dateToIso(session.time?.created),
-    };
-  } catch (err) {
-    logger.error('OpenCode preview fetch failed', {
-      sessionId,
-      error: errorMessage(err),
-    });
-    return null;
-  }
-}
-
-function extractTextFromParts(parts: unknown[] | string): string {
+function extractUserTextFromParts(parts: unknown[] | string): string {
   if (typeof parts === 'string') return parts;
   if (!Array.isArray(parts)) return '';
   return parts
     .map((p) => asRecord(p))
-    .filter((p) => p.type === 'text')
+    .filter((p) => p.type === 'text' && p.synthetic !== true)
     .map((p) => typeof p.text === 'string' ? p.text : '')
     .join('\n');
+}
+
+// Submitted images persist as user file parts with data URLs; the round trip
+// restores them so Reload and fork seeding keep the attachment manifest.
+function extractUserImagesFromParts(parts: unknown[] | string): ChatImage[] {
+  if (!Array.isArray(parts)) return [];
+  return parts
+    .map((part) => asRecord(part))
+    .filter((part) => (
+      part.type === 'file'
+      && typeof part.mime === 'string'
+      && part.mime.startsWith('image/')
+      && typeof part.url === 'string'
+      && part.url.startsWith('data:')
+    ))
+    .map((part) => ({
+      data: part.url as string,
+      name: typeof part.filename === 'string' && part.filename ? part.filename : 'image',
+      mimeType: part.mime as string,
+    }));
+}
+
+function isCompactionAssistant(info: NonNullable<OpenCodeMessage['info']>): boolean {
+  return info.summary === true || info.mode === 'compaction' || info.agent === 'compaction';
+}
+
+// OpenCode persists compaction summaries and continuation prompts as ordinary messages.
+// The overflow path also replays the original prompt after its successful summary.
+// A manual compaction boundary survives as a synthetic marker row so Reload and
+// fork seeding reproduce the live transcript's compaction boundary.
+function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): OpenCodeMessage[] {
+  const visible: OpenCodeMessage[] = [];
+  let overflowCompactionPending = false;
+  let replayExpectedText: string | null = null;
+  let lastVisibleUserText: string | null = null;
+  let manualCompactionBoundary: OpenCodeMessage | null = null;
+
+  for (const message of rawMessages) {
+    const info = message.info ?? {};
+    const parts = Array.isArray(message.parts) ? message.parts.map(asRecord) : [];
+
+    if (info.role === 'user') {
+      const compaction = parts.find((part) => part.type === 'compaction');
+      if (compaction) {
+        overflowCompactionPending = compaction.overflow === true;
+        replayExpectedText = null;
+        manualCompactionBoundary = compaction.auto === true ? null : message;
+        continue;
+      }
+
+      const text = extractUserTextFromParts(message.parts ?? []);
+      const hasFileParts = parts.some((part) => part.type === 'file');
+      if (!text.trim() && !hasFileParts) {
+        if (parts.some((part) => part.type === 'text' && part.synthetic === true)) {
+          overflowCompactionPending = false;
+          replayExpectedText = null;
+        }
+        continue;
+      }
+
+      overflowCompactionPending = false;
+      if (replayExpectedText !== null) {
+        const isReplay = text === replayExpectedText;
+        replayExpectedText = null;
+        if (isReplay) continue;
+      }
+      visible.push(message);
+      lastVisibleUserText = text;
+      continue;
+    }
+
+    if (info.role === 'assistant' && isCompactionAssistant(info)) {
+      const succeeded = info.error == null && info.finish !== 'error';
+      replayExpectedText = overflowCompactionPending && succeeded
+        ? lastVisibleUserText
+        : null;
+      overflowCompactionPending = false;
+      // A failed summary remains internal, but its provider failure must survive
+      // reload. A successful manual boundary re-appears as the summary assistant
+      // itself, anchored to its id so point forks match the live transcript.
+      if (!succeeded) visible.push({ ...message, parts: [] });
+      else if (manualCompactionBoundary) visible.push({ ...message, parts: [] });
+      manualCompactionBoundary = null;
+      continue;
+    }
+
+    overflowCompactionPending = false;
+    replayExpectedText = null;
+    visible.push(message);
+  }
+
+  return visible;
+}
+
+function isOpenCodeStoredAbort(error: unknown): boolean {
+  return asRecord(error).name === 'MessageAbortedError';
+}
+
+function openCodeStoredErrorMessage(error: unknown): string | null {
+  if (error == null) return null;
+  if (typeof error === 'string') return error.trim() || 'OpenCode session failed';
+  const record = asRecord(error);
+  if (isOpenCodeStoredAbort(error)) return null;
+  const data = asRecord(record.data);
+  if (typeof data.message === 'string' && data.message.trim()) return data.message.trim();
+  if (typeof record.name === 'string' && record.name.trim()) return record.name.trim();
+  return 'OpenCode session failed';
 }
 
 export async function fetchOpenCodeStoredMessages(
@@ -212,96 +220,184 @@ export async function fetchOpenCodeStoredMessages(
   options: OpenCodeHistoryLoadOptions = {},
 ): Promise<OpenCodeMessage[]> {
   const logger = options.logger ?? SILENT_LOGGER;
-  if (!sessionId) return [];
   try {
-    const client = await getClient();
-    const { result } = await callWithDirectoryFallback(
-      'message fetch',
-      createOpenCodeRequestScope(options.directory),
-      (scope) => {
-        const args = withOpenCodeRequestScope({ sessionID: sessionId }, scope);
-        return options.signal
-          ? client.session.messages(args, { signal: options.signal })
-          : client.session.messages(args);
-      },
-      logger,
-    );
-    if (isOpenCodeNotFoundResult(result)) return [];
-    if (hasOpenCodeResultError(result)) {
-      const message = openCodeResultErrorMessage(result, 'OpenCode message fetch failed');
-      if (options.throwOnError) throw new Error(message);
-      logger.warn('OpenCode chat message load failed', { sessionId, error: message });
-      return [];
-    }
-    if (Array.isArray(result.data)) return result.data;
-    if (options.throwOnError) throw new Error('OpenCode message fetch returned an invalid payload');
-    logger.warn('OpenCode chat message load returned an invalid payload', { sessionId });
-    return [];
+    const result = await requestOpenCodeStoredMessages(sessionId, getClient, options);
+    return result.kind === 'found' ? result.messages : [];
   } catch (err) {
     if (options.throwOnError) throw err;
     logger.error('OpenCode chat message load failed', {
-      sessionId,
+      sessionId: sessionId ?? null,
       error: errorMessage(err),
     });
     return [];
   }
 }
 
+async function requestOpenCodeStoredMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions,
+): Promise<OpenCodeStoredMessagesResult> {
+  if (!sessionId) return { kind: 'not-found' };
+  const client = await getClient();
+  const scope = createOpenCodeRequestScope(options.directory);
+  const args = withOpenCodeRequestScope({
+    sessionID: sessionId,
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+  }, scope);
+  const result = options.signal
+    ? await client.session.messages(args, { signal: options.signal })
+    : await client.session.messages(args);
+  if (isOpenCodeNotFoundResult(result)) return { kind: 'not-found' };
+  if (hasOpenCodeResultError(result)) {
+    throw new Error(openCodeResultErrorMessage(result, 'OpenCode message fetch failed'));
+  }
+  if (!Array.isArray(result.data)) {
+    throw new Error('OpenCode message fetch returned an invalid payload');
+  }
+  return { kind: 'found', messages: result.data };
+}
+
+async function requestScopedOpenCodeStoredMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions,
+): Promise<OpenCodeStoredMessagesResult> {
+  if (!sessionId) return { kind: 'not-found' };
+  const client = await getClient();
+  const scope = createOpenCodeRequestScope(options.directory);
+  const sessionArgs = withOpenCodeRequestScope({ sessionID: sessionId }, scope);
+  let sessionResult;
+  try {
+    sessionResult = options.signal
+      ? await client.session.get(sessionArgs, { signal: options.signal })
+      : await client.session.get(sessionArgs);
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    throw error;
+  }
+  options.signal?.throwIfAborted();
+  if (isOpenCodeNotFoundResult(sessionResult)) {
+    return { kind: 'not-found' };
+  }
+  if (hasOpenCodeResultError(sessionResult)) {
+    throw new Error(openCodeResultErrorMessage(sessionResult, 'OpenCode session fetch failed'));
+  }
+  if (!sessionResult.data) {
+    throw new Error('OpenCode session fetch returned an invalid payload');
+  }
+  if (scope.directory) {
+    if (typeof sessionResult.data.directory !== 'string' || !sessionResult.data.directory) {
+      throw new Error('OpenCode session fetch returned a session without a directory');
+    }
+    if (path.resolve(sessionResult.data.directory) !== path.resolve(scope.directory)) {
+      return { kind: 'not-found' };
+    }
+  }
+  const messages = await requestOpenCodeStoredMessages(sessionId, getClient, options);
+  if (messages.kind === 'not-found') {
+    throw new Error('OpenCode transcript messages disappeared during import');
+  }
+  return messages;
+}
+
 export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
-  for (const msg of rawMessages) {
-      const info = msg.info || {};
-      const ts = dateToIso(info.time?.created)
-        ?? new Date().toISOString();
+  // Rows keep provider part order, and every row carries its stable provider
+  // identity: part rows the part ID, message-level rows the message ID. Live
+  // conversion attaches the same tuples, so audits match without guessing.
+  const push = (message: ChatMessage, entryId: unknown, withinSourceOrdinal = 0): void => {
+    messages.push(typeof entryId === 'string' && entryId.length > 0
+      ? attachNativeMessageSource(message, { entryId, withinSourceOrdinal })
+      : message);
+  };
+  for (const msg of visibleOpenCodeStoredMessages(rawMessages)) {
+    const info = msg.info || {};
+    const ts = dateToIso(info.time?.created)
+      ?? new Date().toISOString();
 
-      if (info.role === 'user') {
-        const text = extractTextFromParts(msg.parts || []);
-        if (text?.trim()) {
-          messages.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
+    if (info.role === 'user') {
+      const text = extractUserTextFromParts(msg.parts || []);
+      const images = extractUserImagesFromParts(msg.parts || []);
+      if (text?.trim() || images.length > 0) {
+        push(new UserMessage(
+          ts,
+          stripResolvedFileMentionContext(text ?? ''),
+          images.length > 0 ? images : undefined,
+        ), info.id);
+      }
+      continue;
+    }
+
+    if (info.role === 'assistant') {
+      if (isCompactionAssistant(info)) {
+        // A visible summary assistant is either a successful manual boundary
+        // anchored to the same id the live turn published or a failed summary
+        // whose stored error survives. Aborted and incomplete summaries
+        // replaced nothing and reload as no boundary at all.
+        if (info.error != null && !isOpenCodeStoredAbort(info.error)) {
+          push(new ErrorMessage(ts, openCodeStoredErrorMessage(info.error) ?? 'OpenCode session failed'), info.id);
+        } else if (info.error != null) {
+          // Aborted summary: nothing to render.
+        } else if (info.finish === 'error') {
+          push(new ErrorMessage(ts, 'OpenCode session failed'), info.id);
+        } else {
+          const time = asRecord(info.time);
+          const completed = time && typeof time.completed === 'number' ? time.completed : undefined;
+          const terminalFinish = typeof info.finish === 'string'
+            && info.finish
+            && info.finish !== 'tool-calls'
+            && info.finish !== 'unknown';
+          if (completed !== undefined && terminalFinish) {
+            push(new CompactionMessage(
+              dateToIso(completed) ?? ts,
+              'manual',
+              '',
+            ), info.id);
+          }
         }
         continue;
       }
-
-      if (info.role === 'assistant') {
-        // Emit thinking parts first
-        const parts = Array.isArray(msg.parts) ? msg.parts : [];
-        for (const rawPart of parts) {
-          const part = asRecord(rawPart);
-          if (part.type === 'reasoning') {
-            const content = typeof part.reasoning === 'string'
-              ? part.reasoning
-              : typeof part.text === 'string'
-                ? part.text
-                : '';
-            if (content.trim()) {
-              messages.push(new ThinkingMessage(ts, content));
-            }
+      const providerError = openCodeStoredErrorMessage(info.error);
+      const parts = Array.isArray(msg.parts) ? msg.parts : [];
+      for (const rawPart of parts) {
+        const part = asRecord(rawPart);
+        if (part.type === 'reasoning') {
+          const content = typeof part.reasoning === 'string'
+            ? part.reasoning
+            : typeof part.text === 'string'
+              ? part.text
+              : '';
+          if (content.trim()) {
+            push(new ThinkingMessage(ts, content), part.id);
           }
-        }
+        } else if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+          push(new AssistantMessage(ts, part.text), part.id);
+        } else if (part.type === 'tool') {
+          const state = asRecord(part.state);
+          if (state.status !== 'completed' && state.status !== 'error') continue;
+          const toolUse = convertOpenCodeToolUse(ts, part);
+          push(toolUse, part.id);
 
-        // Emit text and tool-use parts
-        for (const rawPart of parts) {
-          const part = asRecord(rawPart);
-          if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-            messages.push(new AssistantMessage(ts, part.text));
-          } else if (part.type === 'tool') {
-            const toolId = typeof part.callID === 'string'
-              ? part.callID
-              : typeof part.id === 'string'
-                ? part.id
-                : '';
-            messages.push(convertOpenCodeToolUse(ts, part));
-            const state = asRecord(part.state);
-
-            // Emit tool result if completed or errored
-            if (state.status === 'completed') {
-              messages.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(state.output), false));
-            } else if (state.status === 'error') {
-              messages.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(state.error || 'Error'), true));
-            }
+          if (state.status === 'completed') {
+            push(new ToolResultMessage(
+              ts,
+              toolUse.toolId,
+              normalizeOpenCodeToolResultContent(part.tool, state),
+              false,
+            ), part.id, 1);
+          } else if (state.status === 'error') {
+            push(new ToolResultMessage(
+              ts,
+              toolUse.toolId,
+              normalizeToolResultContent(state.error || 'Error'),
+              true,
+            ), part.id, 1);
           }
         }
       }
+      if (providerError) push(new ErrorMessage(ts, providerError), info.id);
+    }
   }
   return messages;
 }
@@ -314,4 +410,74 @@ export async function loadOpenCodeChatMessages(
 ): Promise<ChatMessage[]> {
   const stored = await fetchOpenCodeStoredMessages(sessionId, getClient, options);
   return convertOpenCodeStoredMessages(stored);
+}
+
+export async function loadLegacyOpenCodeChatMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions = {},
+): Promise<ChatMessage[]> {
+  // A chat that records no native session is the only positive legacy absence.
+  // A recorded session the provider cannot return within scope is loss, not
+  // absence: adoption must fail and retry later instead of permanently
+  // committing a false-empty view.
+  if (!sessionId) return [];
+  return loadRequiredOpenCodeChatMessages(sessionId, getClient, options);
+}
+
+export async function loadRequiredOpenCodeChatMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions = {},
+): Promise<ChatMessage[]> {
+  const result = await requestScopedOpenCodeStoredMessages(sessionId, getClient, options);
+  if (result.kind === 'not-found') throw new OpenCodeTranscriptNotFoundError();
+  return convertImportableOpenCodeStoredMessages(result.messages);
+}
+
+function convertImportableOpenCodeStoredMessages(
+  messages: readonly OpenCodeMessage[],
+): ChatMessage[] {
+  for (const message of messages) {
+    const info = asRecord(message.info);
+    if (
+      typeof info.id !== 'string'
+      || !info.id
+      || (info.role !== 'user' && info.role !== 'assistant')
+      || !Array.isArray(message.parts)
+    ) {
+      throw new Error('OpenCode stored transcript message is invalid');
+    }
+    for (const part of message.parts) {
+      const rawPart = part as Record<string, unknown>;
+      if (
+        !part
+        || typeof part !== 'object'
+        || Array.isArray(part)
+        || typeof rawPart.type !== 'string'
+        || !rawPart.type
+        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
+        || (
+          rawPart.type === 'reasoning'
+          && typeof rawPart.reasoning !== 'string'
+          && typeof rawPart.text !== 'string'
+        )
+      ) {
+        throw new Error('OpenCode stored transcript part is invalid');
+      }
+    }
+  }
+  return convertOpenCodeStoredMessages(messages);
+}
+
+export function latestOpenCodeStoredActivityAt(
+  rawMessages: readonly OpenCodeMessage[],
+): string | null {
+  const messages = visibleOpenCodeStoredMessages(rawMessages);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (convertOpenCodeStoredMessages([message]).length === 0) continue;
+    return dateToIso(message.info?.time?.created);
+  }
+  return null;
 }

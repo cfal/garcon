@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import { composerModelSelectorMode } from '../composer-model-selector-mode';
 
 function makeCatalog(input: {
@@ -40,6 +40,22 @@ describe('composerModelSelectorMode', () => {
 		});
 
 		expect(composerModelSelectorMode(catalog, 'claude')).toEqual({
+			agent: 'fixed',
+			source: 'hidden',
+			surface: 'composer',
+		});
+	});
+
+	it('uses the eligible agent count instead of the full catalog count', () => {
+		const catalog = makeCatalog({
+			agents: ['claude', 'direct-openai-compatible'],
+			models: {
+				claude: [{ value: 'opus', label: 'Opus' }],
+				'direct-openai-compatible': [{ value: 'gpt-5.5', label: 'GPT-5.5' }],
+			},
+		});
+
+		expect(composerModelSelectorMode(catalog, 'claude', ['claude'])).toEqual({
 			agent: 'fixed',
 			source: 'hidden',
 			surface: 'composer',

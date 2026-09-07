@@ -1,21 +1,26 @@
 // Implements Direct over OpenAI-compatible Responses APIs.
 // Keeps Responses request/stream parsing separate from chat completions.
 
-import type { SharedModelOption } from '@garcon/common/models';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   DirectChatRuntimeBase,
+  type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
-  type DirectUserTurn,
-} from "./direct-chat-runtime-base.js";
-import type { DirectConversationMessage } from "./session-store.js";
-import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
+  type DirectTurnCompletion,
+} from './direct-chat-runtime-base.js';
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
   directSingleQuerySignal,
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
+import {
+  isUnresolvedCheckpoint,
+  readOpenAiResponsesResponse,
+  throwResponsesHttpError,
+  type ResponsesCompletion,
+} from './openai-compatible-responses-protocol.js';
+import type { DirectResponsesCheckpointV1 } from './session-store.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -37,15 +42,11 @@ interface ResponsesInputMessage {
   content: ResponsesInputContent;
 }
 
-export interface OpenAiCompatibleResponsesRuntimeConfig {
-  runtimeId: string;
-  runtimeLabel: string;
-  defaultModel: string;
-  fallbackModels: SharedModelOption[];
+export interface OpenAiCompatibleResponsesRuntimeConfig extends DirectChatRuntimeBaseConfig {
+  endpointId: string;
+  endpointFingerprint: string;
   getApiKey: () => string;
   getBaseUrl: () => string;
-  getSessionDir: () => string;
-  getSessionFilePath: (sessionId: string) => string;
   buildHeaders?: (apiKey: string) => Record<string, string>;
 }
 
@@ -89,83 +90,6 @@ export function extractOpenAiResponsesTextContent(content: ResponsesInputContent
     .join('\n');
 }
 
-function persistedToResponsesMessage(message: DirectConversationMessage): ResponsesInputMessage {
-  return {
-    role: message.role,
-    content: message.content,
-  };
-}
-
-interface ResponsesOutputTextPart {
-  type: 'output_text';
-  text?: string;
-}
-
-interface ResponsesOutputMessage {
-  type?: string;
-  content?: ResponsesOutputTextPart[];
-}
-
-export function extractResponsesOutputText(data: unknown): string {
-  if (!data || typeof data !== 'object') return '';
-  const response = data as {
-    output_text?: unknown;
-    output?: unknown;
-  };
-
-  if (typeof response.output_text === 'string') {
-    return response.output_text.trim();
-  }
-
-  if (!Array.isArray(response.output)) return '';
-  return response.output
-    .filter((item): item is ResponsesOutputMessage => Boolean(item) && typeof item === 'object')
-    .flatMap((item) => Array.isArray(item.content) ? item.content : [])
-    .filter((part): part is ResponsesOutputTextPart => part?.type === 'output_text')
-    .map((part) => typeof part.text === 'string' ? part.text : '')
-    .join('')
-    .trim();
-}
-
-export function applyResponsesStreamEvent(accumulated: string, event: unknown): {
-  text: string;
-  error?: string;
-} {
-  if (!event || typeof event !== 'object') return { text: accumulated };
-  const parsed = event as {
-    type?: string;
-    delta?: unknown;
-    error?: { message?: unknown };
-    response?: { status_details?: { error?: { message?: unknown } } };
-  };
-
-  if (parsed.type === 'response.output_text.delta') {
-    return {
-      text: accumulated + (typeof parsed.delta === 'string' ? parsed.delta : ''),
-    };
-  }
-
-  if (parsed.type === 'error') {
-    return {
-      text: accumulated,
-      error: typeof parsed.error?.message === 'string'
-        ? parsed.error.message
-        : 'Responses stream returned an error.',
-    };
-  }
-
-  if (parsed.type === 'response.failed' || parsed.type === 'response.incomplete') {
-    return {
-      text: accumulated,
-      error: typeof parsed.response?.status_details?.error?.message === 'string'
-        ? parsed.response.status_details.error.message
-        : `Responses stream ended with ${parsed.type}.`,
-    };
-  }
-
-  return { text: accumulated };
-}
-
 export async function runOpenAiResponsesSingleQuery(
   config: OpenAiCompatibleResponsesRuntimeConfig,
   prompt: string,
@@ -187,6 +111,7 @@ export async function runOpenAiResponsesSingleQuery(
       body: JSON.stringify({
         model,
         input: [{ role: 'user', content: prompt }],
+        stream: true,
         store: false,
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       }),
@@ -194,11 +119,10 @@ export async function runOpenAiResponsesSingleQuery(
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`${config.runtimeLabel} Responses API error ${response.status}: ${errorText}`);
+      await throwResponsesHttpError(response, config.runtimeLabel);
     }
 
-    return extractResponsesOutputText(await response.json());
+    return (await readOpenAiResponsesResponse(response, config.runtimeLabel)).text;
   } finally {
     clearTimeout(timer);
   }
@@ -212,26 +136,21 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
     super(config);
   }
 
-  protected buildUserTurn(
+  protected buildUserMessage(
     command: string,
     images?: readonly AgentAttachment[],
-  ): DirectUserTurn<ResponsesInputMessage> {
+  ): ResponsesInputMessage {
     const content = buildOpenAiResponsesUserContent(command, images);
-    return {
-      message: { role: 'user', content },
-      persistedContent: extractOpenAiResponsesTextContent(content),
-    };
+    return { role: 'user', content };
   }
 
   protected buildAssistantMessage(content: string): ResponsesInputMessage {
     return { role: 'assistant', content };
   }
 
-  protected persistedToMessage(message: DirectConversationMessage): ResponsesInputMessage {
-    return persistedToResponsesMessage(message);
-  }
-
-  protected async streamSession(session: DirectRuntimeSession<ResponsesInputMessage>): Promise<string> {
+  protected async streamSession(
+    session: DirectRuntimeSession<ResponsesInputMessage>,
+  ): Promise<DirectTurnCompletion> {
     const apiKey = this.config.getApiKey();
     const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
@@ -239,46 +158,96 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
     const timer = setTimeout(() => abortController.abort(), STREAM_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${this.config.getBaseUrl()}/responses`, {
-        method: 'POST',
-        headers: buildHeaders(this.config, apiKey),
-        body: JSON.stringify({
-          model: session.model,
-          input: session.messages,
-          stream: true,
-          store: false,
-          ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`${this.config.runtimeLabel} Responses API error ${response.status}: ${errorText}`);
+      const checkpoint = compatibleCheckpoint(session, this.config);
+      const currentInput = session.messages.at(-1);
+      if (!currentInput || currentInput.role !== 'user') {
+        throw new Error(`${this.config.runtimeLabel} session is missing its current user input.`);
       }
-      if (!response.body) {
-        throw new Error(`${this.config.runtimeLabel} response did not include a stream body.`);
+      const requestInput = checkpoint ? [currentInput] : session.messages;
+      let completion: ResponsesCompletion;
+      try {
+        completion = await this.#request(
+          session,
+          requestInput,
+          checkpoint?.responseId ?? null,
+          apiKey,
+          reasoningEffort,
+          abortController.signal,
+        );
+      } catch (error) {
+        if (!checkpoint || !isUnresolvedCheckpoint(error)) throw error;
+        completion = await this.#request(
+          session,
+          session.messages,
+          null,
+          apiKey,
+          reasoningEffort,
+          abortController.signal,
+        );
       }
 
-      let accumulated = '';
-      let streamError = '';
-      await readSseDataEvents(response.body, (data) => {
-        try {
-          const result = applyResponsesStreamEvent(accumulated, JSON.parse(data));
-          accumulated = result.text;
-          if (result.error) streamError = result.error;
-        } catch {
-          // Skips malformed chunks from partially-compatible providers.
-        }
-      });
-
-      if (!accumulated.trim() && streamError) {
-        throw new Error(`${this.config.runtimeLabel} Responses stream error: ${streamError}`);
-      }
-      return accumulated;
+      const nextCheckpoint: DirectResponsesCheckpointV1 | null = completion.responseId
+        ? {
+            kind: 'openai-response',
+            responseId: completion.responseId,
+            endpointId: this.config.endpointId,
+            endpointFingerprint: this.config.endpointFingerprint,
+            model: session.model,
+          }
+        : null;
+      return {
+        content: completion.text,
+        checkpoint: nextCheckpoint,
+      };
     } finally {
       clearTimeout(timer);
       session.abortController = null;
     }
   }
+
+  async #request(
+    session: DirectRuntimeSession<ResponsesInputMessage>,
+    input: readonly ResponsesInputMessage[],
+    previousResponseId: string | null,
+    apiKey: string,
+    reasoningEffort: ReturnType<typeof resolveDirectExplicitEffort>,
+    signal: AbortSignal,
+  ): Promise<ResponsesCompletion> {
+    const response = await fetch(`${this.config.getBaseUrl()}/responses`, {
+      method: 'POST',
+      headers: buildHeaders(this.config, apiKey),
+      body: JSON.stringify({
+        model: session.model,
+        input,
+        previous_response_id: previousResponseId,
+        stream: true,
+        store: true,
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      await throwResponsesHttpError(response, this.config.runtimeLabel);
+    }
+    return await readOpenAiResponsesResponse(response, this.config.runtimeLabel);
+  }
+}
+
+function compatibleCheckpoint(
+  session: DirectRuntimeSession<ResponsesInputMessage>,
+  config: OpenAiCompatibleResponsesRuntimeConfig,
+): DirectResponsesCheckpointV1 | null {
+  const previous = session.history.at(-2);
+  if (!previous || previous.type !== 'assistant') return null;
+  const checkpoint = previous.checkpoint;
+  if (
+    checkpoint?.kind !== 'openai-response'
+    || checkpoint.endpointId !== config.endpointId
+    || checkpoint.endpointFingerprint !== config.endpointFingerprint
+    || checkpoint.model !== session.model
+  ) {
+    return null;
+  }
+  return checkpoint;
 }

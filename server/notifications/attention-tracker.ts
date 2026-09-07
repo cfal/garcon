@@ -2,12 +2,17 @@
 // notifications when a chat requires user attention.
 //
 // Three notification triggers:
-// 1. Permission request  - immediate, deduped by permissionRequestId
+// 1. Permission request  - immediate, deduped by occurrence
 // 2. Chat idle           - turn finished and queue drained (completed/failed)
 // 3. Session stopped     - user-initiated abort
 
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
-import type { ChatMessage } from '../../common/chat-types.js';
+import {
+  AssistantMessage,
+  isAbortAcknowledged,
+  type ChatMessage,
+  type ChatStopOutcome,
+} from '../../common/chat-types.js';
+import type { TranscriptCommitEvent } from '../ledger/service.js';
 import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../lib/log.js';
 
@@ -45,14 +50,12 @@ function userMessageContent(message: ChatMessage): string | null {
 // classes and keeps the module unit-testable with plain mocks.
 
 interface AgentRegistryDep {
-  onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number) => void): void;
-  onFailed(cb: (chatId: string, errorMessage: string) => void): void;
+  onTranscriptCommitted(cb: (event: TranscriptCommitEvent) => void): void;
 }
 
 interface QueueManagerDep {
   onChatIdle(cb: (chatId: string) => void): void;
-  onSessionStopped(cb: (chatId: string, success: boolean) => void): void;
+  onSessionStopped(cb: (chatId: string, outcome: ChatStopOutcome) => void): void;
 }
 
 interface SettingsStoreDep {
@@ -91,7 +94,7 @@ export class AttentionTracker {
   #telegram: TelegramNotifier;
   #telegramSettings: TelegramSettingsDep;
 
-  // Tracks pending permission request IDs per chat to avoid duplicate
+  // Tracks pending permission occurrences per chat to avoid duplicate
   // notifications and to suppress idle notifications when a permission
   // is already being surfaced.
   #pendingPermissions = new Map<string, Set<string>>();
@@ -100,8 +103,11 @@ export class AttentionTracker {
   // include the reason text.
   #lastTurnResult = new Map<string, TurnResult>();
 
-  // Tracks the last assistant response per chat from onMessages.
+  // Tracks the last assistant response per chat from applied commit events.
   #lastAssistantMessage = new Map<string, string>();
+
+  // Prevents repeated idle events for one settle from composing duplicate notifications.
+  #idleNotified = new Set<string>();
 
   constructor(
     agents: AgentRegistryDep,
@@ -124,28 +130,56 @@ export class AttentionTracker {
   }
 
   #wire(): void {
-    this.#agents.onMessages((chatId, messages) => this.#handleMessages(chatId, messages));
-    this.#agents.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
-    this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
+    this.#agents.onTranscriptCommitted((event) => this.#handleTranscriptCommit(event));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
-    this.#queue.onSessionStopped((chatId, success) => {
-      if (success) this.#handleSessionStopped(chatId);
+    this.#queue.onSessionStopped((chatId, outcome) => {
+      if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId);
     });
-    this.#registry.onChatRemoved?.((chatId) => this.#cleanupChat(chatId));
+    this.#registry.onChatRemoved?.((chatId) => {
+      this.#cleanupChat(chatId);
+      this.#idleNotified.delete(chatId);
+    });
   }
 
-  #handleMessages(chatId: string, messages: unknown[]): void {
-    for (const msg of messages) {
-      if (msg instanceof AssistantMessage) {
-        this.#lastAssistantMessage.set(chatId, msg.content);
-      } else if (msg instanceof PermissionRequestMessage) {
-        this.#trackPermission(chatId, msg.permissionRequestId, toolDisplayName(msg.requestedTool));
-      } else if (msg instanceof PermissionResolvedMessage) {
-        this.#clearPermission(chatId, msg.permissionRequestId);
-      } else if (msg instanceof PermissionCancelledMessage) {
-        this.#clearPermission(chatId, msg.permissionRequestId);
+  #handleTranscriptCommit(event: TranscriptCommitEvent): void {
+    this.#idleNotified.delete(event.chatId);
+    if (event.type === 'rows') {
+      for (const row of event.rows) {
+        const message = row.kind === 'user-input'
+          ? row.detail.message
+          : row.kind === 'provider-row'
+            ? row.message
+            : null;
+        if (message instanceof AssistantMessage) {
+          this.#lastAssistantMessage.set(event.chatId, message.content);
+        }
       }
+      return;
     }
+    if (event.type === 'run-ended') {
+      this.#pendingPermissions.delete(event.chatId);
+      if (event.row.outcome === 'finished') {
+        this.#lastTurnResult.set(event.chatId, { reason: 'completed' });
+      } else if (event.row.outcome === 'failed') {
+        this.#lastTurnResult.set(event.chatId, {
+          reason: 'failed',
+          detail: event.row.error?.message ?? event.row.error?.code,
+        });
+      }
+      return;
+    }
+    if (event.type !== 'permission') return;
+    const lifecycle = event.row.lifecycle;
+    if (lifecycle.kind === 'requested') {
+      if (!event.runId) return;
+      this.#trackPermission(
+        event.chatId,
+        lifecycle.permissionOccurrenceId,
+        toolDisplayName(lifecycle.requestedTool),
+      );
+      return;
+    }
+    this.#clearPermission(event.chatId, lifecycle.permissionOccurrenceId);
   }
 
   // Reads the last user message from the history cache. This covers both
@@ -160,14 +194,18 @@ export class AttentionTracker {
     return null;
   }
 
-  #trackPermission(chatId: string, permissionRequestId: string, toolName: string): void {
+  #trackPermission(
+    chatId: string,
+    permissionOccurrenceId: string,
+    toolName: string,
+  ): void {
     let ids = this.#pendingPermissions.get(chatId);
     if (!ids) {
       ids = new Set();
       this.#pendingPermissions.set(chatId, ids);
     }
-    if (ids.has(permissionRequestId)) return;
-    ids.add(permissionRequestId);
+    if (ids.has(permissionOccurrenceId)) return;
+    ids.add(permissionOccurrenceId);
 
     const meta = this.#chatMeta(chatId);
     const userMsg = this.#getLastUserMessage(chatId);
@@ -176,31 +214,20 @@ export class AttentionTracker {
     ));
   }
 
-  #clearPermission(chatId: string, permissionRequestId: string): void {
+  #clearPermission(chatId: string, permissionOccurrenceId: string): void {
     const ids = this.#pendingPermissions.get(chatId);
     if (!ids) return;
-    ids.delete(permissionRequestId);
+    ids.delete(permissionOccurrenceId);
     if (ids.size === 0) this.#pendingPermissions.delete(chatId);
-  }
-
-  #handleFinished(chatId: string, exitCode: number): void {
-    this.#lastTurnResult.set(chatId, {
-      reason: exitCode === 0 ? 'completed' : 'failed',
-      detail: exitCode !== 0 ? `exit code ${exitCode}` : undefined,
-    });
-  }
-
-  #handleFailed(chatId: string, errorMessage: string): void {
-    this.#lastTurnResult.set(chatId, {
-      reason: 'failed',
-      detail: errorMessage,
-    });
   }
 
   #handleChatIdle(chatId: string): void {
     // If a permission request is already pending, the user was already
     // notified about that. Skip the idle notification.
     if (this.#pendingPermissions.has(chatId)) return;
+
+    if (this.#idleNotified.has(chatId)) return;
+    this.#idleNotified.add(chatId);
 
     const result = this.#lastTurnResult.get(chatId);
     this.#lastTurnResult.delete(chatId);

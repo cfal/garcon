@@ -35,11 +35,11 @@ export interface CursorMessageBlob {
 const USER_QUERY_OPEN_TAG = '<user_query>';
 const USER_QUERY_CLOSE_TAG = '</user_query>';
 
-export interface CursorPreview {
-  createdAt: string | null;
-  firstMessage: string;
-  lastActivity: string | null;
-  lastMessage: string;
+export class CursorTranscriptNotFoundError extends Error {
+  constructor(readonly sourcePath: string) {
+    super('Cursor transcript database not found');
+    this.name = 'CursorTranscriptNotFoundError';
+  }
 }
 
 function cursorHomePath(): string {
@@ -114,12 +114,22 @@ export function cursorAcpStoreDbPath(sessionId: string, cursorHome = cursorHomeP
 
 export function cursorStoreDbPath(sessionId: string, projectPath: string, cursorHome = cursorHomePath()): string {
   const acpStoreDbPath = cursorAcpStoreDbPath(sessionId, cursorHome);
-  if (fs.existsSync(acpStoreDbPath)) return acpStoreDbPath;
+  if (cursorSourcePathExists(acpStoreDbPath)) return acpStoreDbPath;
 
   const streamJsonStoreDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
-  if (fs.existsSync(streamJsonStoreDbPath)) return streamJsonStoreDbPath;
+  if (cursorSourcePathExists(streamJsonStoreDbPath)) return streamJsonStoreDbPath;
 
   return acpStoreDbPath;
+}
+
+function cursorSourcePathExists(sourcePath: string): boolean {
+  try {
+    fs.lstatSync(sourcePath);
+    return true;
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
 }
 
 function isInternalCursorText(value: unknown): boolean {
@@ -458,48 +468,68 @@ export function normalizeCursorBlobs(blobs: CursorMessageBlob[]): ChatMessage[] 
   return messages;
 }
 
-export async function loadCursorChatMessagesBySessionId(
+function assertImportableCursorBlobs(blobs: readonly CursorMessageBlob[]): void {
+  for (const blob of blobs) {
+    const nestedMessage = asObject(blob.content.message);
+    const rawRole = blob.content.role ?? nestedMessage.role;
+    if (rawRole === undefined || rawRole === 'system') continue;
+    if (typeof rawRole !== 'string') {
+      throw new Error('Cursor transcript message has an invalid role');
+    }
+    const content = blob.content.content ?? nestedMessage.content;
+    if (typeof content === 'string') continue;
+    if (!Array.isArray(content)) {
+      throw new Error('Cursor transcript message has invalid content');
+    }
+    for (const part of content) {
+      if (typeof part === 'string') continue;
+      if (!part || typeof part !== 'object' || Array.isArray(part)) {
+        throw new Error('Cursor transcript message has an invalid content part');
+      }
+      const rawPart = part as Record<string, unknown>;
+      if (
+        typeof rawPart.type !== 'string'
+        || !rawPart.type
+        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
+      ) {
+        throw new Error('Cursor transcript message has an invalid content part');
+      }
+    }
+  }
+}
+
+function readCursorSessionBlobs(
+  sessionId: string,
+  projectPath: string,
+  cursorHome?: string,
+): CursorMessageBlob[] {
+  if (!sessionId) return [];
+  const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(storeDbPath);
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) throw new CursorTranscriptNotFoundError(storeDbPath);
+    throw error;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error('Cursor transcript source is not a regular file');
+  }
+  return readCursorBlobs(storeDbPath);
+}
+
+export async function loadImportableCursorChatMessagesBySessionId(
   sessionId: string,
   projectPath: string,
   cursorHome?: string,
 ): Promise<ChatMessage[]> {
-  if (!sessionId) return [];
-  const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
-  if (!fs.existsSync(storeDbPath)) {
-    throw new Error(`Cursor transcript database not found: ${storeDbPath}`);
-  }
-  return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
+  const blobs = readCursorSessionBlobs(sessionId, projectPath, cursorHome);
+  assertImportableCursorBlobs(blobs);
+  return normalizeCursorBlobs(blobs);
 }
 
-function previewText(message: ChatMessage): string {
-  switch (message.type) {
-    case 'user-message':
-    case 'assistant-message':
-    case 'thinking':
-      return message.content;
-    default:
-      return '';
-  }
-}
-
-export async function getCursorPreviewFromSessionId(
-  sessionId: string,
-  projectPath: string,
-  cursorHome?: string,
-): Promise<CursorPreview | null> {
-  const messages = await loadCursorChatMessagesBySessionId(sessionId, projectPath, cursorHome);
-  if (messages.length === 0) return null;
-
-  const visibleMessages = messages.filter((message) =>
-    message.type === 'user-message' || message.type === 'assistant-message');
-  const firstUser = visibleMessages.find((message) => message.type === 'user-message');
-  const lastVisible = [...visibleMessages].reverse()[0];
-  const lastActivity = [...messages].reverse().find((message) => typeof message.timestamp === 'string');
-
-  return {
-    createdAt: messages[0]?.timestamp ?? null,
-    firstMessage: firstUser ? previewText(firstUser) : 'Unknown Cursor Session',
-    lastActivity: lastActivity?.timestamp ?? null,
-    lastMessage: lastVisible ? previewText(lastVisible) : 'Unknown Cursor Session',
-  };
+function hasNodeErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && (error as NodeJS.ErrnoException).code === code;
 }

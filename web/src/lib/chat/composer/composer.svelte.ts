@@ -1,110 +1,113 @@
-// Composer state: input text, image attachments, draft persistence,
-// and message submission. Manages the input area lifecycle for a single chat.
-
 import {
-	chatDraftStorageKey,
-	getLocalStorageItem,
-	removeLocalStorageItem,
-	setLocalStorageItem,
-	type ChatDraftStorageKey,
-} from '$lib/utils/local-persistence';
-import { isSupportedChatAttachment } from '$lib/chat/composer/image-attachment.svelte.js';
+	isSupportedChatAttachment,
+	type ChatAttachmentSupport,
+} from '$lib/chat/composer/image-attachment.svelte.js';
+import type {
+	ChatDraftAppendOptions,
+	ChatDraftAppendResult,
+} from '$lib/chat/composer/chat-draft-append.js';
+import {
+	ChatDraftStore,
+	type ChatDraftSnapshot,
+} from '$lib/chat/composer/chat-draft-store.svelte.js';
 
-const DEFAULT_DRAFT_SAVE_DELAY_MS = 250;
-
-function draftKey(chatId: string): ChatDraftStorageKey {
-	return chatDraftStorageKey(chatId);
-}
-
-function writeDraft(chatId: string, text: string): void {
-	if (!chatId) return;
-	const key = draftKey(chatId);
-	if (text.trim()) {
-		setLocalStorageItem(key, text);
-	} else {
-		removeLocalStorageItem(key);
-	}
+interface ComposerStateOptions {
+	readonly activeChatId: string | null;
 }
 
 export class ComposerState {
-	inputText = $state('');
-	images = $state<File[]>([]);
 	isSubmitting = $state(false);
 	isDragActive = $state(false);
-	#draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
-	#pendingDraftSave: { chatId: string; text: string } | null = null;
-	#draftImagesByChatId = new Map<string, File[]>();
+	draftAppendRequest = $state<{ chatId: string; requestId: number } | null>(null);
+	#nextDraftAppendRequestId = 0;
 
-	/** Saves the current text and in-memory attachments as a draft keyed by chat ID. */
+	constructor(
+		private readonly drafts: ChatDraftStore,
+		private readonly options: ComposerStateOptions,
+	) {}
+
+	#activeChatId(): string {
+		return this.options.activeChatId ?? '';
+	}
+
+	get inputText(): string {
+		return this.drafts.view(this.#activeChatId()).text;
+	}
+
+	set inputText(value: string) {
+		this.drafts.setText(this.#activeChatId(), value);
+	}
+
+	get images(): File[] {
+		return [...this.drafts.view(this.#activeChatId()).attachments];
+	}
+
+	set images(value: File[]) {
+		this.drafts.setAttachments(this.#activeChatId(), value);
+	}
+
+	get contentRevision(): number {
+		return this.drafts.view(this.#activeChatId()).revision;
+	}
+
+	/** Appends an editable block to the active draft without submitting it. */
+	appendDraftBlock(
+		chatId: string,
+		block: string,
+		options?: ChatDraftAppendOptions,
+	): ChatDraftAppendResult {
+		const result = this.drafts.appendBlock(chatId, block, options);
+		if (result !== 'appended') return result;
+		this.#nextDraftAppendRequestId += 1;
+		this.draftAppendRequest = { chatId, requestId: this.#nextDraftAppendRequestId };
+		return result;
+	}
+
 	saveDraft(chatId: string): void {
-		if (!chatId) return;
-		writeDraft(chatId, this.inputText);
-		if (this.images.length > 0) {
-			this.#draftImagesByChatId.set(chatId, [...this.images]);
-		} else {
-			this.#draftImagesByChatId.delete(chatId);
-		}
+		this.drafts.flushChat(chatId);
 	}
 
-	/** Schedules draft persistence without blocking every input event. */
-	queueDraftSave(chatId: string, text: string, delayMs = DEFAULT_DRAFT_SAVE_DELAY_MS): void {
-		if (!chatId) return;
-		this.cancelDraftSave();
-		this.#pendingDraftSave = { chatId, text };
-		this.#draftSaveTimer = setTimeout(() => {
-			this.flushDraftSave();
-		}, delayMs);
+	queueDraftSave(chatId: string, text: string, delayMs?: number): void {
+		this.drafts.queuePersist(chatId, text, delayMs);
 	}
 
-	/** Persists the latest queued draft immediately. */
-	flushDraftSave(): void {
-		if (this.#draftSaveTimer) {
-			clearTimeout(this.#draftSaveTimer);
-			this.#draftSaveTimer = null;
-		}
-		const pending = this.#pendingDraftSave;
-		this.#pendingDraftSave = null;
-		if (pending) writeDraft(pending.chatId, pending.text);
-	}
-
-	/** Drops a queued draft write, optionally scoped to one chat. */
-	cancelDraftSave(chatId?: string): void {
-		if (chatId && this.#pendingDraftSave?.chatId !== chatId) return;
-		if (this.#draftSaveTimer) {
-			clearTimeout(this.#draftSaveTimer);
-			this.#draftSaveTimer = null;
-		}
-		this.#pendingDraftSave = null;
-	}
-
-	/** Restores a previously saved draft for the given chat ID. */
 	restoreDraft(chatId: string): void {
-		this.cancelDraftSave();
-		this.inputText = '';
-		this.images = [];
-		if (!chatId) return;
-		const key = draftKey(chatId);
-		const saved = getLocalStorageItem(key);
-		if (saved) {
-			this.inputText = saved;
-		}
-		this.images = [...(this.#draftImagesByChatId.get(chatId) ?? [])];
+		this.drafts.load(chatId);
 	}
 
-	/** Removes the saved draft for the given chat ID. */
-	clearDraft(chatId: string): void {
-		if (!chatId) return;
-		const key = draftKey(chatId);
-		removeLocalStorageItem(key);
-		this.#draftImagesByChatId.delete(chatId);
+	draftSnapshot(chatId: string): ChatDraftSnapshot {
+		return this.drafts.snapshot(chatId);
 	}
 
-	/** Adds supported attachment files, filtering out duplicates by name. */
-	addImages(files: File[]): void {
-		const existingNames = new Set(this.images.map((f) => f.name));
-		const newFiles = files
-			.filter(isSupportedChatAttachment)
-			.filter((f) => !existingNames.has(f.name));
+	draftRevision(chatId: string): number {
+		return this.drafts.view(chatId).revision;
+	}
+
+	restoreDraftIfRevision(
+		chatId: string,
+		expectedRevision: number,
+		text: string,
+		images: readonly File[],
+	): boolean {
+		return this.drafts.restoreIfRevision(chatId, expectedRevision, {
+			text,
+			attachments: images,
+		});
+	}
+
+	isDraftEmpty(chatId: string): boolean {
+		const draft = this.drafts.view(chatId);
+		return draft.text.length === 0 && draft.attachments.length === 0;
+	}
+
+	/** Adds supported attachment files, deduplicating by File identity. */
+	addImages(files: File[], support?: ChatAttachmentSupport): void {
+		const seen = new Set(this.images);
+		const newFiles = files.filter((file) => {
+			if (seen.has(file) || !isSupportedChatAttachment(file, support)) return false;
+			seen.add(file);
+			return true;
+		});
 		this.images = [...this.images, ...newFiles];
 	}
 
@@ -118,15 +121,7 @@ export class ComposerState {
 		this.images = [];
 	}
 
-	/** Resets input text, images, and draft for the given chat. */
-	clearAfterSubmit(chatId: string): void {
-		this.cancelDraftSave(chatId);
-		this.inputText = '';
-		this.images = [];
-		this.clearDraft(chatId);
+	clearAfterSubmit(chatId: string): number {
+		return this.drafts.clear(chatId);
 	}
-}
-
-export function createComposerState(): ComposerState {
-	return new ComposerState();
 }

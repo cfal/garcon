@@ -3,7 +3,12 @@
 // render with the same diff primitives as the local workbench.
 
 import { apiGet, type ApiFetchOptions } from './client.js';
-import type { GitReviewFileBody, GitReviewFileSummary } from './git.js';
+import type {
+	GitReviewFileBody,
+	GitReviewFilePatchBody,
+	GitReviewFileSummary,
+} from './git.js';
+import { createIndexedGitReviewFileBody } from '$lib/git/review/git-review-body-index.js';
 
 export type PullRequestState = 'open' | 'closed' | 'merged';
 export type PullRequestChecksState = 'passing' | 'failing' | 'pending' | 'none';
@@ -80,6 +85,10 @@ export interface PullRequestDetail {
 	threads: PullRequestThread[];
 }
 
+interface PullRequestDetailWire extends Omit<PullRequestDetail, 'fileBodies'> {
+	fileBodies: Record<string, GitReviewFilePatchBody>;
+}
+
 function projectParam(project: string): string {
 	return `project=${encodeURIComponent(project)}`;
 }
@@ -99,8 +108,17 @@ export async function getPullRequest(
 	number: number,
 	options?: ApiFetchOptions,
 ): Promise<PullRequestDetail> {
-	return apiGet<PullRequestDetail>(
+	const detail = await apiGet<PullRequestDetailWire>(
 		`/api/v1/gh/pull-request?${projectParam(project)}&number=${encodeURIComponent(number)}`,
 		options,
 	);
+	return {
+		...detail,
+		fileBodies: Object.fromEntries(
+			Object.entries(detail.fileBodies).map(([path, body]) => [
+				path,
+				createIndexedGitReviewFileBody(body),
+			]),
+		),
+	};
 }

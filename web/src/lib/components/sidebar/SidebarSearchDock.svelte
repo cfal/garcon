@@ -1,88 +1,106 @@
 <script lang="ts">
 	import SidebarControlsRow from './SidebarControlsRow.svelte';
+	import type {
+		SidebarChatGrouping,
+		SidebarChatItemLayout,
+		SidebarSortMode,
+	} from '$lib/stores/local-settings.svelte';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
-	import SidebarSortIndicator from './SidebarSortIndicator.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarSearchDockProps {
 		isLoading: boolean;
 		visibleUnreadCount: number;
-		isMarkingAllRead?: boolean;
-		groupByProject?: boolean;
+		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
-		compactChatItems?: boolean;
-		sortByRecent?: boolean;
+		chatItemLayout?: SidebarChatItemLayout;
+		sortMode?: SidebarSortMode;
+		chatListAutohide?: boolean;
+		chatListAutohideAvailable?: boolean;
+		dockOnRight?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
-		onToggleGroupByProject?: () => void;
+		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
-		onToggleCompactChatItems?: () => void;
-		onToggleSortByRecent?: () => void;
+		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
+		onSetSortMode?: (mode: SidebarSortMode) => void;
+		onToggleChatListAutohide?: () => void;
+		onSetDockOnRight?: (enabled: boolean) => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
 		onShowScheduledPrompts: () => void;
+		onShowPreambles: () => void;
 		onShowSettings: () => void;
 	}
 
 	let {
 		isLoading,
 		visibleUnreadCount,
-		isMarkingAllRead = false,
-		groupByProject = false,
+		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
-		compactChatItems = false,
-		sortByRecent = false,
+		chatItemLayout = 'default',
+		sortMode = 'manual',
+		chatListAutohide = false,
+		chatListAutohideAvailable = false,
+		dockOnRight = false,
 		sidebarMenuSearches = [],
 		sidebarPillSearches,
 		activeQuery,
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
-		onToggleGroupByProject,
+		onSetChatGrouping,
 		onToggleGroupNestedProjectPaths,
-		onToggleCompactChatItems,
-		onToggleSortByRecent,
+		onSetChatItemLayout,
+		onSetSortMode,
+		onToggleChatListAutohide,
+		onSetDockOnRight,
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
 		onClearActiveQuery,
 		onShowScheduledPrompts,
+		onShowPreambles,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
 	let hasSearchContext = $derived(sidebarPillSearches.length > 0 || activeQuery.trim().length > 0);
-	// The controls row drops its own bottom border whenever another element
-	// (sort indicator or search context) renders directly beneath it.
-	let hasContentBelowControls = $derived(sortByRecent || hasSearchContext);
+	// The controls row drops its own bottom border whenever the search context
+	// renders directly beneath it.
+	let hasContentBelowControls = $derived(hasSearchContext);
 </script>
 
 <div data-slot="sidebar-search-dock">
 	<SidebarControlsRow
 		{isLoading}
 		{visibleUnreadCount}
-		{isMarkingAllRead}
-		{groupByProject}
+		{chatGrouping}
 		{groupNestedProjectPaths}
-		{compactChatItems}
-		{sortByRecent}
+		{chatItemLayout}
+		{sortMode}
+		{chatListAutohide}
+		{chatListAutohideAvailable}
+		{dockOnRight}
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasContentBelowControls}
 		{onOpenSearchDialog}
 		{onCreateChat}
 		{onMarkAllRead}
-		{onToggleGroupByProject}
+		{onSetChatGrouping}
 		{onToggleGroupNestedProjectPaths}
-		{onToggleCompactChatItems}
-		{onToggleSortByRecent}
+		{onSetChatItemLayout}
+		{onSetSortMode}
+		{onToggleChatListAutohide}
+		{onSetDockOnRight}
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}
+		{onShowPreambles}
 		{onShowSettings}
 	/>
-	<SidebarSortIndicator active={sortByRecent} onDisable={() => onToggleSortByRecent?.()} />
 	<SidebarSearchContext
 		hasAdjacentControlsRow={true}
 		{sidebarPillSearches}

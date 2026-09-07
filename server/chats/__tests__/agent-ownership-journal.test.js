@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { UserMessage } from '../../../common/chat-types.js';
-import { AgentOwnershipJournal } from '../agent-ownership-journal.js';
-import { ChatCarryOverStore } from '../chat-carryover-store.js';
+import {
+  AgentOwnershipJournal,
+  emptyOwnershipJournalV5,
+} from '../agent-ownership-journal.js';
 
-const ts = '2026-01-01T00:00:00.000Z';
+const timestamp = '2026-01-01T00:00:00.000Z';
 
 function envelope(ownerId) {
   return { ownerId, schemaVersion: 1, values: {} };
@@ -16,11 +17,12 @@ function chat(agentId = 'source-agent', overrides = {}) {
   return {
     agentId,
     agentSessionId: `${agentId}-session`,
-    nativeSession: {
-      ownerId: agentId,
-      schemaVersion: 1,
-      value: { id: `${agentId}-session` },
-    },
+    nativeSession: null,
+    nativeSeedReceipt: null,
+    carryOverSegments: [],
+    carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
+    preambleSelection: { revision: 0, orderedPreambleIds: [] },
     agentOwnershipEpoch: `${agentId}-epoch`,
     agentSettingsById: { [agentId]: envelope(agentId) },
     projectPath: '/workspace/project',
@@ -35,205 +37,421 @@ function chat(agentId = 'source-agent', overrides = {}) {
   };
 }
 
-function createRegistry(initialEntries) {
-  const entries = new Map(Object.entries(initialEntries));
-  const removedListeners = [];
-  let failUpdateBeforeCommit = false;
+function target() {
   return {
-    entries,
-    setFailUpdateBeforeCommit(value) {
-      failUpdateBeforeCommit = value;
-    },
-    getChat: (chatId) => entries.get(chatId) ?? null,
-    listAllChats: () => Object.fromEntries(entries),
-    updateChat: mock(async (chatId, patch) => {
-      if (failUpdateBeforeCommit) throw new Error('registry write failed');
-      const current = entries.get(chatId);
-      if (!current) return null;
-      const next = { ...current, ...patch };
-      entries.set(chatId, next);
-      return { id: chatId, ...next };
-    }),
-    removeChat: mock((chatId) => {
-      const removed = entries.delete(chatId);
-      if (removed) removedListeners.forEach((listener) => listener(chatId));
-      return removed;
-    }),
-    flush: mock(async () => {}),
-    onChatRemoved(listener) {
-      removedListeners.push(listener);
-    },
+    agentId: 'target-agent',
+    model: 'target-agent-model',
+    apiProviderId: null,
+    modelEndpointId: null,
+    modelProtocol: null,
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    agentSettings: envelope('target-agent'),
   };
 }
 
-function createIntegrations(releases) {
-  const byId = new Map(['source-agent', 'target-agent'].map((agentId) => [agentId, {
+function createRegistry(initialEntries) {
+  const entries = new Map(Object.entries(initialEntries));
+  return {
+    getChat: (chatId) => entries.get(chatId) ?? null,
+    setChat: (chatId, value) => entries.set(chatId, value),
+    listAllChats: () => Object.fromEntries(entries),
+    updateChat: mock(async (chatId, patch) => {
+      const current = entries.get(chatId);
+      if (!current) return null;
+      Object.assign(current, patch);
+      return { id: chatId, ...current };
+    }),
+    removeChat: mock((chatId) => entries.delete(chatId)),
+    flush: mock(async () => {}),
+  };
+}
+
+function createIntegrations(release = mock(async () => {})) {
+  const integration = (agentId) => ({
     descriptor: { id: agentId },
     settings: {
       defaults: () => envelope(agentId),
       parse: (input) => input,
     },
-    transcript: {
-      release: mock(async (request) => {
-        releases.push(request);
-      }),
-    },
-  }]));
+    nativeSessions: { release },
+  });
+  const byId = new Map([
+    ['source-agent', integration('source-agent')],
+    ['target-agent', integration('target-agent')],
+  ]);
   return {
+    get: (agentId) => byId.get(agentId),
     require(agentId) {
-      const integration = byId.get(agentId);
-      if (!integration) throw new Error(`missing integration ${agentId}`);
-      return integration;
+      const value = byId.get(agentId);
+      if (!value) throw new Error(`missing integration ${agentId}`);
+      return value;
     },
+  };
+}
+
+function decisionInput(registry, overrides = {}) {
+  return {
+    operationId: 'handoff:request-1',
+    clientRequestId: 'request-1',
+    submittedTargetHash: 'a'.repeat(64),
+    chatId: 'chat',
+    source: registry.getChat('chat'),
+    target: target(),
+    targetAgentOwnershipEpoch: 'target-epoch',
+    watermark: { viewId: 'view-1', ordinal: 7 },
+    ...overrides,
   };
 }
 
 describe('AgentOwnershipJournal', () => {
   let workspaceDir;
-  let carryOver;
 
   beforeEach(async () => {
     workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-ownership-journal-'));
-    carryOver = new ChatCarryOverStore({
-      filePath: path.join(workspaceDir, 'chat-carryover.json'),
-      saveDelayMs: 0,
-    });
-    await carryOver.init();
   });
 
   afterEach(async () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
-  it('rolls back staging and intent when the registry commit fails before ownership changes', async () => {
+  it('persists the complete handoff decision and accepts an identical retry', async () => {
     const registry = createRegistry({ chat: chat() });
-    registry.setFailUpdateBeforeCommit(true);
-    carryOver.bindRegistry(registry);
-    const releases = [];
     const journal = new AgentOwnershipJournal({
       workspaceDir,
       registry,
-      carryOver,
-      integrations: createIntegrations(releases),
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
     });
     await journal.initialize();
 
-    await expect(journal.transfer({
-      chatId: 'chat',
-      source: registry.getChat('chat'),
-      targetAgentId: 'target-agent',
-      patch: {
-        model: 'target-model',
-        agentSettingsById: {
-          'source-agent': envelope('source-agent'),
-          'target-agent': envelope('target-agent'),
-        },
-      },
-      carryOverSegment: {
-        agentId: 'source-agent',
-        model: 'source-model',
-        messages: [new UserMessage(ts, 'retained')],
-      },
-    })).rejects.toThrow('registry write failed');
+    const input = decisionInput(registry);
+    const first = await journal.decideHandoff(input);
+    const retry = await journal.decideHandoff(input);
 
-    expect(journal.hasPending('chat')).toBe(false);
-    expect(registry.getChat('chat').agentId).toBe('source-agent');
-    expect(carryOver.getMessages('chat')).toEqual([]);
-    expect(releases).toEqual([]);
-    const persisted = JSON.parse(await fs.readFile(
-      path.join(workspaceDir, 'agent-ownership-journal.json'),
-      'utf8',
-    ));
-    expect(persisted.intents).toEqual([]);
+    expect(retry).toEqual(first);
+    expect(first).toMatchObject({
+      version: 5,
+      phase: 'commit-decided',
+      source: { agentId: 'source-agent', agentOwnershipEpoch: 'source-agent-epoch' },
+      target: { execution: target(), agentOwnershipEpoch: 'target-epoch' },
+      watermark: { viewId: 'view-1', ordinal: 7 },
+    });
+    expect(journal.pendingHandoffs()).toEqual([first]);
+    expect(await readJournal(workspaceDir)).toEqual({
+      version: 5,
+      ownershipIntents: [first],
+    });
   });
 
-  it('recovers a committed transfer after unrelated target edits', async () => {
-    const target = chat('target-agent', {
+  it('rejects a conflicting retry without changing the durable decision', async () => {
+    const registry = createRegistry({ chat: chat() });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+    await journal.initialize();
+    const input = decisionInput(registry);
+    await journal.decideHandoff(input);
+
+    await expect(journal.decideHandoff({
+      ...input,
+      watermark: { viewId: 'view-1', ordinal: 8 },
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+
+    expect((await readJournal(workspaceDir)).ownershipIntents[0].watermark.ordinal).toBe(7);
+  });
+
+  it('rolls registry ownership forward without deleting the source transcript', async () => {
+    const registry = createRegistry({ chat: chat() });
+    const release = mock(async () => {});
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+    await journal.initialize();
+    const intent = await journal.decideHandoff(decisionInput(registry));
+
+    const updated = await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
+
+    expect(updated).toMatchObject({
+      agentId: 'target-agent',
+      agentOwnershipEpoch: 'target-epoch',
+      pendingPreambleBoundary: {
+        kind: 'agent-switch',
+        ownershipEpoch: 'target-epoch',
+      },
       agentSessionId: null,
       nativeSession: null,
-      agentOwnershipEpoch: 'target-epoch',
-      tags: ['edited-after-transfer'],
-      agentSettingsById: {
-        'source-agent': envelope('source-agent'),
-        'target-agent': envelope('target-agent'),
-      },
+      nativeSeedReceipt: null,
+      carryOverSegments: [],
     });
-    const registry = createRegistry({ chat: target });
-    carryOver.bindRegistry(registry);
-    await carryOver.stageTransfer({
-      chatId: 'chat',
-      targetEpoch: 'target-epoch',
-      ownerId: 'target-agent',
-      segment: {
-        agentId: 'source-agent',
-        model: 'source-model',
-        messages: [new UserMessage(ts, 'retained')],
-      },
-    });
-    await fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), JSON.stringify({
-      version: 1,
-      intents: [{
-        id: 'intent-1',
-        kind: 'transfer',
-        chatId: 'chat',
-        oldReference: {
-          chatId: 'chat',
-          agentId: 'source-agent',
-          agentSessionId: 'source-agent-session',
-          projectPath: '/workspace/project',
-          model: 'source-agent-model',
-          nativeSession: {
-            ownerId: 'source-agent',
-            schemaVersion: 1,
-            value: { id: 'source-agent-session' },
-          },
-          carryOverRevision: 'carry-v1:0',
-          settings: envelope('source-agent'),
-        },
-        oldEpoch: 'source-agent-epoch',
-        targetAgentId: 'target-agent',
-        targetEpoch: 'target-epoch',
-        createdAt: ts,
-      }],
-    }));
-    const releases = [];
+    expect(release).not.toHaveBeenCalled();
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
+  });
 
+  it('preserves the chat preamble selection and revision across the roll-forward', async () => {
+    const selectedId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+    const registry = createRegistry({
+      chat: chat('source-agent', {
+        preambleSelection: { revision: 3, orderedPreambleIds: [selectedId] },
+      }),
+    });
     const journal = new AgentOwnershipJournal({
       workspaceDir,
       registry,
-      carryOver,
-      integrations: createIntegrations(releases),
+      integrations: createIntegrations(mock(async () => {})),
+      ledger: { deleteChat: mock(() => {}) },
     });
     await journal.initialize();
+    const intent = await journal.decideHandoff(decisionInput(registry));
 
-    expect(releases).toHaveLength(1);
-    expect(releases[0]).toMatchObject({
-      reason: 'transferred',
-      chat: { agentId: 'source-agent', agentSessionId: 'source-agent-session' },
+    const updated = await journal.applyHandoffDecision(intent.operationId);
+    await journal.completeHandoff(intent.operationId);
+
+    expect(updated).toMatchObject({
+      preambleSelection: { revision: 3, orderedPreambleIds: [selectedId] },
+      pendingPreambleBoundary: {
+        kind: 'agent-switch',
+        ownershipEpoch: 'target-epoch',
+      },
     });
-    expect(carryOver.getMessages('chat').map((message) => message.content)).toEqual(['retained']);
-    expect(registry.getChat('chat').tags).toEqual(['edited-after-transfer']);
-    expect(journal.hasPending('chat')).toBe(false);
   });
 
-  it('releases integration-owned transcript data on deletion independently of search state', async () => {
+  it('keeps durable handoffs pending at startup for ledger-aware recovery', async () => {
     const registry = createRegistry({ chat: chat() });
-    carryOver.bindRegistry(registry);
-    carryOver.appendSegment('chat', {
-      agentId: 'source-agent',
-      model: 'source-model',
-      messages: [new UserMessage(ts, 'retained')],
+    const persisted = persistedHandoff();
+    await writeJournal(workspaceDir, {
+      version: 5,
+      ownershipIntents: [persisted],
     });
-    const releases = [];
-    const integrations = createIntegrations(releases);
-    const journal = new AgentOwnershipJournal({ workspaceDir, registry, carryOver, integrations });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+
     await journal.initialize();
 
+    expect(registry.getChat('chat').agentId).toBe('source-agent');
+    expect(journal.pendingHandoffs()).toEqual([persisted]);
+    expect(journal.hasPending('chat')).toBeTrue();
+  });
+
+  it('rejects malformed durable handoff decisions', async () => {
+    await writeJournal(workspaceDir, {
+      version: 5,
+      ownershipIntents: [{ ...persistedHandoff(), watermark: { viewId: '', ordinal: -1 } }],
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry: createRegistry({}),
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+
+    await expect(journal.initialize()).rejects.toThrow('Invalid agent ownership journal');
+  });
+
+  it('adopts an empty journal left at an earlier format version', async () => {
+    await writeJournal(workspaceDir, {
+      version: 3,
+      ownershipIntents: [],
+      transferCleanup: [],
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry: createRegistry({}),
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+
+    await journal.initialize();
+
+    expect(journal.pendingHandoffs()).toEqual([]);
+    expect(journal.hasPending('chat')).toBeFalse();
+  });
+
+  it('rejects an earlier journal that still records a decision', async () => {
+    await writeJournal(workspaceDir, {
+      version: 3,
+      ownershipIntents: [{ kind: 'handoff', chatId: 'chat', operationId: 'legacy' }],
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry: createRegistry({}),
+      integrations: createIntegrations(),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+
+    await expect(journal.initialize()).rejects.toThrow('Invalid agent ownership journal');
+  });
+
+  it('removes registry ownership without waiting for provider release', async () => {
+    const registry = createRegistry({ chat: chat() });
+    let releaseStarted;
+    let releaseProvider;
+    const release = mock(() => new Promise((resolve) => {
+      releaseProvider = resolve;
+      releaseStarted?.();
+    }));
+    const ledger = { deleteChat: mock(() => {}) };
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+      ledger,
+    });
+    await journal.initialize();
+
+    const started = new Promise((resolve) => { releaseStarted = resolve; });
     await journal.delete('chat');
 
     expect(registry.getChat('chat')).toBeNull();
-    expect(releases).toHaveLength(1);
-    expect(releases[0]).toMatchObject({ reason: 'deleted', chat: { agentId: 'source-agent' } });
-    expect(carryOver.getMessages('chat')).toEqual([]);
+    expect(ledger.deleteChat).toHaveBeenCalledWith('chat');
+    expect((await readJournal(workspaceDir)).ownershipIntents[0]).toMatchObject({
+      chatId: 'chat',
+      phase: 'registry-removed',
+    });
+    await started;
+    expect(release).toHaveBeenCalledTimes(1);
+    releaseProvider();
+    await journal.waitForProviderCleanup();
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
+  });
+
+  it('does not let blocked cleanup A delay delete B', async () => {
+    const registry = createRegistry({ chatA: chat(), chatB: chat('target-agent') });
+    let releaseA;
+    const release = mock((request) => {
+      if (request.chat.chatId === 'chatA') return new Promise((resolve) => { releaseA = resolve; });
+      return Promise.resolve();
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+    await journal.initialize();
+
+    await journal.delete('chatA');
+    const deleteB = journal.delete('chatB');
+    await Promise.race([
+      deleteB,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('delete B blocked')), 100)),
+    ]);
+    expect(registry.getChat('chatB')).toBeNull();
+    releaseA();
+    await journal.waitForProviderCleanup();
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
+  });
+
+  it('does not delete a recreated same-id ledger during old provider cleanup', async () => {
+    const original = chat();
+    const replacement = chat('target-agent');
+    const registry = createRegistry({ chat: original });
+    let releaseProvider;
+    const release = mock(() => new Promise((resolve) => { releaseProvider = resolve; }));
+    const ledger = { deleteChat: mock(() => {}) };
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+      ledger,
+    });
+    await journal.initialize();
+
+    await journal.delete('chat');
+    registry.setChat('chat', replacement);
+    releaseProvider();
+    await journal.waitForProviderCleanup();
+
+    expect(ledger.deleteChat).toHaveBeenCalledTimes(1);
+    expect(registry.getChat('chat')).toBe(replacement);
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
+  });
+
+  it('retains delete cleanup when provider release fails', async () => {
+    const reference = referenceFor('source-agent');
+    await writeJournal(workspaceDir, {
+      version: 5,
+      ownershipIntents: [{
+        version: 2,
+        operationId: 'delete:chat',
+        kind: 'delete',
+        chatId: 'chat',
+        phase: 'registry-removed',
+        sourceEpoch: 'source-agent-epoch',
+        releaseReferences: [reference],
+        createdAt: timestamp,
+      }],
+    });
+    const release = mock(async () => { throw new Error('provider unavailable'); });
+    const ledger = { deleteChat: mock(() => {}) };
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry: createRegistry({}),
+      integrations: createIntegrations(release),
+      ledger,
+    });
+
+    await journal.initialize();
+    await journal.waitForProviderCleanup();
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(ledger.deleteChat).toHaveBeenCalledWith('chat');
+    expect((await readJournal(workspaceDir)).ownershipIntents).toHaveLength(1);
   });
 });
+
+function persistedHandoff() {
+  return {
+    version: 5,
+    operationId: 'handoff:request-1',
+    clientRequestId: 'request-1',
+    submittedTargetHash: 'a'.repeat(64),
+    kind: 'handoff',
+    chatId: 'chat',
+    phase: 'commit-decided',
+    source: { agentId: 'source-agent', agentOwnershipEpoch: 'source-agent-epoch' },
+    target: { execution: target(), agentOwnershipEpoch: 'target-epoch' },
+    watermark: { viewId: 'view-1', ordinal: 7 },
+    createdAt: timestamp,
+  };
+}
+
+function referenceFor(agentId) {
+  return {
+    chatId: 'chat',
+    agentId,
+    agentSessionId: `${agentId}-session`,
+    projectPath: '/workspace/project',
+    model: `${agentId}-model`,
+    nativeSession: null,
+    carryOverRevision: 'carry-v1:0',
+    nativeSeedReceipt: null,
+    settings: envelope(agentId),
+    agentOwnershipEpoch: `${agentId}-epoch`,
+  };
+}
+
+async function readJournal(workspaceDir) {
+  return JSON.parse(await fs.readFile(
+    path.join(workspaceDir, 'agent-ownership-journal.json'),
+    'utf8',
+  ));
+}
+
+function writeJournal(workspaceDir, journal) {
+  return fs.writeFile(
+    path.join(workspaceDir, 'agent-ownership-journal.json'),
+    JSON.stringify(journal),
+  );
+}

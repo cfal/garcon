@@ -6,8 +6,6 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
 		id: 'chat-1',
 		projectPath: '/tmp/project',
-		effectiveProjectKey: '/tmp/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
@@ -21,10 +19,14 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 

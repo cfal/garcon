@@ -57,6 +57,49 @@ describe('ResponsiveSurfaceActions', () => {
 		expect(screen.getByText('Preferences')).toBeTruthy();
 	});
 
+	it('places leading menu content before a separator and overflow actions', async () => {
+		const { container } = render(ResponsiveSurfaceActionsTestHost, {
+			props: { leadingContent: true },
+		});
+		await Promise.resolve();
+		const root = container.querySelector<HTMLElement>('[data-responsive-surface-actions]');
+		if (!root) throw new Error('Expected responsive action root');
+		Object.defineProperty(root, 'clientWidth', { get: () => 240 });
+		for (const element of container.querySelectorAll<HTMLElement>(
+			'[data-surface-action-measure]',
+		)) {
+			const width =
+				element.dataset.surfaceActionMeasure === 'filter'
+					? 80
+					: element.dataset.surfaceActionMeasure === 'project'
+						? 100
+						: 32;
+			element.getBoundingClientRect = () => ({ width }) as DOMRect;
+		}
+		const menuMeasure = container.querySelector<HTMLElement>(
+			'[data-surface-action-overflow-measure]',
+		);
+		if (!menuMeasure) throw new Error('Expected menu measurement control');
+		menuMeasure.getBoundingClientRect = () => ({ width: 32 }) as DOMRect;
+
+		ResizeObserverHarness.emit(root, 240);
+		await Promise.resolve();
+		expect(screen.getAllByRole('button', { name: 'File browser actions' })).toHaveLength(1);
+		expect(screen.queryByRole('button', { name: 'Refresh files' })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const leading = document.querySelector<HTMLElement>('[data-leading-menu-content]');
+		const separator = document.querySelector<HTMLElement>('[data-slot="dropdown-menu-separator"]');
+		const overflowAction = screen.getByRole('menuitem', { name: 'Refresh files' });
+		if (!leading || !separator) throw new Error('Expected ordered menu content');
+		expect(leading.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+			0,
+		);
+		expect(
+			separator.compareDocumentPosition(overflowAction) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).not.toBe(0);
+	});
+
 	it('disconnects every observer on destroy', async () => {
 		const rendered = render(ResponsiveSurfaceActionsTestHost);
 		await Promise.resolve();

@@ -2,6 +2,7 @@
 	import SidebarSearchDialog from '../SidebarSearchDialog.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSearchSort } from '$shared/chat-search';
 
 	interface SidebarSearchDialogHostProps {
 		filteredChats: ChatSessionRecord[];
@@ -12,6 +13,13 @@
 		onCreateSavedSearch?: () => void;
 		onOpenManager?: () => void;
 		onClose?: () => void;
+		sort?: ChatSearchSort;
+		onSortChange?: (sort: ChatSearchSort) => void;
+		hasMoreTranscriptResults?: boolean;
+		transcriptSearchPageError?: string | null;
+		transcriptSearchRevalidationError?: string | null;
+		onLoadMoreTranscriptResults?: () => Promise<void> | void;
+		reduceMotion?: boolean;
 	}
 
 	let {
@@ -23,6 +31,13 @@
 		onCreateSavedSearch,
 		onOpenManager,
 		onClose,
+		sort = $bindable('relevance'),
+		onSortChange,
+		hasMoreTranscriptResults = false,
+		transcriptSearchPageError = null,
+		transcriptSearchRevalidationError = null,
+		onLoadMoreTranscriptResults,
+		reduceMotion = false,
 	}: SidebarSearchDialogHostProps = $props();
 
 	let query = $state('');
@@ -43,6 +58,11 @@
 	function handleHighlightChange(index: number) {
 		highlightedIndex = index;
 	}
+
+	function handleSortChange(nextSort: ChatSearchSort) {
+		sort = nextSort;
+		onSortChange?.(nextSort);
+	}
 </script>
 
 <SidebarSearchDialog
@@ -52,12 +72,20 @@
 	{savedSearches}
 	{currentTime}
 	{highlightedIndex}
+	{reduceMotion}
+	{sort}
+	showTranscriptPagination={Boolean(onLoadMoreTranscriptResults)}
+	{hasMoreTranscriptResults}
+	{transcriptSearchPageError}
+	{transcriptSearchRevalidationError}
 	onQueryChange={handleQueryChange}
 	onSelectChat={(chatId) => onSelectChat?.(chatId)}
 	onApplySavedSearch={handleApplySavedSearch}
 	onCreateSavedSearch={() => onCreateSavedSearch?.()}
 	onOpenManager={() => onOpenManager?.()}
 	onHighlightChange={handleHighlightChange}
+	onSortChange={onSortChange ? handleSortChange : undefined}
+	{onLoadMoreTranscriptResults}
 	onClose={() => {
 		isOpen = false;
 		onClose?.();

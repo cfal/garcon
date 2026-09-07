@@ -1,16 +1,12 @@
 <script lang="ts">
-	import ConversationTranscript from './ConversationTranscript.svelte';
-	import PermissionRequestRow from './PermissionRequestRow.svelte';
+	import { onDestroy, untrack } from 'svelte';
+	import ConversationFeedVirtualRow from './ConversationFeedVirtualRow.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import { PermissionRequestMessage } from '$shared/chat-types';
-	import {
-		getActiveTranscriptState,
-		getAgentState,
-		getLocalSettings,
-		getAppShell,
-		getModelCatalog,
-	} from '$lib/context';
+	import { getLocalSettings, getModelCatalog, getRemoteSettings } from '$lib/context';
+	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { SessionAgentId } from '$lib/types/app';
+	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		CHAT_FEED_CONTENT_BASE_CLASS,
@@ -29,53 +25,91 @@
 		canUseForkAtMessageAction,
 	} from '$lib/chat/actions/fork-at-message-action.js';
 	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { createHiddenBashCommandMatcherCache } from '$lib/chat/transcript/hidden-bash-commands.js';
+	import {
+		conversationScrollbarScrollDirection,
+		conversationScrollbarTrackDirection,
+		conversationWheelScrollDirection,
+	} from '$lib/chat/transcript/conversation-scroll-gesture.js';
+	import { ConversationFeedProjectionState } from './ConversationFeedProjectionState.svelte.js';
+	import { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
+	import { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
+	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+	import { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
+	import { virtualItems as selectVirtualItems } from '$lib/virt/virtual-list-types.js';
+	import {
+		ConversationFeedAnnouncementBatcher,
+		ConversationFeedAnnouncerState,
+	} from './conversation-feed-announcer.js';
+
+	const EMPTY_PENDING_PERMISSIONS: PendingPermissionRequest[] = [];
 
 	interface Props {
+		transcript: ActiveTranscriptState;
+		agentId: SessionAgentId;
 		scrollContainer?: HTMLDivElement | null;
-		scrollContentContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
-		onUserScrollIntent?: () => void;
+		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
 		onPermissionDecision?: (
-			permissionRequestId: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
-		pendingPermissionRequests?: PendingPermissionRequest[];
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
+		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		onRetry?: () => void;
+		onLoadEarlier?: () => void;
+		onLoadLater?: () => void;
 		reserveComposerTraySpace?: boolean;
-		reserveTopFloatingToolbar?: boolean;
 		isPreparingInitialScroll?: boolean;
-		textScale?: number;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
+		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
+		isVisible: boolean;
+		announcementsEnabled?: boolean;
+		pinnedToBottom: boolean;
+		surfaceIdentity: string;
+		onViewportPortChange?: (port: ConversationViewportPort | null) => void;
+		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
+		onPresentationPortChange?: (port: ConversationFeedPresentationPort | null) => void;
+		onInitialEndRestored?: () => void;
 	}
 
 	let {
+		transcript,
+		agentId,
 		scrollContainer = $bindable(null),
-		scrollContentContainer = $bindable(null),
 		onscroll,
 		onUserScrollIntent,
 		onPermissionDecision,
 		onExitPlanMode,
 		pendingPermissionRequests = [],
 		onRetry,
+		onLoadEarlier = () => {},
+		onLoadLater = () => {},
 		reserveComposerTraySpace = false,
-		reserveTopFloatingToolbar = false,
 		isPreparingInitialScroll = false,
-		textScale = 1,
 		isProcessing = false,
 		onForkChat,
+		onAppendToDraft,
 		onGenerateTitleFromMessage,
+		isVisible,
+		announcementsEnabled = true,
+		pinnedToBottom,
+		surfaceIdentity,
+		onViewportPortChange,
+		onRegisterPrepareHide,
+		onPresentationPortChange,
+		onInitialEndRestored,
 	}: Props = $props();
 
-	const chatState = getActiveTranscriptState();
-	const agentState = getAgentState();
+	const chatState = $derived(transcript);
 	const localSettings = getLocalSettings();
-	const appShell = getAppShell();
+	const remoteSettings = getRemoteSettings();
+	const hiddenBashCommandMatcherFor = createHiddenBashCommandMatcherCache();
 	const modelCatalog = getModelCatalog();
 
-	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentState.agentId));
+	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
 	const canShowForkAtMessage = $derived(
 		canShowForkAtMessageAction({
 			supportsForkAtMessage,
@@ -84,21 +118,52 @@
 	const canUseForkAtMessage = $derived(
 		canUseForkAtMessageAction({
 			supportsForkAtMessage,
-			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentState.agentId),
+			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentId),
 			isProcessing,
 		}),
 	);
 
-	function handleMessagePaneFocusIntent() {
-		appShell.requestSidebarRecenterToSelected();
+	let scrollbarPointerY: number | null = null;
+
+	function handleScrollbarPointerDownCapture(event: PointerEvent): void {
+		if (event.button !== 0 || !(event.currentTarget instanceof HTMLElement)) return;
+		const target = event.target instanceof Element ? event.target : null;
+		const isThumbPickup = Boolean(target?.closest('[data-slot="scroll-area-thumb"]'));
+		scrollbarPointerY = event.clientY;
+		if (isThumbPickup) {
+			onUserScrollIntent?.(null);
+			return;
+		}
+		const thumbRect = event.currentTarget
+			.querySelector<HTMLElement>('[data-slot="scroll-area-thumb"]')
+			?.getBoundingClientRect();
+		const direction = thumbRect
+			? conversationScrollbarTrackDirection(event.clientY, thumbRect.top, thumbRect.bottom)
+			: null;
+		onUserScrollIntent?.(direction);
+	}
+
+	function handleScrollbarPointerMove(event: PointerEvent): void {
+		if (scrollbarPointerY === null || (event.buttons & 1) === 0) return;
+		const direction = conversationScrollbarScrollDirection(scrollbarPointerY, event.clientY);
+		scrollbarPointerY = event.clientY;
+		if (direction) onUserScrollIntent?.(direction);
+	}
+
+	function handleScrollbarWheel(event: WheelEvent): void {
+		const direction = conversationWheelScrollDirection(event.deltaY);
+		if (direction) onUserScrollIntent?.(direction);
+	}
+
+	function finishScrollbarPointerIntent(): void {
+		scrollbarPointerY = null;
+		virtualController.finishScrollbarDrag();
 	}
 
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
 	const feedViewportClass = $derived(
 		cn(
 			'h-full overflow-y-auto overflow-x-hidden relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
-			'pt-3 sm:pt-4',
-			reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4',
 			CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[localSettings.chatMaxWidth],
 		),
 	);
@@ -106,26 +171,187 @@
 		cn(
 			CHAT_FEED_CONTENT_BASE_CLASS,
 			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
+			chatState.displayMessageCount === 0 && 'pt-3 sm:pt-4',
+			chatState.displayMessageCount === 0 && (reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4'),
 			isPreparingInitialScroll && 'invisible',
 		),
+	);
+	const showEarlierLoadingStatus = $derived(
+		!isPreparingInitialScroll &&
+			chatState.displayMessageCount > 0 &&
+			chatState.pageStates.earlier.status === 'loading' &&
+			chatState.pageStates.earlier.error === null,
 	);
 	const activePendingPermissionRequests = $derived.by(() =>
 		pendingPermissionRequests.filter(
 			(request) => !request.chatId || request.chatId === chatState.activeChatId,
 		),
 	);
-	const floatingPendingPermissionRequests = $derived(
+	const projectedPendingPermissionRequests = $derived(
 		visiblePendingPermissionRequests(chatState.visibleRows, activePendingPermissionRequests),
 	);
+	const projectionState = new ConversationFeedProjectionState();
+	const retention = new ConversationFeedRetentionState();
+	const itemState = new ConversationFeedItemState();
+	const announcerState = new ConversationFeedAnnouncerState();
+	let announcement = $state.raw({ sequence: 0, text: '' });
+	const announcementBatcher = new ConversationFeedAnnouncementBatcher((text) => {
+		announcement = { sequence: announcement.sequence + 1, text };
+	});
+	const hiddenBashCommands = $derived(
+		hiddenBashCommandMatcherFor(remoteSettings.snapshot?.ui.hiddenBashCommandPatterns ?? []),
+	);
+	const projectionInput = $derived({
+		surfaceIdentity,
+		rows: chatState.visibleRows,
+		mutationClock: chatState.feedMutationClock,
+		hiddenToolTypes: localSettings.hiddenToolTypes,
+		hiddenBashCommands,
+		showThinking: localSettings.showThinking,
+		isLiveWindow: !chatState.hasLaterMessages,
+		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
+		showEarlierBoundary:
+			chatState.pageStates.earlier.status === 'error' ||
+			(chatState.pageStates.earlier.status === 'loading' &&
+				chatState.pageStates.earlier.error !== null),
+		showLaterBoundary: chatState.hasLaterMessages || chatState.pageStates.later.status !== 'idle',
+		reserveComposerTraySpace,
+		transcriptViewId: chatState.getCursor().transcriptViewId,
+		pendingPermissions:
+			projectedPendingPermissionRequests.length > 0 && onPermissionDecision
+				? projectedPendingPermissionRequests
+				: EMPTY_PENDING_PERMISSIONS,
+	});
+	let projection = $state.raw(projectionState.reconcile(untrack(() => projectionInput)));
+	let virtualRoot: HTMLDivElement | null = $state(null);
 
-	function permissionRequestMessage(request: PendingPermissionRequest): PermissionRequestMessage {
-		const timestamp = request.receivedAt?.toISOString() ?? request.requestedTool.timestamp;
-		return new PermissionRequestMessage(
-			timestamp,
-			request.permissionRequestId,
-			request.requestedTool,
+	$effect.pre(() => {
+		const input = {
+			surfaceIdentity,
+			rows: chatState.visibleRows,
+			mutationClock: chatState.feedMutationClock,
+			visible: isVisible && announcementsEnabled,
+			pinnedToBottom,
+			isLiveWindow: !chatState.hasLaterMessages,
+			detachedStatus: m.chat_feed_new_response_available(),
+			hiddenToolTypes: localSettings.hiddenToolTypes,
+			hiddenBashCommands,
+			floatingPermissionOccurrences: projectionInput.pendingPermissions.map(
+				(request) => request.permissionOccurrenceId,
+			),
+		};
+		untrack(() => {
+			const update = announcerState.reconcileUpdate(input);
+			if (update !== null) announcementBatcher.enqueue(update);
+		});
+	});
+
+	const virtualController = new ConversationFeedVirtualController({
+		get model() {
+			return projection.model;
+		},
+		get geometry() {
+			return projection.geometry;
+		},
+		get projectedDataRevision() {
+			return projection.projectedDataRevision;
+		},
+		get viewport() {
+			return scrollContainer;
+		},
+		get virtualRoot() {
+			return virtualRoot;
+		},
+		get visible() {
+			return isVisible;
+		},
+		get pinned() {
+			return pinnedToBottom;
+		},
+		get retention() {
+			return retention;
+		},
+		onInitialEndRestored: () => onInitialEndRestored?.(),
+	});
+	const virtualSnapshot = $derived(virtualController.snapshot);
+	const renderedIndexes = $derived(virtualController.renderedIndexes(virtualSnapshot));
+	const virtualItems = $derived(selectVirtualItems(virtualSnapshot, renderedIndexes));
+
+	$effect.pre(() => {
+		const input = projectionInput;
+		const pendingPermissionOccurrences = new Set(
+			activePendingPermissionRequests.map((request) => request.permissionOccurrenceId),
 		);
+		untrack(() => {
+			const nextProjection = projectionState.reconcile(input);
+			const applied = virtualController.applyProjection({
+				next: nextProjection,
+				pinned: pinnedToBottom,
+				scrollbarDragActive: scrollbarPointerY !== null,
+			});
+			if (!applied) return;
+			projection = nextProjection;
+			itemState.reconcile(
+				input.surfaceIdentity,
+				new Set(input.rows.map((row) => row.id)),
+				pendingPermissionOccurrences,
+			);
+		});
+	});
+
+	$effect(() => {
+		onViewportPortChange?.(virtualController);
+		return () => onViewportPortChange?.(null);
+	});
+
+	function prepareForHide(): void {
+		retention.closeAllTransients();
+		virtualController.prepareForHide();
 	}
+
+	function closeTransients(): void {
+		retention.closeAllTransients();
+	}
+
+	$effect(() => {
+		const port: ConversationFeedPresentationPort = {
+			captureRestoreTarget: () =>
+				virtualController.captureRestoreTarget(chatState.transcriptViewId, pinnedToBottom),
+			closeTransients,
+		};
+		onPresentationPortChange?.(port);
+		return () => onPresentationPortChange?.(null);
+	});
+
+	$effect(() => {
+		onRegisterPrepareHide?.(prepareForHide);
+		return () => onRegisterPrepareHide?.(null);
+	});
+
+	$effect(() =>
+		retention.observeSelection({
+			get root() {
+				return virtualRoot;
+			},
+			get visible() {
+				return isVisible;
+			},
+		}),
+	);
+
+	$effect(() => {
+		if (isVisible) return;
+		retention.closeAllTransients();
+	});
+
+	onDestroy(() => {
+		virtualController.destroy();
+		retention.clear();
+		projectionState.reset();
+		itemState.clear();
+		announcementBatcher.destroy();
+		announcerState.reset();
+	});
 </script>
 
 {#snippet feedContent()}
@@ -158,82 +384,47 @@
 			<p class="text-xs mt-1">{m.chat_messages_send_first_message()}</p>
 		</div>
 	{:else}
-		{#if chatState.loadStatus === 'error' && chatState.displayMessageCount > 0}
-			<div
-				class="text-center text-sm text-muted-foreground py-2 border-b border-border bg-destructive/5"
-			>
-				<div class="flex items-center justify-center space-x-2">
-					<TriangleAlert class="h-3 w-3 text-destructive" />
-					<span>{m.chat_feed_failed_to_refresh()}</span>
-					{#if onRetry}
-						<Button variant="ghost" size="sm" class="text-xs h-6 px-2" onclick={onRetry}>
-							<RefreshCw class="h-3 w-3 mr-1" />
-							{m.chat_feed_retry()}
-						</Button>
-					{/if}
-				</div>
-			</div>
-		{/if}
-		{#if chatState.isLoadingMoreMessages}
-			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
-				<div class="h-px flex-1 bg-border/70"></div>
-				<Loader2 class="h-3.5 w-3.5 animate-spin" />
-				<span>{m.chat_chat_loading_older_messages()}</span>
-				<div class="h-px flex-1 bg-border/70"></div>
-			</div>
-		{/if}
-
-		{#if chatState.hasMoreMessages && !chatState.isLoadingMoreMessages}
-			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
-				<div class="h-px flex-1 bg-border/70"></div>
-				<span>{m.chat_chat_messages_scroll_to_load()}</span>
-				<div class="h-px flex-1 bg-border/70"></div>
-			</div>
-		{/if}
-
-		{#if !chatState.hasMoreMessages && !chatState.hasInitialMessagesToReveal && chatState.displayMessageCount > chatState.visibleMessageCount}
-			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
-				<div class="h-px flex-1 bg-border/70"></div>
-				<span>
-					{m.chat_chat_messages_showing_last({
-						count: chatState.visibleMessageCount,
-						total: chatState.displayMessageCount,
-					})}
-				</span>
-				<Button
-					variant="link"
-					class="text-primary hover:text-primary/80 underline p-0 h-auto text-xs"
-					onclick={() => chatState.loadEarlierMessages()}
-				>
-					{m.chat_chat_messages_load_earlier()}
-				</Button>
-				<div class="h-px flex-1 bg-border/70"></div>
-			</div>
-		{/if}
-
-		<ConversationTranscript
-			rows={chatState.visibleRows}
-			agentId={agentState.agentId}
-			showThinking={localSettings.showThinking}
-			hiddenToolTypes={localSettings.hiddenToolTypes}
-			{textScale}
-			{pendingPermissionRequests}
-			{onPermissionDecision}
-			{onExitPlanMode}
-			canForkAtMessageNow={canUseForkAtMessage}
-			onForkChat={canShowForkAtMessage ? onForkChat : undefined}
-			{onGenerateTitleFromMessage}
-		/>
-		{#if floatingPendingPermissionRequests.length > 0 && onPermissionDecision}
-			<div class="mt-2 flex w-full flex-col gap-2 sm:gap-3">
-				{#each floatingPendingPermissionRequests as request (request.permissionRequestId)}
-					<PermissionRequestRow
-						request={permissionRequestMessage(request)}
-						onDecision={onPermissionDecision}
+		<div
+			bind:this={virtualRoot}
+			class="relative w-full"
+			style:height={`${virtualSnapshot.sizerSize}px`}
+			style="overflow-anchor: none;"
+			data-chat-virtual-sizer
+			data-chat-virtual-count={virtualItems.length}
+			data-chat-virtual-model-count={projection.model.items.length}
+			data-chat-virtual-data-revision={projection.projectedDataRevision}
+			data-chat-transcript-entry-count={chatState.entries.length}
+			{@attach virtualController.sizer}
+		>
+			{#each virtualItems as virtualItem (virtualItem.key)}
+				{@const itemIndex = projection.model.indexByKey.get(String(virtualItem.key))}
+				{@const item = itemIndex === undefined ? undefined : projection.model.items[itemIndex]}
+				{#if item}
+					<ConversationFeedVirtualRow
+						{virtualItem}
+						{item}
+						controller={virtualController}
+						{retention}
+						{itemState}
+						renderModel={projection.renderModel}
+						showThinking={localSettings.showThinking}
+						{pendingPermissionRequests}
+						earlierPageState={chatState.pageStates.earlier}
+						laterPageState={chatState.pageStates.later}
+						loadError={chatState.loadError}
+						{onRetry}
+						{onLoadEarlier}
+						{onLoadLater}
+						{onPermissionDecision}
+						{onExitPlanMode}
+						onForkChat={canShowForkAtMessage ? onForkChat : undefined}
+						{onAppendToDraft}
+						{onGenerateTitleFromMessage}
+						canForkAtMessageNow={canUseForkAtMessage}
 					/>
-				{/each}
-			</div>
-		{/if}
+				{/if}
+			{/each}
+		</div>
 	{/if}
 {/snippet}
 
@@ -247,38 +438,58 @@
 				<span>{m.chat_chat_loading_chat_messages()}</span>
 			</div>
 		</div>
+	{:else if showEarlierLoadingStatus}
+		<!-- Keeps automatic loading outside virtual geometry so prepends cannot move the reading anchor. -->
+		<div
+			class="pointer-events-none absolute left-1/2 top-2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-none"
+			role={announcementsEnabled ? 'status' : undefined}
+			aria-live={announcementsEnabled ? 'polite' : 'off'}
+			data-chat-earlier-loading-indicator
+		>
+			<Loader2 class="size-3.5 animate-spin" aria-hidden="true" />
+			<span class="sr-only">{m.chat_transcript_loading_earlier()}</span>
+		</div>
 	{/if}
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
 	<ScrollAreaPrimitive.Viewport
 		bind:ref={scrollContainer}
 		{onscroll}
-		onfocusin={handleMessagePaneFocusIntent}
 		tabindex={-1}
-		role="log"
-		aria-busy={chatState.isLoadingMessages || isPreparingInitialScroll}
+		role="region"
+		aria-busy={chatState.isLoadingMessages ||
+			isPreparingInitialScroll ||
+			chatState.pageStates.earlier.status === 'loading' ||
+			chatState.pageStates.later.status === 'loading'}
+		aria-live="off"
 		aria-label={m.chat_messages_region()}
+		data-chat-scroll-viewport
+		data-chat-pinned-to-bottom={pinnedToBottom}
+		data-chat-user-scrolled-up={chatState.isUserScrolledUp}
 		class={feedViewportClass}
+		{@attach virtualController.viewport}
 	>
-		<div bind:this={scrollContentContainer} class={feedContentClass}>
-			<div style="overflow-anchor: none;">
-				{#if reserveTopFloatingToolbar}
-					<!-- Reserves the floating taskbar only at the transcript's scroll origin. -->
-					<div
-						aria-hidden="true"
-						class="h-[var(--workspace-floating-taskbar-inset)] shrink-0"
-						data-chat-feed-top-floating-toolbar-spacer
-					></div>
-				{/if}
-				{@render feedContent()}
-			</div>
-			<div
-				aria-hidden="true"
-				class="h-px"
-				data-chat-bottom-anchor
-				style="overflow-anchor: auto;"
-			></div>
+		<div class={feedContentClass} data-chat-feed-content>
+			{@render feedContent()}
 		</div>
 	</ScrollAreaPrimitive.Viewport>
-	<Scrollbar orientation="vertical" class="w-1.5" onpointerdown={onUserScrollIntent} />
+	<Scrollbar
+		orientation="vertical"
+		class={cn('w-1.5', isPreparingInitialScroll && 'invisible')}
+		data-chat-feed-scrollbar
+		onpointerdowncapture={handleScrollbarPointerDownCapture}
+		onwheel={handleScrollbarWheel}
+		onpointermove={handleScrollbarPointerMove}
+		onpointerup={finishScrollbarPointerIntent}
+		onpointercancel={finishScrollbarPointerIntent}
+		onlostpointercapture={finishScrollbarPointerIntent}
+	/>
 	<ScrollAreaPrimitive.Corner />
+	<div
+		class="sr-only"
+		role={announcementsEnabled ? 'status' : undefined}
+		aria-live={announcementsEnabled ? 'polite' : 'off'}
+		aria-atomic="true"
+		data-chat-feed-announcement-sequence={announcement.sequence}
+	>
+		{#key announcement.sequence}<span>{announcement.text}</span>{/key}
+	</div>
 </ScrollAreaPrimitive.Root>

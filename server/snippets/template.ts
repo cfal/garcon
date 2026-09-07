@@ -1,11 +1,16 @@
 import {
-  matchSnippetTemplateTokens,
   SNIPPET_EXPANDED_MAX_LENGTH,
+  SNIPPET_TEMPLATE_VARIABLES,
 } from '../../common/snippets.js';
+import {
+  expandTemplate,
+  TemplateExpansionTooLongError,
+} from '../../common/template-tokens.js';
 
 export interface SnippetTemplateValues {
   arguments: string;
   projectPath: string;
+  chatId: string;
 }
 
 export class SnippetExpansionError extends Error {
@@ -21,26 +26,19 @@ export function expandSnippetTemplate(
   template: string,
   values: SnippetTemplateValues,
 ): string {
-  const chunks: string[] = [];
-  let length = 0;
-  let cursor = 0;
-
-  const append = (value: string): void => {
-    length += value.length;
-    if (length > SNIPPET_EXPANDED_MAX_LENGTH) {
-      throw new SnippetExpansionError();
-    }
-    chunks.push(value);
-  };
-
-  for (const match of matchSnippetTemplateTokens(template)) {
-    append(template.slice(cursor, match.index));
-    if (match.escaped) append(match.raw.slice(1));
-    else
-      append(match.variable === 'arguments' ? values.arguments : values.projectPath);
-    cursor = match.index + match.raw.length;
+  try {
+    return expandTemplate(
+      template,
+      SNIPPET_TEMPLATE_VARIABLES,
+      {
+        arguments: values.arguments,
+        project_path: values.projectPath,
+        chat_id: values.chatId,
+      },
+      SNIPPET_EXPANDED_MAX_LENGTH,
+    );
+  } catch (error) {
+    if (error instanceof TemplateExpansionTooLongError) throw new SnippetExpansionError();
+    throw error;
   }
-
-  append(template.slice(cursor));
-  return chunks.join('');
 }

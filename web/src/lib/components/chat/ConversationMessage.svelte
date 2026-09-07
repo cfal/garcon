@@ -1,32 +1,51 @@
 <script lang="ts">
+	import { onDestroy, tick } from 'svelte';
 	import {
 		UserMessage,
 		AssistantMessage,
 		ThinkingMessage,
 		isToolUseMessage,
 		ErrorMessage,
+		TranscriptNoticeMessage,
+		CliRowMessage,
 		PermissionRequestMessage,
 		CompactionMessage,
 		AgentSwitchMessage,
+		ToolResultMessage,
+		AskUserQuestionToolUseMessage,
 	} from '$shared/chat-types';
-	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
+	import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import { getChatSessions, getFileSessions, getAppShell, getLocalSettings } from '$lib/context';
+	import {
+		getAppShell,
+		getChatSessions,
+		getFileSessions,
+		getLocalSettings,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
+	import {
+		resolveChatReferenceTarget,
+		type ResolveChatReference,
+	} from '$lib/chat/transcript/chat-reference.js';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import CompactionRow from './CompactionRow.svelte';
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
+	import CliRow from './rows/CliRow.svelte';
+	import CliPresentationHeader from './rows/CliPresentationHeader.svelte';
+	import CollapsibleBody from './rows/CollapsibleBody.svelte';
+	import TranscriptNoticeRow from './rows/TranscriptNoticeRow.svelte';
+	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
+	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
 		ContextMenu,
@@ -34,15 +53,17 @@
 		ContextMenuContent,
 	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatQuoteBlock } from '$lib/chat/composer/quote-selection.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils/cn';
 	import MessageActionMenu from './MessageActionMenu.svelte';
 	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
-	import {
-		askUserQuestionPermissionId,
-		askUserQuestionTerminalFromResult,
-		type PermissionTerminalState,
-	} from '$lib/chat/transcript/conversation-feed-items.js';
+	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { historicalAskUserQuestion } from '$lib/chat/transcript/ask-user-question-history.js';
+	import type {
+		ConversationDisclosureStatePort,
+		PermissionQuestionDraft,
+	} from './ConversationFeedItemState.svelte.js';
 
 	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
 	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =
@@ -50,45 +71,67 @@
 
 	interface Props {
 		message: ChatMessage;
-		index: number;
+		/** Marks a submitted message whose request has not come back yet. */
+		awaitingDelivery?: boolean;
+		rowId?: string;
+		anchorId?: string;
 		forkUpToSeq?: number;
-		prevMessage: ChatMessage | null;
 		toolResult?: ToolResultMessage;
+		toolResultRowId?: string;
+		pairedToolUse?: ToolUseChatMessage;
 		permissionTerminal?: PermissionTerminalState;
+		permissionActionable?: boolean;
 		onPermissionDecision?: (
-			permissionRequestId: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
-		agentId: SessionAgentId | string;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		showThinking?: boolean;
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		/** Appends a formatted block to the active chat draft. Omitted when no composer owns the chat. */
+		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
+		disclosureState?: ConversationDisclosureStatePort;
+		permissionDraft?: (permissionOccurrenceId: string) => PermissionQuestionDraft;
+		onPermissionDraftChange?: (
+			permissionOccurrenceId: string,
+			draft: PermissionQuestionDraft,
+		) => void;
+		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
 	let {
 		message,
-		index,
+		awaitingDelivery = false,
+		rowId,
+		anchorId,
 		forkUpToSeq,
-		prevMessage,
 		toolResult,
+		toolResultRowId,
+		pairedToolUse,
 		permissionTerminal,
+		permissionActionable = false,
 		onPermissionDecision,
 		onExitPlanMode,
-		agentId,
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
+		onAppendToDraft,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
+		disclosureState,
+		permissionDraft,
+		onPermissionDraftChange,
+		acquireTransientActivity,
 	}: Props = $props();
 
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
+	const workspace = getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
@@ -99,19 +142,11 @@
 		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
 	});
 	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
+	const resolveChatReference: ResolveChatReference = (chatId) =>
+		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 
-	// Groups consecutive messages of the same visual category.
-	function isGroupedWith(prev: ChatMessage | null, current: ChatMessage): boolean {
-		if (!prev) return false;
-		const prevCategory = prev instanceof AssistantMessage ? 'assistant' : prev.type;
-		const curCategory = current instanceof AssistantMessage ? 'assistant' : current.type;
-		return prevCategory === curCategory;
-	}
-
-	const isGrouped = $derived(isGroupedWith(prevMessage, message));
 	const shouldHideThinking = $derived(message instanceof ThinkingMessage && !showThinking);
 
-	// Maps message type to a simplified CSS class name.
 	function getCssType(msg: ChatMessage): string {
 		if (isToolUseMessage(msg)) return 'tool';
 		switch (msg.type) {
@@ -126,12 +161,27 @@
 
 	const cssType = $derived(getCssType(message));
 
-	// Type narrowing helpers for the template.
 	const asUser = $derived(message instanceof UserMessage ? message : null);
+	const userMessagePresentation = $derived(asUser?.presentation ?? null);
+	const userMessageDisclosure = $derived(userMessageBodyDisclosure(userMessagePresentation));
+	const userMessageDisclosureKind = $derived<'user-body' | 'cli-body'>(
+		userMessagePresentation ? 'cli-body' : 'user-body',
+	);
+	const userMessageSurfaceClass = $derived(
+		userMessagePresentation?.style
+			? cliPresentationSurfaceClass(userMessagePresentation.style)
+			: '',
+	);
+	const userMessageCustomStyle = $derived(
+		userMessagePresentation?.style === 'custom' ? userMessagePresentation.customStyle : null,
+	);
 	const asAssistant = $derived(message instanceof AssistantMessage ? message : null);
 	const asThinking = $derived(message instanceof ThinkingMessage ? message : null);
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
+	const asToolResult = $derived(message instanceof ToolResultMessage ? message : null);
+	const asNotice = $derived(message instanceof TranscriptNoticeMessage ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
+	const asCliRow = $derived(message instanceof CliRowMessage ? message : null);
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
 	const asAgentSwitch = $derived(message instanceof AgentSwitchMessage ? message : null);
 	const asPermissionRequest = $derived(
@@ -142,34 +192,14 @@
 			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
 			: null,
 	);
-	const askUserQuestionPermissionRequest = $derived(
-		asToolUse?.type === 'ask-user-question-tool-use' && toolResult
-			? new PermissionRequestMessage(
-					message.timestamp,
-					askUserQuestionPermissionId(asToolUse.toolId),
-					asToolUse,
-				)
-			: null,
-	);
-	const askUserQuestionTerminal = $derived(
-		asToolUse?.type === 'ask-user-question-tool-use'
-			? askUserQuestionTerminalFromResult(asToolUse, toolResult)
-			: undefined,
-	);
-	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
-	const userDeliveryTitle = $derived(
-		userDeliveryStatus === 'submitting'
-			? m.chat_message_delivery_sending()
-			: userDeliveryStatus === 'unconfirmed'
-				? m.chat_message_delivery_unconfirmed()
-				: userDeliveryStatus === 'failed'
-					? m.chat_message_delivery_failed()
-					: '',
-	);
+	const historicalQuestion = $derived.by(() => {
+		if (!(asToolResult && pairedToolUse instanceof AskUserQuestionToolUseMessage)) return null;
+		return historicalAskUserQuestion(pairedToolUse, asToolResult);
+	});
+	function ignorePermissionDecision(): void {}
 
-	const showNonAssistantHeader = $derived(!isGrouped && message instanceof ErrorMessage);
+	const showNonAssistantHeader = $derived(Boolean(asError));
 
-	/** Formats assistant or error content for display. */
 	function getFormattedContent(): string {
 		if (message instanceof AssistantMessage || message instanceof ErrorMessage) {
 			return String(message.content || '');
@@ -182,8 +212,7 @@
 		cn(
 			'chat-message',
 			cssType,
-			isGrouped && 'grouped',
-			message instanceof UserMessage && 'flex justify-start min-w-0',
+			message instanceof UserMessage ? 'flex justify-start min-w-0' : 'flow-root',
 		),
 	);
 
@@ -196,7 +225,7 @@
 	const messageMenuText = $derived(getMessageMenuText());
 	const canGenerateTitleFromMessage = $derived(
 		Boolean(
-			asUser &&
+			(asUser || asAssistant) &&
 			messageMenuText.trim() &&
 			activeChatContext?.chatId &&
 			forkUpToSeq !== undefined &&
@@ -216,8 +245,32 @@
 	let messageMenuTriggerRef = $state<HTMLElement | null>(null);
 	let messageMenuContentRef = $state<HTMLElement | null>(null);
 	let selectTextDialogOpen = $state(false);
+	let messageSelectionText = $state<string | null>(null);
 	let messageLongPressTimer: ReturnType<typeof setTimeout> | null = null;
 	let suppressNextMenuButtonClick = false;
+	let releaseMessageMenu: (() => void) | null = null;
+	let releaseSelectionDialog: (() => void) | null = null;
+
+	const hasMessageSelection = $derived(messageSelectionText !== null);
+
+	async function releaseAfterPortalClose(release: (() => void) | null): Promise<void> {
+		if (!release) return;
+		await tick();
+		release();
+	}
+
+	function handleMessageMenuOpenChange(open: boolean): void {
+		if (open) {
+			releaseMessageMenu ??=
+				acquireTransientActivity?.(() => handleMessageMenuOpenChange(false)) ?? null;
+			messageMenuOpen = true;
+			return;
+		}
+		messageMenuOpen = false;
+		const release = releaseMessageMenu;
+		releaseMessageMenu = null;
+		void releaseAfterPortalClose(release);
+	}
 
 	function openContextMenuFromButton(e: MouseEvent) {
 		e.preventDefault();
@@ -289,11 +342,11 @@
 		suppressNextMenuButtonClick =
 			event.target instanceof Element &&
 			Boolean(event.target.closest('.chat-message-menu-button, .chat-message-action-button'));
-		messageMenuOpen = false;
+		handleMessageMenuOpenChange(false);
 	}
 
 	function closeMessageMenuFromInteractOutside(): void {
-		messageMenuOpen = false;
+		handleMessageMenuOpenChange(false);
 	}
 
 	// Closes touch context menus on pointerdown because Bits UI defers touch dismissal to click.
@@ -325,9 +378,33 @@
 		};
 	});
 
+	// Snapshots the live selection on the capture-phase contextmenu event, before Bits UI
+	// focus management can collapse it. Each menu open overwrites the previous snapshot.
+	function captureMessageSelection(): void {
+		const trigger = messageMenuTriggerRef;
+		const selection = window.getSelection();
+		if (!trigger || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+			messageSelectionText = null;
+			return;
+		}
+		const fullyInsideMessage = Array.from({ length: selection.rangeCount }, (_, index) => {
+			const range = selection.getRangeAt(index);
+			return trigger.contains(range.startContainer) && trigger.contains(range.endContainer);
+		}).every(Boolean);
+		const text = selection.toString();
+		messageSelectionText = fullyInsideMessage && text.trim() ? text : null;
+	}
+
 	async function copyText() {
-		if (!messageMenuText) return;
-		await copyToClipboard(messageMenuText);
+		const text = messageSelectionText ?? messageMenuText;
+		if (!text) return;
+		await copyToClipboard(text);
+	}
+
+	function quoteSelection() {
+		const text = messageSelectionText;
+		if (!text) return;
+		onAppendToDraft?.(formatQuoteBlock(text));
 	}
 
 	function sendToNewSession() {
@@ -345,6 +422,7 @@
 
 	function openSelectTextDialog(): void {
 		if (!messageMenuText) return;
+		releaseSelectionDialog ??= acquireTransientActivity?.(closeSelectTextDialog) ?? null;
 		selectTextDialogOpen = true;
 	}
 
@@ -355,6 +433,9 @@
 
 	function closeSelectTextDialog(): void {
 		selectTextDialogOpen = false;
+		const release = releaseSelectionDialog;
+		releaseSelectionDialog = null;
+		void releaseAfterPortalClose(release);
 	}
 
 	/** Routes a file-like markdown link to the viewer overlay. */
@@ -371,7 +452,7 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : 'main',
+			origin: appShell.isMobile ? 'mobile' : workspace.currentWindowId,
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
@@ -392,14 +473,29 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : 'main',
+			origin: appShell.isMobile ? 'mobile' : workspace.currentWindowId,
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
 		});
 	}
 
-	let thinkingOpen = $state(true);
+	let localThinkingOpen = $state(true);
+	let thinkingOpen = $derived(
+		disclosureState?.open('thinking', 'thinking', true) ?? localThinkingOpen,
+	);
+
+	function toggleThinking(): void {
+		const next = !thinkingOpen;
+		if (disclosureState) disclosureState.setOpen('thinking', 'thinking', next, true);
+		else localThinkingOpen = next;
+	}
+
+	onDestroy(() => {
+		clearMessageLongPressTimer();
+		releaseMessageMenu?.();
+		releaseSelectionDialog?.();
+	});
 </script>
 
 {#snippet floatingMessageMenuButton(positionClass: string)}
@@ -417,29 +513,63 @@
 {/snippet}
 
 {#if !shouldHideThinking}
-	<div class={messageClass}>
+	<div
+		class={messageClass}
+		data-chat-row-id={rowId}
+		data-chat-anchor-id={anchorId}
+		data-chat-message-type={message.type}
+	>
 		{#if asUser}
 			<div
 				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
 				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
+				style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
+				style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}
 			>
-				<ContextMenu bind:open={messageMenuOpen}>
+				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 					<ContextMenuTrigger
 						bind:ref={messageMenuTriggerRef}
-						class="user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground data-[state=open]:bg-user-bubble-selected rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+						oncontextmenucapture={captureMessageSelection}
+						class={cn(
+							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
+							!userMessagePresentation?.style && 'data-[state=open]:bg-user-bubble-selected',
+							userMessageSurfaceClass,
+						)}
+						data-user-message-presentation={userMessagePresentation?.style}
 					>
 						<div>
-							<div class="text-sm">
-								<Markdown
-									source={asUser.content}
-									variant="user"
-									fileLinkBasePath={projectBasePath}
-									onLinkNavigate={handleLinkNavigate}
+							{#if userMessagePresentation?.style}
+								<CliPresentationHeader
+									style={userMessagePresentation.style}
+									title={userMessagePresentation.title}
 								/>
-							</div>
+							{/if}
+							<CollapsibleBody
+								disclosure={userMessageDisclosure}
+								previewHeight={userMessagePresentation?.style ? 'default' : 'tall'}
+								alwaysExpanded={Boolean(userMessagePresentation) &&
+									localSettings.alwaysExpandCliMessages}
+								expanded={disclosureState?.open(userMessageDisclosureKind, 'body', false)}
+								onExpandedChange={disclosureState
+									? (expanded) =>
+											disclosureState.setOpen(userMessageDisclosureKind, 'body', expanded, false)
+									: undefined}
+							>
+								<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+									<Markdown
+										source={asUser.content}
+										variant={userMessagePresentation?.style ? 'presented' : 'user'}
+										fileLinkBasePath={projectBasePath}
+										onLinkNavigate={handleLinkNavigate}
+										{resolveChatReference}
+										chatReferencePolicy={userMessagePresentation ? 'explicit' : 'explicit-and-bare'}
+										{acquireTransientActivity}
+									/>
+								</div>
+							</CollapsibleBody>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
-									{#each asUser.images as img, idx (img.name || idx)}
+									{#each asUser.images as img, idx (idx)}
 										{#if isImageAttachment(img)}
 											<img
 												src={img.data}
@@ -467,10 +597,12 @@
 						onInteractOutside={closeMessageMenuFromInteractOutside}
 					>
 						<MessageActionMenu
+							hasSelection={hasMessageSelection}
 							canFork={Boolean(onForkChat && forkUpToSeq)}
 							canForkNow={canForkAtMessageNow}
 							onFork={handleFork}
 							onCopy={copyText}
+							onQuoteSelection={quoteSelection}
 							onSendToNewSession={sendToNewSession}
 							onSelectText={openSelectTextDialog}
 							onGenerateTitleFromMessage={canGenerateTitleFromMessage
@@ -482,23 +614,13 @@
 				<div
 					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
 				>
-					{@render floatingMessageMenuButton('bottom-0 right-0')}
-					{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'unconfirmed' || userDeliveryStatus === 'failed'}
-						<span
-							class={cn(
-								'user-message-delivery-indicator absolute left-1/2 top-1/2 inline-flex size-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center',
-								userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-								userDeliveryStatus === 'unconfirmed' && 'text-status-warning-muted-foreground',
-							)}
-							title={userDeliveryTitle}
-							aria-label={userDeliveryTitle}
-						>
-							{#if userDeliveryStatus === 'submitting'}
-								<LoaderCircle class="size-3.5 animate-spin" />
-							{:else}
-								<CircleAlert class="size-3" />
-							{/if}
-						</span>
+					{#if awaitingDelivery}
+						<LoaderCircle
+							class="absolute bottom-0 right-0 size-3.5 animate-spin text-muted-foreground"
+							aria-label={m.chat_message_delivery_sending()}
+						/>
+					{:else}
+						{@render floatingMessageMenuButton('bottom-0 right-0')}
 					{/if}
 				</div>
 			</div>
@@ -530,16 +652,24 @@
 						<PermissionRequestRow
 							request={exitPlanPermissionRequest}
 							terminal={permissionTerminal}
-							onDecision={onPermissionDecision ?? (() => {})}
+							actionable={permissionActionable}
+							onDecision={onPermissionDecision ?? ignorePermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
+							draft={permissionDraft?.(exitPlanPermissionRequest.permissionOccurrenceId)}
+							{acquireTransientActivity}
+							onDraftChange={onPermissionDraftChange
+								? (draft) =>
+										onPermissionDraftChange(exitPlanPermissionRequest.permissionOccurrenceId, draft)
+								: undefined}
 						/>
-					{:else if askUserQuestionPermissionRequest}
+					{:else if historicalQuestion}
 						<PermissionRequestRow
-							request={askUserQuestionPermissionRequest}
-							terminal={askUserQuestionTerminal}
-							onDecision={onPermissionDecision ?? (() => {})}
+							request={historicalQuestion.request}
+							terminal={historicalQuestion.terminal}
+							onDecision={ignorePermissionDecision}
 							{chatContext}
+							{acquireTransientActivity}
 						/>
 					{:else if asToolUse}
 						<ChatToolEventRenderer
@@ -548,10 +678,28 @@
 								? { content: toolResult.content, isError: toolResult.isError }
 								: undefined}
 							mode="input"
+							resultAnchorId={toolResultRowId ? `tool-result-${toolResultRowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
 							onFileOpen={handleToolFileOpen}
 							{projectBasePath}
 							{chatProjectPath}
+							{resolveChatReference}
+							{disclosureState}
+							{acquireTransientActivity}
+						/>
+					{:else if asToolResult && pairedToolUse}
+						<ChatToolEventRenderer
+							toolMessage={pairedToolUse}
+							toolResult={{ content: asToolResult.content, isError: asToolResult.isError }}
+							mode="result"
+							resultAnchorId={rowId ? `tool-result-${rowId}` : undefined}
+							autoExpandTools={localSettings.autoExpandTools}
+							onFileOpen={handleToolFileOpen}
+							{projectBasePath}
+							{chatProjectPath}
+							{resolveChatReference}
+							{disclosureState}
+							{acquireTransientActivity}
 						/>
 					{:else if asThinking}
 						<ChatEventCard variant="thinking" compact>
@@ -559,9 +707,7 @@
 								<button
 									type="button"
 									class="flex w-full items-center gap-2 text-left cursor-pointer"
-									onclick={() => {
-										thinkingOpen = !thinkingOpen;
-									}}
+									onclick={toggleThinking}
 									aria-expanded={thinkingOpen}
 								>
 									<span class="text-xs font-medium text-muted-foreground"
@@ -578,15 +724,19 @@
 											variant="thinking"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{resolveChatReference}
+											chatReferencePolicy="explicit"
+											{acquireTransientActivity}
 										/>
 									</div>
 								{/if}
 							{/snippet}
 						</ChatEventCard>
 					{:else if asAssistant}
-						<ContextMenu bind:open={messageMenuOpen}>
+						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger
 								bind:ref={messageMenuTriggerRef}
+								oncontextmenucapture={captureMessageSelection}
 								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
 							>
 								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
@@ -596,6 +746,9 @@
 											variant="assistant"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{resolveChatReference}
+											chatReferencePolicy="explicit-and-bare"
+											{acquireTransientActivity}
 										/>
 									</div>
 									{@render floatingMessageMenuButton('-bottom-1 right-1')}
@@ -606,19 +759,45 @@
 								onInteractOutside={closeMessageMenuFromInteractOutside}
 							>
 								<MessageActionMenu
+									hasSelection={hasMessageSelection}
 									canFork={Boolean(onForkChat && forkUpToSeq)}
 									canForkNow={canForkAtMessageNow}
 									onFork={handleFork}
 									onCopy={copyText}
+									onQuoteSelection={quoteSelection}
 									onSendToNewSession={sendToNewSession}
 									onSelectText={openSelectTextDialog}
+									onGenerateTitleFromMessage={canGenerateTitleFromMessage
+										? generateTitleFromCurrentMessage
+										: undefined}
 								/>
 							</ContextMenuContent>
 						</ContextMenu>
+					{:else if asCliRow}
+						<CliRow
+							message={asCliRow}
+							fileLinkBasePath={projectBasePath}
+							onLinkNavigate={handleLinkNavigate}
+							{resolveChatReference}
+							{acquireTransientActivity}
+							alwaysExpanded={localSettings.alwaysExpandCliMessages}
+							{disclosureState}
+						/>
+					{:else if asNotice}
+						<TranscriptNoticeRow
+							message={asNotice}
+							fileLinkBasePath={projectBasePath}
+							onLinkNavigate={handleLinkNavigate}
+							{acquireTransientActivity}
+							{disclosureState}
+							{resolveChatReference}
+						/>
 					{:else if asError}
 						<ChatEventCard variant="error">
 							{#snippet body()}
-								<div class="text-sm whitespace-pre-wrap break-words">{formattedContent}</div>
+								<div class="text-sm whitespace-pre-wrap break-words">
+									{formattedContent}
+								</div>
 							{/snippet}
 						</ChatEventCard>
 					{:else if asCompaction}
@@ -626,16 +805,29 @@
 							message={asCompaction}
 							{projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveChatReference}
+							{acquireTransientActivity}
+							open={disclosureState?.open('compaction', 'compaction', false)}
+							onOpenChange={disclosureState
+								? (open) => disclosureState.setOpen('compaction', 'compaction', open, false)
+								: undefined}
 						/>
 					{:else if asAgentSwitch}
 						<AgentSwitchRow message={asAgentSwitch} />
-					{:else if asPermissionRequest && onPermissionDecision}
+					{:else if asPermissionRequest}
 						<PermissionRequestRow
 							request={asPermissionRequest}
 							terminal={permissionTerminal}
-							onDecision={onPermissionDecision}
+							actionable={permissionActionable}
+							onDecision={onPermissionDecision ?? ignorePermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
+							draft={permissionDraft?.(asPermissionRequest.permissionOccurrenceId)}
+							{acquireTransientActivity}
+							onDraftChange={onPermissionDraftChange
+								? (draft) =>
+										onPermissionDraftChange(asPermissionRequest.permissionOccurrenceId, draft)
+								: undefined}
 						/>
 					{/if}
 				</div>

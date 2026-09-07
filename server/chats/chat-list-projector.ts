@@ -1,14 +1,16 @@
 import type { ChatListEntry, ChatOrderGroup } from '../../common/chat-list.js';
+import type { ChatSnapshotChat } from '../../common/chat-snapshot.js';
+import type { ChatProcessingPhase } from '../../common/chat-types.js';
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { chatIdCreatedAt } from '../../common/chat-id.js';
-import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import { normalizeTags } from '../../common/tags.js';
 import type { ChatMetadata } from './metadata-store.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
-import type { PathCache, ProjectPathStatus } from './path-cache.js';
 import { extractFirstLine } from '../lib/text.js';
+import { carryOverRevision } from './carryover-segments.js';
 
 interface ChatListProjectorSettings {
   getPinnedChatIds(): string[];
@@ -32,8 +34,13 @@ export interface ChatListProjectorDeps {
   registry: Pick<IChatRegistry, 'getChat'>;
   settings: ChatListProjectorSettings;
   metadata: ChatListProjectorMetadata;
-  agents: Pick<AgentRegistryServiceContract, 'isAgentSessionRunning'>;
-  pathCache: Pick<PathCache, 'resolveProjectPath'>;
+  processing: { phase(chatId: string): ChatProcessingPhase | null };
+  canReloadFromNativeHistory(chatId: string, session: ChatRegistryEntry): boolean;
+}
+
+export interface ChatSummaryProjection {
+  chat: ChatSnapshotChat;
+  processingPhase: ChatProcessingPhase | null;
 }
 
 export class ChatListProjector {
@@ -47,23 +54,31 @@ export class ChatListProjector {
     };
   }
 
-  async buildMany(
+  buildSummary(chatId: string): ChatSummaryProjection | null {
+    const session = this.deps.registry.getChat(chatId);
+    if (!session) return null;
+    return this.#summary(
+      chatId,
+      session,
+      this.deps.metadata.getChatMetadata(chatId),
+    );
+  }
+
+  buildMany(
     sessions: readonly (readonly [string, ChatRegistryEntry])[],
-    statuses: ReadonlyMap<string, ProjectPathStatus>,
-  ): Promise<Map<string, ChatListEntry>> {
+  ): Map<string, ChatListEntry> {
     const metadata = this.deps.metadata.listAllChatMetadata();
     const membership = this.membershipSnapshot();
     const entries = new Map<string, ChatListEntry>();
     for (const [chatId, session] of sessions) {
-      const status = statuses.get(session.projectPath);
-      if (!status?.available || !status.effectiveProjectKey) continue;
+      const chatMetadata = metadata.get(chatId) ?? null;
+      const summary = this.#summary(chatId, session, chatMetadata);
       entries.set(
         chatId,
-        this.#project(
-          chatId,
+        this.#listEntry(
+          summary,
           session,
-          status.effectiveProjectKey,
-          metadata.get(chatId) ?? null,
+          chatMetadata,
           membership,
         ),
       );
@@ -71,62 +86,94 @@ export class ChatListProjector {
     return entries;
   }
 
-  async buildOne(chatId: string): Promise<ChatListEntry | null> {
+  buildOne(chatId: string): ChatListEntry | null {
     const session = this.deps.registry.getChat(chatId);
     if (!session) return null;
-    const status = await this.deps.pathCache.resolveProjectPath(
-      session.projectPath,
-    );
-    if (!status.available || !status.effectiveProjectKey) return null;
-    return this.#project(
-      chatId,
+    const metadata = this.deps.metadata.getChatMetadata(chatId);
+    const summary = this.#summary(chatId, session, metadata);
+    return this.#listEntry(
+      summary,
       session,
-      status.effectiveProjectKey,
-      this.deps.metadata.getChatMetadata(chatId),
+      metadata,
       this.membershipSnapshot(),
     );
   }
 
-  #project(
+  #summary(
     chatId: string,
     session: ChatRegistryEntry,
-    effectiveProjectKey: string,
     metadata: ChatMetadata | null,
-    membership: ChatListMembershipSnapshot,
-  ): ChatListEntry {
-    const orderGroup = classifyOrderGroup(chatId, membership);
+  ): ChatSummaryProjection {
     const inferredCreatedAt = chatIdCreatedAt(chatId).toISOString();
     const overrideTitle = this.deps.settings.getChatName(chatId);
     const title = extractFirstLine(
       overrideTitle || metadata?.firstMessage || 'New Session',
-    );
+    ) || 'New Session';
+    return {
+      chat: {
+        id: chatId,
+        agentId: session.agentId,
+        agentOwnershipEpoch: session.agentOwnershipEpoch,
+        carryOverRevision: carryOverRevision(
+          session.carryOverSegments,
+          session.carryOverMigrationQuarantine,
+        ),
+        model: session.model || null,
+        apiProviderId: session.apiProviderId ?? null,
+        modelEndpointId: session.modelEndpointId ?? null,
+        modelProtocol: session.modelProtocol ?? null,
+        permissionMode: normalizePermissionMode(session.permissionMode),
+        thinkingMode: normalizeThinkingMode(session.thinkingMode),
+        title,
+        projectPath: session.projectPath,
+        tags: normalizeTags(session.tags ?? []),
+        canReloadFromNativeHistory: this.deps.canReloadFromNativeHistory(chatId, session),
+        activity: {
+          createdAt: metadata?.createdAt || inferredCreatedAt,
+          lastActivityAt: metadata?.lastActivity ?? null,
+        },
+      },
+      processingPhase: this.deps.processing.phase(chatId),
+    };
+  }
+
+  #listEntry(
+    summary: ChatSummaryProjection,
+    session: ChatRegistryEntry,
+    metadata: ChatMetadata | null,
+    membership: ChatListMembershipSnapshot,
+  ): ChatListEntry {
+    const { chat, processingPhase } = summary;
+    const orderGroup = classifyOrderGroup(chat.id, membership);
+    const title = chat.title;
     const firstPreview = extractFirstLine(metadata?.firstMessage || title);
     const lastPreview = extractFirstLine(
       metadata?.lastMessage || metadata?.firstMessage || title,
     );
     const lastReadAt = session.lastReadAt ?? null;
-    const lastActivityAt = metadata?.lastActivity ?? null;
+    const lastActivityAt = chat.activity.lastActivityAt;
     return {
-      id: chatId,
-      agentId: session.agentId,
-      model: session.model || null,
-      apiProviderId: session.apiProviderId ?? null,
-      modelEndpointId: session.modelEndpointId ?? null,
-      modelProtocol: session.modelProtocol ?? null,
-      permissionMode: normalizePermissionMode(session.permissionMode),
-      thinkingMode: normalizeThinkingMode(session.thinkingMode),
+      id: chat.id,
+      parentChat: session.parentChat,
+      agentId: chat.agentId,
+      agentOwnershipEpoch: session.agentOwnershipEpoch,
+      model: chat.model,
+      apiProviderId: chat.apiProviderId,
+      modelEndpointId: chat.modelEndpointId,
+      modelProtocol: chat.modelProtocol,
+      permissionMode: chat.permissionMode,
+      thinkingMode: chat.thinkingMode,
       agentSettings: session.agentSettingsById[session.agentId] ?? {
         ownerId: session.agentId,
         schemaVersion: 1,
         values: {},
       },
       title,
-      projectPath: session.projectPath,
-      effectiveProjectKey,
+      projectPath: chat.projectPath,
       orderGroup,
-      tags: session.tags || [],
+      tags: chat.tags,
       activity: {
-        createdAt: metadata?.createdAt || inferredCreatedAt,
+        createdAt: chat.activity.createdAt,
         lastActivityAt,
         lastReadAt,
       },
@@ -134,10 +181,10 @@ export class ChatListProjector {
         lastMessage: lastPreview,
         firstMessage: firstPreview,
       },
-      isActive: this.deps.agents.isAgentSessionRunning(
-        session.agentId,
-        session.agentSessionId,
-      ),
+      isActive: processingPhase !== null,
+      isProcessing: processingPhase !== null,
+      processingPhase,
+      canReloadFromNativeHistory: chat.canReloadFromNativeHistory,
       isPinned: orderGroup === 'pinned',
       isArchived: orderGroup === 'archived',
       isUnread: Boolean(

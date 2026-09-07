@@ -3,22 +3,47 @@
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
 
 import {
-	normalizePermissionMode,
-	normalizeThinkingMode,
-} from '$shared/chat-modes';
-import type { AgentSettingsEnvelope } from '$shared/agent-integration';
-import { createEmptyAgentSettings, normalizeAgentSettings } from '$lib/agents/agent-settings.js';
-import {
 	deleteChat as deleteChatApi,
 	generateChatTitle,
 	listChats,
+	reorderChat as reorderChatApi,
+	setChatTags as setChatTagsApi,
 	setLastSelectedChat,
+	toggleArchive as toggleArchiveApi,
+	type ToggleArchiveResponse,
 } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
-import type { ChatListEntry, ChatOrderGroup } from '$shared/chat-list';
+import type { ChatListEntry } from '$shared/chat-list';
+import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
+import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
+import {
+	chatExecutionDraftStorageKey,
+	removeLocalStorageItem,
+} from '$lib/utils/local-persistence.js';
+import {
+	ChatArchiveProjectionState,
+	type ChatArchiveProjectionOperation,
+} from './chat-archive-projection-state.svelte.js';
+import {
+	ChatProjectBindingState,
+	type ProjectPathChangedListener,
+} from './chat-project-binding-state.js';
+import {
+	insertServerEntry,
+	normalizeExecutionFields,
+	reconcileActivityProjection,
+	sameRecord,
+	toRecord,
+} from './chat-session-records.js';
+
+export interface ChatProcessingTransition {
+	chatId: string;
+	previousPhase: ChatProcessingPhase | null;
+	phase: ChatProcessingPhase | null;
+}
 
 export interface ChatSessionsStoreDeps {
 	listChats?: typeof listChats;
@@ -26,7 +51,22 @@ export interface ChatSessionsStoreDeps {
 	setLastSelectedChat?: typeof setLastSelectedChat;
 	generateChatTitle?: typeof generateChatTitle;
 	updateSessionName?: typeof updateSessionName;
+	reorderChat?: typeof reorderChatApi;
+	setChatTags?: typeof setChatTagsApi;
+	toggleArchive?: typeof toggleArchiveApi;
 	notifyError?: (message: string) => void;
+}
+
+export interface ChatArchiveMutation {
+	chatIds: string[];
+	completion: Promise<void>;
+}
+
+interface ArchiveMutationSettlement {
+	chatId: string;
+	result: PromiseSettledResult<ToggleArchiveResponse>;
+	requiredRefreshGeneration: number;
+	serverEntryGenerationAtSettlement: number;
 }
 
 export interface ChatSessionsPort {
@@ -38,6 +78,11 @@ export interface ChatSessionsPort {
 	setSelectedChatId(chatId: string | null): void;
 	quietRefreshChats(): Promise<void>;
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
+	moveChatToBoundary(
+		chatId: string,
+		boundary: ChatOrderBoundary,
+	): Promise<ReorderChatResponse | null>;
+	setChatTags(chatId: string, tags: string[]): Promise<boolean>;
 	hasChat(chatId: string): boolean;
 	isDraft(chatId: string): boolean;
 	patchDraftStartup(chatId: string, patch: Partial<ChatStartupConfig>): void;
@@ -45,192 +90,20 @@ export interface ChatSessionsPort {
 	upsertServerChat(entry: ChatListEntry): void;
 	removeChat(chatId: string): void;
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
+	patchActivity(chatId: string, timestamp: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
+	projectPathRevision(chatId: string): number;
+	onProjectPathChanged(listener: (chatId: string, projectPath: string | null) => void): () => void;
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
-	applyProcessingEvent(chatId: string, isProcessing: boolean): void;
-	invalidateProcessingAuthority(): void;
-	reconcileProcessing(activeChatIds: Set<string>): void;
-}
-
-function normalizeExecutionFields<
-	T extends {
-		agentId: string;
-		permissionMode?: unknown;
-		thinkingMode?: unknown;
-		agentSettings?: AgentSettingsEnvelope;
-	},
->(
-	value: T,
-): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
-	return {
-		permissionMode: normalizePermissionMode(value.permissionMode),
-		thinkingMode: normalizeThinkingMode(value.thinkingMode),
-		agentSettings: normalizeAgentSettings(
-			value.agentId,
-			value.agentSettings,
-			createEmptyAgentSettings(value.agentId),
-		),
-	};
-}
-
-function toRecord(session: ChatSession): ChatSessionRecord {
-	return {
-		id: session.id,
-		projectPath: session.projectPath,
-		effectiveProjectKey: session.effectiveProjectKey,
-		projectIdentityState: 'available',
-		orderGroup: session.orderGroup,
-		title: session.title,
-		agentId: session.agentId,
-		model: session.model,
-		apiProviderId: session.apiProviderId ?? null,
-		modelEndpointId: session.modelEndpointId ?? null,
-		modelProtocol: session.modelProtocol ?? null,
-		...normalizeExecutionFields(session),
-		createdAt: session.activity?.createdAt ?? null,
-		lastActivityAt: session.activity?.lastActivityAt ?? null,
-		lastReadAt: session.activity?.lastReadAt ?? null,
-		isPinned: session.isPinned,
-		isArchived: session.isArchived ?? false,
-		isProcessing: session.isActive,
-		isUnread: session.isUnread ?? false,
-		status: 'running',
-		lastMessage: session.preview?.lastMessage || undefined,
-		tags: session.tags ?? [],
-		firstMessage: session.preview?.firstMessage || undefined,
-	};
-}
-
-function arraysEqual(a: string[], b: string[]): boolean {
-	if (a.length !== b.length) return false;
-	for (let i = 0; i < a.length; i++) {
-		if (a[i] !== b[i]) return false;
-	}
-	return true;
-}
-
-function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
-	return (
-		a.id === b.id &&
-		a.projectPath === b.projectPath &&
-		a.effectiveProjectKey === b.effectiveProjectKey &&
-		a.projectIdentityState === b.projectIdentityState &&
-		a.orderGroup === b.orderGroup &&
-		a.title === b.title &&
-		a.agentId === b.agentId &&
-		a.model === b.model &&
-		a.apiProviderId === b.apiProviderId &&
-		a.modelEndpointId === b.modelEndpointId &&
-		a.modelProtocol === b.modelProtocol &&
-		a.permissionMode === b.permissionMode &&
-		a.thinkingMode === b.thinkingMode &&
-		JSON.stringify(a.agentSettings) === JSON.stringify(b.agentSettings) &&
-		a.createdAt === b.createdAt &&
-		a.lastActivityAt === b.lastActivityAt &&
-		a.lastReadAt === b.lastReadAt &&
-		a.isPinned === b.isPinned &&
-		a.isArchived === b.isArchived &&
-		a.isProcessing === b.isProcessing &&
-		a.isUnread === b.isUnread &&
-		a.status === b.status &&
-		a.lastMessage === b.lastMessage &&
-		a.firstMessage === b.firstMessage &&
-		arraysEqual(a.tags, b.tags)
-	);
-}
-
-function reconcileActivityProjection(
-	previous: ChatSessionRecord | undefined,
-	next: ChatSessionRecord,
-): void {
-	if (!previous) return;
-	let preservedLocalTimestamp = false;
-
-	if (previous.lastActivityAt && (!next.lastActivityAt || previous.lastActivityAt > next.lastActivityAt)) {
-		next.lastActivityAt = previous.lastActivityAt;
-		next.lastMessage = previous.lastMessage;
-		preservedLocalTimestamp = true;
-	} else if (previous.lastMessage && !next.lastMessage) {
-		next.lastMessage = previous.lastMessage;
-	}
-
-	if (previous.lastReadAt && (!next.lastReadAt || previous.lastReadAt > next.lastReadAt)) {
-		next.lastReadAt = previous.lastReadAt;
-		preservedLocalTimestamp = true;
-	}
-
-	if (preservedLocalTimestamp) {
-		next.isUnread = Boolean(
-			next.lastActivityAt && (!next.lastReadAt || next.lastActivityAt > next.lastReadAt),
-		);
-	}
-}
-
-function insertServerEntry(
-	order: readonly string[],
-	records: Readonly<Record<string, ChatSessionRecord>>,
-	chatId: string,
-	group: ChatOrderGroup,
-	previous: ChatSessionRecord | undefined,
-): string[] {
-	const priorIndex = order.indexOf(chatId);
-	const without = order.filter((id) => id !== chatId && Boolean(records[id]));
-	if (previous?.status !== 'draft' && previous?.orderGroup === group && priorIndex >= 0) {
-		without.splice(Math.min(priorIndex, without.length), 0, chatId);
-		return without;
-	}
-
-	const groupRank: Record<ChatOrderGroup, number> = {
-		pinned: 0,
-		orphan: 1,
-		normal: 2,
-		archived: 3,
-	};
-	const draftCount = without.findIndex((id) => records[id]?.status !== 'draft');
-	const serverStart = draftCount === -1 ? without.length : draftCount;
-	let insertionIndex = serverStart;
-	while (insertionIndex < without.length) {
-		const record = records[without[insertionIndex]];
-		if (!record || record.status === 'draft') {
-			insertionIndex += 1;
-			continue;
-		}
-		const recordGroup = record.orderGroup ?? 'orphan';
-		if (groupRank[recordGroup] >= groupRank[group]) break;
-		insertionIndex += 1;
-	}
-	if (group === 'normal') {
-		without.splice(insertionIndex, 0, chatId);
-		return without;
-	}
-	if (group === 'archived') {
-		without.push(chatId);
-		return without;
-	}
-	while (
-		insertionIndex < without.length &&
-		records[without[insertionIndex]]?.orderGroup === group
-	) {
-		insertionIndex += 1;
-	}
-	without.splice(insertionIndex, 0, chatId);
-	if (group !== 'orphan') return without;
-
-	const orphanIds = without.filter((id) => records[id]?.orderGroup === 'orphan');
-	orphanIds.sort((a, b) => {
-		const aCreated = records[a]?.createdAt ?? '';
-		const bCreated = records[b]?.createdAt ?? '';
-		return bCreated.localeCompare(aCreated) || a.localeCompare(b);
-	});
-	let orphanIndex = 0;
-	return without.map((id) =>
-		records[id]?.orderGroup === 'orphan' ? orphanIds[orphanIndex++] : id,
-	);
+	isChatProcessing(chatId: string): boolean;
+	processingPhase(chatId: string): ChatProcessingPhase | null;
+	applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null): ChatProcessingTransition;
+	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[];
 }
 
 export class ChatSessionsStore implements ChatSessionsPort {
-	byId = $state<Record<string, ChatSessionRecord>>({});
-	order = $state<string[]>([]);
+	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
+	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	lastSelectedChatId = $state<string | null>(null);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
@@ -239,20 +112,29 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#deps: ChatSessionsStoreDeps;
 	#inFlightFetch: Promise<void> | null = null;
 	#needsFollowUpFetch = false;
+	#nextFetchGeneration = 0;
+	#latestSuccessfulFetchGeneration = 0;
+	#nextServerEntryGeneration = 0;
+	readonly #serverEntryGenerationByChatId = new Map<string, number>();
 	#selectionWriteInFlight = false;
 	#selectionWritePending: string | null | undefined = undefined;
 	#selectionWriteAcked: string | null = null;
-	#processingSnapshot: Set<string> | null = null;
-	readonly #processingOverrides = new Map<string, boolean>();
+	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
+	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
+	readonly #archiveProjection = new ChatArchiveProjectionState();
+	readonly #projectBindings = new ChatProjectBindingState();
+
+	#byId = $derived.by(() => this.#archiveProjection.projectRecords(this.#baseById));
+	#order = $derived.by(() => this.#archiveProjection.projectOrder(this.#baseOrder, this.#byId));
 
 	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
-		return this.byId[this.selectedChatId] ?? null;
+		return this.#byId[this.selectedChatId] ?? null;
 	});
 
 	#orderedChats = $derived.by(() =>
-		this.order
-			.map((id) => this.byId[id])
+		this.#order
+			.map((id) => this.#byId[id])
 			.filter((chat): chat is ChatSessionRecord => Boolean(chat)),
 	);
 
@@ -264,6 +146,23 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		return this.#selectedChat;
 	}
 
+	get byId(): Record<string, ChatSessionRecord> {
+		return this.#byId;
+	}
+
+	set byId(records: Record<string, ChatSessionRecord>) {
+		this.#baseById = records;
+		this.#pruneServerEntryGenerations(records);
+	}
+
+	get order(): string[] {
+		return this.#order;
+	}
+
+	set order(chatIds: string[]) {
+		this.#baseOrder = chatIds;
+	}
+
 	get orderedChats(): ChatSessionRecord[] {
 		return this.#orderedChats;
 	}
@@ -273,13 +172,16 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	async #runFetch(showLoading: boolean): Promise<void> {
+		const fetchGeneration = ++this.#nextFetchGeneration;
 		if (showLoading) this.isLoadingChats = true;
 		try {
 			const fetchChats = this.#deps.listChats ?? listChats;
+			const projectPathRevisions = this.#projectBindings.captureRevisions();
 			const res = await fetchChats();
 			this.lastSelectedChatId =
 				typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
-			this.upsertFromServer(res.sessions ?? []);
+			this.#upsertFromServer(res.sessions ?? [], projectPathRevisions);
+			this.#latestSuccessfulFetchGeneration = fetchGeneration;
 		} catch (err) {
 			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
 			console.error(`[ChatSessionsStore] ${prefix}:`, err);
@@ -320,6 +222,114 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		return this.#refresh(false);
 	}
 
+	isArchiveMutationPending(chatId: string): boolean {
+		return this.#archiveProjection.isPending(chatId);
+	}
+
+	isChatOptimisticallyArchived(chatId: string): boolean {
+		return this.#archiveProjection.isOptimisticallyArchived(chatId);
+	}
+
+	startArchivingChats(chatIds: readonly string[]): ChatArchiveMutation {
+		return this.#startArchiveMutation(chatIds, true);
+	}
+
+	startUnarchivingChats(chatIds: readonly string[]): ChatArchiveMutation {
+		return this.#startArchiveMutation(chatIds, false);
+	}
+
+	#startArchiveMutation(chatIds: readonly string[], targetArchived: boolean): ChatArchiveMutation {
+		const operation = this.#archiveProjection.admit(this.#byId, chatIds, targetArchived);
+		return {
+			chatIds: operation.chatIds,
+			completion: this.#executeArchiveMutation(operation),
+		};
+	}
+
+	async #executeArchiveMutation(operation: ChatArchiveProjectionOperation): Promise<void> {
+		if (operation.chatIds.length === 0) return;
+		const toggleRemoteArchive = this.#deps.toggleArchive ?? toggleArchiveApi;
+		const settlements = await Promise.all(
+			operation.chatIds.map((chatId) => this.#settleArchiveMutation(chatId, toggleRemoteArchive)),
+		);
+		await this.#refresh(false);
+
+		if (operation.targetArchived) {
+			this.#applyAcknowledgedArchives(settlements);
+		}
+		this.#archiveProjection.complete(operation);
+
+		for (const { chatId, result } of settlements) {
+			if (result.status === 'rejected') throw result.reason;
+			if (!result.value.success || result.value.isArchived !== operation.targetArchived) {
+				throw new Error(`Archive mutation did not reach the requested state for ${chatId}`);
+			}
+		}
+	}
+
+	async #settleArchiveMutation(
+		chatId: string,
+		toggleRemoteArchive: typeof toggleArchiveApi,
+	): Promise<ArchiveMutationSettlement> {
+		// Lets the initiating handler navigate before archive I/O begins.
+		await Promise.resolve();
+		let result: PromiseSettledResult<ToggleArchiveResponse>;
+		try {
+			const value = await toggleRemoteArchive(chatId);
+			result = { status: 'fulfilled', value };
+		} catch (reason) {
+			result = { status: 'rejected', reason };
+		}
+
+		return {
+			chatId,
+			result,
+			// Only a fetch started after this mutation settles can reconcile it.
+			requiredRefreshGeneration: this.#nextFetchGeneration + 1,
+			serverEntryGenerationAtSettlement: this.#serverEntryGenerationByChatId.get(chatId) ?? 0,
+		};
+	}
+
+	#applyAcknowledgedArchives(settlements: ArchiveMutationSettlement[]): void {
+		const archivedIds: string[] = [];
+		let nextById = this.#baseById;
+		for (const settlement of settlements) {
+			const { chatId } = settlement;
+			if (!this.#shouldApplyAcknowledgedArchive(settlement)) continue;
+			const chat = this.#baseById[chatId];
+			if (!chat) continue;
+			if (nextById === this.#baseById) nextById = { ...this.#baseById };
+			nextById[chatId] = {
+				...chat,
+				isArchived: true,
+				isPinned: false,
+				orderGroup: 'archived',
+			};
+			archivedIds.push(chatId);
+		}
+		if (archivedIds.length === 0) return;
+
+		const archivedIdSet = new Set(archivedIds);
+		const nextOrder = this.#baseOrder.filter((chatId) => !archivedIdSet.has(chatId));
+		const archivedIndex = nextOrder.findIndex(
+			(chatId) => nextById[chatId]?.orderGroup === 'archived',
+		);
+		nextOrder.splice(archivedIndex < 0 ? nextOrder.length : archivedIndex, 0, ...archivedIds);
+		this.#baseById = nextById;
+		this.#baseOrder = nextOrder;
+	}
+
+	#shouldApplyAcknowledgedArchive(settlement: ArchiveMutationSettlement): boolean {
+		if (this.#latestSuccessfulFetchGeneration >= settlement.requiredRefreshGeneration) {
+			return false;
+		}
+		const serverEntryGeneration = this.#serverEntryGenerationByChatId.get(settlement.chatId) ?? 0;
+		if (serverEntryGeneration > settlement.serverEntryGenerationAtSettlement) return false;
+
+		const { result } = settlement;
+		return result.status === 'fulfilled' && result.value.success && result.value.isArchived;
+	}
+
 	/** Deletes a chat server-side after callers apply any optimistic local removal. */
 	async deleteRemoteChat(chatId: string): Promise<void> {
 		try {
@@ -340,6 +350,48 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		} catch (err) {
 			console.error('[ChatSessionsStore] Rename failed:', err);
 			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
+			return false;
+		}
+	}
+
+	async moveChatToBoundary(
+		chatId: string,
+		boundary: ChatOrderBoundary,
+	): Promise<ReorderChatResponse | null> {
+		try {
+			const reorderRemoteChat = this.#deps.reorderChat ?? reorderChatApi;
+			const result = await reorderRemoteChat({
+				chatId,
+				placement: { kind: 'boundary', boundary },
+			});
+			await this.quietRefreshChats();
+			return result;
+		} catch (err) {
+			console.error('[ChatSessionsStore] Reorder failed:', err);
+			this.#deps.notifyError?.(m.notifications_reorder_chats_failed());
+			return null;
+		}
+	}
+
+	async setChatTags(chatId: string, tags: string[]): Promise<boolean> {
+		const chat = this.#baseById[chatId];
+		if (!chat) return false;
+		if (chat.status === 'draft') {
+			this.patchDraftStartup(chatId, { tags });
+			this.patchChat(chatId, { tags });
+			return true;
+		}
+
+		try {
+			const setRemoteTags = this.#deps.setChatTags ?? setChatTagsApi;
+			const result = await setRemoteTags(chatId, tags);
+			if (!result.success) return false;
+			this.patchChat(chatId, { tags: result.tags });
+			await this.quietRefreshChats();
+			return true;
+		} catch (err) {
+			console.error('[ChatSessionsStore] Tag update failed:', err);
+			this.#deps.notifyError?.(m.notifications_update_chat_tags_failed());
 			return false;
 		}
 	}
@@ -396,28 +448,35 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	/** Returns true if the store contains a record for the given chat ID. */
 	hasChat(chatId: string): boolean {
-		return chatId in this.byId;
+		return chatId in this.#baseById;
 	}
 
 	/** Returns true if the chat exists and is in draft status. */
 	isDraft(chatId: string): boolean {
-		return this.byId[chatId]?.status === 'draft';
+		return this.#baseById[chatId]?.status === 'draft';
 	}
 
 	/** Merges server-fetched sessions into the store. Preserves object identity
 	 *  for unchanged records to avoid unnecessary re-renders. Drafts that the
 	 *  server now owns get their startup config cleaned up. */
 	upsertFromServer(sessions: ChatSession[]): void {
+		this.#upsertFromServer(sessions);
+	}
+
+	#upsertFromServer(
+		sessions: ChatSession[],
+		requestProjectPathRevisions?: ReadonlyMap<string, number>,
+	): void {
 		const nextById: Record<string, ChatSessionRecord> = {};
 		const nextOrder: string[] = [];
 		const previousServerChatIds = new Set(
-			Object.values(this.byId)
+			Object.values(this.#baseById)
 				.filter((record) => record.status !== 'draft')
 				.map((record) => record.id),
 		);
 
 		// Preserve drafts that the server doesn't know about yet.
-		for (const [id, record] of Object.entries(this.byId)) {
+		for (const [id, record] of Object.entries(this.#baseById)) {
 			if (record.status === 'draft') {
 				nextById[id] = record;
 			}
@@ -426,9 +485,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const startupIdsToRemove: string[] = [];
 
 		for (const session of sessions) {
-			const next = toRecord(session);
-			next.isProcessing = this.#resolveProcessing(next.id, next.isProcessing);
-			const prev = this.byId[next.id];
+			let next = toRecord(session);
+			next.processingPhase = this.#resolveProcessing(next.id, next.processingPhase);
+			next.isProcessing = next.processingPhase !== null;
+			const prev = this.#baseById[next.id];
+			next = this.#projectBindings.reconcileFetchedRecord(next, prev, requestProjectPathRevisions);
 			reconcileActivityProjection(prev, next);
 			if (prev && sameRecord(prev, next)) {
 				nextById[next.id] = prev;
@@ -455,18 +516,23 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const serverIdSet = new Set(nextOrder);
 		for (const chatId of previousServerChatIds) {
 			if (serverIdSet.has(chatId)) continue;
+			this.#projectBindings.publish(chatId, null);
 			this.#processingOverrides.delete(chatId);
 			this.#processingSnapshot?.delete(chatId);
 		}
 		const draftOrder: string[] = [];
-		for (const id of this.order) {
+		for (const id of this.#baseOrder) {
 			if (nextById[id]?.status === 'draft' && !serverIdSet.has(id)) {
 				draftOrder.push(id);
 			}
 		}
 
-		this.byId = nextById;
-		this.order = [...draftOrder, ...nextOrder];
+		this.#baseById = nextById;
+		this.#baseOrder = [...draftOrder, ...nextOrder];
+		this.#pruneServerEntryGenerations(nextById);
+		if (this.selectedChatId && !nextById[this.selectedChatId]) {
+			this.selectedChatId = null;
+		}
 	}
 
 	createDraft(params: { id: string; projectPath: string; startup: ChatStartupConfig }): void {
@@ -478,9 +544,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 		const draft: ChatSessionRecord = {
 			id,
+			parentChat: null,
 			projectPath,
-			effectiveProjectKey: null,
-			projectIdentityState: 'pending',
 			orderGroup: null,
 			title: normalizedStartup.firstMessage.trim() || m.chat_sessions_new_session(),
 			agentId: normalizedStartup.agentId,
@@ -495,21 +560,24 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			isPinned: false,
 			isArchived: false,
 			isProcessing: false,
+			processingPhase: null,
+			canReloadFromNativeHistory: false,
 			isUnread: false,
 			status: 'draft',
+			agentOwnershipEpoch: null,
 			tags: normalizedStartup.tags ?? [],
 			firstMessage: undefined,
 		};
 
-		this.byId = { ...this.byId, [id]: draft };
-		this.order = this.order.includes(id) ? this.order : [id, ...this.order];
+		this.#baseById = { ...this.#baseById, [id]: draft };
+		this.#baseOrder = this.#baseOrder.includes(id) ? this.#baseOrder : [id, ...this.#baseOrder];
 		this.startupByChatId = { ...this.startupByChatId, [id]: normalizedStartup };
 		this.selectedChatId = id;
 	}
 
 	/** Updates startup configuration for an existing draft chat. */
 	patchDraftStartup(chatId: string, patch: Partial<ChatStartupConfig>): void {
-		const chat = this.byId[chatId];
+		const chat = this.#baseById[chatId];
 		if (!chat || chat.status !== 'draft') return;
 		const startup = this.startupByChatId[chatId];
 		if (!startup) return;
@@ -534,13 +602,22 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
-		const previous = this.byId[entry.id];
+		const previous = this.#baseById[entry.id];
+		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath);
 		reconcileActivityProjection(previous, next);
-		next.isProcessing = this.#resolveProcessing(entry.id, next.isProcessing);
-		const nextById = { ...this.byId, [entry.id]: next };
-		const nextOrder = insertServerEntry(this.order, nextById, entry.id, entry.orderGroup, previous);
-		this.byId = nextById;
-		this.order = nextOrder;
+		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
+		next.isProcessing = next.processingPhase !== null;
+		const nextById = { ...this.#baseById, [entry.id]: next };
+		const nextOrder = insertServerEntry(
+			this.#baseOrder,
+			nextById,
+			entry.id,
+			entry.orderGroup,
+			previous,
+		);
+		this.#baseById = nextById;
+		this.#baseOrder = nextOrder;
+		this.#serverEntryGenerationByChatId.set(entry.id, ++this.#nextServerEntryGeneration);
 		if ((clearStartup || previous?.status === 'draft') && this.startupByChatId[entry.id]) {
 			const startup = { ...this.startupByChatId };
 			delete startup[entry.id];
@@ -551,26 +628,35 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	removeChat(chatId: string): void {
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
-		if (!this.byId[chatId]) return;
+		removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
+		if (!this.#baseById[chatId]) return;
+		this.#projectBindings.publish(chatId, null);
 
-		const nextById = { ...this.byId };
+		const nextById = { ...this.#baseById };
 		delete nextById[chatId];
 
 		const nextStartup = { ...this.startupByChatId };
 		delete nextStartup[chatId];
 
-		this.byId = nextById;
+		this.#baseById = nextById;
 		this.startupByChatId = nextStartup;
-		this.order = this.order.filter((id) => id !== chatId);
+		this.#baseOrder = this.#baseOrder.filter((id) => id !== chatId);
+		this.#serverEntryGenerationByChatId.delete(chatId);
 
 		if (this.selectedChatId === chatId) {
 			this.selectedChatId = null;
 		}
 	}
 
+	#pruneServerEntryGenerations(records: Readonly<Record<string, ChatSessionRecord>>): void {
+		for (const chatId of this.#serverEntryGenerationByChatId.keys()) {
+			if (!records[chatId]) this.#serverEntryGenerationByChatId.delete(chatId);
+		}
+	}
+
 	/** Patches preview text for a chat in the sidebar. */
 	patchPreview(chatId: string, content: string, timestamp?: string): void {
-		const chat = this.byId[chatId];
+		const chat = this.#baseById[chatId];
 		if (!chat) return;
 		if (timestamp && chat.lastActivityAt && timestamp < chat.lastActivityAt) return;
 		const lastActivityAt = timestamp ?? chat.lastActivityAt;
@@ -578,95 +664,141 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			? Boolean(lastActivityAt && (!chat.lastReadAt || lastActivityAt > chat.lastReadAt))
 			: chat.isUnread;
 		if (
-			(chat.lastMessage || '') === content
-			&& chat.lastActivityAt === lastActivityAt
-			&& chat.isUnread === isUnread
-		) return;
-		this.byId = {
-			...this.byId,
+			(chat.lastMessage || '') === content &&
+			chat.lastActivityAt === lastActivityAt &&
+			chat.isUnread === isUnread
+		)
+			return;
+		this.#baseById = {
+			...this.#baseById,
 			[chatId]: { ...chat, lastMessage: content, lastActivityAt, isUnread },
+		};
+	}
+
+	/** Advances live activity without changing the user/assistant preview text. */
+	patchActivity(chatId: string, timestamp: string): void {
+		const chat = this.#baseById[chatId];
+		if (!chat || (chat.lastActivityAt && timestamp < chat.lastActivityAt)) return;
+		const isUnread = Boolean(!chat.lastReadAt || timestamp > chat.lastReadAt);
+		if (chat.lastActivityAt === timestamp && chat.isUnread === isUnread) return;
+		this.#baseById = {
+			...this.#baseById,
+			[chatId]: { ...chat, lastActivityAt: timestamp, isUnread },
 		};
 	}
 
 	/** Updates a chat record field, such as title after rename. */
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
-		const chat = this.byId[chatId];
+		const chat = this.#baseById[chatId];
 		if (!chat) return;
+		if (typeof patch.projectPath === 'string' && patch.projectPath !== chat.projectPath) {
+			this.#projectBindings.publish(chatId, patch.projectPath);
+		}
 		const nextChat = {
 			...chat,
 			...patch,
 			...normalizeExecutionFields({ ...chat, ...patch }),
 		};
-		this.byId = {
-			...this.byId,
+		this.#baseById = {
+			...this.#baseById,
 			[chatId]: nextChat,
 		};
+	}
+
+	projectPathRevision(chatId: string): number {
+		return this.#projectBindings.revision(chatId);
+	}
+
+	onProjectPathChanged(listener: ProjectPathChangedListener): () => void {
+		return this.#projectBindings.subscribe(listener);
 	}
 
 	/** Applies a server-confirmed lastReadAt and recomputes isUnread locally.
 	 *  Avoids the race where the server computes isUnread from a lastActivity
 	 *  that advances during streaming, overwriting the client's optimistic false. */
 	patchLastReadAt(chatId: string, lastReadAt: string): void {
-		const chat = this.byId[chatId];
+		const chat = this.#baseById[chatId];
 		if (!chat) return;
-		const reconciledLastReadAt = chat.lastReadAt && chat.lastReadAt > lastReadAt
-			? chat.lastReadAt
-			: lastReadAt;
-		const isUnread = Boolean(
-			chat.lastActivityAt && chat.lastActivityAt > reconciledLastReadAt,
-		);
+		const reconciledLastReadAt =
+			chat.lastReadAt && chat.lastReadAt > lastReadAt ? chat.lastReadAt : lastReadAt;
+		const isUnread = Boolean(chat.lastActivityAt && chat.lastActivityAt > reconciledLastReadAt);
 		if (chat.lastReadAt === reconciledLastReadAt && chat.isUnread === isUnread) return;
-		this.byId = {
-			...this.byId,
+		this.#baseById = {
+			...this.#baseById,
 			[chatId]: { ...chat, lastReadAt: reconciledLastReadAt, isUnread },
 		};
 	}
 
+	/** Returns WebSocket-authoritative processing state before or after list hydration. */
+	isChatProcessing(chatId: string): boolean {
+		return this.processingPhase(chatId) !== null;
+	}
+
+	processingPhase(chatId: string): ChatProcessingPhase | null {
+		return this.#resolveProcessing(chatId, this.#baseById[chatId]?.processingPhase ?? null);
+	}
+
 	/** Applies a WebSocket-authoritative processing event for one chat. */
-	applyProcessingEvent(chatId: string, isProcessing: boolean): void {
-		this.#processingOverrides.set(chatId, isProcessing);
-		const chat = this.byId[chatId];
-		if (!chat) return;
+	applyProcessingEvent(
+		chatId: string,
+		phase: ChatProcessingPhase | null,
+	): ChatProcessingTransition {
+		const previousPhase = this.processingPhase(chatId);
+		this.#processingOverrides.set(chatId, phase);
+		const chat = this.#baseById[chatId];
+		if (!chat) return { chatId, previousPhase, phase };
 
-		if (chat.isProcessing === isProcessing) return;
-		this.byId = {
-			...this.byId,
-			[chatId]: { ...chat, isProcessing },
-		};
+		if (chat.processingPhase !== phase || chat.isProcessing !== (phase !== null)) {
+			this.#baseById = {
+				...this.#baseById,
+				[chatId]: { ...chat, isProcessing: phase !== null, processingPhase: phase },
+			};
+		}
+		return { chatId, previousPhase, phase };
 	}
 
-	/** Drops authority retained from a previous socket so REST can converge state. */
-	invalidateProcessingAuthority(): void {
-		this.#processingSnapshot = null;
-		this.#processingOverrides.clear();
-	}
-
-	/** Replaces processing state from a reconnect snapshot. Later WebSocket
+	/** Replaces processing state from a correlated snapshot. Later WebSocket
 	 *  events override this baseline; REST list responses never do. */
-	reconcileProcessing(activeChatIds: Set<string>): void {
-		this.#processingSnapshot = new Set(activeChatIds);
+	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[] {
+		const snapshot = new Map(entries.map((entry) => [entry.chatId, entry.phase]));
+		const chatIds = new Set([
+			...Object.keys(this.#baseById),
+			...(this.#processingSnapshot?.keys() ?? []),
+			...this.#processingOverrides.keys(),
+			...snapshot.keys(),
+		]);
+		const transitions = [...chatIds].map((chatId) => ({
+			chatId,
+			previousPhase: this.processingPhase(chatId),
+			phase: snapshot.get(chatId) ?? null,
+		}));
+		this.#processingSnapshot = snapshot;
 		this.#processingOverrides.clear();
 
 		let changed = false;
-		const nextById = { ...this.byId };
+		const nextById = { ...this.#baseById };
 
 		for (const [id, record] of Object.entries(nextById)) {
-			const shouldBeProcessing = activeChatIds.has(id);
-			if (record.isProcessing !== shouldBeProcessing) {
-				nextById[id] = { ...record, isProcessing: shouldBeProcessing };
+			const phase = snapshot.get(id) ?? null;
+			if (record.processingPhase !== phase || record.isProcessing !== (phase !== null)) {
+				nextById[id] = { ...record, isProcessing: phase !== null, processingPhase: phase };
 				changed = true;
 			}
 		}
 
 		if (changed) {
-			this.byId = nextById;
+			this.#baseById = nextById;
 		}
+		return transitions.filter((transition) => transition.previousPhase !== transition.phase);
 	}
 
-	#resolveProcessing(chatId: string, restValue: boolean): boolean {
+	#resolveProcessing(
+		chatId: string,
+		restValue: ChatProcessingPhase | null,
+	): ChatProcessingPhase | null {
 		const override = this.#processingOverrides.get(chatId);
-		if (override !== undefined) return override;
-		if (this.#processingSnapshot) return this.#processingSnapshot.has(chatId);
+		if (override !== undefined || this.#processingOverrides.has(chatId)) return override ?? null;
+		if (this.#processingSnapshot) return this.#processingSnapshot.get(chatId) ?? null;
 		return restValue;
 	}
 }

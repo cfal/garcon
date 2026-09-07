@@ -7,17 +7,14 @@ import type { DrainHandle } from '$lib/ws/drain';
 import type { ServerWsMessage, EventKey } from '$shared/ws-events';
 import {
 	ChatMessagesMessage,
-	ChatGenerationResetMessage,
+	ChatTranscriptReplacedMessage,
+	ChatOperationalNoticeMessage,
+	ChatTransientFeedMutationMessage,
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
 	ChatSessionStoppedMessage,
-	ChatProcessingUpdatedMessage,
 	ChatExecutionControlUpdatedMessage,
-	QueueDispatchingMessage,
-	PendingUserInputUpdatedMessage,
-	PendingUserInputStatusUpdatedMessage,
-	PendingUserInputClearedMessage,
 	WsFaultMessage,
 	ChatTitleUpdatedMessage,
 	ChatProjectPathUpdatedMessage,
@@ -25,8 +22,7 @@ import {
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
-import type { ChatViewMessage } from '$shared/chat-view';
-import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
+import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
@@ -37,6 +33,8 @@ import {
 } from '$lib/chat/conversation/pending-chat-handoff.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
+import { getChatSnapshot } from '$lib/api/chats.js';
 
 import { untrack } from 'svelte';
 import { normalizeEvent } from '$lib/ws/normalize';
@@ -48,15 +46,10 @@ import {
 	handlePermissionLifecycleFromBatch,
 	type PermissionLifecycleContext,
 } from './handlers/permissions';
-import {
-	handleExecutionControlUpdated,
-	handleQueueSending,
-	type QueueContext,
-} from './handlers/queue';
+import { handleExecutionControlUpdated, type QueueContext } from './handlers/queue';
 import {
 	handleChatCreated,
 	handleChatAborted,
-	handleChatStatus,
 	handleWsError,
 	type ChatEventContext,
 } from './handlers/chat';
@@ -70,19 +63,22 @@ import {
 } from './handlers/sidebar';
 
 export interface EventRouterAgentSettings {
-	permissionMode: () => PermissionMode;
-	setPermissionMode: (mode: PermissionMode) => void;
+	permissionMode: (chatId: string) => PermissionMode | null;
+	setPermissionMode: (chatId: string, mode: PermissionMode) => void;
 }
 
 export type EventRouterSessionsStore = Pick<
 	ChatSessionsPort,
+	| 'byId'
 	| 'selectedChat'
 	| 'setSelectedChatId'
 	| 'patchPreview'
+	| 'patchActivity'
 	| 'quietRefreshChats'
 	| 'removeChat'
 	| 'patchChat'
 	| 'reconcileProcessing'
+	| 'isChatProcessing'
 	| 'applyProcessingEvent'
 	| 'patchLastReadAt'
 >;
@@ -94,32 +90,21 @@ export interface EventRouterNavigation {
 
 export type EventRouterChatStateStore = Pick<
 	ActiveTranscriptPort,
-	| 'getCursor'
-	| 'appendLocalNotice'
-	| 'upsertPendingUserInput'
-	| 'clearPendingUserInput'
-	| 'updatePendingUserInputDeliveryStatus'
-	| 'loadMessages'
+	'getCursor' | 'appendLocalNotice' | 'appendServerNotice' | 'loadMessages'
 > & {
+	getChatCursor: (chatId: string) => { transcriptViewId: string; lastOrdinal: number } | null;
 	applyChatMessages: (
 		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	) => 'applied' | 'generation-changed' | 'gap-detected';
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
+		resendCandidates: ResendCandidate[],
+	) => 'applied' | 'view-changed' | 'gap-detected';
 	reloadChatTranscript: (chatId: string) => void;
-	warmBackgroundTranscript: (
-		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	) => boolean;
-	isVisiblePreviewChat: (chatId: string) => boolean;
-	warmVisibleChatPreview: (
-		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	) => boolean | void;
-	loadVisibleChatPreview: (chatId: string) => Promise<void> | void;
-	markVisibleChatPreviewStale: (chatId: string) => void;
+	isRenderedChat: (chatId: string) => boolean;
+	loadRenderedChat: (chatId: string) => Promise<void> | void;
+	markRenderedChatStale: (chatId: string) => void;
 	removeChatTranscript: (chatId: string) => void;
 	markChatTranscriptStale: (chatId: string) => void;
 	markChatTranscriptValidated: (chatId: string) => void;
@@ -129,14 +114,15 @@ export interface EventRouterLifecycleStore {
 	currentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	markTurnRunning: (chatId?: string | null) => void;
-	clearTurnStatus: () => void;
+	clearTurnStatus: (chatId: string) => void;
 	setLoadingStatus: (
 		status: { text: string; tokens: number; can_interrupt: boolean } | null,
 	) => void;
 	pushLoadingStatus: (
+		chatId: string,
 		entry: import('$lib/chat/conversation/conversation-lifecycle-state.svelte.js').LoadingStatusEntry,
 	) => void;
-	popLoadingStatus: (id: string) => void;
+	popLoadingStatus: (chatId: string, id: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 }
 
@@ -149,6 +135,10 @@ export interface EventRouterReadStateStore {
 	enqueueReadReceipt: (chatId: string, readAt: string) => void;
 }
 
+export interface EventRouterChatPresentations {
+	clearDeletedChat: (chatId: string) => void;
+}
+
 // Store references required by the router to build handler contexts.
 export interface EventRouterStores {
 	agentSettings: EventRouterAgentSettings;
@@ -159,67 +149,62 @@ export interface EventRouterStores {
 	conversationUi: ConversationUiPort;
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
-}
-
-function extractFirstLine(text: string): string {
-	if (!text) return '';
-	const nl = text.indexOf('\n');
-	if (nl < 0) return text.trim();
-	return text.slice(0, nl).trim();
-}
-
-// Extracts sidebar preview content from an incoming message batch.
-// Only considers finalized types (not partials) so background chats
-// update on completed messages. Returns null if the batch contains
-// no displayable content.
-export function selectPreviewFromBatch(
-	messages: ChatMessage[],
-): { content: string; timestamp: string } | null {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (
-			msg instanceof AssistantMessage ||
-			msg instanceof UserMessage ||
-			msg instanceof ThinkingMessage
-		) {
-			return {
-				content: extractFirstLine(String(msg.content || '')).slice(0, 200),
-				timestamp: msg.timestamp,
-			};
-		}
-	}
-	return null;
+	chatPresentations: EventRouterChatPresentations;
+	notifyCompletion: () => void;
 }
 
 export function createChatMessagesAccumulator(
 	chatState: Pick<EventRouterChatStateStore, 'applyChatMessages' | 'reloadChatTranscript'>,
 ) {
-	let pendingMessages: ChatViewMessage[] = [];
-	let pendingGenerationId = '';
+	let pendingMessages: TranscriptMessage[] = [];
+	let pendingTranscriptViewId = '';
 	let pendingChatId = '';
+	let pendingFirstOrdinal = 0;
+	let pendingLastOrdinal = 0;
+	let pendingResendCandidates: ResendCandidate[] = [];
+	let hasPending = false;
 
 	return {
 		enqueue(msg: ChatMessagesMessage) {
-			if (msg.messages.length === 0) return;
 			if (
-				pendingMessages.length > 0 &&
-				(msg.generationId !== pendingGenerationId || msg.chatId !== pendingChatId)
+				hasPending &&
+				(msg.transcriptViewId !== pendingTranscriptViewId ||
+					msg.chatId !== pendingChatId ||
+					msg.firstOrdinal > pendingLastOrdinal + 1)
 			) {
 				this.flush();
 			}
-			pendingGenerationId = msg.generationId;
+			if (!hasPending) pendingFirstOrdinal = msg.firstOrdinal;
+			hasPending = true;
+			pendingTranscriptViewId = msg.transcriptViewId;
 			pendingChatId = msg.chatId;
+			pendingLastOrdinal = Math.max(pendingLastOrdinal, msg.lastOrdinal);
+			pendingResendCandidates = msg.resendCandidates;
 			pendingMessages.push(...msg.messages);
 		},
 		flush() {
-			if (pendingMessages.length === 0) return;
+			if (!hasPending) return;
 			const messages = pendingMessages;
-			const generationId = pendingGenerationId;
+			const transcriptViewId = pendingTranscriptViewId;
 			const chatId = pendingChatId;
+			const firstOrdinal = pendingFirstOrdinal;
+			const lastOrdinal = pendingLastOrdinal;
+			const resendCandidates = pendingResendCandidates;
 			pendingMessages = [];
-			pendingGenerationId = '';
+			pendingTranscriptViewId = '';
 			pendingChatId = '';
-			const result = chatState.applyChatMessages(chatId, generationId, messages);
+			pendingFirstOrdinal = 0;
+			pendingLastOrdinal = 0;
+			pendingResendCandidates = [];
+			hasPending = false;
+			const result = chatState.applyChatMessages(
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+				resendCandidates,
+			);
 			if (result !== 'applied') {
 				chatState.reloadChatTranscript(chatId);
 			}
@@ -233,20 +218,13 @@ function createHelpers(stores: EventRouterStores) {
 		stores.lifecycle.markTurnRunning(chatId);
 	};
 
-	const clearTurnStatus = (_chatId?: string | null) => {
-		stores.lifecycle.clearTurnStatus();
+	const clearTurnStatus = (chatId?: string | null) => {
+		if (chatId) stores.lifecycle.clearTurnStatus(chatId);
 	};
+	const isChatProcessing = (chatId?: string | null) =>
+		Boolean(chatId && stores.sessions.isChatProcessing(chatId));
 
-	const markChatsAsCompleted = (...chatIds: Array<string | null | undefined>) => {
-		const unique = new Set(
-			chatIds.filter((id): id is string => typeof id === 'string' && id.length > 0),
-		);
-		for (const id of unique) {
-			stores.sessions.applyProcessingEvent(id, false);
-		}
-	};
-
-	return { markTurnRunning, clearTurnStatus, markChatsAsCompleted };
+	return { markTurnRunning, clearTurnStatus, isChatProcessing };
 }
 
 // Builds the dispatch table mapping EventKey to handler functions.
@@ -254,28 +232,22 @@ function buildDispatch(
 	stores: EventRouterStores,
 	messagesAccumulator: ReturnType<typeof createChatMessagesAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
-	const { markTurnRunning, clearTurnStatus, markChatsAsCompleted } = createHelpers(stores);
+	const { markTurnRunning, clearTurnStatus, isChatProcessing } = createHelpers(stores);
 
 	const onNavigateToChat = (chatId: string) => stores.navigation.navigateToChat(chatId);
-	const onChatProcessing = (chatId?: string | null) => {
-		if (chatId) stores.sessions.applyProcessingEvent(chatId, true);
-	};
-	const onChatNotProcessing = (chatId?: string | null) => {
-		if (chatId) stores.sessions.applyProcessingEvent(chatId, false);
-	};
-
 	const lifecycleCtx: LifecycleContext = {
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
-		appendLocalNotice: stores.chatState.appendLocalNotice,
+		appendServerNotice: stores.chatState.appendServerNotice,
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		clearTurnStatus,
-		markChatsAsCompleted,
+		isChatProcessing,
 		onNavigateToChat,
 		getPendingChatId,
 		clearPendingChatId,
 		markChatTranscriptValidated: stores.chatState.markChatTranscriptValidated,
+		notifyCompletion: stores.notifyCompletion,
 	};
 
 	const chatEventCtx: ChatEventContext = {
@@ -284,11 +256,6 @@ function buildDispatch(
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
 		appendLocalNotice: stores.chatState.appendLocalNotice,
 		conversationUi: stores.conversationUi,
-		markTurnRunning,
-		clearTurnStatus,
-		markChatsAsCompleted,
-		onChatProcessing,
-		onChatNotProcessing,
 		startupCoordinator: stores.startup.startupCoordinator,
 		onExternalChatCreated: stores.startup.onExternalChatCreated,
 		getPendingChatId,
@@ -297,7 +264,6 @@ function buildDispatch(
 	};
 
 	const permLifecycleCtx: PermissionLifecycleContext = {
-		getCurrentChatId: stores.lifecycle.currentChatId,
 		conversationUi: stores.conversationUi,
 		markTurnRunning,
 		pushLoadingStatus: stores.lifecycle.pushLoadingStatus,
@@ -305,15 +271,10 @@ function buildDispatch(
 	};
 
 	const queueCtx: QueueContext = {
-		getCurrentChatId: stores.lifecycle.currentChatId,
-		getSelectedChatId: () => stores.sessions.selectedChat?.id || null,
 		conversationUi: stores.conversationUi,
-		markTurnRunning,
-		onChatProcessing,
 	};
 
 	const planModeCtx: PlanModeContext = {
-		getCurrentChatId: stores.lifecycle.currentChatId,
 		getPermissionMode: stores.agentSettings.permissionMode,
 		setPermissionMode: stores.agentSettings.setPermissionMode,
 		conversationUi: stores.conversationUi,
@@ -325,8 +286,51 @@ function buildDispatch(
 		patchChatTitle: (chatId, title) => stores.sessions.patchChat(chatId, { title }),
 		patchChatProjectPath: (chatId, patch) => stores.sessions.patchChat(chatId, patch),
 		patchLastReadAt: (chatId, lastReadAt) => stores.sessions.patchLastReadAt(chatId, lastReadAt),
-		refreshChats: () => { void stores.sessions.quietRefreshChats(); },
+		refreshChats: () => {
+			void stores.sessions.quietRefreshChats();
+		},
 		removeChatTranscript: stores.chatState.removeChatTranscript,
+		clearChatPresentations: stores.chatPresentations.clearDeletedChat,
+	};
+	const transientTranscriptViews = new Map<string, string>();
+
+	const refreshTransientFeed = (chatId: string, requestedTranscriptViewId: string) => {
+		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
+		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId) return;
+		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
+		const previousTranscriptViewId =
+			stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
+		void getChatSnapshot(chatId, 1)
+			.then((snapshot) => {
+				if (transientTranscriptViews.get(chatId) !== requestedTranscriptViewId) return;
+				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+				if (result.kind !== 'applied') return;
+				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;
+				transientTranscriptViews.set(chatId, snapshotTranscriptViewId);
+				if (
+					(previousTranscriptViewId && previousTranscriptViewId !== snapshotTranscriptViewId) ||
+					requestedTranscriptViewId !== snapshotTranscriptViewId
+				)
+					handleViewTransition(chatId, snapshotTranscriptViewId);
+			})
+			.catch(() => undefined);
+	};
+
+	const handleViewTransition = (chatId: string, transcriptViewId: string) => {
+		messagesAccumulator.flush();
+		const selectedChatId = stores.sessions.selectedChat?.id ?? null;
+		const cursor = stores.chatState.getChatCursor(chatId);
+		if (cursor?.transcriptViewId === transcriptViewId) {
+			stores.chatState.markChatTranscriptValidated(chatId);
+			return;
+		}
+		if (stores.chatState.isRenderedChat(chatId)) {
+			stores.chatState.markRenderedChatStale(chatId);
+			void stores.chatState.loadRenderedChat(chatId);
+			return;
+		}
+		stores.chatState.markChatTranscriptStale(chatId);
+		if (selectedChatId === chatId) stores.chatState.reloadChatTranscript(chatId);
 	};
 
 	return {
@@ -337,24 +341,18 @@ function buildDispatch(
 			handlePlanModeMessages(batch, planModeCtx);
 			handlePermissionLifecycleFromBatch(batch, permLifecycleCtx);
 		},
-		'chat-generation-reset': (msg) => {
-			if (!(msg instanceof ChatGenerationResetMessage)) return;
-			messagesAccumulator.flush();
-			const selectedChatId = stores.sessions.selectedChat?.id ?? null;
-			if (selectedChatId === msg.chatId) {
-				const cursor = stores.chatState.getCursor();
-				if (cursor.generationId !== msg.generationId) {
-					stores.chatState.reloadChatTranscript(msg.chatId);
-				} else {
-					stores.chatState.markChatTranscriptValidated(msg.chatId);
-				}
-				return;
+		'chat-transcript-replaced': (msg) => {
+			if (!(msg instanceof ChatTranscriptReplacedMessage)) return;
+			transientTranscriptViews.set(msg.chatId, msg.transcriptViewId);
+			stores.conversationUi.removeTransientFeed(msg.chatId);
+			handleViewTransition(msg.chatId, msg.transcriptViewId);
+		},
+		'chat-transient-feed-mutation': (msg) => {
+			if (!(msg instanceof ChatTransientFeedMutationMessage)) return;
+			const result = stores.conversationUi.applyTransientFeedMutation(msg);
+			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
+				refreshTransientFeed(msg.chatId, msg.transcriptViewId);
 			}
-			if (stores.chatState.isVisiblePreviewChat(msg.chatId)) {
-				stores.chatState.markVisibleChatPreviewStale(msg.chatId);
-				void stores.chatState.loadVisibleChatPreview(msg.chatId);
-			}
-			stores.chatState.markChatTranscriptStale(msg.chatId);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
@@ -378,41 +376,15 @@ function buildDispatch(
 				handleChatAborted(msg, chatEventCtx);
 			}
 		},
-		'chat-processing-updated': (msg) => {
-			if (msg instanceof ChatProcessingUpdatedMessage) handleChatStatus(msg, chatEventCtx);
-		},
 
 		'chat-execution-control-updated': (msg) => {
 			if (msg instanceof ChatExecutionControlUpdatedMessage) {
 				handleExecutionControlUpdated(msg, queueCtx);
 			}
 		},
-		'queue-dispatching': (msg) => {
-			if (!(msg instanceof QueueDispatchingMessage)) return;
-			handleQueueSending(msg, queueCtx);
-			const sendChatId = msg.chatId || stores.lifecycle.currentChatId();
-			if (sendChatId && msg.content) {
-				stores.sessions.patchPreview(
-					sendChatId,
-					String(msg.content).slice(0, 200),
-				);
-			}
-		},
-		'pending-user-input-updated': (msg) => {
-			if (!(msg instanceof PendingUserInputUpdatedMessage)) return;
-			stores.chatState.upsertPendingUserInput(msg.input);
-		},
-		'pending-user-input-status-updated': (msg) => {
-			if (!(msg instanceof PendingUserInputStatusUpdatedMessage)) return;
-			stores.chatState.updatePendingUserInputDeliveryStatus(
-				msg.clientRequestId,
-				msg.deliveryStatus,
-			);
-		},
-		'pending-user-input-cleared': (msg) => {
-			if (!(msg instanceof PendingUserInputClearedMessage)) return;
-			messagesAccumulator.flush();
-			stores.chatState.clearPendingUserInput(msg.clientRequestId);
+		'chat-operational-notice': (msg) => {
+			if (!(msg instanceof ChatOperationalNoticeMessage)) return;
+			stores.chatState.appendServerNotice(msg.chatId, msg.noticeType, msg.content);
 		},
 		'ws-fault': (msg) => {
 			if (msg instanceof WsFaultMessage) {
@@ -429,7 +401,11 @@ function buildDispatch(
 				handleChatProjectPathUpdated(msg, sidebarCtx);
 		},
 		'chat-session-deleted': (msg) => {
-			if (msg instanceof ChatSessionDeletedWsMessage) handleChatDeleted(msg, sidebarCtx);
+			if (msg instanceof ChatSessionDeletedWsMessage) {
+				transientTranscriptViews.delete(msg.chatId);
+				stores.conversationUi.removeTransientFeed(msg.chatId);
+				handleChatDeleted(msg, sidebarCtx);
+			}
 		},
 		'chat-read-updated-v1': (msg) => {
 			if (msg instanceof ChatReadUpdatedV1Message) handleChatReadUpdated(msg, sidebarCtx);
@@ -470,41 +446,21 @@ export function createEventRouter(
 				const selectedChat = stores.sessions.selectedChat;
 				const currentChatId = stores.lifecycle.currentChatId();
 				const pendingViewChatId = stores.conversationUi.pendingViewChat?.chatId || null;
-				const activeViewChatId = selectedChat?.id || currentChatId || pendingViewChatId;
-
-				// Pre-filter: patch sidebar preview for any chat so background
-				// chats update even when the filter skips full dispatch. Cached
-				// background transcripts are warmed only when already contiguous.
+				// Patch the sidebar and selected-chat read state before keyed reducers run.
 				if (event.message instanceof ChatMessagesMessage) {
 					const agentMsg = event.message;
-					if (agentMsg.chatId && agentMsg.messages.length > 0) {
-						if (agentMsg.chatId !== activeViewChatId) {
-							if (stores.chatState.isVisiblePreviewChat(agentMsg.chatId)) {
-								const applied = stores.chatState.warmVisibleChatPreview(
-									agentMsg.chatId,
-									agentMsg.generationId,
-									agentMsg.messages,
-								);
-								if (applied === false) {
-									stores.chatState.markVisibleChatPreviewStale(agentMsg.chatId);
-									void stores.chatState.loadVisibleChatPreview(agentMsg.chatId);
-								}
-							}
-							stores.chatState.warmBackgroundTranscript(
-								agentMsg.chatId,
-								agentMsg.generationId,
-								agentMsg.messages,
-							);
-						}
-						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));
-						if (preview) {
-							stores.sessions.patchPreview(agentMsg.chatId, preview.content, preview.timestamp);
+					if (agentMsg.chatId) {
+						const messages = agentMsg.messages.map((entry) => entry.message);
+						const activityTimestamp = applyChatMessageBatchActivity(
+							stores.sessions,
+							agentMsg.chatId,
+							messages,
+						);
 
-							// Enqueue read receipt for the active chat when visible.
-							const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);
-							if (isActiveChat && document.visibilityState === 'visible') {
-								stores.readState.enqueueReadReceipt(agentMsg.chatId, preview.timestamp);
-							}
+						// Enqueue read receipts for all active-chat transcript activity when visible.
+						const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);
+						if (isActiveChat && activityTimestamp && document.visibilityState === 'visible') {
+							stores.readState.enqueueReadReceipt(agentMsg.chatId, activityTimestamp);
 						}
 					}
 				}
@@ -525,8 +481,6 @@ export function createEventRouter(
 		});
 	});
 }
-
-export { extractFirstLine as _extractFirstLine };
 
 function messagesOf(msg: ChatMessagesMessage): { chatId: string; messages: ChatMessage[] } {
 	return {

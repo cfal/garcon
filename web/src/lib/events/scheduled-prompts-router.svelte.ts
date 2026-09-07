@@ -1,4 +1,4 @@
-import type { ScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte.js';
+import type { ScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 import type { WsConnection } from '$lib/ws/connection.svelte.js';
 import { createDrainCursor, type DrainHandle } from '$lib/ws/drain';
 import { parseServerWsMessage, ScheduledPromptsInvalidatedMessage } from '$shared/ws-events';

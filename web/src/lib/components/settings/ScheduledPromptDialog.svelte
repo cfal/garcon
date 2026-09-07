@@ -4,12 +4,18 @@
 	import { Button } from '$lib/components/ui/button';
 	import ScheduledChatPickerDialog from './ScheduledChatPickerDialog.svelte';
 	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
+	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import { ScheduledPromptFormState } from './scheduled-prompt-form-state.svelte';
-	import { getChatSessions, getModelCatalog, getRemoteSettings } from '$lib/context';
+	import {
+		getChatSessions,
+		getLocalSettings,
+		getModelCatalog,
+		getRemoteSettings,
+	} from '$lib/context';
+	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import { browserTimeZoneLabel, localDateValue } from '$lib/scheduling/local-schedule';
 	import {
-		SCHEDULED_PROMPT_INTERVAL_DAYS_MAX,
-		SCHEDULED_PROMPT_INTERVAL_DAYS_MIN,
+		SCHEDULED_PROMPT_INTERVAL_HOURS_MIN,
 		type ScheduledPrompt,
 		type ScheduledPromptDefinitionInput,
 	} from '$shared/scheduled-prompts';
@@ -25,12 +31,26 @@
 
 	let { open, scheduledPrompt, onSave, onClose }: Props = $props();
 	const modelCatalog = getModelCatalog();
+	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
+	const selectableAgentIds = $derived.by(() => {
+		const allAgentIds = modelCatalog.getSelectableAgents();
+		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
+	});
 	const knownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((chat) => chat.tags))).sort(),
 	);
-	let form = $state(new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions));
+
+	function createForm(): ScheduledPromptFormState {
+		return new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions, {
+			get selectableAgentIds() {
+				return selectableAgentIds;
+			},
+		});
+	}
+
+	let form = $state(createForm());
 	let pickerOpen = $state(false);
 	let isMobile = $state(false);
 	let initialization = 0;
@@ -45,7 +65,7 @@
 		if (!open) return;
 		const currentPrompt = scheduledPrompt;
 		const token = ++initialization;
-		const nextForm = new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions);
+		const nextForm = createForm();
 		form = nextForm;
 		pickerOpen = false;
 		untrack(() => {
@@ -67,6 +87,13 @@
 		if (!open) return;
 		void modelCatalog.version;
 		form.startup.validateAllModelsAgainstLive();
+	});
+
+	$effect(() => {
+		if (!open) return;
+		const eligibleAgentIds = selectableAgentIds;
+		const activeForm = form;
+		untrack(() => activeForm.startup.reconcileAgentSelection(eligibleAgentIds));
 	});
 
 	onMount(() => {
@@ -181,19 +208,32 @@
 					</div>
 				{:else}
 					<div class="grid gap-3 sm:grid-cols-2">
+						<div class="space-y-1 text-sm">
+							<label for="scheduled-prompt-interval" class="font-medium">
+								{m.scheduled_prompts_repeat_every()}
+							</label>
+							<div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+								<input
+									id="scheduled-prompt-interval"
+									type="number"
+									min={SCHEDULED_PROMPT_INTERVAL_HOURS_MIN}
+									max={form.intervalAmountMax}
+									step="1"
+									bind:value={form.intervalAmount}
+									class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+								/>
+								<select
+									aria-label={m.scheduled_prompts_interval_unit()}
+									bind:value={form.intervalUnit}
+									class="h-10 rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+								>
+									<option value="hours">{m.scheduled_prompts_hours()}</option>
+									<option value="days">{m.scheduled_prompts_days()}</option>
+								</select>
+							</div>
+						</div>
 						<label class="space-y-1 text-sm">
-							<span class="font-medium">{m.scheduled_prompts_every_n_days()}</span>
-							<input
-								type="number"
-								min={SCHEDULED_PROMPT_INTERVAL_DAYS_MIN}
-								max={SCHEDULED_PROMPT_INTERVAL_DAYS_MAX}
-								step="1"
-								bind:value={form.intervalDays}
-								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
-							/>
-						</label>
-						<label class="space-y-1 text-sm">
-							<span class="font-medium">{m.scheduled_prompts_time()}</span>
+							<span class="font-medium">{m.scheduled_prompts_first_run_time()}</span>
 							<input
 								type="time"
 								step="60"
@@ -277,6 +317,7 @@
 						startup={form.startup}
 						{modelCatalog}
 						{remoteSettings}
+						{selectableAgentIds}
 						prompt={form.prompt}
 						promptError={form.promptError}
 						{knownTags}
@@ -340,29 +381,14 @@
 			</section>
 
 			{#if form.targetType === 'existing-chat'}
-				<section class="space-y-2" aria-labelledby="scheduled-prompt-content">
-					<div>
-						<label
-							id="scheduled-prompt-content"
-							for="scheduled-prompt-input"
-							class="text-sm font-medium"
-						>
-							{m.scheduled_prompts_prompt()}
-						</label>
-						<p class="text-xs text-muted-foreground">{m.scheduled_prompts_prompt_description()}</p>
-					</div>
-					<textarea
-						id="scheduled-prompt-input"
-						bind:value={form.prompt}
-						onkeydown={handlePromptKeydown}
-						rows="5"
-						placeholder={m.scheduled_prompts_prompt_placeholder()}
-						class="block min-h-32 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-					></textarea>
-					{#if form.prompt.length > 0 && form.promptError}
-						<p class="text-xs text-destructive">{form.promptError}</p>
-					{/if}
-				</section>
+				<ScheduledPromptField
+					prompt={form.prompt}
+					promptError={form.promptError}
+					targetType="existing-chat"
+					surface="standalone"
+					onPromptChange={(value) => (form.prompt = value)}
+					onPromptKeydown={handlePromptKeydown}
+				/>
 			{/if}
 
 			{#if form.error}

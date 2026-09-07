@@ -1,18 +1,28 @@
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
-import type { StartChatCommandResponse } from '../../common/chat-command-contracts.js';
-import type { RunAgentTurnOptions } from '../agents/session-types.js';
+import {
+  recordsStartupPreferences,
+  type StartChatCommandResponse,
+} from '../../common/chat-command-contracts.js';
+
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
+import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import { createLogger } from '../lib/log.js';
-import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
+import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
+import { resolveNewChatPreambleSelection } from '../preambles/selection.js';
 import {
   CommandSupport,
   CommandValidationError,
-  commandResultFromRecord,
+  agentTurnResultFromRecord,
   type ChatStartInput,
   type NormalizedChatStart,
   type ScheduledChatStartInput,
 } from './command-support.js';
+import {
+  PRE_SCHEDULE_FAILURE_ERROR_CODE,
+  commandLedgerKey,
+  commandPayloadHash,
+  type CommandLedgerRecord,
+} from './command-ledger.js';
 
 const logger = createLogger('commands:start');
 
@@ -24,52 +34,85 @@ export class StartCommands {
   }
 
   async submitStart(input: ChatStartInput): Promise<StartChatCommandResponse> {
-    const normalized = await this.normalizeStart(input);
+    const chatId = this.support.requireChatId(input.chatId);
     return this.support.withChatMutationLock(
-      normalized.chatId,
-      () => this.submitNormalizedStart(normalized),
+      chatId,
+      async () => {
+        const replay = await this.replayStart(input, chatId);
+        if (replay) return replay;
+        return this.submitNormalizedStart(await this.normalizeStart(input, chatId));
+      },
     );
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
-    const normalized = await this.normalizeStart({
+    return this.submitStart({
       ...input,
-      chatId: this.deps.chatIds.allocate(),
+      origin: 'scheduled',
       images: [],
       agentSettings: input.agentSettingsById[input.agentId],
     });
-    return this.support.withChatMutationLock(
-      normalized.chatId,
-      () => this.submitNormalizedStart(normalized),
-    );
   }
 
-  private async normalizeStart(input: ChatStartInput): Promise<NormalizedChatStart> {
-    const chatId = this.support.requireChatId(input.chatId);
+  private async normalizeStart(
+    input: ChatStartInput,
+    chatId: NormalizedChatStart['chatId'],
+  ): Promise<NormalizedChatStart> {
     const images = input.images ?? [];
+    const idempotencyProjectPath = String(input.projectPath || '').trim();
 
     if (!this.deps.agents.hasAgent(input.agentId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
+    this.deps.agents.assertExecutionModeSelectionSupported(input.agentId, {
+      thinkingMode: input.thinkingMode,
+    });
+    const parentChatId = input.parentChatId === undefined
+      ? null
+      : this.support.requireChatId(input.parentChatId, 'parentChatId');
+    if (parentChatId !== null && !this.deps.chats.getChat(parentChatId)) {
+      throw new CommandValidationError(
+        'SESSION_NOT_FOUND',
+        `Parent chat not found: ${parentChatId}`,
+        404,
+      );
+    }
     this.support.assertContent(input.command, images);
-    await this.assertStartImagesSupported({
+    await this.support.assertAttachmentsSupported({
       agentId: input.agentId,
       model: input.model,
       apiProviderId: input.apiProviderId,
       modelEndpointId: input.modelEndpointId,
-      images,
+      attachments: images,
     });
 
     if (!input.agentSettings || input.agentSettings.ownerId !== input.agentId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'agentSettings must be owned by agentId');
     }
 
-    return {
+    const projectPath = await resolveStartProjectPath(input.projectPath);
+    // Omitted IDs resolve the newest defaults here, at actual creation; an
+    // explicit list is proven safe against this same catalog snapshot.
+    const preambleSelection = resolveNewChatPreambleSelection({
+      catalog: this.deps.preambles.snapshot(),
+      canonicalProjectPath: projectPath,
+      agentId: input.agentId,
+      tags: input.tags ?? [],
       chatId,
+      ...(input.orderedPreambleIds === undefined
+        ? {}
+        : { orderedPreambleIds: input.orderedPreambleIds }),
+    });
+
+    return {
+      origin: input.origin,
+      chatId,
+      parentChatId,
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
       agentId: input.agentId,
-      projectPath: await this.resolveProjectPathForStart(input.projectPath),
+      projectPath,
+      idempotencyProjectPath,
       command: input.command,
       images,
       model: input.model,
@@ -80,70 +123,34 @@ export class StartCommands {
       thinkingMode: input.thinkingMode,
       agentSettings: input.agentSettings,
       tags: input.tags ?? [],
+      userMessagePresentation: input.userMessagePresentation,
+      ...(input.orderedPreambleIds === undefined
+        ? {}
+        : { orderedPreambleIds: input.orderedPreambleIds }),
+      preambleSelection,
     };
   }
 
-  private async assertStartImagesSupported(input: {
-    agentId: string;
-    model: string;
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-    images: NonNullable<RunAgentTurnOptions['images']>;
-  }): Promise<void> {
-    if (input.images.length === 0) return;
-
-    let modelSupportsImages = false;
-    try {
-      modelSupportsImages = await this.deps.agents.modelSupportsImages({
-        agentId: input.agentId,
-        model: input.model,
-        apiProviderId: input.apiProviderId,
-        modelEndpointId: input.modelEndpointId,
-      });
-    } catch {}
-    const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
-    const supportsImages = hasBackendSelection ? modelSupportsImages : this.deps.agents.supportsImages(input.agentId);
-    if (!supportsImages) {
-      throw new CommandValidationError('UNSUPPORTED_AGENT', `Attachments unsupported for agent: ${input.agentId}`, 422);
-    }
-  }
-
   private async submitNormalizedStart(input: NormalizedChatStart): Promise<StartChatCommandResponse> {
+    const existing = this.deps.chats.getChat(input.chatId);
+    if (existing) {
+      throw new CommandValidationError(
+        'CHAT_ID_COLLISION',
+        `Session already exists: ${input.chatId}`,
+        409,
+      );
+    }
     const turnId = crypto.randomUUID();
     const ledger = await this.deps.ledger.accept({
       commandType: 'chat-start',
       chatId: input.chatId,
       clientRequestId: input.clientRequestId,
       turnId,
-      payload: {
-        chatId: input.chatId,
-        clientMessageId: input.clientMessageId,
-        agentId: input.agentId,
-        projectPath: input.projectPath,
-        command: input.command,
-        model: input.model,
-        images: input.images,
-        apiProviderId: input.apiProviderId,
-        modelEndpointId: input.modelEndpointId,
-        modelProtocol: input.modelProtocol,
-        permissionMode: input.permissionMode,
-        thinkingMode: input.thinkingMode,
-        agentSettings: input.agentSettings,
-        tags: input.tags,
-      },
+      payload: startPayload(input),
     });
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
-    if (ledger.kind === 'duplicate') this.support.throwRecordedExecutionFailure(ledger.record);
     if (ledger.kind === 'duplicate') {
-      return {
-        ...commandResultFromRecord(ledger.record, 'duplicate'),
-        chat: await this.support.projectCommandChat(ledger.record.chatId),
-      };
-    }
-
-    const existing = this.deps.chats.getChat(input.chatId);
-    if (existing) {
-      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${input.chatId}`, 409);
+      return this.replayedStart(ledger.record);
     }
 
     await this.deps.queue.runInitialInput({
@@ -161,6 +168,7 @@ export class StartCommands {
         images: input.images.length > 0 ? input.images : undefined,
         agentSettings: input.agentSettings,
       },
+      userMessagePresentation: input.userMessagePresentation,
       settlement: this.support.settlement,
       preparation: {
         operation: 'chat-start',
@@ -168,6 +176,7 @@ export class StartCommands {
           this.deps.chats.addChat({
             id: input.chatId,
             agentId: input.agentId,
+            ...createPreambleBoundaryBinding('new-chat'),
             nativeSession: null,
             projectPath: input.projectPath,
             tags: input.tags,
@@ -179,24 +188,17 @@ export class StartCommands {
             permissionMode: input.permissionMode,
             thinkingMode: input.thinkingMode,
             agentSettingsById: { [input.agentId]: input.agentSettings },
-          });
-          this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
-          await this.deps.settings.recordChatStartup({
-            agentId: input.agentId,
-            projectPath: input.projectPath,
-            model: input.model,
-            apiProviderId: input.apiProviderId,
-            modelEndpointId: input.modelEndpointId,
-            modelProtocol: input.modelProtocol,
-            permissionMode: input.permissionMode,
-            thinkingMode: input.thinkingMode,
-            agentSettingsById: { [input.agentId]: input.agentSettings },
+            preambleSelection: input.preambleSelection,
+            parentChat: input.parentChatId === null
+              ? null
+              : { chatId: input.parentChatId, relation: 'delegation' },
           });
           await this.deps.settings.ensureInNormal(input.chatId);
+          await this.deps.chats.flush();
         },
         compensate: async () => {
-          this.deps.pendingInputs.clearChat(input.chatId, 'chat-removed');
-          this.deps.chats.removeChat(input.chatId);
+          this.deps.chats.removeChat(input.chatId, 'start-compensation');
+          await this.deps.chats.flush();
           try {
             await this.deps.settings.removeFromAllOrderLists(input.chatId);
           } catch (cleanupError: unknown) {
@@ -207,16 +209,27 @@ export class StartCommands {
           }
         },
       },
-      dispatch: (executionAdmission) => this.deps.agents.startSession(input.chatId, input.command, {
-        projectPath: input.projectPath,
-        images: input.images.length > 0 ? input.images : undefined,
-        clientRequestId: input.clientRequestId,
-        clientMessageId: input.clientMessageId,
-        turnId,
-        executionAdmission,
-        agentSettings: input.agentSettings,
-      }),
+      dispatch: (executionAdmission) =>
+        this.deps.agents.startSession(input.chatId, input.command, {
+          projectPath: input.projectPath,
+          images: input.images.length > 0 ? input.images : undefined,
+          clientRequestId: input.clientRequestId,
+          clientMessageId: input.clientMessageId,
+          turnId,
+          executionAdmission,
+          agentSettings: input.agentSettings,
+        }),
     });
+
+    if (!this.deps.metadata.getChatMetadata(input.chatId)) this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
+
+    if (recordsStartupPreferences(input.origin)) {
+      try {
+        await this.deps.settings.recordChatStartup(input);
+      } catch (error: unknown) {
+        logger.warn('commands: failed to record startup preferences:', error);
+      }
+    }
 
     void maybeGenerateChatTitle({
       chatId: input.chatId,
@@ -224,43 +237,103 @@ export class StartCommands {
       firstPrompt: input.command,
       agents: this.deps.agents,
       settings: this.deps.settings,
+      recentTitleIcons: this.deps.recentTitleIcons,
     });
     const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed', 'finished'], {
       status: 'running',
       turnId,
     });
+    const chat = await this.support.projectCommandChat(input.chatId);
     return {
-      ...commandResultFromRecord(accepted ?? ledger.record),
-      chat: await this.support.projectCommandChat(input.chatId),
+      ...agentTurnResultFromRecord(accepted ?? ledger.record),
+      chat,
     };
   }
 
-  private async resolveProjectPathForStart(projectPath: string | undefined): Promise<string> {
-    const requestedPath = String(projectPath || '').trim();
-    if (!requestedPath) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
+  private async replayStart(
+    input: ChatStartInput,
+    chatId: NormalizedChatStart['chatId'],
+  ): Promise<StartChatCommandResponse | null> {
+    const existing = await this.deps.ledger.getRecord(
+      commandLedgerKey('chat-start', chatId, input.clientRequestId),
+    );
+    if (!existing) return null;
+    if (existing.payloadHash !== commandPayloadHash(startReplayPayload(input, chatId))) {
+      throw new CommandValidationError(
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId was reused with different payload',
+        409,
+      );
     }
-
-    let resolvedPath: string;
-    try {
-      resolvedPath = await assertRealWithinProjectBase(requestedPath);
-    } catch (error) {
-      if (isProjectBoundaryError(error)) {
-        throw new CommandValidationError(
-          'PROJECT_PATH_OUTSIDE_BASE',
-          'Project path is outside the allowed base directory',
-          403,
-        );
-      }
-      throw error;
+    if (
+      existing.status === 'failed'
+      && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
+      && existing.publicTerminalAt === undefined
+    ) {
+      return null;
     }
-
-    try {
-      await fs.access(resolvedPath);
-    } catch {
-      throw new CommandValidationError('VALIDATION_FAILED', `Project path not found: ${resolvedPath}`, 404);
+    if (existing.publicTerminalAt === undefined) {
+      this.support.throwRecordedExecutionFailure(existing);
     }
-
-    return resolvedPath;
+    return this.replayedStart(existing);
   }
+
+  private async replayedStart(record: CommandLedgerRecord): Promise<StartChatCommandResponse> {
+    return {
+      ...agentTurnResultFromRecord(record, 'duplicate'),
+      chat: await this.support.projectReplayedStartChat(record.chatId),
+    };
+  }
+
+}
+
+function startPayload(input: NormalizedChatStart): Record<string, unknown> {
+  return {
+    origin: input.origin,
+    chatId: input.chatId,
+    parentChatId: input.parentChatId,
+    clientMessageId: input.clientMessageId,
+    agentId: input.agentId,
+    projectPath: input.idempotencyProjectPath,
+    command: input.command,
+    model: input.model,
+    images: input.images,
+    apiProviderId: input.apiProviderId,
+    modelEndpointId: input.modelEndpointId,
+    modelProtocol: input.modelProtocol,
+    permissionMode: input.permissionMode,
+    thinkingMode: input.thinkingMode,
+    agentSettings: input.agentSettings,
+    tags: input.tags,
+    // Only the canonical request intent is fingerprinted, so a catalog change
+    // does not turn an identical retry into an idempotency conflict.
+    orderedPreambleIds: input.orderedPreambleIds ?? null,
+    userMessagePresentation: input.userMessagePresentation ?? null,
+  };
+}
+
+function startReplayPayload(
+  input: ChatStartInput,
+  chatId: NormalizedChatStart['chatId'],
+): Record<string, unknown> {
+  return {
+    origin: input.origin,
+    chatId,
+    parentChatId: input.parentChatId ?? null,
+    clientMessageId: input.clientMessageId,
+    agentId: input.agentId,
+    projectPath: String(input.projectPath || '').trim(),
+    command: input.command,
+    model: input.model,
+    images: input.images ?? [],
+    apiProviderId: input.apiProviderId ?? null,
+    modelEndpointId: input.modelEndpointId ?? null,
+    modelProtocol: input.modelProtocol ?? null,
+    permissionMode: input.permissionMode,
+    thinkingMode: input.thinkingMode,
+    agentSettings: input.agentSettings,
+    tags: input.tags ?? [],
+    orderedPreambleIds: input.orderedPreambleIds ?? null,
+    userMessagePresentation: input.userMessagePresentation ?? null,
+  };
 }

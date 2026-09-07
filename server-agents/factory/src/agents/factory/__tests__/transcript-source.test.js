@@ -6,7 +6,6 @@ import { createFactoryTranscriptSource } from '../factory-transcript-source.js';
 function createDeps(overrides = {}) {
   return {
     findSessionFileBySessionId: mock(async () => null),
-    getPreviewFromSessionPath: mock(async (sessionPath) => ({ firstMessage: `path:${sessionPath}` })),
     loadFromPath: mock(async (sessionPath) => [new UserMessage('2026-03-29T00:00:00.000Z', `path:${sessionPath}`)]),
     ...overrides,
   };
@@ -21,7 +20,7 @@ function createSession(overrides = {}) {
 }
 
 describe('createFactoryTranscriptSource', () => {
-  it('loads and previews real Factory native paths directly', async () => {
+  it('loads real Factory native paths directly', async () => {
     const deps = createDeps();
     const source = createFactoryTranscriptSource(deps);
     const session = createSession({
@@ -32,9 +31,6 @@ describe('createFactoryTranscriptSource', () => {
     await expect(source.loadMessages(session)).resolves.toEqual([
       new UserMessage('2026-03-29T00:00:00.000Z', 'path:/tmp/factory/sess-1.jsonl'),
     ]);
-    await expect(source.getPreview?.(session)).resolves.toEqual({
-      firstMessage: 'path:/tmp/factory/sess-1.jsonl',
-    });
     expect(deps.loadFromPath).toHaveBeenCalledWith('/tmp/factory/sess-1.jsonl');
   });
 

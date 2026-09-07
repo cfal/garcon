@@ -9,9 +9,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	type PlaceholderRow =
-		| GitVirtualFilePlaceholderRow
-		| GitVirtualFileLimitRow
-		| GitVirtualCollectionLimitRow;
+		GitVirtualFilePlaceholderRow | GitVirtualFileLimitRow | GitVirtualCollectionLimitRow;
 
 	interface GitVirtualPlaceholderRowProps {
 		row: PlaceholderRow;
@@ -39,6 +37,12 @@
 <div
 	class="flex min-h-[96px] items-start gap-2 px-3 py-5 text-xs text-muted-foreground"
 	data-git-placeholder-row
+	data-git-placeholder-file={row.filePath || undefined}
+	data-git-placeholder-state={row.kind === 'file-placeholder'
+		? row.loadState === 'loading'
+			? 'loading'
+			: 'unloaded'
+		: 'terminal'}
 >
 	{#if isLoading}
 		<LoaderCircle class="mt-0.5 h-4 w-4 shrink-0 animate-spin" />

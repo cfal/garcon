@@ -3,8 +3,8 @@ import type {
   AgentEndpointSelection,
 } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
-import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
+import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
 
 export interface DirectEndpointRuntime {
   readonly selection: AgentEndpointSelection;
@@ -13,7 +13,7 @@ export interface DirectEndpointRuntime {
 
 export interface DirectExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export interface DirectExecutionRequest {
@@ -22,26 +22,25 @@ export interface DirectExecutionRequest {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
-  readonly clientRequestId?: string;
-  readonly clientMessageId?: string;
-  readonly turnId?: string;
   readonly executionAdmission?: DirectExecutionAdmission;
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
-  readonly onAbortable?: () => void;
   readonly endpoint: DirectEndpointRuntime;
+  readonly operation: AgentRuntimeOperation;
 }
 
-export type DirectStartRequest = DirectExecutionRequest;
+export interface DirectStartRequest extends DirectExecutionRequest {
+  readonly onSessionActivated?: (session: DirectStartedSession) => void;
+}
 
 export interface DirectResumeRequest extends DirectExecutionRequest {
   readonly agentSessionId: string;
-  readonly nativePath?: string | null;
+  readonly nativeSession: AgentNativeSessionRef | null;
 }
 
 export interface DirectStartedSession {
   readonly agentSessionId: string;
-  readonly nativePath: string;
+  readonly nativeSession: AgentNativeSessionRef;
 }
 
 export function assertDirectExecutionOpen(
@@ -50,20 +49,9 @@ export function assertDirectExecutionOpen(
   request.executionAdmission?.signal.throwIfAborted();
 }
 
-export function markDirectExecutionStarted(
+export async function markDirectExecutionStarted(
   request: { readonly executionAdmission?: DirectExecutionAdmission },
-): void {
+): Promise<void> {
   assertDirectExecutionOpen(request);
-  request.executionAdmission?.markStarted();
-}
-
-export function directEventMetadata(
-  request: Pick<DirectExecutionRequest, 'clientRequestId' | 'turnId'>,
-  commandType?: AgentOperationIdentity['commandType'],
-): RuntimeEventMetadata {
-  return Object.freeze({
-    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
-    ...(commandType ? { commandType } : {}),
-    ...(request.turnId ? { turnId: request.turnId } : {}),
-  });
+  await request.executionAdmission?.markStarted();
 }

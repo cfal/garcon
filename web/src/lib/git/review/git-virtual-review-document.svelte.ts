@@ -1,28 +1,43 @@
 import {
 	getGitReviewFileBodies,
 	type GitDiffTab,
-	type GitRenderedDiffRow,
-	type GitReviewCommentDraft,
+	type GitReviewCollectionLimit,
 	type GitReviewDocumentSummary,
+	type GitReviewDocumentIndexedFileBodiesResponse,
+	type GitReviewBodyPurpose,
 	type GitReviewFileBody,
 	type GitReviewFileSummary,
 	type GitReviewLimitReason,
 } from '$lib/api/git.js';
-import {
-	buildCommentsByLineKey,
-	buildSplitDiffRows,
-	buildSplitDiffRowViews,
-	buildUnifiedDiffRowsFromRenderedRows,
-	buildUnifiedDiffRowViews,
-	getSelectableLineKeys,
-	type SplitDiffRowView,
-	type UnifiedDiffRowView,
-} from '$lib/git/review/git-diff-rows.js';
+import { type SplitDiffRowView, type UnifiedDiffRowView } from '$lib/git/review/git-diff-rows.js';
 import * as m from '$lib/paraglide/messages.js';
-import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { DiffMode, GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
-import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+import type { CommentComposerState } from '$lib/git/review/git-inline-comment.svelte.js';
+import type { GitDiffSyntaxResults } from '$lib/git/review/git-diff-syntax.js';
 import type { GitWorkbenchLoadGuard } from '$lib/git/workbench/git-workbench-types.js';
+import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
+import {
+	collectionLimitDecisionFromGitReviewBody,
+	decideGitReviewBodyBudget,
+	type GitReviewBodyBudgetDecision,
+} from './git-review-body-budget.js';
+import {
+	buildGitVirtualReviewRowSource,
+	emptyGitVirtualReviewRowSource,
+	type GitVirtualReviewRowSource,
+} from './git-virtual-review-row-source.js';
+import {
+	normalizeGitReviewDemandFilePaths,
+	type GitReviewBodyDemand,
+	type GitReviewDemandOutcome,
+} from './git-review-body-demand.js';
+import { GitReviewDemandReconciler } from './git-review-demand-reconciler.js';
+import { GitDiffSyntaxController } from './git-diff-syntax-controller.svelte.js';
+import {
+	assertGitReviewLoadingOwnership,
+	traceGitReviewDemand,
+	type GitReviewDemandDebugSnapshot,
+} from './git-review-demand-trace.js';
 
 export type GitVirtualReviewRow =
 	| GitVirtualFileHeaderRow
@@ -30,6 +45,7 @@ export type GitVirtualReviewRow =
 	| GitVirtualFileLimitRow
 	| GitVirtualUnifiedRow
 	| GitVirtualSplitRow
+	| GitVirtualReviewThreadRow
 	| GitVirtualCollectionLimitRow;
 
 interface GitVirtualRowBase {
@@ -55,23 +71,29 @@ export interface GitVirtualFileLimitRow extends GitVirtualRowBase {
 	file: GitReviewFileSummary;
 	title: string;
 	message: string;
-	reason: GitReviewLimitReason;
+	reason: GitReviewLimitReason | 'stale-document';
 }
 
 export interface GitVirtualUnifiedRow extends GitVirtualRowBase {
 	kind: 'unified-row';
 	file: GitReviewFileSummary;
 	view: UnifiedDiffRowView;
-	actionTarget: GitDiffActionTarget;
-	selectableLineKeys: string[];
+	actionTarget: GitDiffActionTarget | null;
+	selectableLineKeys: () => string[];
 }
 
 export interface GitVirtualSplitRow extends GitVirtualRowBase {
 	kind: 'split-row';
 	file: GitReviewFileSummary;
 	view: SplitDiffRowView;
-	actionTarget: GitDiffActionTarget;
-	selectableLineKeys: string[];
+	actionTarget: GitDiffActionTarget | null;
+	selectableLineKeys: () => string[];
+}
+
+export interface GitVirtualReviewThreadRow extends GitVirtualRowBase {
+	kind: 'review-thread';
+	threadId: string;
+	showUnanchoredLabel: boolean;
 }
 
 export interface GitVirtualCollectionLimitRow extends GitVirtualRowBase {
@@ -87,74 +109,116 @@ export interface GitVirtualReviewDocumentDeps {
 	visibleFilePaths: () => string[];
 	selectedFile: () => string | null;
 	selectedLineKeys: () => Set<string>;
-	commentsByFile: () => Record<string, GitReviewCommentDraft[]>;
 	composerState: () => CommentComposerState;
 	surfaceError: (message: string) => void;
-	markExternallyStale: () => void;
+	markExternallyStale: (reason?: 'stale' | 'document-expired') => void;
 }
 
+export type GitVirtualDocumentSummary = Pick<
+	GitReviewDocumentSummary,
+	'documentId' | 'project' | 'context' | 'files' | 'limits' | 'collectionLimit'
+>;
+
+export type GitVirtualRowInteraction =
+	| {
+			kind: 'workbench';
+			activeTab: GitDiffTab;
+			selectedLineKeys: Set<string>;
+			composerState: CommentComposerState;
+	  }
+	| { kind: 'commentable'; composerState: CommentComposerState }
+	| { kind: 'read-only' };
+
 export interface BuildVirtualRowsOptions {
-	summary: GitReviewDocumentSummary;
+	summary: GitVirtualDocumentSummary;
 	visibleFilePaths: string[];
 	fileBodies: Record<string, GitReviewFileBody>;
 	loadingBodies: Set<string>;
 	focusedFilePath: string | null;
 	diffMode: DiffMode;
-	activeTab: GitDiffTab;
 	contextLines: number;
-	commentsByFile: Record<string, GitReviewCommentDraft[]>;
-	composerState: CommentComposerState;
-	selectedLineKeys: Set<string>;
-	readOnly?: boolean;
+	interaction: GitVirtualRowInteraction;
+	syntaxResults?: GitDiffSyntaxResults;
+	collapsedFilePaths?: ReadonlySet<string>;
+	placeholderLimit?: {
+		title: string;
+		message: string;
+		reason: GitReviewLimitReason | 'stale-document';
+	};
 }
 
-type BodyCacheKey = `${string}|${GitDiffTab}|${number}|${string}|${string}`;
+type BodyCacheKey = `${GitDiffTab}|${number}|${string}|${string}`;
 
 const BODY_BATCH_SIZE = 24;
-const DEFAULT_ROW_HEIGHT = 22;
-
+const MAX_CACHED_FILE_BODIES = 128;
 export class GitVirtualReviewDocumentController {
 	summary = $state<GitReviewDocumentSummary | null>(null);
-	fileBodies = $state<Record<string, GitReviewFileBody>>({});
+	fileBodies = $state.raw<Record<string, GitReviewFileBody>>({});
 	loadingBodies = $state(new Set<string>());
 	scrollRequest = $state<{ filePath: string; token: number } | null>(null);
 	diffMode = $state<DiffMode>('unified');
 	contextLines = $state(5);
+	aggregateLimit = $state<GitReviewCollectionLimit | null>(null);
 
 	private bodyCache = new Map<BodyCacheKey, GitReviewFileBody>();
-	private pendingBodyQueue: string[] = [];
-	private bodyBatchController: AbortController | null = null;
-	private bodyBatchFiles = new Set<string>();
+	private bodyCacheBytes = 0;
+	private prefetchStopped = false;
+	private bodyScheduler: GitReviewBodyScheduler<GitReviewDocumentIndexedFileBodiesResponse> | null =
+		null;
+	private readonly demandReconciler: GitReviewDemandReconciler;
 	private loadGeneration = 0;
 	private scrollToken = 0;
 
-	virtualRows = $derived.by<GitVirtualReviewRow[]>(() => {
-		if (!this.summary) return [];
-		return buildVirtualRows({
-			summary: this.summary,
+	rowSource = $derived.by<GitVirtualReviewRowSource>(() => {
+		if (!this.summary) return emptyGitVirtualReviewRowSource();
+		const summary = this.aggregateLimit
+			? { ...this.summary, collectionLimit: this.aggregateLimit }
+			: this.summary;
+		const placeholderLimit = this.aggregateLimit
+			? {
+					title: m.git_virtual_diff_limit_reached(),
+					message: this.aggregateLimit.message,
+					reason: this.aggregateLimit.reason,
+				}
+			: undefined;
+		return buildGitVirtualReviewRowSource({
+			summary,
 			visibleFilePaths: this.deps.visibleFilePaths(),
 			fileBodies: this.fileBodies,
+			syntaxResults: this.syntax.results,
 			loadingBodies: this.loadingBodies,
 			focusedFilePath: this.deps.selectedFile(),
 			diffMode: this.diffMode,
-			activeTab: this.deps.activeTab(),
 			contextLines: this.contextLines,
-			commentsByFile: this.deps.commentsByFile(),
-			composerState: this.deps.composerState(),
-			selectedLineKeys: this.deps.selectedLineKeys(),
-			readOnly: false,
+			interaction: {
+				kind: 'workbench',
+				activeTab: this.deps.activeTab(),
+				selectedLineKeys: this.deps.selectedLineKeys(),
+				composerState: this.deps.composerState(),
+			},
+			...(placeholderLimit ? { placeholderLimit } : {}),
 		});
 	});
 
-	fileRowIndex = $derived.by(() => {
-		const index = new Map<string, number>();
-		this.virtualRows.forEach((row, rowIndex) => {
-			if (row.kind === 'file-header') index.set(row.filePath, rowIndex);
+	constructor(
+		private readonly deps: GitVirtualReviewDocumentDeps,
+		private readonly syntax = new GitDiffSyntaxController(),
+	) {
+		this.demandReconciler = new GitReviewDemandReconciler({
+			currentDocumentId: () => this.summary?.documentId ?? null,
+			requestViewportPaths: (filePaths) => this.requestDemandPaths(filePaths),
+			requestNavigationPaths: (filePaths) => this.requestDemandPaths(filePaths),
+			reportOutcome: (demand, outcome) => {
+				traceGitReviewDemand({
+					stage: 'controller',
+					owner: 'workbench',
+					documentId: demand.documentId,
+					fileCount: demand.filePaths.length,
+					outcome,
+				});
+			},
 		});
-		return index;
-	});
-
-	constructor(private readonly deps: GitVirtualReviewDocumentDeps) {}
+	}
 
 	get hasLoading(): boolean {
 		return this.loadingBodies.size > 0;
@@ -165,26 +229,52 @@ export class GitVirtualReviewDocumentController {
 	}
 
 	applySummary(summary: GitReviewDocumentSummary | null): void {
+		const nextBodies = summary ? this.retainedBodiesForSummary(summary) : {};
 		this.clearBodyInFlightLoads();
-		this.pendingBodyQueue = [];
 		this.loadingBodies = new Set();
 		this.loadGeneration++;
 		this.summary = summary;
+		this.aggregateLimit = null;
+		this.prefetchStopped = false;
 		if (summary) {
-			this.pruneBodiesToSummary(summary);
+			this.fileBodies = nextBodies;
+			this.syntax.open({ documentId: summary.documentId, files: summary.files }, nextBodies);
+			this.replayViewportSyntaxDemand(summary.documentId);
 		} else {
 			this.fileBodies = {};
+			this.syntax.close({ preserveCache: true });
 		}
+		this.demandReconciler.markReadinessChanged();
 	}
 
-	setVisibleRows(projectPath: string, rows: GitVirtualReviewRow[]): void {
-		if (!this.summary) return;
-		const filePaths = Array.from(new Set(rows.map((row) => row.filePath).filter(Boolean)));
-		this.requestBodies(projectPath, filePaths);
+	handleBodyDemand(demand: GitReviewBodyDemand): void {
+		this.syntax.handleDemand(demand);
+		this.demandReconciler.handle(demand);
+	}
+
+	markDemandReadinessChanged(): void {
+		this.demandReconciler.markReadinessChanged();
+	}
+
+	getDemandDebugSnapshot(): GitReviewDemandDebugSnapshot {
+		const demand = this.demandReconciler.snapshot();
+		return {
+			documentId: this.summary?.documentId ?? null,
+			demandedPaths: demand.filePaths,
+			loadingPaths: Array.from(this.loadingBodies),
+			schedulerPendingByPath: Object.fromEntries(
+				Array.from(this.loadingBodies, (filePath) => [
+					filePath,
+					this.bodyScheduler?.hasPending(filePath) === true,
+				]),
+			),
+			readinessGeneration: demand.readinessGeneration,
+		};
 	}
 
 	focusFile(projectPath: string, filePath: string): void {
-		this.requestBodies(projectPath, [filePath]);
+		this.discardErrorBody(filePath);
+		this.requestNavigationBodies(projectPath, [filePath]);
 		this.requestScrollToFile(filePath);
 	}
 
@@ -193,28 +283,53 @@ export class GitVirtualReviewDocumentController {
 		this.scrollRequest = { filePath, token: this.scrollToken };
 	}
 
-	requestBodies(projectPath: string, filePaths: string[]): void {
-		if (!this.summary) return;
-		const guard = this.createLoadGuard(projectPath);
-		const uniquePaths = unique(filePaths).filter(Boolean);
-		this.seedCachedBodies(uniquePaths, guard);
-		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath, guard));
-		if (toFetch.length === 0) return;
+	requestInitialBodies(projectPath: string, filePaths: string[]): void {
+		const [priority, ...prefetch] = unique(filePaths);
+		if (priority) this.requestNavigationBodies(projectPath, [priority]);
+		this.requestBodies(projectPath, prefetch, 'prefetch');
+	}
 
-		this.markLoading(toFetch, true);
-		this.prioritizeBodyQueue(toFetch);
-		this.pumpBodyQueue(projectPath, guard.generation);
+	requestBodies(
+		projectPath: string,
+		filePaths: readonly string[],
+		purpose: GitReviewBodyPurpose = 'visible',
+	): GitReviewDemandOutcome {
+		if (!this.summary) return 'not-ready';
+		if (this.aggregateLimit) return 'limited';
+		if (purpose === 'prefetch' && this.prefetchStopped) return 'already-satisfied';
+		const guard = this.createLoadGuard(projectPath);
+		this.ensureBodyScheduler(projectPath, guard);
+		if (!this.bodyScheduler) return 'not-ready';
+		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
+		this.seedCachedBodies(uniquePaths, purpose, guard);
+		if (this.aggregateLimit) return 'limited';
+		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath, guard));
+		const pending = uniquePaths.filter(
+			(filePath) =>
+				this.loadingBodies.has(filePath) &&
+				this.summaryForFile(filePath)?.bodyState === 'unloaded' &&
+				!this.fileBodies[filePath],
+		);
+		const scheduled =
+			purpose === 'visible'
+				? this.bodyScheduler.requestVisible([...toFetch, ...pending])
+				: this.bodyScheduler.requestPrefetch(toFetch);
+		return scheduled ? 'scheduled' : 'already-satisfied';
 	}
 
 	refreshAllData(): void {
 		this.bodyCache.clear();
+		this.bodyCacheBytes = 0;
+		this.syntax.reset();
 		this.applySummary(null);
 	}
 
 	clearForDisplayChange(): void {
 		this.summary = null;
 		this.fileBodies = {};
-		this.pendingBodyQueue = [];
+		this.syntax.close({ preserveCache: true });
+		this.aggregateLimit = null;
+		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
 		this.loadGeneration++;
 		this.clearBodyInFlightLoads();
@@ -222,32 +337,84 @@ export class GitVirtualReviewDocumentController {
 
 	invalidateFile(filePath: string): void {
 		for (const key of Array.from(this.bodyCache.keys())) {
-			if (key.endsWith(`|${filePath}`)) this.bodyCache.delete(key);
+			if (key.endsWith(`|${filePath}`)) {
+				this.bodyCacheBytes -= this.bodyCache.get(key)?.patchBytes ?? 0;
+				this.bodyCache.delete(key);
+			}
 		}
-		this.fileBodies = Object.fromEntries(
-			Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+		this.replaceFileBodies(
+			Object.fromEntries(
+				Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+			),
 		);
+		this.syntax.invalidateFile(filePath);
 	}
 
 	pruneToFilePaths(paths: Set<string>): void {
-		this.fileBodies = Object.fromEntries(
-			Object.entries(this.fileBodies).filter(([filePath]) => paths.has(filePath)),
+		this.replaceFileBodies(
+			Object.fromEntries(
+				Object.entries(this.fileBodies).filter(([filePath]) => paths.has(filePath)),
+			),
 		);
+		this.syntax.pruneToFilePaths(paths);
 		for (const key of Array.from(this.bodyCache.keys())) {
-			const filePath = key.split('|').slice(4).join('|');
-			if (!paths.has(filePath)) this.bodyCache.delete(key);
+			const filePath = key.split('|').slice(3).join('|');
+			if (!paths.has(filePath)) {
+				this.bodyCacheBytes -= this.bodyCache.get(key)?.patchBytes ?? 0;
+				this.bodyCache.delete(key);
+			}
 		}
 	}
 
 	reset(): void {
 		this.summary = null;
 		this.fileBodies = {};
+		this.syntax.reset();
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
+		this.aggregateLimit = null;
+		this.prefetchStopped = false;
 		this.bodyCache.clear();
-		this.pendingBodyQueue = [];
+		this.bodyCacheBytes = 0;
 		this.loadGeneration++;
 		this.clearBodyInFlightLoads();
+		this.demandReconciler.clear();
+	}
+
+	private replaceFileBodies(next: Record<string, GitReviewFileBody>): void {
+		this.fileBodies = next;
+		this.syntax.replaceBodies(next);
+	}
+
+	private replayViewportSyntaxDemand(documentId: string): void {
+		const demand = this.demandReconciler.snapshot();
+		if (demand.documentId !== documentId) return;
+		this.syntax.handleDemand({
+			kind: 'viewport',
+			documentId,
+			filePaths: demand.filePaths,
+		});
+	}
+
+	private requestDemandPaths(filePaths: readonly string[]): GitReviewDemandOutcome {
+		const projectPath = this.deps.targetProjectPath();
+		if (!projectPath) return 'not-ready';
+		return this.requestBodies(projectPath, filePaths, 'visible');
+	}
+
+	private requestNavigationBodies(
+		projectPath: string,
+		filePaths: readonly string[],
+	): GitReviewDemandOutcome {
+		const summary = this.summary;
+		if (summary) {
+			this.syntax.handleDemand({
+				kind: 'navigation',
+				documentId: summary.documentId,
+				filePaths,
+			});
+		}
+		return this.requestBodies(projectPath, filePaths, 'visible');
 	}
 
 	private createLoadGuard(projectPath: string): GitWorkbenchLoadGuard {
@@ -269,13 +436,26 @@ export class GitVirtualReviewDocumentController {
 		return !targetProjectPath || targetProjectPath === guard.projectPath;
 	}
 
-	private pruneBodiesToSummary(summary: GitReviewDocumentSummary): void {
+	private retainedBodiesForSummary(
+		summary: GitReviewDocumentSummary,
+	): Record<string, GitReviewFileBody> {
 		const files = new Map(summary.files.map((file) => [file.path, file]));
-		this.fileBodies = Object.fromEntries(
+		return Object.fromEntries(
 			Object.entries(this.fileBodies).filter(([filePath, body]) => {
 				const file = files.get(filePath);
-				return Boolean(file && file.bodyFingerprint === body.bodyFingerprint);
+				return Boolean(
+					file && body.bodyState !== 'error' && file.bodyFingerprint === body.bodyFingerprint,
+				);
 			}),
+		);
+	}
+
+	private discardErrorBody(filePath: string): void {
+		if (this.fileBodies[filePath]?.bodyState !== 'error') return;
+		this.replaceFileBodies(
+			Object.fromEntries(
+				Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+			),
 		);
 	}
 
@@ -284,97 +464,203 @@ export class GitVirtualReviewDocumentController {
 		if (!file || file.bodyState !== 'unloaded') return false;
 		if (this.fileBodies[filePath]) return false;
 		if (this.cacheGet(file, guard)) return false;
-		if (this.loadingBodies.has(filePath)) return false;
-		if (this.pendingBodyQueue.includes(filePath)) return false;
-		if (this.bodyBatchFiles.has(filePath)) return false;
-		return true;
+		return !this.loadingBodies.has(filePath);
 	}
 
-	private seedCachedBodies(filePaths: string[], guard: GitWorkbenchLoadGuard): void {
-		const seeded: Record<string, GitReviewFileBody> = {};
+	private seedCachedBodies(
+		filePaths: string[],
+		purpose: GitReviewBodyPurpose,
+		guard: GitWorkbenchLoadGuard,
+	): void {
+		if (this.bodyCache.size === 0) return;
+		const next = { ...this.fileBodies };
+		const pinnedPaths = this.pinnedBodyPaths();
+		let changed = false;
 		for (const filePath of filePaths) {
 			const file = this.summaryForFile(filePath);
 			if (!file || this.fileBodies[filePath]) continue;
 			const cached = this.cacheGet(file, guard);
-			if (cached) seeded[filePath] = cached;
-		}
-		if (Object.keys(seeded).length > 0) this.fileBodies = { ...this.fileBodies, ...seeded };
-	}
-
-	private prioritizeBodyQueue(filePaths: string[]): void {
-		const requested = new Set(filePaths);
-		const stalePending = this.pendingBodyQueue.filter((filePath) => !requested.has(filePath));
-		this.pendingBodyQueue = [...filePaths, ...stalePending];
-	}
-
-	private pumpBodyQueue(projectPath: string, generation: number): void {
-		if (!this.summary || this.bodyBatchController || this.pendingBodyQueue.length === 0) return;
-
-		const guard = this.createLoadGuard(projectPath);
-		if (guard.generation !== generation) return;
-		const batchSize = this.summary.limits.maxBodyBatchFiles || BODY_BATCH_SIZE;
-		const batch = this.pendingBodyQueue
-			.splice(0, batchSize)
-			.filter((filePath) => this.shouldStartBodyLoad(filePath, guard));
-		if (batch.length === 0) {
-			this.pumpBodyQueue(projectPath, generation);
-			return;
-		}
-
-		const controller = new AbortController();
-		this.bodyBatchController = controller;
-		this.bodyBatchFiles = new Set(batch);
-
-		void getGitReviewFileBodies(
-			projectPath,
-			this.summary.documentId,
-			batch,
-			guard.tab,
-			guard.contextLines,
-			{
-				signal: controller.signal,
-			},
-		)
-			.then((result) => {
-				if (!this.isCurrentGuard(guard)) return;
-				const next = { ...this.fileBodies };
-				for (const filePath of batch) {
-					const file = this.summaryForFile(filePath);
-					const body = result.files[filePath];
-					if (!file || !body) continue;
-					if (body.bodyFingerprint !== file.bodyFingerprint) {
-						this.deps.markExternallyStale();
-						continue;
-					}
-					this.cacheSet(file, guard, body);
-					next[filePath] = body;
+			if (!cached) continue;
+			const decision = decideGitReviewBodyBudget(
+				cached,
+				purpose,
+				next,
+				pinnedPaths,
+				this.summary!.limits,
+			);
+			this.evictActiveBodies(next, decision);
+			changed ||= decision.evictedPaths.length > 0;
+			if (!decision.accept) {
+				if (purpose === 'prefetch') {
+					this.stopPrefetch();
+				} else {
+					next[filePath] = this.collectionLimitBody(cached, decision);
+					changed = true;
+					this.setAggregateLimit(decision, Object.keys(next).length);
 				}
-				this.fileBodies = next;
-			})
-			.catch((error) => {
-				if (isAbortError(error) || !this.isCurrentGuard(guard)) return;
+				continue;
+			}
+			next[filePath] = cached;
+			changed = true;
+		}
+		if (changed) this.replaceFileBodies(next);
+	}
+
+	private ensureBodyScheduler(projectPath: string, guard: GitWorkbenchLoadGuard): void {
+		if (this.bodyScheduler || !this.summary) return;
+		const summary = this.summary;
+		this.bodyScheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: summary.limits.maxBodyBatchFiles || BODY_BATCH_SIZE,
+			load: (paths, purpose, signal) =>
+				getGitReviewFileBodies(
+					projectPath,
+					summary.documentId,
+					paths,
+					guard.tab,
+					guard.contextLines,
+					{ purpose, signal },
+				),
+			onResult: (result, paths, purpose) => this.applyBodyResult(result, paths, purpose, guard),
+			onError: (error) => {
+				if (!this.isCurrentGuard(guard)) return;
 				this.deps.surfaceError(
 					m.git_virtual_load_diff_failed_with_detail({
 						detail: error instanceof Error ? error.message : String(error),
 					}),
 				);
-			})
-			.finally(() => {
-				if (this.bodyBatchController !== controller) return;
-				this.bodyBatchController = null;
-				this.bodyBatchFiles = new Set();
-				this.markLoading(batch, false);
-				if (generation === this.loadGeneration) this.pumpBodyQueue(projectPath, generation);
-			});
+			},
+			onLoadingChange: (paths, loading) => this.markLoading(paths, loading),
+			onDispatch: (paths, purpose) => {
+				traceGitReviewDemand({
+					stage: 'scheduler',
+					owner: 'workbench',
+					documentId: summary.documentId,
+					fileCount: paths.length,
+					purpose,
+				});
+			},
+		});
 	}
 
-	private shouldStartBodyLoad(filePath: string, guard: GitWorkbenchLoadGuard): boolean {
-		const file = this.summaryForFile(filePath);
-		if (!file || file.bodyState !== 'unloaded') return false;
-		if (this.fileBodies[filePath]) return false;
-		if (this.cacheGet(file, guard)) return false;
-		if (this.bodyBatchFiles.has(filePath)) return false;
-		return true;
+	private applyBodyResult(
+		result: GitReviewDocumentIndexedFileBodiesResponse,
+		paths: string[],
+		purpose: GitReviewBodyPurpose,
+		guard: GitWorkbenchLoadGuard,
+	): void {
+		if (!this.isCurrentGuard(guard)) return;
+		if (result.status === 'stale' || result.status === 'document-expired') {
+			this.deps.markExternallyStale(result.status);
+			return;
+		}
+		const next = { ...this.fileBodies };
+		const pinnedPaths = this.pinnedBodyPaths();
+		for (const filePath of paths) {
+			const file = this.summaryForFile(filePath);
+			const body = result.files[filePath];
+			if (!file || !body) continue;
+			if (body.bodyFingerprint !== file.bodyFingerprint) {
+				this.deps.markExternallyStale();
+				continue;
+			}
+			const serverLimit = collectionLimitDecisionFromGitReviewBody(body, next);
+			if (serverLimit) {
+				next[filePath] = body;
+				this.setAggregateLimit(serverLimit, Object.keys(next).length, body.limitMessage);
+				break;
+			}
+			const effectivePurpose =
+				purpose === 'prefetch' &&
+				this.demandReconciler.demandsPath(this.summary!.documentId, filePath)
+					? 'visible'
+					: purpose;
+			const decision = decideGitReviewBodyBudget(
+				body,
+				effectivePurpose,
+				next,
+				pinnedPaths,
+				this.summary!.limits,
+			);
+			this.evictActiveBodies(next, decision);
+			if (!decision.accept) {
+				if (effectivePurpose === 'prefetch') {
+					this.stopPrefetch();
+					continue;
+				}
+				next[filePath] = this.collectionLimitBody(body, decision);
+				this.setAggregateLimit(decision, Object.keys(next).length);
+				break;
+			}
+			if (body.bodyState !== 'error') this.cacheSet(file, guard, body);
+			next[filePath] = body;
+		}
+		this.replaceFileBodies(next);
+	}
+
+	private collectionLimitBody(
+		body: GitReviewFileBody,
+		decision: GitReviewBodyBudgetDecision,
+	): GitReviewFileBody {
+		const reason = decision.reason ?? 'collection-too-many-rows';
+		return {
+			path: body.path,
+			bodyFingerprint: body.bodyFingerprint,
+			bodyState: 'too-large',
+			category: 'large',
+			isBinary: false,
+			isTooLarge: true,
+			renderedRowCount: 0,
+			patchBytes: 0,
+			patch: null,
+			patchIndex: null,
+			limitReason: reason,
+			limitMessage: this.aggregateLimitMessage(decision),
+		};
+	}
+
+	private setAggregateLimit(
+		decision: GitReviewBodyBudgetDecision,
+		visibleFiles: number,
+		message = this.aggregateLimitMessage(decision),
+	): void {
+		this.bodyScheduler?.cancel();
+		this.loadingBodies = new Set();
+		this.aggregateLimit = {
+			reason: decision.reason ?? 'collection-too-many-rows',
+			message,
+			visibleFiles,
+			totalFilesKnown: this.summary?.files.length ?? 0,
+		};
+	}
+
+	private aggregateLimitMessage(decision: GitReviewBodyBudgetDecision): string {
+		return decision.reason === 'collection-too-many-bytes'
+			? `Stopped loading after ${decision.loadedBytes.toLocaleString()} patch bytes.`
+			: `Stopped loading after ${decision.loadedRows.toLocaleString()} rendered rows.`;
+	}
+
+	private evictActiveBodies(
+		bodies: Record<string, GitReviewFileBody>,
+		decision: GitReviewBodyBudgetDecision,
+	): void {
+		for (const path of decision.evictedPaths) {
+			delete bodies[path];
+		}
+	}
+
+	private pinnedBodyPaths(): Set<string> {
+		const pinned = new Set<string>();
+		const documentId = this.summary?.documentId;
+		const demand = this.demandReconciler.snapshot();
+		if (documentId && demand.documentId === documentId) {
+			for (const filePath of demand.filePaths) pinned.add(filePath);
+		}
+		return pinned;
+	}
+
+	private stopPrefetch(): void {
+		this.prefetchStopped = true;
+		this.bodyScheduler?.cancelPrefetch();
 	}
 
 	private markLoading(filePaths: string[], isLoading: boolean): void {
@@ -384,17 +670,27 @@ export class GitVirtualReviewDocumentController {
 			else next.delete(filePath);
 		}
 		this.loadingBodies = next;
+		assertGitReviewLoadingOwnership(
+			next,
+			(filePath) => this.bodyScheduler?.hasPending(filePath) === true,
+			'workbench',
+		);
 	}
 
 	private cacheKey(file: GitReviewFileSummary, guard: GitWorkbenchLoadGuard): BodyCacheKey {
-		return `${this.summary?.documentId ?? ''}|${guard.tab}|${guard.contextLines}|${file.bodyFingerprint}|${file.path}`;
+		return `${guard.tab}|${guard.contextLines}|${file.bodyFingerprint}|${file.path}`;
 	}
 
 	private cacheGet(
 		file: GitReviewFileSummary,
 		guard: GitWorkbenchLoadGuard,
 	): GitReviewFileBody | null {
-		return this.bodyCache.get(this.cacheKey(file, guard)) ?? null;
+		const key = this.cacheKey(file, guard);
+		const body = this.bodyCache.get(key);
+		if (!body) return null;
+		this.bodyCache.delete(key);
+		this.bodyCache.set(key, body);
+		return body;
 	}
 
 	private cacheSet(
@@ -402,205 +698,28 @@ export class GitVirtualReviewDocumentController {
 		guard: GitWorkbenchLoadGuard,
 		body: GitReviewFileBody,
 	): void {
-		this.bodyCache.set(this.cacheKey(file, guard), body);
+		const key = this.cacheKey(file, guard);
+		const previous = this.bodyCache.get(key);
+		if (previous) this.bodyCacheBytes -= previous.patchBytes;
+		this.bodyCache.delete(key);
+		this.bodyCache.set(key, body);
+		this.bodyCacheBytes += body.patchBytes;
+		const byteLimit = this.summary?.limits.maxLoadedPatchBytes ?? 10_000_000;
+		while (
+			(this.bodyCache.size > MAX_CACHED_FILE_BODIES || this.bodyCacheBytes > byteLimit) &&
+			this.bodyCache.size > 0
+		) {
+			const oldestKey = this.bodyCache.keys().next().value;
+			if (oldestKey === undefined) break;
+			this.bodyCacheBytes -= this.bodyCache.get(oldestKey)?.patchBytes ?? 0;
+			this.bodyCache.delete(oldestKey);
+		}
 	}
 
 	private clearBodyInFlightLoads(): void {
-		this.bodyBatchController?.abort();
-		this.bodyBatchController = null;
-		this.bodyBatchFiles = new Set();
+		this.bodyScheduler?.cancel();
+		this.bodyScheduler = null;
 	}
-}
-
-export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualReviewRow[] {
-	const rows: GitVirtualReviewRow[] = [];
-	const summaryByPath = new Map(options.summary.files.map((file) => [file.path, file]));
-	const orderedFiles =
-		options.visibleFilePaths.length > 0
-			? options.visibleFilePaths
-					.map((filePath) => summaryByPath.get(filePath))
-					.filter((file): file is GitReviewFileSummary => Boolean(file))
-			: options.summary.files;
-
-	for (const file of orderedFiles) {
-		rows.push({
-			kind: 'file-header',
-			id: fileHeaderRowId(file.path),
-			filePath: file.path,
-			estimatedHeight: 42,
-			file,
-			isFocused: options.focusedFilePath === file.path,
-		});
-
-		const body = options.fileBodies[file.path];
-		if (file.isBinary || body?.bodyState === 'binary') {
-			rows.push(
-				fileLimitRow(
-					file,
-					'binary',
-					m.git_virtual_binary_file(),
-					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_binary_diff_unavailable(),
-				),
-			);
-			continue;
-		}
-		if (file.isTooLarge || body?.bodyState === 'too-large') {
-			rows.push(
-				fileLimitRow(
-					file,
-					body?.limitReason ?? file.limitReason ?? 'file-too-many-rows',
-					m.git_virtual_large_diff(),
-					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_large_diff_unavailable(),
-				),
-			);
-			continue;
-		}
-		if (!body) {
-			rows.push({
-				kind: 'file-placeholder',
-				id: filePlaceholderRowId(file.path),
-				filePath: file.path,
-				estimatedHeight: Math.max(96, Math.min(720, file.estimatedRows * DEFAULT_ROW_HEIGHT)),
-				file,
-				loadState: options.loadingBodies.has(file.path) ? 'loading' : 'unloaded',
-			});
-			continue;
-		}
-		if (body.error || body.bodyState === 'error') {
-			rows.push(
-				fileLimitRow(
-					file,
-					'git-timeout',
-					m.git_virtual_diff_failed(),
-					body.error ?? m.git_virtual_diff_failed_message(),
-				),
-			);
-			continue;
-		}
-		rows.push(...bodyRows(file, body.rows, options));
-	}
-
-	if (options.summary.collectionLimit) {
-		rows.push({
-			kind: 'collection-limit',
-			id: 'collection-limit',
-			filePath: '',
-			estimatedHeight: 112,
-			title: m.git_virtual_diff_limit_reached(),
-			message: options.summary.collectionLimit.message,
-		});
-	}
-
-	return rows;
-}
-
-function bodyRows(
-	file: GitReviewFileSummary,
-	renderedRows: GitRenderedDiffRow[],
-	options: BuildVirtualRowsOptions,
-): GitVirtualReviewRow[] {
-	const actionTarget: GitDiffActionTarget = {
-		filePath: file.path,
-		tab: options.activeTab,
-		mode: options.activeTab === 'unstaged' ? 'stage' : 'unstage',
-		contextLines: options.contextLines,
-	};
-	const commentsByLineKey = buildCommentsByLineKey(options.commentsByFile[file.path] ?? []);
-	const composerTarget =
-		options.composerState.open && options.composerState.filePath === file.path
-			? {
-					open: options.composerState.open,
-					filePath: options.composerState.filePath,
-					side: options.composerState.side,
-					line: options.composerState.line,
-					body: options.composerState.body,
-					severity: options.composerState.severity,
-				}
-			: null;
-	const unifiedRows = buildUnifiedDiffRowsFromRenderedRows(renderedRows);
-	const selectableLineKeys = getSelectableLineKeys(unifiedRows, file.path, options.activeTab);
-
-	if (options.diffMode === 'split') {
-		return buildSplitDiffRowViews({
-			rows: buildSplitDiffRows(unifiedRows),
-			filePath: file.path,
-			activeTab: options.activeTab,
-			readOnly: options.readOnly === true,
-			selectedLineKeys: options.selectedLineKeys,
-			commentsByLineKey,
-			composerTarget,
-		}).map((view) => ({
-			kind: 'split-row',
-			id: diffRowId(file.path, view.key, 'split'),
-			filePath: file.path,
-			estimatedHeight: estimateViewHeight(
-				view.isHunkHeader,
-				view.comments.length,
-				view.showComposer,
-			),
-			file,
-			view,
-			actionTarget,
-			selectableLineKeys,
-		}));
-	}
-
-	return buildUnifiedDiffRowViews({
-		rows: unifiedRows,
-		filePath: file.path,
-		activeTab: options.activeTab,
-		readOnly: options.readOnly === true,
-		selectedLineKeys: options.selectedLineKeys,
-		commentsByLineKey,
-		composerTarget,
-	}).map((view) => ({
-		kind: 'unified-row',
-		id: diffRowId(file.path, view.key, 'unified'),
-		filePath: file.path,
-		estimatedHeight: estimateViewHeight(view.isHunkHeader, view.comments.length, view.showComposer),
-		file,
-		view,
-		actionTarget,
-		selectableLineKeys,
-	}));
-}
-
-function fileLimitRow(
-	file: GitReviewFileSummary,
-	reason: GitReviewLimitReason,
-	title: string,
-	message: string,
-): GitVirtualFileLimitRow {
-	return {
-		kind: 'file-limit',
-		id: `file:${encodeURIComponent(file.path)}:limit:${reason}`,
-		filePath: file.path,
-		estimatedHeight: 112,
-		file,
-		title,
-		message,
-		reason,
-	};
-}
-
-function estimateViewHeight(
-	isHunkHeader: boolean,
-	comments: number,
-	showComposer: boolean,
-): number {
-	return (isHunkHeader ? 28 : DEFAULT_ROW_HEIGHT) + comments * 72 + (showComposer ? 180 : 0);
-}
-
-function fileHeaderRowId(filePath: string): string {
-	return `file:${encodeURIComponent(filePath)}:header`;
-}
-
-function filePlaceholderRowId(filePath: string): string {
-	return `file:${encodeURIComponent(filePath)}:placeholder`;
-}
-
-function diffRowId(filePath: string, rowKey: string, mode: DiffMode): string {
-	return `file:${encodeURIComponent(filePath)}:${mode}:row:${rowKey}`;
 }
 
 function unique(values: string[]): string[] {

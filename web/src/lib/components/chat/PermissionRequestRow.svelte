@@ -28,26 +28,51 @@
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
-	import { getChatSessions, getFileSessions, getAppShell } from '$lib/context';
+	import {
+		resolveChatReferenceTarget,
+		type ResolveChatReference,
+	} from '$lib/chat/transcript/chat-reference.js';
+	import {
+		getAppShell,
+		getChatSessions,
+		getFileSessions,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
+	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
 
 	interface Props {
 		request: PermissionRequestMessage;
 		terminal?: PermissionTerminalState;
+		actionable?: boolean;
 		onDecision: (
-			permissionRequestId: string,
+			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
-		onExitPlanMode?: (permissionRequestId: string, choice: PlanExitChoice, plan: string) => void;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: PlanExitChoice, plan: string) => void;
 		chatContext?: ConversationMessageChatContext | null;
+		draft?: PermissionQuestionDraft;
+		onDraftChange?: (draft: PermissionQuestionDraft) => void;
+		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
-	let { request, terminal, onDecision, onExitPlanMode, chatContext = null }: Props = $props();
+	let {
+		request,
+		terminal,
+		actionable = true,
+		onDecision,
+		onExitPlanMode,
+		chatContext = null,
+		draft: controlledDraft,
+		onDraftChange,
+		acquireTransientActivity,
+	}: Props = $props();
 
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
+	const workspace = getWorkspaceCoordinator();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
@@ -56,10 +81,10 @@
 		if (!selected?.id) return null;
 		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
 	});
-	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
-	const isPending = $derived(!terminal);
+	const resolveChatReference: ResolveChatReference = (chatId) =>
+		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
+	const isPending = $derived(!terminal && actionable);
 	const isResolved = $derived(terminal?.state === 'resolved');
-	const isCancelled = $derived(terminal?.state === 'cancelled');
 	const wasAllowed = $derived(isResolved && terminal?.allowed === true);
 
 	type CardVariant = 'info' | 'success' | 'warning' | 'error' | 'neutral';
@@ -95,7 +120,7 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : 'main',
+			origin: appShell.isMobile ? 'mobile' : workspace.currentWindowId,
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
@@ -144,8 +169,28 @@
 		return m.chat_permission_permission_cancelled();
 	});
 
-	let selectedQuestionOptions = $state<Record<string, string[]>>({});
+	let localDraft = $state<PermissionQuestionDraft>({
+		selectedQuestionOptions: {},
+		rawInputOpen: false,
+	});
+	let effectiveDraft = $derived(controlledDraft ?? localDraft);
+	let selectedQuestionOptions = $derived(effectiveDraft.selectedQuestionOptions);
 	const terminalQuestionOptions = $derived(terminal?.selectedQuestionOptions ?? {});
+
+	function setDraft(next: PermissionQuestionDraft): void {
+		if (onDraftChange) onDraftChange(next);
+		else localDraft = next;
+	}
+
+	function setSelectedOptions(questionId: string, selected: string[]): void {
+		setDraft({
+			...effectiveDraft,
+			selectedQuestionOptions: {
+				...effectiveDraft.selectedQuestionOptions,
+				[questionId]: selected,
+			},
+		});
+	}
 
 	const canAnswerAskUserQuestion = $derived.by(() => {
 		const questions = askUserQuestionRequest?.questions ?? [];
@@ -205,10 +250,10 @@
 			const current = new Set(selectedOptionsFor(question.id));
 			if (checked) current.add(optionId);
 			else current.delete(optionId);
-			selectedQuestionOptions[question.id] = Array.from(current);
+			setSelectedOptions(question.id, Array.from(current));
 			return;
 		}
-		selectedQuestionOptions[question.id] = checked ? [optionId] : [];
+		setSelectedOptions(question.id, checked ? [optionId] : []);
 	}
 
 	function selectedQuestionPreview(question: AskUserQuestionPrompt): string | undefined {
@@ -238,7 +283,7 @@
 	}
 
 	function respondToAskUserQuestion(outcome: 'answered' | 'skipped'): void {
-		onDecision(request.permissionRequestId, {
+		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
 			response: askUserQuestionResponse(outcome),
 		});
@@ -253,10 +298,10 @@
 			const current = new Set(selectedOptionsFor(question.id));
 			if (checked) current.add(optionId);
 			else current.delete(optionId);
-			selectedQuestionOptions[question.id] = Array.from(current);
+			setSelectedOptions(question.id, Array.from(current));
 			return;
 		}
-		selectedQuestionOptions[question.id] = checked ? [optionId] : [];
+		setSelectedOptions(question.id, checked ? [optionId] : []);
 	}
 
 	function cursorQuestionResponse(outcome: 'answered' | 'skipped'): Record<string, unknown> {
@@ -275,7 +320,7 @@
 	}
 
 	function respondToCursorQuestion(outcome: 'answered' | 'skipped'): void {
-		onDecision(request.permissionRequestId, {
+		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
 			response: cursorQuestionResponse(outcome),
 		});
@@ -287,7 +332,7 @@
 	}
 
 	function respondToCursorPlan(outcome: 'accepted' | 'rejected'): void {
-		onDecision(request.permissionRequestId, {
+		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'accepted',
 			response: cursorPlanResponse(outcome),
 		});
@@ -335,6 +380,9 @@
 							source={plan}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveChatReference}
+							chatReferencePolicy="explicit"
+							{acquireTransientActivity}
 						/>
 					</div>
 				</div>
@@ -374,7 +422,7 @@
 				<div class="flex flex-wrap items-center gap-2">
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(request.permissionRequestId, 'bypass-new', plan)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'bypass-new', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border bg-status-warning text-status-warning-foreground hover:bg-status-warning/90"
 						title={m.chat_permission_tooltip_new_session_bypass()}
 					>
@@ -382,7 +430,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(request.permissionRequestId, 'bypass', plan)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'bypass', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border text-status-warning hover:bg-status-warning/15"
 						title={m.chat_permission_tooltip_bypass()}
 					>
@@ -390,7 +438,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(request.permissionRequestId, 'approve-edits', plan)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'approve-edits', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-info-border text-status-info hover:bg-status-info/15"
 						title={m.chat_permission_tooltip_approve_edits()}
 					>
@@ -399,7 +447,7 @@
 					<button
 						type="button"
 						onclick={() =>
-							onDecision(request.permissionRequestId, {
+							onDecision(request.permissionOccurrenceId, {
 								allow: false,
 								message: m.chat_permission_revise_plan_message(),
 							})}
@@ -410,7 +458,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(request.permissionRequestId, 'deny', plan)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'deny', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-neutral-border text-status-neutral-foreground hover:bg-status-neutral/50"
 					>
 						<X class="w-3.5 h-3.5" />
@@ -457,7 +505,7 @@
 									>
 										<input
 											type={question.allowMultiple ? 'checkbox' : 'radio'}
-											name={`${request.permissionRequestId}-${question.id}`}
+											name={`${request.permissionOccurrenceId}-${question.id}`}
 											checked={isOptionSelected(question.id, option.id)}
 											disabled={!isPending}
 											onchange={(event) =>
@@ -545,7 +593,7 @@
 									>
 										<input
 											type={question.allowMultiple ? 'checkbox' : 'radio'}
-											name={`${request.permissionRequestId}-${question.id}`}
+											name={`${request.permissionOccurrenceId}-${question.id}`}
 											checked={isOptionSelected(question.id, option.id)}
 											disabled={!isPending}
 											onchange={(event) =>
@@ -639,6 +687,9 @@
 									source={cursorCreatePlanRequest.plan}
 									fileLinkBasePath={projectBasePath}
 									onLinkNavigate={handleLinkNavigate}
+									{resolveChatReference}
+									chatReferencePolicy="explicit"
+									{acquireTransientActivity}
 								/>
 							</div>
 						</div>
@@ -734,7 +785,15 @@
 
 		{#snippet body()}
 			{#if rawInput}
-				<details class="mt-1">
+				<details
+					class="mt-1"
+					open={effectiveDraft.rawInputOpen}
+					ontoggle={(event) => {
+						const open = event.currentTarget.open;
+						if (open === effectiveDraft.rawInputOpen) return;
+						setDraft({ ...effectiveDraft, rawInputOpen: open });
+					}}
+				>
 					<summary class="cursor-pointer text-xs opacity-80 flex items-center gap-1 select-none">
 						<ChevronDown class="w-3.5 h-3.5" />
 						{m.chat_permission_view_tool_input()}
@@ -750,7 +809,7 @@
 				<div class="flex flex-wrap gap-2">
 					<button
 						type="button"
-						onclick={() => onDecision(request.permissionRequestId, { allow: true })}
+						onclick={() => onDecision(request.permissionOccurrenceId, { allow: true })}
 						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors"
 					>
 						<Check class="w-3.5 h-3.5" />
@@ -759,7 +818,7 @@
 					<button
 						type="button"
 						onclick={() =>
-							onDecision(request.permissionRequestId, {
+							onDecision(request.permissionOccurrenceId, {
 								allow: false,
 								message: 'User denied tool use',
 							})}

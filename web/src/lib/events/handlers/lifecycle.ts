@@ -12,30 +12,35 @@ function agentReportedFailure(exitCode: number | undefined): boolean {
 	return exitCode === AGENT_REPORTED_FAILURE_EXIT_CODE;
 }
 
+function agentRunSucceeded(msg: AgentRunFinishedMessage): boolean {
+	return msg.exitCode === 0 && msg.outcome !== 'interrupted';
+}
+
 export interface LifecycleContext {
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
+	appendServerNotice: (chatId: string, noticeType: LocalNoticeType, content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiPort,
-		'setPendingPermissionRequests' | 'clearPendingPermissionRequests'
+		'clearPendingPermissionsForChat' | 'clearTurnPermissionRequestsForChat'
 	>;
 	clearTurnStatus: (chatId?: string | null) => void;
-	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
+	isChatProcessing: (chatId?: string | null) => boolean;
 	onNavigateToChat: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
 	markChatTranscriptValidated: (chatId: string) => void;
+	notifyCompletion: () => void;
 }
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
 	const pendingChatId = ctx.getPendingChatId();
 	const currentChatId = ctx.getCurrentChatId();
 	const completedChatId = msg.chatId || currentChatId || pendingChatId;
+	const successorIsProcessing = ctx.isChatProcessing(completedChatId);
 
-	ctx.clearTurnStatus(completedChatId);
-	ctx.markChatsAsCompleted(completedChatId);
+	if (!successorIsProcessing) ctx.clearTurnStatus(completedChatId);
 
 	const runFailed = agentReportedFailure(msg.exitCode);
 
@@ -53,18 +58,22 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 		ctx.markChatTranscriptValidated(completedChatId);
 	}
 
+	if (agentRunSucceeded(msg) && !successorIsProcessing) ctx.notifyCompletion();
+
 	// Preserve plan-exit permission requests across turn boundaries
-	ctx.conversationUi.setPendingPermissionRequests((prev) =>
-		prev.filter((r) => r.permissionRequestId.startsWith('plan-exit-')),
-	);
+	if (!successorIsProcessing && completedChatId) {
+		ctx.conversationUi.clearTurnPermissionRequestsForChat(completedChatId);
+	}
 }
 
 export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleContext) {
 	const errorChatId = msg.chatId || ctx.getCurrentChatId();
+	const successorIsProcessing = ctx.isChatProcessing(errorChatId);
 
-	ctx.clearTurnStatus(errorChatId);
-	ctx.markChatsAsCompleted(errorChatId);
+	if (!successorIsProcessing) ctx.clearTurnStatus(errorChatId);
 
-	ctx.appendLocalNotice('error', msg.error || m.chat_notice_agent_error());
-	ctx.conversationUi.clearPendingPermissionRequests();
+	ctx.appendServerNotice(msg.chatId, 'error', msg.error || m.chat_notice_agent_error());
+	if (!successorIsProcessing && errorChatId) {
+		ctx.conversationUi.clearPendingPermissionsForChat(errorChatId);
+	}
 }

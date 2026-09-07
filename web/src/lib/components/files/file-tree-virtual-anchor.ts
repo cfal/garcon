@@ -1,4 +1,4 @@
-import type { VirtualItem } from '@tanstack/svelte-virtual';
+import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 import type {
 	FileTreeRenderModel,
 	FileTreeRenderRow,

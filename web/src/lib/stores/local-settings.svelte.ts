@@ -6,25 +6,72 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
-import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 import { parseFontSizeOption, type FontSizeOption } from '$lib/utils/font-size.js';
+import {
+	DEFAULT_CHAT_LIST_DOCK,
+	normalizeChatListDock,
+	type ChatListDock,
+} from '$lib/layout/desktop-layout.js';
+import {
+	sanitizeGlobalShortcutOverrides,
+	type GlobalShortcutOverrides,
+} from '$lib/workspace/global-shortcuts.js';
+import {
+	DEFAULT_SNIPPET_TRIGGER,
+	normalizeSnippetTrigger,
+} from '$lib/chat/composer/snippet-trigger.js';
+import {
+	CHAT_SEARCH_SORT_VALUES,
+	type ChatSearchSort,
+} from '$shared/chat-search';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
+export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
+export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
+export const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as const;
+export type CompletionSoundVisibility = (typeof COMPLETION_SOUND_VISIBILITY_VALUES)[number];
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
-export type FileOpenPlacementPreference = DesktopPlacement | 'source';
+
+export const SIDEBAR_CHAT_GROUPING_VALUES = [
+	'none',
+	'project',
+	'project-and-activity',
+	'activity',
+] as const;
+export type SidebarChatGrouping = (typeof SIDEBAR_CHAT_GROUPING_VALUES)[number];
+
+export const SIDEBAR_INACTIVITY_DURATION_VALUES = [
+	'2-days',
+	'3-days',
+	'4-days',
+	'5-days',
+	'1-week',
+	'2-weeks',
+	'1-month',
+	'2-months',
+	'3-months',
+] as const;
+export type SidebarInactivityDuration = (typeof SIDEBAR_INACTIVITY_DURATION_VALUES)[number];
+
+export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
+export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
+export type FileOpenPlacementPreference = 'same-window' | 'new-window' | 'dialog';
 export const FILE_OPEN_PLACEMENT_VALUES = [
-	'source',
+	'same-window',
+	'new-window',
 	'dialog',
-	'main',
-	'sidebar',
 ] as const satisfies readonly FileOpenPlacementPreference[];
 export const HIDEABLE_TOOL_GROUPS = [
 	{
-		id: 'commands',
-		toolTypes: ['bash-tool-use', 'exec-tool-use', 'wait-tool-use', 'write-stdin-tool-use'],
+		id: 'bash',
+		toolTypes: ['bash-tool-use', 'write-stdin-tool-use'],
+	},
+	{
+		id: 'exec',
+		toolTypes: ['exec-tool-use', 'wait-tool-use'],
 	},
 	{
 		id: 'file-reads',
@@ -78,18 +125,26 @@ export interface LocalSettingsSnapshot {
 	colorblindMode: boolean;
 	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
+	alwaysExpandCliMessages: boolean;
 	showThinking: boolean;
+	allowDirectChats: boolean;
+	reduceMotion: boolean;
 	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
+	steerWithCtrlEnter: boolean;
+	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
-	hideChatListWhenGitInMain: boolean;
+	chatListAutohide: boolean;
+	chatListDock: ChatListDock;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
-	sidebarGroupByProject: boolean;
+	sidebarGrouping: SidebarChatGrouping;
+	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
-	sidebarCompactChatItems: boolean;
+	sidebarChatItemLayout: SidebarChatItemLayout;
 	sidebarSortMode: SidebarSortMode;
+	sidebarSearchResultSort: ChatSearchSort;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
 	codeEditorFontSize: string;
@@ -101,21 +156,28 @@ export interface LocalSettingsSnapshot {
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
 	language: string;
 	hiddenToolTypes: HideableToolType[];
+	globalShortcuts: GlobalShortcutOverrides;
+	completionSoundMode: CompletionSoundMode;
+	completionSoundVolume: number;
+	completionSoundVisibility: CompletionSoundVisibility;
+	customCompletionSoundName: string | null;
 }
 
 type BooleanLocalSettingKey =
 	| 'colorblindMode'
 	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
+	| 'alwaysExpandCliMessages'
 	| 'showThinking'
+	| 'allowDirectChats'
+	| 'reduceMotion'
 	| 'showQuickCommitTray'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
-	| 'hideChatListWhenGitInMain'
+	| 'steerWithCtrlEnter'
+	| 'chatListAutohide'
 	| 'sidebarVisible'
-	| 'sidebarGroupByProject'
 	| 'sidebarGroupNestedProjectPaths'
-	| 'sidebarCompactChatItems'
 	| 'codeEditorWordWrap'
 	| 'codeEditorLineNumbers';
 
@@ -124,29 +186,42 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	colorblindMode: false,
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
+	alwaysExpandCliMessages: false,
 	showThinking: true,
+	allowDirectChats: false,
+	reduceMotion: false,
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
+	steerWithCtrlEnter: true,
+	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
-	hideChatListWhenGitInMain: false,
+	chatListAutohide: false,
+	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	sidebarGroupByProject: true,
+	sidebarGrouping: 'project-and-activity',
+	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
-	sidebarCompactChatItems: false,
+	sidebarChatItemLayout: 'compact',
 	sidebarSortMode: 'manual',
+	sidebarSearchResultSort: 'relevance',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
 	terminalFontSize: '13',
-	textEditorOpenPlacement: 'source',
-	imageViewerOpenPlacement: 'source',
-	markdownViewerOpenPlacement: 'source',
+	textEditorOpenPlacement: 'same-window',
+	imageViewerOpenPlacement: 'same-window',
+	markdownViewerOpenPlacement: 'same-window',
 	language: 'en',
 	hiddenToolTypes: [],
+	globalShortcuts: {},
+	completionSoundMode: 'off',
+	completionSoundVolume: 0.7,
+	completionSoundVisibility: 'unfocused',
+	customCompletionSoundName: null,
 };
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
@@ -155,6 +230,26 @@ function parseBoolean(value: unknown, fallback: boolean): boolean {
 
 function parseString(value: unknown, fallback: string): string {
 	return typeof value === 'string' ? value : fallback;
+}
+
+function parseCompletionSoundMode(value: unknown): CompletionSoundMode {
+	return typeof value === 'string' &&
+		COMPLETION_SOUND_MODE_VALUES.includes(value as CompletionSoundMode)
+		? (value as CompletionSoundMode)
+		: DEFAULTS.completionSoundMode;
+}
+
+function parseCompletionSoundVolume(value: unknown): number {
+	return typeof value === 'number' && Number.isFinite(value)
+		? Math.min(1, Math.max(0, value))
+		: DEFAULTS.completionSoundVolume;
+}
+
+function parseCompletionSoundVisibility(value: unknown): CompletionSoundVisibility {
+	return typeof value === 'string' &&
+		COMPLETION_SOUND_VISIBILITY_VALUES.includes(value as CompletionSoundVisibility)
+		? (value as CompletionSoundVisibility)
+		: DEFAULTS.completionSoundVisibility;
 }
 
 function parseTheme(value: unknown): ThemeMode {
@@ -183,6 +278,37 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 		: DEFAULTS.sidebarSortMode;
 }
 
+function parseSidebarSearchResultSort(value: unknown): ChatSearchSort {
+	return typeof value === 'string' && CHAT_SEARCH_SORT_VALUES.includes(value as ChatSearchSort)
+		? (value as ChatSearchSort)
+		: DEFAULTS.sidebarSearchResultSort;
+}
+
+function parseSidebarChatGrouping(value: unknown): SidebarChatGrouping {
+	return typeof value === 'string' &&
+		SIDEBAR_CHAT_GROUPING_VALUES.includes(value as SidebarChatGrouping)
+		? (value as SidebarChatGrouping)
+		: DEFAULTS.sidebarGrouping;
+}
+
+export function isSidebarInactivityDuration(value: unknown): value is SidebarInactivityDuration {
+	return (
+		typeof value === 'string' &&
+		SIDEBAR_INACTIVITY_DURATION_VALUES.includes(value as SidebarInactivityDuration)
+	);
+}
+
+function parseSidebarInactivityDuration(value: unknown): SidebarInactivityDuration {
+	return isSidebarInactivityDuration(value) ? value : DEFAULTS.sidebarInactivityDuration;
+}
+
+function parseSidebarChatItemLayout(value: unknown): SidebarChatItemLayout {
+	return typeof value === 'string' &&
+		SIDEBAR_CHAT_ITEM_LAYOUT_VALUES.includes(value as SidebarChatItemLayout)
+		? (value as SidebarChatItemLayout)
+		: DEFAULTS.sidebarChatItemLayout;
+}
+
 export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementPreference {
 	return (
 		typeof value === 'string' &&
@@ -194,7 +320,8 @@ function parseFileOpenPlacement(
 	value: unknown,
 	fallback: FileOpenPlacementPreference,
 ): FileOpenPlacementPreference {
-	return isFileOpenPlacement(value) ? value : fallback;
+	if (isFileOpenPlacement(value)) return value;
+	return fallback;
 }
 
 function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
@@ -214,30 +341,34 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.overlayBackdropEffects,
 		),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
+		alwaysExpandCliMessages: parseBoolean(
+			parsed.alwaysExpandCliMessages,
+			DEFAULTS.alwaysExpandCliMessages,
+		),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
+		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
+		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
+		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
+		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		hideChatListWhenGitInMain: parseBoolean(
-			parsed.hideChatListWhenGitInMain,
-			DEFAULTS.hideChatListWhenGitInMain,
-		),
+		chatListAutohide: parseBoolean(parsed.chatListAutohide, DEFAULTS.chatListAutohide),
+		chatListDock: normalizeChatListDock(parsed.chatListDock),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
-		sidebarGroupByProject: parseBoolean(
-			parsed.sidebarGroupByProject,
-			DEFAULTS.sidebarGroupByProject,
+		sidebarGrouping: parseSidebarChatGrouping(parsed.sidebarGrouping),
+		sidebarInactivityDuration: parseSidebarInactivityDuration(
+			parsed.sidebarInactivityDuration,
 		),
 		sidebarGroupNestedProjectPaths: parseBoolean(
 			parsed.sidebarGroupNestedProjectPaths,
 			DEFAULTS.sidebarGroupNestedProjectPaths,
 		),
-		sidebarCompactChatItems: parseBoolean(
-			parsed.sidebarCompactChatItems,
-			DEFAULTS.sidebarCompactChatItems,
-		),
+		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
+		sidebarSearchResultSort: parseSidebarSearchResultSort(parsed.sidebarSearchResultSort),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(
 			parsed.codeEditorLineNumbers,
@@ -264,6 +395,14 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		language: parseString(parsed.language, DEFAULTS.language),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
+		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
+		completionSoundMode: parseCompletionSoundMode(parsed.completionSoundMode),
+		completionSoundVolume: parseCompletionSoundVolume(parsed.completionSoundVolume),
+		completionSoundVisibility: parseCompletionSoundVisibility(parsed.completionSoundVisibility),
+		customCompletionSoundName:
+			typeof parsed.customCompletionSoundName === 'string'
+				? parsed.customCompletionSoundName
+				: null,
 	};
 }
 
@@ -292,18 +431,28 @@ export class LocalSettingsStore {
 	colorblindMode = $state(DEFAULTS.colorblindMode);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
+	alwaysExpandCliMessages = $state(DEFAULTS.alwaysExpandCliMessages);
 	showThinking = $state(DEFAULTS.showThinking);
+	allowDirectChats = $state(DEFAULTS.allowDirectChats);
+	reduceMotion = $state(DEFAULTS.reduceMotion);
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
+	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
+	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
-	hideChatListWhenGitInMain = $state(DEFAULTS.hideChatListWhenGitInMain);
+	chatListAutohide = $state(DEFAULTS.chatListAutohide);
+	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
-	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
+	sidebarGrouping = $state<SidebarChatGrouping>(DEFAULTS.sidebarGrouping);
+	sidebarInactivityDuration = $state<SidebarInactivityDuration>(
+		DEFAULTS.sidebarInactivityDuration,
+	);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
-	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
+	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
+	sidebarSearchResultSort = $state<ChatSearchSort>(DEFAULTS.sidebarSearchResultSort);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
@@ -317,6 +466,13 @@ export class LocalSettingsStore {
 	);
 	language = $state(DEFAULTS.language);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
+	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
+	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
+	completionSoundVolume = $state(DEFAULTS.completionSoundVolume);
+	completionSoundVisibility = $state<CompletionSoundVisibility>(
+		DEFAULTS.completionSoundVisibility,
+	);
+	customCompletionSoundName = $state<string | null>(DEFAULTS.customCompletionSoundName);
 
 	#storageListener = (event: StorageEvent) => {
 		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
@@ -338,10 +494,20 @@ export class LocalSettingsStore {
 	}
 
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
-		const normalizedValue = key === 'hiddenToolTypes' ? normalizeHiddenToolTypes(value) : value;
-		(this as unknown as Record<K, LocalSettingsSnapshot[K]>)[key] =
-			normalizedValue as LocalSettingsSnapshot[K];
-		persistLocalSettings(this.snapshot());
+		const next = { ...this.snapshot(), [key]: value };
+		if (key === 'snippetTrigger') next.snippetTrigger = normalizeSnippetTrigger(value);
+		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
+		if (key === 'chatListDock') {
+			next.chatListDock = normalizeChatListDock(value);
+		}
+		if (key === 'globalShortcuts') {
+			next.globalShortcuts = sanitizeGlobalShortcutOverrides(value);
+		}
+		if (key === 'completionSoundVolume') {
+			next.completionSoundVolume = parseCompletionSoundVolume(value);
+		}
+		this.#apply(next);
+		persistLocalSettings(next);
 	}
 
 	toggle(key: BooleanLocalSettingKey): void {
@@ -366,18 +532,26 @@ export class LocalSettingsStore {
 			colorblindMode: this.colorblindMode,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
+			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
 			showThinking: this.showThinking,
+			allowDirectChats: this.allowDirectChats,
+			reduceMotion: this.reduceMotion,
 			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
+			steerWithCtrlEnter: this.steerWithCtrlEnter,
+			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
-			hideChatListWhenGitInMain: this.hideChatListWhenGitInMain,
+			chatListAutohide: this.chatListAutohide,
+			chatListDock: this.chatListDock,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
-			sidebarGroupByProject: this.sidebarGroupByProject,
+			sidebarGrouping: this.sidebarGrouping,
+			sidebarInactivityDuration: this.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
-			sidebarCompactChatItems: this.sidebarCompactChatItems,
+			sidebarChatItemLayout: this.sidebarChatItemLayout,
 			sidebarSortMode: this.sidebarSortMode,
+			sidebarSearchResultSort: this.sidebarSearchResultSort,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
 			codeEditorFontSize: this.codeEditorFontSize,
@@ -389,6 +563,11 @@ export class LocalSettingsStore {
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			language: this.language,
 			hiddenToolTypes: this.hiddenToolTypes,
+			globalShortcuts: { ...this.globalShortcuts },
+			completionSoundMode: this.completionSoundMode,
+			completionSoundVolume: this.completionSoundVolume,
+			completionSoundVisibility: this.completionSoundVisibility,
+			customCompletionSoundName: this.customCompletionSoundName,
 		};
 	}
 
@@ -397,18 +576,26 @@ export class LocalSettingsStore {
 		this.colorblindMode = snap.colorblindMode;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
+		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;
 		this.showThinking = snap.showThinking;
+		this.allowDirectChats = snap.allowDirectChats;
+		this.reduceMotion = snap.reduceMotion;
 		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
+		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
+		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
-		this.hideChatListWhenGitInMain = snap.hideChatListWhenGitInMain;
+		this.chatListAutohide = snap.chatListAutohide;
+		this.chatListDock = snap.chatListDock;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
-		this.sidebarGroupByProject = snap.sidebarGroupByProject;
+		this.sidebarGrouping = snap.sidebarGrouping;
+		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
-		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
+		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
 		this.sidebarSortMode = snap.sidebarSortMode;
+		this.sidebarSearchResultSort = snap.sidebarSearchResultSort;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;
 		this.codeEditorFontSize = snap.codeEditorFontSize;
@@ -420,6 +607,11 @@ export class LocalSettingsStore {
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
+		this.globalShortcuts = { ...snap.globalShortcuts };
+		this.completionSoundMode = snap.completionSoundMode;
+		this.completionSoundVolume = snap.completionSoundVolume;
+		this.completionSoundVisibility = snap.completionSoundVisibility;
+		this.customCompletionSoundName = snap.customCompletionSoundName;
 	}
 }
 

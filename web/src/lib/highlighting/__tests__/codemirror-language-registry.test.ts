@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	canHighlightCodeFenceLanguage,
 	loadCodeFenceLanguage,
+	loadCodeMirrorLanguageForFile,
 	loadLanguageExtension,
 	normalizeCodeFenceLanguage,
 } from '../codemirror-language-registry';
@@ -102,5 +103,30 @@ describe('loadLanguageExtension', () => {
 		});
 
 		expect(extensions.length).toBeGreaterThan(0);
+	});
+});
+
+describe('loadCodeMirrorLanguageForFile', () => {
+	it.each([
+		['src/main.ts', 'typescript'],
+		['src/main.py', 'python'],
+		['Containerfile', 'dockerfile'],
+		['src/Counter.svelte', 'html'],
+	])('loads %s as %s', async (filePath, expectedKey) => {
+		const loaded = await loadCodeMirrorLanguageForFile(filePath);
+
+		expect(loaded?.key).toBe(expectedKey);
+		expect(loaded?.language.parser).toBeTruthy();
+		expect(loaded?.extensions.length).toBeGreaterThan(0);
+	});
+
+	it('preserves the extension-only compatibility API', async () => {
+		const loaded = await loadCodeMirrorLanguageForFile('src/main.ts');
+
+		await expect(loadLanguageExtension('src/main.ts')).resolves.toEqual(loaded?.extensions);
+	});
+
+	it('returns null for unsupported filenames', async () => {
+		await expect(loadCodeMirrorLanguageForFile('Makefile')).resolves.toBeNull();
 	});
 });

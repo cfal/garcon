@@ -7,7 +7,7 @@ import * as m from '$lib/paraglide/messages.js';
 describe('SidebarTranscriptSearchStatus', () => {
 	afterEach(cleanup);
 
-	it('shows exact index progress only while the client is polling', () => {
+	it('[TLV5-SEARCH.11-UI-01] includes unindexed chats in visible progress', () => {
 		render(SidebarTranscriptSearchStatus, {
 			enabled: true,
 			indexing: true,
@@ -15,17 +15,73 @@ describe('SidebarTranscriptSearchStatus', () => {
 				indexedChatCount: 1,
 				pendingChatCount: 2,
 				failedChatCount: 0,
+				unindexedChatCount: 3,
 				unsupportedChatCount: 0,
+				resultsTruncated: false,
 			},
 		});
 
 		const row = screen.getByRole('status');
 		expect(row.textContent).toContain(
-			m.sidebar_search_transcript_indexing_progress({ indexed: 1, pending: 2 }),
+			m.sidebar_search_transcript_indexing_progress({ indexed: 1, pending: 5 }),
 		);
 		expect(row.classList.contains('h-8')).toBe(true);
 		expect(row.classList.contains('shrink-0')).toBe(true);
 		expect(row.classList.contains('bg-chat-thinking')).toBe(true);
+	});
+
+	it('[TLV5-SEARCH.11-UI-02] discloses when a broad query returns a bounded recent sample', () => {
+		render(SidebarTranscriptSearchStatus, {
+			enabled: true,
+			index: {
+				indexedChatCount: 3,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unindexedChatCount: 0,
+				unsupportedChatCount: 0,
+				resultsTruncated: true,
+			},
+		});
+
+		expect(screen.getByRole('status').textContent).toContain(
+			m.sidebar_search_results_truncated(),
+		);
+	});
+
+	it('[TLV5-SEARCH.09-UI-06] renders only exact resync progress states', async () => {
+		const baseStatus = {
+			version: 1 as const,
+			phase: 'rebuilding' as const,
+			chats: { total: 10, indexed: 3, pending: 7, failed: 0, unindexed: 0 },
+			queuedJobs: 1,
+			resync: { completedChats: 3, totalChats: 10 },
+			backlogRows: 20,
+			activeChat: null,
+			lastErrorCode: null,
+			updatedAt: '2026-08-19T00:00:00.000Z',
+		};
+		const view = render(SidebarTranscriptSearchStatus, {
+			enabled: true,
+			indexing: true,
+			status: baseStatus,
+		});
+		const row = screen.getByRole('status');
+		expect(row.textContent).toContain(m.sidebar_search_indexing_progress({ done: 3, total: 10 }));
+
+		await view.rerender({
+			enabled: true,
+			indexing: true,
+			status: { ...baseStatus, resync: { completedChats: 10, totalChats: 10 } },
+		});
+		expect(row.textContent).toContain(m.sidebar_search_finalizing());
+
+		await view.rerender({
+			enabled: true,
+			indexing: true,
+			status: { ...baseStatus, resync: null },
+		});
+		expect(row.textContent).toContain(m.sidebar_search_updating());
+		expect(row.textContent).not.toContain('10');
 	});
 
 	it('keeps one row mounted and stops presenting a stale pending count as live', async () => {
@@ -43,7 +99,9 @@ describe('SidebarTranscriptSearchStatus', () => {
 				indexedChatCount: 42,
 				pendingChatCount: 7,
 				failedChatCount: 0,
+				unindexedChatCount: 0,
 				unsupportedChatCount: 0,
+				resultsTruncated: false,
 			},
 		});
 
@@ -61,7 +119,9 @@ describe('SidebarTranscriptSearchStatus', () => {
 				indexedChatCount: 1,
 				pendingChatCount: 0,
 				failedChatCount: 1,
+				unindexedChatCount: 0,
 				unsupportedChatCount: 1,
+				resultsTruncated: false,
 			},
 		});
 
@@ -81,7 +141,9 @@ describe('SidebarTranscriptSearchStatus', () => {
 				indexedChatCount: 42,
 				pendingChatCount: 7,
 				failedChatCount: 1,
+				unindexedChatCount: 0,
 				unsupportedChatCount: 1,
+				resultsTruncated: false,
 			},
 			error: m.sidebar_search_transcript_error(),
 		});

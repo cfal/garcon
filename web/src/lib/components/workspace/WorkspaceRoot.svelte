@@ -1,117 +1,238 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
-	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
+	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
+	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
+	import ConversationPanel from '$lib/components/chat/ConversationPanel.svelte';
+	import { resolveChatSurfacePresentation } from '$lib/components/chat/chat-surface-presentation.js';
+	import type { ConversationPanelActions } from '$lib/components/chat/conversation-panel-actions.js';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
+	import TerminalWindowMenuItems from '$lib/components/terminal/TerminalWindowMenuItems.svelte';
+	import TerminalRenameDialog from '$lib/components/terminal/TerminalRenameDialog.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
+	import type { MenuPrimitives } from '$lib/components/ui/menu-primitives.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
-	import RightSidebarHost from './RightSidebarHost.svelte';
-	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
+	import WorkspaceWindow from './WorkspaceWindow.svelte';
+	import WorkspaceWindowResizer from './WorkspaceWindowResizer.svelte';
+	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
 	import {
-		getTerminalRegistry,
-		getWorkspaceContext,
-		getWorkspaceCoordinator,
-		getTransientLayers,
 		getChatSessions,
-		getModelCatalog,
-		getSplitLayout,
-		getGitBranchActions,
 		getFileSessions,
+		getGitBranchActions,
+		getGitQuickSummary,
+		getChatProcessingReconciler,
+		getModelCatalog,
+		getLocalSettings,
+		getProjectResolution,
 		getSurfaceFrames,
+		getTerminalRegistry,
+		getWorkspaceCoordinator,
+		getWorkspaceHostGeometry,
+		setConversationUi,
+		setConversationLifecycles,
+		setConversationPanels,
+		type WorkspaceChatActions,
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
-	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
-	import { CHAT_SURFACE_ID, type HostId } from '$lib/workspace/surface-types';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import { surfaceFrame } from '$lib/workspace/surface-frame-action';
+	import type {
+		UserMessageNavigatorCommand,
+		UserMessageNavigatorRegistration,
+	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
+	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
+	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
+	import {
+		ConversationPanelRegistry,
+		type ConversationPanelDescriptor,
+	} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+	import type { GitQuickProjectLease } from '$lib/git/surface/git-quick-summary.svelte.js';
+	import {
+		chatViewSurfaceId,
+		type ChatViewSurfaceId,
+		type ChatViewSurfaceDescriptor,
+		type WorkspacePartitionNode,
+		type WorkspaceWindowId,
+	} from '$lib/workspace/surface-types.js';
+	import { CANONICAL_WINDOW_ID } from '$lib/workspace/canonical-layout.js';
+	import {
+		computeWindowRects,
+		windowNodeById,
+		type WorkspaceWindowRect,
+	} from '$lib/workspace/window-tree.js';
+	import type {
+		ChatDraftAppend,
+		ChatDraftAppendResult,
+	} from '$lib/chat/composer/chat-draft-append.js';
+	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import {
 		renderedPortablePresentations,
+		visibleChatPresentations,
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
+	import { cn } from '$lib/utils/cn';
+	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { DropdownMenuItem } from '$lib/components/ui/dropdown-menu';
-
-	interface WorkspaceChatActions {
-		requestDelete: (chat: ChatSessionRecord) => void;
-		requestRename: (chat: ChatSessionRecord) => void;
-		requestDetails: (chat: ChatSessionRecord) => void;
-		requestShare: (chat: ChatSessionRecord) => void;
-		requestProjectPath: (chat: ChatSessionRecord) => void;
-		fork: (chat: ChatSessionRecord) => void;
-		reload: (chat: ChatSessionRecord) => void;
-	}
+	import { projectTargetKey, type ProjectTarget } from '$shared/project-resolution';
 
 	let {
 		isMobile,
-		onMenuClick,
-		isDesktopFullscreen = false,
-		onToggleDesktopFullscreen,
 		onRegisterReload,
-		onOverlayModalChange,
 		chatActions,
 	}: {
 		isMobile: boolean;
-		onMenuClick?: () => void;
-		isDesktopFullscreen?: boolean;
-		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
-		onOverlayModalChange?: (open: boolean) => void;
 		chatActions: WorkspaceChatActions;
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
-	const workspaceContext = getWorkspaceContext();
+	const hostGeometry = getWorkspaceHostGeometry();
 	const terminals = getTerminalRegistry();
-	const transientLayers = getTransientLayers();
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
-	const splitLayout = getSplitLayout();
+	const localSettings = getLocalSettings();
+	const projectResolution = getProjectResolution();
 	const gitBranchActions = getGitBranchActions();
+	const gitQuickSummary = getGitQuickSummary();
 	const fileSessions = getFileSessions();
 	const surfaceFrames = getSurfaceFrames();
-	let openSidebarButton: HTMLButtonElement | null = $state(null);
+	const processingReconciler = getChatProcessingReconciler();
+	const subagentToolbar = new SubagentToolbarState();
+	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+	const conversationUi = new ConversationUiState();
+	setConversationUi(conversationUi);
+	const conversationLifecycles = new ConversationLifecycleRegistry({
+		sessions,
+		processing: processingReconciler,
+		conversationUi,
+	});
+	setConversationLifecycles(conversationLifecycles);
+	const conversationTranscriptOverlays = new ConversationTranscriptOverlayStore();
+	const conversationPanels = new ConversationPanelRegistry({
+		cache: chatTranscriptCache,
+		lifecycle: conversationLifecycles,
+		overlays: conversationTranscriptOverlays,
+		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
+		getSelectedChatId: () => sessions.selectedChatId,
+	});
+	setConversationPanels(conversationPanels);
+	const unregisterChatSurfaceTransfers =
+		workspace.registerChatSurfaceTransferPort(conversationPanels);
+	conversationUi.mountExecutionControlPruning({
+		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
+	});
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
+	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
+	let chatDraftAppend: ChatDraftAppend | null = null;
+	let renamingTerminalId = $state<string | null>(null);
+	let conversationPanelActions = $state<ConversationPanelActions | null>(null);
+	let composerInsetPx = $state(0);
+	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
+
 	const snapshot = $derived(workspace.layout.snapshot);
-	const activeMain = $derived(snapshot.main.activeId ?? CHAT_SURFACE_ID);
-	const mobileActive = $derived(snapshot.mobileActiveSurfaceId);
-	const selectedChat = $derived(sessions.selectedChat);
-	const canForkSelectedChat = $derived(
-		selectedChat ? modelCatalog.supportsFork(selectedChat.agentId) : false,
-	);
-	const canForkSelectedChatNow = $derived(
-		selectedChat
-			? canUseForkAction({
-					supportsFork: canForkSelectedChat,
-					supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(selectedChat.agentId),
-					isProcessing: selectedChat.isProcessing,
-				})
-			: false,
-	);
-	const sidebarPresented = $derived(
-		!isMobile && snapshot.sidebarOpen && !snapshot.manualFullscreen,
-	);
+	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
+	const currentWindowId = $derived(workspace.currentWindowId);
+	const projectedWindowId = $derived(fullscreenWindowId);
+	const presentedCurrentWindowId = $derived(projectedWindowId ?? currentWindowId);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
+	const chatPresentations = $derived.by<ConversationPanelDescriptor[]>(() =>
+		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').flatMap((presentation) => {
+			const chat = sessions.byId[presentation.chatId] ?? null;
+			if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
+				return [];
+			}
+			return [
+				{
+					...presentation,
+					snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
+				},
+			];
+		}),
+	);
+	const existingChatSurfaceIds = $derived.by(
+		() =>
+			new Set<ChatViewSurfaceId>(
+				Object.values(snapshot.surfaces).flatMap((surface) =>
+					surface.type === 'chat' ? [surface.id] : [],
+				),
+			),
+	);
+	const visibleGitProjects = $derived.by<GitQuickProjectLease[]>(() => {
+		if (!localSettings.showQuickCommitTray) return [];
+		return chatPresentations.flatMap(({ chatId }) => {
+			const chat = sessions.byId[chatId];
+			if (!chat?.projectPath) return [];
+			const target = targetForChat(chat);
+			const resolution = projectResolution.snapshotFor(target);
+			return resolution.kind === 'available'
+				? [{ projectPath: chat.projectPath, isProcessing: chat.isProcessing }]
+				: [];
+		});
+	});
+	const visibleProjectTargetsKey = $derived.by(() =>
+		visibleProjectTargets()
+			.map((target) => projectResolution.lifecycleKey(target))
+			.sort()
+			.join('\u0000'),
+	);
+
+	$effect(() => {
+		if (!visibleProjectTargetsKey) return;
+		const targets = untrack(visibleProjectTargets);
+		const leases = untrack(() => targets.map((target) => projectResolution.retain(target)));
+		return () => {
+			for (const lease of leases) lease.release();
+		};
+	});
+
+	$effect(() => {
+		const quickCommitVisible = localSettings.showQuickCommitTray;
+		if (!quickCommitVisible || !visibleProjectTargetsKey) return;
+		const targets = untrack(visibleProjectTargets);
+		const leases = untrack(() =>
+			targets.map((target) => {
+				const lease = projectResolution.retain(target);
+				void lease.resolve();
+				return lease;
+			}),
+		);
+		return () => {
+			for (const lease of leases) lease.release();
+		};
+	});
+
+	function visibleProjectTargets(): ProjectTarget[] {
+		return [
+			...new Map(
+				chatPresentations.flatMap(({ chatId }) => {
+					const chat = sessions.byId[chatId];
+					if (!chat?.projectPath) return [];
+					const target = targetForChat(chat);
+					return [[projectTargetKey(target), target] as const];
+				}),
+			).values(),
+		];
+	}
+
+	function targetForChat(chat: { id: string; status: string; projectPath: string }): ProjectTarget {
+		return chat.status === 'draft'
+			? { kind: 'path', projectPath: chat.projectPath }
+			: { kind: 'chat', chatId: chat.id, projectPath: chat.projectPath };
+	}
 	const rootState = new WorkspaceRootState({
-		workspace,
-		transientLayers,
 		get snapshot() {
 			return snapshot;
 		},
 		get isMobile() {
 			return isMobile;
 		},
-		get sidebarPresented() {
-			return sidebarPresented;
-		},
 		get portablePresentations() {
 			return portablePresentations;
 		},
 	});
-	const sidebarMetrics = $derived(rootState.sidebarMetrics);
-	const sidebarPushMaximum = $derived(rootState.sidebarPushMaximum);
 	const renderedPresentations = $derived(
 		renderedPortablePresentations(
 			snapshot,
@@ -120,11 +241,96 @@
 			rootState.retainedSingletonPresentationKeys,
 		),
 	);
-	const renderedSidebarPresentations = $derived(
-		renderedPresentations.filter((item) => item.presentation === 'sidebar'),
+	const renderedMobilePresentations = $derived(
+		renderedPresentations.filter((item) => item.presentation === 'mobile'),
 	);
-	const renderedNonSidebarPresentations = $derived(
-		renderedPresentations.filter((item) => item.presentation !== 'sidebar'),
+	const geometry = $derived(
+		computeWindowRects(snapshot.desktopRoot, (partitionId, ratio) =>
+			rootState.partitionRatio(partitionId, ratio),
+		),
+	);
+	const liveChatBodyTopPx = WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX;
+	const WINDOW_EDGE_EPSILON = 1e-6;
+
+	function hasLeftSeparator(rect: WorkspaceWindowRect): boolean {
+		return rect.left > WINDOW_EDGE_EPSILON;
+	}
+
+	function hasRightSeparator(rect: WorkspaceWindowRect): boolean {
+		return rect.left + rect.width < 1 - WINDOW_EDGE_EPSILON;
+	}
+
+	const composerPlacement = $derived.by(
+		(): {
+			surface: ChatViewSurfaceDescriptor;
+			windowId: WorkspaceWindowId | null;
+			rect: WorkspaceWindowRect | null;
+		} | null => {
+			const anchorSurfaceId = workspace.composerAnchorSurfaceId;
+			if (!anchorSurfaceId) return null;
+			const surface = snapshot.surfaces[anchorSurfaceId];
+			if (surface?.type !== 'chat') return null;
+			if (isMobile) {
+				return snapshot.mobileActiveSurfaceId === anchorSurfaceId
+					? { surface, windowId: null, rect: null }
+					: null;
+			}
+			const windowId = workspace.windowOf(anchorSurfaceId);
+			if (!windowId || (projectedWindowId && projectedWindowId !== windowId)) return null;
+			const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+			if (!workspaceWindow || workspaceWindow.tabs.activeId !== anchorSurfaceId) return null;
+			const rect = geometry.windows.find(
+				(entry) => entry.workspaceWindow.id === workspaceWindow.id,
+			)?.rect;
+			return rect
+				? {
+						surface,
+						windowId: workspaceWindow.id,
+						rect: displayRect(workspaceWindow.id, rect),
+					}
+				: null;
+		},
+	);
+	const composerPanel = $derived(conversationPanels.composerPanel);
+	const composerBound = $derived(
+		Boolean(composerPlacement && composerPanel?.surfaceId === composerPlacement.surface.id),
+	);
+	const liveLayerRectStyle = $derived(
+		composerPlacement?.rect ? rectStyle(composerPlacement.rect) : 'inset: 0;',
+	);
+	const composerHasLeftSeparator = $derived(
+		Boolean(composerPlacement?.rect && hasLeftSeparator(composerPlacement.rect)),
+	);
+	const composerHasRightSeparator = $derived(
+		Boolean(composerPlacement?.rect && hasRightSeparator(composerPlacement.rect)),
+	);
+	const fallbackChatSurfaceId = $derived(
+		Object.values(snapshot.surfaces).find(
+			(surface): surface is ChatViewSurfaceDescriptor => surface.type === 'chat',
+		)?.id ?? chatViewSurfaceId(CANONICAL_WINDOW_ID),
+	);
+	const terminalToRename = $derived(
+		renamingTerminalId ? (terminals.sessions[renamingTerminalId]?.metadata ?? null) : null,
+	);
+	const mobileChatSurface = $derived.by(() => {
+		if (!isMobile) return null;
+		const surface = snapshot.surfaces[snapshot.mobileActiveSurfaceId];
+		return surface?.type === 'chat' ? surface : null;
+	});
+	const mobileChat = $derived(
+		mobileChatSurface?.chatId ? (sessions.byId[mobileChatSurface.chatId] ?? null) : null,
+	);
+	const mobilePanel = $derived(
+		mobileChatSurface ? conversationPanels.panel(mobileChatSurface.id) : null,
+	);
+	const mobileChatPresentation = $derived(
+		resolveChatSurfacePresentation(mobileChat, sessions.isLoadingChats),
+	);
+	const mobileChatIsComposerAnchor = $derived(
+		Boolean(
+			mobileChatSurface?.chatId &&
+			conversationPanels.isComposerTarget(mobileChatSurface.id, mobileChatSurface.chatId),
+		),
 	);
 
 	$effect(() => {
@@ -135,21 +341,56 @@
 	});
 
 	$effect(() => {
-		workspace.setSidebarOverlayMode(sidebarMetrics.mode === 'overlay');
+		const activeChatIds = new Set(Object.keys(sessions.byId));
+		untrack(() => {
+			conversationLifecycles.prune(activeChatIds);
+			conversationTranscriptOverlays.prune(activeChatIds);
+		});
+	});
+
+	$effect.pre(() => {
+		const visible = chatPresentations;
+		untrack(() => conversationPanels.prepareForReconcile(visible));
+	});
+
+	$effect(() => {
+		const visible = chatPresentations;
+		const existingSurfaceIds = existingChatSurfaceIds;
+		untrack(() => {
+			conversationPanels.reconcile(visible);
+			conversationPanels.pruneRemovedSurfaces(existingSurfaceIds);
+		});
+	});
+
+	$effect(() => {
+		const projects = visibleGitProjects;
+		void gitQuickSummary.isEnabled;
+		untrack(() => {
+			gitQuickSummary.setVisibleProjects(projects);
+			gitQuickSummary.reconcilePolling();
+		});
 	});
 
 	onDestroy(() => {
+		gitQuickSummary.setVisibleProjects([]);
+		gitQuickSummary.reconcilePolling();
+		unregisterChatSurfaceTransfers();
+		conversationPanels.destroy();
+		conversationLifecycles.destroy();
 		rootState.destroy();
 	});
 
 	function label(surfaceId: string): string {
 		const surface = snapshot.surfaces[surfaceId];
 		if (!surface) return m.workspace_surface_view();
+		if (surface.type === 'chat') {
+			return surface.chatId
+				? sessions.byId[surface.chatId]?.title || m.chat_window_untitled()
+				: m.workspace_surface_chat();
+		}
 		if (surface.type === 'terminal') {
-			const session = getTerminalSequence(surface.terminalId);
-			return session
-				? m.workspace_surface_terminal_number({ number: session })
-				: m.workspace_surface_terminal();
+			const metadata = terminals.sessions[surface.terminalId]?.metadata;
+			return metadata ? terminalDisplayName(metadata) : m.workspace_surface_terminal();
 		}
 		if (surface.type === 'file') {
 			const session = fileSessions.get(surface.fileSessionId);
@@ -159,65 +400,107 @@
 		}
 		if (surface.type === 'terminal-launcher') return m.workspace_surface_terminal();
 		const labels = {
-			chat: m.workspace_surface_chat(),
 			git: m.workspace_surface_git(),
+			'git-history': m.workspace_surface_git_history(),
+			'git-compare': m.workspace_surface_git_compare(),
 			'pull-requests': m.workspace_surface_pull_requests_short(),
 			files: m.workspace_surface_files(),
 			commit: m.workspace_surface_commit(),
+			'chat-map': m.workspace_surface_chat_map(),
 		};
 		return labels[surface.kind];
 	}
 
-	function getTerminalSequence(terminalId: string): number | null {
-		return terminals.sessions[terminalId]?.metadata.displaySequence ?? null;
+	function rectStyle(rect: WorkspaceWindowRect): string {
+		return `left: ${rect.left * 100}%; top: ${rect.top * 100}%; width: ${rect.width * 100}%; height: ${rect.height * 100}%;`;
+	}
+
+	function displayRect(
+		windowId: WorkspaceWindowId,
+		rect: WorkspaceWindowRect,
+	): WorkspaceWindowRect {
+		return projectedWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
+	}
+
+	function resizerStyle(partition: WorkspacePartitionNode, bounds: WorkspaceWindowRect): string {
+		const ratio = rootState.partitionRatio(partition.id, partition.ratio);
+		if (partition.direction === 'horizontal') {
+			const left = (bounds.left + bounds.width * ratio) * 100;
+			return `left: calc(${left}% - 2px); top: ${bounds.top * 100}%; height: ${bounds.height * 100}%; width: 5px;`;
+		}
+		const top = (bounds.top + bounds.height * ratio) * 100;
+		return `top: calc(${top}% - 2px); left: ${bounds.left * 100}%; width: ${bounds.width * 100}%; height: 5px;`;
 	}
 
 	async function sendToChat(message: string): Promise<boolean> {
 		return chatSubmit ? chatSubmit(message) : false;
 	}
+
+	function appendToChatDraft(block: string): ChatDraftAppendResult {
+		return chatDraftAppend ? chatDraftAppend(block) : 'unavailable';
+	}
 </script>
 
-{#snippet mainMenuItems()}
-	{#if activeMain === CHAT_SURFACE_ID && selectedChat && workspaceContext.currentProject}
+{#snippet surfaceMenuItems(surfaceId: string, menu: MenuPrimitives)}
+	{@const surface = snapshot.surfaces[surfaceId]}
+	{@const chat = surface?.type === 'chat' && surface.chatId ? sessions.byId[surface.chatId] : null}
+	{@const panel = surface?.type === 'chat' ? conversationPanels.panel(surface.id) : null}
+	{#if chat}
+		{@const supportsFork = modelCatalog.supportsFork(chat.agentId)}
 		<CurrentChatMenuItems
-			{selectedChat}
-			showSplitViewAction
-			showFullscreenAction={Boolean(onToggleDesktopFullscreen)}
-			splitEnabled={splitLayout.isEnabled}
-			{isDesktopFullscreen}
-			canReload
-			canUpdateProjectPath={workspaceContext.canUpdateProjectPath}
-			canFork={canForkSelectedChat}
-			canForkNow={canForkSelectedChatNow}
-			onToggleSplitMode={() => toggleChatSplitMode(splitLayout, sessions, selectedChat)}
-			{onToggleDesktopFullscreen}
-			onRename={() => chatActions.requestRename(selectedChat)}
-			onDetails={() => chatActions.requestDetails(selectedChat)}
-			onReload={() => chatActions.reload(selectedChat)}
-			onShare={() => chatActions.requestShare(selectedChat)}
-			onProjectPath={() => chatActions.requestProjectPath(selectedChat)}
-			onFork={() => chatActions.fork(selectedChat)}
-			onDelete={() => chatActions.requestDelete(selectedChat)}
+			{menu}
+			selectedChat={chat}
+			canReload={chat.canReloadFromNativeHistory ?? false}
+			canUpdateProjectPath={modelCatalog.supportsUpdateProjectPath?.(chat.agentId) ?? false}
+			canFork={supportsFork}
+			canForkNow={canUseForkAction({
+				supportsFork,
+				supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(chat.agentId),
+				isProcessing: chat.isProcessing,
+			})}
+			onOpenUserMessageNavigator={sessions.selectedChatId === chat.id
+				? (openUserMessageNavigator ?? undefined)
+				: undefined}
+			onRename={() => chatActions.requestRename(chat)}
+			onDetails={() => chatActions.requestDetails(chat)}
+			onReload={() => chatActions.reload(chat)}
+			onShare={() => chatActions.requestShare(chat)}
+			onConfigurePreambles={panel?.transcript.transcriptViewId
+				? () => chatActions.configurePreambles(chat, panel.transcript.transcriptViewId)
+				: undefined}
+			onProjectPath={() => chatActions.requestProjectPath(chat)}
+			onFork={() => chatActions.fork(chat)}
+			onDelete={() => chatActions.requestDelete(chat)}
 		/>
-	{:else if onToggleDesktopFullscreen}
-		<DropdownMenuItem onclick={onToggleDesktopFullscreen}>
-			{#if isDesktopFullscreen}<Minimize2 />{:else}<Maximize2 />{/if}
-			{isDesktopFullscreen ? m.workspace_exit_fullscreen() : m.workspace_enter_fullscreen()}
-		</DropdownMenuItem>
+	{:else if surface?.type === 'terminal'}
+		<TerminalWindowMenuItems
+			{menu}
+			terminalId={surface.terminalId}
+			onRename={() => (renamingTerminalId = surface.terminalId)}
+		/>
 	{/if}
 {/snippet}
 
-{#snippet portableSurface(surfaceId: string, presentation: HostId | 'mobile', visible: boolean)}
+{#snippet portableSurface(
+	surfaceId: string,
+	presentation: WorkspaceWindowId | 'mobile',
+	visible: boolean,
+)}
 	{@const surface = snapshot.surfaces[surfaceId]}
-	{#if surface && surface.id !== CHAT_SURFACE_ID}
+	{#if surface && surface.type !== 'chat'}
 		{#key `${presentation}:${surface.id}`}
 			<PortableSurfaceFrame
 				{surface}
 				{presentation}
 				{visible}
-				mainInert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
-				style={rootState.surfaceStyle(presentation)}
+				style={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
+				onAppendToChatDraft={appendToChatDraft}
+				onChooseProjectFolder={modelCatalog.supportsUpdateProjectPath(
+					sessions.selectedChat?.agentId ?? '',
+				) && sessions.selectedChat
+					? () => chatActions.requestProjectPath(sessions.selectedChat!)
+					: undefined}
 				frameBridge={rootState.frameBridge(surface.id)}
 			/>
 		{/key}
@@ -225,111 +508,145 @@
 {/snippet}
 
 <div
-	use:rootState.observeHostRegion
-	class="workspace-host-region relative flex h-full min-h-0 min-w-0 bg-background"
-	style="--workspace-floating-taskbar-inset: 3rem;"
+	class="workspace-host-region relative flex h-full min-h-0 min-w-0 flex-1 bg-background"
 	role="region"
 	aria-label={m.workspace_workspace_region()}
 	tabindex="-1"
+	{@attach hostGeometry.attach}
 >
 	<div
-		class="relative flex min-h-0 min-w-0 flex-1 flex-col"
-		inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
+		class="relative min-h-0 min-w-0 flex-1"
+		class:hidden={isMobile}
+		inert={isMobile}
+		aria-hidden={isMobile}
 	>
-		{#if !isMobile}
-			<div
-				data-floating-workspace-toolbar
-				class={`pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 ${snapshot.main.order.length === 1 ? 'justify-end' : 'justify-center'}`}
-			>
-				<WorkspaceTaskBar
-					host="main"
-					hostState={snapshot.main}
-					labelFor={label}
-					onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
-					onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
-				>
-					{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
-					{#snippet endActions()}
-						{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
-							<div
-								class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-							>
-								<button
-									bind:this={openSidebarButton}
-									type="button"
-									class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-									onclick={() => void workspace.openSidebar()}
-									aria-label={m.workspace_open_sidebar()}
-									title={m.workspace_open_sidebar()}
-								>
-									<PanelRightOpen class="h-3.5 w-3.5" />
-								</button>
-							</div>
-						{/if}
-					{/snippet}
-				</WorkspaceTaskBar>
-			</div>
-		{/if}
-		<div class="relative min-h-0 flex-1 overflow-hidden">
-			<div
-				data-workspace-surface-id={CHAT_SURFACE_ID}
-				id={`main-panel-${CHAT_SURFACE_ID}`}
-				role="tabpanel"
-				aria-labelledby={!isMobile && snapshot.main.order.length > 1
-					? `main-tab-${CHAT_SURFACE_ID}`
-					: undefined}
-				aria-label={isMobile || snapshot.main.order.length === 1
-					? m.workspace_surface_chat()
-					: undefined}
-				onfocusin={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
-				onpointerdown={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
-				class="absolute inset-0"
-				class:hidden={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				inert={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				aria-hidden={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				use:surfaceFrame={{
-					registry: surfaceFrames,
-					surfaceId: CHAT_SURFACE_ID,
-					host: isMobile ? 'mobile' : 'main',
-					version: 0,
+		{#each geometry.windows as { workspaceWindow, rect } (workspaceWindow.id)}
+			{@const renderedRect = displayRect(workspaceWindow.id, rect)}
+			<WorkspaceWindow
+				{workspaceWindow}
+				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
+				isVisible={!isMobile && (!projectedWindowId || projectedWindowId === workspaceWindow.id)}
+				hasLeftSeparator={hasLeftSeparator(renderedRect)}
+				hasRightSeparator={hasRightSeparator(renderedRect)}
+				presentations={renderedPresentations}
+				style={rectStyle(renderedRect)}
+				labelFor={label}
+				panelActions={conversationPanelActions}
+				{composerInsetPx}
+				{subagentToolbar}
+				{surfaceMenuItems}
+				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
+				surfaceStyle={PORTABLE_SURFACE_STYLE}
+				onSendToChat={sendToChat}
+				onAppendToChatDraft={appendToChatDraft}
+			/>
+		{/each}
+		{#if !projectedWindowId}
+			{#each geometry.partitions as { partition, bounds } (partition.id)}
+				{@const ratioBounds = workspace.resolvePartitionRatioBounds(partition.id) ?? {
+					min: partition.ratio,
+					max: partition.ratio,
+					adjustable: false,
 				}}
-			>
-				<ChatSurface
-					{isMobile}
-					reserveTopFloatingToolbar={!isMobile}
-					isVisible={workspace.isChatPresented}
-					isInteractive={workspace.isChatInteractive}
-					onMenuClick={isMobile ? onMenuClick : undefined}
-					{isDesktopFullscreen}
-					{onToggleDesktopFullscreen}
-					{onRegisterReload}
-					onRegisterSubmit={(submit) => (chatSubmit = submit)}
-					{chatActions}
+				<WorkspaceWindowResizer
+					direction={partition.direction}
+					ratio={rootState.partitionRatio(partition.id, partition.ratio)}
+					style={resizerStyle(partition, bounds)}
+					boundsFraction={partition.direction === 'horizontal' ? bounds.width : bounds.height}
+					minRatio={ratioBounds.min}
+					maxRatio={ratioBounds.max}
+					disabled={!ratioBounds.adjustable}
+					onPreview={(next) => rootState.setPartitionRatioPreview(partition.id, next)}
+					onCommit={(next) => void workspace.setPartitionRatio(partition.id, next)}
 				/>
-			</div>
+			{/each}
+		{/if}
+	</div>
+
+	{#if isMobile && mobileChatSurface}
+		<div class="absolute inset-0 overflow-hidden bg-background">
+			{#if mobileChat && mobilePanel}
+				{#key mobilePanel}
+					{const panel = mobilePanel}
+					{const chat = mobileChat}
+					{const surfaceId = mobileChatSurface.id}
+					<ConversationPanel
+						{surfaceId}
+						{chat}
+						{panel}
+						isCommandOwner={workspace.focusOwner.kind !== 'chat-list' &&
+							workspace.focusOwner.surfaceId === surfaceId}
+						ownsComposer={composerBound && panel === composerPanel}
+						isVisible={true}
+						actions={conversationPanelActions}
+						composerInsetPx={composerBound ? composerInsetPx : 0}
+						reserveMobileToolbar={true}
+					/>
+				{/key}
+			{:else if mobileChatPresentation === 'loading'}
+				<ChatLoadingState announcementsEnabled={mobileChatIsComposerAnchor} />
+			{:else}
+				<ChatEmptyState />
+			{/if}
+		</div>
+	{/if}
+
+	<div
+		class="pointer-events-none absolute z-30 overflow-hidden"
+		class:invisible={!composerBound}
+		style={liveLayerRectStyle}
+		aria-hidden={!composerBound}
+		inert={!composerBound}
+	>
+		<div
+			class={cn(
+				'pointer-events-none absolute overflow-visible',
+				composerPlacement && !isMobile ? 'inset-x-0 bottom-0' : 'inset-0',
+				composerHasLeftSeparator && 'ml-3',
+				composerHasRightSeparator && 'mr-3',
+			)}
+			style:top={composerPlacement && !isMobile ? `${liveChatBodyTopPx}px` : undefined}
+			data-workspace-live-chat-body
+			data-workspace-live-chat-body-top-px={composerPlacement && !isMobile
+				? liveChatBodyTopPx
+				: undefined}
+			data-workspace-surface-id={composerPlacement?.surface.id}
+			onpointerdowncapture={() => {
+				if (composerPlacement) workspace.noteSurfaceFocus(composerPlacement.surface.id);
+			}}
+			onfocusincapture={() => {
+				if (composerPlacement) workspace.noteSurfaceFocus(composerPlacement.surface.id);
+			}}
+			use:surfaceFrame={{
+				registry: surfaceFrames,
+				surfaceId: composerPlacement?.surface.id ?? fallbackChatSurfaceId,
+				host: composerBound && composerPlacement ? (composerPlacement.windowId ?? 'mobile') : null,
+				version: 0,
+			}}
+		>
+			<ChatSurface
+				{isMobile}
+				isVisible={composerBound}
+				isInteractive={composerBound && workspace.isChatInteractive}
+				{onRegisterReload}
+				onRegisterSubmit={(submit) => (chatSubmit = submit)}
+				onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
+					(openUserMessageNavigator = command)}
+				onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
+				onRegisterPanelActions={(actions) => (conversationPanelActions = actions)}
+				onComposerHeightChange={(height) => (composerInsetPx = height)}
+				{subagentToolbar}
+				{chatActions}
+				transcriptCache={chatTranscriptCache}
+			/>
 		</div>
 	</div>
 
-	<RightSidebarHost
-		presented={sidebarPresented}
-		metrics={sidebarMetrics}
-		pushMaximum={sidebarPushMaximum}
-		{snapshot}
-		presentations={renderedSidebarPresentations}
-		labelFor={label}
-		onSendToChat={sendToChat}
-		frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
-		surfaceStyle={(presentation) => rootState.surfaceStyle(presentation)}
-		getOpenSidebarButton={() => openSidebarButton}
-		onPreviewWidth={(width) => (rootState.resizePreviewWidth = width)}
-		onCommitWidth={(width) => void rootState.commitSidebarWidth(width)}
-		onCancelWidth={() => (rootState.resizePreviewWidth = null)}
-		{onOverlayModalChange}
-	/>
-
-	{#each renderedNonSidebarPresentations as item (`${item.presentation}:${item.surfaceId}`)}
-		{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
-	{/each}
+	{#if isMobile}
+		{#each renderedMobilePresentations as item (`${item.presentation}:${item.surfaceId}`)}
+			{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
+		{/each}
+	{/if}
 </div>
 
 {#if gitBranchActions.showNewBranchModal}
@@ -347,3 +664,9 @@
 		onClose={() => gitBranchActions.closeNewBranchDialog()}
 	/>
 {/if}
+
+<TerminalRenameDialog
+	terminal={terminalToRename}
+	onClose={() => (renamingTerminalId = null)}
+	onRename={(terminalId, title) => terminals.rename(terminalId, title)}
+/>

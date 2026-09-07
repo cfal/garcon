@@ -14,7 +14,7 @@ describe('accepted input submission boundaries', () => {
 	it('keeps accepted input transports out of UI components', () => {
 		for (const file of sourceFiles('src/lib/components')) {
 			expect(readFileSync(file, 'utf8'), file).not.toMatch(
-				/\b(?:createQueuedInput|forkRunChat|runChat|sendActiveInput|startChat)\b/,
+				/\b(?:createQueuedInput|forkRunChat|runChat|steerChat|submitGoalControl|startChat)\b/,
 			);
 		}
 	});
@@ -23,7 +23,7 @@ describe('accepted input submission boundaries', () => {
 		for (const file of sourceFiles('src/lib/chat/conversation')) {
 			if (file.endsWith('accepted-input-submission-service.ts')) continue;
 			expect(readFileSync(file, 'utf8'), file).not.toMatch(
-				/\b(?:createQueuedInput|forkRunChat|runChat|sendActiveInput|startChat)\b/,
+				/\b(?:createQueuedInput|forkRunChat|runChat|steerChat|submitGoalControl|startChat)\b/,
 			);
 		}
 	});

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import ComposerBottomBar from '$lib/components/chat/ComposerBottomBar.svelte';
 	import AgentSettingsControls from '$lib/components/chat/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
@@ -9,6 +8,7 @@
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
 		buildPermissionOptions,
@@ -19,7 +19,8 @@
 		ModelSelectorChange,
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
-	import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import Check from '@lucide/svelte/icons/check';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -30,6 +31,7 @@
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
+		selectableAgentIds: readonly SessionAgentId[];
 		prompt: string;
 		promptError: string | null;
 		knownTags: string[];
@@ -42,6 +44,7 @@
 		startup,
 		modelCatalog,
 		remoteSettings,
+		selectableAgentIds,
 		prompt,
 		promptError,
 		knownTags,
@@ -49,8 +52,7 @@
 		onPromptChange,
 		onPromptKeydown,
 	}: Props = $props();
-	let textarea: HTMLTextAreaElement | undefined = $state();
-	let resizeFrame: number | null = null;
+	let textarea: HTMLTextAreaElement | null = $state(null);
 
 	const permissionOptions = $derived(buildPermissionOptions(startup.permissionModes));
 	const thinkingOptions = $derived(buildThinkingOptions(startup.thinkingModes, startup.modelValue));
@@ -62,36 +64,12 @@
 	const modelSelectorValue = $derived({
 		agentId: startup.agentId,
 		model: startup.modelValue,
+		...(startup.modelSelectionTarget ?? {}),
 	});
 	const recentSelectorOptions = $derived.by(() =>
 		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
 	);
 	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
-
-	function resizeTextarea(): void {
-		if (!textarea) return;
-		textarea.style.height = 'auto';
-		textarea.style.height = `${textarea.scrollHeight}px`;
-	}
-
-	$effect(() => {
-		prompt;
-		textarea;
-		if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
-		resizeFrame = requestAnimationFrame(() => {
-			resizeFrame = null;
-			resizeTextarea();
-		});
-		return () => {
-			if (resizeFrame === null) return;
-			cancelAnimationFrame(resizeFrame);
-			resizeFrame = null;
-		};
-	});
-
-	onDestroy(() => {
-		if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
-	});
 
 	function handlePathKeydown(event: KeyboardEvent): void {
 		if (event.key === 'Tab') {
@@ -105,14 +83,14 @@
 		textarea?.focus();
 	}
 
-	function handlePromptInput(event: Event): void {
-		onPromptChange((event.currentTarget as HTMLTextAreaElement).value);
-		resizeTextarea();
+	function handlePathFocus(event: FocusEvent & { currentTarget: HTMLInputElement }): void {
+		if (isMobile) event.currentTarget.blur();
+		startup.handlePathFocus();
 	}
 
 	function handleModelChange(next: ModelSelectorChange): void {
 		startup.selectAgent(next.agentId);
-		startup.handleModelChange(next.modelValue);
+		startup.selectModel(next.modelValue, next);
 	}
 </script>
 
@@ -129,7 +107,7 @@
 						type="text"
 						value={startup.projectPath}
 						readonly={startup.isUpdatingPinnedPath}
-						onfocus={() => startup.handlePathFocus()}
+						onfocus={handlePathFocus}
 						oninput={(event) => {
 							startup.projectPath = event.currentTarget.value;
 							startup.clearError();
@@ -137,7 +115,7 @@
 						}}
 						onkeydown={handlePathKeydown}
 						placeholder={startup.projectBasePath}
-						class="w-full rounded-lg border border-border bg-background py-2 pl-3 pr-8 text-base text-foreground outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
+						class="w-full rounded-lg border border-border bg-background py-2 pl-3 pr-8 text-base text-foreground outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 					/>
 					<div class="absolute right-2 top-1/2 -translate-y-1/2">
 						{#if startup.validationStatus === 'checking'}
@@ -209,24 +187,22 @@
 			onRemove={(tag) => startup.removeTag(tag)}
 			onClose={() => (startup.showTagInput = false)}
 		/>
+
+		{#if startup.modelSelectionError}
+			<p class="text-sm text-destructive">{startup.modelSelectionError}</p>
+		{/if}
 	</div>
 
-	<div>
-		<div
-			class="relative min-h-[120px] rounded-lg border border-border"
-			data-slot="scheduled-new-chat-composer"
-		>
-			<textarea
-				bind:this={textarea}
-				value={prompt}
-				oninput={handlePromptInput}
-				onkeydown={onPromptKeydown}
-				rows="2"
-				aria-label={m.scheduled_prompts_prompt()}
-				placeholder={m.scheduled_prompts_prompt_placeholder()}
-				class="chat-input-placeholder block min-h-11 max-h-[40vh] w-full resize-none overflow-y-auto bg-transparent px-4 py-1.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:max-h-[500px] sm:py-3"
-			></textarea>
-
+	<ScheduledPromptField
+		bind:ref={textarea}
+		{prompt}
+		{promptError}
+		targetType="new-chat"
+		surface="composer"
+		{onPromptChange}
+		{onPromptKeydown}
+	>
+		{#snippet controls()}
 			<div data-slot="scheduled-new-chat-composer-controls">
 				<ComposerBottomBar
 					canAttachImages={false}
@@ -260,19 +236,15 @@
 							onChange={handleModelChange}
 							recents={recentSelectorOptions}
 							{preferRecentsOnOpen}
+							{selectableAgentIds}
 							align="end"
 							side="bottom"
 						/>
 					{/snippet}
 				</ComposerBottomBar>
 			</div>
-		</div>
-		<div class="min-h-5 pt-1">
-			{#if prompt.length > 0 && promptError}
-				<p class="text-xs text-destructive">{promptError}</p>
-			{/if}
-		</div>
-	</div>
+		{/snippet}
+	</ScheduledPromptField>
 </div>
 
 {#if startup.worktreeModalOpen}

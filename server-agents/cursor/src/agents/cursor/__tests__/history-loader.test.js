@@ -9,8 +9,7 @@ import {
   cursorAcpStoreDbPath,
   cursorStoreDbPath,
   cursorStreamJsonStoreDbPath,
-  getCursorPreviewFromSessionId,
-  loadCursorChatMessagesBySessionId,
+  loadImportableCursorChatMessagesBySessionId,
   normalizeCursorBlobs,
   readCursorBlobs,
 } from '../history-loader.js';
@@ -51,7 +50,7 @@ describe('Cursor history loader', () => {
   });
 
   it('raises a clear error when the Cursor store is missing', async () => {
-    await expect(loadCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
+    await expect(loadImportableCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
       .rejects.toThrow('Cursor transcript database not found');
   });
 
@@ -274,7 +273,7 @@ describe('Cursor history loader', () => {
     });
   });
 
-  it('loads Cursor store.db blobs and builds previews', async () => {
+  it('loads Cursor store.db blobs', async () => {
     const sessionId = 'session-db';
     const projectPath = '/tmp/project';
     const storeDbPath = cursorAcpStoreDbPath(sessionId, tempRoot);
@@ -303,16 +302,13 @@ describe('Cursor history loader', () => {
       db.close();
     }
 
-    const messages = await loadCursorChatMessagesBySessionId(sessionId, projectPath, tempRoot);
+    const messages = await loadImportableCursorChatMessagesBySessionId(
+      sessionId,
+      projectPath,
+      tempRoot,
+    );
     expect(messages.map((message) => message.type)).toEqual(['user-message', 'assistant-message']);
     expect(messages[0].content).toBe('First prompt');
-
-    await expect(getCursorPreviewFromSessionId(sessionId, projectPath, tempRoot)).resolves.toEqual({
-      createdAt: '2026-05-22T02:00:00.000Z',
-      firstMessage: 'First prompt',
-      lastActivity: '2026-05-22T02:00:01.000Z',
-      lastMessage: 'Final reply',
-    });
   });
 
   it('keeps binary conversation graph ordering stable', async () => {

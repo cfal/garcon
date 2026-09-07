@@ -1,15 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import type { ChatSession } from '$lib/types/session';
 
 function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
+	const processingPhase =
+		overrides.processingPhase ?? (overrides.isProcessing || overrides.isActive ? 'running' : null);
 	return {
 		id: 'a',
 		agentId: 'claude',
 		model: 'opus',
 		title: 'A',
 		projectPath: '/p',
-		effectiveProjectKey: '/p',
 		orderGroup: 'normal',
 		tags: [],
 		permissionMode: 'default',
@@ -18,14 +19,38 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		preview: { lastMessage: '' },
 		isPinned: false,
 		isArchived: false,
-		isActive: false,
+		isActive: processingPhase !== null,
+		isProcessing: processingPhase !== null,
+		processingPhase,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
 }
 
 describe('ChatSessionsStore', () => {
+	it('publishes each changed project binding through one ordered boundary', () => {
+		const store = new ChatSessionsStore();
+		const listener = vi.fn();
+		const unsubscribe = store.onProjectPathChanged(listener);
+
+		store.upsertFromServer([makeServerSession({ id: 'a', projectPath: '/workspace/a' })]);
+		store.patchChat('a', { projectPath: '/workspace/b' });
+		store.patchChat('a', { projectPath: '/workspace/b' });
+		store.removeChat('a');
+
+		expect(listener.mock.calls).toEqual([
+			['a', '/workspace/a'],
+			['a', '/workspace/b'],
+			['a', null],
+		]);
+		expect(store.projectPathRevision('a')).toBe(3);
+		unsubscribe();
+	});
+
 	it('preserves identity for unchanged records on upsert', () => {
 		const store = new ChatSessionsStore();
 
@@ -39,6 +64,129 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']).toBe(ref);
 		expect(store.byId['b']).toBeTruthy();
+	});
+
+	it('preserves identity when agent setting keys are reordered', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { nested: { first: true, second: false }, mode: 'auto' },
+				},
+			}),
+		]);
+		const original = store.byId['a'];
+
+		store.upsertFromServer([
+			makeServerSession({
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { mode: 'auto', nested: { second: false, first: true } },
+				},
+			}),
+		]);
+
+		expect(store.byId['a']).toBe(original);
+	});
+
+	it('preserves identity for structurally equal parent references', () => {
+		const store = new ChatSessionsStore();
+		const parentChat = {
+			chatId: '1783725900000000',
+			relation: 'fork' as const,
+			transcriptViewId: 'view-parent',
+			ordinal: 7,
+		};
+
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChat })]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChat: { ...parentChat } })]);
+
+		expect(store.byId['a']).toBe(ref);
+	});
+
+	it('preserves identity for structurally equal delegation references', () => {
+		const store = new ChatSessionsStore();
+		const parentChat = {
+			chatId: '1783725900000000',
+			relation: 'delegation' as const,
+		};
+
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChat })]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChat: { ...parentChat } })]);
+
+		expect(store.byId['a']).toBe(ref);
+	});
+
+	it('replaces a record when its parent relation changes', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				parentChat: {
+					chatId: '1783725900000000',
+					relation: 'fork',
+					transcriptViewId: 'view-parent',
+					ordinal: 7,
+				},
+			}),
+		]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				parentChat: { chatId: '1783725900000000', relation: 'delegation' },
+			}),
+		]);
+
+		expect(store.byId['a']).not.toBe(ref);
+		expect(store.byId['a']?.parentChat).toEqual({
+			chatId: '1783725900000000',
+			relation: 'delegation',
+		});
+	});
+
+	it('replaces a record when its parent reference changes', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				parentChat: {
+					chatId: '1783725900000000',
+					relation: 'fork',
+					transcriptViewId: 'view-parent',
+					ordinal: 7,
+				},
+			}),
+		]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				parentChat: {
+					chatId: '1783725900000000',
+					relation: 'fork',
+					transcriptViewId: 'view-parent',
+					ordinal: 8,
+				},
+			}),
+		]);
+
+		expect(store.byId['a']).not.toBe(ref);
+		const parentChat = store.byId['a']?.parentChat;
+		expect(parentChat?.relation).toBe('fork');
+		if (parentChat?.relation !== 'fork') {
+			throw new Error('Expected fork parentage after the watermark changed.');
+		}
+		expect(parentChat.ordinal).toBe(8);
 	});
 
 	it('replaces record when fields change', () => {
@@ -70,6 +218,7 @@ describe('ChatSessionsStore', () => {
 		});
 
 		expect(store.byId['draft-1']?.status).toBe('draft');
+		expect(store.byId['draft-1']?.parentChat).toBeNull();
 		expect(store.byId['draft-1']?.title).toBe('Hello');
 		expect(store.startupByChatId['draft-1']).toBeTruthy();
 		expect(store.selectedChatId).toBe('draft-1');
@@ -79,6 +228,29 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['draft-1']?.status).toBe('running');
 		expect(store.startupByChatId['draft-1']).toBeUndefined();
+	});
+
+	it('updates draft tags without calling the server', async () => {
+		const setChatTags = vi.fn();
+		const store = new ChatSessionsStore({ setChatTags });
+		store.createDraft({
+			id: 'draft-1',
+			projectPath: '/repo',
+			startup: {
+				agentId: 'claude',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+				firstMessage: '',
+			},
+		});
+
+		await expect(store.setChatTags('draft-1', ['urgent'])).resolves.toBe(true);
+
+		expect(store.byId['draft-1'].tags).toEqual(['urgent']);
+		expect(store.startupByChatId['draft-1'].tags).toEqual(['urgent']);
+		expect(setChatTags).not.toHaveBeenCalled();
 	});
 
 	it('selectedChat derives from selectedChatId and byId', () => {
@@ -144,6 +316,20 @@ describe('ChatSessionsStore', () => {
 		expect(store.startupByChatId['draft-1']).toBeUndefined();
 		expect(store.order).not.toContain('draft-1');
 		expect(store.selectedChatId).toBeNull();
+	});
+
+	it('deselects a server chat omitted from a replacement snapshot', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({ id: 'selected' }),
+			makeServerSession({ id: 'remaining' }),
+		]);
+		store.setSelectedChatId('selected');
+
+		store.upsertFromServer([makeServerSession({ id: 'remaining' })]);
+
+		expect(store.selectedChatId).toBeNull();
+		expect(store.selectedChat).toBeNull();
 	});
 
 	it('upsertFromServer cleans up startup for server-known chats', () => {
@@ -214,6 +400,31 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']?.lastMessage).toBe('Hello world');
 		expect(store.byId['a']?.lastActivityAt).toBe('2026-02-25T12:00:00.000Z');
+	});
+
+	it('patchActivity advances unread activity without replacing preview text', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				preview: { lastMessage: 'Visible answer' },
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T10:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+				isUnread: false,
+			}),
+		]);
+
+		store.patchActivity('a', '2026-02-25T12:00:00.000Z');
+		store.patchActivity('a', '2026-02-25T11:00:00.000Z');
+
+		expect(store.byId['a']).toMatchObject({
+			lastMessage: 'Visible answer',
+			lastActivityAt: '2026-02-25T12:00:00.000Z',
+			isUnread: true,
+		});
 	});
 
 	it('patchPreview derives unread state when live activity advances past the read receipt', () => {
@@ -514,10 +725,11 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		expect(store.byId['a']?.isProcessing).toBe(false);
 
-		store.applyProcessingEvent('a', true);
+		store.applyProcessingEvent('a', 'running');
 		expect(store.byId['a']?.isProcessing).toBe(true);
+		expect(store.byId['a']?.processingPhase).toBe('running');
 
-		store.applyProcessingEvent('a', false);
+		store.applyProcessingEvent('a', null);
 		expect(store.byId['a']?.isProcessing).toBe(false);
 	});
 
@@ -533,10 +745,11 @@ describe('ChatSessionsStore', () => {
 	it('applies an early processing event when an external chat enters the snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('scheduled-chat', true);
+		store.applyProcessingEvent('scheduled-chat', 'running');
 		const ref = store.byId;
 
 		expect(store.byId).toBe(ref);
+		expect(store.isChatProcessing('scheduled-chat')).toBe(true);
 
 		store.upsertFromServer([
 			makeServerSession({ id: 'scheduled-chat', title: 'Scheduled chat', isActive: false }),
@@ -548,8 +761,8 @@ describe('ChatSessionsStore', () => {
 	it('cancels an early processing event when completion arrives before the snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('scheduled-chat', true);
-		store.applyProcessingEvent('scheduled-chat', false);
+		store.applyProcessingEvent('scheduled-chat', 'running');
+		store.applyProcessingEvent('scheduled-chat', null);
 		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
 
 		expect(store.byId['scheduled-chat']?.isProcessing).toBe(false);
@@ -558,7 +771,7 @@ describe('ChatSessionsStore', () => {
 	it('clears an early processing event when its chat is deleted', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('scheduled-chat', true);
+		store.applyProcessingEvent('scheduled-chat', 'running');
 		store.removeChat('scheduled-chat');
 		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
 
@@ -571,7 +784,7 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		const ref = store.byId;
 
-		store.applyProcessingEvent('a', false);
+		store.applyProcessingEvent('a', null);
 
 		expect(store.byId).toBe(ref);
 	});
@@ -585,11 +798,15 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({ id: 'c', title: 'C' }),
 		]);
 
-		store.reconcileProcessing(new Set(['a', 'c']));
+		store.reconcileProcessing([
+			{ chatId: 'a', phase: 'running' },
+			{ chatId: 'c', phase: 'stopping' },
+		]);
 
 		expect(store.byId['a']?.isProcessing).toBe(true);
 		expect(store.byId['b']?.isProcessing).toBe(false);
 		expect(store.byId['c']?.isProcessing).toBe(true);
+		expect(store.byId['c']?.processingPhase).toBe('stopping');
 	});
 
 	it('reconcileProcessing clears stale processing flags', () => {
@@ -599,10 +816,10 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({ id: 'a' }),
 			makeServerSession({ id: 'b', title: 'B' }),
 		]);
-		store.applyProcessingEvent('a', true);
-		store.applyProcessingEvent('b', true);
+		store.applyProcessingEvent('a', 'running');
+		store.applyProcessingEvent('b', 'running');
 
-		store.reconcileProcessing(new Set(['b']));
+		store.reconcileProcessing([{ chatId: 'b', phase: 'stopping' }]);
 
 		expect(store.byId['a']?.isProcessing).toBe(false);
 		expect(store.byId['b']?.isProcessing).toBe(true);
@@ -611,8 +828,8 @@ describe('ChatSessionsStore', () => {
 	it('reconcileProcessing replaces early processing events with its authoritative snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('stale-chat', true);
-		store.reconcileProcessing(new Set(['active-chat']));
+		store.applyProcessingEvent('stale-chat', 'running');
+		store.reconcileProcessing([{ chatId: 'active-chat', phase: 'running' }]);
 		store.upsertFromServer([
 			makeServerSession({ id: 'stale-chat', isActive: false }),
 			makeServerSession({ id: 'active-chat', title: 'Active', isActive: false }),
@@ -629,10 +846,10 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({ id: 'a' }),
 			makeServerSession({ id: 'b', title: 'B' }),
 		]);
-		store.applyProcessingEvent('a', true);
+		store.applyProcessingEvent('a', 'running');
 
 		const ref = store.byId;
-		store.reconcileProcessing(new Set(['a']));
+		store.reconcileProcessing([{ chatId: 'a', phase: 'running' }]);
 
 		expect(store.byId).toBe(ref);
 	});
@@ -641,7 +858,7 @@ describe('ChatSessionsStore', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		store.applyProcessingEvent('a', true);
+		store.applyProcessingEvent('a', 'running');
 
 		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated' })]);
 
@@ -653,29 +870,17 @@ describe('ChatSessionsStore', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
-		store.applyProcessingEvent('a', false);
+		store.applyProcessingEvent('a', null);
 		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated', isActive: true })]);
 
 		expect(store.byId['a']?.isProcessing).toBe(false);
 		expect(store.byId['a']?.title).toBe('Updated');
 	});
 
-	it('invalidateProcessingAuthority lets the next REST snapshot converge processing', () => {
-		const store = new ChatSessionsStore();
-		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
-		store.reconcileProcessing(new Set(['a']));
-		store.applyProcessingEvent('a', true);
-
-		store.invalidateProcessingAuthority();
-		store.upsertFromServer([makeServerSession({ id: 'a', isActive: false })]);
-
-		expect(store.byId['a']?.isProcessing).toBe(false);
-	});
-
 	it('prunes processing authority for a known chat removed from the server list', () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		store.applyProcessingEvent('a', true);
+		store.applyProcessingEvent('a', 'running');
 
 		store.upsertFromServer([]);
 		store.upsertFromServer([makeServerSession({ id: 'a', isActive: false })]);
@@ -686,7 +891,7 @@ describe('ChatSessionsStore', () => {
 	it('reconnect processing baseline governs chats arriving in later list responses', () => {
 		const store = new ChatSessionsStore();
 
-		store.reconcileProcessing(new Set(['active-chat']));
+		store.reconcileProcessing([{ chatId: 'active-chat', phase: 'running' }]);
 		store.upsertFromServer([
 			makeServerSession({ id: 'active-chat', isActive: false }),
 			makeServerSession({ id: 'stale-chat', title: 'Stale', isActive: true }),
@@ -706,7 +911,7 @@ describe('ChatSessionsStore', () => {
 		]);
 
 		// Active-chats snapshot arrives after.
-		store.reconcileProcessing(new Set(['a']));
+		store.reconcileProcessing([{ chatId: 'a', phase: 'running' }]);
 
 		expect(store.byId['a']?.isProcessing).toBe(true);
 		expect(store.byId['b']?.isProcessing).toBe(false);

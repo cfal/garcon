@@ -1,6 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AskUserQuestionToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
+import {
+	AskUserQuestionToolUseMessage,
+	ExitPlanModeToolUseMessage,
+	PermissionRequestMessage,
+} from '$shared/chat-types';
 import PermissionRequestRowTestHost from './PermissionRequestRowTestHost.svelte';
 
 const TS = '2026-07-02T00:00:00.000Z';
@@ -8,7 +12,7 @@ const TS = '2026-07-02T00:00:00.000Z';
 function askUserQuestionRequest(): PermissionRequestMessage {
 	return new PermissionRequestMessage(
 		TS,
-		'perm-question',
+		'incarnation-question',
 		new AskUserQuestionToolUseMessage(TS, 'tool-question', undefined, [
 			{
 				id: 'Which mode?',
@@ -52,7 +56,7 @@ describe('PermissionRequestRow', () => {
 
 		await fireEvent.click(submit);
 
-		expect(onDecision).toHaveBeenCalledWith('perm-question', {
+		expect(onDecision).toHaveBeenCalledWith('incarnation-question', {
 			allow: true,
 			response: {
 				type: 'ask-user-question-response',
@@ -70,6 +74,7 @@ describe('PermissionRequestRow', () => {
 			request,
 			onDecision,
 			terminal: {
+				permissionOccurrenceId: 'incarnation-question',
 				state: 'resolved',
 				allowed: true,
 				selectedQuestionOptions: { 'Which mode?': ['Careful'] },
@@ -96,6 +101,7 @@ describe('PermissionRequestRow', () => {
 			request,
 			onDecision,
 			terminal: {
+				permissionOccurrenceId: 'incarnation-question',
 				state: 'resolved',
 				allowed: false,
 				reason: 'The user did not answer the questions.',
@@ -112,5 +118,41 @@ describe('PermissionRequestRow', () => {
 		expect(careful.disabled).toBe(true);
 		expect(screen.queryByRole('button', { name: /skip/i })).toBeNull();
 		expect(onDecision).not.toHaveBeenCalled();
+	});
+
+	it('reports immutable controlled drafts without losing the caller-owned value', async () => {
+		const onDraftChange = vi.fn();
+		const draft = { selectedQuestionOptions: {}, rawInputOpen: false };
+		render(PermissionRequestRowTestHost, {
+			request: askUserQuestionRequest(),
+			onDecision: vi.fn(),
+			draft,
+			onDraftChange,
+		});
+
+		await fireEvent.click(screen.getByRole('radio', { name: /Careful/ }));
+		expect(onDraftChange).toHaveBeenCalledWith({
+			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
+			rawInputOpen: false,
+		});
+		expect(draft).toEqual({ selectedQuestionOptions: {}, rawInputOpen: false });
+	});
+
+	it('resolves explicit chat links without autolinking bare IDs in permission plans', () => {
+		const chatId = '1788592720180699';
+		const request = new PermissionRequestMessage(
+			TS,
+			'incarnation-plan',
+			new ExitPlanModeToolUseMessage(TS, 'tool-plan', `${chatId} [Open target](/chat/${chatId})`),
+		);
+		const { container } = render(PermissionRequestRowTestHost, {
+			request,
+			onDecision: vi.fn(),
+			chatTitles: { [chatId]: 'Target chat' },
+			chatContext: { chatId: 'chat-1', projectPath: '/workspace/project' },
+		});
+
+		expect(screen.getByRole('link', { name: 'Open target' })).toBeTruthy();
+		expect(container.querySelectorAll('[data-chat-reference-id]')).toHaveLength(1);
 	});
 });

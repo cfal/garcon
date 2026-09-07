@@ -15,10 +15,39 @@ permissions:
   contents: read
 
 jobs:
-  server-integration:
-    name: Server protocol integration
+  server-integration-lane:
+    name: Server protocol integration / ${{ matrix.lane }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: server 1/4
+            path: tests/server
+            shard: "1/4"
+            test_timeout: 30000
+            artifact_suffix: server-1-of-4
+          - lane: server 2/4
+            path: tests/server
+            shard: "2/4"
+            test_timeout: 30000
+            artifact_suffix: server-2-of-4
+          - lane: server 3/4
+            path: tests/server
+            shard: "3/4"
+            test_timeout: 30000
+            artifact_suffix: server-3-of-4
+          - lane: server 4/4
+            path: tests/server
+            shard: "4/4"
+            test_timeout: 30000
+            artifact_suffix: server-4-of-4
+          - lane: SACS
+            path: tests/sacs
+            shard: "1/1"
+            test_timeout: 120000
+            artifact_suffix: sacs
 
     steps:
       - name: Check out repository
@@ -27,7 +56,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: canary
 
       - name: Install server dependencies
         working-directory: server
@@ -42,13 +71,290 @@ jobs:
         run: bun run typecheck
 
       - name: Run server integration tests
-        run: bun run test:integration:server
+        working-directory: integration-tests
+        env:
+          TEST_PATH: ${{ matrix.path }}
+          TEST_SHARD: ${{ matrix.shard }}
+          TEST_TIMEOUT: ${{ matrix.test_timeout }}
+        run: bun test --max-concurrency=1 --timeout="$TEST_TIMEOUT" --shard="$TEST_SHARD" "$TEST_PATH"
 
       - name: Upload server integration diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: server-integration-diagnostics
+          name: server-integration-diagnostics-${{ matrix.artifact_suffix }}
+          path: integration-tests/artifacts/server/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  server-integration:
+    name: Server protocol integration
+    needs: server-integration-lane
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Verify server protocol integration lanes
+        env:
+          LANES_RESULT: ${{ needs.server-integration-lane.result }}
+        run: |
+          if [ "$LANES_RESULT" != "success" ]; then
+            echo "::error::Server protocol integration lanes finished with result: $LANES_RESULT"
+            exit 1
+          fi
+
+  claude-live:
+    name: Live Claude conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check for Claude testing configuration
+        id: claude-config
+        shell: bash
+        env:
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+          CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
+          CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
+        run: |
+          if [ -n "$DEEPSEEK_TESTING_KEY" ] && [ -n "$CLAUDE_TESTING_BASE_URL" ] && [ -n "$CLAUDE_TESTING_MODEL" ]; then
+            echo "::add-mask::$DEEPSEEK_TESTING_KEY"
+            echo "::add-mask::$CLAUDE_TESTING_BASE_URL"
+            echo "::add-mask::$CLAUDE_TESTING_MODEL"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Claude testing configuration is unavailable; skipping live Claude tests."
+          fi
+
+      - name: Check out repository
+        if: steps.claude-config.outputs.available == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        if: steps.claude-config.outputs.available == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install server dependencies
+        if: steps.claude-config.outputs.available == 'true'
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        if: steps.claude-config.outputs.available == 'true'
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Run live Claude conformance tests
+        if: steps.claude-config.outputs.available == 'true'
+        env:
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+          CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
+          CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
+        run: bun run test:live:claude
+
+      - name: Verify Claude diagnostics contain no testing configuration
+        id: claude-diagnostics-audit
+        if: always() && steps.claude-config.outputs.available == 'true'
+        shell: bash
+        env:
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+          CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
+          CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
+        run: |
+          if [ -d integration-tests/artifacts/server ]; then
+            # Only the credential is audited: the base URL and model are public
+            # lane configuration that legitimately appears in diagnostics.
+            for value in "$DEEPSEEK_TESTING_KEY"; do
+              echo "::add-mask::$value"
+              set +e
+              grep --recursive --fixed-strings --files-with-matches \
+                -- "$value" integration-tests/artifacts/server >/dev/null 2>&1
+              audit_status=$?
+              set -e
+              if [ "$audit_status" -eq 0 ]; then
+                echo "safe=false" >> "$GITHUB_OUTPUT"
+                echo "::error::Live Claude diagnostics contain testing configuration and will not be uploaded."
+                exit 1
+              fi
+              if [ "$audit_status" -ne 1 ]; then
+                echo "safe=false" >> "$GITHUB_OUTPUT"
+                echo "::error::Live Claude diagnostics could not be audited and will not be uploaded."
+                exit 1
+              fi
+            done
+          fi
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload live Claude diagnostics
+        if: failure() && steps.claude-config.outputs.available == 'true' && steps.claude-diagnostics-audit.outputs.safe == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-live-integration-diagnostics
+          path: integration-tests/artifacts/server/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  codex-live:
+    name: Live Codex conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check for Codex testing key
+        id: codex-key
+        shell: bash
+        env:
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+        run: |
+          if [ -n "$OPENAI_TESTING_KEY" ]; then
+            echo "::add-mask::$OPENAI_TESTING_KEY"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "OPENAI_TESTING_KEY is unavailable; skipping live Codex tests."
+          fi
+
+      - name: Check out repository
+        if: steps.codex-key.outputs.available == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        if: steps.codex-key.outputs.available == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install server dependencies
+        if: steps.codex-key.outputs.available == 'true'
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        if: steps.codex-key.outputs.available == 'true'
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Run live Codex conformance tests
+        if: steps.codex-key.outputs.available == 'true'
+        env:
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+        run: bun run test:live:codex
+
+      - name: Verify Codex diagnostics contain no testing credential
+        id: codex-diagnostics-audit
+        if: always() && steps.codex-key.outputs.available == 'true'
+        shell: bash
+        env:
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+        run: |
+          echo "::add-mask::$OPENAI_TESTING_KEY"
+          if [ -d integration-tests/artifacts/server ]; then
+            set +e
+            grep --recursive --fixed-strings --files-with-matches \
+              -- "$OPENAI_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+            audit_status=$?
+            set -e
+            if [ "$audit_status" -eq 0 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live Codex diagnostics contain the testing credential and will not be uploaded."
+              exit 1
+            fi
+            if [ "$audit_status" -ne 1 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live Codex diagnostics could not be audited and will not be uploaded."
+              exit 1
+            fi
+          fi
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload live Codex diagnostics
+        if: failure() && steps.codex-key.outputs.available == 'true' && steps.codex-diagnostics-audit.outputs.safe == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-live-integration-diagnostics
+          path: integration-tests/artifacts/server/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  opencode-live:
+    name: Live OpenCode conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check for OpenCode testing key
+        id: opencode-key
+        shell: bash
+        env:
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+        run: |
+          if [ -n "$DEEPSEEK_TESTING_KEY" ]; then
+            echo "::add-mask::$DEEPSEEK_TESTING_KEY"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "DEEPSEEK_TESTING_KEY is unavailable; skipping live OpenCode tests."
+          fi
+
+      - name: Check out repository
+        if: steps.opencode-key.outputs.available == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        if: steps.opencode-key.outputs.available == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install server dependencies
+        if: steps.opencode-key.outputs.available == 'true'
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        if: steps.opencode-key.outputs.available == 'true'
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Run live OpenCode conformance tests
+        if: steps.opencode-key.outputs.available == 'true'
+        env:
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+        run: bun run test:live:opencode
+
+      - name: Verify OpenCode diagnostics contain no testing credential
+        id: opencode-diagnostics-audit
+        if: always() && steps.opencode-key.outputs.available == 'true'
+        shell: bash
+        env:
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+        run: |
+          echo "::add-mask::$DEEPSEEK_TESTING_KEY"
+          if [ -d integration-tests/artifacts/server ]; then
+            set +e
+            grep --recursive --fixed-strings --files-with-matches \
+              -- "$DEEPSEEK_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+            audit_status=$?
+            set -e
+            if [ "$audit_status" -eq 0 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live OpenCode diagnostics contain the testing credential and will not be uploaded."
+              exit 1
+            fi
+            if [ "$audit_status" -ne 1 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live OpenCode diagnostics could not be audited and will not be uploaded."
+              exit 1
+            fi
+          fi
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload live OpenCode diagnostics
+        if: failure() && steps.opencode-key.outputs.available == 'true' && steps.opencode-diagnostics-audit.outputs.safe == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-live-integration-diagnostics
           path: integration-tests/artifacts/server/
           if-no-files-found: ignore
           retention-days: 7
@@ -70,7 +376,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: canary
 
       - name: Install server dependencies
         working-directory: server
@@ -128,5 +434,64 @@ jobs:
         with:
           name: lightpanda-e2e-diagnostics
           path: integration-tests/artifacts/e2e/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  chromium-e2e:
+    name: Chromium E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install server dependencies
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Compile Paraglide messages
+        working-directory: web
+        run: bun run i18n:compile
+
+      - name: Build SPA
+        run: bun run build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('integration-tests/bun.lock') }}
+
+      - name: Install Chromium
+        working-directory: integration-tests
+        run: bunx playwright install --with-deps chromium
+
+      - name: Type-check integration tests
+        working-directory: integration-tests
+        run: bun run typecheck
+
+      - name: Run Chromium E2E
+        run: bun run test:integration:chromium
+
+      - name: Upload Chromium diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromium-e2e-diagnostics
+          path: integration-tests/artifacts/chromium/
           if-no-files-found: ignore
           retention-days: 7

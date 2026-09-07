@@ -2,9 +2,12 @@ import { describe, expect, it } from 'bun:test';
 
 import { jsonError, jsonErrorFromUnknown } from '../http-error.ts';
 import {
-  ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
-  ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
-  ActiveInputDeliveryError,
+  GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
+  GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
+  GoalControlDeliveryError,
+  STEER_NOT_DELIVERED_MESSAGE,
+  STEER_OUTCOME_UNKNOWN_MESSAGE,
+  SteerDeliveryError,
 } from '../domain-error.ts';
 
 describe('jsonError', () => {
@@ -48,11 +51,11 @@ describe('jsonErrorFromUnknown', () => {
     expect(body.errorCode).toBe('VALIDATION_FAILED');
   });
 
-  it('sanitizes active-input delivery errors while preserving retry safety', async () => {
+  it('sanitizes goal-control delivery errors while preserving retry safety', async () => {
     const preAcceptCause = new Error('/secret/workspace/chat.jsonl could not be appended');
     const postAcceptCause = new Error('Codex RPC turn/steer rejected internal request 987');
-    const preAcceptError = new ActiveInputDeliveryError(preAcceptCause, false);
-    const postAcceptError = new ActiveInputDeliveryError(postAcceptCause, true);
+    const preAcceptError = new GoalControlDeliveryError(preAcceptCause, false);
+    const postAcceptError = new GoalControlDeliveryError(postAcceptCause, true);
 
     const [preAcceptResponse, postAcceptResponse] = [
       jsonErrorFromUnknown(preAcceptError),
@@ -66,16 +69,38 @@ describe('jsonErrorFromUnknown', () => {
     expect(preAcceptError.cause).toBe(preAcceptCause);
     expect(postAcceptError.cause).toBe(postAcceptCause);
     expect(preAcceptBody).toMatchObject({
-      error: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
-      errorCode: 'ACTIVE_INPUT_NOT_DELIVERED',
+      error: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
+      errorCode: 'GOAL_CONTROL_NOT_DELIVERED',
       retryable: true,
     });
     expect(postAcceptBody).toMatchObject({
-      error: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
-      errorCode: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
+      error: GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
+      errorCode: 'GOAL_CONTROL_OUTCOME_UNKNOWN',
       retryable: false,
     });
     expect(JSON.stringify([preAcceptBody, postAcceptBody])).not.toContain('/secret/workspace');
     expect(JSON.stringify([preAcceptBody, postAcceptBody])).not.toContain('turn/steer');
+  });
+
+  it('sanitizes strict steering delivery failures without making them retryable', async () => {
+    const notSent = new SteerDeliveryError(new Error('/secret/pre-send failure'), 'not-sent');
+    const unknown = new SteerDeliveryError(new Error('turn/steer transport closed'), 'unknown');
+    const [notSentBody, unknownBody] = await Promise.all([
+      jsonErrorFromUnknown(notSent).json(),
+      jsonErrorFromUnknown(unknown).json(),
+    ]);
+
+    expect(notSentBody).toMatchObject({
+      error: STEER_NOT_DELIVERED_MESSAGE,
+      errorCode: 'STEER_NOT_DELIVERED',
+      retryable: false,
+    });
+    expect(unknownBody).toMatchObject({
+      error: STEER_OUTCOME_UNKNOWN_MESSAGE,
+      errorCode: 'STEER_OUTCOME_UNKNOWN',
+      retryable: false,
+    });
+    expect(JSON.stringify([notSentBody, unknownBody])).not.toContain('/secret');
+    expect(JSON.stringify([notSentBody, unknownBody])).not.toContain('turn/steer');
   });
 });

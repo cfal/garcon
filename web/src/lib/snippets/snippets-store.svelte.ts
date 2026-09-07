@@ -1,12 +1,6 @@
 import { untrack } from 'svelte';
 import { ApiError } from '$lib/api/client.js';
-import {
-	createSnippet,
-	getSnippets,
-	removeSnippet,
-	reorderSnippets,
-	updateSnippet,
-} from '$lib/api/snippets.js';
+import { createSnippet, getSnippets, removeSnippet, updateSnippet } from '$lib/api/snippets.js';
 import {
 	SNIPPET_ERROR_CODES,
 	type SnippetDefinitionInput,
@@ -20,7 +14,6 @@ export interface SnippetsStoreDeps {
 	create?: typeof createSnippet;
 	update?: typeof updateSnippet;
 	remove?: typeof removeSnippet;
-	reorder?: typeof reorderSnippets;
 }
 
 export class SnippetsStore {
@@ -31,8 +24,6 @@ export class SnippetsStore {
 	#loadPromise: Promise<SnippetsSnapshot> | null = null;
 	#refreshLoopPromise: Promise<void> | null = null;
 	#refreshRequested = false;
-	#localRevision = 0;
-	#reorderTail: Promise<void> = Promise.resolve();
 
 	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
 
@@ -130,42 +121,11 @@ export class SnippetsStore {
 		}
 	}
 
-	move(id: string, direction: 'up' | 'down'): Promise<void> {
-		const operation = this.#reorderTail.then(() => this.#performMove(id, direction));
-		this.#reorderTail = operation.catch(() => undefined);
-		return operation;
-	}
-
-	async #performMove(id: string, direction: 'up' | 'down'): Promise<void> {
-		const current = await this.#requireSnapshot();
-		const index = current.snippets.findIndex((snippet) => snippet.id === id);
-		const target = direction === 'up' ? index - 1 : index + 1;
-		if (index < 0 || target < 0 || target >= current.snippets.length) return;
-		const ordered = [...current.snippets];
-		[ordered[index], ordered[target]] = [ordered[target], ordered[index]];
-		const optimisticMarker = this.#localRevision + 1;
-		this.#localRevision = optimisticMarker;
-		this.snapshot = { ...current, snippets: ordered };
-		try {
-			const reorder = this.deps.reorder ?? reorderSnippets;
-			const result = await reorder({
-				expectedRevision: current.revision,
-				orderedSnippetIds: ordered.map((snippet) => snippet.id),
-			});
-			this.applySnapshot(result.snapshot);
-		} catch (error) {
-			if (this.#localRevision === optimisticMarker) this.snapshot = current;
-			await this.#refreshAfterConflict(error);
-			throw error;
-		}
-	}
-
 	applySnapshot(nextSnapshot: SnippetsSnapshot): SnippetsSnapshot {
 		if (this.snapshot && nextSnapshot.revision < this.snapshot.revision) return this.snapshot;
 		this.snapshot = nextSnapshot;
 		this.status = 'ready';
 		this.error = null;
-		this.#localRevision += 1;
 		return nextSnapshot;
 	}
 

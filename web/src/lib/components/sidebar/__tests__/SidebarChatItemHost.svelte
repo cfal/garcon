@@ -1,8 +1,16 @@
 <script lang="ts">
 	import SidebarChatItem from '../SidebarChatItem.svelte';
-	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
-	import type { SidebarDisplayOptions } from '../sidebar-display-options';
+	import { setAppShell, setModelCatalog } from '$lib/context';
+	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from '../sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemHostProps {
 		session: ChatSessionRecord;
@@ -10,15 +18,25 @@
 		currentTime?: Date;
 		isPinned?: boolean;
 		isArchived?: boolean;
+		isArchiveMutationPending?: boolean;
 		isMobile?: boolean;
+		isMultiSelectMode?: boolean;
+		isMultiSelected?: boolean;
 		enableNativeDrag?: boolean;
-		displayOptions?: SidebarDisplayOptions;
+		displayOptions?: Partial<SidebarDisplayOptions>;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
+		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
 		onForkChat?: (sourceChatId: string) => void;
+		onTogglePinned?: (chatId: string) => void;
+		onToggleArchive?: (chatId: string) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowEdges?: WorkspaceSplitAdmissions;
+		hasChatPlacement?: boolean;
 		supportsFork?: boolean;
 		supportsForkWhileRunning?: boolean;
 	}
@@ -29,23 +47,34 @@
 		currentTime = new Date('2025-01-01T03:00:00.000Z'),
 		isPinned = false,
 		isArchived = false,
+		isArchiveMutationPending = false,
 		isMobile = false,
+		isMultiSelectMode = false,
+		isMultiSelected = false,
 		enableNativeDrag = true,
-		displayOptions = {
-			groupByProject: false,
-			groupNestedProjectPaths: false,
-			compactChatItems: false,
-			sortMode: 'manual',
-		},
+		displayOptions: displayOptionsInput = {},
 		onTagClick,
 		onManageTags,
 		onEnterMultiSelect,
+		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
 		onForkChat = () => {},
+		onTogglePinned = () => {},
+		onToggleArchive = () => {},
+		onOpenInNewWindow,
+		newWindowEdges = workspaceSplitAdmissions(),
+		hasChatPlacement = false,
 		supportsFork = true,
 		supportsForkWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
+
+	let displayOptions = $derived({
+		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		grouping: 'none' as const,
+		...displayOptionsInput,
+	});
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -65,11 +94,7 @@
 		},
 	} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		startDrag() {},
-		endDrag() {},
-	} as never);
+	setWorkspaceWindowDndTestContext(hasChatPlacement ? session.id : undefined);
 </script>
 
 <SidebarChatItem
@@ -78,20 +103,27 @@
 	{currentTime}
 	{isPinned}
 	{isArchived}
+	{isArchiveMutationPending}
 	{isMobile}
+	{isMultiSelectMode}
+	{isMultiSelected}
 	{enableNativeDrag}
 	{displayOptions}
 	onChatSelect={() => {}}
 	onDeleteChat={() => {}}
 	onStartRenameChat={() => {}}
-	onTogglePinned={() => {}}
-	onToggleArchive={() => {}}
+	{onTogglePinned}
+	{onToggleArchive}
 	onShowDetails={() => {}}
 	{onForkChat}
 	onShareChat={() => {}}
 	{onTagClick}
 	{onManageTags}
 	{onEnterMultiSelect}
+	{onMultiSelectToggle}
 	{onMoveToTop}
 	{onMoveToBottom}
+	{onSortChatOrder}
+	{onOpenInNewWindow}
+	{newWindowEdges}
 />

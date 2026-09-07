@@ -8,12 +8,25 @@ import {
   extractPermissionRequest,
   mapPermissionMode,
   OPENCODE_PERMISSION_KEYS,
-} from '../opencode.js';
+} from '../permissions.js';
 import { convertOpencodePermissionTool } from '../permission-tool-converter.js';
-import { EnterPlanModeToolUseMessage, PermissionRequestMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '@garcon/common/chat-types';
+import { EnterPlanModeToolUseMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '@garcon/common/chat-types';
 
-function createAsyncEventStream() {
+function collectOperation(runId) {
   const events = [];
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+      },
+    },
+  };
+}
+
+function createAsyncEventStream(promptHarness) {
+  const events = [{ payload: { id: 'evt_connected', type: 'server.connected', properties: {} } }];
   const waiters = [];
   let closed = false;
 
@@ -27,6 +40,7 @@ function createAsyncEventStream() {
     push(event) {
       events.push(event);
       flushWaiters();
+      promptHarness?.observe(event);
     },
     close() {
       closed = true;
@@ -47,16 +61,68 @@ function createAsyncEventStream() {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function createPromptHarness(promptAsync) {
+  const requestsByPart = new Map();
+  const requestsByMessage = new Map();
+  return {
+    prompt(...args) {
+      void promptAsync(...args);
+      const [input, options] = args;
+      const response = deferred();
+      const partId = input.parts[0].id;
+      requestsByPart.set(partId, response);
+      const abort = () => {
+        requestsByPart.delete(partId);
+        response.reject(options.signal.reason ?? new Error('OpenCode prompt request aborted'));
+      };
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
+      return response.promise;
+    },
+    observe(envelope) {
+      const event = envelope.payload;
+      if (event?.type === 'message.part.updated') {
+        const part = event.properties?.part;
+        const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
+        const request = requestsByPart.get(operationPartId);
+        if (request && typeof part?.messageID === 'string') {
+          requestsByMessage.set(part.messageID, request);
+        }
+        return;
+      }
+      const info = event?.type === 'message.updated' ? event.properties?.info : null;
+      if (typeof info?.time?.completed !== 'number') return;
+      const request = requestsByMessage.get(info.parentID);
+      if (request) setImmediate(() => request.resolve({ data: { info, parts: [] } }));
+    },
+  };
+}
+
 async function* neverEndingStream() {
+  yield { payload: { id: 'evt_connected', type: 'server.connected', properties: {} } };
   await new Promise(() => {});
 }
 
 async function waitForMockCall(fn) {
+  await waitFor(() => fn.mock.calls.length > 0);
+}
+
+async function waitFor(predicate) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (fn.mock.calls.length > 0) return;
+    if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  throw new Error('Timed out waiting for mock call');
+  throw new Error('Timed out waiting for condition');
 }
 
 describe('mapPermissionDecision', () => {
@@ -106,7 +172,6 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-abc',
-      toolName: 'bash',
       toolInput: {
         permission: 'bash',
         patterns: ['*.sh'],
@@ -114,7 +179,6 @@ describe('extractPermissionRequest', () => {
         always: ['/bin/bash'],
         tool: { name: 'bash' },
       },
-      sessionID: 'sess-1',
     });
   });
 
@@ -159,7 +223,6 @@ describe('extractPermissionRequest', () => {
     const result = extractPermissionRequest(event);
     expect(result).toEqual({
       requestId: 'req-2',
-      toolName: 'Unknown',
       toolInput: {
         permission: null,
         patterns: [],
@@ -167,7 +230,6 @@ describe('extractPermissionRequest', () => {
         always: [],
         tool: null,
       },
-      sessionID: null,
     });
   });
 
@@ -214,14 +276,14 @@ describe('convertOpencodePermissionTool', () => {
 });
 
 describe('mapPermissionMode', () => {
-  it('maps bypassPermissions to allow all OpenCode permission keys', () => {
+  it('maps bypassPermissions across all OpenCode permission keys', () => {
     const rules = mapPermissionMode('bypassPermissions');
     expect(rules).toHaveLength(OPENCODE_PERMISSION_KEYS.length);
     expect(rules).toEqual(
       OPENCODE_PERMISSION_KEYS.map((permission) => ({
         permission,
         pattern: '*',
-        action: 'allow',
+        action: permission === 'plan_enter' || permission === 'plan_exit' ? 'deny' : 'allow',
       })),
     );
   });
@@ -232,6 +294,20 @@ describe('mapPermissionMode', () => {
       permission: 'external_directory',
       pattern: '*',
       action: 'allow',
+    });
+  });
+
+  it('denies native plan transitions in bypassPermissions', () => {
+    const rules = mapPermissionMode('bypassPermissions');
+    expect(rules).toContainEqual({
+      permission: 'plan_enter',
+      pattern: '*',
+      action: 'deny',
+    });
+    expect(rules).toContainEqual({
+      permission: 'plan_exit',
+      pattern: '*',
+      action: 'deny',
     });
   });
 
@@ -252,18 +328,22 @@ describe('mapPermissionMode', () => {
   });
 });
 
-describe('OpenCodeRuntime resolvePermission guards', () => {
+describe('OpenCodeRuntime permissions', () => {
   let provider;
   let client;
+  let promptHarness;
 
   beforeEach(async () => {
     const { OpenCodeRuntime } = await import('../opencode.js');
+    const promptAsync = mock(() => Promise.resolve());
+    promptHarness = createPromptHarness(promptAsync);
     client = {
       permission: { reply: mock(() => Promise.resolve({ data: true })) },
-      event: { subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+      global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
       session: {
         create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
-        promptAsync: mock(() => Promise.resolve()),
+        prompt: (...args) => promptHarness.prompt(...args),
+        promptAsync,
         abort: mock(() => Promise.resolve()),
       },
       provider: {
@@ -282,40 +362,73 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
   });
 
   it('passes comprehensive bypass permission rules at session creation', async () => {
+    const published = collectOperation('run-bypass');
     await provider.startSession({
       command: 'test command',
       chatId: '123',
       permissionMode: 'bypassPermissions',
+      operation: published.operation,
     });
 
     expect(client.session.create.mock.calls[0][0]).toEqual({
       permission: OPENCODE_PERMISSION_KEYS.map((permission) => ({
         permission,
         pattern: '*',
-        action: 'allow',
+        action: permission === 'plan_enter' || permission === 'plan_exit' ? 'deny' : 'allow',
       })),
     });
   });
 
   it('auto-replies once for manual bypass permission events without emitting a permission row', async () => {
-    const eventStream = createAsyncEventStream();
-    client.event.subscribe.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const eventStream = createAsyncEventStream(promptHarness);
+    client.global.event.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
+    const published = collectOperation('run-manual');
 
     await provider.startSession({
       command: 'test command',
       chatId: '123',
       permissionMode: 'manualBypass',
+      operation: published.operation,
     });
 
     eventStream.push({
-      id: 'evt_permission_manual',
-      type: 'permission.asked',
-      properties: {
-        sessionID: 'sess-1',
-        requestID: 'req-manual',
-        permission: 'bash',
+      directory: '/repo',
+      payload: {
+        id: 'evt_prompt_manual',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-1',
+          part: {
+            id: client.session.promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-manual',
+            type: 'text',
+            text: 'test command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_assistant_manual',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-1',
+          info: { id: 'assistant-manual', role: 'assistant', parentID: 'user-manual' },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_permission_manual',
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'sess-1',
+          requestID: 'req-manual',
+          permission: 'bash',
+          tool: { messageID: 'assistant-manual', callID: 'call-manual' },
+        },
       },
     });
 
@@ -324,24 +437,231 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
       requestID: 'req-manual',
       reply: 'once',
     });
-    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
 
     eventStream.close();
     provider.shutdown();
   });
 
-  it('returns early for null permissionRequestId', async () => {
-    await provider.resolvePermission(null, { allow: true, alwaysAllow: false });
-    expect(client.permission.reply).not.toHaveBeenCalled();
+  it('drops and warns for a permission naming a message outside its turn', async () => {
+    const { OpenCodeRuntime } = await import('../opencode.js');
+    const warn = mock(() => undefined);
+    const eventStream = createAsyncEventStream(promptHarness);
+    const promptAsync = client.session.promptAsync;
+    const localClient = {
+      permission: { reply: mock(() => Promise.resolve({ data: true })) },
+      global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
+      session: {
+        create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
+        prompt: (...args) => promptHarness.prompt(...args),
+        promptAsync,
+        abort: mock(() => Promise.resolve()),
+      },
+    };
+    const runtime = new OpenCodeRuntime({
+      logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+      createInstance: mock(() => Promise.resolve({
+        client: localClient,
+        server: { close: () => {} },
+      })),
+    });
+    const published = collectOperation('run-foreign');
+    await runtime.startSession({
+      command: 'test command',
+      chatId: '123',
+      permissionMode: 'default',
+      operation: published.operation,
+    });
+
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_foreign_prompt',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-1',
+          part: {
+            id: promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-foreign',
+            type: 'text',
+            text: 'test command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_foreign_permission',
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'sess-1',
+          requestID: 'req-foreign',
+          permission: 'bash',
+          tool: { messageID: 'user-foreign', callID: 'call-foreign' },
+        },
+      },
+    });
+
+    await waitFor(() => warn.mock.calls.some(([message]) => (
+      message === 'Ignoring an OpenCode permission for a message outside its turn'
+    )));
+    const warned = warn.mock.calls.find(([message]) => (
+      message === 'Ignoring an OpenCode permission for a message outside its turn'
+    ));
+    expect(warned[1]).toEqual({
+      agentSessionId: 'sess-1',
+      eventId: 'evt_foreign_permission',
+      toolMessageId: 'user-foreign',
+    });
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
+    expect(localClient.permission.reply).not.toHaveBeenCalled();
+    eventStream.close();
+    runtime.shutdown();
   });
 
-  it('returns early for unknown permissionRequestId', async () => {
-    await provider.resolvePermission('nonexistent-id', { allow: true, alwaysAllow: false });
-    expect(client.permission.reply).not.toHaveBeenCalled();
-  });
+  it('isolates a failed manual bypass reply without stalling the global event stream', async () => {
+    const eventStream = createAsyncEventStream(promptHarness);
+    const reply = deferred();
+    client.global.event.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
+    client.session.create
+      .mockImplementationOnce(() => Promise.resolve({ data: { id: 'sess-1' } }))
+      .mockImplementationOnce(() => Promise.resolve({ data: { id: 'sess-2' } }));
+    client.permission.reply.mockImplementation(() => reply.promise);
+    const manual = collectOperation('run-manual');
+    const healthy = collectOperation('run-healthy');
 
-  it('returns early for empty string permissionRequestId', async () => {
-    await provider.resolvePermission('', { allow: true, alwaysAllow: false });
-    expect(client.permission.reply).not.toHaveBeenCalled();
+    await provider.startSession({
+      command: 'manual command',
+      chatId: 'chat-manual',
+      permissionMode: 'manualBypass',
+      operation: manual.operation,
+    });
+    await provider.startSession({
+      command: 'healthy command',
+      chatId: 'chat-healthy',
+      permissionMode: 'default',
+      operation: healthy.operation,
+    });
+
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_manual_prompt',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-1',
+          part: {
+            id: client.session.promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-manual',
+            type: 'text',
+            text: 'manual command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_manual_assistant',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-1',
+          info: { id: 'assistant-manual', role: 'assistant', parentID: 'user-manual' },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0001',
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'sess-1',
+          requestID: 'req-manual',
+          permission: 'bash',
+          tool: { messageID: 'assistant-manual', callID: 'call-manual' },
+        },
+      },
+    });
+    await waitForMockCall(client.permission.reply);
+
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0002',
+        type: 'message.updated',
+        properties: { sessionID: 'sess-2', info: { id: 'user-2', role: 'user' } },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0003',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-2',
+          part: {
+            id: client.session.promptAsync.mock.calls[1][0].parts[0].id,
+            messageID: 'user-2',
+            type: 'text',
+            text: 'healthy command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0004',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-2',
+          info: { id: 'assistant-2', role: 'assistant', parentID: 'user-2' },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0005',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-2',
+          info: {
+            id: 'assistant-2',
+            role: 'assistant',
+            parentID: 'user-2',
+            finish: 'stop',
+            time: { completed: Date.now() },
+          },
+        },
+      },
+    });
+    await waitFor(() => healthy.events.some((event) => event.type === 'run-ended'));
+    expect(healthy.events).toContainEqual({
+      type: 'run-ended',
+      runId: 'run-healthy',
+      outcome: 'finished',
+    });
+    expect(manual.events.some((event) => event.type === 'run-ended')).toBe(false);
+
+    reply.reject(new Error('permission endpoint failed'));
+    await waitFor(() => manual.events.some((event) => event.type === 'run-ended'));
+    expect(manual.events).toContainEqual({
+      type: 'run-ended',
+      runId: 'run-manual',
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: 'permission endpoint failed' },
+    });
+    expect(manual.events.flatMap((event) => event.type === 'rows' ? event.rows : []))
+      .toContainEqual(expect.objectContaining({
+        message: expect.objectContaining({ type: 'error', content: 'permission endpoint failed' }),
+        providerMeta: { entryId: 'assistant-manual' },
+      }));
+    expect(client.global.event).toHaveBeenCalledTimes(1);
+
+    eventStream.close();
+    await provider.shutdown();
   });
 });

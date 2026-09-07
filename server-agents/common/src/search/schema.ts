@@ -3,9 +3,18 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { HistoricalSearchMessageRow } from './rows.js';
 
-export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 4;
+export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 9;
+export const SEARCH_INGEST_TXN_MAX_ROWS = 256;
+export const SEARCH_INGEST_TXN_MAX_BYTES = 1_048_576;
+export const SEARCH_INGEST_ROW_MAX_BYTES = 1_048_576;
+export const SEARCH_TIMESTAMP_MAX_BYTES = 256;
+export const SEARCH_DELETE_BATCH_MAX_ROWS = 512;
+export const SEARCH_FTS_CRISISMERGE = 1_000;
+export const SEARCH_FTS_AUTOMERGE = 4;
+export const SEARCH_FTS_MERGE_PAGES_PER_TXN = 16;
+export const SEARCH_FTS_RANK = 'bm25(1.0)';
 
-export type SearchChatStatus = 'pending' | 'sealed' | 'failed' | 'unsupported';
+export type SearchChatStatus = 'pending' | 'indexed' | 'failed';
 
 export interface SearchDatabase {
   readonly db: Database;
@@ -15,53 +24,116 @@ export interface SearchDatabase {
 
 export interface SearchChatState {
   readonly chatId: string;
-  readonly agentId: string;
-  readonly model: string;
-  readonly sourceDescriptorHash: string | null;
-  readonly sourceRevision: string | null;
-  readonly carryOverRevision: string;
-  readonly contentDigest: string | null;
-  readonly sealedSourceKey: string | null;
-  readonly operationEpoch: string;
-  readonly operationSequence: number;
-  readonly messageCount: number;
+  readonly transcriptViewId: string;
   readonly status: SearchChatStatus;
-  readonly lastCheckedAt: string | null;
+  readonly indexedThrough: number;
+  readonly targetThrough: number;
+  readonly lastErrorCode: string | null;
 }
 
-export interface SearchChatAttempt {
-  readonly chatId: string;
-  readonly agentId: string;
-  readonly model: string;
-  readonly sourceApiVersion: number;
-  readonly projectorVersion: number;
-  readonly sourceDescriptorHash: string | null;
-  readonly sourceRevision: string | null;
-  readonly carryOverRevision: string;
-  readonly operationEpoch: string;
-  readonly operationSequence: number;
+export interface SearchStatusCounts {
+  readonly indexed: number;
+  readonly pending: number;
+  readonly failed: number;
+  readonly backlogRows: number;
 }
 
-export interface SearchChatSeal extends SearchChatAttempt {
-  readonly contentDigest: string;
-  readonly sealedSourceKey: string;
-  readonly messageCount: number;
+export type SearchSyncPlan =
+  | { readonly plan: 'current'; readonly state: SearchChatState }
+  | { readonly plan: 'build'; readonly state: SearchChatState; readonly staleRows: boolean };
+
+interface SearchSchemaObject {
+  readonly masterType: 'table' | 'trigger';
+  readonly sql: string;
 }
 
 const ROLE_CODES = { user: 0, assistant: 1, tool: 2, system: 3 } as const;
 
-function nowIso(): string {
-  return new Date().toISOString();
+export const SEARCH_FTS_SHADOW_TABLES: ReadonlySet<string> = new Set([
+  'search_chunks_fts_data',
+  'search_chunks_fts_idx',
+  'search_chunks_fts_config',
+]);
+
+const SEARCH_SCHEMA_OBJECT_SQL: ReadonlyMap<string, SearchSchemaObject> = new Map([
+  ['search_chat_state', { masterType: 'table', sql: `CREATE TABLE search_chat_state (
+  chat_id            TEXT PRIMARY KEY,
+  transcript_view_id TEXT NOT NULL,
+  status             TEXT NOT NULL CHECK(status IN ('pending', 'indexed', 'failed')),
+  indexed_through    INTEGER NOT NULL CHECK(indexed_through >= 0),
+  target_through     INTEGER NOT NULL CHECK(target_through >= 0),
+  last_error_code    TEXT,
+  updated_at         TEXT NOT NULL,
+  CHECK(status <> 'indexed' OR indexed_through = target_through),
+  CHECK(status <> 'pending' OR indexed_through <= target_through)
+) WITHOUT ROWID, STRICT` }],
+  ['search_chunks', { masterType: 'table', sql: `CREATE TABLE search_chunks (
+  id                 INTEGER PRIMARY KEY,
+  chat_id            TEXT NOT NULL REFERENCES search_chat_state(chat_id) ON DELETE CASCADE,
+  transcript_view_id TEXT NOT NULL,
+  ordinal            INTEGER NOT NULL,
+  role               INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
+  timestamp          TEXT CHECK(
+    timestamp IS NULL OR length(CAST(timestamp AS BLOB)) <= ${SEARCH_TIMESTAMP_MAX_BYTES}
+  ),
+  body               TEXT NOT NULL,
+  UNIQUE(chat_id, transcript_view_id, ordinal)
+) STRICT` }],
+  ['search_chunks_fts', { masterType: 'table', sql: `CREATE VIRTUAL TABLE search_chunks_fts USING fts5(
+  body,
+  content='search_chunks',
+  content_rowid='id',
+  columnsize=0,
+  tokenize='unicode61 remove_diacritics 2'
+)` }],
+  ['search_chunks_ai', { masterType: 'trigger', sql: `CREATE TRIGGER search_chunks_ai AFTER INSERT ON search_chunks BEGIN
+  INSERT INTO search_chunks_fts(rowid, body)
+  VALUES (new.id, new.body);
+END` }],
+  ['search_chunks_ad', { masterType: 'trigger', sql: `CREATE TRIGGER search_chunks_ad AFTER DELETE ON search_chunks BEGIN
+  INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body)
+  VALUES ('delete', old.id, old.body);
+END` }],
+  ['search_chunks_au', { masterType: 'trigger', sql: `CREATE TRIGGER search_chunks_au AFTER UPDATE OF body ON search_chunks BEGIN
+  INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body)
+  VALUES ('delete', old.id, old.body);
+  INSERT INTO search_chunks_fts(rowid, body)
+  VALUES (new.id, new.body);
+END` }],
+]);
+
+function searchError(code: string): Error {
+  return new Error(code);
 }
 
-function runTransaction(db: Database, work: () => void): void {
+function runTransaction<T>(db: Database, work: () => T): T {
   db.exec('BEGIN IMMEDIATE');
   try {
-    work();
+    const result = work();
     db.exec('COMMIT');
+    return result;
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
+  }
+}
+
+function requireIdentifier(value: string): void {
+  if (typeof value !== 'string' || value.length === 0 || Buffer.byteLength(value) > 256) {
+    throw searchError('SEARCH_IDENTIFIER_INVALID');
+  }
+}
+
+function normalizeDdl(sql: string): string {
+  return sql.replace(/;+\s*$/, '').replace(/\s+/g, ' ').trim();
+}
+
+export function requireExactShadowSet(shadows: ReadonlySet<string>): void {
+  if (shadows.size !== SEARCH_FTS_SHADOW_TABLES.size) {
+    throw searchError('SEARCH_SCHEMA_INVALID');
+  }
+  for (const name of SEARCH_FTS_SHADOW_TABLES) {
+    if (!shadows.has(name)) throw searchError('SEARCH_SCHEMA_INVALID');
   }
 }
 
@@ -75,131 +147,72 @@ export function configureConnection(db: Database): void {
 
 export function createSchema(db: Database): void {
   db.exec('PRAGMA auto_vacuum = INCREMENTAL');
-  db.exec(`
-    CREATE TABLE search_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    ) STRICT;
-    CREATE TABLE search_chat_state (
-      chat_id TEXT PRIMARY KEY,
-      agent_id TEXT NOT NULL,
-      model TEXT NOT NULL,
-      source_api_version INTEGER NOT NULL,
-      projector_version INTEGER NOT NULL,
-      source_descriptor_hash TEXT,
-      source_revision TEXT,
-      carry_over_revision TEXT NOT NULL,
-      content_digest TEXT,
-      sealed_source_key TEXT,
-      operation_epoch TEXT NOT NULL,
-      operation_sequence INTEGER NOT NULL,
-      message_count INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending', 'sealed', 'failed', 'unsupported')),
-      last_error_code TEXT,
-      last_checked_at TEXT,
-      indexed_at TEXT,
-      updated_at TEXT NOT NULL
-    ) WITHOUT ROWID, STRICT;
-    CREATE TABLE search_chunks (
-      id INTEGER PRIMARY KEY,
-      chat_id TEXT NOT NULL REFERENCES search_chat_state(chat_id) ON DELETE CASCADE,
-      message_ordinal INTEGER NOT NULL,
-      role INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
-      timestamp TEXT,
-      body TEXT NOT NULL,
-      source_anchor TEXT,
-      chat_scope TEXT NOT NULL GENERATED ALWAYS AS (
-        'c' || lower(hex(CAST(chat_id AS BLOB)))
-      ) STORED,
-      UNIQUE(chat_id, message_ordinal)
-    ) STRICT;
-    CREATE VIRTUAL TABLE search_chunks_fts USING fts5(
-      body,
-      chat_scope,
-      content='search_chunks',
-      content_rowid='id',
-      columnsize=0,
-      tokenize='unicode61 remove_diacritics 2'
-    );
-    CREATE TRIGGER search_chunks_ai AFTER INSERT ON search_chunks BEGIN
-      INSERT INTO search_chunks_fts(rowid, body, chat_scope)
-      VALUES (new.id, new.body, new.chat_scope);
-    END;
-    CREATE TRIGGER search_chunks_ad AFTER DELETE ON search_chunks BEGIN
-      INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
-      VALUES ('delete', old.id, old.body, old.chat_scope);
-    END;
-    CREATE TRIGGER search_chunks_au AFTER UPDATE OF body, chat_id ON search_chunks BEGIN
-      INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
-      VALUES ('delete', old.id, old.body, old.chat_scope);
-      INSERT INTO search_chunks_fts(rowid, body, chat_scope)
-      VALUES (new.id, new.body, new.chat_scope);
-    END;
-  `);
-  db.exec("INSERT INTO search_chunks_fts(search_chunks_fts, rank) VALUES ('secure-delete', 1)");
-  db.exec("INSERT INTO search_chunks_fts(search_chunks_fts, rank) VALUES ('rank', 'bm25(1.0, 0.0)')");
+  for (const object of SEARCH_SCHEMA_OBJECT_SQL.values()) db.exec(object.sql);
+  const configure = db.prepare<unknown, [string, string | number]>(
+    'INSERT INTO search_chunks_fts(search_chunks_fts, rank) VALUES (?, ?)',
+  );
+  try {
+    configure.run('secure-delete', 1);
+    configure.run('rank', SEARCH_FTS_RANK);
+    configure.run('crisismerge', SEARCH_FTS_CRISISMERGE);
+    configure.run('automerge', SEARCH_FTS_AUTOMERGE);
+  } finally {
+    configure.finalize();
+  }
   db.exec(`PRAGMA user_version = ${TRANSCRIPT_SEARCH_SCHEMA_VERSION}`);
 }
 
 function validateExistingSchema(db: Database): void {
-  const version = Number(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0);
-  const autoVacuum = Number(db.query<{ auto_vacuum: number }, []>('PRAGMA auto_vacuum').get()?.auto_vacuum ?? 0);
-  if (version !== TRANSCRIPT_SEARCH_SCHEMA_VERSION || autoVacuum !== 2) {
-    throw new Error('Transcript search schema version or auto-vacuum mode is invalid');
-  }
-  const required = new Set([
-    'search_meta', 'search_chat_state', 'search_chunks', 'search_chunks_fts',
-    'search_chunks_ai', 'search_chunks_ad', 'search_chunks_au',
-  ]);
-  const rows = db.query<{ name: string }, []>(`
-    SELECT name FROM sqlite_master WHERE name IN (
-      'search_meta', 'search_chat_state', 'search_chunks', 'search_chunks_fts',
-      'search_chunks_ai', 'search_chunks_ad', 'search_chunks_au'
-    )
-  `).all();
-  for (const row of rows) required.delete(row.name);
-  if (required.size > 0) throw new Error('Transcript search schema is incomplete');
-  const chunksSql = db.query<{ sql: string | null }, []>(
-    "SELECT sql FROM sqlite_master WHERE name = 'search_chunks'",
-  ).get()?.sql ?? '';
-  if (!/source_anchor/i.test(chunksSql) || !/chat_scope/i.test(chunksSql)) {
-    throw new Error('Transcript search chunk schema is invalid');
-  }
-  requireColumns(db, 'search_chat_state', [
-    'chat_id', 'agent_id', 'model', 'source_api_version', 'projector_version',
-    'source_descriptor_hash', 'source_revision', 'carry_over_revision',
-    'content_digest', 'sealed_source_key', 'operation_epoch', 'operation_sequence',
-    'message_count', 'status', 'last_error_code', 'last_checked_at', 'indexed_at',
-    'updated_at',
-  ]);
-  requireColumns(db, 'search_chunks', [
-    'id', 'chat_id', 'message_ordinal', 'role', 'timestamp', 'body',
-    'source_anchor', 'chat_scope',
-  ]);
-  const ftsSql = db.query<{ sql: string | null }, []>(
-    "SELECT sql FROM sqlite_master WHERE name = 'search_chunks_fts'",
-  ).get()?.sql ?? '';
-  if (!/fts5/i.test(ftsSql) || !/columnsize\s*=\s*0/i.test(ftsSql)
-      || !/content\s*=\s*'search_chunks'/i.test(ftsSql)) {
-    throw new Error('Transcript search FTS schema is invalid');
-  }
-  const foreignKey = db.query<{ table: string; from: string; to: string; on_delete: string }, []>(
-    'PRAGMA foreign_key_list(search_chunks)',
-  ).all().some((entry) => entry.table === 'search_chat_state'
-    && entry.from === 'chat_id' && entry.to === 'chat_id' && entry.on_delete === 'CASCADE');
-  if (!foreignKey) throw new Error('Transcript search foreign key schema is invalid');
-}
+  const version = db.query<{ user_version: number }, []>('PRAGMA user_version')
+    .get()?.user_version;
+  if (version !== TRANSCRIPT_SEARCH_SCHEMA_VERSION) throw searchError('SEARCH_SCHEMA_INVALID');
+  const autoVacuum = db.query<{ auto_vacuum: number }, []>('PRAGMA auto_vacuum')
+    .get()?.auto_vacuum;
+  if (autoVacuum !== 2) throw searchError('SEARCH_SCHEMA_INVALID');
 
-function requireColumns(db: Database, table: string, expected: readonly string[]): void {
-  const actual = new Set(db.query<{ name: string }, []>(`PRAGMA table_xinfo(${table})`).all()
-    .map((column) => column.name));
-  if (expected.some((column) => !actual.has(column))) {
-    throw new Error(`Transcript search ${table} schema is incomplete`);
+  const shadows = new Set(
+    db.query<{ name: string }, []>(
+      "SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'shadow'",
+    ).all().map((row) => row.name),
+  );
+  requireExactShadowSet(shadows);
+
+  const objects = db.query<{ type: string; name: string; sql: string | null }, []>(`
+    SELECT type, name, sql FROM sqlite_master
+    WHERE name NOT GLOB 'sqlite_*'
+    ORDER BY name
+  `).all();
+  let matched = 0;
+  for (const object of objects) {
+    if (shadows.has(object.name)) continue;
+    const expected = SEARCH_SCHEMA_OBJECT_SQL.get(object.name);
+    if (!expected
+        || object.type !== expected.masterType
+        || object.sql === null
+        || normalizeDdl(object.sql) !== normalizeDdl(expected.sql)) {
+      throw searchError('SEARCH_SCHEMA_INVALID');
+    }
+    matched += 1;
+  }
+  if (matched !== SEARCH_SCHEMA_OBJECT_SQL.size) throw searchError('SEARCH_SCHEMA_INVALID');
+
+  const config = new Map(
+    db.query<{ k: string; v: string | number }, []>(
+      'SELECT k, v FROM search_chunks_fts_config',
+    ).all().map((row) => [row.k, row.v]),
+  );
+  if (Number(config.get('crisismerge')) !== SEARCH_FTS_CRISISMERGE
+      || Number(config.get('automerge')) !== SEARCH_FTS_AUTOMERGE
+      || Number(config.get('secure-delete')) !== 1
+      || config.get('rank') !== SEARCH_FTS_RANK) {
+    throw searchError('SEARCH_SCHEMA_INVALID');
   }
 }
 
 async function unlinkDatabaseFiles(dbPath: string): Promise<void> {
-  await Promise.all([dbPath, `${dbPath}-wal`, `${dbPath}-shm`].map((file) => fs.rm(file, { force: true })));
+  await Promise.all(
+    [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].map((file) => fs.rm(file, { force: true })),
+  );
 }
 
 async function protectDatabaseFiles(dbPath: string): Promise<void> {
@@ -212,13 +225,6 @@ async function protectDatabaseFiles(dbPath: string): Promise<void> {
   }));
 }
 
-function markCleanShutdown(db: Database, clean: boolean): void {
-  db.query(`
-    INSERT INTO search_meta(key, value) VALUES ('clean_shutdown', ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-  `).run(clean ? '1' : '0');
-}
-
 async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
   const db = new Database(dbPath);
   try {
@@ -226,7 +232,6 @@ async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
     db.exec('VACUUM');
     configureConnection(db);
     createSchema(db);
-    markCleanShutdown(db, false);
     await protectDatabaseFiles(dbPath);
     return { db, dbPath, recreated: true };
   } catch (error) {
@@ -237,14 +242,15 @@ async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
 
 export async function openSearchDatabase(dbPath: string): Promise<SearchDatabase> {
   await fs.mkdir(path.dirname(dbPath), { recursive: true, mode: 0o700 });
-  const exists = await fs.stat(dbPath).then((entry) => entry.isFile() && entry.size > 0).catch(() => false);
+  const exists = await fs.stat(dbPath)
+    .then((entry) => entry.isFile() && entry.size > 0)
+    .catch(() => false);
   if (!exists) return createFreshDatabase(dbPath);
   let db: Database | null = null;
   try {
     db = new Database(dbPath);
     configureConnection(db);
     validateExistingSchema(db);
-    markCleanShutdown(db, false);
     await protectDatabaseFiles(dbPath);
     return { db, dbPath, recreated: false };
   } catch {
@@ -259,10 +265,10 @@ export function openSearchReadDatabase(dbPath: string): Database {
   try {
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('PRAGMA busy_timeout = 2000');
+    db.exec('PRAGMA temp_store = MEMORY');
     validateExistingSchema(db);
-    db.exec('PRAGMA query_only = ON');
-    const queryOnly = Number(db.query<{ query_only: number }, []>('PRAGMA query_only').get()?.query_only ?? 0);
-    if (queryOnly !== 1) throw new Error('Transcript search reader is not query-only');
+    const tempStore = db.query<{ temp_store: number }, []>('PRAGMA temp_store').get()?.temp_store;
+    if (tempStore !== 2) throw searchError('SEARCH_SCHEMA_INVALID');
     return db;
   } catch (error) {
     db.close();
@@ -272,178 +278,298 @@ export function openSearchReadDatabase(dbPath: string): Database {
 
 export function closeSearchDatabase(db: Database): void {
   try {
-    markCleanShutdown(db, true);
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   } finally {
     db.close();
   }
 }
 
-export function prepareChatBuild(db: Database): void {
-  db.exec(`
-    CREATE TEMP TABLE IF NOT EXISTS temp_search_build (
-      message_ordinal INTEGER PRIMARY KEY,
-      role INTEGER NOT NULL,
-      timestamp TEXT,
-      body TEXT NOT NULL,
-      source_anchor TEXT
-    ) WITHOUT ROWID
-  `);
-  db.query('DELETE FROM temp_search_build').run();
-}
-
-export function stageChatRows(db: Database, rows: readonly HistoricalSearchMessageRow[]): void {
-  const insert = db.query(`
-    INSERT INTO temp_search_build(message_ordinal, role, timestamp, body, source_anchor)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  runTransaction(db, () => {
-    for (const row of rows) {
-      insert.run(row.messageOrdinal, ROLE_CODES[row.role], row.timestamp, row.body, row.sourceAnchor ?? null);
-    }
-  });
-}
-
 export function getChatState(db: Database, chatId: string): SearchChatState | null {
   return db.query<SearchChatState, [string]>(`
-    SELECT chat_id AS chatId, agent_id AS agentId, model,
-      source_descriptor_hash AS sourceDescriptorHash, source_revision AS sourceRevision,
-      carry_over_revision AS carryOverRevision, content_digest AS contentDigest,
-      sealed_source_key AS sealedSourceKey, operation_epoch AS operationEpoch,
-      operation_sequence AS operationSequence, message_count AS messageCount, status,
-      last_checked_at AS lastCheckedAt
+    SELECT chat_id AS chatId, transcript_view_id AS transcriptViewId, status,
+      indexed_through AS indexedThrough, target_through AS targetThrough,
+      last_error_code AS lastErrorCode
     FROM search_chat_state WHERE chat_id = ?
   `).get(chatId) ?? null;
 }
 
-export function getChatSafetyStates(
-  db: Database,
-): Map<string, { readonly sourceRevision: string | null; readonly lastCheckedAt: string | null }> {
-  const rows = db.query<{
-    chatId: string;
-    sourceRevision: string | null;
-    lastCheckedAt: string | null;
-  }, []>(`
-    SELECT chat_id AS chatId, source_revision AS sourceRevision,
-      last_checked_at AS lastCheckedAt
-    FROM search_chat_state
+export function listChatStates(db: Database): SearchChatState[] {
+  return db.query<SearchChatState, []>(`
+    SELECT chat_id AS chatId, transcript_view_id AS transcriptViewId, status,
+      indexed_through AS indexedThrough, target_through AS targetThrough,
+      last_error_code AS lastErrorCode
+    FROM search_chat_state ORDER BY chat_id
   `).all();
-  return new Map(rows.map((row) => [row.chatId, row]));
 }
 
-export function markChatAttempt(
-  db: Database,
-  attempt: SearchChatAttempt,
-  status: Exclude<SearchChatStatus, 'sealed'>,
-  errorCode: string | null = null,
-): void {
-  const timestamp = nowIso();
-  db.query(`
-    INSERT INTO search_chat_state(
-      chat_id, agent_id, model, source_api_version, projector_version,
-      source_descriptor_hash, source_revision, carry_over_revision,
-      operation_epoch, operation_sequence, message_count, status,
-      last_error_code, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-    ON CONFLICT(chat_id) DO UPDATE SET
-      agent_id = excluded.agent_id,
-      model = excluded.model,
-      source_api_version = excluded.source_api_version,
-      projector_version = excluded.projector_version,
-      operation_epoch = excluded.operation_epoch,
-      operation_sequence = excluded.operation_sequence,
-      status = excluded.status,
-      last_error_code = excluded.last_error_code,
-      updated_at = excluded.updated_at
-  `).run(
-    attempt.chatId, attempt.agentId, attempt.model, attempt.sourceApiVersion,
-    attempt.projectorVersion, attempt.sourceDescriptorHash, attempt.sourceRevision,
-    attempt.carryOverRevision, attempt.operationEpoch, attempt.operationSequence,
-    status, errorCode, timestamp,
-  );
+export function listStateChatIds(db: Database): string[] {
+  return db.query<{ chatId: string }, []>(
+    'SELECT chat_id AS chatId FROM search_chat_state ORDER BY chat_id',
+  ).all().map((row) => row.chatId);
 }
 
-export function sealChatFromStaging(db: Database, seal: SearchChatSeal): void {
-  const timestamp = nowIso();
-  runTransaction(db, () => {
+export function statusCounts(db: Database): SearchStatusCounts {
+  return db.query<SearchStatusCounts, []>(`
+    SELECT
+      COALESCE(SUM(status = 'indexed'), 0) AS indexed,
+      COALESCE(SUM(status = 'pending'), 0) AS pending,
+      COALESCE(SUM(status = 'failed'), 0) AS failed,
+      COALESCE(SUM(CASE WHEN status = 'pending'
+        THEN target_through - indexed_through ELSE 0 END), 0) AS backlogRows
+    FROM search_chat_state
+  `).get()!;
+}
+
+export function planChatSync(db: Database, input: {
+  readonly mode: 'replace' | 'append';
+  readonly chatId: string;
+  readonly transcriptViewId: string;
+  readonly targetThrough: number;
+  readonly expectedAfterOrdinal: number;
+}): SearchSyncPlan {
+  requireIdentifier(input.chatId);
+  requireIdentifier(input.transcriptViewId);
+  if (!Number.isSafeInteger(input.targetThrough) || input.targetThrough < 0
+      || !Number.isSafeInteger(input.expectedAfterOrdinal) || input.expectedAfterOrdinal < 0) {
+    throw searchError('SEARCH_FRONTIER_INVALID');
+  }
+  const prior = getChatState(db, input.chatId);
+  if (prior
+      && prior.status === 'indexed'
+      && prior.transcriptViewId === input.transcriptViewId
+      && prior.indexedThrough >= input.targetThrough) {
+    return { plan: 'current', state: prior };
+  }
+  if (input.mode === 'append') {
+    if (!prior || prior.transcriptViewId !== input.transcriptViewId) {
+      throw searchError('SEARCH_VIEW_MISMATCH');
+    }
+    if (prior.status !== 'indexed' || prior.indexedThrough !== input.expectedAfterOrdinal) {
+      throw searchError('SEARCH_INDEX_GAP');
+    }
+  }
+
+  return runTransaction(db, () => {
+    const resume = input.mode === 'append'
+      || (prior !== null && prior.transcriptViewId === input.transcriptViewId);
+    const indexedThrough = resume ? Math.min(prior?.indexedThrough ?? 0, input.targetThrough) : 0;
     db.query(`
       INSERT INTO search_chat_state(
-        chat_id, agent_id, model, source_api_version, projector_version,
-        source_descriptor_hash, source_revision, carry_over_revision,
-        content_digest, sealed_source_key, operation_epoch, operation_sequence,
-        message_count, status, last_error_code, last_checked_at, indexed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sealed', NULL, ?, ?, ?)
+        chat_id, transcript_view_id, status, indexed_through, target_through,
+        last_error_code, updated_at
+      ) VALUES (?, ?, 'pending', ?, ?, NULL, ?)
       ON CONFLICT(chat_id) DO UPDATE SET
-        agent_id = excluded.agent_id,
-        model = excluded.model,
-        source_api_version = excluded.source_api_version,
-        projector_version = excluded.projector_version,
-        source_descriptor_hash = excluded.source_descriptor_hash,
-        source_revision = excluded.source_revision,
-        carry_over_revision = excluded.carry_over_revision,
-        content_digest = excluded.content_digest,
-        sealed_source_key = excluded.sealed_source_key,
-        operation_epoch = excluded.operation_epoch,
-        operation_sequence = excluded.operation_sequence,
-        message_count = excluded.message_count,
-        status = 'sealed', last_error_code = NULL,
-        last_checked_at = excluded.last_checked_at,
-        indexed_at = excluded.indexed_at, updated_at = excluded.updated_at
+        transcript_view_id = excluded.transcript_view_id,
+        status = 'pending',
+        indexed_through = excluded.indexed_through,
+        target_through = excluded.target_through,
+        last_error_code = NULL,
+        updated_at = excluded.updated_at
     `).run(
-      seal.chatId, seal.agentId, seal.model, seal.sourceApiVersion, seal.projectorVersion,
-      seal.sourceDescriptorHash, seal.sourceRevision, seal.carryOverRevision,
-      seal.contentDigest, seal.sealedSourceKey, seal.operationEpoch, seal.operationSequence,
-      seal.messageCount, timestamp, timestamp, timestamp,
+      input.chatId,
+      input.transcriptViewId,
+      indexedThrough,
+      input.targetThrough,
+      new Date().toISOString(),
     );
-    db.query('DELETE FROM search_chunks WHERE chat_id = ?').run(seal.chatId);
-    db.query(`
-      INSERT INTO search_chunks(chat_id, message_ordinal, role, timestamp, body, source_anchor)
-      SELECT ?, message_ordinal, role, timestamp, body, source_anchor
-      FROM temp_search_build ORDER BY message_ordinal
-    `).run(seal.chatId);
+    const state = getChatState(db, input.chatId);
+    if (!state) throw searchError('SEARCH_STATE_INVARIANT');
+    const staleRows = db.query<{ found: 1 }, [string, string, number]>(`
+      SELECT 1 AS found FROM search_chunks
+      WHERE chat_id = ? AND (transcript_view_id <> ? OR ordinal > ?) LIMIT 1
+    `).get(input.chatId, input.transcriptViewId, indexedThrough) !== null;
+    return { plan: 'build', state, staleRows };
   });
 }
 
-export function deleteChatRows(db: Database, chatId: string): void {
-  db.query('DELETE FROM search_chat_state WHERE chat_id = ?').run(chatId);
+export function deleteStaleRowsBatch(db: Database, input: {
+  readonly chatId: string;
+  readonly keepViewId: string;
+  readonly keepThrough: number;
+  readonly limit?: number;
+}): number {
+  requireIdentifier(input.chatId);
+  requireIdentifier(input.keepViewId);
+  const limit = input.limit ?? SEARCH_DELETE_BATCH_MAX_ROWS;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > SEARCH_DELETE_BATCH_MAX_ROWS) {
+    throw searchError('SEARCH_BATCH_TOO_LARGE');
+  }
+  return runTransaction(db, () => db.query<{ id: number }, [string, string, number, number]>(`
+    DELETE FROM search_chunks WHERE id IN (
+      SELECT id FROM search_chunks
+      WHERE chat_id = ? AND (transcript_view_id <> ? OR ordinal > ?)
+      LIMIT ?
+    )
+    RETURNING id
+  `).all(input.chatId, input.keepViewId, input.keepThrough, limit).length);
 }
 
-export function pruneMissingChats(db: Database, chatIds: readonly string[]): void {
-  const json = JSON.stringify([...new Set(chatIds)]);
-  db.query(`
-    DELETE FROM search_chat_state
-    WHERE chat_id NOT IN (SELECT CAST(value AS TEXT) FROM json_each(?))
-  `).run(json);
+export function insertRowsBatch(db: Database, input: {
+  readonly chatId: string;
+  readonly transcriptViewId: string;
+  readonly rows: readonly HistoricalSearchMessageRow[];
+  readonly advanceTo: number;
+}): SearchChatState {
+  requireIdentifier(input.chatId);
+  requireIdentifier(input.transcriptViewId);
+  if (input.rows.length > SEARCH_INGEST_TXN_MAX_ROWS) {
+    throw searchError('SEARCH_BATCH_TOO_LARGE');
+  }
+  let batchBytes = 0;
+  for (const row of input.rows) {
+    const rowBytes = Buffer.byteLength(row.body, 'utf8');
+    if (rowBytes > SEARCH_INGEST_ROW_MAX_BYTES) throw searchError('SEARCH_ROW_TOO_LARGE');
+    if (row.timestamp !== null && typeof row.timestamp !== 'string') {
+      throw searchError('SEARCH_ROW_INVALID');
+    }
+    const timestampBytes = row.timestamp === null ? 0 : Buffer.byteLength(row.timestamp, 'utf8');
+    if (timestampBytes > SEARCH_TIMESTAMP_MAX_BYTES) throw searchError('SEARCH_ROW_INVALID');
+    batchBytes += rowBytes + timestampBytes;
+  }
+  if (input.rows.length > 1 && batchBytes > SEARCH_INGEST_TXN_MAX_BYTES) {
+    throw searchError('SEARCH_BATCH_TOO_LARGE');
+  }
+
+  return runTransaction(db, () => {
+    const state = getChatState(db, input.chatId);
+    if (!state || state.transcriptViewId !== input.transcriptViewId) {
+      throw searchError('SEARCH_VIEW_MISMATCH');
+    }
+    if (state.status !== 'pending'
+        || !Number.isSafeInteger(input.advanceTo)
+        || input.advanceTo <= state.indexedThrough
+        || input.advanceTo > state.targetThrough) {
+      throw searchError('SEARCH_FRONTIER_INVALID');
+    }
+    let previous = state.indexedThrough;
+    const insert = db.query(`
+      INSERT INTO search_chunks(chat_id, transcript_view_id, ordinal, role, timestamp, body)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (const row of input.rows) {
+      if (!Number.isSafeInteger(row.ordinal)
+          || row.ordinal <= previous
+          || row.ordinal > input.advanceTo
+          || !Object.hasOwn(ROLE_CODES, row.role)
+          || row.body.length === 0) {
+        throw searchError('SEARCH_ROW_INVALID');
+      }
+      insert.run(
+        input.chatId,
+        input.transcriptViewId,
+        row.ordinal,
+        ROLE_CODES[row.role],
+        row.timestamp,
+        row.body,
+      );
+      previous = row.ordinal;
+    }
+    db.query(`
+      UPDATE search_chat_state SET indexed_through = ?, updated_at = ?
+      WHERE chat_id = ?
+    `).run(input.advanceTo, new Date().toISOString(), input.chatId);
+    db.query(`INSERT INTO search_chunks_fts(search_chunks_fts, rank)
+      VALUES ('merge', ?)`).run(SEARCH_FTS_MERGE_PAGES_PER_TXN);
+    const updated = getChatState(db, input.chatId);
+    if (!updated) throw searchError('SEARCH_STATE_INVARIANT');
+    return updated;
+  });
+}
+
+export function finishChatSync(db: Database, input: {
+  readonly chatId: string;
+  readonly transcriptViewId: string;
+}): SearchChatState {
+  requireIdentifier(input.chatId);
+  requireIdentifier(input.transcriptViewId);
+  return runTransaction(db, () => {
+    const state = getChatState(db, input.chatId);
+    if (!state
+        || state.transcriptViewId !== input.transcriptViewId
+        || state.status !== 'pending') {
+      throw searchError('SEARCH_STATE_INVARIANT');
+    }
+    if (state.indexedThrough !== state.targetThrough) {
+      throw searchError('SEARCH_FRONTIER_INVALID');
+    }
+    db.query(`
+      UPDATE search_chat_state SET status = 'indexed', last_error_code = NULL, updated_at = ?
+      WHERE chat_id = ?
+    `).run(new Date().toISOString(), input.chatId);
+    const updated = getChatState(db, input.chatId);
+    if (!updated) throw searchError('SEARCH_STATE_INVARIANT');
+    return updated;
+  });
+}
+
+export function markChatFailed(db: Database, input: {
+  readonly chatId: string;
+  readonly transcriptViewId: string;
+  readonly errorCode: string;
+}): void {
+  requireIdentifier(input.chatId);
+  requireIdentifier(input.transcriptViewId);
+  if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(input.errorCode)) {
+    throw searchError('INVALID_SEARCH_ERROR_CODE');
+  }
+  runTransaction(db, () => {
+    const prior = getChatState(db, input.chatId);
+    const sameView = prior?.transcriptViewId === input.transcriptViewId;
+    db.query(`
+      INSERT INTO search_chat_state(
+        chat_id, transcript_view_id, status, indexed_through, target_through,
+        last_error_code, updated_at
+      ) VALUES (?, ?, 'failed', 0, 0, ?, ?)
+      ON CONFLICT(chat_id) DO UPDATE SET
+        transcript_view_id = excluded.transcript_view_id,
+        status = 'failed',
+        indexed_through = CASE WHEN ? THEN indexed_through ELSE 0 END,
+        target_through = CASE WHEN ? THEN target_through ELSE 0 END,
+        last_error_code = excluded.last_error_code,
+        updated_at = excluded.updated_at
+    `).run(
+      input.chatId,
+      input.transcriptViewId,
+      input.errorCode,
+      new Date().toISOString(),
+      sameView ? 1 : 0,
+      sameView ? 1 : 0,
+    );
+  });
+}
+
+export function deleteChatBatch(
+  db: Database,
+  chatId: string,
+  limit = SEARCH_DELETE_BATCH_MAX_ROWS,
+): { readonly done: boolean; readonly deletedRows: number } {
+  requireIdentifier(chatId);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > SEARCH_DELETE_BATCH_MAX_ROWS) {
+    throw searchError('SEARCH_BATCH_TOO_LARGE');
+  }
+  return runTransaction(db, () => {
+    const deletedRows = db.query<{ id: number }, [string, number]>(`
+      DELETE FROM search_chunks WHERE id IN (
+        SELECT id FROM search_chunks WHERE chat_id = ? LIMIT ?
+      )
+      RETURNING id
+    `).all(chatId, limit).length;
+    if (deletedRows < limit) {
+      db.query('DELETE FROM search_chat_state WHERE chat_id = ?').run(chatId);
+      return { done: true, deletedRows };
+    }
+    return { done: false, deletedRows };
+  });
 }
 
 export function runIdleMaintenance(db: Database): void {
-  db.exec('PRAGMA incremental_vacuum(2048)');
+  db.exec('PRAGMA incremental_vacuum(512)');
+  for (let pass = 0; pass < 2; pass += 1) {
+    db.exec("INSERT INTO search_chunks_fts(search_chunks_fts, rank) VALUES ('merge', 64)");
+  }
 }
 
-// Retains the benchmark helper while the production writer uses explicit v4 seals.
-export function replaceChatRows(
-  db: Database,
-  chatId: string,
-  generation: number,
-  sourceKey: string,
-  rows: HistoricalSearchMessageRow[],
-): boolean {
-  prepareChatBuild(db);
-  stageChatRows(db, rows);
-  sealChatFromStaging(db, {
-    chatId,
-    agentId: 'benchmark',
-    model: '',
-    sourceApiVersion: 1,
-    projectorVersion: 1,
-    sourceDescriptorHash: null,
-    sourceRevision: sourceKey,
-    carryOverRevision: 'carry-v1:0',
-    contentDigest: sourceKey,
-    sealedSourceKey: sourceKey,
-    operationEpoch: 'benchmark',
-    operationSequence: generation,
-    messageCount: rows.length,
-  });
-  return true;
+export function observeWalTruncate(db: Database): { busy: number; logFrames: number } {
+  const row = db.query<{ busy: number; log: number }, []>('PRAGMA wal_checkpoint(TRUNCATE)').get();
+  return { busy: Number(row?.busy ?? 1), logFrames: Number(row?.log ?? -1) };
 }

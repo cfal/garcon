@@ -3,14 +3,19 @@
 	// permission, error, info). Centralizes variant styling and row anatomy.
 
 	import type { Snippet } from 'svelte';
-
-	type Variant = 'default' | 'info' | 'success' | 'warning' | 'error' | 'neutral' | 'thinking';
+	import {
+		chatEventCardSurfaceClass,
+		type ChatEventCardVariant,
+	} from '$lib/chat/transcript/chat-event-card-style';
+	import { cn } from '$lib/utils/cn';
 
 	interface Props {
-		variant?: Variant;
+		variant?: ChatEventCardVariant;
 		compact?: boolean;
 		header?: Snippet;
-		body: Snippet;
+		// Omitted while a disclosure body is hidden so the card does not
+		// reserve the header gap for content it is not showing.
+		body?: Snippet;
 		footer?: Snippet;
 		class?: string;
 	}
@@ -24,38 +29,23 @@
 		class: className = '',
 	}: Props = $props();
 
-	const variantClass = $derived.by(() => {
-		switch (variant) {
-			case 'info':
-				return 'border-status-info-border bg-status-info/20 text-status-info-foreground';
-			case 'success':
-				return 'border-status-success-border bg-status-success/20 text-status-success-foreground';
-			case 'warning':
-				return 'border-status-warning-border bg-status-warning/20 text-status-warning-muted-foreground';
-			case 'error':
-				return 'border-status-error-border bg-status-error/20 text-status-error-foreground';
-			case 'neutral':
-				return 'border-status-neutral-border bg-status-neutral/25 text-status-neutral-foreground';
-			case 'thinking':
-				return 'border-border border-dotted bg-muted/50 text-foreground';
-			default:
-				return 'border-border bg-card text-foreground';
-		}
-	});
+	const variantClass = $derived(chatEventCardSurfaceClass(variant));
 
 	const paddingClass = $derived(compact ? 'px-3 py-2' : 'px-3.5 py-3');
 </script>
 
-<article class="rounded-xl border shadow-sm {variantClass} {paddingClass} {className}">
+<article class={cn('rounded-xl border shadow-sm', variantClass, paddingClass, className)}>
 	{#if header}
-		<div class="mb-2 flex items-start justify-between gap-2">
+		<div class={cn('flex items-start justify-between gap-2', body && 'mb-2')}>
 			{@render header()}
 		</div>
 	{/if}
 
-	<div class="min-w-0">
-		{@render body()}
-	</div>
+	{#if body}
+		<div class="min-w-0">
+			{@render body()}
+		</div>
+	{/if}
 
 	{#if footer}
 		<div class="mt-3">

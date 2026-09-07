@@ -29,6 +29,53 @@ function createFixture() {
   };
 }
 
+function chatHandlerDeps() {
+  return {
+    serverInstanceId: 'server-instance-test',
+    processing: { phase: () => null, snapshot: () => [] },
+    chatViews: {
+      readReplay: () => Promise.resolve({
+        transcriptViewId: 'view-1',
+        messages: [],
+        firstOrdinal: 1,
+        lastOrdinal: 0,
+      }),
+      resendCandidates: () => [],
+    },
+    transcriptReload: () => Promise.resolve({
+      transcriptViewId: 'view-1',
+      messages: [],
+      lastOrdinal: 0,
+      pageOldestOrdinal: 0,
+      pageNewestOrdinal: 0,
+      hasMore: false,
+    }),
+    queue: {
+      readChatExecutionControl: async () => ({
+        serverInstanceId: 'server-instance-test',
+        entries: [],
+        controlEntries: [],
+        recentlyDispatched: [],
+        appliedCommands: [],
+        pause: null,
+        reorderRevision: 0,
+        version: 0,
+        updatedAt: null,
+      }),
+    },
+    transientFeeds: {
+      snapshot: (chatId, transcriptViewId) => ({
+        serverInstanceId: 'server-instance-test',
+        chatId,
+        transcriptViewId,
+        transientRevision: 0,
+        rows: [],
+      }),
+    },
+    registry: { getChat: () => null },
+  };
+}
+
 describe('PrimaryWsHandler', () => {
   it('opens chat before terminal and drains terminal output', () => {
     const { calls, primary, socket } = createFixture();
@@ -111,14 +158,7 @@ describe('PrimaryWsHandler', () => {
       detachPeer: mock(() => undefined),
       detachTerminal: mock(() => undefined),
     };
-    const chat = new ChatHandler({
-      agents: { getRunningChatIdsSnapshot: () => [] },
-      chatViews: { readReplay: () => ({}) },
-      nativeReloader: { reloadFromNative: async () => ({}) },
-      queue: { readChatExecutionControl: async () => ({}) },
-      pendingInputs: { listForTransport: () => [] },
-      registry: { getChat: () => null },
-    });
+    const chat = new ChatHandler(chatHandlerDeps());
     const primary = new PrimaryWsHandler(
       chat,
       new TerminalStreamHandler(terminalManager, () => 1_000),
@@ -167,6 +207,7 @@ describe('PrimaryWsHandler', () => {
       type: 'ws-pong',
       clientRequestId: 'ping-1',
       sentAt: 42,
+      serverInstanceId: 'server-instance-test',
     });
     expect(socket.closes).toEqual([]);
     expect(terminalManager.detachPeer).toHaveBeenCalledTimes(1);
@@ -183,14 +224,7 @@ describe('PrimaryWsHandler', () => {
       detachPeer: mock(() => undefined),
       detachTerminal: mock(() => undefined),
     };
-    const chat = new ChatHandler({
-      agents: { getRunningChatIdsSnapshot: () => [] },
-      chatViews: { readReplay: () => ({}) },
-      nativeReloader: { reloadFromNative: async () => ({}) },
-      queue: { readChatExecutionControl: async () => ({}) },
-      pendingInputs: { listForTransport: () => [] },
-      registry: { getChat: () => null },
-    });
+    const chat = new ChatHandler(chatHandlerDeps());
     const primary = new PrimaryWsHandler(
       chat,
       new TerminalStreamHandler(terminalManager),

@@ -1,12 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   migrateAgentIntegrationCoreRecords,
-  restorePreAgentIntegrationCoreRecords,
+  refreshAgentExecutionModeCoreRecords,
+  refreshAgentIntegrationCoreRecords,
 } from '../core-record-migration.js';
+import { ChatRegistry } from '../../chats/store.js';
+import { ScheduledPromptStore } from '../../scheduled-prompts/store.js';
 
 const MIGRATION_DIR = path.join('migration-journals', 'agent-integration-v1');
 
@@ -14,9 +17,13 @@ function envelope(ownerId, values = {}) {
   return { ownerId, schemaVersion: 1, values };
 }
 
-function integration(id, legacyKey, defaultValue) {
+function integration(id, legacyKey, defaultValue, options = {}) {
   return {
-    descriptor: { id },
+    descriptor: {
+      id,
+      supportedPermissionModes: ['default'],
+      supportedThinkingModes: options.supportedThinkingModes ?? ['none', 'high'],
+    },
     settings: {
       parse(input) {
         if (input.ownerId !== id) throw new Error(`wrong owner for ${id}`);
@@ -25,6 +32,7 @@ function integration(id, legacyKey, defaultValue) {
       migrate: async (input) => input,
     },
     migration: {
+      translateLegacyModel: async ({ model }) => options.translateLegacyModel?.(model) ?? model,
       translateLegacyNativeSession: async ({ legacyNativePath }) => ({
         ownerId: id,
         schemaVersion: 1,
@@ -43,6 +51,7 @@ function integrations(...values) {
   const byId = new Map(values.map((value) => [value.descriptor.id, value]));
   return {
     list: () => [...byId.values()],
+    get: (id) => byId.get(id) ?? null,
     require(id) {
       const value = byId.get(id);
       if (!value) throw new Error(`missing integration ${id}`);
@@ -125,7 +134,7 @@ describe('agent integration core-record migration', () => {
       workspaceDir,
       integrations: integrations(
         integration('claude', 'claudeThinkingMode', 'auto'),
-        integration('amp', 'ampAgentMode', 'smart'),
+        integration('amp', 'ampAgentMode', 'smart', { supportedThinkingModes: [] }),
       ),
     });
 
@@ -196,10 +205,470 @@ describe('agent integration core-record migration', () => {
     ));
     expect(manifest.state).toBe('committed');
 
-    await restorePreAgentIntegrationCoreRecords(workspaceDir);
-    expect(JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'))).toEqual(originalChats);
-    expect(JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'))).toEqual(originalSettings);
-    expect(JSON.parse(await fs.readFile(path.join(workspaceDir, 'scheduled-prompts.json'), 'utf8'))).toEqual(originalScheduled);
+  });
+
+  it('refreshes persisted integration settings and legacy models in current core records', async () => {
+    const ampV1 = envelope('amp', { ampAgentMode: 'smart' });
+    const ampV2 = { ownerId: 'amp', schemaVersion: 2, values: {} };
+    const amp = integration('amp', 'ampAgentMode', 'smart', {
+      translateLegacyModel: (model) => ['smart', 'deep'].includes(model) ? 'medium' : model,
+      supportedThinkingModes: [],
+    });
+    amp.settings.parse = (input) => {
+      if (input.ownerId !== 'amp' || input.schemaVersion !== 2) throw new Error('Invalid settings for amp');
+      return input;
+    };
+    amp.settings.migrate = async (input) => input.schemaVersion === 1 ? ampV2 : amp.settings.parse(input);
+
+    await Promise.all([
+      fs.writeFile(path.join(workspaceDir, 'chats.json'), `${JSON.stringify({
+        version: 3,
+        sessions: {
+          '100': {
+            agentId: 'amp',
+            model: 'smart',
+            projectPath: '/workspace/project',
+            agentSessionId: 'native-100',
+            nativeSession: null,
+            agentSettingsById: { amp: ampV1 },
+            agentOwnershipEpoch: 'epoch-100',
+          },
+        },
+      })}\n`),
+      fs.writeFile(path.join(workspaceDir, 'project-settings.json'), `${JSON.stringify({
+        ui: {
+          chatTitle: { agentId: 'amp', thinkingMode: 'high', enabled: true },
+          agentSwitchCompaction: { agentId: 'amp', thinkingMode: 'high', enabled: true },
+          commitMessage: { agentId: 'amp', thinkingMode: 'high', customPrompt: 'Summarize' },
+          promptRefinement: { agentId: 'amp', thinkingMode: 'high', customPrompt: 'Refine' },
+        },
+        recentAgentSettings: [{
+          agentId: 'amp',
+          model: 'smart',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+          retained: 'recent',
+        }],
+        executionDefaults: {
+          global: { agentSettingsById: { amp: ampV1 } },
+          byAgent: { amp: { agentSettingsById: { amp: ampV1 } } },
+        },
+      })}\n`),
+      fs.writeFile(path.join(workspaceDir, 'scheduled-prompts.json'), `${JSON.stringify({
+        version: 1,
+        prompts: [{
+          id: 'scheduled-1',
+          target: {
+            type: 'new-chat',
+            agentId: 'amp',
+            model: 'deep',
+            agentSettingsById: { amp: ampV1 },
+          },
+        }],
+      })}\n`),
+      fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), `${JSON.stringify({
+        version: 5,
+        ownershipIntents: [{
+          version: 5,
+          operationId: 'handoff-1',
+          clientRequestId: 'request-1',
+          submittedTargetHash: 'a'.repeat(64),
+          kind: 'handoff',
+          chatId: '100',
+          phase: 'commit-decided',
+          source: { agentId: 'claude', agentOwnershipEpoch: 'source-epoch' },
+          target: {
+            execution: {
+              agentId: 'amp',
+              model: 'deep',
+              apiProviderId: null,
+              modelEndpointId: null,
+              modelProtocol: null,
+              permissionMode: 'default',
+              thinkingMode: 'none',
+              agentSettings: ampV1,
+              retained: 'handoff',
+            },
+            agentOwnershipEpoch: 'target-epoch',
+          },
+          watermark: { viewId: 'view-1', ordinal: 0 },
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }, {
+          version: 2,
+          operationId: 'delete-1',
+          kind: 'delete',
+          chatId: '200',
+          phase: 'prepared',
+          sourceEpoch: null,
+          releaseReferences: [],
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }],
+      })}\n`),
+    ]);
+
+    await refreshAgentIntegrationCoreRecords({
+      workspaceDir,
+      integrations: integrations(amp),
+    });
+
+    const chats = JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
+    expect(chats.sessions['100']).toMatchObject({
+      model: 'medium',
+      agentSettingsById: { amp: ampV2 },
+    });
+    const settings = JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'));
+    expect(settings.recentAgentSettings).toEqual([{
+      agentId: 'amp',
+      model: 'medium',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      retained: 'recent',
+    }]);
+    expect(settings.executionDefaults.global.agentSettingsById.amp).toEqual(ampV2);
+    expect(settings.executionDefaults.byAgent.amp.agentSettingsById.amp).toEqual(ampV2);
+    for (const selection of Object.values(settings.ui)) {
+      expect(selection).toMatchObject({ agentId: 'amp', thinkingMode: 'none' });
+    }
+    expect(settings.ui.commitMessage.customPrompt).toBe('Summarize');
+    const scheduled = JSON.parse(await fs.readFile(path.join(workspaceDir, 'scheduled-prompts.json'), 'utf8'));
+    expect(scheduled.prompts[0].target).toMatchObject({
+      model: 'medium',
+      agentSettingsById: { amp: ampV2 },
+    });
+    const ownership = JSON.parse(await fs.readFile(
+      path.join(workspaceDir, 'agent-ownership-journal.json'),
+      'utf8',
+    ));
+    expect(ownership.ownershipIntents[0]).toMatchObject({
+      submittedTargetHash: 'a'.repeat(64),
+      target: {
+        execution: {
+          model: 'medium',
+          agentSettings: ampV2,
+          retained: 'handoff',
+        },
+      },
+    });
+    expect(ownership.ownershipIntents[1]).toEqual({
+      version: 2,
+      operationId: 'delete-1',
+      kind: 'delete',
+      chatId: '200',
+      phase: 'prepared',
+      sourceEpoch: null,
+      releaseReferences: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('preserves execution defaults for integrations that are no longer installed', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const removedSettings = envelope('removed-agent', { mode: 'custom' });
+    await fs.writeFile(path.join(workspaceDir, 'project-settings.json'), `${JSON.stringify({
+      lastAgentId: 'legacy-agent',
+      lastThinkingMode: 'high',
+      executionDefaults: {
+        global: {},
+        byAgent: {
+          'removed-agent': {
+            permissionMode: 'default',
+            thinkingMode: 'high',
+            agentSettingsById: { 'removed-agent': removedSettings },
+          },
+        },
+      },
+    })}\n`);
+
+    try {
+      await refreshAgentExecutionModeCoreRecords({
+        workspaceDir,
+        integrations: integrations(integration('claude', 'claudeThinkingMode', 'auto')),
+      });
+
+      const settings = JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'));
+      expect(settings.executionDefaults.byAgent['removed-agent']).toMatchObject({
+        permissionMode: 'default',
+        thinkingMode: 'high',
+        agentSettingsById: { 'removed-agent': removedSettings },
+      });
+      expect(settings.executionDefaults.byAgent['legacy-agent']).toMatchObject({
+        thinkingMode: 'high',
+      });
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "removed-agent" in saved execution defaults; preserving its settings.',
+      );
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "legacy-agent" in saved execution defaults; preserving its settings.',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('preserves core records for integrations that are no longer installed', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const removedSettings = envelope('removed-agent', { mode: 'custom' });
+    const chat = {
+      agentId: 'removed-agent',
+      model: 'custom-model',
+      projectPath: '/workspace/project',
+      agentSessionId: 'native-100',
+      nativeSession: null,
+      agentSettingsById: { 'removed-agent': removedSettings },
+      agentOwnershipEpoch: 'epoch-100',
+    };
+    const scheduledPrompt = {
+      id: 'scheduled-removed',
+      target: {
+        type: 'new-chat',
+        agentId: 'removed-agent',
+        model: 'custom-model',
+        thinkingMode: 'high',
+        agentSettingsById: { 'removed-agent': removedSettings },
+      },
+    };
+    const handoffIntent = {
+      kind: 'handoff',
+      operationId: 'handoff-removed',
+      target: {
+        execution: {
+          agentId: 'removed-agent',
+          model: 'custom-model',
+          thinkingMode: 'high',
+          agentSettings: removedSettings,
+        },
+      },
+    };
+    await Promise.all([
+      fs.writeFile(path.join(workspaceDir, 'chats.json'), `${JSON.stringify({
+        version: 3,
+        sessions: { 'chat-removed': chat },
+      })}\n`),
+      fs.writeFile(path.join(workspaceDir, 'scheduled-prompts.json'), `${JSON.stringify({
+        version: 1,
+        prompts: [scheduledPrompt],
+      })}\n`),
+      fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), `${JSON.stringify({
+        version: 5,
+        ownershipIntents: [handoffIntent],
+      })}\n`),
+    ]);
+
+    try {
+      await refreshAgentExecutionModeCoreRecords({
+        workspaceDir,
+        integrations: integrations(integration('claude', 'claudeThinkingMode', 'auto')),
+      });
+
+      const chats = JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
+      const scheduled = JSON.parse(await fs.readFile(
+        path.join(workspaceDir, 'scheduled-prompts.json'),
+        'utf8',
+      ));
+      const ownership = JSON.parse(await fs.readFile(
+        path.join(workspaceDir, 'agent-ownership-journal.json'),
+        'utf8',
+      ));
+      expect(chats.sessions['chat-removed']).toEqual(chat);
+      expect(scheduled.prompts).toEqual([scheduledPrompt]);
+      expect(ownership.ownershipIntents).toEqual([handoffIntent]);
+      expect(warn).toHaveBeenCalledTimes(3);
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "removed-agent" in saved chat "chat-removed"; preserving the record.',
+      );
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "removed-agent" in scheduled prompt "scheduled-removed"; preserving the record.',
+      );
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "removed-agent" in handoff intent "handoff-removed"; preserving the record.',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('migrates installed settings on chats owned by removed integrations', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const installed = integration('installed-agent', 'installedMode', 'default');
+    installed.settings.migrate = async (input) => ({ ...input, schemaVersion: 2 });
+    installed.settings.parse = (input) => {
+      if (input.ownerId !== 'installed-agent' || input.schemaVersion !== 2) {
+        throw new Error('installed-agent settings are stale');
+      }
+      return input;
+    };
+    const failing = integration('failing-agent', 'failingMode', 'default');
+    failing.settings.migrate = async () => {
+      throw new Error('injected settings migration failure');
+    };
+    const removedSettings = envelope('removed-agent', { mode: 'custom' });
+    const installedSettings = envelope('installed-agent', { installedMode: 'legacy' });
+    const failingSettings = envelope('failing-agent', { failingMode: 'legacy' });
+    await fs.writeFile(path.join(workspaceDir, 'chats.json'), `${JSON.stringify({
+      version: 3,
+      sessions: {
+        'chat-removed': {
+          agentId: 'removed-agent',
+          model: 'custom-model',
+          projectPath: '/workspace/project',
+          agentSessionId: null,
+          nativeSession: null,
+          agentSettingsById: {
+            'removed-agent': removedSettings,
+            'installed-agent': installedSettings,
+            'failing-agent': failingSettings,
+          },
+          agentOwnershipEpoch: 'epoch-100',
+        },
+      },
+    })}\n`);
+
+    try {
+      await refreshAgentIntegrationCoreRecords({
+        workspaceDir,
+        integrations: integrations(installed, failing),
+      });
+
+      const chats = JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
+      const settings = chats.sessions['chat-removed'].agentSettingsById;
+      expect(settings['removed-agent']).toEqual(removedSettings);
+      expect(settings['installed-agent']).toEqual({
+        ...installedSettings,
+        schemaVersion: 2,
+      });
+      expect(settings['failing-agent']).toEqual(failingSettings);
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Failed to migrate settings for installed agent integration "failing-agent" in saved chat "chat-removed" owned by unknown integration "removed-agent"; preserving the original envelope.',
+        expect.any(Error),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps legacy chats for removed integrations loadable', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const chatId = '1700000000000001';
+    const legacyChat = {
+      provider: 'removed-agent',
+      providerSessionId: 'native-100',
+      nativePath: '/removed-agent/sessions/native-100.json',
+      model: 'custom-model',
+      projectPath: '/workspace/project',
+    };
+    await fs.writeFile(path.join(workspaceDir, 'chats.json'), `${JSON.stringify({
+      version: 2,
+      sessions: { [chatId]: legacyChat },
+    })}\n`);
+
+    try {
+      await migrateAgentIntegrationCoreRecords({
+        workspaceDir,
+        integrations: integrations(integration('claude', 'claudeThinkingMode', 'auto')),
+      });
+
+      const migrated = JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
+      const migratedChat = migrated.sessions[chatId];
+      expect(typeof migratedChat.agentOwnershipEpoch).toBe('string');
+      expect(migratedChat.agentSettingsById).toEqual({});
+      expect(migratedChat).toMatchObject({
+        ...legacyChat,
+        agentId: 'removed-agent',
+        agentSessionId: 'native-100',
+        nativeSession: null,
+      });
+
+      await fs.writeFile(path.join(workspaceDir, 'chats.json'), `${JSON.stringify({
+        ...migrated,
+        version: 5,
+        sessions: {
+          [chatId]: {
+            ...migratedChat,
+            carryOverSegments: [],
+            nativeSeedReceipt: null,
+            carryOverMigrationQuarantine: null,
+          },
+        },
+      })}\n`);
+
+      const registry = await new ChatRegistry(workspaceDir).init();
+      expect(registry.sessions[chatId]).toMatchObject({
+        agentId: 'removed-agent',
+        agentSessionId: 'native-100',
+        nativeSession: null,
+        agentOwnershipEpoch: migratedChat.agentOwnershipEpoch,
+      });
+      expect(registry.sessions[chatId].agentSettingsById).toEqual({});
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        `Unknown agent integration "removed-agent" in saved chat "${chatId}"; preserving the record.`,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps legacy scheduled prompts for removed integrations loadable', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const scheduledPrompt = {
+      id: 'scheduled-removed',
+      schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
+      target: {
+        type: 'new-chat',
+        agentId: 'removed-agent',
+        projectPath: '/workspace/project',
+        model: 'custom-model',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+        permissionMode: 'default',
+        thinkingMode: 'high',
+        tags: [],
+      },
+      prompt: 'Review the project',
+      createdAt: '2029-01-01T00:00:00.000Z',
+      updatedAt: '2029-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(workspaceDir, 'scheduled-prompts.json'), `${JSON.stringify({
+      version: 1,
+      revision: 1,
+      prompts: [scheduledPrompt],
+    })}\n`);
+
+    try {
+      await migrateAgentIntegrationCoreRecords({
+        workspaceDir,
+        integrations: integrations(integration('claude', 'claudeThinkingMode', 'auto')),
+      });
+
+      const migrated = JSON.parse(await fs.readFile(
+        path.join(workspaceDir, 'scheduled-prompts.json'),
+        'utf8',
+      ));
+      expect(migrated.prompts[0]).toEqual({
+        ...scheduledPrompt,
+        target: { ...scheduledPrompt.target, agentSettingsById: {} },
+      });
+
+      const store = new ScheduledPromptStore(workspaceDir);
+      await store.init();
+      expect(store.list()).toEqual(migrated.prompts);
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "removed-agent" in scheduled prompt "scheduled-removed"; preserving the record.',
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('discards a prepared journal before loading core records', async () => {

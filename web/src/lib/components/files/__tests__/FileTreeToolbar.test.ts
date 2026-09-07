@@ -16,6 +16,14 @@ function readyStore(): FileTreeStore {
 		kind: 'ready',
 		response: {
 			fileRootPath: '/workspace',
+			homeDirectory: {
+				path: '/workspace/users/me',
+				breadcrumbs: [
+					{ name: 'workspace', path: '/workspace' },
+					{ name: 'users', path: '/workspace/users' },
+					{ name: 'me', path: '/workspace/users/me' },
+				],
+			},
 			directory: {
 				path: '/workspace/project',
 				relativePath: 'project',
@@ -31,9 +39,9 @@ function readyStore(): FileTreeStore {
 	return store;
 }
 
-async function renderMeasuredToolbar(initialWidth = 270) {
+async function renderMeasuredToolbar(initialWidth = 200) {
 	const store = readyStore();
-	const { container } = render(FileTreeToolbar, { store });
+	const { container } = render(FileTreeToolbar, { store, viewMode: 'columns' });
 	await tick();
 	const measuredRoot = container.querySelector<HTMLElement>('[data-responsive-surface-actions]');
 	if (!measuredRoot) throw new Error('Expected responsive action root');
@@ -42,13 +50,15 @@ async function renderMeasuredToolbar(initialWidth = 270) {
 	Object.defineProperty(root, 'clientWidth', { get: () => availableWidth });
 	for (const element of container.querySelectorAll<HTMLElement>('[data-surface-action-measure]')) {
 		const widths: Record<string, number> = {
-			'filter-files': 80,
-			'chat-project': 100,
+			'filter-files': 32,
+			home: 32,
+			'chat-project': 32,
 			'refresh-files': 32,
 		};
-		element.getBoundingClientRect = () => ({
-			width: widths[element.dataset.surfaceActionMeasure ?? ''] ?? 0,
-		}) as DOMRect;
+		element.getBoundingClientRect = () =>
+			({
+				width: widths[element.dataset.surfaceActionMeasure ?? ''] ?? 0,
+			}) as DOMRect;
 	}
 	const menuMeasure = container.querySelector<HTMLElement>(
 		'[data-surface-action-overflow-measure]',
@@ -79,11 +89,101 @@ describe('FileTreeToolbar', () => {
 		restoreResizeObserver();
 	});
 
+	it('uses a settings icon for its persistent view menu', async () => {
+		await renderMeasuredToolbar();
+		const trigger = screen.getByRole('button', { name: 'File browser actions' });
+
+		expect(trigger.querySelector('svg')?.classList.contains('lucide-settings')).toBe(true);
+	});
+
+	it('uses distinct icon-only actions with accessible titles', async () => {
+		await renderMeasuredToolbar();
+		const filter = screen.getByRole('button', { name: 'Filter files' });
+		const home = screen.getByRole('button', { name: 'Home' });
+		const chatProject = screen.getByRole('button', { name: 'Go to chat project' });
+
+		for (const button of [filter, home, chatProject]) {
+			expect(button.textContent?.trim()).toBe('');
+			expect(button.getAttribute('title')).toBe(button.getAttribute('aria-label'));
+		}
+		expect(home.querySelector('svg')?.classList.contains('lucide-house')).toBe(true);
+		expect(chatProject.querySelector('svg')?.classList.contains('lucide-folder-code')).toBe(true);
+	});
+
+	it('opens Home and disables it while loading or at the Home directory', async () => {
+		const { store } = await renderMeasuredToolbar();
+		const goToHome = vi.spyOn(store, 'goToHome').mockResolvedValue();
+		const initialResponse = store.readyResponse!;
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Home' }));
+		expect(goToHome).toHaveBeenCalledOnce();
+
+		store.navigation = {
+			kind: 'loading',
+			target: {
+				path: '/workspace/project/src',
+				label: 'src',
+				breadcrumbs: [
+					{ name: 'workspace', path: '/workspace' },
+					{ name: 'project', path: '/workspace/project' },
+					{ name: 'src', path: '/workspace/project/src' },
+				],
+				reason: 'directory-row',
+			},
+			previous: initialResponse,
+		};
+		await tick();
+		expect(screen.getByRole('button', { name: 'Home' }).hasAttribute('disabled')).toBe(true);
+
+		store.navigation = { kind: 'idle' };
+		await tick();
+		const idleHome = screen.getByRole('button', { name: 'Home' });
+		expect(idleHome.hasAttribute('disabled')).toBe(true);
+		expect(idleHome.getAttribute('title')).toBe('Home');
+
+		store.navigation = {
+			kind: 'ready',
+			response: {
+				...initialResponse,
+				directory: {
+					path: '/workspace/users/me',
+					relativePath: 'users/me',
+					parentPath: '/workspace/users',
+					breadcrumbs: initialResponse.homeDirectory!.breadcrumbs,
+				},
+			},
+		};
+		await tick();
+
+		const home = screen.getByRole('button', { name: 'Home' });
+		expect(home.hasAttribute('disabled')).toBe(true);
+		expect(home.getAttribute('title')).toBe('Already at home');
+	});
+
+	it('disables Home with an unavailable title when it is outside the file root', async () => {
+		const { store, setWidth } = await renderMeasuredToolbar();
+		store.navigation = {
+			kind: 'ready',
+			response: { ...store.readyResponse!, homeDirectory: null },
+		};
+		await tick();
+
+		const unavailableLabel = "Home directory isn't available in Files";
+		const home = screen.getByRole('button', { name: unavailableLabel });
+		expect(home.hasAttribute('disabled')).toBe(true);
+		expect(home.getAttribute('title')).toBe(unavailableLabel);
+
+		await setWidth(60);
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const menuItem = screen.getByRole('menuitem', { name: unavailableLabel });
+		expect(menuItem.hasAttribute('data-disabled')).toBe(true);
+	});
+
 	it('moves Refresh from its toolbar button into the persistent menu when space runs out', async () => {
 		const { setWidth } = await renderMeasuredToolbar();
 		expect(screen.getByRole('button', { name: 'Refresh files' })).toBeTruthy();
 
-		await setWidth(240);
+		await setWidth(150);
 		expect(screen.queryByRole('button', { name: 'Refresh files' })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
 		expect(screen.getByRole('menuitem', { name: 'Refresh files' })).toBeTruthy();
@@ -120,11 +220,26 @@ describe('FileTreeToolbar', () => {
 
 	it('focuses Filter files when it is opened from the overflow menu', async () => {
 		const { setWidth } = await renderMeasuredToolbar();
-		await setWidth(100);
+		await setWidth(60);
 		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		expect(screen.getByRole('menuitem', { name: 'Home' })).toBeTruthy();
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Filter files' }));
 		await tick();
 
 		expect(document.activeElement).toBe(screen.getByPlaceholderText('Filter by name...'));
+	});
+
+	it('keeps overflow actions before persistent view controls', async () => {
+		const { setWidth } = await renderMeasuredToolbar();
+		await setWidth(150);
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const refresh = screen.getByRole('menuitem', { name: 'Refresh files' });
+		const details = screen.getByRole('menuitemcheckbox', {
+			name: 'Always use detailed rows',
+		});
+
+		expect(
+			refresh.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 	});
 });

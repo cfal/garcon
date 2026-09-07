@@ -16,12 +16,14 @@ export function restoreChatIdForBareRoute(input: {
 	routeChatId: string | undefined;
 	isLoadingChats: boolean;
 	lastSelectedChatId: string | null;
+	lastSelectedChatExists: boolean;
 	selectedChatId: string | null;
 }): string | null {
 	if (!isBareChatRoute(input.pathname)) return null;
 	if (input.routeChatId) return null;
 	if (input.isLoadingChats) return null;
 	if (!input.lastSelectedChatId) return null;
+	if (!input.lastSelectedChatExists) return null;
 	if (input.lastSelectedChatId === input.selectedChatId) return null;
 	return input.lastSelectedChatId;
 }

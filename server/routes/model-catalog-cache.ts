@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { AgentCatalogEntry } from '../../common/agents.js';
 import type { ApiProviderCatalogEntry } from '../../common/api-providers.js';
+import { isRecord } from '../../common/json.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 
@@ -25,10 +26,6 @@ export interface ModelCatalogSnapshot {
   body: ModelCatalogResponseBody;
   etag: string;
   createdAt: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function stableObject(value: unknown): unknown {

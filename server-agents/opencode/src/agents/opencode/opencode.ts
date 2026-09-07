@@ -1,21 +1,45 @@
-// OpenCode SDK integration. Extends AgentEventEmitterRuntime so all output flows
-// through typed events wired in the composition root.
+// OpenCode SDK integration. Each provider operation owns its transcript publisher.
 
 import crypto from 'crypto';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
-import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
-import type { ChatMessage } from '@garcon/common/chat-types';
-import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
-import { convertOpenCodeToolUse } from "./tool-use-converter.js";
-import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import { isRecord } from '@garcon/common/json';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
+import {
+  extractSessionId,
+  extractTextParts,
+  isOpenCodeCompactionAssistant,
+  isOpenCodeCompactionContinuationPart,
+  isOpenCodeCompactionControlPart,
+  isOpenCodeManualCompactionControlPart,
+  openCodeAssistantTerminal,
+  openCodeRetryNotice,
+  type OpenCodeAssistantTerminal,
+  type SSEEvent,
+} from './sse-events.js';
+import {
+  acceptUniqueOpenCodeTurnEvent,
+  activateOpenCodeSessionTurn,
+  createOpenCodeTurnContext,
+  openCodeEventBelongsToTurn,
+  openCodeTurnRequiresProviderQuiescence,
+  relocateOpenCodeSession,
+  shouldWarnForUnroutedOpenCodeEvent,
+  type OpenCodeSession,
+  type OpenCodeTurnContext,
+} from './turn-events.js';
+import type { CompactionTrigger } from '@garcon/common/chat-types';
+import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  runtimeRows,
+  type AgentRuntimeEvent,
+  type AgentRuntimeOperation,
+} from '@garcon/server-agent-common/execution/runtime-events';
 import type { OpenCodeConfig } from '../../config.js';
-import { normalizeThinkingMode, type PermissionMode } from '@garcon/common/chat-modes';
+import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import {
   assertOpenCodeExecutionOpen,
   markOpenCodeExecutionStarted,
-  openCodeEventMetadata,
+  type OpenCodeExecutionAdmission,
   type OpenCodeResumeRequest,
   type OpenCodeSessionSettingsPatch,
   type OpenCodeStartRequest,
@@ -28,12 +52,49 @@ import {
   type OpenCodeRequestScope,
 } from './sdk-result.js';
 import {
-  AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
   AgentIntegrationError,
   type AgentLogger,
 } from '@garcon/server-agent-interface';
-import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { OpenCodeEndpointCoordinator } from './endpoint-coordinator.js';
+import { OpenCodeGlobalEventListener } from './global-event-listener.js';
+import {
+  closeOpenCodeInstance,
+  OpenCodeInstanceCreationTracker,
+  type OpenCodeInstance,
+  type OpenCodeServerTermination,
+} from './instance-lifecycle.js';
+import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import {
+  OpenCodeTimeoutError,
+  withAbortableTimeout,
+} from './request-control.js';
+import { convertOpenCodeEventToChatMessages } from './event-converter.js';
+import { OpenCodeSteeringController } from './steering.js';
+import { OpenCodeModelDiscovery } from './model-discovery.js';
+import { resolveOpenCodeThinkingVariant } from './thinking-variant.js';
+import {
+  OpenCodeOperationRoutes,
+  type OpenCodeOperationEventSource,
+  type OpenCodeOperationRoute,
+} from './operation-routes.js';
+import {
+  OpenCodeDecisionController,
+  mapPermissionMode,
+} from './permissions.js';
+import { createOpenCodeInstance } from './server-instance.js';
+import {
+  configuredProvidersFromResult,
+  connectedProvidersFromListResult,
+  modelsFromProviders,
+  type OpenCodeModelOption,
+} from './model-catalog.js';
+import { adoptOpenCodeCompactionPartRoute, compactionBoundaryRow, compactionEventTrigger } from './compaction-routing.js';
+import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
+import {
+  OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
+  latestOpenCodePromptTerminal,
+  openCodeProviderFailureRow,
+} from './turn-failure.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -42,175 +103,23 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
   error() {},
 });
 
-const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 5_000;
+// Matches OpenCode's own subprocess harness: cold starts of the platform binary are
+// dominated by transpile and plugin init, not the listen() call.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/test/lib/cli-process.ts#L363
+const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
 const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
+const DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS = 3_000;
+const RETAINED_SESSION_DELETION_LIMIT = 256;
+const DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS = 30_000;
 const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
-const OPENCODE_SERVER_CONFIG_CONTENT = JSON.stringify({});
-
-// Source of OpenCode permission keys:
-// - https://github.com/anomalyco/opencode/blob/f5eade1d2b95562c7fb58e3041e662a8b2b611b6/packages/web/src/content/docs/permissions.mdx
-// - https://github.com/anomalyco/opencode/blob/f5eade1d2b95562c7fb58e3041e662a8b2b611b6/packages/opencode/src/agent/agent.ts
-export const OPENCODE_PERMISSION_KEYS = Object.freeze([
-  'read',
-  'edit',
-  'glob',
-  'grep',
-  'list',
-  'bash',
-  'task',
-  'skill',
-  'lsp',
-  'todoread',
-  'todowrite',
-  'webfetch',
-  'websearch',
-  'codesearch',
-  'external_directory',
-  'doom_loop',
-  'question',
-  'plan_enter',
-  'plan_exit',
-] as const);
-
-export function mapPermissionMode(mode: string): Array<{ permission: string; pattern: string; action: string }> {
-  const map: Record<string, Record<string, string>> = {
-    acceptEdits: { edit: 'allow', bash: 'ask', webfetch: 'allow' },
-    bypassPermissions: Object.fromEntries(OPENCODE_PERMISSION_KEYS.map((permission) => [permission, 'allow'])),
-    manualBypass: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
-    default: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
-  };
-
-  const selected = map[mode] || map.default;
-
-  return Object.entries(selected).map(([permission, action]) => ({
-    permission,
-    pattern: '*',
-    action,
-  }));
-}
-
-function buildPromptBody(
-  command: string,
-  model: string | undefined,
-  providerMessageId: string,
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    messageID: providerMessageId,
-    parts: [{ type: 'text', text: command }],
-  };
-  if (model && model.includes('/')) {
-    const idx = model.indexOf('/');
-    body.model = {
-      providerID: model.slice(0, idx),
-      modelID: model.slice(idx + 1),
-    };
-  }
-  return body;
-}
-
-interface SSEEvent {
-  id?: string;
-  type: string;
-  properties?: Record<string, any>;
-}
-
-function extractSessionId(event: SSEEvent): string | undefined {
-  const props = event.properties || {};
-  return props.sessionID
-    || props.part?.sessionID
-    || props.info?.sessionID
-    || (event.type?.startsWith('session.') ? props.info?.id : undefined);
-}
-
-function extractTextParts(parts: unknown): string {
-  if (!Array.isArray(parts)) return '';
-  return parts
-    .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-    .map((part: any) => part.text.trim())
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
-
-function parseOpenCodeModel(model: string | undefined): { providerID: string; modelID: string } | null {
-  if (!model || typeof model !== 'string') return null;
-  const idx = model.indexOf('/');
-  if (idx < 1 || idx === model.length - 1) return null;
-  return {
-    providerID: model.slice(0, idx),
-    modelID: model.slice(idx + 1),
-  };
-}
-
-// Maps a permission decision to V2 reply value.
-export function mapPermissionDecision(decision: { allow?: boolean; alwaysAllow?: boolean } | null | undefined): string {
-  const allow = Boolean(decision?.allow);
-  const alwaysAllow = Boolean(decision?.alwaysAllow);
-  return allow ? (alwaysAllow ? 'always' : 'once') : 'reject';
-}
-
-// Extracts a normalized permission request from a V2 permission.asked event.
-export function extractPermissionRequest(event: SSEEvent): {
-  requestId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  sessionID: string | null;
-} | null {
-  if (event.type !== 'permission.asked') return null;
-
-  const props = event.properties || {};
-  const requestId = props.requestID || props.id;
-  if (!requestId) return null;
-
-  return {
-    requestId: String(requestId),
-    toolName: props.permission || 'Unknown',
-    toolInput: {
-      permission: props.permission || null,
-      patterns: Array.isArray(props.patterns) ? props.patterns : [],
-      metadata: props.metadata || {},
-      always: Array.isArray(props.always) ? props.always : [],
-      tool: props.tool || null,
-    },
-    sessionID: props.sessionID || null,
-  };
-}
-
-interface OpenCodeTurnContext {
-  eventMetadata: RuntimeEventMetadata;
-  providerMessageId: string;
-  providerObservedEventId: string | null;
-  assistantMessageIds: Set<string>;
-  messageRoles: Map<string, string>;
-  assistantPartTypes: Map<string, string>;
-}
-
-interface OpenCodeSession {
-  status: 'running' | 'completed' | 'aborted';
-  chatId: string;
-  model?: string;
-  permissionMode: PermissionMode;
-  directory?: string;
-  startedAt: string;
-  lastActivityAt: number;
-  lastEventId: string | null;
-  turn: OpenCodeTurnContext;
-}
-
+const DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS = 100;
+const DEFAULT_OPENCODE_SHUTDOWN_FORK_GRACE_MS = 3_000;
+type OpenCodeForkSessionOptions = { projectPath?: string | null; messageId?: string; permissionMode?: string; signal?: AbortSignal };
 interface PendingTurnWaiter {
-  promise: Promise<void>;
-  resolve: () => void;
-  reject: (error: Error) => void;
-}
-
-interface PendingPermission {
-  originalRequestId: string;
-  agentSessionId: string;
-  chatId: string;
-  directory?: string;
-  eventMetadata: RuntimeEventMetadata;
+  promise: Promise<Error | null>;
+  settle: (failure: Error | null) => void;
 }
 
 interface OpenCodeRuntimeOptions {
@@ -220,12 +129,15 @@ interface OpenCodeRuntimeOptions {
   modelDiscoveryTimeoutMs?: number;
   requestTimeoutMs?: number;
   unavailableRetryMs?: number;
+  sseRetryDelayMs?: number;
+  sseHeartbeatTimeoutMs?: number;
   modelCacheTtlMs?: number;
+  shutdownStartupGraceMs?: number;
+  shutdownNativeForkGraceMs?: number;
+  idleRetirementDelayMs?: number;
+  idleRetirementCheckIntervalMs?: number;
   now?: () => number;
-  createInstance?: (input: {
-    port: number;
-    signal: AbortSignal;
-  }) => Promise<OpenCodeInstance>;
+  createInstance?: (input: { signal: AbortSignal }) => Promise<OpenCodeInstance>;
 }
 
 interface NormalizedOpenCodeRuntimeOptions {
@@ -233,39 +145,14 @@ interface NormalizedOpenCodeRuntimeOptions {
   modelDiscoveryTimeoutMs: number;
   requestTimeoutMs: number;
   unavailableRetryMs: number;
+  sseRetryDelayMs: number;
+  sseHeartbeatTimeoutMs: number;
   modelCacheTtlMs: number;
+  shutdownStartupGraceMs: number;
+  shutdownNativeForkGraceMs: number;
   now: () => number;
   requiresExecutable: boolean;
-  createInstance: (input: {
-    port: number;
-    signal: AbortSignal;
-  }) => Promise<OpenCodeInstance>;
-}
-
-interface OpenCodeInstance {
-  client: any;
-  baseUrl?: string;
-  server?: {
-    close?: () => void;
-  };
-  close?: () => void;
-}
-
-interface OpenCodeModelOption {
-  value: string;
-  label: string;
-}
-
-interface OpenCodeModelCache {
-  models: OpenCodeModelOption[];
-  fetchedAt: number;
-}
-
-class OpenCodeTimeoutError extends Error {
-  constructor(label: string, timeoutMs: number) {
-    super(`${label} timed out after ${timeoutMs}ms`);
-    this.name = 'OpenCodeTimeoutError';
-  }
+  createInstance: (input: { signal: AbortSignal }) => Promise<OpenCodeInstance>;
 }
 
 function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
@@ -274,231 +161,172 @@ function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRu
     modelDiscoveryTimeoutMs: options.modelDiscoveryTimeoutMs ?? DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS,
     requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS,
     unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
+    sseRetryDelayMs: options.sseRetryDelayMs ?? DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS,
+    sseHeartbeatTimeoutMs: options.sseHeartbeatTimeoutMs ?? DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS,
     modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
+    shutdownStartupGraceMs:
+      options.shutdownStartupGraceMs ?? DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS,
+    shutdownNativeForkGraceMs:
+      options.shutdownNativeForkGraceMs ?? DEFAULT_OPENCODE_SHUTDOWN_FORK_GRACE_MS,
     now: options.now ?? (() => Date.now()),
     requiresExecutable: options.createInstance === undefined,
     createInstance: options.createInstance ?? createOpenCodeInstance,
   };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error || 'unknown error');
-}
-
-export function buildOpenCodeServerEnv(
-  baseEnv: Record<string, string | undefined> = process.env,
-): Record<string, string | undefined> {
-  return {
-    ...baseEnv,
-    OPENCODE_CONFIG_CONTENT: OPENCODE_SERVER_CONFIG_CONTENT,
-    OPENCODE_DISABLE_AUTOUPDATE: '1',
-  };
-}
-
-function configuredProvidersFromResult(result: any): any[] {
-  const providers = result?.data?.providers;
-  return Array.isArray(providers) ? providers : [];
-}
-
-function connectedProvidersFromListResult(result: any): any[] {
-  const data = result?.data;
-  const allProviders: any[] = Array.isArray(data?.all) ? data.all : [];
-  const connected = new Set<string>(Array.isArray(data?.connected) ? data.connected : []);
-  return allProviders.filter((provider) => connected.has(provider.id || provider.name));
-}
-
-function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
-  const models: OpenCodeModelOption[] = [];
-  for (const provider of providers) {
-    const providerId = provider.id || provider.name;
-    const providerName = provider.name || providerId;
-    const agentModelsObj = provider.models || {};
-    for (const [modelKey, model] of Object.entries(agentModelsObj)) {
-      const m = model as any;
-      const modelId = m.id || modelKey;
-      models.push({
-        value: `${providerId}/${modelId}`,
-        label: `${providerName}: ${m.name || modelId}`,
-      });
-    }
-  }
-  return models;
-}
-
-async function withAbortableTimeout<T>(
-  operation: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  const controller = new AbortController();
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      operation(controller.signal),
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          const error = new OpenCodeTimeoutError(label, timeoutMs);
-          controller.abort(error);
-          reject(error);
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-  }
-}
-
-function stopOpenCodeProcess(proc: ChildProcess): void {
-  if (proc.exitCode !== null || proc.signalCode !== null) return;
-
-  proc.kill();
-  proc.stdout?.destroy();
-  proc.stderr?.destroy();
-
-  const killTimer = setTimeout(() => {
-    if (proc.exitCode === null && proc.signalCode === null) {
-      proc.kill('SIGKILL');
-    }
-  }, 500);
-  killTimer.unref?.();
-  proc.once('exit', () => clearTimeout(killTimer));
-}
-
-async function createOpenCodeInstance(input: {
-  port: number;
-  signal: AbortSignal;
-}): Promise<OpenCodeInstance> {
-  const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
-  const proc = spawn('opencode', ['serve', '--hostname=127.0.0.1', `--port=${input.port}`], {
-    env: buildOpenCodeServerEnv(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  const url = await new Promise<string>((resolve, reject) => {
-    let output = '';
-    let resolved = false;
-
-    const cleanup = () => {
-      input.signal.removeEventListener('abort', abort);
-      proc.off('exit', onExit);
-      proc.off('error', onError);
-      proc.stdout.off('data', onStdout);
-      proc.stderr.off('data', onStderr);
-    };
-
-    const fail = (error: unknown) => {
-      if (resolved) return;
-      cleanup();
-      stopOpenCodeProcess(proc);
-      reject(error);
-    };
-
-    const abort = () => {
-      fail(input.signal.reason ?? new Error('OpenCode startup aborted'));
-    };
-
-    const onStdout = (chunk: Buffer) => {
-      if (resolved) return;
-      output += chunk.toString();
-      const lines = output.split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('opencode server listening')) continue;
-        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-        if (!match) {
-          fail(new Error(`Failed to parse OpenCode server URL from output: ${line}`));
-          return;
-        }
-        resolved = true;
-        cleanup();
-        resolve(match[1]);
-        return;
-      }
-    };
-
-    const onStderr = (chunk: Buffer) => {
-      output += chunk.toString();
-    };
-
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      const detail = output.trim() ? `\nServer output: ${output.trim()}` : '';
-      fail(new Error(`OpenCode server exited before startup with code ${code ?? signal}${detail}`));
-    };
-
-    const onError = (error: Error) => {
-      fail(error);
-    };
-
-    input.signal.addEventListener('abort', abort, { once: true });
-    proc.stdout.on('data', onStdout);
-    proc.stderr.on('data', onStderr);
-    proc.on('exit', onExit);
-    proc.on('error', onError);
-
-    if (input.signal.aborted) abort();
-  });
-
-  const close = () => stopOpenCodeProcess(proc);
-  return {
-    client: createOpencodeClient({ baseUrl: url }),
-    baseUrl: url,
-    server: { close },
-  };
-}
-
-export class OpenCodeRuntime extends AgentEventEmitterRuntime {
+export class OpenCodeRuntime {
   readonly #config: OpenCodeConfig;
   readonly #logger: AgentLogger;
   #instance: OpenCodeInstance | null = null;
+  // Bumped on every instance transition so availability reports can be
+  // generation-tagged: reports from a retired generation are ignored.
+  #instanceGeneration = 0;
+  // Instances Garcon itself closed; their termination callbacks must leave the
+  // availability cooldown intact instead of disarming it.
+  readonly #deliberatelyClosed = new WeakSet<OpenCodeInstance>();
+  // Sessions whose deletion failed through a dead endpoint; replayed once the
+  // next instance is installed, because native sessions persist in the
+  // provider database across respawns.
+  #pendingSessionDeletions: Array<{ sessionId: string; scope: OpenCodeRequestScope }> = [];
   #initPromise: Promise<OpenCodeInstance> | null = null;
-  #sseListenerStarted = false;
-  #sseListenerGeneration = 0;
-  #sseReadyPromise: Promise<void> | null = null;
-  #rejectSseReady: ((error: Error) => void) | null = null;
-  #sseRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  #startupAbortController: AbortController | null = null;
+  #shutdownPromise: Promise<void> | null = null;
+  #shuttingDown = false;
   #sessions = new Map<string, OpenCodeSession>();
+  #pendingSessionAborts = new WeakMap<OpenCodeSession, Promise<boolean>>();
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
-  #pendingPermissions = new Map<string, PendingPermission>();
+  readonly #decisions: OpenCodeDecisionController;
+  readonly steering: OpenCodeSteeringController;
   readonly #endpointCoordinator: OpenCodeEndpointCoordinator;
-  #modelCache: OpenCodeModelCache | null = null;
-  #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
+  readonly #globalEventListener: OpenCodeGlobalEventListener;
+  readonly #operationRoutes: OpenCodeOperationRoutes;
+  readonly #models: OpenCodeModelDiscovery;
+  readonly #idleLifecycle: OpenCodeIdleLifecycle;
   #unavailableUntil = 0;
   #unavailableReason = '';
-  #idlePurger = new IdleSessionPurger<OpenCodeSession>({
-    sessions: () => this.#sessions.entries(),
-    isRunning: (session) => session.status === 'running',
-    lastActivityAt: (session) => session.lastActivityAt,
-    purge: (sessionId, session) => {
-      this.#sessions.delete(sessionId);
-    },
-  });
+  readonly #instanceCreations: OpenCodeInstanceCreationTracker;
 
   #available: boolean | null = null;
   readonly #options: NormalizedOpenCodeRuntimeOptions;
 
   constructor(options: OpenCodeRuntimeOptions = {}) {
-    super();
     this.#config = options.config ?? { isTestEnvironment: () => false };
     this.#logger = options.logger ?? SILENT_LOGGER;
+    this.#operationRoutes = new OpenCodeOperationRoutes(this.#logger);
     this.#options = normalizeOptions(options);
+    this.#decisions = new OpenCodeDecisionController({
+      logger: this.#logger,
+      publish: (agentSessionId, operation, event) => this.#publish(
+        agentSessionId,
+        operation,
+        event,
+      ),
+      getClient: () => this.getClient(),
+      runScopedRequest: (label, scope, operation) => (
+        this.#runScopedSessionRequest(label, scope, operation)
+      ),
+      getSession: (agentSessionId) => this.#sessions.get(agentSessionId),
+      failTurn: (agentSessionId, session, message) => (
+        this.#failTurnForProviderError(agentSessionId, session, message)
+      ),
+    });
+    this.#instanceCreations = new OpenCodeInstanceCreationTracker(() => this.#shuttingDown);
+    this.#models = new OpenCodeModelDiscovery({
+      cacheTtlMs: this.#options.modelCacheTtlMs,
+      discoveryTimeoutMs: this.#options.modelDiscoveryTimeoutMs,
+      logger: this.#logger,
+      withClientLease: (operation) => this.withClientLease(operation),
+      isAvailable: () => this.isAvailable(),
+      isTemporarilyUnavailable: () => this.isTemporarilyUnavailable(),
+      instanceGeneration: () => this.#instanceGeneration,
+      markAvailable: (sourceGeneration) => this.#markAvailable(sourceGeneration),
+      markTemporarilyUnavailable: (reason, sourceGeneration) => (
+        this.#markTemporarilyUnavailable(reason, sourceGeneration)
+      ),
+      now: () => this.#now(),
+    });
+    this.#idleLifecycle = new OpenCodeIdleLifecycle({
+      logger: this.#logger,
+      sessions: () => this.#sessions.entries(),
+      purgeSession: (sessionId) => { this.#sessions.delete(sessionId); },
+      hasInstance: () => this.#instance !== null,
+      hasStartup: () => this.#initPromise !== null,
+      endpointIdle: () => this.#endpointCoordinator.idle,
+      routesIdle: () => this.#operationRoutes.idle,
+      decisionsIdle: () => this.#decisions.idle,
+      hasPendingTurnWaiters: () => this.#pendingTurnWaiters.size > 0,
+      isShuttingDown: () => this.#shuttingDown,
+      runTransition: (operation) => this.#endpointCoordinator.runTransition(operation),
+      invalidateModels: () => this.#models.invalidate(),
+      closeInstance: () => this.#closeInstance(),
+      now: () => this.#now(),
+      retirementDelayMs: options.idleRetirementDelayMs,
+      retirementCheckIntervalMs: options.idleRetirementCheckIntervalMs,
+    });
     this.#endpointCoordinator = new OpenCodeEndpointCoordinator({
       assertAvailable: () => this.#assertCanUseOpenCode(),
       ensureUnlocked: () => this.#ensureOpenCodeServerUnlocked(),
-      closeInstance: () => this.#closeInstance(),
-      hasRunningSessions: () => this.#hasRunningSessions(),
       logger: this.#logger,
+      onActivity: () => this.#idleLifecycle.recordActivity(),
+    });
+    this.#globalEventListener = new OpenCodeGlobalEventListener({
+      requestTimeoutMs: this.#options.requestTimeoutMs,
+      heartbeatTimeoutMs: this.#options.sseHeartbeatTimeoutMs,
+      retryDelayMs: this.#options.sseRetryDelayMs,
+      logger: this.#logger,
+      getClient: () => this.getClient(),
+      isShuttingDown: () => this.#shuttingDown,
+      isTemporarilyUnavailable: () => this.isTemporarilyUnavailable(),
+      getUnavailableRetryAfterMs: () => this.getUnavailableRetryAfterMs(),
+      instanceGeneration: () => this.#instanceGeneration,
+      markTemporarilyUnavailable: (reason, sourceGeneration) => (
+        this.#markTemporarilyUnavailable(reason, sourceGeneration)
+      ),
+      failRunningTurns: (error) => this.#failRunningTurnsForListenerError(error),
+      closeUnavailableInstanceIfIdle: () => this.#idleLifecycle.closeInstanceIfIdle(),
+      confirmEventDelivery: this.#options.requiresExecutable
+        ? (input) => this.#confirmGlobalEventDelivery(input)
+        : async () => undefined,
+      handleEvent: (client, event) => this.#handleGlobalSSEEvent(client, event),
+    });
+    this.steering = new OpenCodeSteeringController({
+      requestTimeoutMs: this.#options.requestTimeoutMs,
+      getSession: (agentSessionId) => this.#sessions.get(agentSessionId),
+      getClient: () => this.getClient(),
+      runScopedRequest: (label, scope, operation) => (
+        this.#runScopedSessionRequest(label, scope, operation)
+      ),
+      releaseDeferredTerminal: (agentSessionId, session) => (
+        this.#releaseDeferredTerminal(agentSessionId, session)
+      ),
+      bindOperationPart: (turn, partId) => this.#operationRoutes.bindPart(turn, partId),
+      unbindOperationPart: (turn, partId) => this.#operationRoutes.unbindPart(turn, partId),
     });
   }
 
   // Shuts down the spawned opencode server process (if any).
   // Called during garcon graceful shutdown to prevent orphaned processes.
-  shutdown(): void {
-    this.#idlePurger.stop();
+  shutdown(): Promise<void> {
+    if (this.#shutdownPromise) return this.#shutdownPromise;
+    this.#shuttingDown = true;
+    this.#idleLifecycle.stop();
     for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
       this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode runtime shutting down'));
     }
     this.#sessions.clear();
-    this.#pendingPermissions.clear();
-    this.#closeInstance();
+    this.#decisions.clear();
+    const startup = this.#initPromise;
+    this.#startupAbortController?.abort(new Error('OpenCode runtime shutting down'));
+    const shutdown = (async () => {
+      // The response carries the only child ID available to clean up a fork after disconnect.
+      await this.#endpointCoordinator.waitForProtectedNativeWork(this.#options.shutdownNativeForkGraceMs, () => this.#pendingSessionDeletions.length);
+      this.#closeInstance();
+      await startup?.catch(() => undefined);
+      await this.#instanceCreations.waitForCleanup(this.#options.shutdownStartupGraceMs);
+      this.#closeInstance();
+    })();
+    this.#shutdownPromise = shutdown;
+    return shutdown;
   }
 
   // Returns whether an OpenCode instance can be created without starting one.
@@ -544,83 +372,223 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   #assertCanUseOpenCode(): void {
+    if (this.#shuttingDown) throw new Error('OpenCode runtime is shutting down');
     if (!this.isAvailable()) throw new Error('opencode is not installed');
     if (this.isTemporarilyUnavailable()) throw this.#temporaryUnavailableError();
   }
 
-  #markAvailable(): void {
+  #markAvailable(sourceGeneration?: number): void {
+    if (sourceGeneration !== undefined && sourceGeneration !== this.#instanceGeneration) return;
     this.#unavailableUntil = 0;
     this.#unavailableReason = '';
   }
 
-  #markTemporarilyUnavailable(reason: string): boolean {
+  #markTemporarilyUnavailable(reason: string, sourceGeneration?: number): boolean {
+    // A report about a retired generation must not poison the current one: a
+    // late timeout from a dead instance never arms a cooldown the replacement
+    // has to wait out.
+    if (sourceGeneration !== undefined && sourceGeneration !== this.#instanceGeneration) {
+      return false;
+    }
     const now = this.#now();
     const wasAvailable = this.#unavailableRemainingMs() === 0;
     const reasonChanged = this.#unavailableReason !== reason;
     this.#unavailableReason = reason;
     this.#unavailableUntil = now + this.#options.unavailableRetryMs;
-    this.#closeInstanceIfIdle();
+    this.#idleLifecycle.closeInstanceIfIdle();
     return wasAvailable || reasonChanged;
   }
 
-  #hasRunningSessions(): boolean {
-    return Array.from(this.#sessions.values()).some((session) => session.status === 'running');
-  }
-
-  #closeInstanceIfIdle(): void {
-    if (!this.#hasRunningSessions() && this.#endpointCoordinator.idle) {
-      this.#closeInstance();
-    }
-  }
-
   #closeInstance(): void {
-    this.#rejectSseReady?.(new Error('OpenCode event listener closed before it was ready'));
-    this.#rejectSseReady = null;
-    this.#sseReadyPromise = null;
-    this.#sseListenerGeneration += 1;
-    if (this.#sseRetryTimer) {
-      clearTimeout(this.#sseRetryTimer);
-      this.#sseRetryTimer = null;
-    }
+    // Null before killing the process so the resulting termination callback finds a
+    // stale identity and is ignored.
     const instance = this.#instance;
+    this.#instance = null;
+    this.#instanceGeneration += 1;
+    this.#globalEventListener.close();
+    this.#operationRoutes.clear();
+    // Closing the provider process definitively quiesces every settled session.
+    for (const session of this.#sessions.values()) {
+      if (session.status !== 'running') session.providerWorkRequiresQuiescence = false;
+    }
     if (instance) {
+      // Killing a still-live process must preserve the availability cooldown
+      // that prompted the close; an already-exited process keeps death
+      // semantics so the termination handler disarms the cooldown.
+      if (instance.server?.exitObserved && !instance.server.exitObserved()) {
+        this.#deliberatelyClosed.add(instance);
+      }
+      closeOpenCodeInstance(instance);
+    }
+  }
+
+  // Subscribes to the instance's process-lifetime termination signal. The instance
+  // object itself is the generation token: a late callback from a deliberately closed
+  // or replaced instance finds a different #instance and is ignored.
+  // Fences admissions that captured an instance which was retired mid-flight: after every
+  // await that can cross a termination transition, the captured identity must still be
+  // current before sessions are registered, activations are published, or prompts are
+  // sent through the captured client.
+  #assertInstanceCurrent(instance: OpenCodeInstance): void {
+    if (this.#instance !== instance) {
+      throw new Error('OpenCode server process was retired while the request was in flight');
+    }
+  }
+
+  #watchServerTermination(instance: OpenCodeInstance): void {
+    const termination = instance.server?.termination;
+    if (!termination) return;
+    void termination.then((outcome) => this.#handleServerTermination(instance, outcome));
+  }
+
+  #handleServerTermination(
+    instance: OpenCodeInstance,
+    outcome: OpenCodeServerTermination,
+  ): void {
+    void this.#endpointCoordinator.runTransition(async () => {
+      if (this.#shuttingDown) return;
+      if (this.#deliberatelyClosed.has(instance)) {
+        // Garcon closed this instance on purpose, most often to honor an
+        // availability cooldown: the resulting exit must not disarm it.
+        return;
+      }
+      if (this.#instance !== instance) {
+        // The instance was already retired, but its death still invalidates any cooldown
+        // armed by failures in its death window while no replacement is installed. A
+        // failed replacement startup re-arms the cooldown on its own ensure path.
+        if (this.#instance === null) this.#markAvailable();
+        return;
+      }
+      const detail = outcome.kind === 'exit'
+        ? `code ${outcome.code ?? outcome.signal ?? 'unknown'}`
+        : errorMessage(outcome.error);
+      this.#logger.warn('OpenCode server process terminated; retiring the instance', { detail });
+      // Death is authoritative, unlike an SSE failure: retire the dead endpoint
+      // immediately regardless of in-flight admissions or leases, fail active
+      // turns, and leave the cooldown disarmed so the next demand respawns at
+      // once. A failed replacement startup still arms the cooldown through the
+      // ensure path.
+      this.#failRunningTurnsForServerDeath(
+        new Error(`OpenCode server process terminated unexpectedly (${detail})`),
+      );
+      this.#closeInstance();
+      this.#markAvailable();
+    }).catch((error) => {
+      this.#logger.error('OpenCode server termination handling failed', {
+        error: errorMessage(error),
+      });
+    });
+  }
+
+  // Death leaves no provider work behind, unlike an SSE failure: sessions stop
+  // without quiescence so the idle purger can reclaim them, while steering
+  // cleanup staging survives for the next turn.
+  #failRunningTurnsForServerDeath(failure: Error): void {
+    for (const [agentSessionId, session] of this.#sessions) {
+      if (session.status !== 'running') continue;
+      this.steering.stagePendingCleanup(session);
+      session.providerWorkRequiresQuiescence = false;
+      session.status = 'completed';
+      session.lastActivityAt = Date.now();
+      this.#operationRoutes.cancelRequest(session.turn, failure);
+      this.#decisions.cancelForSession(agentSessionId, 'cancelled');
+      this.#rejectTurnWaiter(agentSessionId, failure);
+      this.#publishFailed(agentSessionId, session.turn.operation, failure.message);
+    }
+    for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
+      this.#rejectTurnWaiter(agentSessionId, failure);
+    }
+  }
+
+  // Deletes through the current instance when possible and retains the
+  // deletion otherwise; cleanup must never target a retired client.
+  #deleteSessionBestEffort(
+    sessionId: string,
+    scope: OpenCodeRequestScope,
+    cleanup: { client?: any; generation?: number } = {},
+  ): Promise<void> {
+    return this.#endpointCoordinator.runProtectedNativeCleanup(async () => {
+      const currentClient = this.getClientIfInitialized();
+      const originalIsCurrent = cleanup.client === currentClient
+        && (cleanup.generation === undefined || cleanup.generation === this.#instanceGeneration);
+      const deleteThrough = originalIsCurrent ? cleanup.client : currentClient;
+      if (!deleteThrough) {
+        this.#retainSessionDeletion(sessionId, scope);
+        return;
+      }
       try {
-        if (typeof instance.server?.close === 'function') {
-          instance.server.close();
-        } else if (typeof instance.close === 'function') {
-          instance.close();
+        const result = await this.#runScopedSessionRequest(
+          'OpenCode cancelled session delete',
+          scope,
+          (signal, requestScope) => deleteThrough.session.delete(
+            withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
+            { signal },
+          ),
+        );
+        if (!isOpenCodeNotFoundResult(result)) {
+          throwOpenCodeResultError(result, 'OpenCode cancelled session delete failed');
         }
       } catch {
-        // Best-effort cleanup.
+        this.#retainSessionDeletion(sessionId, scope, deleteThrough);
       }
-    }
-    this.#instance = null;
-    this.#initPromise = null;
-    this.#sseListenerStarted = false;
+    });
   }
 
-  #createTurnContext(eventMetadata: RuntimeEventMetadata): OpenCodeTurnContext {
-    return {
-      eventMetadata,
-      providerMessageId: `msg_${crypto.randomUUID().replaceAll('-', '')}`,
-      providerObservedEventId: null,
-      assistantMessageIds: new Set(),
-      messageRoles: new Map(),
-      assistantPartTypes: new Map(),
-    };
+  // Retained deletions stay keyed by session id so repeated failures for one
+  // session cannot accumulate, and the queue stays bounded: a provider that
+  // never accepts deletions must not grow Garcon's memory without limit.
+  #retainSessionDeletion(sessionId: string, scope: OpenCodeRequestScope, attemptedClient: any = null): void {
+    const existing = this.#pendingSessionDeletions.findIndex((entry) => entry.sessionId === sessionId);
+    if (existing >= 0) this.#pendingSessionDeletions.splice(existing, 1);
+    if (this.#pendingSessionDeletions.length >= RETAINED_SESSION_DELETION_LIMIT) {
+      this.#logger.warn('Discarding an OpenCode retained session deletion at capacity', {
+        sessionId,
+        retained: this.#pendingSessionDeletions.length,
+      });
+      return;
+    }
+    this.#pendingSessionDeletions.push({ sessionId, scope });
+    const replacement = attemptedClient && this.getClientIfInitialized();
+    if (replacement && replacement !== attemptedClient) this.#drainPendingSessionDeletions();
+  }
+
+  // Replays retained deletions through the freshly installed instance. Each
+  // attempt is best-effort: a failed replay stays retained for the next one.
+  #drainPendingSessionDeletions(): void {
+    if (this.#pendingSessionDeletions.length === 0) return;
+    const pending = this.#pendingSessionDeletions.splice(0);
+    for (const { sessionId, scope } of pending) {
+      let attemptedClient: any;
+      void this.#endpointCoordinator.runProtectedNativeCleanup(() => (
+        this.withClientLease(async (client) => {
+          attemptedClient = client;
+          const result = await this.#runScopedSessionRequest(
+            'OpenCode retained session delete',
+            scope,
+            (signal, requestScope) => client.session.delete(
+              withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
+              { signal },
+            ),
+          );
+          if (!isOpenCodeNotFoundResult(result)) {
+            throwOpenCodeResultError(result, 'OpenCode retained session delete failed');
+          }
+        }).catch(() => {
+          this.#retainSessionDeletion(sessionId, scope, attemptedClient);
+        })
+      ));
+    }
   }
 
   #createTurnWaiter(agentSessionId: string): PendingTurnWaiter {
     if (this.#pendingTurnWaiters.has(agentSessionId)) {
       throw new Error(`Turn already in progress for session ${agentSessionId}`);
     }
-    let resolveFn!: () => void;
-    let rejectFn!: (error: Error) => void;
-    const promise = new Promise<void>((resolve, reject) => {
-      resolveFn = resolve;
-      rejectFn = reject;
+    let settle!: (failure: Error | null) => void;
+    const promise = new Promise<Error | null>((resolve) => {
+      settle = resolve;
     });
-    const waiter: PendingTurnWaiter = { promise, resolve: resolveFn, reject: rejectFn };
+    const waiter: PendingTurnWaiter = { promise, settle };
     this.#pendingTurnWaiters.set(agentSessionId, waiter);
     return waiter;
   }
@@ -629,31 +597,188 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const waiter = this.#pendingTurnWaiters.get(agentSessionId);
     if (!waiter) return;
     this.#pendingTurnWaiters.delete(agentSessionId);
-    waiter.resolve();
+    waiter.settle(null);
   }
 
   #rejectTurnWaiter(agentSessionId: string, error: unknown): void {
     const waiter = this.#pendingTurnWaiters.get(agentSessionId);
     if (!waiter) return;
     this.#pendingTurnWaiters.delete(agentSessionId);
-    waiter.reject(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
+    waiter.settle(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
+  }
+
+  #publish(
+    agentSessionId: string,
+    operation: AgentRuntimeOperation,
+    event: AgentRuntimeEvent,
+  ): void {
+    try {
+      operation.publish(event);
+    } catch (error) {
+      this.#logger.warn('OpenCode publisher rejected an event', {
+        agentSessionId,
+        eventType: event.type,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  #publishRows(
+    agentSessionId: string,
+    operation: AgentRuntimeOperation,
+    messages: Parameters<typeof runtimeRows>[0],
+  ): void {
+    if (messages.length === 0) return;
+    this.#publish(agentSessionId, operation, { type: 'rows', rows: runtimeRows(messages) });
+  }
+
+  #publishFinished(agentSessionId: string, operation: AgentRuntimeOperation): void {
+    this.#publish(agentSessionId, operation, {
+      type: 'run-ended',
+      runId: operation.runId,
+      outcome: 'finished',
+    });
+  }
+
+  #publishFailed(
+    agentSessionId: string,
+    operation: AgentRuntimeOperation,
+    message: string,
+  ): void {
+    this.#publish(agentSessionId, operation, {
+      type: 'run-ended',
+      runId: operation.runId,
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message },
+    });
   }
 
   #failRunningTurnsForListenerError(error: unknown): void {
     const failure = error instanceof Error ? error : new Error(String(error));
     for (const [agentSessionId, session] of this.#sessions) {
       if (session.status !== 'running') continue;
-      const eventMetadata = session.turn.eventMetadata;
+      this.steering.stagePendingCleanup(session);
+      session.providerWorkRequiresQuiescence = true;
       session.status = 'completed';
       session.lastActivityAt = Date.now();
-      this.#cancelPendingPermissionsForSession(agentSessionId, 'cancelled');
+      this.#operationRoutes.cancelRequest(session.turn, failure);
+      this.#decisions.cancelForSession(agentSessionId, 'cancelled');
       this.#rejectTurnWaiter(agentSessionId, failure);
-      this.emitProcessing(session.chatId, false);
-      this.emitFailed(session.chatId, failure.message, eventMetadata);
+      this.#publishFailed(agentSessionId, session.turn.operation, failure.message);
     }
     for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
       this.#rejectTurnWaiter(agentSessionId, failure);
     }
+  }
+
+  #failTurnForProviderError(
+    agentSessionId: string, session: OpenCodeSession, message: string, entryId?: string,
+  ): void {
+    this.steering.stagePendingCleanup(session);
+    session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(session.turn);
+    session.status = 'completed';
+    session.lastActivityAt = Date.now();
+    this.#decisions.cancelForSession(agentSessionId, 'cancelled');
+    this.#rejectTurnWaiter(agentSessionId, new Error(message));
+    const row = openCodeProviderFailureRow(message, entryId, session.turn);
+    this.#publishRows(agentSessionId, session.turn.operation, [row]);
+    this.#publishFailed(agentSessionId, session.turn.operation, message);
+  }
+
+  #failPromptRequest(route: OpenCodeOperationRoute, error: unknown): void {
+    const session = this.#sessions.get(route.sessionId);
+    if (
+      !this.#operationRoutes.isRegistered(route)
+      || !session
+      || session.status !== 'running'
+      || session.turn !== route.turn
+    ) {
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
+      return;
+    }
+    const providerTerminal = latestOpenCodePromptTerminal(route.turn);
+    if (providerTerminal?.outcome === 'failed') {
+      this.#failTurnForProviderError(
+        route.sessionId, session, providerTerminal.error, providerTerminal.messageId,
+      );
+    } else if (providerTerminal?.outcome === 'aborted') {
+      this.#logger.debug('OpenCode prompt failed after an aborted terminal', { error: errorMessage(error) });
+      this.#settleTurnTerminal(route.sessionId, session, providerTerminal);
+    } else {
+      const message = errorMessage(error);
+      this.#logger.error('OpenCode prompt failed', {
+        agentSessionId: route.sessionId,
+        error: message,
+      });
+      this.steering.stagePendingCleanup(session);
+      session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(route.turn);
+      session.status = 'completed';
+      session.lastActivityAt = Date.now();
+      this.#decisions.cancelForSession(route.sessionId, 'cancelled');
+      this.#rejectTurnWaiter(route.sessionId, error);
+      this.#publishFailed(route.sessionId, route.turn.operation, message);
+    }
+    const active = this.#sessions.get(route.sessionId);
+    if (active?.turn !== route.turn || active.status !== 'running') {
+      // Settled routes either observed a terminal or require quiescence before provider reuse;
+      // retaining either route blocks idle retirement indefinitely.
+      this.#operationRoutes.unregister(route);
+    }
+    if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
+  }
+
+  #settleTurnTerminal(
+    agentSessionId: string,
+    session: OpenCodeSession,
+    terminal: OpenCodeAssistantTerminal,
+  ): void {
+    if (session.status !== 'running') return;
+    if (session.aborting || session.activeSteeringDeliveries > 0) {
+      session.deferredTerminal = terminal;
+      return;
+    }
+    session.deferredTerminal = null;
+    if (session.turn.pendingSteeringMessageIds.size > 0) {
+      this.#failTurnForProviderError(
+        agentSessionId,
+        session,
+        'OpenCode stopped before processing accepted steering input',
+        terminal.messageId,
+      );
+      return;
+    }
+    if (terminal.outcome === 'aborted') {
+      this.#logger.warn('OpenCode interrupted the current turn', {
+        agentSessionId, messageId: terminal.messageId,
+      });
+      this.#failTurnForProviderError(
+        agentSessionId,
+        session,
+        OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
+        terminal.messageId,
+      );
+      return;
+    }
+    if (terminal.outcome === 'failed') {
+      this.#failTurnForProviderError(
+        agentSessionId, session, terminal.error, terminal.messageId,
+      );
+      return;
+    }
+    this.#decisions.cancelForSession(agentSessionId, 'session-complete');
+    session.status = 'completed';
+    session.lastActivityAt = Date.now();
+    this.#resolveTurnWaiter(agentSessionId);
+    this.#publishFinished(agentSessionId, session.turn.operation);
+  }
+
+  #releaseDeferredTerminal(agentSessionId: string, session: OpenCodeSession): void {
+    if (session.aborting || session.activeSteeringDeliveries > 0) return;
+    const terminal = session.deferredTerminal;
+    if (!terminal) return;
+    session.deferredTerminal = null;
+    this.#settleTurnTerminal(agentSessionId, session, terminal);
+    if (session.status !== 'running') this.#operationRoutes.retireTurn(session.turn);
   }
 
   #clearTurnWaiter(agentSessionId: string): void {
@@ -670,6 +795,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#assertCanUseOpenCode();
 
     let startup: Promise<OpenCodeInstance> | null = null;
+    const startupAbortController = new AbortController();
+    this.#startupAbortController = startupAbortController;
     startup = (async () => {
       try {
         if (this.#options.requiresExecutable
@@ -678,19 +805,32 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           throw new Error('opencode executable not found in $PATH');
         }
 
-        const port = 10000 + Math.floor(Math.random() * 50000);
         const result: OpenCodeInstance = await withAbortableTimeout(
-          (signal) => this.#options.createInstance({ port, signal }),
+          (signal) => this.#instanceCreations.track(
+            () => this.#options.createInstance({ signal }),
+            signal,
+          ),
           this.#options.startupTimeoutMs,
           'OpenCode startup',
+          startupAbortController.signal,
         );
 
+        if (this.#shuttingDown || startupAbortController.signal.aborted) {
+          closeOpenCodeInstance(result);
+          throw startupAbortController.signal.reason ?? new Error('OpenCode runtime is shutting down');
+        }
+
         if (!result?.client?.permission?.reply) {
+          closeOpenCodeInstance(result);
           throw new Error('OpenCode v2 client missing permission.reply; aborting startup');
         }
 
         this.#instance = result;
+        this.#instanceGeneration += 1;
+        this.#idleLifecycle.recordActivity();
+        this.#watchServerTermination(result);
         this.#markAvailable();
+        this.#drainPendingSessionDeletions();
         return result;
       } catch (err) {
         const reason = errorMessage(err);
@@ -700,6 +840,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         throw err;
       } finally {
         if (this.#initPromise === startup) this.#initPromise = null;
+        if (this.#startupAbortController === startupAbortController) {
+          this.#startupAbortController = null;
+        }
       }
     })();
 
@@ -707,357 +850,295 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return this.#initPromise;
   }
 
-  #convertOpenCodeEventToChatMessages(
-    event: SSEEvent,
+  // Fails an admitted turn whose delivery raised: either the execution
+  // admission closed (the caller aborted) or the provider work failed.
+  #failAdmittedTurn(
+    agentSessionId: string,
     turn: OpenCodeTurnContext,
-  ): ChatMessage[] | undefined {
-    const chatMessages: ChatMessage[] = [];
-    const now = new Date().toISOString();
-    const props = event.properties || {};
-    const roleFromEvent = (
-      props.info?.role
-      || props.part?.role
-      || props.part?.snapshot?.role
-      || props.message?.role
-      || null
-    );
-
-    const { assistantPartTypes, messageRoles } = turn;
-
-    switch (event.type) {
-      case 'message.updated': {
-        const info = props.info || {};
-        const messageId = info.id;
-        if (!messageId) {
-          this.#logger.warn('OpenCode event is missing a message ID', { eventType: event.type });
-          return;
-        }
-        if (info.finish !== 'stop') {
-          if (info.role && info.role !== 'user') {
-            messageRoles.set(messageId, info.role);
-          }
-        } else {
-          messageRoles.delete(messageId);
-        }
-        break;
+    route: OpenCodeOperationRoute,
+    request: { readonly executionAdmission?: OpenCodeExecutionAdmission },
+    error: Error & { message: string },
+    options: { readonly logLabel: string; readonly stageSteeringCleanup?: boolean },
+  ): unknown {
+    if (turn.providerMessageId === null) this.#operationRoutes.unregister(route);
+    const sess = this.#sessions.get(agentSessionId);
+    if (request.executionAdmission?.signal.aborted) {
+      if (sess?.turn === turn) {
+        sess.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
+        sess.status = 'completed';
+        sess.lastActivityAt = Date.now();
       }
-
-      case 'message.part.updated': {
-        const part = props.part || {};
-        if (!part.id) {
-          this.#logger.warn('OpenCode event is missing a part ID', { eventType: event.type });
-          return;
-        }
-
-        const messageId = part.messageID;
-        if (!messageId) {
-          this.#logger.warn('OpenCode event is missing a message ID', { eventType: event.type });
-          return;
-        }
-
-        const messageRole = roleFromEvent || messageRoles.get(messageId) || null;
-        if (!messageRole) {
-          return;
-        }
-
-        if (part.type === 'tool') {
-          if (part.state?.status === 'completed') {
-            chatMessages.push(convertOpenCodeToolUse(now, part));
-            chatMessages.push(new ToolResultMessage(now, part.callID || '', normalizeToolResultContent(part.state.output), false));
-          } else if (part.state?.status === 'error') {
-            chatMessages.push(new ErrorMessage(now, 'Tool Error: ' + (part.state.error || 'Unknown')));
-          }
-          break;
-        }
-
-        if (part.type === 'text' || part.type === 'reasoning') {
-          assistantPartTypes.set(part.id, part.type);
-        }
-
-        if (part.text) {
-          const partType = assistantPartTypes.get(part.id);
-          if (!partType) {
-            this.#logger.warn('OpenCode final text part was not observed earlier', {
-              eventType: event.type,
-            });
-            return;
-          }
-          assistantPartTypes.delete(part.id);
-
-          if (partType === 'text') {
-            chatMessages.push(new AssistantMessage(now, part.text));
-          } else {
-            chatMessages.push(new ThinkingMessage(now, part.text));
-          }
-        }
-        break;
-      }
-
-      case 'message.part.delta':
-        break;
-
-      default:
-        break;
+      this.#clearTurnWaiter(agentSessionId);
+      return error;
     }
-
-    return chatMessages;
+    this.#logger.error(options.logLabel, { agentSessionId, error: error.message });
+    if (!sess || sess.status !== 'running' || sess.turn !== turn) return error;
+    if (options.stageSteeringCleanup) this.steering.stagePendingCleanup(sess);
+    sess.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
+    sess.status = 'completed';
+    sess.lastActivityAt = Date.now();
+    this.#clearTurnWaiter(agentSessionId);
+    this.#publishFailed(agentSessionId, turn.operation, error.message);
+    return error;
   }
 
-  #dispatchOpenCodeEvent(event: SSEEvent, session: OpenCodeSession): void {
-    const chatMessages = this.#convertOpenCodeEventToChatMessages(event, session.turn);
-    if (!chatMessages || !chatMessages.length) {
-      return;
-    }
-
-    this.emitMessages(session.chatId, chatMessages, session.turn.eventMetadata);
-  }
-
-  #emitPermissionMessages(
-    chatId: string,
-    messages: ChatMessage[],
-    eventMetadata?: RuntimeEventMetadata,
+  // Marks a session as the owner of a freshly admitted turn, inserting one
+  // for a session the runtime has not seen (fork materialization, compaction).
+  #activateTurn(
+    agentSessionId: string,
+    session: OpenCodeSession | undefined,
+    input: {
+      chatId: string;
+      model: string;
+      thinkingVariant?: string;
+      permissionMode: PermissionMode;
+      directory: string | undefined;
+      turn: OpenCodeTurnContext;
+    },
   ): void {
-    if (!messages.length) return;
-    this.emitMessages(chatId, messages, eventMetadata);
-  }
-
-  #cancelPendingPermissionsForSession(agentSessionId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
-    for (const [permissionRequestId, pending] of this.#pendingPermissions.entries()) {
-      if (pending.agentSessionId !== agentSessionId) continue;
-      this.#pendingPermissions.delete(permissionRequestId);
-      this.#emitPermissionMessages(
-        pending.chatId,
-        [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason)],
-        pending.eventMetadata,
-      );
-    }
-  }
-
-  #extractPermissionRequestFromEvent(event: SSEEvent) {
-    return extractPermissionRequest(event);
-  }
-
-  #acceptSequencedTurnEvent(session: OpenCodeSession, event: SSEEvent): boolean {
-    if (
-      event.type !== 'message.updated'
-      && event.type !== 'message.part.updated'
-      && event.type !== 'message.part.delta'
-      && event.type !== 'permission.asked'
-      && event.type !== 'session.status'
-    ) {
-      return true;
-    }
-    if (typeof event.id !== 'string' || !event.id) {
-      this.#logger.warn('Ignoring OpenCode event without an event ID', { eventType: event.type });
-      return false;
-    }
-    if (session.lastEventId && event.id <= session.lastEventId) {
-      this.#logger.debug('Ignoring replayed or out-of-order OpenCode event', {
-        eventType: event.type,
-        eventId: event.id,
-      });
-      return false;
-    }
-    session.lastEventId = event.id;
-    return true;
-  }
-
-  #eventBelongsToTurn(session: OpenCodeSession, event: SSEEvent): boolean {
-    const turn = session.turn;
-    if (event.type === 'message.updated') {
-      const info = event.properties?.info;
-      const messageId = typeof info?.id === 'string' ? info.id : '';
-      if (info?.role === 'user') {
-        if (messageId !== turn.providerMessageId) return false;
-        turn.providerObservedEventId = event.id ?? null;
-        return false;
-      }
-      if (info?.role !== 'assistant' || info.parentID !== turn.providerMessageId || !messageId) {
-        return false;
-      }
-      turn.providerObservedEventId = event.id ?? null;
-      turn.assistantMessageIds.add(messageId);
-      return true;
-    }
-    if (event.type === 'message.part.updated' || event.type === 'message.part.delta') {
-      const messageId = event.properties?.part?.messageID;
-      return typeof messageId === 'string' && turn.assistantMessageIds.has(messageId);
-    }
-    return true;
-  }
-
-  async #startGlobalSSEListener(): Promise<void> {
-    if (this.#sseListenerStarted) {
-      if (this.#sseReadyPromise) await this.#sseReadyPromise;
+    if (session) {
+      activateOpenCodeSessionTurn(session, input);
       return;
     }
-    this.#sseListenerStarted = true;
-    const generation = ++this.#sseListenerGeneration;
-    let readySettled = false;
-    let resolveReady!: () => void;
-    let rejectReady!: (error: Error) => void;
-    const readyPromise = new Promise<void>((resolve, reject) => {
-      resolveReady = resolve;
-      rejectReady = reject;
+    this.#sessions.set(agentSessionId, {
+      status: 'running',
+      chatId: input.chatId,
+      model: input.model,
+      thinkingVariant: input.thinkingVariant,
+      permissionMode: input.permissionMode,
+      directory: input.directory,
+      startedAt: new Date().toISOString(),
+      lastActivityAt: Date.now(),
+      providerWorkRequiresQuiescence: false,
+      activeSteeringDeliveries: 0,
+      deferredTerminal: null,
+      pendingSteeringRevertMessageId: null,
+      turn: input.turn,
     });
-    this.#sseReadyPromise = readyPromise;
-    this.#rejectSseReady = (error) => {
-      if (readySettled) return;
-      readySettled = true;
-      rejectReady(error);
+  }
+
+  #dispatchOpenCodeEvent(event: SSEEvent, route: OpenCodeOperationRoute): void {
+    const compactionTrigger = compactionEventTrigger(event, route.turn);
+    if (compactionTrigger) {
+      this.#dispatchCompactionBoundary(event, route, compactionTrigger);
+      return;
+    }
+    const chatMessages = convertOpenCodeEventToChatMessages(event, route.turn, this.#logger);
+    if (!chatMessages?.length) return;
+
+    this.#publishRows(route.sessionId, route.turn.operation, chatMessages);
+  }
+
+  #dispatchCompactionBoundary(
+    event: SSEEvent,
+    route: OpenCodeOperationRoute,
+    trigger: CompactionTrigger,
+  ): void {
+    if (trigger === 'manual' && route.turn.manualCompactionBoundaryPublished) return;
+    const boundary = compactionBoundaryRow(event, trigger);
+    if (!boundary) return;
+    if (trigger === 'manual') route.turn.manualCompactionBoundaryPublished = true;
+    this.#publishRows(route.sessionId, route.turn.operation, [
+      attachNativeMessageSource(boundary.row, { entryId: boundary.summaryMessageId }),
+    ]);
+  }
+
+  #dispatchPromptResponse(
+    result: unknown,
+    route: OpenCodeOperationRoute,
+  ): OpenCodeAssistantTerminal {
+    const response = isRecord(result) && isRecord(result.data) ? result.data : null;
+    const info = response && isRecord(response.info) ? response.info : null;
+    if (info?.role !== 'assistant' || typeof info.id !== 'string' || !info.id) {
+      throw new Error('OpenCode prompt response is missing its assistant message');
+    }
+
+    const messageEvent: SSEEvent = {
+      type: 'message.updated',
+      properties: { sessionID: route.sessionId, info },
     };
+    const responseParentId = typeof info.parentID === 'string' && info.parentID
+      ? info.parentID
+      : null;
+    if (!this.#operationRoutes.activateFromResponse(route, responseParentId ?? info.id)) {
+      throw new Error('OpenCode operation route retired before prompt completion');
+    }
+    if (responseParentId) route.turn.providerContinuationMessageIds.add(responseParentId);
+    this.#operationRoutes.observe(route, messageEvent);
+    const isCompaction = isOpenCodeCompactionAssistant(info);
+    if (!isCompaction) {
+      route.turn.assistantMessageIds.add(info.id);
+      this.#dispatchOpenCodeEvent(messageEvent, route);
+    }
 
-    const runListener = async () => {
-      try {
-        const client = await this.getClient();
-        const result: any = await this.#runRequest<any>(
-          'OpenCode event subscribe',
-          (signal) => client.event.subscribe(undefined, { signal }),
-        );
-        if (generation !== this.#sseListenerGeneration) {
-          throw new Error('OpenCode event listener was superseded during startup');
+    const parts = response && Array.isArray(response.parts) ? response.parts : [];
+    for (const part of isCompaction ? [] : parts) {
+      if (!isRecord(part)) continue;
+      const partEvent: SSEEvent = {
+        type: 'message.part.updated',
+        properties: { sessionID: route.sessionId, part },
+      };
+      this.#operationRoutes.observe(route, partEvent);
+      this.#dispatchOpenCodeEvent(partEvent, route);
+    }
+
+    return openCodeAssistantTerminal(messageEvent)
+      ?? { outcome: 'finished', messageId: info.id };
+  }
+
+  async #completePromptRequest(
+    client: any,
+    route: OpenCodeOperationRoute,
+    scope: OpenCodeRequestScope,
+    request: Promise<unknown>,
+  ): Promise<void> {
+    let sourceRetired = false;
+    try {
+      const result = await request;
+      await this.#awaitGlobalEventBarrier(
+        client,
+        scope.directory,
+        route.requestAbortController.signal,
+      );
+      sourceRetired = true;
+      route.requestAbortController.signal.throwIfAborted();
+      throwOpenCodeResultError(result, 'OpenCode prompt failed');
+      const terminal = this.#dispatchPromptResponse(result, route);
+      const session = this.#sessions.get(route.sessionId);
+      if (session?.turn !== route.turn) return;
+      const observedTerminal = route.turn.assistantTerminals.get(terminal.messageId);
+      this.#settleTurnTerminal(route.sessionId, session, observedTerminal ?? terminal);
+    } catch (error) {
+      this.#failPromptRequest(route, error);
+    } finally {
+      if (sourceRetired) {
+        const session = this.#sessions.get(route.sessionId);
+        if (session?.turn === route.turn) {
+          route.turn.providerPromptRequestCompleted = true;
+          session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(route.turn);
         }
-        readySettled = true;
-        resolveReady();
-        if (this.#sseReadyPromise === readyPromise) {
-          this.#sseReadyPromise = null;
-          this.#rejectSseReady = null;
-        }
-
-        for await (const event of result.stream) {
-          if (generation !== this.#sseListenerGeneration) return;
-          const sessionId = extractSessionId(event);
-          if (!sessionId) {
-            if (event.type !== 'server.heartbeat') {
-              this.#logger.debug('OpenCode SSE event has no session ID', { eventType: event.type });
-            }
-            continue;
-          }
-
-          const session = this.#sessions.get(sessionId);
-          if (!session || session.status === 'aborted') {
-            this.#logger.debug('OpenCode SSE event targets an unknown or aborted session', {
-              eventType: event.type,
-              sessionId,
-              knownSessionIds: [...this.#sessions.keys()],
-            });
-            continue;
-          }
-
-          if (!this.#acceptSequencedTurnEvent(session, event)) continue;
-
-          const chatId = session.chatId;
-          if (!chatId) {
-            this.#logger.debug('OpenCode SSE event arrived before chat assignment', {
-              eventType: event.type,
-              sessionId,
-            });
-            continue;
-          }
-
-          if (event.type === 'permission.asked') {
-            const toolMessageId = event.properties?.tool?.messageID;
-            if (
-              typeof toolMessageId === 'string'
-              && !session.turn.assistantMessageIds.has(toolMessageId)
-            ) {
-              continue;
-            }
-            const permission = this.#extractPermissionRequestFromEvent(event);
-            if (!permission) continue;
-            if (session.permissionMode === 'manualBypass') {
-              const client = await this.getClient();
-              const result = await this.#runScopedSessionRequest(
-                'OpenCode manual bypass permission reply',
-                { directory: session.directory },
-                (signal, requestScope) => client.permission.reply(
-                  withOpenCodeRequestScope({
-                    requestID: permission.requestId,
-                    reply: 'once',
-                  }, requestScope),
-                  { signal },
-                ),
-              );
-              throwOpenCodeResultError(result, 'OpenCode manual bypass permission reply failed');
-              continue;
-            }
-            const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
-            this.#pendingPermissions.set(permissionRequestId, {
-              originalRequestId: permission.requestId,
-              agentSessionId: sessionId,
-              chatId,
-              directory: session.directory,
-              eventMetadata: session.turn.eventMetadata,
-            });
-
-            const now = new Date().toISOString();
-            this.#emitPermissionMessages(chatId, [
-              new PermissionRequestMessage(
-                now,
-                permissionRequestId,
-                convertOpencodePermissionTool(now, permissionRequestId, permission.toolInput),
-              ),
-            ], session.turn.eventMetadata);
-
-            continue;
-          }
-
-          if (!this.#eventBelongsToTurn(session, event)) continue;
-          this.#dispatchOpenCodeEvent(event, session);
-
-          if (event.type === 'session.status') {
-            const status = event.properties?.status;
-            if (
-              status?.type === 'idle'
-              && session.status === 'running'
-              && session.turn.providerObservedEventId
-              && event.id
-              && event.id > session.turn.providerObservedEventId
-            ) {
-              const eventMetadata = session.turn.eventMetadata;
-              this.#cancelPendingPermissionsForSession(sessionId, 'session-complete');
-              session.status = 'completed';
-              session.lastActivityAt = Date.now();
-              this.#resolveTurnWaiter(sessionId);
-              this.emitProcessing(chatId, false);
-              this.emitFinished(chatId, 0, eventMetadata);
-            }
-          }
-        }
-        throw new Error('OpenCode event stream ended');
-      } catch (err: any) {
-        if (!readySettled) {
-          readySettled = true;
-          rejectReady(err instanceof Error ? err : new Error(String(err)));
-        }
-        if (generation !== this.#sseListenerGeneration) return;
-        this.#failRunningTurnsForListenerError(err);
-        const retryMs = this.isTemporarilyUnavailable()
-          ? Math.max(3000, Math.min(this.getUnavailableRetryAfterMs(), 30_000))
-          : 3000;
-        this.#logger.error('OpenCode SSE listener failed and will reconnect', {
-          retrySeconds: Math.round(retryMs / 1000),
-          error: err.message,
-        });
-        this.#sseListenerStarted = false;
-        if (this.#sseReadyPromise === readyPromise) {
-          this.#sseReadyPromise = null;
-          this.#rejectSseReady = null;
-        }
-        this.#sseRetryTimer = setTimeout(() => {
-          this.#sseRetryTimer = null;
-          void this.#startGlobalSSEListener().catch((error) => {
-            this.#logger.error('OpenCode SSE listener restart failed', {
-              error: errorMessage(error),
-            });
-          });
-        }, retryMs);
-        this.#sseRetryTimer.unref?.();
+        this.#operationRoutes.unregister(route);
       }
-    };
+    }
+  }
 
-    void runListener();
-    await readyPromise;
+  #handleGlobalSSEEvent(client: any, event: SSEEvent): void {
+    const sessionId = extractSessionId(event);
+    if (!sessionId) {
+      if (event.type !== 'server.heartbeat') {
+        this.#logger.debug('OpenCode SSE event has no session ID', { eventType: event.type });
+      }
+      return;
+    }
+
+    // Session status has no operation identity, so it is adopted at the session
+    // scope before route resolution would drop it.
+    if (event.type === 'session.status') {
+      this.#handleSessionStatusEvent(sessionId, event);
+      return;
+    }
+
+    this.#operationRoutes.bindTaskDescendantSession(event);
+    const taskChildRoute = this.#operationRoutes.resolveTaskChild(sessionId);
+    if (
+      taskChildRoute
+      && event.type !== 'permission.asked'
+      && event.type !== 'question.asked'
+    ) {
+      this.#logger.debug('Ignoring an OpenCode task child transcript event', {
+        eventId: event.id ?? null,
+        eventType: event.type,
+        parentSessionId: taskChildRoute.sessionId,
+        childSessionId: sessionId,
+      });
+      return;
+    }
+
+    // Marked parts always pass through current-turn adoption so a foreign named ID cannot
+    // bypass collision refusal through ordinary named resolution.
+    const isCompactionPart = isOpenCodeCompactionControlPart(event)
+      || isOpenCodeCompactionContinuationPart(event)
+      || isOpenCodeManualCompactionControlPart(event);
+    const route = taskChildRoute ?? (
+      isCompactionPart
+        ? adoptOpenCodeCompactionPartRoute({
+            event,
+            logger: this.#logger,
+            operationRoutes: this.#operationRoutes,
+            session: this.#sessions.get(sessionId),
+            sessionId,
+          })
+        : this.#operationRoutes.resolve(sessionId, event)
+    );
+    if (!route) {
+      if (isCompactionPart) return;
+      const part = event.properties?.part;
+      const info = event.properties?.info;
+      const tool = event.properties?.tool;
+      const partMessageId = typeof part?.messageID === 'string' ? part.messageID : null;
+      const eventMessageId = typeof event.properties?.messageID === 'string'
+        ? event.properties.messageID
+        : null;
+      const details = {
+        eventId: event.id ?? null,
+        eventType: event.type,
+        sessionId,
+        partId: typeof part?.id === 'string' ? part.id : null,
+        messageId: partMessageId ?? eventMessageId,
+        parentId: typeof info?.parentID === 'string' ? info.parentID : null,
+        infoId: typeof info?.id === 'string' ? info.id : null,
+        toolMessageId: typeof tool?.messageID === 'string' ? tool.messageID : null,
+      };
+      if (shouldWarnForUnroutedOpenCodeEvent(event.type, this.#sessions.has(sessionId))) {
+        this.#logger.warn('Ignoring an OpenCode event without an operation identity', details);
+      } else {
+        this.#logger.debug('Ignoring an OpenCode event without an operation identity', details);
+      }
+      return;
+    }
+    if (!acceptUniqueOpenCodeTurnEvent(route.turn, event, this.#logger)) return;
+
+    const source: OpenCodeOperationEventSource = taskChildRoute
+      ? { kind: 'task-child', sessionId }
+      : { kind: 'operation', sessionId };
+    const session = this.#sessions.get(route.sessionId);
+    const isCurrentTurn = session?.turn === route.turn;
+    if (this.#decisions.handle(client, event, source, route)) return;
+    if (isCurrentTurn) this.steering.observeAcknowledgement(session, event);
+    const belongs = openCodeEventBelongsToTurn(route.turn, event);
+    this.#operationRoutes.observe(route, event);
+    if (belongs) {
+      this.#operationRoutes.bindTaskChildSession(route, event);
+      this.#dispatchOpenCodeEvent(event, route);
+    }
+    const terminal = belongs ? openCodeAssistantTerminal(event) : null;
+    if (terminal) {
+      route.turn.assistantTerminals.set(terminal.messageId, terminal);
+      // A compaction turn has no prompt HTTP completion to drive settlement;
+      // the summary assistant's terminal settles it directly.
+      if (route.turn.compaction) {
+        const terminalSession = this.#sessions.get(route.sessionId);
+        if (terminalSession?.turn === route.turn) {
+          this.#settleTurnTerminal(route.sessionId, terminalSession, terminal);
+        }
+      }
+    }
+  }
+
+  // Surfaces a provider-announced retry wait as one durable notice row per
+  // scheduled attempt, so an upstream stall is visible instead of dead air.
+  #handleSessionStatusEvent(sessionId: string, event: SSEEvent): void {
+    const notice = openCodeRetryNotice(event);
+    const session = this.#sessions.get(sessionId);
+    if (!notice || !session || session.status !== 'running') return;
+    if (session.turn.lastRetryNoticeKey === notice.key) return;
+    session.turn.lastRetryNoticeKey = notice.key;
+    this.#publish(sessionId, session.turn.operation, {
+      type: 'notice',
+      runId: session.turn.operation.runId,
+      title: notice.title,
+      content: notice.content,
+    });
   }
 
   async getClient(): Promise<any> {
@@ -1065,85 +1146,41 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const instance = await this.#ensureOpenCodeServer();
     return instance.client;
   }
-  withClientLease<T>(operation: (client: any) => Promise<T>): Promise<T> {
-    return this.#endpointCoordinator.withClientLease(operation);
+  withClientLease<T>(operation: (client: any) => Promise<T>, admissionSignal?: AbortSignal): Promise<T> {
+    return this.#endpointCoordinator.withClientLease(operation, admissionSignal);
   }
-  getTranscriptIndexEndpoint(signal: AbortSignal): Promise<string> {
-    return this.#endpointCoordinator.getTranscriptEndpoint(signal);
-  }
-  refreshTranscriptIndexEndpoint(failedBaseUrl: string, signal: AbortSignal): Promise<string> {
-    return this.#endpointCoordinator.refreshTranscriptEndpoint(failedBaseUrl, signal);
-  }
-
   getClientIfInitialized(): any | null {
     return this.#instance?.client ?? null;
   }
-
   async getModels(): Promise<OpenCodeModelOption[]> {
-    if (!this.isAvailable()) return [];
-    if (this.isTemporarilyUnavailable()) return this.#cachedModels();
-    if (this.#isModelCacheFresh()) return this.#cachedModels();
-    if (this.#modelsPromise) return this.#modelsPromise;
-
-    this.#modelsPromise = this.#loadModels().finally(() => {
-      this.#modelsPromise = null;
-    });
-    return this.#modelsPromise;
+    return this.#models.getModels();
   }
 
-  #cachedModels(): OpenCodeModelOption[] {
-    return this.#modelCache?.models ?? [];
+  #resolveThinkingVariant(
+    model: string | undefined,
+    thinkingMode: ThinkingMode | undefined,
+  ): Promise<string | undefined> {
+    return this.#models.resolveThinkingVariantForTurn(model, thinkingMode);
   }
 
-  #isModelCacheFresh(): boolean {
-    if (!this.#modelCache) return false;
-    return this.#now() - this.#modelCache.fetchedAt < this.#options.modelCacheTtlMs;
-  }
-
-  async #loadModels(): Promise<OpenCodeModelOption[]> {
-    try {
-      const models = await this.withClientLease((client) => this.#discoverModels(client));
-      this.#modelCache = {
-        models,
-        fetchedAt: this.#now(),
-      };
-      this.#markAvailable();
-      return models;
-    } catch (err) {
-      const reason = errorMessage(err);
-      if (this.#markTemporarilyUnavailable(reason)) {
-        this.#logger.warn('OpenCode model discovery is unavailable', { reason });
-      }
-      return this.#cachedModels();
-    }
-  }
-
-  async #discoverModels(client: any): Promise<OpenCodeModelOption[]> {
-    if (typeof client.config?.providers === 'function') {
-      const result = await withAbortableTimeout(
-        (signal) => client.config.providers(undefined, { signal }),
-        this.#options.modelDiscoveryTimeoutMs,
-        'OpenCode model discovery',
-      );
-      return modelsFromProviders(configuredProvidersFromResult(result));
-    }
-
-    const result = await withAbortableTimeout(
-      (signal) => client.provider.list(undefined, { signal }),
-      this.#options.modelDiscoveryTimeoutMs,
-      'OpenCode provider list',
-    );
-    return modelsFromProviders(connectedProvidersFromListResult(result));
-  }
-
-  async #runRequest<T>(label: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  async #runRequest<T>(
+    label: string,
+    operation: (signal: AbortSignal) => Promise<T>,
+    control: { signal?: AbortSignal; timeoutMs?: number | null } = {},
+  ): Promise<T> {
+    const generation = this.#instanceGeneration;
     this.#endpointCoordinator.requestStarted();
     try {
-      return await withAbortableTimeout(operation, this.#options.requestTimeoutMs, label);
+      return await withAbortableTimeout(
+        operation,
+        control.timeoutMs === undefined ? this.#options.requestTimeoutMs : control.timeoutMs,
+        label,
+        control.signal,
+      );
     } catch (err) {
       if (err instanceof OpenCodeTimeoutError) {
         const reason = errorMessage(err);
-        if (this.#markTemporarilyUnavailable(reason)) {
+        if (this.#markTemporarilyUnavailable(reason, generation)) {
           this.#logger.warn('OpenCode request timed out', { reason });
         }
       }
@@ -1157,15 +1194,123 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     label: string,
     scope: OpenCodeRequestScope,
     operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
+    control: { signal?: AbortSignal; timeoutMs?: number | null } = {},
   ): Promise<T> {
-    const result = await this.#runRequest<T>(label, (signal) => operation(signal, scope));
-    if (!scope.directory || !isOpenCodeNotFoundResult(result)) return result;
+    return this.#runRequest<T>(label, (signal) => operation(signal, scope), control);
+  }
 
-    this.#logger.warn('OpenCode request missed the scoped directory; retrying without it', {
-      label,
-      directory: scope.directory,
-    });
-    return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}));
+  async #runScopedTurnRequest<T>(
+    scope: OpenCodeRequestScope,
+    signal: AbortSignal,
+    operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
+  ): Promise<T> {
+    this.#endpointCoordinator.requestStarted();
+    try {
+      signal.throwIfAborted();
+      return await operation(signal, scope);
+    } finally {
+      this.#endpointCoordinator.requestFinished();
+    }
+  }
+
+  async #awaitGlobalEventBarrier(
+    client: any,
+    directory: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!this.#options.requiresExecutable) return;
+    await withAbortableTimeout(
+      (signal) => this.#confirmGlobalEventDelivery({
+        client,
+        directory,
+        signal,
+        waitForEvent: (matches, waitSignal) => (
+          this.#globalEventListener.waitForEvent(matches, waitSignal)
+        ),
+      }),
+      this.#options.requestTimeoutMs,
+      'OpenCode prompt event delivery',
+      signal,
+    );
+  }
+
+  async #confirmGlobalEventDelivery(input: {
+    client: any;
+    directory?: string;
+    signal: AbortSignal;
+    waitForEvent(matches: (event: SSEEvent) => boolean, signal?: AbortSignal): Promise<SSEEvent>;
+  }): Promise<void> {
+    const marker = `garcon-event-stream-readiness-${crypto.randomUUID()}`;
+    let observed = false;
+    let deliveryFailure: unknown;
+    const delivery = input.waitForEvent(
+      (event) => event.type === 'tui.toast.show'
+        && event.properties?.message === marker,
+      input.signal,
+    );
+    void delivery.then(
+      () => {
+        observed = true;
+      },
+      (error) => {
+        deliveryFailure = error;
+      },
+    );
+    const scope = { directory: input.directory };
+    // The global route registers its bus listener lazily after server.connected. An echoed
+    // transient TUI event proves that later session events cannot fall in that gap without
+    // creating or changing provider sessions.
+    // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/server/routes/instance/httpapi/handlers/global.ts#L33-L50
+    // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/server/routes/instance/httpapi/handlers/tui.ts#L79-L83
+    while (!observed) {
+      if (deliveryFailure) throw deliveryFailure;
+      const published: any = await this.#runScopedSessionRequest(
+        'OpenCode event stream delivery probe',
+        scope,
+        (signal, requestScope) => input.client.tui.showToast(withOpenCodeRequestScope({
+          message: marker,
+          variant: 'info',
+          duration: 1,
+        }, requestScope), { signal }),
+        { signal: input.signal },
+      );
+      throwOpenCodeResultError(published, 'OpenCode event stream delivery probe failed');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    await delivery;
+  }
+
+  async #quiesceRetiredProviderWork(
+    client: any,
+    agentSessionId: string,
+    session: OpenCodeSession,
+    scope: OpenCodeRequestScope,
+  ): Promise<void> {
+    if (!session.providerWorkRequiresQuiescence) return;
+    const result = await this.#runScopedSessionRequest(
+      'OpenCode retired session abort',
+      scope,
+      (signal, requestScope) => client.session.abort(
+        withOpenCodeRequestScope({ sessionID: agentSessionId }, requestScope),
+        { signal },
+      ),
+    );
+    throwOpenCodeResultError(result, 'OpenCode retired session abort failed');
+    await this.#awaitGlobalEventBarrier(client, scope.directory);
+    this.#operationRoutes.retireTurn(session.turn);
+    session.providerWorkRequiresQuiescence = false;
+  }
+
+  async #quiesceSessionBeforeTurn(
+    agentSessionId: string,
+    session: OpenCodeSession,
+  ): Promise<void> {
+    const pending = this.#pendingSessionAborts.get(session);
+    if (pending) {
+      await pending;
+      return;
+    }
+    if (session.status === 'running') await this.abort(agentSessionId);
   }
 
   async startSession(request: OpenCodeStartRequest): Promise<string> {
@@ -1180,19 +1325,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       permissionMode = 'default',
       projectPath,
       thinkingMode,
-      onAbortable,
-      clientRequestId,
-      turnId,
+      operation,
     } = request;
-    void images;
-    void thinkingMode;
-
-    await this.#ensureOpenCodeServer();
-    await this.#startGlobalSSEListener();
-
-    const client = await this.getClient();
-    assertOpenCodeExecutionOpen(request);
     const scope = createOpenCodeRequestScope(projectPath);
+
+    const instance = await this.#ensureOpenCodeServer();
+    const generation = this.#instanceGeneration;
+    await this.#globalEventListener.start(scope.directory);
+    this.#assertInstanceCurrent(instance);
+
+    const client: any = instance.client;
+    assertOpenCodeExecutionOpen(request);
     const sessionResult: any = await this.#runRequest<any>(
       'OpenCode session create',
       (signal) => client.session.create(withOpenCodeRequestScope({
@@ -1208,76 +1351,79 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       throw new Error('Failed to create OpenCode session: missing session id');
     }
 
-    const eventMetadata = openCodeEventMetadata(
-      { clientRequestId, turnId },
-      'chat-start',
-    );
-    const turn = this.#createTurnContext(eventMetadata);
+    const turn = createOpenCodeTurnContext(operation);
+    const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
     this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
       model,
+      thinkingVariant,
       permissionMode,
       directory: scope.directory,
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
-      lastEventId: null,
+      providerWorkRequiresQuiescence: false,
+      activeSteeringDeliveries: 0,
+      deferredTerminal: null,
+      pendingSteeringRevertMessageId: null,
       turn,
     });
-    this.emitSessionCreated(chatId);
+    const route = this.#operationRoutes.register(
+      agentSessionId,
+      chatId,
+      turn,
+      true,
+      permissionMode,
+      scope.directory,
+    );
     this.#logger.info('OpenCode session created and registered', { agentSessionId });
 
     try {
-      await this.#startGlobalSSEListener();
+      // Fence inside the cleanup scope: a retirement after the session was
+      // created must still attempt deleting it, because native sessions
+      // persist in the provider database across respawns.
+      this.#assertInstanceCurrent(instance);
+      await this.#globalEventListener.start(scope.directory);
+      this.#assertInstanceCurrent(instance);
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
-      markOpenCodeExecutionStarted(request);
-      this.emitProcessing(chatId, true);
+      if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+      this.#assertInstanceCurrent(instance);
+      // Activation publishes the durable session fact, so it must follow every
+      // failure whose cleanup deletes the just-created native session; a chat
+      // must never stay durably bound to a session this path removed.
+      request.onSessionActivated?.(agentSessionId);
     } catch (error) {
+      this.#operationRoutes.unregister(route);
       this.#sessions.delete(agentSessionId);
-      await this.#runScopedSessionRequest(
-        'OpenCode cancelled session delete',
-        scope,
-        (signal, requestScope) => client.session.delete(
-          withOpenCodeRequestScope({ sessionID: agentSessionId }, requestScope),
-          { signal },
-        ),
-      ).catch(() => undefined);
+      await this.#deleteSessionBestEffort(agentSessionId, scope, { client, generation });
       throw error;
     }
 
-    const promptBody = buildPromptBody(command, model, turn.providerMessageId);
+    const promptBody = buildPromptBody(
+      command,
+      model,
+      turn.providerPromptPartId,
+      images ?? [],
+      thinkingVariant,
+    );
 
-    const promptRequest = this.#runScopedSessionRequest(
-      'OpenCode prompt submit',
+    const promptRequest = this.#runScopedTurnRequest(
       scope,
-      (signal, requestScope) => client.session.promptAsync(withOpenCodeRequestScope({
+      route.requestAbortController.signal,
+      (signal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
         sessionID: agentSessionId,
         ...promptBody,
       }, requestScope), { signal }),
     );
-    onAbortable?.();
-    promptRequest.then((result) => {
-      throwOpenCodeResultError(result, 'OpenCode prompt submit failed');
-    }).catch((err: Error) => {
-      const sess = this.#sessions.get(agentSessionId);
-      if (
-        !sess
-        || sess.status !== 'running'
-        || sess.turn !== turn
-      ) return;
-      this.#logger.error('OpenCode prompt failed', { agentSessionId, error: err.message });
-      sess.status = 'completed';
-      sess.lastActivityAt = Date.now();
-      this.emitProcessing(chatId, false);
-      this.emitFailed(chatId, err.message, eventMetadata);
-    });
+    void this.#completePromptRequest(client, route, scope, promptRequest);
 
     return agentSessionId;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
     }
   }
 
@@ -1294,106 +1440,287 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       permissionMode,
       projectPath,
       thinkingMode,
-      onAbortable,
-      clientRequestId,
-      turnId,
+      operation,
     } = request;
-    void images;
-    void thinkingMode;
-
-    await this.#ensureOpenCodeServer();
-    await this.#startGlobalSSEListener();
-    assertOpenCodeExecutionOpen(request);
-
+    const pendingSession = this.#sessions.get(agentSessionId);
+    if (pendingSession) await this.#quiesceSessionBeforeTurn(agentSessionId, pendingSession);
     const session = this.#sessions.get(agentSessionId);
-    const eventMetadata = openCodeEventMetadata({ clientRequestId, turnId });
-    const turn = this.#createTurnContext(eventMetadata);
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
-    const client = await this.getClient();
-    const waiter = this.#createTurnWaiter(agentSessionId);
+
+    const instance = await this.#ensureOpenCodeServer();
+    await this.#globalEventListener.start(scope.directory);
+    this.#assertInstanceCurrent(instance);
+    assertOpenCodeExecutionOpen(request);
+
+    const turn = createOpenCodeTurnContext(operation);
+    const client: any = instance.client;
     if (session) {
-      session.status = 'running';
-      session.chatId = chatId;
-      session.permissionMode = permissionMode;
-      session.directory = scope.directory;
-      session.lastActivityAt = Date.now();
-      session.turn = turn;
-    } else {
-      this.#sessions.set(agentSessionId, {
-        status: 'running',
-        chatId,
-        model,
-        permissionMode,
-        directory: scope.directory,
-        startedAt: new Date().toISOString(),
-        lastActivityAt: Date.now(),
-        lastEventId: null,
-        turn,
-      });
+      await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+      await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
-    const promptBody = buildPromptBody(command, model, turn.providerMessageId);
+    this.#assertInstanceCurrent(instance);
+    const waiter = this.#createTurnWaiter(agentSessionId);
+    // One resolution per turn: the stored variant steering reuses must be the
+    // variant this prompt submits, even if discovery refreshes mid-admission.
+    const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
+    this.#activateTurn(agentSessionId, session, {
+      chatId,
+      model,
+      thinkingVariant,
+      permissionMode,
+      directory: scope.directory,
+      turn,
+    });
+    const route = this.#operationRoutes.register(
+      agentSessionId,
+      chatId,
+      turn,
+      false,
+      permissionMode,
+      scope.directory,
+    );
+    const promptBody = buildPromptBody(
+      command,
+      model,
+      turn.providerPromptPartId,
+      images ?? [],
+      thinkingVariant,
+    );
 
     try {
-      await this.#startGlobalSSEListener();
+      await this.#globalEventListener.start(scope.directory);
+      this.#assertInstanceCurrent(instance);
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
-      markOpenCodeExecutionStarted(request);
-      this.emitProcessing(chatId, true);
-      const promptRequest = this.#runScopedSessionRequest(
-        'OpenCode prompt submit',
+      if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+      this.#assertInstanceCurrent(instance);
+      const promptRequest = this.#runScopedTurnRequest(
         scope,
-        (signal, requestScope) => client.session.promptAsync(withOpenCodeRequestScope({
+        route.requestAbortController.signal,
+        (signal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
           sessionID: agentSessionId,
           ...promptBody,
         }, requestScope), { signal }),
       );
-      onAbortable?.();
-      const result = await promptRequest;
-      throwOpenCodeResultError(result, 'OpenCode prompt submit failed');
+      void this.#completePromptRequest(client, route, scope, promptRequest);
     } catch (err: any) {
-      const sess = this.#sessions.get(agentSessionId);
-      if (request.executionAdmission?.signal.aborted) {
-        if (sess?.turn === turn) {
-          sess.status = 'completed';
-          sess.lastActivityAt = Date.now();
-        }
-        this.#clearTurnWaiter(agentSessionId);
-        throw err;
-      }
-      this.#logger.error('OpenCode query failed', { agentSessionId, error: err.message });
-      if (!sess || sess.status !== 'running' || sess.turn !== turn) throw err;
-      sess.status = 'completed';
-      sess.lastActivityAt = Date.now();
-      this.#clearTurnWaiter(agentSessionId);
-      this.emitProcessing(chatId, false);
-      this.emitFailed(chatId, err.message, eventMetadata);
-      throw err;
+      throw this.#failAdmittedTurn(agentSessionId, turn, route, request, err, {
+        logLabel: 'OpenCode query failed',
+        stageSteeringCleanup: true,
+      });
     }
 
-    await waiter.promise;
+    const turnFailure = await waiter.promise;
+    if (turnFailure) throw turnFailure;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
     }
   }
 
-  async forkSession(
-    sourceSessionId: string,
-    options: { projectPath?: string | null } = {},
-  ): Promise<string> {
-    return this.#endpointCoordinator.forkSession(
-      sourceSessionId,
-      options.projectPath,
-      (label, scope, operation) => this.#runScopedSessionRequest(label, scope, operation),
-    );
+  // Manual compaction runs provider-native summarize as its own turn. The
+  // summarize route returns before the model runs, so the turn's route binds to
+  // the compaction user message it created and the summary assistant's terminal
+  // arrives through the global stream.
+  async compact(request: Omit<OpenCodeResumeRequest, 'command' | 'images'>): Promise<void> {
+    this.#endpointCoordinator.turnAdmissionStarted();
+    let turn: OpenCodeTurnContext | null = null;
+    try {
+      assertOpenCodeExecutionOpen(request);
+      const {
+        agentSessionId,
+        chatId,
+        model,
+        projectPath,
+        operation,
+      } = request;
+      const session = this.#sessions.get(agentSessionId);
+      if (session?.status === 'running') {
+        throw new Error('Cannot compact while an OpenCode turn is active');
+      }
+      const requestScope = createOpenCodeRequestScope(projectPath);
+      const scope = requestScope.directory ? requestScope : { directory: session?.directory };
+
+      const instance = await this.#ensureOpenCodeServer();
+      await this.#globalEventListener.start(scope.directory);
+      this.#assertInstanceCurrent(instance);
+      assertOpenCodeExecutionOpen(request);
+
+      turn = createOpenCodeTurnContext(operation, { compaction: true });
+      const client: any = instance.client;
+      if (session) {
+        await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+        await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
+      }
+      this.#assertInstanceCurrent(instance);
+      this.#activateTurn(agentSessionId, session, {
+        chatId,
+        model,
+        permissionMode: request.permissionMode,
+        directory: scope.directory,
+        turn,
+      });
+      const route = this.#operationRoutes.register(
+        agentSessionId,
+        chatId,
+        turn,
+        false,
+        request.permissionMode,
+        scope.directory,
+      );
+      const waiter = this.#createTurnWaiter(agentSessionId);
+
+      try {
+        await this.#globalEventListener.start(scope.directory);
+        this.#assertInstanceCurrent(instance);
+        const activeSession = this.#sessions.get(agentSessionId);
+        if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
+          throw new Error('OpenCode event stream ended before compaction delivery');
+        }
+        if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+        this.#assertInstanceCurrent(instance);
+        const parsedModel = parseOpenCodeModel(model);
+        const summarizeRequest = this.#runScopedTurnRequest(
+          scope,
+          route.requestAbortController.signal,
+          (signal, requestScopeInner) => client.session.summarize(
+            withOpenCodeRequestScope({
+              sessionID: agentSessionId,
+              ...(parsedModel ?? {}),
+            }, requestScopeInner),
+            { signal },
+          ),
+        );
+        const result = await summarizeRequest;
+        await this.#awaitGlobalEventBarrier(client, scope.directory, route.requestAbortController.signal);
+        throwOpenCodeResultError(result, 'OpenCode compaction failed');
+        // The control part event precedes the summarize response, so the stream
+        // adoption must have bound the compaction source by now.
+        if (turn.providerMessageId === null) {
+          throw new Error('OpenCode compaction did not create a compaction message');
+        }
+      } catch (error: any) {
+        throw this.#failAdmittedTurn(agentSessionId, turn, route, request, error, {
+          logLabel: 'OpenCode compaction failed',
+        });
+      }
+
+      const turnFailure = await waiter.promise;
+      if (turnFailure) throw turnFailure;
+    } finally {
+      // The route outlives the summarize response because the terminal arrives
+      // on the stream; retiring here follows the awaited turn settlement and
+      // keeps repeated compactions from leaking routes.
+      if (turn) this.#operationRoutes.retireTurn(turn);
+      this.#endpointCoordinator.turnAdmissionFinished();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
+    }
   }
 
-  async abort(agentSessionId: string): Promise<boolean> {
+  runProtectedNativeFork<T>(operation: () => Promise<T>): Promise<T> { return this.#endpointCoordinator.runProtectedNativeFork(operation); }
+
+  async forkSession(sourceSessionId: string, options: OpenCodeForkSessionOptions = {}): Promise<string> {
+    // OpenCode persists a manual compaction control before its summary runs, so
+    // a whole-tip fork mid-compaction would clone a pending control into the
+    // child, where the next prompt could be consumed as compaction input.
+    const source = this.#sessions.get(sourceSessionId.trim());
+    if (source?.status === 'running' && source.turn.compaction) {
+      throw new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'The OpenCode source session is compacting; fork after it settles',
+        true,
+        { nativeForkReason: 'not-settled' },
+      );
+    }
+    const scope = createOpenCodeRequestScope(options.projectPath);
+    const forkedSessionId = await this.#endpointCoordinator.forkSession(
+      sourceSessionId,
+      options,
+      (label, scope, operation, control) => this.#runScopedSessionRequest(label, scope, operation, control),
+      (client, sessionId, requestScope) => this.#deleteSessionBestEffort(sessionId, requestScope, { client }),
+    );
+    if (options.signal?.aborted) await this.#deleteSessionBestEffort(forkedSessionId, scope);
+    options.signal?.throwIfAborted();
+    // Native fork clones only messages: the forked session carries no permission
+    // ruleset, so without this the forked chat prompts for everything the source
+    // had allowed. https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/session/session.ts#L691-L701
+    const permissionMode = options.permissionMode;
+    if (permissionMode) {
+      try {
+        await this.withClientLease(async (client) => {
+          const result = await this.#runScopedSessionRequest(
+            'OpenCode fork permission update',
+            createOpenCodeRequestScope(options.projectPath),
+            (requestSignal, requestScope) => client.session.update(
+              withOpenCodeRequestScope({
+                sessionID: forkedSessionId,
+                permission: mapPermissionMode(permissionMode),
+              }, requestScope),
+              { signal: requestSignal },
+            ),
+            { signal: options.signal, timeoutMs: null },
+          );
+          throwOpenCodeResultError(result, 'Failed to apply OpenCode fork permission mode');
+        }, options.signal);
+        options.signal?.throwIfAborted();
+      } catch (error) {
+        // Never leave a forked session behind with a ruleset that does not match the
+        // chat record; the fork caller retries the whole operation. Cleanup goes
+        // through the retained-deletion path: an update that failed because the
+        // endpoint died would otherwise orphan a full transcript clone.
+        await this.#deleteSessionBestEffort(
+          forkedSessionId,
+          createOpenCodeRequestScope(options.projectPath),
+        );
+        options.signal?.throwIfAborted();
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          errorMessage(error),
+          true,
+        );
+      }
+    }
+    return forkedSessionId;
+  }
+
+  async discardSession(agentSessionId: string, projectPath?: string | null): Promise<void> {
+    await this.#deleteSessionBestEffort(agentSessionId, createOpenCodeRequestScope(projectPath));
+  }
+
+  async moveSession(agentSessionId: string, directory: string, signal: AbortSignal): Promise<void> {
+    await this.#endpointCoordinator.moveSession(
+      agentSessionId, directory, signal, (...args) => this.#runRequest(...args),
+    );
+    const session = this.#sessions.get(agentSessionId.trim());
+    if (session) relocateOpenCodeSession(session, directory.trim());
+  }
+
+  abort(agentSessionId: string): Promise<boolean> {
     const session = this.#sessions.get(agentSessionId);
-    if (!session || session.status !== 'running') return false;
+    if (!session || session.status !== 'running') return Promise.resolve(false);
+    const existing = this.#pendingSessionAborts.get(session);
+    if (existing) return existing;
+
+    const pending = this.#abortRunningSession(agentSessionId, session);
+    this.#pendingSessionAborts.set(session, pending);
+    void pending.then(
+      () => this.#pendingSessionAborts.delete(session),
+      () => this.#pendingSessionAborts.delete(session),
+    );
+    return pending;
+  }
+
+  async #abortRunningSession(
+    agentSessionId: string,
+    session: OpenCodeSession,
+  ): Promise<boolean> {
     const turn = session.turn;
+    this.steering.stagePendingCleanup(session);
+    session.providerWorkRequiresQuiescence = true;
+    session.aborting = true;
 
     try {
       const client = await this.getClient();
@@ -1406,23 +1733,33 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         ),
       );
       throwOpenCodeResultError(result, 'OpenCode session abort failed');
+      await this.#awaitGlobalEventBarrier(client, session.directory);
     } catch (error) {
+      session.aborting = false;
       this.#logger.warn('OpenCode session abort failed', {
         agentSessionId,
         error: errorMessage(error),
       });
+      this.#releaseDeferredTerminal(agentSessionId, session);
       return false;
     }
 
+    session.providerWorkRequiresQuiescence = false;
+    session.aborting = false;
     if (
       this.#sessions.get(agentSessionId) !== session
       || session.status !== 'running'
       || session.turn !== turn
     ) return false;
     session.status = 'aborted';
+    session.deferredTerminal = null;
     session.lastActivityAt = Date.now();
+    this.#operationRoutes.retireTurn(turn);
+    this.#decisions.cancelForSession(agentSessionId, 'aborted');
+    // The acknowledged stop is turn-terminal work: the terminal event settles
+    // the core run and releases queued execution.
+    this.#publishFinished(agentSessionId, turn.operation);
     this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));
-    this.#cancelPendingPermissionsForSession(agentSessionId, 'aborted');
     return true;
   }
 
@@ -1443,63 +1780,31 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       .map(([id, session]) => ({ id, status: session.status, startedAt: session.startedAt }));
   }
 
-  async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {
-    if (!permissionRequestId) return;
-    const pending = this.#pendingPermissions.get(permissionRequestId);
-    this.#pendingPermissions.delete(permissionRequestId);
-    if (!pending) {
-      this.#logger.warn('OpenCode permission response has no pending request', {
-        permissionRequestId,
-      });
-      return;
-    }
-
-    const allow = Boolean(decision?.allow);
-
-    if (pending.chatId) {
-      this.#emitPermissionMessages(
-        pending.chatId,
-        [new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, allow)],
-        pending.eventMetadata,
-      );
-    }
-
-    const reply = mapPermissionDecision(decision);
-
-    const client = await this.getClient();
-    const result = await this.#runScopedSessionRequest(
-      'OpenCode permission reply',
-      { directory: pending.directory },
-      (signal, requestScope) => client.permission.reply(
-        withOpenCodeRequestScope({
-          requestID: pending.originalRequestId,
-          reply,
-          message: allow ? undefined : 'User denied tool use',
-        }, requestScope),
-        { signal },
-      ),
-    );
-    throwOpenCodeResultError(result, 'OpenCode permission reply failed');
-  }
-
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
     const thinkingMode = normalizeThinkingMode(options.thinkingMode);
-    if (thinkingMode !== 'none') {
-      throw new AgentIntegrationError(
-        'OPERATION_UNSUPPORTED',
-        `opencode does not support explicit one-shot effort ${thinkingMode}.`,
-        false,
-        AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
-      );
-    }
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
     const scope = createOpenCodeRequestScope(projectPath || cwd);
-    return this.withClientLease(async (client) => {
+    const requestTimeoutMs = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+      ? Math.max(1, Math.round(options.timeoutMs))
+      : undefined;
+    return withSingleQueryControl(options, async (signal) => this.withClientLease(async (client) => {
+      // The lease blocks idle retirement but not authoritative death
+      // retirement: every stage after this point re-fences the generation so a
+      // dead client is never prompted through, while the created session is
+      // still cleaned up or retained for the replacement.
+      const generation = this.#instanceGeneration;
+      const assertCurrent = () => {
+        if (this.#instanceGeneration !== generation) {
+          throw new Error('OpenCode server process was retired while the request was in flight');
+        }
+      };
+
       const createResult: any = await this.#runRequest<any>(
         'OpenCode session create',
-        (signal) => client.session.create(withOpenCodeRequestScope({
+        (requestSignal) => client.session.create(withOpenCodeRequestScope({
           permission: mapPermissionMode(permissionMode),
-        }, scope), { signal }),
+        }, scope), { signal: requestSignal }),
+        { signal, timeoutMs: requestTimeoutMs },
       );
 
       throwOpenCodeResultError(createResult, 'Failed to create OpenCode session');
@@ -1510,40 +1815,36 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       }
 
       try {
+        assertCurrent();
         const parsedModel = parseOpenCodeModel(model);
         const body: Record<string, unknown> = {
           parts: [{ type: 'text', text: prompt }],
           tools: { '*': false },
         };
         if (parsedModel) body.model = parsedModel;
+        const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
+        if (thinkingVariant) body.variant = thinkingVariant;
 
         const promptResult: any = await this.#runScopedSessionRequest<any>(
           'OpenCode prompt',
           scope,
-          (signal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
+          (requestSignal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
             sessionID: sessionId,
             ...body,
-          }, requestScope), { signal }),
+          }, requestScope), { signal: requestSignal }),
+          { signal, timeoutMs: requestTimeoutMs },
         );
+        assertCurrent();
 
         throwOpenCodeResultError(promptResult, 'OpenCode one-shot prompt failed');
         return extractTextParts(promptResult.data?.parts);
       } finally {
-        await this.#runScopedSessionRequest(
-          'OpenCode session delete',
-          scope,
-          (signal, requestScope) => client.session.delete(
-            withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
-            { signal },
-          ),
-        ).then((result) => {
-          throwOpenCodeResultError(result, 'OpenCode session delete failed');
-        }).catch(() => {});
+        await this.#deleteSessionBestEffort(sessionId, scope, { client, generation });
       }
-    });
+    }));
   }
 
   startPurgeTimer(): void {
-    this.#idlePurger.start();
+    this.#idleLifecycle.start();
   }
 }

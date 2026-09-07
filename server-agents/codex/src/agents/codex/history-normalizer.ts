@@ -104,6 +104,17 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const EXEC_OUTPUT_WRAPPER = /^Chunk ID: \S+\nWall time: [\d.]+ seconds\nProcess exited with code (\d+)\n(?:Original token count: \d+\n)?Output:\n/;
+
+function normalizeExecOutput(raw: string): { content: string; isError: boolean } | null {
+  const match = EXEC_OUTPUT_WRAPPER.exec(raw);
+  if (!match) return null;
+  return {
+    content: raw.slice(match[0].length),
+    isError: match[1] !== '0',
+  };
+}
+
 function createNormalizationResult(): CodexJsonlNormalizationResult {
   return {
     canonical: [],
@@ -153,7 +164,7 @@ export function parseApplyPatch(input: string): ParsedApplyPatch {
 
 // Normalizes a single parsed JSONL entry into zero or more ChatMessage
 // objects. Returns an object describing the messages produced and whether
-// they represent canonical or fallback content for dedup purposes.
+// they represent canonical or fallback content for message-class source precedence.
 //
 // Return shape:
 //   { canonical: ChatMessage[], fallbackUser: ChatMessage[],
@@ -219,8 +230,16 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
     case 'user_message': {
       const text = asString(rawPayload.message);
       if (text?.trim()) {
+        // Pinned Codex carries client_id into its legacy user-message event:
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/protocol/src/legacy_events.rs#L77-L94
+        const clientId = asString(rawPayload.client_id)?.trim();
         result.isCanonicalUser = true;
-        result.canonical.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
+        result.canonical.push(new UserMessage(
+          ts,
+          stripResolvedFileMentionContext(text),
+          undefined,
+          clientId ? { upstreamRequestId: clientId } : undefined,
+        ));
       }
       return result;
     }
@@ -354,7 +373,14 @@ function normalizeResponseItem(
     }
 
     case 'function_call_output': {
-      result.canonical.push(new ToolResultMessage(ts, asString(rawPayload.call_id) || '', normalizeToolResultContent(rawPayload.output), false));
+      const normalized = asString(rawPayload.output);
+      const execution = normalized === undefined ? null : normalizeExecOutput(normalized);
+      result.canonical.push(new ToolResultMessage(
+        ts,
+        asString(rawPayload.call_id) || '',
+        normalizeToolResultContent(execution?.content ?? rawPayload.output),
+        execution?.isError ?? false,
+      ));
       return result;
     }
 

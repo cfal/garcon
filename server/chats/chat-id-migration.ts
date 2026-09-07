@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 import { legacyChatIdToCanonical } from '../../common/chat-id.js';
+import { isRecord } from '../../common/json.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { commandLedgerKey, commandPayloadHash } from '../commands/command-ledger.js';
 
@@ -13,10 +14,6 @@ interface MigrationResult<T> {
 export interface WorkspaceChatIdMigrationResult {
   migratedChatIds: Record<string, string>;
   changedFiles: string[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function discoverLegacyRegistryIds(
@@ -292,7 +289,25 @@ async function migrateChatIdFileNames(
 
 function migrateRegistry(value: unknown, migrated: Map<string, string>): MigrationResult<unknown> {
   if (!isRecord(value) || !isRecord(value.sessions)) return { value, changed: false };
-  const sessions = migrateRecordKeys(value.sessions, migrated, 'chats.json');
+  const sessions = migrateRecordKeys(
+    value.sessions,
+    migrated,
+    'chats.json',
+    (entry) => {
+      if (!isRecord(entry) || !isRecord(entry.parentChat)) {
+        return { value: entry, changed: false };
+      }
+      const chatId = migratedChatId(entry.parentChat.chatId, migrated);
+      if (chatId === entry.parentChat.chatId) return { value: entry, changed: false };
+      return {
+        value: {
+          ...entry,
+          parentChat: { ...entry.parentChat, chatId },
+        },
+        changed: true,
+      };
+    },
+  );
   return sessions.changed
     ? { value: { ...value, sessions: sessions.value }, changed: true }
     : { value, changed: false };
@@ -307,19 +322,19 @@ export async function migrateWorkspaceChatIds(
   await discoverLegacyRegistryIds(workspaceDir, migrated);
   if (migrated.size === 0) return { migratedChatIds: {}, changedFiles: [] };
 
-  await migrateJsonFile(workspaceDir, 'project-settings.json', (value) => migrateSettings(value, migrated), changedFiles);
-  await migrateJsonFile(workspaceDir, 'chat-metadata.json', (value) => migrateMetadata(value, migrated), changedFiles);
+  await migrateJsonFile(workspaceDir, 'project-settings.json', (value) => migrateSettings(value, migrated), changedFiles, 0o600);
+  await migrateJsonFile(workspaceDir, 'chat-metadata.json', (value) => migrateMetadata(value, migrated), changedFiles, 0o600);
   await migrateJsonFile(workspaceDir, 'chat-carryover.json', (value) => migrateKeyedChats(value, migrated, 'chat-carryover.json'), changedFiles);
   await migrateJsonFile(workspaceDir, 'command-ledger.json', (value) => migrateLedger(value, migrated), changedFiles);
   await migrateJsonFile(workspaceDir, 'scheduled-prompts.json', (value) => migrateScheduledPrompts(value, migrated), changedFiles, 0o600);
-  await migrateJsonFile(workspaceDir, 'shared-chats.json', (value) => migrateShareIndex(value, migrated), changedFiles);
+  await migrateJsonFile(workspaceDir, 'shared-chats.json', (value) => migrateShareIndex(value, migrated), changedFiles, 0o600);
   await migrateShareSnapshots(workspaceDir, migrated, changedFiles);
   await migrateChatIdFileNames(workspaceDir, 'queues', '.queue.json', migrated, changedFiles);
   await migrateChatIdFileNames(workspaceDir, 'chat-events', '.events.jsonl', migrated, changedFiles);
 
   // The registry is committed last so an interrupted migration can recover all
   // dependent references from the remaining legacy keys on the next startup.
-  await migrateJsonFile(workspaceDir, 'chats.json', (value) => migrateRegistry(value, migrated), changedFiles);
+  await migrateJsonFile(workspaceDir, 'chats.json', (value) => migrateRegistry(value, migrated), changedFiles, 0o600);
 
   return {
     migratedChatIds: Object.fromEntries([...migrated.entries()].sort(([left], [right]) => left.localeCompare(right))),

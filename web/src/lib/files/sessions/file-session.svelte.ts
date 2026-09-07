@@ -1,4 +1,4 @@
-import type { EditorState } from '@codemirror/state';
+import type { EditorState, StateEffect } from '@codemirror/state';
 import type { CanonicalFileIdentity, FileRevision } from '$shared/file-contracts';
 import type { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
@@ -9,8 +9,6 @@ export type FileRendererMode = 'code' | 'markdown' | 'image';
 export interface ImageViewState {
 	mode: 'fit' | 'manual';
 	scale: number;
-	focalX: number;
-	focalY: number;
 	scrollLeft: number;
 	scrollTop: number;
 }
@@ -19,8 +17,6 @@ export function defaultImageViewState(): ImageViewState {
 	return {
 		mode: 'fit',
 		scale: 1,
-		focalX: 0.5,
-		focalY: 0.5,
 		scrollLeft: 0,
 		scrollTop: 0,
 	};
@@ -40,6 +36,7 @@ export class FileSession {
 	dirty = $state(false);
 	loading = $state(false);
 	loadError = $state<string | null>(null);
+	loadErrorRequiresPageReload = $state(false);
 	saving = $state(false);
 	saveError = $state<string | null>(null);
 	isExternallyStale = $state(false);
@@ -58,9 +55,12 @@ export class FileSession {
 
 	loadedRevision: FileRevision | null = null;
 	editorState: EditorState | null = null;
+	editorScrollSnapshot: StateEffect<unknown> | null = null;
+	textScrollLeft = 0;
 	textScrollTop = 0;
+	markdownScrollLeft = 0;
 	markdownScrollTop = 0;
-	editor: CodeEditorController | null = null;
+	editor = $state.raw<CodeEditorController | null>(null);
 	loadController: AbortController | null = null;
 	saveController: AbortController | null = null;
 	freshnessController: AbortController | null = null;

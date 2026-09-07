@@ -1,286 +1,290 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  clearQueue,
-  createQueueEntry,
-  deleteQueueEntry,
-  pauseQueue,
-  popNextQueueEntry,
-  removeSentQueueEntry,
-  replaceQueueEntry,
-  requeueAndPause,
-  restoreStoppedQueueEntry,
-  resumeQueue,
-  returnUnsentQueueEntry,
-} from '../chat-execution-control-transitions.ts';
-import {
-  MAX_STORED_APPLIED_QUEUE_COMMANDS,
+  MAX_CONTROL_INPUT_ENTRIES,
   emptyStoredChatExecutionControl,
 } from '../control-state.ts';
+import {
+  clearQueue,
+  discardPendingInput,
+  consumeQueueSteer,
+  createQueueEntry,
+  dequeueNextTurn,
+  deleteQueueEntry,
+  moveQueueEntry,
+  pauseAfterDispatchFailure,
+  pauseQueue,
+  releaseQueueSteer,
+  replaceQueueEntry,
+  reserveQueueSteer,
+  resumeQueue,
+  enqueueControlInput,
+} from '../chat-execution-control-transitions.ts';
 
-function context(start = 0, protectedKeys = new Set()) {
-  let nextId = start;
+function context(tick = 1, unsettled = []) {
   return {
-    now: `2026-07-19T00:00:${String(start).padStart(2, '0')}.000Z`,
-    newId: () => `id-${++nextId}`,
-    unsettledQueueReceiptKeys: () => protectedKeys,
+    now: `2026-08-12T00:00:0${tick}.000Z`,
+    newId: () => `id-${tick}`,
+    unsettledQueueReceiptKeys: () => new Set(unsettled),
   };
 }
 
-function value(result) {
-  expect(result.outcome.status).toBe('ok');
-  return result.outcome.value;
+function initial() {
+  return emptyStoredChatExecutionControl('server-1');
+}
+
+function value(transition) {
+  expect(transition.outcome.status).toBe('ok');
+  return transition.outcome.value;
+}
+
+function rejection(transition) {
+  expect(transition.outcome.status).toBe('rejected');
+  return transition.outcome.rejection;
+}
+
+function add(control, content, tick, input = {}) {
+  return createQueueEntry(control, { content, ...input }, context(tick));
+}
+
+function controlInput(content, createdAt = context(1).now) {
+  return {
+    content: `<garcon-message>${content}</garcon-message>`,
+    transcriptViewId: 'view-1',
+    createdAt,
+    receipt: {
+      title: 'Inter-agent message',
+      content,
+      detail: { type: 'inter-agent-message-received', fromChatId: null },
+    },
+  };
 }
 
 describe('chat execution control transitions', () => {
-  it('creates, replaces, dispatches, returns, and removes one entry without mutating inputs', () => {
-    const initial = emptyStoredChatExecutionControl();
-    const created = createQueueEntry(initial, { content: 'first' }, context());
-    expect(initial).toEqual(emptyStoredChatExecutionControl());
-    expect(created.next).toMatchObject({ version: 1, entries: [{ content: 'first', revision: 1 }] });
+  it('creates, replaces, moves, and deletes queued entries by stable identity', () => {
+    const first = add(initial(), 'first', 1);
+    const firstId = value(first).entryId;
+    const second = add(first.next, 'second', 2);
+    const secondId = value(second).entryId;
 
-    const entryId = value(created).entryId;
-    const replaced = replaceQueueEntry(created.next, {
-      entryId,
+    const replaced = replaceQueueEntry(second.next, {
+      entryId: secondId,
       content: 'updated',
       expectedRevision: 1,
-    }, context(1));
-    expect(replaced.next.entries[0]).toMatchObject({ id: entryId, content: 'updated', revision: 2 });
+    }, context(3));
+    expect(value(replaced).entry).toMatchObject({ id: secondId, content: 'updated', revision: 2 });
 
-    const popped = popNextQueueEntry(replaced.next, context(2));
-    expect(value(popped).entry).toMatchObject({ id: entryId, status: 'sending' });
-    expect(popped.next.entries[0].delivery).toEqual({
-      clientRequestId: 'id-3',
-      clientMessageId: 'id-4',
-      turnId: 'id-5',
-    });
+    const moved = moveQueueEntry(replaced.next, {
+      entryId: secondId,
+      targetEntryId: firstId,
+      placement: 'before',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 2,
+      expectedTargetRevision: 1,
+    }, context(4));
+    expect(value(moved).rebased).toBe(false);
+    expect(moved.next.entries.map((entry) => entry.id)).toEqual([secondId, firstId]);
 
-    const returned = returnUnsentQueueEntry(popped.next, entryId, context(3));
-    expect(returned.next.entries[0].status).toBe('queued');
-    expect(returned.next.entries[0].delivery).toEqual(popped.next.entries[0].delivery);
-    expect(returned.next.recentlyDispatched).toEqual([]);
-
-    const sentAgain = popNextQueueEntry(returned.next, context(4));
-    const removed = removeSentQueueEntry(sentAgain.next, entryId, context(5));
-    expect(removed.next.entries).toEqual([]);
-    expect(removed.next.version).toBe(6);
+    const deleted = deleteQueueEntry(moved.next, { entryId: firstId }, context(5));
+    expect(value(deleted)).toMatchObject({ entryId: firstId, entry: null });
+    expect(deleted.next.entries.map((entry) => entry.id)).toEqual([secondId]);
   });
 
-  it('returns typed mutation rejections with the input state unchanged', () => {
-    const created = createQueueEntry(
-      emptyStoredChatExecutionControl(),
-      { content: 'first' },
-      context(),
-    );
-    const entryId = value(created).entryId;
-    const stale = replaceQueueEntry(created.next, {
-      entryId,
-      content: 'updated',
-      expectedRevision: 2,
-    }, context(1));
-    expect(stale).toMatchObject({
-      changed: false,
-      outcome: {
-        status: 'rejected',
-        rejection: { code: 'QUEUE_ENTRY_REVISION_CONFLICT', actualRevision: 1 },
-      },
-    });
-    expect(stale.next).toEqual(created.next);
-
-    const missing = deleteQueueEntry(created.next, { entryId: 'missing' }, context(1));
-    expect(missing.outcome).toEqual({
-      status: 'rejected',
-      rejection: { code: 'QUEUE_ENTRY_NOT_FOUND', entryId: 'missing' },
-    });
-  });
-
-  it('retains unresolved receipts while enforcing the receipt bound', () => {
-    const current = emptyStoredChatExecutionControl();
-    current.appliedCommands = Array.from(
-      { length: MAX_STORED_APPLIED_QUEUE_COMMANDS + 3 },
-      (_, index) => ({
-        key: `old-${index}`,
-        operation: 'create',
-        entryId: `entry-${index}`,
-        appliedAt: `2026-07-18T00:00:${String(index % 60).padStart(2, '0')}.000Z`,
-      }),
-    );
-    const protectedKeys = new Set(['old-0', 'old-1', 'old-2']);
-    const transition = createQueueEntry(current, {
-      content: 'new',
-      command: { key: 'current', entryId: 'current-entry' },
-    }, context(0, protectedKeys));
-
-    const keys = new Set(transition.next.appliedCommands.map((receipt) => receipt.key));
-    expect(keys).toContain('current');
-    expect(keys).toContain('old-0');
-    expect(keys).toContain('old-1');
-    expect(keys).toContain('old-2');
-    expect(transition.next.appliedCommands.length).toBe(MAX_STORED_APPLIED_QUEUE_COMMANDS);
-  });
-
-  it('replays queue command receipts without applying a mutation twice', () => {
-    const command = { key: 'queue:create:request', entryId: 'entry-1' };
-    const first = createQueueEntry(
-      emptyStoredChatExecutionControl(),
-      { content: 'first', command },
-      context(0, new Set([command.key])),
-    );
-    const duplicate = createQueueEntry(
-      first.next,
-      { content: 'first', command },
-      context(1, new Set([command.key])),
-    );
-    expect(value(duplicate)).toMatchObject({ entryId: 'entry-1', duplicate: true });
+  it('deduplicates queued submissions and rejects content conflicts', () => {
+    const submission = {
+      clientMessageId: 'message-1',
+      transcriptViewId: 'view-1',
+      excludedResendOrdinals: [2, 4],
+    };
+    const created = add(initial(), 'same', 1, { submission });
+    const duplicate = add(created.next, 'same', 2, { submission });
+    expect(value(duplicate)).toMatchObject({ entryId: value(created).entryId, duplicate: true });
     expect(duplicate.changed).toBe(false);
-    expect(duplicate.next).toEqual(first.next);
+
+    const conflict = add(created.next, 'different', 3, { submission });
+    expect(rejection(conflict)).toEqual({
+      code: 'IDEMPOTENCY_CONFLICT',
+      clientMessageId: 'message-1',
+    });
+    expect(conflict.next).toEqual(created.next);
   });
 
-  it('restores pause stacks and rejects stale pause identities', () => {
-    const current = emptyStoredChatExecutionControl();
-    current.entries.push({
-      id: 'entry-1',
-      content: 'queued',
-      revision: 1,
-      status: 'queued',
-      createdAt: '2026-07-19T00:00:00.000Z',
-      updatedAt: '2026-07-19T00:00:00.000Z',
-    });
-    current.pause = { id: 'automatic', kind: 'queued-turn-failed', pausedAt: null };
-    current.resumePauses = [{ id: 'manual', kind: 'manual', pausedAt: null }];
+  it('removes a dequeued entry immediately and records its former identity', () => {
+    const first = add(initial(), 'first', 1);
+    const firstId = value(first).entryId;
+    const second = add(first.next, 'second', 2);
 
-    const stale = resumeQueue(current, 'stale', context());
-    expect(stale.outcome).toEqual({ status: 'rejected', rejection: { code: 'QUEUE_PAUSE_CHANGED' } });
-    const resumed = resumeQueue(current, 'automatic', context());
-    expect(resumed.next.pause?.id).toBe('manual');
-    expect(resumed.next.resumePauses).toBeUndefined();
+    const dequeued = dequeueNextTurn(second.next, context(3));
+    expect(value(dequeued)).toMatchObject({
+      kind: 'user',
+      entry: { id: firstId, status: 'queued' },
+    });
+    expect(dequeued.next.entries.map((entry) => entry.content)).toEqual(['second']);
+    expect(dequeued.next.recentlyDispatched).toEqual([
+      { entryId: firstId, revision: 1, dispatchedAt: context(3).now },
+    ]);
+    expect(rejection(deleteQueueEntry(
+      dequeued.next,
+      { entryId: firstId },
+      context(4),
+    )).code).toBe('QUEUE_ENTRY_ALREADY_SENT');
   });
 
-  it('applies stage-specific queue compensation without changing delivery identity', () => {
-    const current = emptyStoredChatExecutionControl();
-    current.entries.push({
-      id: 'entry-1',
-      content: 'queued',
-      revision: 1,
-      status: 'sending',
-      delivery: { clientRequestId: 'request', clientMessageId: 'message', turnId: 'turn' },
-      createdAt: '2026-07-19T00:00:00.000Z',
-      updatedAt: '2026-07-19T00:00:00.000Z',
-    });
-    current.recentlyDispatched.push({
-      entryId: 'entry-1',
-      dispatchedAt: '2026-07-19T00:00:00.000Z',
-    });
+  it('treats pause as a dequeue gate and requires the current pause identity', () => {
+    const created = add(initial(), 'first', 1);
+    const paused = pauseQueue(created.next, context(2));
+    expect(paused.next.pause).toMatchObject({ id: 'id-2', kind: 'manual' });
+    expect(value(dequeueNextTurn(paused.next, context(3)))).toBeNull();
+    expect(rejection(resumeQueue(paused.next, 'stale', context(4))).code).toBe(
+      'QUEUE_PAUSE_CHANGED',
+    );
+    const resumed = resumeQueue(paused.next, 'id-2', context(5));
+    expect(resumed.next.pause).toBeNull();
+    expect(value(dequeueNextTurn(resumed.next, context(6))).entry.content).toBe('first');
+  });
 
-    const uncertain = requeueAndPause(current, {
-      entryId: 'entry-1',
-      kind: 'completion-uncertain',
-    }, context());
-    expect(uncertain.next.entries[0]).toMatchObject({
-      status: 'queued',
-      delivery: current.entries[0].delivery,
-    });
-    expect(uncertain.next.pause?.kind).toBe('completion-uncertain');
+  it('reserves only the queue head for steering and consumes it atomically', () => {
+    const first = add(initial(), 'first', 1);
+    const firstId = value(first).entryId;
+    const second = add(first.next, 'second', 2);
+    const secondId = value(second).entryId;
 
-    const stopped = restoreStoppedQueueEntry(current, 'entry-1', context());
-    expect(stopped.next.pause?.kind).toBe('manual');
-    const cleared = clearQueue(uncertain.next, context(2));
+    expect(rejection(reserveQueueSteer(second.next, {
+      entryId: secondId,
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    }, context(3))).code).toBe('QUEUE_ENTRY_REORDER_CONFLICT');
+
+    const reserved = reserveQueueSteer(second.next, {
+      entryId: firstId,
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    }, context(4));
+    expect(value(reserved).entry.status).toBe('steering');
+    expect(value(dequeueNextTurn(reserved.next, context(5)))).toBeNull();
+
+    const released = releaseQueueSteer(reserved.next, firstId, context(6));
+    expect(released.next.entries[0].status).toBe('queued');
+    const reservedAgain = reserveQueueSteer(released.next, {
+      entryId: firstId,
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    }, context(7));
+    const consumed = consumeQueueSteer(reservedAgain.next, firstId, context(8));
+    expect(consumed.next.entries.map((entry) => entry.id)).toEqual([secondId]);
+    expect(consumed.next.recentlyDispatched.at(-1)?.entryId).toBe(firstId);
+  });
+
+  it('pauses only the remaining tail after a dequeued dispatch fails', () => {
+    const only = add(initial(), 'only', 1);
+    const onlyId = value(only).entryId;
+    const empty = dequeueNextTurn(only.next, context(2));
+    const noTail = pauseAfterDispatchFailure(empty.next, onlyId, context(3));
+    expect(noTail.changed).toBe(false);
+    expect(noTail.next.pause).toBeNull();
+
+    const withTail = add(only.next, 'tail', 2);
+    const dequeued = dequeueNextTurn(withTail.next, context(3));
+    const failed = pauseAfterDispatchFailure(dequeued.next, onlyId, context(4));
+    expect(failed.next.entries.map((entry) => entry.content)).toEqual(['tail']);
+    expect(failed.next.pause).toMatchObject({
+      kind: 'queued-turn-failed',
+      entryId: onlyId,
+    });
+  });
+
+  it('clears queue entries and pause state together', () => {
+    const created = add(initial(), 'first', 1);
+    const paused = pauseQueue(created.next, context(2));
+    const cleared = clearQueue(paused.next, context(3));
     expect(cleared.next.entries).toEqual([]);
     expect(cleared.next.pause).toBeNull();
   });
 
-  it('stages only the queue head with the supplied active delivery identity', () => {
-    const initial = emptyStoredChatExecutionControl();
-    const first = createQueueEntry(initial, {
-      content: 'first',
-      command: { key: 'first-command', entryId: 'first-entry' },
-    }, context());
-    const second = createQueueEntry(first.next, {
-      content: 'second',
-      command: { key: 'second-command', entryId: 'second-entry' },
-    }, context(1));
-    const delivery = {
-      clientRequestId: 'active-request',
-      clientMessageId: 'active-message',
-      turnId: 'active-turn',
-    };
-
-    const skipped = popNextQueueEntry(second.next, context(2), {
-      entryId: 'second-entry',
-      delivery,
-    });
-    expect(value(skipped)).toBeNull();
-    expect(skipped.changed).toBe(false);
-
-    const staged = popNextQueueEntry(second.next, context(3), {
-      entryId: 'first-entry',
-      delivery,
-    });
-    expect(value(staged).entry).toMatchObject({
-      id: 'first-entry',
-      status: 'sending',
-      delivery,
-    });
-    const blocked = popNextQueueEntry(staged.next, context(4));
-    expect(value(blocked)).toBeNull();
-    expect(blocked.changed).toBe(false);
+  it('enqueues a bounded private FIFO without changing public revisions', () => {
+    let control = initial();
+    for (let index = 0; index < MAX_CONTROL_INPUT_ENTRIES; index += 1) {
+      const transition = enqueueControlInput(
+        control,
+        controlInput(`message-${index}`),
+        {
+          ...context(index + 1),
+          newId: () => `control-${index}`,
+        },
+      );
+      expect(transition.publicChanged).toBe(false);
+      expect(transition.next.version).toBe(0);
+      control = transition.next;
+    }
+    expect(control.controlEntries.map((entry) => entry.id)).toEqual(
+      Array.from({ length: MAX_CONTROL_INPUT_ENTRIES }, (_, index) => `control-${index}`),
+    );
+    expect(rejection(enqueueControlInput(
+      control,
+      controlInput('overflow'),
+      context(1),
+    ))).toEqual({ code: 'CONTROL_INPUT_QUEUE_FULL' });
   });
 
-  it('preserves invariants through a deterministic transition sequence', () => {
-    let seed = 0x5eed1234;
-    const random = () => {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      return seed;
+  it('gates both lanes with one pause and dequeues control input first', () => {
+    const user = add(initial(), 'user input', 1);
+    const control = enqueueControlInput(user.next, controlInput('control input'), context(2));
+    const paused = pauseQueue(control.next, context(3));
+
+    expect(value(dequeueNextTurn(paused.next, context(4)))).toBeNull();
+    const resumed = resumeQueue(paused.next, 'id-3', context(5));
+    const first = dequeueNextTurn(resumed.next, context(6));
+    expect(value(first)).toMatchObject({
+      kind: 'control',
+      entry: { receipt: { content: 'control input' } },
+    });
+    expect(first.publicChanged).toBe(false);
+    expect(first.next.version).toBe(resumed.next.version);
+    expect(first.next.recentlyDispatched).toEqual([]);
+    expect(value(dequeueNextTurn(first.next, context(7)))).toMatchObject({
+      kind: 'user',
+      entry: { content: 'user input' },
+    });
+  });
+
+  it('preserves private control work when the public queue is cleared', () => {
+    const user = add(initial(), 'user input', 1);
+    const control = enqueueControlInput(user.next, controlInput('control input'), context(2));
+    const paused = pauseQueue(control.next, context(3));
+    const cleared = clearQueue(paused.next, context(4));
+
+    expect(cleared.next.entries).toEqual([]);
+    expect(cleared.next.controlEntries).toHaveLength(1);
+    expect(cleared.next.pause).toBeNull();
+    expect(value(dequeueNextTurn(cleared.next, context(5)))?.kind).toBe('control');
+  });
+
+  it('discards both pending lanes and pauses while preserving receipts', () => {
+    const created = add(initial(), 'future work', 1, {
+      command: { key: 'command-1', entryId: 'entry-1' },
+    });
+    const controlQueued = enqueueControlInput(created.next, controlInput('control'), context(2));
+    const paused = pauseQueue(controlQueued.next, context(3));
+    const current = {
+      ...paused.next,
+      recentlyDispatched: [{
+        entryId: 'sent-1',
+        revision: 1,
+        dispatchedAt: context(3).now,
+      }],
+      resumePauses: [{ id: 'resume-1', kind: 'manual', pausedAt: context(2).now }],
     };
-    let control = emptyStoredChatExecutionControl();
-    let ordinal = 0;
-    const knownIds = [];
 
-    for (let index = 0; index < 500; index += 1) {
-      const ctx = {
-        now: new Date(Date.UTC(2026, 6, 19, 0, 0, index)).toISOString(),
-        newId: () => `generated-${++ordinal}`,
-        unsettledQueueReceiptKeys: () => new Set(),
-      };
-      const operation = random() % 8;
-      let transition;
-      if (operation <= 1 || knownIds.length === 0) {
-        transition = createQueueEntry(control, { content: `message-${index}` }, ctx);
-        if (transition.outcome.status === 'ok') knownIds.push(transition.outcome.value.entryId);
-      } else if (operation === 2) {
-        transition = pauseQueue(control, ctx);
-      } else if (operation === 3 && control.pause) {
-        transition = resumeQueue(control, control.pause.id, ctx);
-      } else if (operation === 4) {
-        transition = popNextQueueEntry(control, ctx);
-      } else if (operation === 5) {
-        const sending = control.entries.find((entry) => entry.status === 'sending');
-        transition = sending
-          ? returnUnsentQueueEntry(control, sending.id, ctx)
-          : pauseQueue(control, ctx);
-      } else if (operation === 6) {
-        const queued = control.entries.find((entry) => entry.status === 'queued');
-        transition = queued
-          ? deleteQueueEntry(control, { entryId: queued.id }, ctx)
-          : pauseQueue(control, ctx);
-      } else {
-        const sending = control.entries.find((entry) => entry.status === 'sending');
-        transition = sending
-          ? removeSentQueueEntry(control, sending.id, ctx)
-          : pauseQueue(control, ctx);
-      }
+    const discarded = discardPendingInput(current, context(4));
 
-      const priorVersion = control.version;
-      control = transition.next;
-      const ids = control.entries.map((entry) => entry.id);
-      expect(new Set(ids).size).toBe(ids.length);
-      expect(control.entries.filter((entry) => entry.status === 'sending').length).toBeLessThanOrEqual(1);
-      expect(control.version).toBe(priorVersion + (transition.changed ? 1 : 0));
-      for (const entry of control.entries) {
-        if (!entry.delivery) continue;
-        expect(entry.delivery.clientRequestId).toBeTruthy();
-        expect(entry.delivery.clientMessageId).toBeTruthy();
-        expect(entry.delivery.turnId).toBeTruthy();
-      }
-    }
+    expect(discarded.changed).toBe(true);
+    expect(discarded.next.entries).toEqual([]);
+    expect(discarded.next.controlEntries).toEqual([]);
+    expect(discarded.next.pause).toBeNull();
+    expect(discarded.next.resumePauses).toBeUndefined();
+    expect(discarded.next.appliedCommands).toEqual(current.appliedCommands);
+    expect(discarded.next.recentlyDispatched).toEqual(current.recentlyDispatched);
+    expect(discarded.next.version).toBe(current.version + 1);
+    expect(current.entries).toHaveLength(1);
+    expect(current.controlEntries).toHaveLength(1);
   });
 });

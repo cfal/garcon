@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/api/commands.js', () => ({
@@ -14,9 +15,19 @@ const baseProps = {
 	agent: 'claude',
 	projectPath: '',
 	supportsFork: true,
+	supportsSteering: false,
+	supportsGoals: false,
 	canScheduleIn: true,
 };
 const mockedGetSlashCommands = vi.mocked(getSlashCommands);
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
 
 describe('SlashCommandMenu', () => {
 	beforeEach(() => {
@@ -63,6 +74,57 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Rename the current chat')).toBeTruthy();
 	});
 
+	it('lists the Manual order move command', () => {
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 'move',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.getByText('/move')).toBeTruthy();
+		expect(
+			screen.getByText('Move this chat to the top or bottom of its section in Manual order'),
+		).toBeTruthy();
+	});
+
+	it('deduplicates discovered move and tag commands behind the built-ins', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'move', source: 'command', description: 'Agent move' },
+			{ name: 'tag', source: 'command', description: 'Agent tag' },
+		]);
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: '',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(await screen.findByText('/move')).toBeTruthy();
+		expect(screen.getAllByText('/move')).toHaveLength(1);
+		expect(screen.getAllByText('/tag')).toHaveLength(1);
+		expect(screen.queryByText('Agent move')).toBeNull();
+		expect(screen.queryByText('Agent tag')).toBeNull();
+	});
+
+	it('selects a boundary command', async () => {
+		const onSelect = vi.fn();
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 'move',
+			onSelect,
+			onClose: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /\/move/ }));
+
+		expect(onSelect).toHaveBeenCalledWith('move');
+	});
+
 	it('lists /snippet and its /s alias without advertising a plural command', () => {
 		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,
@@ -105,10 +167,10 @@ describe('SlashCommandMenu', () => {
 		expect(onSelect).toHaveBeenCalledWith('s');
 	});
 
-	it('lists the Codex goal command only for Codex', () => {
+	it('lists the goal command when the agent supports goals', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
-			agent: 'codex',
+			supportsGoals: true,
 			isVisible: true,
 			query: 'goal',
 			onSelect: vi.fn(),
@@ -116,10 +178,10 @@ describe('SlashCommandMenu', () => {
 		});
 
 		expect(screen.getByText('/goal')).toBeTruthy();
-		expect(screen.getByText('Set a Codex goal and start working toward it')).toBeTruthy();
+		expect(screen.getByText('Set an agent goal and start working toward it')).toBeTruthy();
 	});
 
-	it('hides the Codex goal command for other agents', () => {
+	it('hides the goal command without the capability', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
@@ -131,10 +193,10 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('/goal')).toBeNull();
 	});
 
-	it('lists the steer command only for Codex', () => {
+	it('lists the steer commands from capability data', () => {
 		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,
-			agent: 'codex',
+			supportsSteering: true,
 			isVisible: true,
 			query: 'steer',
 			onSelect: vi.fn(),
@@ -142,17 +204,30 @@ describe('SlashCommandMenu', () => {
 		});
 
 		expect(screen.getByText('/steer')).toBeTruthy();
-		expect(screen.getByText('Send guidance to the active Codex turn immediately')).toBeTruthy();
+		expect(screen.getByText('Send guidance to the active turn')).toBeTruthy();
 		unmount();
+
+		const alias = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			supportsSteering: true,
+			isVisible: true,
+			query: 'st',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(screen.getByText('/st')).toBeTruthy();
+		expect(screen.getByText('Short alias for /steer')).toBeTruthy();
+		alias.unmount();
 
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
-			query: 'steer',
+			query: 'st',
 			onSelect: vi.fn(),
 			onClose: vi.fn(),
 		});
 		expect(screen.queryByText('/steer')).toBeNull();
+		expect(screen.queryByText('/st')).toBeNull();
 	});
 
 	it('hides the fork command when not supported', () => {
@@ -258,6 +333,8 @@ describe('SlashCommandMenu', () => {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
+			supportsSteering: true,
+			supportsGoals: true,
 			canScheduleIn: true,
 			isVisible: true,
 			query: 'skill-11',
@@ -284,6 +361,8 @@ describe('SlashCommandMenu', () => {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
+			supportsSteering: true,
+			supportsGoals: true,
 			canScheduleIn: true,
 			isVisible: true,
 			query: 'skill',
@@ -345,5 +424,60 @@ describe('SlashCommandMenu', () => {
 
 		expect(screen.queryByRole('option')).toBeNull();
 		expect(screen.getByText('No matching commands')).toBeTruthy();
+	});
+
+	it('restarts discovery aborted by a pending project transition', async () => {
+		const first = deferred<Awaited<ReturnType<typeof getSlashCommands>>>();
+		mockedGetSlashCommands
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce([{ name: 'recovered-command', source: 'command' }]);
+		const view = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'recovered-command',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledOnce());
+		const firstSignal = mockedGetSlashCommands.mock.calls[0]?.[1]?.signal;
+
+		await view.rerender({ projectPath: '', projectPending: true });
+		expect(firstSignal?.aborted).toBe(true);
+		await view.rerender({ projectPath: '/repo', projectPending: false });
+
+		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledTimes(2));
+		expect(await screen.findByText('/recovered-command')).toBeTruthy();
+		first.resolve([]);
+		await tick();
+		expect(screen.getByText('/recovered-command')).toBeTruthy();
+	});
+
+	it('hides cached discovered commands while keeping built-ins available', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'agent-command', source: 'command', description: 'Agent command' },
+		]);
+		const onSelect = vi.fn();
+		const view = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'agent-command',
+			onSelect,
+			onClose: vi.fn(),
+		});
+		await screen.findByText('/agent-command');
+
+		await view.rerender({ projectUnavailable: true });
+		expect(view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(
+			false,
+		);
+		expect(screen.queryByText('/agent-command')).toBeNull();
+		expect(onSelect).not.toHaveBeenCalled();
+
+		await view.rerender({ query: 'compact' });
+		expect(screen.getByText('/compact')).toBeTruthy();
+		expect(view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true);
+		expect(onSelect).toHaveBeenCalledWith('compact');
 	});
 });

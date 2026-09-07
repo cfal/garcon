@@ -17,6 +17,7 @@
 		lastError?: string | null;
 		branchSelector?: GitQuickBranchSelectorControls | null;
 		onCommit: () => void;
+		announcementsEnabled?: boolean;
 	}
 
 	let {
@@ -27,6 +28,7 @@
 		lastError = null,
 		branchSelector = null,
 		onCommit,
+		announcementsEnabled = true,
 	}: Props = $props();
 
 	// The cap stays out of flow while sliding underneath the rounded composer
@@ -61,8 +63,8 @@
 	<div class={trayClass}>
 		<div
 			class={panelClass}
-			role="status"
-			aria-live="polite"
+			role={announcementsEnabled ? 'status' : undefined}
+			aria-live={announcementsEnabled ? 'polite' : 'off'}
 			aria-busy={isRefreshing || (!summary && !lastError)}
 			aria-label={summary ? undefined : lastError || m.status_loading()}
 		>
@@ -72,12 +74,13 @@
 						<GitBranchSelector
 							currentBranch={summary.branch || 'HEAD'}
 							refs={branchSelector.refs}
+							sort={branchSelector.sort}
 							isOpen={branchSelector.isOpen}
 							isLoading={branchSelector.isLoading}
 							{isMobile}
 							side="top"
-							menuClass="w-[min(18rem,calc(100vw-2rem))]"
-							triggerClass="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							menuClass="w-[min(36rem,calc(100vw-2rem))]"
+							triggerClass="inline-flex h-7 min-w-0 max-w-44 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-80"
 							iconClass="h-3.5 w-3.5 shrink-0"
 							labelClass="max-w-32 text-xs font-medium text-foreground"
 							chevronClass="h-3.5 w-3.5"
@@ -86,6 +89,7 @@
 							onCreateBranch={branchSelector.onCreateBranch}
 							onSwitchBranch={branchSelector.onSwitchBranch}
 							onSearchRefs={branchSelector.onSearchRefs}
+							onSortRefs={branchSelector.onSortRefs}
 							onSwitchDialogClose={branchSelector.onSwitchDialogClose}
 						/>
 					{:else}

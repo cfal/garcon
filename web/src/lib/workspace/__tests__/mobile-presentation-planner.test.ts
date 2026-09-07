@@ -1,16 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalWorkspaceSnapshot } from '../canonical-layout.js';
+import {
+	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_FILES_SURFACE_ID,
+	canonicalWorkspaceSnapshot,
+} from '../canonical-layout.js';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte.js';
 import { MobilePresentationPlanner } from '../mobile-presentation-planner.js';
 
 describe('MobilePresentationPlanner', () => {
 	it('records and restores a route- and project-valid transient invoker', () => {
-		const context = { chatId: 'chat-a', effectiveProjectKey: 'project-a' };
+		const context = { chatId: 'chat-a', projectPath: '/project-a' };
 		const planner = new MobilePresentationPlanner({
 			getContext: () => context,
 			getRouteIdentity: () => '/chat/chat-a',
 		});
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-main',
+			},
 			{
 				type: 'set-mobile-presentation',
 				activeId: 'singleton:git',
@@ -31,7 +45,7 @@ describe('MobilePresentationPlanner', () => {
 				invokerSurfaceId: 'singleton:git',
 				invokerHost: 'mobile',
 				chatId: 'chat-a',
-				effectiveProjectKey: 'project-a',
+				projectPath: '/project-a',
 				routeIdentity: '/chat/chat-a',
 			},
 		]);
@@ -43,12 +57,22 @@ describe('MobilePresentationPlanner', () => {
 
 	it('ignores stale return entries and falls back to non-excluded mobile recency', () => {
 		let routeIdentity = '/chat/chat-a';
-		const context = { chatId: 'chat-a', effectiveProjectKey: 'project-a' };
+		const context = { chatId: 'chat-a', projectPath: '/project-a' };
 		const planner = new MobilePresentationPlanner({
 			getContext: () => context,
 			getRouteIdentity: () => routeIdentity,
 		});
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-main',
+			},
 			{
 				type: 'set-mobile-presentation',
 				activeId: 'singleton:git',
@@ -82,8 +106,101 @@ describe('MobilePresentationPlanner', () => {
 		expect(planner.returnStackForTransient('singleton:commit', snapshot, false)).toBe(
 			snapshot.mobileReturnStack,
 		);
-		expect(planner.returnStackForTransient('singleton:chat', snapshot, true)).toBe(
+		expect(planner.returnStackForTransient(CANONICAL_CHAT_SURFACE_ID, snapshot, true)).toBe(
 			snapshot.mobileReturnStack,
 		);
+	});
+
+	it("prefers the source window's prior tab over another window's active surface", () => {
+		const planner = new MobilePresentationPlanner({
+			getContext: () => null,
+			getRouteIdentity: () => '/',
+		});
+		const commitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'activate-window-tab',
+				windowId: 'window-main',
+				surfaceId: 'singleton:commit',
+			},
+			{
+				type: 'set-mobile-presentation',
+				activeId: 'singleton:commit',
+				returnStack: [],
+			},
+		]);
+
+		expect(planner.resolveReturn('singleton:commit', commitActive)).toEqual({
+			activeId: CANONICAL_CHAT_SURFACE_ID,
+			returnStack: [],
+		});
+	});
+
+	it("retains the source window's prior tab after close removes the source topology", () => {
+		const planner = new MobilePresentationPlanner({
+			getContext: () => null,
+			getRouteIdentity: () => '/',
+		});
+		const commitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-files',
+			},
+			{
+				type: 'activate-window-tab',
+				windowId: 'window-files',
+				surfaceId: 'singleton:commit',
+			},
+			{
+				type: 'set-mobile-presentation',
+				activeId: 'singleton:commit',
+				returnStack: [],
+			},
+		]);
+		const afterClose = reduceWorkspaceLayout(commitActive, [
+			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
+		]);
+
+		expect(planner.resolveReturn('singleton:commit', afterClose, commitActive)).toEqual({
+			activeId: CANONICAL_FILES_SURFACE_ID,
+			returnStack: [],
+		});
+	});
+
+	it('falls back to an inactive window tab when no other window is active', () => {
+		const planner = new MobilePresentationPlanner({
+			getContext: () => null,
+			getRouteIdentity: () => '/',
+		});
+		const chatOnly = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'remove-surface', surfaceId: CANONICAL_FILES_SURFACE_ID },
+		]);
+		const commitActive = reduceWorkspaceLayout(chatOnly, [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'activate-window-tab',
+				windowId: 'window-main',
+				surfaceId: 'singleton:commit',
+			},
+			{
+				type: 'set-mobile-presentation',
+				activeId: 'singleton:commit',
+				returnStack: [],
+			},
+		]);
+
+		expect(planner.resolveReturn('singleton:commit', commitActive)).toEqual({
+			activeId: CANONICAL_CHAT_SURFACE_ID,
+			returnStack: [],
+		});
 	});
 });

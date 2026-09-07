@@ -6,19 +6,30 @@
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
+		setPreambles,
 		setRemoteSettings,
 		setSnippets,
 		setTransientLayers,
 		setWorkspaceCoordinator,
 	} from '$lib/context';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+
+	interface Props {
+		snippetTemplate?: string | null;
+		onCreateDraft?: (draft: unknown) => void;
+	}
+
+	let { snippetTemplate = null, onCreateDraft = () => {} }: Props = $props();
 
 	const appShell = createAppShellStore();
+	setCanonicalWorkspaceLayout();
 	appShell.projectBasePath = '/workspace';
 	appShell.openNewChatDialog();
 
@@ -29,15 +40,35 @@
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
 	setNotifications(createNotificationsStore());
-	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
+	const preambles = new PreamblesStore();
+	preambles.applySnapshot({ revision: 0, preambles: [] });
+	setPreambles(preambles);
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+	setTransientLayers(transientLayers);
 	setSnippets(
 		createSnippetsStore({
-			get: async () => ({ revision: 0, snippets: [] }),
+			get: async () => ({
+				revision: 0,
+				snippets: snippetTemplate
+					? [
+							{
+								id: 'snippet-handoff',
+								shortName: 'handoff',
+								template: snippetTemplate,
+								defaultArguments: '',
+								createdAt: '2026-01-01T00:00:00.000Z',
+								updatedAt: '2026-01-01T00:00:00.000Z',
+							},
+						]
+					: [],
+			}),
 		}),
 	);
 	setChatSessions({
 		orderedChats: [],
-		createDraft() {},
+		createDraft(draft: unknown) {
+			onCreateDraft(draft);
+		},
 	} as never);
 	setWorkspaceCoordinator({
 		focusChat: () => Promise.resolve(),
@@ -113,4 +144,5 @@
 	} as never);
 </script>
 
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <NewChatDialog />

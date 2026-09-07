@@ -1,12 +1,17 @@
-import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
-  type AgentExecution,
-  type AgentExecutionContext,
+  type AgentEstablishedSession,
+  type AgentGoalControlRequest,
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
-import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
+import {
+  type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
+  type AgentRuntimeExecutionContext,
+  type AgentRuntimeResumeRequest,
+  type AgentRuntimeStartRequest,
+} from '@garcon/server-agent-common/execution/runtime-events';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import type { CodexConfig } from '../../config.js';
@@ -14,6 +19,8 @@ import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
 } from './app-server/endpoint-runtime.js';
+import { codexOperation } from './app-server/operation-routes.js';
+import { mapThinkingModeToCodexEffort } from './app-server/request-builders.js';
 import type { CodexAppServerRuntime } from './app-server/runtime.js';
 import { parseCodexGoalCommand, type CodexGoalCommand } from './goal-command.js';
 import type {
@@ -27,100 +34,77 @@ interface CodexRuntimeConfiguration {
   readonly codexConfig?: CodexProviderConfig;
 }
 
-export class CodexExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
-  readonly #operations = new AgentOperationTracker();
+type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'sink'>;
 
+export class CodexExecution implements AgentRuntimeExecution {
   constructor(
     private readonly host: AgentHost,
     private readonly runtime: CodexAppServerRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
     private readonly config: CodexConfig,
-  ) {
-    runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({ type: 'messages', chatId, messages, operation });
-    });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
-    });
-    runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
-    });
-    runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({
-        type: 'failed',
-        chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
-      });
-      this.#operations.finish(chatId, operation);
-    });
-  }
+  ) {}
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
-    this.#operations.register(request.chatId, request.operation);
-    try {
-      const configuration = await this.#runtimeConfiguration(request);
-      const runtimeRequest = prepareStartRequest(request, configuration);
-      const started = await this.runtime.startSession(runtimeRequest);
-      const session = {
+  async start(request: AgentRuntimeStartRequest, publish: AgentRuntimePublisher) {
+    const configuration = await this.#runtimeConfiguration(request);
+    const runtimeRequest = prepareStartRequest(request, configuration, publish);
+    // A blocking runtime can settle the first turn inside startSession.
+    const holder: { session: AgentEstablishedSession | null } = { session: null };
+    const emitStarted = (started: { agentSessionId: string; nativePath: string | null }) => {
+      if (holder.session) return holder.session;
+      holder.session = {
         agentSessionId: started.agentSessionId,
         nativeSession: this.nativeSessions.encode({
           path: started.nativePath,
           agentSessionId: started.agentSessionId,
           modelEndpointId: request.endpoint?.endpointId ?? null,
         }),
+        nativeSeedReceipt: receiptForCarriedContext(
+          request.carriedContext,
+          started.agentSessionId,
+          runtimeRequest.codexGoalCommand ? 'provider-context' : 'user-prefix',
+        ),
       };
-      this.#events.emit({
-        type: 'session-created',
-        chatId: request.chatId,
-        session,
-        operation: request.operation,
-      });
-      return session;
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+      publish({ type: 'session', session: holder.session });
+      return holder.session;
+    };
+    const started = await this.runtime.startSession({
+      ...runtimeRequest,
+      onSessionActivated: (session) => void emitStarted(session),
+    });
+    const early = holder.session;
+    return early && early.agentSessionId === started.agentSessionId
+      // The materialized path supersedes the activation-time path for core's
+      // durable record without re-emitting the session event.
+      ? {
+          ...early,
+          nativeSession: this.nativeSessions.encode({
+            path: started.nativePath,
+            agentSessionId: started.agentSessionId,
+            modelEndpointId: request.endpoint?.endpointId ?? null,
+          }),
+        }
+      : emitStarted(started);
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
-    return this.#resume(request, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
+  async resume(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
+    return this.#resume(request, publish, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
   }
 
-  async submitActiveInput(
-    request: Parameters<NonNullable<AgentExecution['submitActiveInput']>>[0],
+  async submitGoalControl(
+    request: CodexGoalControlRuntimeRequest,
+    publish: AgentRuntimePublisher,
   ): Promise<boolean> {
-    this.#operations.register(request.chatId, request.operation);
-    try {
-      const runtimeRequest = prepareResumeRequest(
-        request,
-        await this.#runtimeConfiguration(request),
-        this.nativeSessions,
-      );
-      const accepted = await this.runtime.submitActiveInput(
-        runtimeRequest,
-        request.beforeDelivery,
-      );
-      if (!accepted) this.#operations.finish(request.chatId, request.operation);
-      return accepted;
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+    const runtimeRequest = prepareResumeRequest(
+      request,
+      await this.#runtimeConfiguration(request),
+      this.nativeSessions,
+      publish,
+    );
+    return this.runtime.submitGoalControl(runtimeRequest, request.beforeDelivery);
   }
 
-  async compact(
-    request: Parameters<NonNullable<AgentExecution['compact']>>[0],
-  ): Promise<void> {
-    return this.#resume(request, (runtimeRequest) => this.runtime.compact(runtimeRequest));
+  async compact(request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher): Promise<void> {
+    return this.#resume(request, publish, (runtimeRequest) => this.runtime.compact(runtimeRequest));
   }
 
   async abort(agentSessionId: string): Promise<boolean> {
@@ -141,43 +125,57 @@ export class CodexExecution implements AgentExecution {
 
   async applySessionConfiguration(
     agentSessionId: string,
-    configuration: Parameters<NonNullable<AgentExecution['applySessionConfiguration']>>[1],
+    configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
+    previousConfiguration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[2],
   ): Promise<void> {
-    this.runtime.updateSessionSettings(agentSessionId, {
+    const previousEffort = mapThinkingModeToCodexEffort(
+      previousConfiguration.thinkingMode,
+      previousConfiguration.model,
+    );
+    const nextEffort = mapThinkingModeToCodexEffort(
+      configuration.thinkingMode,
+      configuration.model,
+    );
+    if (!this.runtime.hasSource(agentSessionId)) return;
+    if (previousEffort !== undefined && nextEffort === undefined) {
+      // Defers the whole update because the runtime replaces explicit-effort sources before Default turns.
+      if (!this.runtime.isRunning(agentSessionId)) return;
+      throw new AgentIntegrationError(
+        'INVALID_SETTINGS',
+        'Codex cannot clear a concrete reasoning effort during an active turn',
+        false,
+      );
+    }
+    if (!sameEndpoint(configuration.endpoint, previousConfiguration.endpoint)) {
+      if (!this.runtime.isRunning(agentSessionId)) return;
+      throw new AgentIntegrationError(
+        'INVALID_ENDPOINT',
+        'Cannot change the Codex endpoint while a session is running',
+        false,
+      );
+    }
+    await this.runtime.updateSessionSettings(agentSessionId, {
+      model: configuration.model,
       permissionMode: configuration.permissionMode,
+      thinkingMode: configuration.thinkingMode,
     });
   }
 
-  async respondToPermission(
-    permissionRequestId: string,
-    decision: Parameters<NonNullable<AgentExecution['respondToPermission']>>[1],
-  ): Promise<void> {
-    await this.runtime.resolvePermission(permissionRequestId, decision);
-  }
-
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
-    return this.#events.subscribe(listener);
-  }
-
   async #resume(
-    request: Parameters<AgentExecution['resume']>[0],
+    request: AgentRuntimeResumeRequest,
+    publish: AgentRuntimePublisher,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
-    this.#operations.register(request.chatId, request.operation);
-    try {
-      await action(prepareResumeRequest(
-        request,
-        await this.#runtimeConfiguration(request),
-        this.nativeSessions,
-      ));
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+    await action(prepareResumeRequest(
+      request,
+      await this.#runtimeConfiguration(request),
+      this.nativeSessions,
+      publish,
+    ));
   }
 
   async #runtimeConfiguration(
-    request: AgentExecutionContext,
+    request: AgentRuntimeExecutionContext,
   ): Promise<CodexRuntimeConfiguration> {
     const endpoint = await resolveAgentEndpoint(
       this.host,
@@ -202,27 +200,36 @@ export class CodexExecution implements AgentExecution {
   }
 }
 
-function executionFields(request: AgentExecutionContext) {
+function sameEndpoint(
+  left: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
+  right: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
+): boolean {
+  if (!left || !right) return left === right;
+  return left.apiProviderId === right.apiProviderId
+    && left.endpointId === right.endpointId
+    && left.protocol === right.protocol;
+}
+
+function executionFields(
+  request: AgentRuntimeExecutionContext,
+) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
-    clientRequestId: request.operation.clientRequestId ?? undefined,
-    clientMessageId: request.operation.clientMessageId ?? undefined,
-    turnId: request.operation.turnId,
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    onAbortable: () => request.admission.markAbortable(),
   };
 }
 
 function prepareStartRequest(
-  request: Parameters<AgentExecution['start']>[0],
+  request: AgentRuntimeStartRequest,
   configuration: CodexRuntimeConfiguration,
+  publish: AgentRuntimePublisher,
 ): CodexStartRequest {
   const goal = parseCodexGoalCommand(request.prompt);
   if (goal && goal.kind !== 'set') {
@@ -232,27 +239,28 @@ function prepareStartRequest(
       false,
     );
   }
-  const carryOver = request.carryOver.length > 0
-    ? renderTranscriptSeed([...request.carryOver])
-    : null;
+  const carriedContext = request.carriedContext?.prefix ?? null;
   return {
     ...executionFields(request),
-    command: goal?.objective ?? (carryOver ? `${carryOver}\n\n${request.prompt}` : request.prompt),
+    operation: codexOperation(request, publish),
+    command: goal?.objective ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
     images: request.attachments,
     ...configuration,
     ...(goal ? { codexGoalCommand: goal } : {}),
-    ...(goal && carryOver ? { codexSeedContext: carryOver } : {}),
+    ...(goal && carriedContext ? { codexSeedContext: carriedContext } : {}),
   };
 }
 
 function prepareResumeRequest(
-  request: Parameters<AgentExecution['resume']>[0],
+  request: AgentRuntimeResumeRequest,
   configuration: CodexRuntimeConfiguration,
   nativeSessions: PathNativeSessionCodec,
+  publish: AgentRuntimePublisher,
 ): CodexResumeRequest {
   const goal = parseCodexGoalCommand(request.prompt);
   return {
     ...executionFields(request),
+    operation: codexOperation(request, publish),
     agentSessionId: request.agentSessionId,
     command: goalObjective(goal) ?? request.prompt,
     images: request.attachments,

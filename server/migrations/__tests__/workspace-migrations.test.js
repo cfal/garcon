@@ -27,9 +27,15 @@ describe('WorkspaceMigrationRunner', () => {
     const migrate = mock(async () => undefined);
     const runner = await WorkspaceMigrationRunner.open(workspaceDir);
 
+    expect(runner.initialVersion).toBe(0);
+
     await runner.run('chat-id-migration', migrate);
     await runner.run('core-record-migration', migrate);
     await runner.run('ephemeral-queue-state-cleanup', migrate);
+    await runner.run('carryover-node-migration', migrate);
+    await runner.run('carryover-segment-migration', migrate);
+    await runner.run('agent-integration-settings-refresh', migrate);
+    await runner.run('agent-execution-mode-refresh', migrate);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -48,6 +54,8 @@ describe('WorkspaceMigrationRunner', () => {
     const events = [];
     const runner = await WorkspaceMigrationRunner.open(workspaceDir);
 
+    expect(runner.initialVersion).toBe(0);
+
     await runner.run('chat-id-migration', async () => { events.push('chat-id'); });
     await runner.run('core-record-migration', async () => { events.push('core-record'); });
     await runner.run('ephemeral-queue-state-cleanup', () => cleanupLegacyQueueState({
@@ -57,9 +65,21 @@ describe('WorkspaceMigrationRunner', () => {
         events.push('ownership');
       },
     }));
+    await runner.run('carryover-node-migration', async () => { events.push('carryover-node'); });
+    await runner.run('carryover-segment-migration', async () => { events.push('carryover-segment'); });
+    await runner.run('agent-integration-settings-refresh', async () => { events.push('settings-refresh'); });
+    await runner.run('agent-execution-mode-refresh', async () => { events.push('execution-mode-refresh'); });
     await runner.finish();
 
-    expect(events).toEqual(['chat-id', 'core-record', 'ownership']);
+    expect(events).toEqual([
+      'chat-id',
+      'core-record',
+      'ownership',
+      'carryover-node',
+      'carryover-segment',
+      'settings-refresh',
+      'execution-mode-refresh',
+    ]);
     await expect(fs.stat(queuesDir)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(path.join(workspaceDir, 'pending-user-inputs.json'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -80,13 +100,43 @@ describe('WorkspaceMigrationRunner', () => {
     const cleanup = mock(async () => undefined);
     const runner = await WorkspaceMigrationRunner.open(workspaceDir);
 
+    expect(runner.initialVersion).toBe(2);
+
     await runner.run('chat-id-migration', early);
     await runner.run('core-record-migration', early);
     await runner.run('ephemeral-queue-state-cleanup', cleanup);
+    await runner.run('carryover-node-migration', cleanup);
+    await runner.run('carryover-segment-migration', cleanup);
+    await runner.run('agent-integration-settings-refresh', cleanup);
+    await runner.run('agent-execution-mode-refresh', cleanup);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
-    expect(cleanup).toHaveBeenCalledOnce();
+    expect(cleanup).toHaveBeenCalledTimes(5);
+    expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
+  });
+
+  it('runs the execution-mode refresh for an existing version 6 workspace', async () => {
+    await fs.writeFile(
+      path.join(workspaceDir, 'workspace-version.json'),
+      JSON.stringify({ version: 6 }),
+      'utf8',
+    );
+    const previous = mock(async () => undefined);
+    const executionModeRefresh = mock(async () => undefined);
+    const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+
+    await runner.run('chat-id-migration', previous);
+    await runner.run('core-record-migration', previous);
+    await runner.run('ephemeral-queue-state-cleanup', previous);
+    await runner.run('carryover-node-migration', previous);
+    await runner.run('carryover-segment-migration', previous);
+    await runner.run('agent-integration-settings-refresh', previous);
+    await runner.run('agent-execution-mode-refresh', executionModeRefresh);
+    await runner.finish();
+
+    expect(previous).not.toHaveBeenCalled();
+    expect(executionModeRefresh).toHaveBeenCalledOnce();
     expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 

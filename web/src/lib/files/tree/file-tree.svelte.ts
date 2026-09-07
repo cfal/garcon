@@ -10,16 +10,24 @@ import {
 } from '$lib/utils/local-persistence';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
-import type { FileTreeBreadcrumb, FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
+import type {
+	FileTreeBreadcrumb,
+	FileTreeEntry,
+	FileTreeHomeDirectory,
+	FileTreeResponse,
+} from '$shared/file-contracts';
 
-export type SortKey = 'name' | 'size' | 'modified' | 'permissions';
 export type SortDirection = 'asc' | 'desc';
 
 export const FILE_TREE_COLUMN_KEYS = ['name', 'size', 'modified', 'permissions'] as const;
 export type FileTreeColumnKey = (typeof FILE_TREE_COLUMN_KEYS)[number];
 export type OptionalFileTreeColumnKey = Exclude<FileTreeColumnKey, 'name'>;
+export type SortKey = FileTreeColumnKey;
 export type FileTreeColumnWidths = Record<FileTreeColumnKey, number>;
 export type FileTreeColumnVisibility = Record<OptionalFileTreeColumnKey, boolean>;
+
+export const FILE_TREE_VIEW_PREFERENCES = ['responsive', 'always-details'] as const;
+export type FileTreeViewPreference = (typeof FILE_TREE_VIEW_PREFERENCES)[number];
 
 export const DEFAULT_FILE_TREE_COLUMN_WIDTHS: Readonly<FileTreeColumnWidths> = {
 	name: 42,
@@ -49,11 +57,7 @@ export interface FileTreeNavigationError {
 }
 
 export type FileTreeDirectoryTargetReason =
-	| 'initial'
-	| 'directory-row'
-	| 'parent-row'
-	| 'breadcrumb'
-	| 'chat-project';
+	'initial' | 'directory-row' | 'parent-row' | 'breadcrumb' | 'home' | 'chat-project';
 
 export interface FileTreeDirectoryTarget {
 	path: string;
@@ -128,6 +132,14 @@ function parseColumnVisibility(raw: string | null): FileTreeColumnVisibility | n
 	}
 }
 
+function isFileTreeViewPreference(value: string | null): value is FileTreeViewPreference {
+	return value !== null && FILE_TREE_VIEW_PREFERENCES.includes(value as FileTreeViewPreference);
+}
+
+function isSortKey(value: string): value is SortKey {
+	return FILE_TREE_COLUMN_KEYS.includes(value as FileTreeColumnKey);
+}
+
 function fileTreeNavigationError(error: unknown): FileTreeNavigationError {
 	if (error instanceof ApiError) {
 		return {
@@ -186,6 +198,8 @@ export class FileTreeStore {
 	foldersFirst = $state(true);
 	showHiddenFiles = $state(true);
 	showBreadcrumbs = $state(true);
+	showIcons = $state(true);
+	viewPreference = $state<FileTreeViewPreference>('responsive');
 	visibleColumns = $state.raw<FileTreeColumnVisibility>(
 		copyColumnVisibility(DEFAULT_FILE_TREE_COLUMN_VISIBILITY),
 	);
@@ -199,6 +213,7 @@ export class FileTreeStore {
 	#chatProjectBreadcrumbs = $state.raw<FileTreeBreadcrumb[]>([]);
 	#effectiveProjectKey = $state('');
 	#active = false;
+	#projectRequestsAllowed = false;
 	#navigationController: AbortController | null = null;
 	#refreshController: AbortController | null = null;
 	#navigationToken = 0;
@@ -242,6 +257,10 @@ export class FileTreeStore {
 		return this.retainedResponse?.fileRootPath ?? null;
 	}
 
+	get homeDirectory(): FileTreeHomeDirectory | null {
+		return this.retainedResponse?.homeDirectory ?? null;
+	}
+
 	get currentDirectoryPath(): string | null {
 		return this.readyResponse?.directory.path ?? null;
 	}
@@ -282,6 +301,11 @@ export class FileTreeStore {
 		);
 	}
 
+	get isAtHome(): boolean {
+		const homeDirectory = this.homeDirectory;
+		return Boolean(homeDirectory && this.currentDirectoryPath === homeDirectory.path);
+	}
+
 	get visibleColumnKeys(): FileTreeColumnKey[] {
 		return FILE_TREE_COLUMN_KEYS.filter((column) => this.isColumnVisible(column));
 	}
@@ -299,8 +323,8 @@ export class FileTreeStore {
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		if (projectState.kind === 'resolving') return;
 		if (projectState.kind === 'absent') {
+			this.#projectRequestsAllowed = false;
 			this.#projectPath = null;
 			this.#effectiveProjectKey = '';
 			this.#canonicalChatProjectPath = null;
@@ -308,8 +332,14 @@ export class FileTreeStore {
 			this.#resetBrowsingState();
 			return;
 		}
+		if (projectState.kind !== 'available') {
+			this.#projectRequestsAllowed = false;
+			this.#abortRequests();
+			return;
+		}
 
 		const { project } = projectState;
+		this.#projectRequestsAllowed = true;
 		const projectPathChanged = project.projectPath !== this.#projectPath;
 		this.#projectPath = project.projectPath;
 		if (!projectPathChanged && project.effectiveProjectKey === this.#effectiveProjectKey) {
@@ -338,6 +368,7 @@ export class FileTreeStore {
 
 	reset(): void {
 		this.#active = false;
+		this.#projectRequestsAllowed = false;
 		this.#projectPath = null;
 		this.#effectiveProjectKey = '';
 		this.#canonicalChatProjectPath = null;
@@ -350,7 +381,7 @@ export class FileTreeStore {
 		this.#clearFilter();
 		this.#clearDirectoryCaches();
 		this.navigation = { kind: 'loading', target, previous };
-		if (!this.#active) return;
+		if (!this.#active || !this.#projectRequestsAllowed) return;
 		await this.#performNavigation(target, previous);
 	}
 
@@ -365,6 +396,9 @@ export class FileTreeStore {
 		});
 	}
 
+	// Focus stays on the parent row rather than the directory just left. Focusing
+	// that directory scrolls it into view, which slides a sibling row under the
+	// pointer so the next click enters it instead of continuing upward.
 	async goToParent(): Promise<void> {
 		const response = this.readyResponse;
 		const parentPath = response?.directory.parentPath;
@@ -375,7 +409,7 @@ export class FileTreeStore {
 			label: breadcrumbs.at(-1)?.name ?? parentPath,
 			breadcrumbs,
 			reason: 'parent-row',
-			focusPathOnSuccess: response.directory.path,
+			focusPathOnSuccess: FILE_TREE_PARENT_ROW_KEY,
 		});
 	}
 
@@ -389,6 +423,18 @@ export class FileTreeStore {
 			breadcrumbs: breadcrumbs.slice(0, index + 1),
 			reason: 'breadcrumb',
 			focusPathOnSuccess: breadcrumbs[index + 1]?.path,
+		});
+	}
+
+	async goToHome(): Promise<void> {
+		const homeDirectory = this.homeDirectory;
+		if (!homeDirectory || this.isAtHome) return;
+		await this.navigateTo({
+			path: homeDirectory.path,
+			label: homeDirectory.breadcrumbs.at(-1)?.name ?? homeDirectory.path,
+			breadcrumbs: [...homeDirectory.breadcrumbs],
+			reason: 'home',
+			focusPathOnSuccess: FILE_TREE_PARENT_ROW_KEY,
 		});
 	}
 
@@ -410,7 +456,7 @@ export class FileTreeStore {
 		if (this.navigation.kind !== 'error') return;
 		const { target, previous } = this.navigation;
 		this.navigation = { kind: 'loading', target, previous };
-		if (!this.#active) return;
+		if (!this.#active || !this.#projectRequestsAllowed) return;
 		await this.#performNavigation(target, previous);
 	}
 
@@ -424,7 +470,7 @@ export class FileTreeStore {
 
 	async refresh(): Promise<void> {
 		const response = this.readyResponse;
-		if (!response || this.isRefreshing || !this.#active) return;
+		if (!response || this.isRefreshing || !this.#active || !this.#projectRequestsAllowed) return;
 		this.#refreshController?.abort();
 		const controller = new AbortController();
 		const token = ++this.#refreshToken;
@@ -475,7 +521,12 @@ export class FileTreeStore {
 	}
 
 	async fetchChildren(path: string): Promise<void> {
-		if (!this.#active || this.childrenCache.has(path) || this.loadingDirs.has(path)) {
+		if (
+			!this.#active ||
+			!this.#projectRequestsAllowed ||
+			this.childrenCache.has(path) ||
+			this.loadingDirs.has(path)
+		) {
 			return;
 		}
 		const controller = new AbortController();
@@ -532,23 +583,34 @@ export class FileTreeStore {
 		this.filterInput = '';
 	}
 
-	setSortKey(key: SortKey): void {
-		this.sortKey = key;
-		this.#persist(LOCAL_STORAGE_KEYS.fileTreeSortKey, key);
+	setViewPreference(preference: FileTreeViewPreference): void {
+		if (preference === this.viewPreference) return;
+		this.viewPreference = preference;
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeViewPreference, preference);
 	}
 
-	setSortDirection(direction: SortDirection): void {
+	setAlwaysUseDetailedRows(always: boolean): void {
+		this.setViewPreference(always ? 'always-details' : 'responsive');
+	}
+
+	selectSortKey(value: string): void {
+		if (!isSortKey(value) || !this.isColumnVisible(value) || value === this.sortKey) return;
+		this.setSort(value, 'asc');
+	}
+
+	setSort(key: SortKey, direction: SortDirection): void {
+		this.sortKey = key;
 		this.sortDirection = direction;
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeSortKey, key);
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeSortDirection, direction);
 	}
 
+	setSortDirection(direction: SortDirection): void {
+		this.setSort(this.sortKey, direction);
+	}
+
 	toggleSort(key: SortKey): void {
-		if (this.sortKey === key) {
-			this.setSortDirection(this.sortDirection === 'asc' ? 'desc' : 'asc');
-			return;
-		}
-		this.setSortKey(key);
-		this.setSortDirection('asc');
+		this.setSort(key, this.sortKey === key && this.sortDirection === 'asc' ? 'desc' : 'asc');
 	}
 
 	setFoldersFirst(value: boolean): void {
@@ -566,12 +628,16 @@ export class FileTreeStore {
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs, String(value));
 	}
 
+	setShowIcons(value: boolean): void {
+		this.showIcons = value;
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowIcons, String(value));
+	}
+
 	setColumnVisible(column: OptionalFileTreeColumnKey, visible: boolean): void {
 		this.visibleColumns = { ...this.visibleColumns, [column]: visible };
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility, JSON.stringify(this.visibleColumns));
 		if (!visible && this.sortKey === column) {
-			this.setSortKey('name');
-			this.setSortDirection('asc');
+			this.setSort('name', 'asc');
 		}
 	}
 
@@ -621,7 +687,13 @@ export class FileTreeStore {
 	}
 
 	#resumePendingWork(): void {
-		if (!this.#active || !this.#effectiveProjectKey || !this.#projectPath) return;
+		if (
+			!this.#active ||
+			!this.#projectRequestsAllowed ||
+			!this.#effectiveProjectKey ||
+			!this.#projectPath
+		)
+			return;
 		if (this.navigation.kind === 'idle') {
 			void this.navigateTo(this.#initialTarget());
 			return;
@@ -643,6 +715,7 @@ export class FileTreeStore {
 		target: FileTreeDirectoryTarget,
 		previous: FileTreeResponse | null,
 	): Promise<void> {
+		if (!this.#active || !this.#projectRequestsAllowed) return;
 		this.#navigationController?.abort();
 		this.#abortRefresh();
 		this.#abortChildren();
@@ -750,9 +823,7 @@ export class FileTreeStore {
 
 	#loadPreferences(): void {
 		const sortKey = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeSortKey);
-		if (sortKey && FILE_TREE_COLUMN_KEYS.includes(sortKey as FileTreeColumnKey)) {
-			this.sortKey = sortKey as SortKey;
-		}
+		if (sortKey && isSortKey(sortKey)) this.sortKey = sortKey;
 		const sortDirection = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeSortDirection);
 		if (sortDirection === 'asc' || sortDirection === 'desc') {
 			this.sortDirection = sortDirection;
@@ -769,6 +840,12 @@ export class FileTreeStore {
 		if (showBreadcrumbs === 'true' || showBreadcrumbs === 'false') {
 			this.showBreadcrumbs = showBreadcrumbs === 'true';
 		}
+		const showIcons = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeShowIcons);
+		if (showIcons === 'true' || showIcons === 'false') {
+			this.showIcons = showIcons === 'true';
+		}
+		const viewPreference = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeViewPreference);
+		if (isFileTreeViewPreference(viewPreference)) this.viewPreference = viewPreference;
 		const visibility = parseColumnVisibility(
 			getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility),
 		);

@@ -24,6 +24,7 @@ export function toAgentChatReference(
     model: entry.model ?? '',
     nativeSession: entry.nativeSession ?? null,
     carryOverRevision,
+    nativeSeedReceipt: entry.nativeSeedReceipt ?? null,
     settings,
   };
 }

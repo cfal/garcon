@@ -2,7 +2,32 @@ import {
 	WorkspaceLayoutStore,
 	reduceWorkspaceLayout,
 } from '$lib/workspace/workspace-layout.svelte';
-import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout';
+import {
+	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_WINDOW_ID,
+	canonicalWorkspaceSnapshot,
+} from '$lib/workspace/canonical-layout';
+import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
+import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy';
+import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures';
+import { windowNodeById } from '$lib/workspace/window-tree';
+import type { ChatListDock } from '$lib/layout/desktop-layout.js';
+import type {
+	SidebarChatGrouping,
+	SidebarInactivityDuration,
+} from '$lib/stores/local-settings.svelte';
+
+export class AppShellLocalSettingsState {
+	chatListAutohide = $state(false);
+	chatListDock = $state<ChatListDock>('left');
+	sidebarWidth = $state(320);
+	reduceMotion = $state(false);
+	sidebarGrouping = $state<SidebarChatGrouping>('none');
+	sidebarInactivityDuration = $state<SidebarInactivityDuration>('3-days');
+	sidebarGroupNestedProjectPaths = $state(false);
+
+	set(): void {}
+}
 
 export class AppShellBreakpointWorkspace {
 	readonly layout = new WorkspaceLayoutStore(canonicalWorkspaceSnapshot());
@@ -11,7 +36,30 @@ export class AppShellBreakpointWorkspace {
 	sidebarOpen = $state(false);
 	enterCalls = 0;
 	exitCalls = 0;
-	focusChatCalls = 0;
+	showChatCalls = 0;
+	readonly focusedMobileSingletons: PortableSingletonKind[] = [];
+	readonly openedSingletons: PortableSingletonKind[] = [];
+
+	get currentWindowId(): WorkspaceWindowId {
+		return CANONICAL_WINDOW_ID;
+	}
+
+	get focusedChatId(): string | null {
+		const snapshot = this.layout.snapshot;
+		const activeSurfaceId = this.isMobile
+			? snapshot.mobileActiveSurfaceId
+			: windowNodeById(snapshot.desktopRoot, this.currentWindowId)?.tabs.activeId;
+		const surface = activeSurfaceId ? snapshot.surfaces[activeSurfaceId] : null;
+		return surface?.type === 'chat' ? surface.chatId : null;
+	}
+
+	get currentChatSurfaceId() {
+		return CANONICAL_CHAT_SURFACE_ID;
+	}
+
+	resolveSplitAdmissions(): WorkspaceSplitAdmissions {
+		return workspaceSplitAdmissions();
+	}
 
 	async enterMobilePresentation(): Promise<void> {
 		this.enterCalls += 1;
@@ -23,18 +71,40 @@ export class AppShellBreakpointWorkspace {
 		this.isMobile = false;
 	}
 
-	async setManualFullscreen(enabled: boolean): Promise<void> {
+	async enterWindowFullscreen(windowId: WorkspaceWindowId): Promise<void> {
 		const next = reduceWorkspaceLayout(this.layout.snapshot, [
-			{ type: 'set-manual-fullscreen', enabled },
+			{ type: 'set-fullscreen-window', windowId },
+		]);
+		this.layout.publish(this.layout.revision, next);
+	}
+
+	async exitWindowFullscreen(windowId: WorkspaceWindowId): Promise<void> {
+		if (this.layout.snapshot.fullscreenWindowId !== windowId) return;
+		const next = reduceWorkspaceLayout(this.layout.snapshot, [
+			{ type: 'set-fullscreen-window', windowId: null },
 		]);
 		this.layout.publish(this.layout.revision, next);
 	}
 
 	noteChatListFocus(): void {}
-	focusChat(): void {
-		this.focusChatCalls += 1;
+	async showChatInCurrentWindow(chatId: string): Promise<typeof CANONICAL_CHAT_SURFACE_ID> {
+		const next = reduceWorkspaceLayout(this.layout.snapshot, [
+			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId },
+		]);
+		this.layout.publish(this.layout.revision, next);
+		this.showChatCalls += 1;
+		return CANONICAL_CHAT_SURFACE_ID;
 	}
-	focusMobileSingleton(): void {}
+	clearDeletedChat(): Promise<void> {
+		return Promise.resolve();
+	}
+	focusMobileSingleton(kind: PortableSingletonKind): void {
+		this.focusedMobileSingletons.push(kind);
+	}
+	openSingletonInNewWindow(kind: PortableSingletonKind): Promise<string> {
+		this.openedSingletons.push(kind);
+		return Promise.resolve(`singleton:${kind}`);
+	}
 	focusMostRecentTerminalOrCreate(): Promise<void> {
 		return Promise.resolve();
 	}

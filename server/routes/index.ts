@@ -12,22 +12,32 @@ import createSnippetRoutes from './snippets.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
+import createPreambleRoutes from './preambles.js';
+import { createChatPreambleRoutes } from './chat-preambles.js';
 import createTerminalRoutes from './terminals.js';
+import createPromptRefinementRoutes from './prompt-refinement.js';
+import { createRuntimeRoutes } from './runtime.js';
+import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
+import { createChatSnapshotRoutes } from './chat-snapshot.js';
+import { createChatRowRoutes } from './chat-rows.js';
+import { createChatExportRoutes } from './chat-export.js';
+import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
+import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
+import { createProjectResolutionRoutes } from './project-resolution.js';
+import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
-import type { PathCache } from '../chats/path-cache.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
-import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
+import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
+import type { ShareTranscriptSnapshotPort } from './shares.js';
 import type { AgentRegistry } from '../agents/registry.js';
-import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
-import type { AgentSwitchService } from '../agents/agent-switch-service.js';
 import type { SnippetService } from '../snippets/service.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
@@ -36,55 +46,93 @@ import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { TerminalManager } from '../terminals/terminal-manager.js';
 import type { TranscriptSearchController } from '../chats/search/controller.js';
 import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
+import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
+import type { CommandLedger } from '../commands/command-ledger.js';
+import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
+import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
+import type { ChatRowService } from '../chats/chat-row-service.js';
+import type { TranscriptExportService } from '../chats/transcript-export/service.js';
+import type { HandoffArtifactService } from '../chats/handoff-artifact/service.js';
+import type { PreambleService } from '../preambles/service.js';
+import type { ChatPreambleSelectionService } from '../preambles/chat-selection-service.js';
 
 export default function createAllRoutes({
   registry,
   settings,
+  recentTitleIcons,
   queue,
-  pathCache,
+  processing,
   metadata,
   chatViews,
+  shareSnapshots,
   agents,
-  pendingInputs,
   telegramNotifier,
   telegramSettings,
   shareStore,
   apiProviders,
   chatCommands,
   chatListProjector,
-  agentSwitch,
   modelCatalogResponseCache,
   lastSelectedChat,
   scheduledPrompts,
   snippets,
+  preambles,
+  chatPreambleSelection,
   terminals,
   searchIndex,
   transcriptSearchSettings,
+  runtimeState,
+  commandLedger,
+  transientFeeds,
+  chatRows,
+  transcriptExport,
+  handoffArtifact,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
+  recentTitleIcons: RecentTitleIconSource;
   queue: ChatExecutionService;
-  pathCache: PathCache;
+  processing: ChatProcessingActivity;
   metadata: MetadataIndex;
-  chatViews: ChatViewPageReader;
+  chatViews: TranscriptPageReader;
+  shareSnapshots: ShareTranscriptSnapshotPort;
   agents: AgentRegistry;
-  pendingInputs: PendingUserInputServiceContract;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
   shareStore: IShareStore;
   apiProviders: ApiProviderService;
   chatCommands: ChatCommandService;
   chatListProjector: ChatListProjector;
-  agentSwitch: AgentSwitchService;
   modelCatalogResponseCache: ModelCatalogResponseCache;
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
+  preambles: PreambleService;
+  chatPreambleSelection: ChatPreambleSelectionService;
   terminals: TerminalManager;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
+  runtimeState: ServerRuntimeState;
+  commandLedger: CommandLedger;
+  transientFeeds: ChatTransientFeedStore;
+  chatRows: ChatRowService;
+  transcriptExport: TranscriptExportService;
+  handoffArtifact: HandoffArtifactService;
 }): RouteMap {
   return {
+    ...createRuntimeRoutes(runtimeState),
+    ...createAgentTurnReceiptRoutes(commandLedger),
+    ...createChatSnapshotRoutes({
+      summaries: chatListProjector,
+      execution: queue,
+      chatViews,
+      transientFeeds,
+    }),
+    ...createChatRowRoutes(chatRows),
+    ...createChatExportRoutes(transcriptExport),
+    ...createChatHandoffArtifactRoutes(handoffArtifact),
+    ...createNativeSessionLookupRoutes(registry, agents),
+    ...createProjectResolutionRoutes({ registry }),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
@@ -92,19 +140,18 @@ export default function createAllRoutes({
     ...createChatRoutes({
       registry,
       settings,
+      recentTitleIcons,
       queue,
-      pathCache,
+      processing,
       metadata,
       chatViews,
       agents,
-      pendingInputs,
       commandService: chatCommands,
       chatListProjector,
-      agentSwitch,
       lastSelectedChat,
       searchIndex,
     }),
-    ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
+    ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     ...createFilesRoutes(registry),
     ...createCommandsRoutes({ registry, agents }),
     ...createWorkspaceRoutes(
@@ -123,6 +170,12 @@ export default function createAllRoutes({
     ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),
+    ...createPreambleRoutes(preambles),
+    ...createChatPreambleRoutes({
+      selection: chatPreambleSelection,
+      preambles,
+    }),
+    ...createPromptRefinementRoutes({ settings, agents }),
     ...createTerminalRoutes(terminals),
   };
 }

@@ -36,6 +36,7 @@ export function startGitFreshnessPolling({
 	return startVisibilityPolling({
 		intervalMs,
 		poll: () => checkFreshness(projectPath),
+		pollImmediately: true,
 		documentRef,
 		setIntervalFn,
 		clearIntervalFn,

@@ -2,12 +2,22 @@ import { ApiError } from '$lib/api/client.js';
 import type { CommandErrorCode } from '$shared/chat-command-contracts';
 
 const OUTCOME_UNKNOWN_ERROR_CODES = new Set<string>(
-	['ACTIVE_INPUT_OUTCOME_UNKNOWN'] satisfies CommandErrorCode[],
+	['STEER_OUTCOME_UNKNOWN', 'GOAL_CONTROL_OUTCOME_UNKNOWN'] satisfies CommandErrorCode[],
 );
 const DEFINITIVE_ERROR_CODES = new Set<string>(
-	['ACTIVE_INPUT_NOT_DELIVERED'] satisfies CommandErrorCode[],
+	[
+		'SERVER_SHUTTING_DOWN',
+		'STEER_NOT_DELIVERED',
+		'STEER_PROVIDER_REJECTED',
+		'STEER_TURN_UNAVAILABLE',
+		'STEER_TURN_CHANGED',
+		'STEER_TURN_NOT_STEERABLE',
+		'STEER_CAPACITY_EXHAUSTED',
+		'QUEUE_STEER_FINALIZATION_FAILED',
+		'QUEUE_STEER_RECOVERY_FAILED',
+		'GOAL_CONTROL_NOT_DELIVERED',
+	] satisfies CommandErrorCode[],
 );
-
 export class CommandOutcomeUnknownError extends Error {
 	constructor(options?: ErrorOptions) {
 		super('The command outcome could not be confirmed', options);
@@ -17,9 +27,15 @@ export class CommandOutcomeUnknownError extends Error {
 
 function isAmbiguousCommandFailure(error: unknown): boolean {
 	if (!(error instanceof ApiError)) return true;
-	if (error.errorCode && DEFINITIVE_ERROR_CODES.has(error.errorCode)) return false;
-	return error.status >= 500
-		|| (error.errorCode !== undefined && OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode));
+	if (error.errorCode !== undefined) {
+		if (OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode)) return true;
+		if (DEFINITIVE_ERROR_CODES.has(error.errorCode)) return false;
+	}
+	return error.status >= 500;
+}
+
+function isStructuredOutcomeUnknownFailure(error: unknown): boolean {
+	return error instanceof ApiError && OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode ?? '');
 }
 
 /** Retries one ambiguous transport outcome with the caller's unchanged command identity. */
@@ -31,8 +47,12 @@ export async function submitIdempotentCommand<T>(submit: () => Promise<T>): Prom
 		try {
 			return await submit();
 		} catch (secondError) {
-			if (!isAmbiguousCommandFailure(secondError)) throw secondError;
-			throw new CommandOutcomeUnknownError({ cause: secondError });
+			throw new CommandOutcomeUnknownError({
+				cause:
+					isStructuredOutcomeUnknownFailure(firstError) || !isAmbiguousCommandFailure(secondError)
+						? firstError
+						: secondError,
+			});
 		}
 	}
 }

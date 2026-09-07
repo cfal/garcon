@@ -48,4 +48,34 @@ describe('authenticateHttpRequest', () => {
     });
     expect(verifyAuthTokenClaims).toHaveBeenCalledWith('valid-token');
   });
+
+  it('accepts the process-scoped local capability before JWT verification', async () => {
+    const capability = `garcon_local_${'a'.repeat(43)}`;
+    const result = await authenticateHttpRequest(new Request('http://localhost/api/private', {
+      headers: { authorization: `Bearer ${capability}` },
+    }), { localCapability: capability });
+
+    expect(result.errorResponse).toBeNull();
+    expect(result.principal).toEqual({
+      mode: 'local',
+      key: 'local',
+      username: 'local',
+      expiresAtMs: null,
+    });
+    expect(verifyAuthTokenClaims).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Unicode token with equal character length without throwing', async () => {
+    verifyAuthTokenClaims.mockResolvedValue(null);
+    const capability = `garcon_local_${'a'.repeat(43)}`;
+    const token = `garcon_local_\u00e9${'a'.repeat(42)}`;
+    expect(token.length).toBe(capability.length);
+
+    const result = await authenticateHttpRequest(new Request('http://localhost/api/private', {
+      headers: { authorization: `Bearer ${token}` },
+    }), { localCapability: capability });
+
+    expect(result.errorResponse.status).toBe(401);
+    expect(result.principal).toBeNull();
+  });
 });

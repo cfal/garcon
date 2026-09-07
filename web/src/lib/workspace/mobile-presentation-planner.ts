@@ -1,14 +1,14 @@
 import { planDesktopReturnMutations } from './responsive-handoff.js';
-import {
-	CHAT_SURFACE_ID,
-	type MobileReturnTarget,
-	type WorkspaceLayoutMutation,
-	type WorkspaceLayoutSnapshot,
+import type {
+	MobileReturnTarget,
+	WorkspaceLayoutMutation,
+	WorkspaceLayoutSnapshot,
 } from './surface-types.js';
+import { collectWindowNodes } from './window-tree.js';
 
 interface MobileWorkspaceContext {
 	chatId: string;
-	effectiveProjectKey: string | null;
+	projectPath: string;
 }
 
 interface MobilePresentationPlannerDeps {
@@ -22,7 +22,7 @@ export interface MobileReturnPlan {
 }
 
 export class MobilePresentationPlanner {
-	#mostRecentSurfaceIds: string[] = [CHAT_SURFACE_ID];
+	#mostRecentSurfaceIds: string[] = [];
 
 	constructor(private readonly deps: MobilePresentationPlannerDeps) {}
 
@@ -41,7 +41,7 @@ export class MobilePresentationPlanner {
 				invokerSurfaceId: snapshot.mobileActiveSurfaceId,
 				invokerHost: 'mobile',
 				chatId: context?.chatId ?? null,
-				effectiveProjectKey: context?.effectiveProjectKey ?? null,
+				projectPath: context?.projectPath ?? null,
 				routeIdentity: this.deps.getRouteIdentity(),
 			},
 		];
@@ -50,11 +50,14 @@ export class MobilePresentationPlanner {
 	resolveReturn(
 		excluding: string | ReadonlySet<string>,
 		snapshot: WorkspaceLayoutSnapshot,
+		sourceSnapshot: WorkspaceLayoutSnapshot = snapshot,
 	): MobileReturnPlan {
 		const context = this.deps.getContext();
 		const routeIdentity = this.deps.getRouteIdentity();
 		const isExcluded = (surfaceId: string): boolean =>
 			typeof excluding === 'string' ? surfaceId === excluding : excluding.has(surfaceId);
+		const isAvailable = (surfaceId: string): boolean =>
+			!isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]);
 		for (let index = snapshot.mobileReturnStack.length - 1; index >= 0; index -= 1) {
 			const target = snapshot.mobileReturnStack[index];
 			if (
@@ -62,7 +65,7 @@ export class MobilePresentationPlanner {
 				snapshot.surfaces[target.invokerSurfaceId] &&
 				target.routeIdentity === routeIdentity &&
 				target.chatId === (context?.chatId ?? null) &&
-				target.effectiveProjectKey === (context?.effectiveProjectKey ?? null)
+				target.projectPath === (context?.projectPath ?? null)
 			) {
 				return {
 					activeId: target.invokerSurfaceId,
@@ -70,12 +73,30 @@ export class MobilePresentationPlanner {
 				};
 			}
 		}
-		const recent = this.#mostRecentSurfaceIds.find(
-			(surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]),
-		);
-		const activeMain = snapshot.main.activeId;
+		const recentSurfaceId = this.#mostRecentSurfaceIds.find(isAvailable);
+		const workspaceWindows = collectWindowNodes(snapshot.desktopRoot);
+		const sourceWindowRecentSurfaceId = collectWindowNodes(sourceSnapshot.desktopRoot)
+			.filter((workspaceWindow) => workspaceWindow.tabs.order.some(isExcluded))
+			.flatMap((workspaceWindow) => workspaceWindow.tabs.mru)
+			.find(isAvailable);
+		const activeWindowSurfaceId = workspaceWindows
+			.map((workspaceWindow) => workspaceWindow.tabs.activeId)
+			.find(isAvailable);
+		const recentWindowSurfaceId = workspaceWindows
+			.flatMap((workspaceWindow) => workspaceWindow.tabs.mru)
+			.find(isAvailable);
+		const currentMobileSurfaceId = isAvailable(snapshot.mobileActiveSurfaceId)
+			? snapshot.mobileActiveSurfaceId
+			: null;
+		const activeId =
+			recentSurfaceId ??
+			sourceWindowRecentSurfaceId ??
+			activeWindowSurfaceId ??
+			recentWindowSurfaceId ??
+			currentMobileSurfaceId;
+		if (!activeId) throw new Error('No mobile return surface is available');
 		return {
-			activeId: recent ?? (activeMain && !isExcluded(activeMain) ? activeMain : CHAT_SURFACE_ID),
+			activeId,
 			returnStack: [],
 		};
 	}

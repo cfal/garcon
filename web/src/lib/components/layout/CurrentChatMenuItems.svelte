@@ -1,30 +1,33 @@
 <script lang="ts">
-	import Columns2 from '@lucide/svelte/icons/columns-2';
 	import Edit2 from '@lucide/svelte/icons/pencil';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitFork from '@lucide/svelte/icons/git-fork';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+	import History from '@lucide/svelte/icons/history';
 	import Info from '@lucide/svelte/icons/info';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import Minimize2 from '@lucide/svelte/icons/minimize-2';
+	import ListIcon from '@lucide/svelte/icons/list';
+	import ListPlus from '@lucide/svelte/icons/list-plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import { DropdownMenuItem, DropdownMenuSeparator } from '$lib/components/ui/dropdown-menu';
+	import {
+		dropdownMenuPrimitives,
+		type MenuPrimitives,
+	} from '$lib/components/ui/menu-primitives.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
+		menu = dropdownMenuPrimitives,
 		selectedChat,
-		showSplitViewAction,
-		showFullscreenAction,
-		splitEnabled,
-		isDesktopFullscreen,
 		canReload,
 		canUpdateProjectPath,
 		canFork,
 		canForkNow,
-		onToggleSplitMode,
-		onToggleDesktopFullscreen,
+		onOpenUserMessageNavigator,
+		onOpenGitHistory,
+		onOpenGitCompare,
+		onConfigurePreambles,
 		onRename,
 		onDetails,
 		onReload,
@@ -33,17 +36,16 @@
 		onFork,
 		onDelete,
 	}: {
+		menu?: MenuPrimitives;
 		selectedChat: ChatSessionRecord;
-		showSplitViewAction: boolean;
-		showFullscreenAction: boolean;
-		splitEnabled: boolean;
-		isDesktopFullscreen: boolean;
 		canReload: boolean;
 		canUpdateProjectPath: boolean;
 		canFork: boolean;
 		canForkNow: boolean;
-		onToggleSplitMode: () => void;
-		onToggleDesktopFullscreen?: () => void;
+		onOpenUserMessageNavigator?: () => void;
+		onOpenGitHistory?: () => void;
+		onOpenGitCompare?: () => void;
+		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
 		onReload: () => void;
@@ -52,69 +54,74 @@
 		onFork: () => void;
 		onDelete: () => void;
 	} = $props();
-
-	const splitLabel = $derived(
-		splitEnabled ? m.workspace_exit_split_view() : m.workspace_split_view(),
-	);
-	const fullscreenLabel = $derived(
-		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
-	);
 </script>
 
-{#if showSplitViewAction || showFullscreenAction}
-	{#if showSplitViewAction}
-		<DropdownMenuItem onclick={onToggleSplitMode}>
-			<Columns2 />
-			{splitLabel}
-		</DropdownMenuItem>
+{#if onOpenGitHistory || onOpenGitCompare}
+	{#if onOpenGitHistory}
+		<menu.Item onSelect={onOpenGitHistory}>
+			<History />
+			{m.workspace_open_git_history()}
+		</menu.Item>
 	{/if}
-	{#if showFullscreenAction}
-		<DropdownMenuItem onclick={onToggleDesktopFullscreen}>
-			{#if isDesktopFullscreen}<Minimize2 />{:else}<Maximize2 />{/if}
-			{fullscreenLabel}
-		</DropdownMenuItem>
+	{#if onOpenGitCompare}
+		<menu.Item onSelect={onOpenGitCompare}>
+			<GitCompareArrows />
+			{m.workspace_open_git_compare()}
+		</menu.Item>
 	{/if}
-	<DropdownMenuSeparator />
+	<menu.Separator />
 {/if}
 
-<DropdownMenuItem onclick={onShare}>
+{#if onOpenUserMessageNavigator}
+	<menu.Item onSelect={onOpenUserMessageNavigator}>
+		<ListIcon />
+		{m.chat_user_message_navigator_menu()}
+	</menu.Item>
+{/if}
+<menu.Item onSelect={onShare}>
 	<Share2 />
 	{m.share_button()}
-</DropdownMenuItem>
-<DropdownMenuItem onclick={onDetails}>
+</menu.Item>
+<menu.Item onSelect={onDetails}>
 	<Info />
 	{m.sidebar_chats_details()}
-</DropdownMenuItem>
+</menu.Item>
+{#if onConfigurePreambles}
+	<menu.Item onSelect={onConfigurePreambles}>
+		<ListPlus />
+		{m.sidebar_chats_configure_preambles()}
+	</menu.Item>
+{/if}
 {#if canFork}
-	<DropdownMenuItem disabled={!canForkNow} onclick={() => canForkNow && onFork()}>
+	<menu.Item disabled={!canForkNow} onSelect={() => canForkNow && onFork()}>
 		<GitFork />
 		{m.sidebar_chats_fork()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
-<DropdownMenuItem onclick={onRename}>
+<menu.Item onSelect={onRename}>
 	<Edit2 />
 	{m.sidebar_tooltips_edit_chat_name()}
-</DropdownMenuItem>
+</menu.Item>
 {#if canUpdateProjectPath}
-	<DropdownMenuItem
+	<menu.Item
 		disabled={selectedChat.isProcessing}
-		onclick={() => !selectedChat.isProcessing && onProjectPath()}
+		onSelect={() => !selectedChat.isProcessing && onProjectPath()}
 	>
 		<FolderOpen />
 		{m.sidebar_project_path_menu_item()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
 {#if canReload}
-	<DropdownMenuItem
+	<menu.Item
 		disabled={selectedChat.isProcessing}
-		onclick={() => !selectedChat.isProcessing && onReload()}
+		onSelect={() => !selectedChat.isProcessing && onReload()}
 	>
 		<RefreshCw />
 		{m.sidebar_chats_reload()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
-<DropdownMenuSeparator />
-<DropdownMenuItem variant="destructive" onclick={onDelete}>
+<menu.Separator />
+<menu.Item variant="destructive" onSelect={onDelete}>
 	<Trash2 />
 	{m.sidebar_tooltips_delete_chat()}
-</DropdownMenuItem>
+</menu.Item>

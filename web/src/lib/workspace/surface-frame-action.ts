@@ -40,7 +40,10 @@ export function surfaceFrame(
 			element: node,
 			attachRetainedRenderer: () => options.renderer?.activate(options.waitForRenderer ?? true),
 			focusPrimary: () => {
-				if (!options.renderer?.focusPrimary()) primaryControl(node).focus();
+				const fallback = primaryControl(node);
+				if (!options.renderer?.focusPrimary(() => document.activeElement === fallback)) {
+					fallback.focus();
+				}
 			},
 		});
 	}

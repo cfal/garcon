@@ -4,9 +4,12 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
+import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
+import { MAX_ATTACHMENT_UPLOAD_BODY_BYTES } from '../../attachments/validation.ts';
 import {
   FILE_REVISION_HEADER,
+  MAX_FILE_VIEW_BYTES,
   isFileRevision,
   parseFileTreeResponse,
   parseReadTextResponse,
@@ -16,15 +19,19 @@ import {
 let projectPath;
 let outsidePath;
 let originalProjectBaseDir;
+let originalHome;
 
 beforeEach(async () => {
   originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+  originalHome = process.env.HOME;
   projectPath = path.join(os.tmpdir(), `garcon-files-route-${randomUUID()}`);
   outsidePath = path.join(
     os.tmpdir(),
     `garcon-files-route-outside-${randomUUID()}`,
   );
   process.env.GARCON_PROJECT_BASE_DIR = projectPath;
+  process.env.HOME = projectPath;
+  resetServerConfigForTests();
   await fs.mkdir(path.join(projectPath, 'src'), { recursive: true });
   await fs.mkdir(outsidePath, { recursive: true });
   await fs.writeFile(path.join(projectPath, 'src/main.ts'), 'hello\n', 'utf8');
@@ -36,6 +43,12 @@ afterEach(async () => {
   } else {
     process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
   }
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
+  }
+  resetServerConfigForTests();
   await fs.rm(projectPath, { recursive: true, force: true });
   await fs.rm(outsidePath, { recursive: true, force: true });
 });
@@ -53,6 +66,10 @@ describe('files route', () => {
     expect(response.status).toBe(200);
     expect(parseFileTreeResponse(body)).not.toBeNull();
     expect(body.fileRootPath).toBe(projectPath);
+    expect(body.homeDirectory).toEqual({
+      path: projectPath,
+      breadcrumbs: [{ name: path.basename(projectPath), path: projectPath }],
+    });
     expect(body.directory).toEqual({
       path: projectPath,
       relativePath: '',
@@ -67,6 +84,131 @@ describe('files route', () => {
         type: 'directory',
       }),
     );
+  });
+
+  it('returns a canonical Home target inside the configured base', async () => {
+    const homePath = path.join(projectPath, 'users', 'me');
+    await fs.mkdir(homePath, { recursive: true });
+    process.env.HOME = homePath;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toEqual({
+      path: homePath,
+      breadcrumbs: [
+        { name: path.basename(projectPath), path: projectPath },
+        { name: 'users', path: path.join(projectPath, 'users') },
+        { name: 'me', path: homePath },
+      ],
+    });
+  });
+
+  it('canonicalizes an in-base symlinked Home target', async () => {
+    const homePath = path.join(projectPath, 'users', 'me');
+    const homeAlias = path.join(projectPath, 'home-alias');
+    await fs.mkdir(homePath, { recursive: true });
+    await fs.symlink(homePath, homeAlias, 'dir');
+    process.env.HOME = homeAlias;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toEqual({
+      path: homePath,
+      breadcrumbs: [
+        { name: path.basename(projectPath), path: projectPath },
+        { name: 'users', path: path.join(projectPath, 'users') },
+        { name: 'me', path: homePath },
+      ],
+    });
+  });
+
+  it('withholds Home when it is outside the configured base', async () => {
+    process.env.HOME = outsidePath;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toBeNull();
+    expect(JSON.stringify(body)).not.toContain(outsidePath);
+  });
+
+  it('withholds Home when an in-base symlink escapes the configured base', async () => {
+    const homeAlias = path.join(projectPath, 'home-alias');
+    await fs.symlink(outsidePath, homeAlias, 'dir');
+    process.env.HOME = homeAlias;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toBeNull();
+    expect(JSON.stringify(body)).not.toContain(outsidePath);
+  });
+
+  it('withholds Home when the configured path is missing or not a directory', async () => {
+    const filePath = path.join(projectPath, 'home-file');
+    await fs.writeFile(filePath, 'not a directory\n', 'utf8');
+
+    for (const homePath of [path.join(projectPath, 'missing-home'), filePath]) {
+      process.env.HOME = homePath;
+      resetServerConfigForTests();
+      const routes = createFilesRoutes({ getChat: () => null });
+      const url = new URL('http://localhost/api/v1/files/tree');
+      const response = await routes['/api/v1/files/tree'].GET(
+        new Request(url),
+        url,
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(parseFileTreeResponse(body)).not.toBeNull();
+      expect(body.homeDirectory).toBeNull();
+    }
+  });
+
+  it('keeps the file tree available when Home resolution fails', async () => {
+    process.env.HOME = path.join(projectPath, 'x'.repeat(4096));
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toBeNull();
   });
 
   it('navigates to parent and sibling directories inside the base', async () => {
@@ -233,47 +375,6 @@ describe('files route', () => {
     expect(body.errorCode).toBe('FILE_TREE_PERMISSION_DENIED');
   });
 
-  it('keeps the selector-based array response for already-open legacy clients', async () => {
-    await fs.mkdir(path.join(projectPath, 'node_modules'));
-    await fs.mkdir(path.join(projectPath, '.git'));
-    await fs.writeFile(path.join(projectPath, 'build'), 'legacy-hidden\n', 'utf8');
-    await fs.symlink('src', path.join(projectPath, 'src-link'), 'dir');
-    await fs.symlink(outsidePath, path.join(projectPath, 'unsafe-link'), 'dir');
-    const routes = createFilesRoutes({
-      getChat: () => ({ projectPath }),
-    });
-    const url = new URL(
-      'http://localhost/api/v1/files/tree?chatId=legacy-chat',
-    );
-    const response = await routes['/api/v1/files/tree'].GET(
-      new Request(url),
-      url,
-    );
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(Array.isArray(body)).toBe(true);
-    expect(body).toContainEqual(
-      expect.objectContaining({ name: 'src', relativePath: 'src' }),
-    );
-    expect(body).toContainEqual(
-      expect.objectContaining({ name: 'src-link', type: 'file' }),
-    );
-    expect(body.map((entry) => entry.name)).not.toEqual(
-      expect.arrayContaining(['node_modules', '.git', 'build', 'unsafe-link']),
-    );
-
-    const fileUrl = new URL(
-      `http://localhost/api/v1/files/tree?chatId=legacy-chat&path=${encodeURIComponent(path.join(projectPath, 'src/main.ts'))}`,
-    );
-    const fileResponse = await routes['/api/v1/files/tree'].GET(
-      new Request(fileUrl),
-      fileUrl,
-    );
-    expect(fileResponse.status).toBe(200);
-    expect(await fileResponse.json()).toEqual([]);
-  });
-
   it('accepts canonical directory paths beneath a symlinked configured base', async () => {
     const baseAlias = path.join(outsidePath, 'base-alias');
     await fs.symlink(projectPath, baseAlias, 'dir');
@@ -390,6 +491,31 @@ describe('files route', () => {
     expect(body.error).toBe(`Project path not found: ${missingPath}`);
   });
 
+  it('returns 404 for unresolvable project roots during path canonicalization', async () => {
+    const danglingPath = path.join(projectPath, 'dangling');
+    const danglingAncestorPath = path.join(projectPath, 'dangling-ancestor');
+    const filePath = path.join(projectPath, 'file');
+    await fs.symlink(path.join(projectPath, 'missing'), danglingPath);
+    await fs.symlink(path.join(projectPath, 'missing-ancestor'), danglingAncestorPath);
+    await fs.writeFile(filePath, 'not a directory');
+    const projectPaths = [
+      danglingPath,
+      path.join(danglingAncestorPath, 'project'),
+      path.join(filePath, 'project'),
+    ];
+    const routes = createFilesRoutes({ getChat: () => null });
+
+    for (const unresolvablePath of projectPaths) {
+      const url = new URL(
+        `http://localhost/api/v1/files/list?projectPath=${encodeURIComponent(unresolvablePath)}`,
+      );
+      const response = await routes['/api/v1/files/list'].GET(new Request(url), url);
+      const body = await response.json();
+      expect(response.status).toBe(404);
+      expect(body.error).toBe(`Project path not found: ${unresolvablePath}`);
+    }
+  });
+
   it('rejects chat project paths outside the configured base', async () => {
     const routes = createFilesRoutes({
       getChat: () => ({ projectPath: outsidePath }),
@@ -478,6 +604,27 @@ describe('files route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('image/png');
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(imageBytes);
+  });
+
+  it('rejects oversized text and binary files before buffering them', async () => {
+    const largePath = path.join(projectPath, 'large.bin');
+    await fs.writeFile(largePath, '');
+    await fs.truncate(largePath, MAX_FILE_VIEW_BYTES + 1);
+    const routes = createFilesRoutes({ getChat: () => null });
+
+    for (const routePath of ['text', 'content']) {
+      const url = new URL(
+        `http://localhost/api/v1/files/${routePath}?projectPath=${encodeURIComponent(projectPath)}&path=large.bin`,
+      );
+      const response = await routes[`/api/v1/files/${routePath}`].GET(
+        new Request(url),
+        url,
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(body.errorCode).toBe('FILE_TOO_LARGE');
+    }
   });
 
   it('rejects writes through project symlink directories that resolve outside the project root', async () => {
@@ -858,5 +1005,60 @@ describe('files route', () => {
       size: '%PDF-1.7'.length,
     });
     expect(body.images).toEqual(body.attachments);
+  });
+
+  it('uploads video attachments with their browser MIME type', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const formData = new FormData();
+    formData.append(
+      'attachments',
+      new File(['video-bytes'], 'clip.mp4', { type: 'video/mp4' }),
+    );
+    const url = new URL('http://localhost/api/v1/files/upload-attachments');
+    const response = await routes['/api/v1/files/upload-attachments'].POST(
+      new Request(url, { method: 'POST', body: formData }),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.attachments).toHaveLength(1);
+    expect(body.attachments[0]).toMatchObject({
+      name: 'clip.mp4',
+      mimeType: 'video/mp4',
+      size: 'video-bytes'.length,
+    });
+    expect(body.attachments[0].data).toStartWith('data:video/mp4;base64,');
+  });
+
+  it('rejects oversized streamed attachment bodies without Content-Length', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const chunk = new Uint8Array(1024 * 1024);
+    let bytesSent = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (bytesSent > MAX_ATTACHMENT_UPLOAD_BODY_BYTES) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+        bytesSent += chunk.byteLength;
+      },
+    });
+    const url = new URL('http://localhost/api/v1/files/upload-attachments');
+    const request = new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'multipart/form-data; boundary=test' },
+      body,
+      duplex: 'half',
+    });
+
+    expect(request.headers.has('content-length')).toBe(false);
+    const response = await routes['/api/v1/files/upload-attachments'].POST(request, url);
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error: 'Upload too large. Maximum request size is 30MB.',
+    });
   });
 });

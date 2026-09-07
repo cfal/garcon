@@ -68,7 +68,7 @@ describe('Lightpanda fork and delete', () => {
       await replaceFirstAcceptedResponse(fixture.page, '/api/v1/chats/fork-run');
       await app.sendComposer('/fork ui-fork-retry-message');
       const forkId = await app.waitForSelectedChatChange(source.id);
-      await app.waitForText('echo:ui-fork-retry-message');
+      await app.waitForAssistantMessageContaining('ui-fork-retry-message');
 
       const interceptedBodies = await acceptedResponseRequestBodies(fixture.page);
       expect(interceptedBodies).toHaveLength(2);
@@ -79,9 +79,10 @@ describe('Lightpanda fork and delete', () => {
       });
       const chats = await fixture.integration.client.listChats();
       expect(chats.sessions.filter((entry) => entry.id === forkId)).toHaveLength(1);
-      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
-        request.lastUserText === 'ui-fork-retry-message'
-      ))).toHaveLength(1);
+      const forkRequests = fixture.integration.fakeProviders.openAi.requests().filter((request) =>
+        request.lastUserText.endsWith('ui-fork-retry-message'));
+      expect(forkRequests).toHaveLength(1);
+      expect(forkRequests[0]?.lastUserText).toContain('<carried-context version="3">');
       fixture.assertNoBrowserErrors();
     });
   });

@@ -1,84 +1,57 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import History from '@lucide/svelte/icons/history';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import {
 		type GitHistoryRevertTarget,
 		type GitHistoryController,
 	} from '$lib/git/history/git-history.svelte.js';
+	import type { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
+	import GitComparisonScreen from './GitComparisonScreen.svelte';
 
 	interface GitHistoryViewProps {
 		history: GitHistoryController;
+		comparisonSelection: GitHistoryComparisonSelectionState;
 		projectPath: string | null;
-		effectiveProjectKey: string | null;
-		isMobile: boolean;
+		presentation: WorkspaceWindowId | 'mobile';
+		active?: boolean;
 		diffMode: DiffMode;
 		contextLines: number;
 		diffFontSize: number;
-		refreshToken?: number;
 		onRevertCommit: (commit: GitHistoryRevertTarget) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
+		onOpenSelectedComparison: () => void;
+		onAppendToChatDraft?: ChatDraftAppend;
+		onOpenChat: () => void;
+		onSetDiffMode?: (mode: DiffMode) => void;
+		onSetContextLines?: (lines: number) => void;
+		onSetDiffFontSize?: (size: string) => void;
 	}
 
 	let {
 		history,
+		comparisonSelection,
 		projectPath,
-		effectiveProjectKey,
-		isMobile,
+		presentation,
+		active = true,
 		diffMode,
 		contextLines,
 		diffFontSize,
-		refreshToken = 0,
 		onRevertCommit,
 		onOpenInEditor,
+		onOpenSelectedComparison,
+		onAppendToChatDraft,
+		onOpenChat,
+		onSetDiffMode = () => undefined,
+		onSetContextLines = () => undefined,
+		onSetDiffFontSize = () => undefined,
 	}: GitHistoryViewProps = $props();
+	const isMobile = $derived(presentation === 'mobile');
 
-	let loadedProjectPath = $state<string | null>(null);
-	let loadedEffectiveProjectKey = $state<string | null>(null);
-	let lastRefreshToken = $state(0);
-
-	$effect(() => {
-		const project = projectPath;
-		const projectKey = effectiveProjectKey;
-		untrack(() => {
-			if (!project || !projectKey) {
-				loadedProjectPath = null;
-				loadedEffectiveProjectKey = null;
-				history.resetForProject(null);
-				return;
-			}
-			if (loadedProjectPath === project && loadedEffectiveProjectKey === projectKey) return;
-			const identityChanged =
-				loadedEffectiveProjectKey !== null && loadedEffectiveProjectKey !== projectKey;
-			loadedProjectPath = project;
-			loadedEffectiveProjectKey = projectKey;
-			if (identityChanged) history.resetForProject(project);
-			history.loadInitial(project);
-		});
-	});
-
-	$effect(() => {
-		const project = projectPath;
-		const mode = diffMode;
-		const context = contextLines;
-		untrack(() => {
-			history.setDisplayOptions(project, mode, context);
-		});
-	});
-
-	$effect(() => {
-		const project = projectPath;
-		const token = refreshToken;
-		untrack(() => {
-			if (token === lastRefreshToken) return;
-			lastRefreshToken = token;
-			if (project) history.loadInitial(project);
-		});
-	});
-
-	function revertListCommit(commit: { hash: string; shortHash: string; subject: string }): void {
+	function requestRevertCommit(commit: GitHistoryRevertTarget): void {
 		onRevertCommit({
 			hash: commit.hash,
 			shortHash: commit.shortHash,
@@ -99,34 +72,76 @@
 		error={history.listError}
 		nextOffset={history.nextOffset}
 		{isMobile}
-		scrollTop={history.listScrollTop}
+		position={history.listPosition}
+		collectionChange={history.listChange}
 		onOpenCommit={(hash) => history.openCommit(projectPath, hash)}
-		onRevertCommit={revertListCommit}
 		onLoadMore={() => history.loadMore(projectPath)}
-		onScrollSave={(top) => history.saveListScrollTop(top)}
+		onPositionSave={(position) => history.saveListPosition(position)}
+		comparisonSelectionActive={comparisonSelection.active}
+		comparisonSelectionSlot={comparisonSelection.slot}
+		comparisonFrom={comparisonSelection.from}
+		comparisonTo={comparisonSelection.to}
+		onBeginComparison={() => comparisonSelection.begin()}
+		onCancelComparison={() => comparisonSelection.cancel()}
+		onSelectComparisonCommit={(hash) => comparisonSelection.select(hash)}
+		onSelectComparisonSlot={(slot) => comparisonSelection.setSlot(slot)}
+		{onOpenSelectedComparison}
 	/>
-{:else}
+{:else if history.screen === 'commit'}
 	<GitCommitDetailsScreen
 		snapshot={history.commitSnapshot}
 		files={history.visibleFiles}
 		isLoading={history.commitLoading}
 		error={history.commitError}
-		rows={history.virtualRows}
-		fileRowIndex={history.fileRowIndex}
+		source={history.rowSource}
 		scrollRequest={history.scrollRequest}
 		fileFilter={history.fileFilter}
 		focusedFilePath={history.focusedFilePath}
-		{isMobile}
+		{presentation}
+		{active}
 		fontSize={Number(diffFontSize) || 12}
+		{diffMode}
+		{contextLines}
+		diffFontSize={String(diffFontSize)}
 		onBack={() => history.backToList()}
 		onRetry={() => history.retryCommit(projectPath)}
 		onSelectParent={(parent) => history.selectParent(projectPath, parent)}
 		onRevertCommit={() => {
-			if (history.commitSnapshot) revertListCommit(history.commitSnapshot.commit);
+			if (history.commitSnapshot) requestRevertCommit(history.commitSnapshot.commit);
 		}}
+		{onSetDiffMode}
+		{onSetContextLines}
+		{onSetDiffFontSize}
 		onSelectFile={(file) => history.focusFile(projectPath, file)}
 		onFileFilterChange={(value) => history.setFileFilter(value)}
-		onVisibleRowsChange={(rows) => history.setVisibleRows(projectPath, rows)}
+		onBodyDemand={(demand) => history.handleBodyDemand(demand)}
 		{onOpenInEditor}
+		composerState={history.document.commentComposer}
+		commentFeedback={history.document.commentFeedback}
+		commentError={history.document.commentError}
+		commentCopyText={history.document.commentCopyText}
+		onAddComment={(filePath, side, line) =>
+			history.document.openCommentComposer(filePath, side, line)}
+		onComposerBodyChange={(body) => history.document.setCommentBody(body)}
+		onComposerSeverityChange={(severity) => history.document.setCommentSeverity(severity)}
+		onComposerSubmit={() => history.document.submitComment(onAppendToChatDraft)}
+		onComposerClose={() => history.document.closeCommentComposer()}
+		onComposerFocusHandled={() => history.document.markCommentComposerFocused()}
+		{onOpenChat}
+	/>
+{:else}
+	<GitComparisonScreen
+		comparison={history.comparison}
+		isLoading={history.comparison.isLoading}
+		{presentation}
+		{active}
+		fontSize={Number(diffFontSize) || 12}
+		onBack={() => history.backToList()}
+		onRefresh={() => {
+			if (projectPath) void history.comparison.refresh(projectPath);
+		}}
+		{onOpenInEditor}
+		{onAppendToChatDraft}
+		{onOpenChat}
 	/>
 {/if}

@@ -6,8 +6,6 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 	return {
 		id: 'chat-1',
 		projectPath: '/tmp/project',
-		effectiveProjectKey: '/tmp/project',
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
@@ -21,10 +19,14 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 
@@ -57,6 +59,7 @@ describe('ChatActionDialogsState', () => {
 		expect(dialogs.chatDetailsDialog).toMatchObject({
 			chatId: chat.id,
 			chatTitle: 'New chat',
+			projectPath: '/workspace/repo',
 			isLoading: true,
 		});
 		expect(dialogs.tagDialog).toEqual({
@@ -78,6 +81,7 @@ describe('ChatActionDialogsState', () => {
 			lastActivityAt: '2026-01-02',
 			agentSessionId: 'stale-session',
 			transcriptSource: null,
+			carryOverSegments: [],
 		});
 
 		expect(dialogs.chatDetailsDialog?.chatId).toBe('c2');

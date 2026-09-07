@@ -13,15 +13,20 @@ export interface ChatFilterContext {
 export type ChatFilterResult = { action: 'process' } | { action: 'skip' };
 
 const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
+	'chat-messages',
 	'chat-session-created',
 	'chat-session-deleted',
 	'chat-processing-updated',
-	'chat-generation-reset',
+	'chat-transcript-replaced',
+	'chat-transient-feed-mutation',
 	'chat-execution-control-updated',
 	'chat-title-updated',
 	'chat-project-path-updated',
 	'chat-read-updated-v1',
 	'chat-list-refresh-requested',
+	// Routed by chat identity in its handler so a background chat retains its
+	// notice instead of leaking it into the active conversation.
+	'chat-operational-notice',
 	'ws-fault',
 ] satisfies EventKey[]);
 
@@ -30,9 +35,6 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 function getChatId(message: ServerWsMessage): string {
 	if ('chatId' in message) {
 		return typeof message.chatId === 'string' ? message.chatId : '';
-	}
-	if (message.type === 'pending-user-input-updated') {
-		return message.input.chatId;
 	}
 	return '';
 }

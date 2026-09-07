@@ -31,7 +31,7 @@ describe('setLocalStorageWithCacheRecovery', () => {
 			key: (index) => localStorage.key(index),
 			removeItem: (key) => localStorage.removeItem(key),
 			setItem: (key, value) => {
-				if (key === 'workspace_layout_v1' && quotaFailurePending) {
+				if (key === 'workspace_layout_v2' && quotaFailurePending) {
 					quotaFailurePending = false;
 					throw new DOMException('Quota exceeded', 'QuotaExceededError');
 				}
@@ -39,9 +39,9 @@ describe('setLocalStorageWithCacheRecovery', () => {
 			},
 		};
 
-		setLocalStorageWithCacheRecovery(quotaStorage, 'workspace_layout_v1', '{"version":1}');
+		setLocalStorageWithCacheRecovery(quotaStorage, 'workspace_layout_v2', '{"version":2}');
 
-		expect(localStorage.getItem('workspace_layout_v1')).toBe('{"version":1}');
+		expect(localStorage.getItem('workspace_layout_v2')).toBe('{"version":2}');
 		expect(localStorage.getItem(`${CHAT_TRANSCRIPT_SNAPSHOT_PREFIX}old`)).toBeNull();
 		expect(localStorage.getItem(`${CHAT_TRANSCRIPT_SNAPSHOT_PREFIX}new`)).toBe('new transcript');
 	});

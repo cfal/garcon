@@ -15,24 +15,49 @@ import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-inte
 import type { AgentId } from './agents';
 import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
+import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from './generation-prompts';
+import {
+  parseAgentSwitchContextWindowTokens,
+  type AgentSwitchContextWindowTokens,
+} from './handoff-sizing';
+import {
+  parseHiddenBashCommandPatterns,
+  type HiddenBashCommandPattern,
+} from './hidden-bash-command-patterns';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 export const DEFAULT_APP_TITLE = 'Garcon';
 export const APP_TITLE_MAX_LENGTH = 120;
 
-export interface GenerationUiSettings {
-  enabled?: boolean;
+export interface GenerationSelectionUiSettings {
   agentId?: AgentId;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
   thinkingMode?: ThinkingMode;
+}
+
+export interface ChatTitleUiSettings extends GenerationSelectionUiSettings {
+  enabled?: boolean;
+}
+
+export interface PromptGenerationUiSettings extends GenerationSelectionUiSettings {
   customPrompt?: string;
+}
+
+export interface CommitMessageUiSettings extends PromptGenerationUiSettings {
   useCommonDirPrefix?: boolean;
 }
 
-export type CommitMessageUiSettings = Omit<GenerationUiSettings, 'enabled'>;
+export type PromptRefinementUiSettings = PromptGenerationUiSettings;
+
+// Names the model that compacts a carried-over transcript when a chat hands off
+// to another agent, or continues in a new chat through `/handoff`.
+export interface AgentSwitchCompactionUiSettings extends GenerationSelectionUiSettings {
+  enabled?: boolean;
+  contextWindowTokens?: AgentSwitchContextWindowTokens;
+}
 
 export interface TelegramNotificationSettings {
   enabled?: boolean;
@@ -55,27 +80,52 @@ export interface RemoteTelegramStatus {
 
 export interface RemoteUiSettings {
   pinnedInsertPosition?: PinnedInsertPosition;
-  chatTitle?: GenerationUiSettings;
+  hiddenBashCommandPatterns?: HiddenBashCommandPattern[];
+  chatTitle?: ChatTitleUiSettings;
+  agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
+  promptRefinement?: PromptRefinementUiSettings;
   appIdentity?: AppIdentityUiSettings;
   notifications?: {
     telegram?: TelegramNotificationSettings;
   };
 }
 
-type EffectiveGenerationExtras = {
+export const GENERATION_UI_SETTING_KEYS = [
+  'chatTitle',
+  'agentSwitchCompaction',
+  'commitMessage',
+  'promptRefinement',
+] as const satisfies readonly (keyof RemoteUiSettings)[];
+
+type EffectiveGenerationSelection = {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+};
+
+type EffectivePromptGenerationExtras = EffectiveGenerationSelection & {
   customPrompt?: string;
+};
+
+type EffectiveCommitMessageExtras = EffectivePromptGenerationExtras & {
   useCommonDirPrefix?: boolean;
 };
 
 export interface RemoteUiEffectiveSettings {
-  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
-    EffectiveGenerationExtras;
+  chatTitle?: Required<Pick<ChatTitleUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
+    EffectiveGenerationSelection;
+  agentSwitchCompaction?: Required<
+    Pick<
+      AgentSwitchCompactionUiSettings,
+      'enabled' | 'agentId' | 'model' | 'thinkingMode' | 'contextWindowTokens'
+    >
+  > & EffectiveGenerationSelection;
   commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model' | 'thinkingMode'>> &
-    EffectiveGenerationExtras;
+    EffectiveCommitMessageExtras;
+  promptRefinement?: Required<
+    Pick<PromptRefinementUiSettings, 'agentId' | 'model' | 'thinkingMode'>
+  > & EffectivePromptGenerationExtras;
 }
 
 export interface RemotePathSettings {
@@ -88,12 +138,27 @@ export interface TranscriptSearchFeatureSettings {
   enabled: boolean;
 }
 
+export const AGENT_COMMAND_SETTING_KEYS = [
+  'enabled',
+  'chatIdDiscovery',
+  'sendMessage',
+] as const;
+
+export type AgentCommandSettingKey = typeof AGENT_COMMAND_SETTING_KEYS[number];
+export type AgentCommandsFeatureSettings = Record<AgentCommandSettingKey, boolean>;
+
 export interface RemoteFeatureSettings {
   transcriptSearch: TranscriptSearchFeatureSettings;
+  agentCommands: AgentCommandsFeatureSettings;
 }
 
 export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
   transcriptSearch: { enabled: false },
+  agentCommands: {
+    enabled: true,
+    chatIdDiscovery: true,
+    sendMessage: true,
+  },
 };
 
 export interface RecentAgentSetting {
@@ -131,6 +196,7 @@ export interface RemoteSettingsSnapshot {
 export interface UpdateRemoteSettingsInput {
   features?: {
     transcriptSearch?: Partial<TranscriptSearchFeatureSettings>;
+    agentCommands?: Partial<AgentCommandsFeatureSettings>;
   };
   ui?: Partial<RemoteUiSettings>;
   paths?: Partial<RemotePathSettings>;
@@ -163,16 +229,13 @@ function safeOptionalProtocol(value: unknown): ApiProtocol | null {
   return null;
 }
 
-function normalizeGenerationUiSettings(
+function normalizeGenerationSelection(
   value: unknown,
-  options: { includeEnabled?: boolean } = {},
-): GenerationUiSettings | undefined {
+): GenerationSelectionUiSettings | undefined {
   const raw = asRecord(value);
   if (!raw) return undefined;
 
-  const includeEnabled = options.includeEnabled ?? true;
-  const normalized: GenerationUiSettings = {};
-  if (includeEnabled && typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  const normalized: GenerationSelectionUiSettings = {};
   if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
@@ -180,10 +243,73 @@ function normalizeGenerationUiSettings(
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
   const thinkingMode = coerceThinkingMode(raw.thinkingMode);
   if (thinkingMode) normalized.thinkingMode = thinkingMode;
-  if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizeChatTitleUiSettings(value: unknown): ChatTitleUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: ChatTitleUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
+  if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizeAgentSwitchCompactionUiSettings(
+  value: unknown,
+): AgentSwitchCompactionUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: AgentSwitchCompactionUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
+  if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  const contextWindowTokens = parseAgentSwitchContextWindowTokens(raw.contextWindowTokens);
+  if (contextWindowTokens !== null) normalized.contextWindowTokens = contextWindowTokens;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizeGenerationPromptTemplate(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string'
+    || value.length > GENERATION_PROMPT_TEMPLATE_MAX_LENGTH
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+export function normalizeCommitMessageUiSettings(
+  value: unknown,
+): CommitMessageUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: CommitMessageUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
   }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizePromptRefinementUiSettings(
+  value: unknown,
+): PromptRefinementUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: PromptRefinementUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
@@ -196,17 +322,49 @@ function normalizeAppIdentityUiSettings(value: unknown): AppIdentityUiSettings |
   return { title };
 }
 
-function normalizeEffectiveGenerationExtras(
+function normalizeEffectiveGenerationSelection(
   raw: Record<string, unknown>,
-  normalized: EffectiveGenerationExtras,
+  normalized: EffectiveGenerationSelection,
 ): void {
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
-  if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
+}
+
+function normalizeEffectivePromptGenerationExtras(
+  raw: Record<string, unknown>,
+  normalized: EffectivePromptGenerationExtras,
+): void {
+  normalizeEffectiveGenerationSelection(raw, normalized);
+  const customPrompt = normalizeGenerationPromptTemplate(raw.customPrompt);
+  if (customPrompt !== undefined) normalized.customPrompt = customPrompt;
+}
+
+function normalizeEffectiveCommitMessageExtras(
+  raw: Record<string, unknown>,
+  normalized: EffectiveCommitMessageExtras,
+): void {
+  normalizeEffectivePromptGenerationExtras(raw, normalized);
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
   }
+}
+
+function normalizePromptRefinementUiEffectiveSettings(
+  value: unknown,
+): RemoteUiEffectiveSettings['promptRefinement'] | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  if (!isAgentId(raw.agentId)) return undefined;
+  if (typeof raw.model !== 'string') return undefined;
+
+  const normalized: NonNullable<RemoteUiEffectiveSettings['promptRefinement']> = {
+    agentId: raw.agentId,
+    model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
+  };
+  normalizeEffectivePromptGenerationExtras(raw, normalized);
+  return normalized;
 }
 
 function normalizeChatTitleUiEffectiveSettings(
@@ -224,7 +382,29 @@ function normalizeChatTitleUiEffectiveSettings(
     model: raw.model,
     thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
-  normalizeEffectiveGenerationExtras(raw, normalized);
+  normalizeEffectiveGenerationSelection(raw, normalized);
+  return normalized;
+}
+
+function normalizeAgentSwitchCompactionUiEffectiveSettings(
+  value: unknown,
+): RemoteUiEffectiveSettings['agentSwitchCompaction'] | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  if (typeof raw.enabled !== 'boolean') return undefined;
+  if (!isAgentId(raw.agentId)) return undefined;
+  if (typeof raw.model !== 'string') return undefined;
+  const contextWindowTokens = parseAgentSwitchContextWindowTokens(raw.contextWindowTokens);
+  if (contextWindowTokens === null) return undefined;
+
+  const normalized: NonNullable<RemoteUiEffectiveSettings['agentSwitchCompaction']> = {
+    enabled: raw.enabled,
+    agentId: raw.agentId,
+    model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
+    contextWindowTokens,
+  };
+  normalizeEffectiveGenerationSelection(raw, normalized);
   return normalized;
 }
 
@@ -241,7 +421,7 @@ function normalizeCommitMessageUiEffectiveSettings(
     model: raw.model,
     thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
-  normalizeEffectiveGenerationExtras(raw, normalized);
+  normalizeEffectiveCommitMessageExtras(raw, normalized);
   return normalized;
 }
 
@@ -254,11 +434,22 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
     normalized.pinnedInsertPosition = raw.pinnedInsertPosition;
   }
 
-  const chatTitle = normalizeGenerationUiSettings(raw.chatTitle);
+  if ('hiddenBashCommandPatterns' in raw) {
+    const patterns = parseHiddenBashCommandPatterns(raw.hiddenBashCommandPatterns);
+    if (patterns !== null) normalized.hiddenBashCommandPatterns = patterns;
+  }
+
+  const chatTitle = normalizeChatTitleUiSettings(raw.chatTitle);
   if (chatTitle) normalized.chatTitle = chatTitle;
 
-  const commitMessage = normalizeGenerationUiSettings(raw.commitMessage, { includeEnabled: false });
+  const agentSwitchCompaction = normalizeAgentSwitchCompactionUiSettings(raw.agentSwitchCompaction);
+  if (agentSwitchCompaction) normalized.agentSwitchCompaction = agentSwitchCompaction;
+
+  const commitMessage = normalizeCommitMessageUiSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;
+
+  const promptRefinement = normalizePromptRefinementUiSettings(raw.promptRefinement);
+  if (promptRefinement) normalized.promptRefinement = promptRefinement;
 
   const appIdentity = normalizeAppIdentityUiSettings(raw.appIdentity);
   if (appIdentity) normalized.appIdentity = appIdentity;
@@ -288,8 +479,14 @@ function normalizeRemoteUiEffectiveSettings(value: unknown): RemoteUiEffectiveSe
   const chatTitle = normalizeChatTitleUiEffectiveSettings(raw.chatTitle);
   if (chatTitle) normalized.chatTitle = chatTitle;
 
+  const compaction = normalizeAgentSwitchCompactionUiEffectiveSettings(raw.agentSwitchCompaction);
+  if (compaction) normalized.agentSwitchCompaction = compaction;
+
   const commitMessage = normalizeCommitMessageUiEffectiveSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;
+
+  const promptRefinement = normalizePromptRefinementUiEffectiveSettings(raw.promptRefinement);
+  if (promptRefinement) normalized.promptRefinement = promptRefinement;
 
   return normalized;
 }
@@ -307,11 +504,27 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
 export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSettings {
   const raw = asRecord(value);
   const transcriptSearch = asRecord(raw?.transcriptSearch);
+  const agentCommands = asRecord(raw?.agentCommands);
+  const legacyChatIdDiscovery = asRecord(raw?.chatIdDiscovery);
+  const chatIdDiscoveryEnabled = agentCommands
+    ? agentCommands.chatIdDiscovery
+    : legacyChatIdDiscovery?.enabled;
   return {
     transcriptSearch: {
       enabled: typeof transcriptSearch?.enabled === 'boolean'
         ? transcriptSearch.enabled
         : false,
+    },
+    agentCommands: {
+      enabled: typeof agentCommands?.enabled === 'boolean'
+        ? agentCommands.enabled
+        : true,
+      chatIdDiscovery: typeof chatIdDiscoveryEnabled === 'boolean'
+        ? chatIdDiscoveryEnabled
+        : true,
+      sendMessage: typeof agentCommands?.sendMessage === 'boolean'
+        ? agentCommands.sendMessage
+        : true,
     },
   };
 }

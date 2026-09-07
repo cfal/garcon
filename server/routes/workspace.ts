@@ -11,17 +11,47 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore, TelegramPublicStatus } from '../notifications/telegram-settings-store.js';
 import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
-import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
+import {
+  asJsonBody,
+  errorMessage,
+  jsonErrorFromCorruptStateFile,
+  type JsonBody,
+} from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
+  AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
+  GENERATION_UI_SETTING_KEYS,
+  normalizeAgentSwitchCompactionUiSettings,
+  normalizeChatTitleUiSettings,
+  normalizeCommitMessageUiSettings,
+  normalizePromptRefinementUiSettings,
+  type AgentCommandsFeatureSettings,
   type RemoteSettingsSnapshot,
+  type RemoteFeatureSettings,
   type RemoteUiEffectiveSettings,
 } from '../../common/settings.js';
+import {
+  GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
+  PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
+} from '../../common/generation-prompts.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 import { isGenerationTestTarget } from '../../common/generation-test-contracts.js';
+import type {
+  UpdateChatTitleRequest,
+  UpdateChatTitleResponse,
+} from '../../common/chat-title-contracts.js';
 import { testGenerationModel } from '../settings/generation-model-test.js';
+import {
+  DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
+  parseAgentSwitchContextWindowTokens,
+} from '../../common/handoff-sizing.js';
+import {
+  HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+  HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
+  parseHiddenBashCommandPatterns,
+} from '../../common/hidden-bash-command-patterns.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -51,12 +81,14 @@ function asPlainObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function resolveCommitMessageUiConfig(
+function resolveUntoggledGenerationUiConfig<
+  T extends 'commitMessage' | 'promptRefinement',
+>(
   input: Parameters<typeof resolveEffectiveGenerationUiConfig>[0],
-): NonNullable<RemoteUiEffectiveSettings['commitMessage']> {
+): NonNullable<RemoteUiEffectiveSettings[T]> {
   const config = { ...resolveEffectiveGenerationUiConfig(input) };
   delete (config as { enabled?: boolean }).enabled;
-  return config as NonNullable<RemoteUiEffectiveSettings['commitMessage']>;
+  return config as NonNullable<RemoteUiEffectiveSettings[T]>;
 }
 
 export async function buildRemoteSettingsSnapshot({
@@ -76,19 +108,36 @@ export async function buildRemoteSettingsSnapshot({
   const pinnedChatIds = settingsSource.pinnedChatIds;
   const recentAgentSettings = settingsSource.recentAgentSettings;
   const executionDefaults = settingsSource.executionDefaults;
-  const [chatTitleContext, commitMessageContext] = await resolveGenerationContextsForSelections(
-    agents,
-    [ui?.chatTitle, ui?.commitMessage],
-  );
+  const [chatTitleContext, compactionContext, commitMessageContext, promptRefinementContext] =
+    await resolveGenerationContextsForSelections(
+      agents,
+      [ui?.chatTitle, ui?.agentSwitchCompaction, ui?.commitMessage, ui?.promptRefinement],
+    );
 
+  const persistedCompaction = asPlainObject(ui?.agentSwitchCompaction);
+  const effectiveCompaction = resolveEffectiveGenerationUiConfig({
+    persisted: persistedCompaction,
+    ...compactionContext,
+  });
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
       ...chatTitleContext,
     }),
-    commitMessage: resolveCommitMessageUiConfig({
+    agentSwitchCompaction: {
+      ...effectiveCompaction,
+      enabled: persistedCompaction.enabled === true,
+      contextWindowTokens:
+        parseAgentSwitchContextWindowTokens(effectiveCompaction.contextWindowTokens)
+        ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
+    },
+    commitMessage: resolveUntoggledGenerationUiConfig<'commitMessage'>({
       persisted: asPlainObject(ui?.commitMessage),
       ...commitMessageContext,
+    }),
+    promptRefinement: resolveUntoggledGenerationUiConfig<'promptRefinement'>({
+      persisted: asPlainObject(ui?.promptRefinement),
+      ...promptRefinementContext,
     }),
   };
 
@@ -127,23 +176,60 @@ export default function createWorkspaceRoutes(
   telegramSettings: TelegramSettingsStore,
   registry?: Pick<IChatRegistry, 'getChat'>,
   transcriptSearchSettings?: {
-    setEnabled(enabled: boolean): Promise<void>;
+    setEnabled(
+      enabled: boolean,
+      patch?: Partial<RemoteFeatureSettings>,
+    ): Promise<void>;
   },
 ): RouteMap {
 
-  function transcriptSearchEnabledPatch(input: Record<string, unknown>): boolean | undefined | null {
+  function featureEnabledPatch(
+    input: Record<string, unknown>,
+    key: keyof RemoteFeatureSettings,
+  ): boolean | undefined | null {
     if (!('features' in input)) return undefined;
     const features = input.features;
     if (!features || typeof features !== 'object' || Array.isArray(features)) return null;
     const featureRecord = features as Record<string, unknown>;
-    if (!('transcriptSearch' in featureRecord)) return undefined;
-    const transcriptSearch = featureRecord.transcriptSearch;
-    if (!transcriptSearch || typeof transcriptSearch !== 'object' || Array.isArray(transcriptSearch)) {
+    if (!(key in featureRecord)) return undefined;
+    const feature = featureRecord[key];
+    if (!feature || typeof feature !== 'object' || Array.isArray(feature)) {
       return null;
     }
-    const transcriptRecord = transcriptSearch as Record<string, unknown>;
-    if (!('enabled' in transcriptRecord) || typeof transcriptRecord.enabled !== 'boolean') return null;
-    return transcriptRecord.enabled;
+    const setting = feature as Record<string, unknown>;
+    if (!('enabled' in setting) || typeof setting.enabled !== 'boolean') return null;
+    return setting.enabled;
+  }
+
+  function featureEnabledPatchError(key: keyof RemoteFeatureSettings): string {
+    return `features.${key}.enabled must be a boolean`;
+  }
+
+  function agentCommandsPatch(
+    input: Record<string, unknown>,
+  ): Partial<AgentCommandsFeatureSettings> | undefined | string {
+    if (!('features' in input)) return undefined;
+    const features = input.features;
+    if (!features || typeof features !== 'object' || Array.isArray(features)) {
+      return 'features.agentCommands must be an object';
+    }
+    const featureRecord = features as Record<string, unknown>;
+    if (!('agentCommands' in featureRecord)) return undefined;
+    const raw = featureRecord.agentCommands;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return 'features.agentCommands must be an object';
+    }
+
+    const patch: Partial<AgentCommandsFeatureSettings> = {};
+    const setting = raw as Record<string, unknown>;
+    for (const key of AGENT_COMMAND_SETTING_KEYS) {
+      if (!(key in setting)) continue;
+      if (typeof setting[key] !== 'boolean') {
+        return `features.agentCommands.${key} must be a boolean`;
+      }
+      patch[key] = setting[key];
+    }
+    return patch;
   }
 
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
@@ -151,6 +237,31 @@ export default function createWorkspaceRoutes(
     const patch = { ...asPlainObject(raw) };
     if ('appIdentity' in patch) {
       patch.appIdentity = sanitizeAppIdentityPatch(patch.appIdentity);
+    }
+    if ('chatTitle' in patch) {
+      const chatTitle = normalizeChatTitleUiSettings(patch.chatTitle);
+      if (chatTitle) patch.chatTitle = chatTitle;
+      else delete patch.chatTitle;
+    }
+    if ('agentSwitchCompaction' in patch) {
+      const compaction = normalizeAgentSwitchCompactionUiSettings(patch.agentSwitchCompaction);
+      if (compaction) patch.agentSwitchCompaction = compaction;
+      else delete patch.agentSwitchCompaction;
+    }
+    if ('commitMessage' in patch) {
+      const commitMessage = normalizeCommitMessageUiSettings(patch.commitMessage);
+      if (commitMessage) patch.commitMessage = commitMessage;
+      else delete patch.commitMessage;
+    }
+    if ('promptRefinement' in patch) {
+      const promptRefinement = normalizePromptRefinementUiSettings(patch.promptRefinement);
+      if (promptRefinement) patch.promptRefinement = promptRefinement;
+      else delete patch.promptRefinement;
+    }
+    if ('hiddenBashCommandPatterns' in patch) {
+      const patterns = parseHiddenBashCommandPatterns(patch.hiddenBashCommandPatterns);
+      if (patterns !== null) patch.hiddenBashCommandPatterns = patterns;
+      else delete patch.hiddenBashCommandPatterns;
     }
     const notifications = asPlainObject(patch.notifications);
     const rawTelegram = notifications.telegram;
@@ -165,9 +276,68 @@ export default function createWorkspaceRoutes(
     return Object.keys(patch).length > 0 ? patch : null;
   }
 
+  function generationPromptPatchError(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const ui = raw as Record<string, unknown>;
+    for (const target of ['commitMessage', 'promptRefinement'] as const) {
+      const value = ui[target];
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const targetPatch = value as Record<string, unknown>;
+      if (!Object.hasOwn(targetPatch, 'customPrompt')) continue;
+      if (typeof targetPatch.customPrompt !== 'string') {
+        return `${target}.customPrompt must be a string.`;
+      }
+      if (targetPatch.customPrompt.length > GENERATION_PROMPT_TEMPLATE_MAX_LENGTH) {
+        return `${target}.customPrompt must be at most ${GENERATION_PROMPT_TEMPLATE_MAX_LENGTH} characters.`;
+      }
+      if (
+        target === 'promptRefinement'
+        && targetPatch.customPrompt.trim()
+        && !targetPatch.customPrompt.includes(PROMPT_REFINEMENT_USER_PROMPT_TOKEN)
+      ) {
+        return `promptRefinement.customPrompt must include ${PROMPT_REFINEMENT_USER_PROMPT_TOKEN}.`;
+      }
+    }
+    return null;
+  }
+
+  function hiddenBashCommandPatternsPatchError(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const ui = raw as Record<string, unknown>;
+    if (
+      'hiddenBashCommandPatterns' in ui
+      && parseHiddenBashCommandPatterns(ui.hiddenBashCommandPatterns) === null
+    ) {
+      return `ui.hiddenBashCommandPatterns must contain at most ${HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT} valid regex or glob patterns of at most ${HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH} characters each`;
+    }
+    return null;
+  }
+
+  async function assertGenerationThinkingModePatchesSupported(
+    uiPatch: Record<string, unknown>,
+  ): Promise<void> {
+    const selections = GENERATION_UI_SETTING_KEYS.flatMap((key) => {
+      const selection = asPlainObject(uiPatch[key]);
+      return Object.hasOwn(selection, 'thinkingMode') ? [selection] : [];
+    });
+    if (selections.length === 0) return;
+
+    const contexts = await resolveGenerationContextsForSelections(agents, selections);
+    for (const [index, selection] of selections.entries()) {
+      const resolved = resolveEffectiveGenerationUiConfig({
+        persisted: selection,
+        ...contexts[index],
+      });
+      if (!resolved.agentId) continue;
+      agents.assertExecutionModeSelectionSupported(resolved.agentId, {
+        thinkingMode: resolved.thinkingMode,
+      });
+    }
+  }
+
   async function putSessionNameHandler(body: JsonBody): Promise<Response> {
     try {
-      const { chatId, title } = asJsonBody(body);
+      const { chatId, title } = asJsonBody(body) as Partial<UpdateChatTitleRequest>;
       if (!chatId || typeof chatId !== 'string') {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
       }
@@ -180,9 +350,9 @@ export default function createWorkspaceRoutes(
       }
       // setSessionName emits 'session-name-changed' for broadcast wiring.
       await settings.setSessionName(chatId, trimmed);
-      return Response.json({ success: true });
+      return Response.json({ success: true } satisfies UpdateChatTitleResponse);
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -191,29 +361,59 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json(snapshot);
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function putAppSettings(body: JsonBody): Promise<Response> {
     try {
       const input = asJsonBody(body);
+      const promptPatchError = generationPromptPatchError(input.ui);
+      if (promptPatchError) {
+        return jsonError(promptPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);
+      }
+      const bashPatternsError = hiddenBashCommandPatternsPatchError(input.ui);
+      if (bashPatternsError) {
+        return jsonError(bashPatternsError, 400, 'INVALID_REMOTE_SETTINGS', false);
+      }
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
-      const transcriptSearchEnabled = transcriptSearchEnabledPatch(input);
+      const transcriptSearchEnabled = featureEnabledPatch(input, 'transcriptSearch');
+      const commandsPatch = agentCommandsPatch(input);
       if (transcriptSearchEnabled === null) {
         return jsonError(
-          'features.transcriptSearch.enabled must be a boolean',
+          featureEnabledPatchError('transcriptSearch'),
           400,
           'INVALID_REMOTE_SETTINGS',
           false,
         );
       }
+      if (typeof commandsPatch === 'string') {
+        return jsonError(
+          commandsPatch,
+          400,
+          'INVALID_REMOTE_SETTINGS',
+          false,
+        );
+      }
+      if (uiPatch) await assertGenerationThinkingModePatchesSupported(uiPatch);
+      const featurePatch: Partial<RemoteFeatureSettings> = {};
+      if (commandsPatch && Object.keys(commandsPatch).length > 0) {
+        featurePatch.agentCommands = {
+          ...settings.getFeatureSettings().agentCommands,
+          ...commandsPatch,
+        };
+      }
       if (transcriptSearchEnabled !== undefined) {
         if (transcriptSearchSettings) {
-          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled);
+          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled, featurePatch);
         } else {
-          await settings.setTranscriptSearchEnabled(transcriptSearchEnabled);
+          await settings.setFeatureSettings({
+            ...featurePatch,
+            transcriptSearch: { enabled: transcriptSearchEnabled },
+          });
         }
+      } else if (featurePatch.agentCommands) {
+        await settings.setFeatureSettings(featurePatch);
       }
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);
@@ -236,7 +436,7 @@ export default function createWorkspaceRoutes(
           errorCode: error.errorCode,
         }, { status: error.status });
       }
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -319,7 +519,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -334,7 +534,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -362,7 +562,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, linkUrl, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+      return jsonErrorFromCorruptStateFile(error) ?? jsonErrorFromUnknown(error, 400);
     }
   }
 
@@ -389,7 +589,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+      return jsonErrorFromCorruptStateFile(error) ?? jsonErrorFromUnknown(error, 400);
     }
   }
 
@@ -402,7 +602,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -426,7 +626,7 @@ export default function createWorkspaceRoutes(
       const savedSearches = await settings.getSavedSearches();
       return Response.json({ savedSearches });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 

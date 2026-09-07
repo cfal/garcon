@@ -1,6 +1,6 @@
 import type { SessionAgentId } from '$lib/types/app';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { ChatTranscriptSourceDto } from '$shared/chat-details';
+import type { ChatCarryOverSegmentDto, ChatTranscriptSourceDto } from '$shared/chat-details';
 
 export interface ChatDeleteConfirmation {
 	chatId: string;
@@ -22,11 +22,13 @@ export interface ChatProjectPathDialog {
 export interface ChatDetailsDialog {
 	chatId: string;
 	chatTitle: string;
+	projectPath: string;
 	firstMessage: string | null;
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	agentSessionId: string | null;
 	transcriptSource: ChatTranscriptSourceDto | null;
+	carryOverSegments: readonly ChatCarryOverSegmentDto[];
 	isLoading: boolean;
 	error: string | null;
 }
@@ -78,11 +80,13 @@ export class ChatActionDialogsState {
 		this.chatDetailsDialog = {
 			chatId: chat.id,
 			chatTitle: chat.title || fallbackTitle,
+			projectPath: chat.projectPath,
 			firstMessage: null,
 			createdAt: null,
 			lastActivityAt: null,
 			agentSessionId: null,
 			transcriptSource: null,
+			carryOverSegments: [],
 			isLoading: true,
 			error: null,
 		};
@@ -96,6 +100,7 @@ export class ChatActionDialogsState {
 			lastActivityAt: string | null;
 			agentSessionId: string | null;
 			transcriptSource: ChatTranscriptSourceDto | null;
+			carryOverSegments: readonly ChatCarryOverSegmentDto[];
 		},
 	): void {
 		if (!this.chatDetailsDialog || this.chatDetailsDialog.chatId !== chatId) return;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
-import { getAmpPreview, loadAmpChatMessages } from '../history-loader.js';
+import { loadAmpChatMessages } from '../history-loader.js';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 
 const THREAD_EXPORT_FIXTURE = {
   id: 'T-123',
@@ -47,6 +48,30 @@ const THREAD_EXPORT_FIXTURE = {
       role: 'assistant',
       messageId: 3,
       content: [
+        {
+          type: 'tool_use',
+          id: 'status-1',
+          name: 'shell_command_status',
+          input: { pid: 1234 },
+          complete: true,
+        },
+      ],
+    },
+    {
+      role: 'user',
+      messageId: 4,
+      content: [
+        {
+          type: 'tool_result',
+          toolUseID: 'status-1',
+          run: { status: 'done', result: { running: false } },
+        },
+      ],
+    },
+    {
+      role: 'assistant',
+      messageId: 5,
+      content: [
         { type: 'text', text: 'final assistant message' },
       ],
       usage: { timestamp: '2026-03-18T01:12:00.000Z' },
@@ -76,14 +101,13 @@ describe('amp history loader', () => {
     });
     expect(messages[5].type).toBe('assistant-message');
     expect(messages[5].content).toBe('final assistant message');
-  });
-
-  it('builds preview metadata from the export payload', () => {
-    expect(getAmpPreview(THREAD_EXPORT_FIXTURE)).toEqual({
-      firstMessage: 'first prompt',
-      lastMessage: 'final assistant message',
-      lastActivity: '2026-03-18T01:12:00.000Z',
-      createdAt: new Date(1773796295774).toISOString(),
-    });
+    expect(messages.map((message) => getNativeMessageRevisionSource(message))).toEqual([
+      { entryId: 'amp-message:0', withinSourceOrdinal: 0 },
+      { entryId: 'amp-message:1', withinSourceOrdinal: 0 },
+      { entryId: 'amp-message:1', withinSourceOrdinal: 1 },
+      { entryId: 'amp-message:1', withinSourceOrdinal: 2 },
+      { entryId: 'amp-message:2', withinSourceOrdinal: 0 },
+      { entryId: 'amp-message:5', withinSourceOrdinal: 0 },
+    ]);
   });
 });

@@ -1,10 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
+import * as preamblesApi from '$lib/api/chat-preambles';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
-import type { ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import type { SessionAgentId } from '$lib/types/app';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import {
+	findModelForSelection,
+	modelValueForSelection,
+	resolveModelSelection,
+} from '../../../../test/model-catalog';
 
 vi.mock('$lib/api/files', () => ({
 	browseDirectory: vi.fn(),
@@ -12,6 +19,10 @@ vi.mock('$lib/api/files', () => ({
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
+}));
+
+vi.mock('$lib/api/chat-preambles', () => ({
+	preambleSelectionPreview: vi.fn(),
 }));
 
 vi.mock('$lib/api/git', () => ({
@@ -30,7 +41,10 @@ type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executi
 function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
 	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
@@ -118,6 +132,36 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
+function modelsForAgent(agentId: string): ModelOption[] {
+	if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
+	if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
+	if (agentId === 'direct-anthropic-compatible') {
+		return [
+			{
+				value: 'acme_anthropic:acme-sonnet',
+				label: 'Acme: Acme Sonnet',
+				rawModel: 'acme-sonnet',
+				apiProviderId: 'acme',
+				endpointId: 'acme_anthropic',
+				protocol: 'anthropic-messages',
+			},
+		];
+	}
+	if (agentId === 'direct-openai-compatible') {
+		return [
+			{
+				value: 'zai_openai:glm-5.1',
+				label: 'Z.AI: GLM-5.1',
+				rawModel: 'glm-5.1',
+				apiProviderId: 'zai',
+				endpointId: 'zai_openai',
+				protocol: 'openai-compatible',
+			},
+		];
+	}
+	return [];
+}
+
 const mockModelCatalog = {
 	agentMetadata: {
 		claude: { label: 'Claude' },
@@ -155,92 +199,23 @@ const mockModelCatalog = {
 			? ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 			: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
 	),
-	getModels: vi.fn((agentId: string): ModelOption[] => {
-		if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
-		if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
-		if (agentId === 'direct-anthropic-compatible') {
-			return [
-				{
-					value: 'acme_anthropic:acme-sonnet',
-					label: 'Acme: Acme Sonnet',
-					rawModel: 'acme-sonnet',
-					apiProviderId: 'acme',
-					endpointId: 'acme_anthropic',
-					protocol: 'anthropic-messages',
-				},
-			];
-		}
-		if (agentId === 'direct-openai-compatible') {
-			return [
-				{
-					value: 'zai_openai:glm-5.1',
-					label: 'Z.AI: GLM-5.1',
-					rawModel: 'glm-5.1',
-					apiProviderId: 'zai',
-					endpointId: 'zai_openai',
-					protocol: 'openai-compatible',
-				},
-			];
-		}
-		return [];
-	}),
-	getModelForSelection: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
-		const models = mockModelCatalog.getModels(agentId);
-		return (
-			models.find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			) ?? null
-		);
-	}),
-	selectionFor: vi.fn((agentId: string, model: string) => {
-		if (agentId === 'direct-anthropic-compatible' && model === 'acme_anthropic:acme-sonnet') {
-			return {
-				model: 'acme-sonnet',
-				apiProviderId: 'acme',
-				modelEndpointId: 'acme_anthropic',
-				modelProtocol: 'anthropic-messages',
-			};
-		}
-		if (agentId === 'direct-openai-compatible' && model === 'zai_openai:glm-5.1') {
-			return {
-				model: 'glm-5.1',
-				apiProviderId: 'zai',
-				modelEndpointId: 'zai_openai',
-				modelProtocol: 'openai-compatible',
-			};
-		}
-		return {
-			model,
-			apiProviderId: null,
-			modelEndpointId: null,
-			modelProtocol: null,
-		};
-	}),
-	selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
-		if (
-			agentId === 'direct-anthropic-compatible' &&
-			model === 'acme-sonnet' &&
-			endpointId === 'acme_anthropic'
-		) {
-			return 'acme_anthropic:acme-sonnet';
-		}
-		if (
-			agentId === 'direct-openai-compatible' &&
-			model === 'glm-5.1' &&
-			endpointId === 'zai_openai'
-		) {
-			return 'zai_openai:glm-5.1';
-		}
-		return model;
-	}),
+	getModels: vi.fn(modelsForAgent),
+	getModelForSelection: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
+		findModelForSelection(mockModelCatalog.getModels(agentId), model, endpointId),
+	),
+	selectionFor: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
+		resolveModelSelection(mockModelCatalog.getModels(agentId), model, endpointId),
+	),
+	selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
+		modelValueForSelection(mockModelCatalog.getModels(agentId), model, endpointId),
+	),
 	refreshIfStale: vi.fn().mockResolvedValue(undefined),
 };
 
 describe('NewChatFormState', () => {
 	let formState: NewChatFormState;
 	let mockRemoteSettings: ReturnType<typeof makeMockRemoteSettings>;
+	let selectableAgentIds: SessionAgentId[];
 
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -252,8 +227,29 @@ describe('NewChatFormState', () => {
 			'direct-anthropic-compatible',
 			'direct-openai-compatible',
 		]);
+		mockModelCatalog.getModels.mockImplementation(modelsForAgent);
+		mockModelCatalog.getDefaultModel.mockImplementation((agentId: string) => {
+			if (agentId === 'claude') return 'opus';
+			if (agentId === 'codex') return 'gpt-5.4';
+			if (agentId === 'direct-anthropic-compatible') return 'acme_anthropic:acme-sonnet';
+			if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
+			return '';
+		});
+		mockModelCatalog.refreshIfStale.mockResolvedValue(undefined);
+		selectableAgentIds = [
+			'claude',
+			'codex',
+			'direct-anthropic-compatible',
+			'direct-openai-compatible',
+		];
 		mockRemoteSettings = makeMockRemoteSettings();
-		formState = new NewChatFormState(mockModelCatalog as any, mockRemoteSettings as any);
+		formState = new NewChatFormState({
+			modelCatalog: mockModelCatalog as any,
+			remoteSettings: mockRemoteSettings as any,
+			get selectableAgentIds() {
+				return selectableAgentIds;
+			},
+		});
 	});
 
 	it('normalizes thinking when the next integration does not support the selected mode', () => {
@@ -414,6 +410,544 @@ describe('NewChatFormState', () => {
 		expect(formState.modelValue).toBe('zai_openai:glm-5.1');
 	});
 
+	it('skips a direct startup recent when direct chats are unavailable', async () => {
+		selectableAgentIds = ['claude', 'codex'];
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+	});
+
+	it('skips a startup recent whose endpoint no longer exposes the model', async () => {
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'claude',
+						model: 'opus',
+						apiProviderId: 'acme',
+						modelEndpointId: 'acme_anthropic',
+						modelProtocol: 'anthropic-messages',
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+	});
+
+	it('reselects the next valid recent after a cached endpoint model disappears', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex' || catalogFresh) return modelsForAgent(agentId);
+			return [
+				{
+					value: 'stale_openai:gpt-stale',
+					label: 'Stale: GPT',
+					rawModel: 'gpt-stale',
+					apiProviderId: 'stale',
+					endpointId: 'stale_openai',
+					protocol: 'openai-compatible',
+				},
+			];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-stale',
+						apiProviderId: 'stale',
+						modelEndpointId: 'stale_openai',
+						modelProtocol: 'openai-compatible',
+					},
+					{
+						agentId: 'claude',
+						model: 'opus',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('claude');
+		expect(formState.modelValue).toBe('opus');
+	});
+
+	it('preserves a user model selection while the catalog refreshes', async () => {
+		const refresh = deferred<void>();
+		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.selectAgent('claude');
+		formState.selectModel('opus');
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('claude');
+		expect(formState.modelValue).toBe('opus');
+	});
+
+	it('skips a stale native recent when refresh leaves only an endpoint with the same model', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex') return modelsForAgent(agentId);
+			if (!catalogFresh) return [{ value: 'shared-model', label: 'Shared Model' }];
+			return [
+				{
+					value: 'live_openai:shared-model',
+					label: 'Live: Shared Model',
+					rawModel: 'shared-model',
+					apiProviderId: 'live-provider',
+					endpointId: 'live_openai',
+					protocol: 'openai-compatible',
+				},
+			];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'shared-model',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+					{
+						agentId: 'claude',
+						model: 'opus',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('shared-model');
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('claude');
+		expect(formState.modelValue).toBe('opus');
+	});
+
+	it('blocks a user-touched endpoint selection that disappears during catalog refresh', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex' || catalogFresh) return modelsForAgent(agentId);
+			return [
+				{
+					value: 'stale_openai:gpt-stale',
+					label: 'Stale: GPT',
+					rawModel: 'gpt-stale',
+					apiProviderId: 'stale',
+					endpointId: 'stale_openai',
+					protocol: 'openai-compatible',
+				},
+			];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-stale',
+						apiProviderId: 'stale',
+						modelEndpointId: 'stale_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.selectModel('stale_openai:gpt-stale');
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+		expect(formState.modelSelectionError).toBe('Model unavailable');
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+
+		formState.selectModel('gpt-5.4');
+		expect(formState.modelSelectionError).toBeNull();
+		expect(formState.canSubmit).toBe(true);
+		expect(formState.buildConfig()?.model).toBe('gpt-5.4');
+	});
+
+	it('blocks a touched direct selection when its sole endpoint disappears', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['direct-openai-compatible'];
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId === 'direct-openai-compatible' && catalogFresh) return [];
+			return modelsForAgent(agentId);
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.setThinkingMode('low');
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		expect(formState.canSubmit).toBe(true);
+		expect(formState.modelSelectionTarget?.modelEndpointId).toBe('zai_openai');
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('direct-openai-compatible');
+		expect(formState.modelValue).toBe('zai_openai:glm-5.1');
+		expect(formState.modelSelectionTarget).toMatchObject({
+			model: 'glm-5.1',
+			apiProviderId: 'zai',
+			modelEndpointId: 'zai_openai',
+			modelProtocol: 'openai-compatible',
+		});
+		expect(formState.modelSelectionError).toBe('Model unavailable');
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+	});
+
+	it('blocks a displayed automatic selection when its recent disappears after refresh', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['codex'];
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex' || catalogFresh) return modelsForAgent(agentId);
+			return [
+				{
+					value: 'stale_openai:gpt-stale',
+					label: 'Stale: GPT',
+					rawModel: 'gpt-stale',
+					apiProviderId: 'stale',
+					endpointId: 'stale_openai',
+					protocol: 'openai-compatible',
+				},
+			];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-stale',
+						apiProviderId: 'stale',
+						modelEndpointId: 'stale_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+		expect(formState.modelSelectionError).not.toBeNull();
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+	});
+
+	it('adopts the default agent when discovery finds no usable recent', async () => {
+		const refresh = deferred<void>();
+		selectableAgentIds = [];
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-stale',
+						apiProviderId: 'stale',
+						modelEndpointId: 'stale_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('opus');
+
+		selectableAgentIds = ['claude', 'codex'];
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('claude');
+		expect(formState.modelValue).toBe('opus');
+		expect(formState.modelSelectionError).toBeNull();
+	});
+
+	it('applies eligible startup recents after background catalog discovery', async () => {
+		const refresh = deferred<void>();
+		selectableAgentIds = [];
+		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'chat-model',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		selectableAgentIds = ['claude', 'codex'];
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+	});
+
+	it('applies a discovered recent even when the prompt was typed first', async () => {
+		const refresh = deferred<void>();
+		selectableAgentIds = [];
+		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		selectableAgentIds = ['claude', 'codex'];
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+		expect(formState.modelSelectionError).toBeNull();
+	});
+
+	it('adopts a live model after discovery when the empty default was stored', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['opencode'];
+		mockModelCatalog.getModels.mockImplementation(() =>
+			catalogFresh ? [{ value: 'glm-5.1', label: 'GLM-5.1' }] : [],
+		);
+		mockModelCatalog.getDefaultModel.mockImplementation(() => '');
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({ recentAgentSettings: [] }));
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('');
+		expect(formState.modelSelectionPending).toBe(true);
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.modelValue).toBe('glm-5.1');
+		expect(formState.modelSelectionError).toBeNull();
+	});
+
+	it('blocks a preserved native selection when only an endpoint exposes the same model', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['codex'];
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex') return modelsForAgent(agentId);
+			return catalogFresh
+				? [
+						{
+							value: 'live_openai:gpt-shared',
+							label: 'Live: GPT Shared',
+							rawModel: 'gpt-shared',
+							apiProviderId: 'live-provider',
+							endpointId: 'live_openai',
+							protocol: 'openai-compatible',
+						},
+					]
+				: [{ value: 'gpt-shared', label: 'GPT Shared' }];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-shared',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('gpt-shared');
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.modelValue).toBe('gpt-shared');
+		expect(formState.modelSelectionTarget?.modelEndpointId).toBeNull();
+		expect(formState.modelSelectionError).not.toBeNull();
+		expect(formState.buildConfig()).toBeNull();
+	});
+
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
@@ -438,6 +972,7 @@ describe('NewChatFormState', () => {
 
 	it('falls back when Direct Anthropic has no endpoint models', async () => {
 		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
+		selectableAgentIds = ['claude', 'codex'];
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
@@ -457,6 +992,80 @@ describe('NewChatFormState', () => {
 
 		expect(formState.agentId).toBe('claude');
 		expect(formState.modelValue).toBe('opus');
+	});
+
+	it('ignores selection of an unavailable agent', () => {
+		selectableAgentIds = ['claude', 'codex'];
+
+		formState.selectAgent('direct-openai-compatible');
+
+		expect(formState.agentId).toBe('claude');
+	});
+
+	it('reconciles a direct selection to the first available recent', async () => {
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+		await formState.loadSettingsAndModels();
+		expect(formState.agentId).toBe('direct-openai-compatible');
+
+		selectableAgentIds = ['claude', 'codex'];
+		formState.reconcileAgentSelection();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+	});
+
+	it('preserves a user-touched selection when its agent becomes unavailable', async () => {
+		const refresh = deferred<void>();
+		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+		await formState.loadSettingsAndModels();
+		formState.setThinkingMode('low');
+
+		selectableAgentIds = ['claude', 'codex'];
+		formState.reconcileAgentSelection();
+
+		expect(formState.agentId).toBe('direct-openai-compatible');
+		expect(formState.modelSelectionTarget).toMatchObject({
+			model: 'glm-5.1',
+			apiProviderId: 'zai',
+			modelEndpointId: 'zai_openai',
+		});
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+
+		refresh.resolve();
+		await refresh.promise;
 	});
 
 	it('falls back when startup defaults reference a non-agent API provider id', async () => {
@@ -581,6 +1190,33 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 	});
 
+	it('tracks prompt and attachment revisions for atomic prompt transforms', () => {
+		const initialRevision = formState.contentRevision;
+		formState.firstMessage = 'Draft';
+		expect(formState.contentRevision).toBe(initialRevision + 1);
+
+		const attachment = new File(['image'], 'draft.png', { type: 'image/png' });
+		formState.addImages([attachment]);
+		expect(formState.contentRevision).toBe(initialRevision + 2);
+
+		formState.removeImage(0);
+		expect(formState.contentRevision).toBe(initialRevision + 3);
+	});
+
+	it('rejects an agent that becomes unavailable before submission', () => {
+		formState.selectAgent('direct-openai-compatible');
+		formState.settingsLoaded = true;
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		selectableAgentIds = ['claude', 'codex'];
+
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+		expect(formState.error).toBe('The selected agent is not available for new chats.');
+	});
+
 	it('rejects submission while startup defaults are still loading', () => {
 		formState.projectPath = '/valid/path';
 		formState.validationStatus = 'valid';
@@ -596,7 +1232,7 @@ describe('NewChatFormState', () => {
 		formState.validationStatus = 'valid';
 		formState.firstMessage = 'Start this task';
 		formState.agentId = 'codex';
-		formState.handleModelChange('gpt-5.4');
+		formState.selectModel('gpt-5.4');
 		formState.permissionMode = 'acceptEdits';
 		formState.thinkingMode = 'medium';
 		formState.agentSettingsById = {
@@ -653,5 +1289,235 @@ describe('NewChatFormState', () => {
 		} finally {
 			warnSpy.mockRestore();
 		}
+	});
+});
+
+describe('NewChatFormState preamble selection', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.mocked(chatsApi.validateStart).mockReset();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockReset();
+	});
+
+	afterEach(() => vi.useRealTimers());
+
+	const ID_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+	const ID_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
+
+	function previewResponse(ids: readonly string[], eligible: readonly string[] = ids) {
+		return {
+			success: true as const,
+			canonicalProjectPath: '/canonical/repo',
+			orderedPreambleIds: [...ids],
+			projection: {
+				catalogRevision: 2,
+				eligiblePreambles: eligible.map((id) => ({ id, title: `Title ${id}` })),
+				unavailable: [],
+			},
+		};
+	}
+
+	function createPreambleFormState(selectableAgentIds: readonly string[] = ['claude']) {
+		return new NewChatFormState({
+			modelCatalog: mockModelCatalog as any,
+			remoteSettings: makeMockRemoteSettings() as any,
+			get selectableAgentIds() {
+				return selectableAgentIds;
+			},
+		});
+	}
+
+	it('clears the preview immediately when the path becomes empty or invalid', async () => {
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+		formState.preambles.preview = previewResponse([ID_A]).projection;
+
+		formState.projectPath = '  ';
+		formState.validatePath();
+		expect(formState.preambles.preview).toBeNull();
+		expect(formState.preambles.previewCount).toBe(0);
+
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+		formState.preambles.preview = previewResponse([ID_A]).projection;
+		formState.validationStatus = 'invalid';
+		formState.validatePath();
+		expect(formState.preambles.preview).toBeNull();
+	});
+
+	it('adopts a preview only when path and choice still match, ignoring reordered responses', async () => {
+		const preview = vi
+			.fn()
+			.mockImplementationOnce(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 40));
+				return previewResponse([ID_A]);
+			})
+			.mockImplementationOnce(async () => previewResponse([ID_A, ID_B]));
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(preview);
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+
+		const first = formState.validatePath();
+		// A path change supersedes the in-flight request before it lands.
+		await vi.advanceTimersByTimeAsync(310);
+		formState.projectPath = '/other';
+		const second = formState.validatePath();
+		await vi.advanceTimersByTimeAsync(500);
+		void first;
+		void second;
+
+		// Only the response for the current path was adopted.
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+			ID_A,
+			ID_B,
+		]);
+		expect(formState.preambles.canonicalProjectPath).toBe('/canonical/repo');
+		expect(formState.preambles.previewCount).toBe(2);
+	});
+
+	it('drops an explicit-choice preview response that raced a reset to defaults', async () => {
+		const preview = vi.fn(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			return previewResponse([ID_A]);
+		});
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(preview);
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+		formState.preambles.setExplicit([ID_A]);
+		await vi.advanceTimersByTimeAsync(320);
+		formState.preambles.resetToDefaults();
+		await vi.advanceTimersByTimeAsync(200);
+		// The stale explicit response is discarded; the defaults preview wins.
+		expect(formState.preambles.choice.mode).toBe('defaults');
+		expect(formState.preambles.orderedIds).toBeUndefined();
+	});
+
+	it('omits orderedPreambleIds in defaults mode and sends explicit lists exactly', () => {
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+		formState.settingsLoaded = true;
+		formState.firstMessage = 'hello';
+		formState.validationStatus = 'valid';
+		expect(formState.buildConfig()?.orderedPreambleIds).toBeUndefined();
+
+		formState.preambles.setExplicit([ID_B, ID_A]);
+		expect(formState.buildConfig()?.orderedPreambleIds).toEqual([ID_B, ID_A]);
+	});
+
+	it('refreshes untouched defaults for agent and tag changes without refetching explicit IDs', async () => {
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(async (request) => {
+			const ids =
+				request.orderedPreambleIds ??
+				(request.agentId === 'codex' || request.tags.includes('backend') ? [ID_B] : [ID_A]);
+			return previewResponse(ids);
+		});
+		const formState = createPreambleFormState(['claude', 'codex']);
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+
+		await formState.preambles.refreshPreview();
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([ID_A]);
+		formState.selectAgent('codex');
+		expect(formState.preambles.preview).toBeNull();
+		expect(formState.preambles.previewLoading).toBe(true);
+		await vi.waitFor(() => {
+			expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+				ID_B,
+			]);
+		});
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
+			projectPath: '/repo',
+			agentId: 'codex',
+			tags: [],
+		});
+
+		formState.preambles.setExplicit([ID_B, ID_A]);
+		await vi.waitFor(() => {
+			expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+				ID_B,
+				ID_A,
+			]);
+		});
+		const explicitPreviewCalls = vi.mocked(preamblesApi.preambleSelectionPreview).mock.calls.length;
+		formState.selectAgent('claude');
+		expect(formState.addTag('Backend')).toBe(true);
+		await Promise.resolve();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(explicitPreviewCalls);
+		expect(formState.preambles.choice).toEqual({
+			mode: 'explicit',
+			orderedPreambleIds: [ID_B, ID_A],
+		});
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+			ID_B,
+			ID_A,
+		]);
+	});
+
+	it('ignores a preview response from an older agent and tag context', async () => {
+		const first = deferred<ReturnType<typeof previewResponse>>();
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce(previewResponse([ID_B]));
+		const formState = createPreambleFormState(['claude', 'codex']);
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+
+		const initial = formState.preambles.refreshPreview();
+		formState.selectAgent('codex');
+		await vi.waitFor(() => {
+			expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+				ID_B,
+			]);
+		});
+		first.resolve(previewResponse([ID_A]));
+		await initial;
+
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([ID_B]);
+	});
+
+	it('loads automatic defaults for a picker draft without changing the explicit choice', async () => {
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue(previewResponse([ID_A]));
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+		formState.preambles.setExplicit([ID_B]);
+
+		const automaticPreview = await formState.preambles.loadAutomaticPreview();
+
+		expect(automaticPreview.orderedPreambleIds).toEqual([ID_A]);
+		expect(formState.preambles.choice).toEqual({
+			mode: 'explicit',
+			orderedPreambleIds: [ID_B],
+		});
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
+			projectPath: '/repo',
+			agentId: 'claude',
+			tags: [],
+		});
+	});
+
+	it('restores automatic defaults when the form reopens with the same valid path', async () => {
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue(previewResponse([ID_A]));
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+
+		await formState.preambles.refreshPreview();
+		expect(formState.preambles.previewCount).toBe(1);
+
+		formState.reseed('next message');
+		expect(formState.preambles.choice).toEqual({ mode: 'defaults' });
+		expect(formState.preambles.previewLoading).toBe(true);
+		await vi.waitFor(() => expect(formState.preambles.previewCount).toBe(1));
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
+			projectPath: '/repo',
+			agentId: 'claude',
+			tags: [],
+		});
 	});
 });

@@ -6,6 +6,7 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { parseAgentSettingsById } from '../../common/agent-integration.js';
+import { isRecord } from '../../common/json.js';
 import type {
   ExecutionDefaults,
   ExecutionDefaultsSettings,
@@ -20,10 +21,6 @@ const EXECUTION_DEFAULT_KEYS = [
   'thinkingMode',
   'agentSettingsById',
 ] as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function optionalString(value: unknown): string | null {
   const trimmed = typeof value === 'string' ? value.trim() : '';

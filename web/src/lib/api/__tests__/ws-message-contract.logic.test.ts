@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	AgentRunFailedMessage,
 	AgentRunFinishedMessage,
-	ChatGenerationResetMessage,
+	ChatTranscriptReplacedMessage,
 	ChatListRefreshRequestedMessage,
 	ChatMessagesMessage,
 	ChatProcessingUpdatedMessage,
@@ -13,9 +13,8 @@ import {
 	ChatSessionDeletedWsMessage,
 	ChatSessionStoppedMessage,
 	ChatSubscribedMessage,
+	ChatTransientFeedMutationMessage,
 	ClientRequestErrorMessage,
-	PendingUserInputClearedMessage,
-	PendingUserInputStatusUpdatedMessage,
 	ReconnectStateMessage,
 	ChatExecutionControlUpdatedMessage,
 	ScheduledPromptsInvalidatedMessage,
@@ -32,21 +31,33 @@ import {
 	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
-import { ErrorMessage } from '$shared/chat-types';
+import { CHAT_STOP_OUTCOMES, ErrorMessage } from '$shared/chat-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 const chatViewMessage = {
-	seq: 1,
+	ordinal: 1,
 	message: { type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' },
 };
 
-function emptyExecutionControl(version = 4) {
+function transientFeed(transcriptViewId = 'generation-1') {
 	return {
+		serverInstanceId: 'server-instance-test',
+		chatId: 'c-1',
+		transcriptViewId,
+		transientRevision: 0,
+		rows: [],
+	};
+}
+
+function emptyExecutionControl(version = 4, serverInstanceId = 'server-instance-test') {
+	return {
+		serverInstanceId,
 		queue: {
 			entries: [],
-			dispatchingEntryId: null,
+			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
+			reorderRevision: 0,
 		},
 		version,
 		updatedAt: '2026-07-18T00:00:00.000Z',
@@ -58,7 +69,10 @@ function makeSettingsSnapshot(
 ): RemoteSettingsSnapshot {
 	return {
 		version: 2,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
@@ -92,8 +106,11 @@ describe('parseServerWsMessage', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-messages',
 			chatId: 'c-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
 			messages: [chatViewMessage],
+			firstOrdinal: 1,
+			lastOrdinal: 1,
+			resendCandidates: [],
 			turnId: 'turn-1',
 			clientRequestId: 'req-1',
 			upstreamRequestId: 'cursor-req-1',
@@ -101,7 +118,7 @@ describe('parseServerWsMessage', () => {
 
 		expect(msg).toBeInstanceOf(ChatMessagesMessage);
 		expect((msg as ChatMessagesMessage).chatId).toBe('c-1');
-		expect((msg as ChatMessagesMessage).generationId).toBe('generation-1');
+		expect((msg as ChatMessagesMessage).transcriptViewId).toBe('generation-1');
 		expect((msg as ChatMessagesMessage).messages).toHaveLength(1);
 		expect((msg as ChatMessagesMessage).turnId).toBe('turn-1');
 		expect((msg as ChatMessagesMessage).clientRequestId).toBe('req-1');
@@ -113,10 +130,12 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'chat-messages',
 				chatId: 'c-1',
-				generationId: 'generation-1',
+				transcriptViewId: 'generation-1',
+				firstOrdinal: 1,
+				lastOrdinal: 1,
 				messages: [
 					{
-						seq: 0,
+						ordinal: 0,
 						message: { type: 'user-message', timestamp: '2025-01-01T00:00:00Z', content: 'bad' },
 					},
 				],
@@ -127,8 +146,10 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'chat-messages',
 				chatId: 'c-1',
-				generationId: 'generation-1',
-				messages: [chatViewMessage, { ...chatViewMessage, seq: 1 }],
+				transcriptViewId: 'generation-1',
+				messages: [chatViewMessage, { ...chatViewMessage, ordinal: 1 }],
+				firstOrdinal: 1,
+				lastOrdinal: 1,
 			}),
 		).toBeNull();
 	});
@@ -137,117 +158,103 @@ describe('parseServerWsMessage', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-messages',
 			chatId: 'c-1',
-			generationId: 'generation-1',
+			transcriptViewId: 'generation-1',
+			firstOrdinal: 1,
+			lastOrdinal: 1,
 			messages: [
 				{
-					seq: 1,
+					ordinal: 1,
 					message: { type: 'future-message', timestamp: '2025-01-01T00:00:00Z', payload: {} },
 				},
 			],
+			resendCandidates: [],
 		});
 
 		expect(msg).toBeInstanceOf(ChatMessagesMessage);
 		expect((msg as ChatMessagesMessage).messages[0].message).toBeInstanceOf(ErrorMessage);
 	});
 
-	it('parses chat-subscribed delta responses', () => {
+	it('parses chat-subscribed replay responses', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-subscribed',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: 'generation-1',
-			mode: 'delta',
+			transcriptViewId: 'generation-1',
 			messages: [chatViewMessage],
-			lastSeq: 1,
-			pendingUserInputs: [
-				{
-					chatId: 'c-1',
-					clientRequestId: 'req-pending',
-					content: '',
-					createdAt: '2025-01-01T00:00:00Z',
-					deliveryStatus: 'unconfirmed',
-					attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
-				},
-			],
+			firstOrdinal: 1,
+			lastOrdinal: 1,
+			nextAfterOrdinal: 1,
+			throughOrdinal: 1,
+			hasMore: false,
+			resendCandidates: [],
+			transientFeed: transientFeed(),
 		});
 
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
-		expect((msg as ChatSubscribedMessage).mode).toBe('delta');
-		expect((msg as ChatSubscribedMessage).generationId).toBe('generation-1');
-		expect((msg as ChatSubscribedMessage).pendingUserInputs[0].attachments).toEqual([
-			{ name: 'context.pdf', mimeType: 'application/pdf' },
-		]);
+		expect((msg as ChatSubscribedMessage).transcriptViewId).toBe('generation-1');
+		expect((msg as ChatSubscribedMessage).messages).toEqual([chatViewMessage]);
 	});
 
-	it('parses unloaded chat-subscribe snapshot-required with null generationId', () => {
-		const msg = parseServerWsMessage({
+	it('rejects chat-subscribe transient state for another chat or transcript view', () => {
+		const response = {
 			type: 'chat-subscribed',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: null,
-			mode: 'snapshot-required',
+			transcriptViewId: 'generation-1',
 			messages: [],
-			lastSeq: 0,
-			pendingUserInputs: [],
+			firstOrdinal: 1,
+			lastOrdinal: 0,
+			nextAfterOrdinal: 0,
+			throughOrdinal: 0,
+			hasMore: false,
+			resendCandidates: [],
+		};
+		expect(parseServerWsMessage({
+			...response,
+			transientFeed: { ...transientFeed(), chatId: 'c-2' },
+		})).toBeNull();
+		expect(parseServerWsMessage({
+			...response,
+			transientFeed: transientFeed('generation-2'),
+		})).toBeNull();
+	});
+
+	it('parses ordered transient mutations', () => {
+		const mutation = parseServerWsMessage({
+			type: 'chat-transient-feed-mutation',
+			...transientFeed(),
+			transientRevision: 1,
+			mutation: { kind: 'remove', permissionOccurrenceId: 'one' },
 		});
-
-		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
-		expect((msg as ChatSubscribedMessage).generationId).toBeNull();
+		expect(mutation).toBeInstanceOf(ChatTransientFeedMutationMessage);
 	});
 
-	it('rejects chat-subscribe responses without a valid pending-input snapshot', () => {
+	it('rejects chat-subscribe responses without a transient-feed snapshot', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				generationId: 'generation-1',
-				mode: 'delta',
+				transcriptViewId: 'generation-1',
 				messages: [],
-				lastSeq: 0,
-			}),
-		).toBeNull();
-		expect(
-			parseServerWsMessage({
-				type: 'chat-subscribed',
-				clientRequestId: 'req-subscribe',
-				chatId: 'c-1',
-				generationId: 'generation-1',
-				mode: 'delta',
-				messages: [],
-				lastSeq: 0,
-				pendingUserInputs: [{ clientRequestId: 'missing-fields' }],
-			}),
-		).toBeNull();
-		expect(
-			parseServerWsMessage({
-				type: 'chat-subscribed',
-				clientRequestId: 'req-subscribe',
-				chatId: 'c-1',
-				generationId: 'generation-1',
-				mode: 'delta',
-				messages: [],
-				lastSeq: 0,
-				pendingUserInputs: [
-					{
-						chatId: 'c-1',
-						clientRequestId: 'req-pending',
-						content: '',
-						createdAt: '2025-01-01T00:00:00Z',
-						deliveryStatus: 'failed',
-						attachments: [{ name: 42 }],
-					},
-				],
+				firstOrdinal: 1,
+				lastOrdinal: 0,
+				nextAfterOrdinal: 0,
+				throughOrdinal: 0,
+				hasMore: false,
+				resendCandidates: [],
 			}),
 		).toBeNull();
 	});
 
-	it('rejects missing generationId except for snapshot-required chat-subscribed null', () => {
+	it('rejects missing or null transcript view IDs', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'chat-messages',
 				chatId: 'c-1',
 				messages: [],
+				firstOrdinal: 1,
+				lastOrdinal: 0,
 			}),
 		).toBeNull();
 
@@ -256,9 +263,13 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				mode: 'delta',
 				messages: [],
-				lastSeq: 0,
+				firstOrdinal: 1,
+				lastOrdinal: 0,
+				nextAfterOrdinal: 0,
+				throughOrdinal: 0,
+				hasMore: false,
+				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
 
@@ -267,26 +278,30 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-subscribed',
 				clientRequestId: 'req-subscribe',
 				chatId: 'c-1',
-				generationId: null,
-				mode: 'delta',
+				transcriptViewId: null,
 				messages: [],
-				lastSeq: 0,
+				firstOrdinal: 1,
+				lastOrdinal: 0,
+				nextAfterOrdinal: 0,
+				throughOrdinal: 0,
+				hasMore: false,
+				transientFeed: transientFeed(),
 			}),
 		).toBeNull();
 	});
 
-	it('parses lightweight generation reset messages', () => {
+	it('parses transcript replacement messages', () => {
 		const msg = parseServerWsMessage({
-			type: 'chat-generation-reset',
+			type: 'chat-transcript-replaced',
 			chatId: 'c-1',
-			generationId: 'generation-2',
-			reason: 'process-error',
-			lastSeq: 2,
+			previousTranscriptViewId: 'generation-1',
+			transcriptViewId: 'generation-2',
+			lastOrdinal: 2,
 		});
 
-		expect(msg).toBeInstanceOf(ChatGenerationResetMessage);
-		expect((msg as ChatGenerationResetMessage).reason).toBe('process-error');
-		expect((msg as ChatGenerationResetMessage).lastSeq).toBe(2);
+		expect(msg).toBeInstanceOf(ChatTranscriptReplacedMessage);
+		expect((msg as ChatTranscriptReplacedMessage).previousTranscriptViewId).toBe('generation-1');
+		expect((msg as ChatTranscriptReplacedMessage).lastOrdinal).toBe(2);
 	});
 
 	it('parses chat-reloaded responses with request correlation', () => {
@@ -294,16 +309,41 @@ describe('parseServerWsMessage', () => {
 			type: 'chat-reloaded',
 			clientRequestId: 'req-reload',
 			chatId: 'c-1',
-			generationId: 'generation-2',
-			messages: [chatViewMessage],
-			lastSeq: 1,
-			pageOldestSeq: 1,
-			hasMore: false,
+			transcriptViewId: 'generation-2',
+			messages: [{ ...chatViewMessage, ordinal: 51 }],
+			lastOrdinal: 100,
+			pageOldestOrdinal: 51,
+			pageNewestOrdinal: 100,
+			nextBeforeOrdinal: 51,
+			hasMore: true,
 		});
 
 		expect(msg).toBeInstanceOf(ChatReloadedMessage);
 		expect((msg as ChatReloadedMessage).clientRequestId).toBe('req-reload');
-		expect((msg as ChatReloadedMessage).generationId).toBe('generation-2');
+		expect((msg as ChatReloadedMessage).transcriptViewId).toBe('generation-2');
+		expect((msg as ChatReloadedMessage).nextBeforeOrdinal).toBe(51);
+	});
+
+	it.each([
+		['non-boolean hasMore', { hasMore: 'false' }],
+		['oldest ordinal that does not match the first message', { pageOldestOrdinal: 0 }],
+		['newest ordinal that does not match the current tail', { pageNewestOrdinal: 0 }],
+		['last ordinal behind the newest page', { lastOrdinal: 0 }],
+		['message outside the declared page', { pageOldestOrdinal: 2 }],
+	])('rejects chat-reloaded responses with invalid %s', (_name, patch) => {
+		expect(parseServerWsMessage({
+			type: 'chat-reloaded',
+			clientRequestId: 'req-reload',
+			chatId: 'c-1',
+			transcriptViewId: 'generation-2',
+			messages: [chatViewMessage],
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 1,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+			...patch,
+		})).toBeNull();
 	});
 
 	it('rejects legacy event-log payloads', () => {
@@ -341,7 +381,11 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'reconnect-state',
 				clientRequestId: 'req-reconnect',
-				processing: { outcome: 'snapshot', runningChatIds: ['running-1'] },
+				serverInstanceId: 'server-instance-test',
+				processing: {
+					outcome: 'snapshot',
+					chats: [{ chatId: 'running-1', phase: 'running' }],
+				},
 				controlResults: [
 					{
 						chatId: 'c-1',
@@ -365,20 +409,46 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'chat-session-stopped',
 				chatId: 'c-1',
-				success: true,
+				outcome: 'interrupt-requested',
 				intent: 'interrupt-and-send',
 			}),
-		).toEqual(new ChatSessionStoppedMessage('c-1', true, 'interrupt-and-send'));
+		).toEqual(new ChatSessionStoppedMessage('c-1', 'interrupt-requested', 'interrupt-and-send'));
 		expect(
 			parseServerWsMessage({
 				type: 'chat-session-stopped',
 				chatId: 'c-1',
-				success: true,
+				outcome: 'interrupt-requested',
 			}),
 		).toBeNull();
+		for (const outcome of CHAT_STOP_OUTCOMES) {
+			expect(
+				parseServerWsMessage({
+					type: 'chat-session-stopped',
+					chatId: 'c-1',
+					outcome,
+					intent: 'stop',
+				}),
+			).toEqual(new ChatSessionStoppedMessage('c-1', outcome, 'stop'));
+		}
+		for (const outcome of [undefined, 'unexpected']) {
+			expect(
+				parseServerWsMessage({
+					type: 'chat-session-stopped',
+					chatId: 'c-1',
+					outcome,
+					intent: 'stop',
+				}),
+			).toBeNull();
+		}
 		expect(
-			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', isProcessing: true }),
-		).toBeInstanceOf(ChatProcessingUpdatedMessage);
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'running' }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'running'));
+		expect(
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'stopping' }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'stopping'));
+		expect(
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: null }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', null));
 		expect(
 			parseServerWsMessage({
 				type: 'chat-execution-control-updated',
@@ -386,38 +456,6 @@ describe('parseServerWsMessage', () => {
 				control: emptyExecutionControl(),
 			}),
 		).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-cleared',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				reason: 'chat-removed',
-			}),
-		).toBeInstanceOf(PendingUserInputClearedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-cleared',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				reason: 'persisted',
-			}),
-		).toBeInstanceOf(PendingUserInputClearedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-status-updated',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				deliveryStatus: 'unconfirmed',
-			}),
-		).toBeInstanceOf(PendingUserInputStatusUpdatedMessage);
-		expect(
-			parseServerWsMessage({
-				type: 'pending-user-input-status-updated',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				deliveryStatus: 'unknown',
-			}),
-		).toBeNull();
 		expect(parseServerWsMessage({ type: 'chat-session-deleted', chatId: 'c-1' })).toBeInstanceOf(
 			ChatSessionDeletedWsMessage,
 		);
@@ -434,7 +472,6 @@ describe('parseServerWsMessage', () => {
 			projectPath: '/workspace/worktree',
 			effectiveProjectKey: '/workspace/worktree',
 			previousProjectPath: '/workspace/repo',
-			previousEffectiveProjectKey: '/workspace/repo',
 		});
 		expect(projectPathUpdated).toBeInstanceOf(ChatProjectPathUpdatedMessage);
 		expect((projectPathUpdated as ChatProjectPathUpdatedMessage).projectPath).toBe(
@@ -443,20 +480,63 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'chat-list-refresh-requested',
-				reason: 'chat-added',
+				reason: 'tags-updated',
 				chatId: 'c-1',
 			}),
 		).toBeInstanceOf(ChatListRefreshRequestedMessage);
+		expect(
+			parseServerWsMessage({
+				type: 'chat-list-refresh-requested',
+				reason: 'chats-reordered',
+				chatId: 'c-1',
+			}),
+		).toBeInstanceOf(ChatListRefreshRequestedMessage);
+		expect(
+			parseServerWsMessage({
+				type: 'chat-list-refresh-requested',
+				reason: 'chats-reordered-quick',
+				chatId: 'c-1',
+			}),
+		).toBeNull();
+		const settingsSnapshot = makeSettingsSnapshot({
+			ui: {
+				appIdentity: { title: 'Garcon - Work' },
+				hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }],
+			},
+		});
 		const settingsChanged = parseServerWsMessage({
 			type: 'settings-changed',
-			settings: makeSettingsSnapshot({
-				ui: { appIdentity: { title: 'Garcon - Work' } },
-			}),
+			settings: settingsSnapshot,
 		});
 		expect(settingsChanged).toBeInstanceOf(SettingsChangedMessage);
 		expect((settingsChanged as SettingsChangedMessage).settings.ui.appIdentity?.title).toBe(
 			'Garcon - Work',
 		);
+		expect(
+			(settingsChanged as SettingsChangedMessage).settings.features.agentCommands,
+		).toEqual({
+			enabled: true,
+			chatIdDiscovery: true,
+			sendMessage: true,
+		});
+		expect(
+			(settingsChanged as SettingsChangedMessage).settings.ui.hiddenBashCommandPatterns,
+		).toEqual([{ pattern: 'git *', mode: 'glob' }]);
+
+		const malformedBashPatterns = parseServerWsMessage({
+			type: 'settings-changed',
+			settings: {
+				...settingsSnapshot,
+				ui: {
+					appIdentity: { title: 'Garcon - Work' },
+					hiddenBashCommandPatterns: [{ pattern: '([unclosed', mode: 'regex' }],
+				},
+			},
+		});
+		expect(malformedBashPatterns).toBeInstanceOf(SettingsChangedMessage);
+		expect((malformedBashPatterns as SettingsChangedMessage).settings.ui).toEqual({
+			appIdentity: { title: 'Garcon - Work' },
+		});
 		expect(
 			parseServerWsMessage({
 				type: 'client-request-error',
@@ -474,8 +554,10 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'ws-pong',
 				clientRequestId: 'req-ping',
+				serverInstanceId: 'server-instance-test',
 				sentAt: 1234,
 				serverTime: '2026-06-17T00:00:00.000Z',
+				processing: { outcome: 'snapshot', chats: [] },
 			}),
 		).toBeInstanceOf(WsPongMessage);
 	});
@@ -485,8 +567,9 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'agent-run-finished',
 				chatId: 'c-1',
+				outcome: 'interrupted',
 			}),
-		).toBeInstanceOf(AgentRunFinishedMessage);
+		).toMatchObject({ outcome: 'interrupted' });
 		for (const exitCode of ['0', 1.5, null, Number.NaN]) {
 			expect(
 				parseServerWsMessage({
@@ -522,41 +605,131 @@ describe('parseServerWsMessage', () => {
 		}
 	});
 
-	it('strictly parses reconnect processing outcomes', () => {
+	it('strictly parses shared reconnect and pong processing outcomes', () => {
 		const snapshot = parseServerWsMessage({
 			type: 'reconnect-state',
 			clientRequestId: 'req-reconnect',
+			serverInstanceId: 'server-instance-test',
 			processing: {
 				outcome: 'snapshot',
-				runningChatIds: ['chat-b', ' chat-a ', 'chat-b'],
+				chats: [
+					{ chatId: 'chat-b', phase: 'stopping' },
+					{ chatId: ' chat-a ', phase: 'running' },
+				],
 			},
 			controlResults: [],
 		});
 		expect(snapshot).toBeInstanceOf(ReconnectStateMessage);
 		expect((snapshot as ReconnectStateMessage).processing).toEqual({
 			outcome: 'snapshot',
-			runningChatIds: ['chat-b', 'chat-a'],
+			chats: [
+				{ chatId: 'chat-b', phase: 'stopping' },
+				{ chatId: 'chat-a', phase: 'running' },
+			],
 		});
 		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
+		expect((snapshot as ReconnectStateMessage).serverInstanceId).toBe('server-instance-test');
 
 		const emptySnapshot = parseServerWsMessage({
 			type: 'reconnect-state',
-			processing: { outcome: 'snapshot', runningChatIds: [] },
+			serverInstanceId: 'server-instance-test',
+			processing: { outcome: 'snapshot', chats: [] },
 			controlResults: [],
 		});
 		expect((emptySnapshot as ReconnectStateMessage).processing).toEqual({
 			outcome: 'snapshot',
-			runningChatIds: [],
+			chats: [],
 		});
 
 		const unavailable = parseServerWsMessage({
 			type: 'reconnect-state',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'unavailable' },
 			controlResults: [],
 		});
 		expect((unavailable as ReconnectStateMessage).processing).toEqual({
 			outcome: 'unavailable',
 		});
+
+		const pong = parseServerWsMessage({
+			type: 'ws-pong',
+			clientRequestId: 'req-ping',
+			serverInstanceId: 'server-instance-test',
+			sentAt: 42,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: {
+				outcome: 'snapshot',
+				chats: [{ chatId: 'chat-a', phase: 'stopping' }],
+			},
+		});
+		expect(pong).toBeInstanceOf(WsPongMessage);
+		expect((pong as WsPongMessage).processing).toEqual({
+			outcome: 'snapshot',
+			chats: [{ chatId: 'chat-a', phase: 'stopping' }],
+		});
+		expect((pong as WsPongMessage).serverInstanceId).toBe('server-instance-test');
+		const unavailablePong = parseServerWsMessage({
+			type: 'ws-pong',
+			clientRequestId: 'req-ping-unavailable',
+			serverInstanceId: 'server-instance-test',
+			sentAt: 43,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: { outcome: 'unavailable' },
+		});
+		expect(unavailablePong).toBeInstanceOf(WsPongMessage);
+		expect((unavailablePong as WsPongMessage).processing).toEqual({
+			outcome: 'unavailable',
+		});
+	});
+
+	it('rejects missing, malformed, and mixed execution-control instance identities', () => {
+		const reconnect = {
+			type: 'reconnect-state',
+			serverInstanceId: 'server-a',
+			processing: { outcome: 'snapshot', chats: [] },
+			controlResults: [
+				{ chatId: 'chat-1', outcome: 'snapshot', control: emptyExecutionControl(1, 'server-a') },
+			],
+		};
+		const pong = {
+			type: 'ws-pong',
+			clientRequestId: 'req-ping',
+			sentAt: 42,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: { outcome: 'snapshot', chats: [] },
+			serverInstanceId: 'server-a',
+		};
+
+		for (const serverInstanceId of [
+			undefined,
+			null,
+			'',
+			' server-a',
+			'server-a ',
+			'x'.repeat(129),
+		]) {
+			expect(parseServerWsMessage({ ...reconnect, serverInstanceId })).toBeNull();
+			expect(parseServerWsMessage({ ...pong, serverInstanceId })).toBeNull();
+		}
+		expect(
+			parseServerWsMessage({
+				type: 'reconnect-state',
+				processing: { outcome: 'snapshot', chats: [] },
+				controlResults: [],
+			}),
+		).toBeNull();
+		expect(
+			parseServerWsMessage({
+				...reconnect,
+				controlResults: [
+					{
+						chatId: 'chat-1',
+						outcome: 'snapshot',
+						control: emptyExecutionControl(1, 'server-b'),
+					},
+				],
+			}),
+		).toBeNull();
 	});
 
 	it('rejects malformed reconnect processing data and legacy session payloads', () => {
@@ -568,18 +741,36 @@ describe('parseServerWsMessage', () => {
 			{},
 			{ outcome: 'unknown' },
 			{ outcome: 'snapshot' },
-			{ outcome: 'snapshot', runningChatIds: {} },
-			{ outcome: 'snapshot', runningChatIds: [42] },
-			{ outcome: 'snapshot', runningChatIds: [''] },
-			{ outcome: 'snapshot', runningChatIds: ['   '] },
+			{ outcome: 'snapshot', chats: {} },
+			{ outcome: 'snapshot', chats: [42] },
+			{ outcome: 'snapshot', chats: [{ chatId: '', phase: 'running' }] },
+			{ outcome: 'snapshot', chats: [{ chatId: 'chat-1', phase: 'unknown' }] },
+			{
+				outcome: 'snapshot',
+				chats: [
+					{ chatId: 'chat-1', phase: 'running' },
+					{ chatId: 'chat-1', phase: 'stopping' },
+				],
+			},
 		];
 
 		for (const processing of invalidProcessingValues) {
 			expect(
 				parseServerWsMessage({
 					type: 'reconnect-state',
+					serverInstanceId: 'server-instance-test',
 					processing,
 					controlResults: [],
+				}),
+			).toBeNull();
+			expect(
+				parseServerWsMessage({
+					type: 'ws-pong',
+					clientRequestId: 'req-ping',
+					serverInstanceId: 'server-instance-test',
+					sentAt: 42,
+					serverTime: '2026-07-27T00:00:00.000Z',
+					processing,
 				}),
 			).toBeNull();
 		}
@@ -587,6 +778,7 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'reconnect-state',
+				serverInstanceId: 'server-instance-test',
 				sessions: { claude: [{ id: 'running-1' }] },
 				controlResults: [],
 			}),
@@ -594,11 +786,19 @@ describe('parseServerWsMessage', () => {
 	});
 
 	it('parses only known snippet invalidation reasons', () => {
-		for (const reason of ['created', 'updated', 'removed', 'reordered']) {
+		for (const reason of ['created', 'updated', 'removed']) {
 			expect(parseServerWsMessage({ type: 'snippets-invalidated', reason })).toBeInstanceOf(
 				SnippetsInvalidatedMessage,
 			);
 		}
+		expect(
+			parseServerWsMessage({
+				type: 'agent-run-finished',
+				chatId: 'c-1',
+				outcome: 'failed',
+			}),
+		).toBeNull();
+		expect(parseServerWsMessage({ type: 'snippets-invalidated', reason: 'reordered' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'snippets-invalidated', reason: 'renamed' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'snippets-invalidated' })).toBeNull();
 	});
@@ -620,64 +820,12 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'reconnect-state',
-				processing: { outcome: 'snapshot', runningChatIds: [] },
+				serverInstanceId: 'server-instance-test',
+				processing: { outcome: 'snapshot', chats: [] },
 				controlResults: [{ chatId: 'c-1', outcome: 'snapshot' }],
 			}),
 		).toBeNull();
 		expect(parseServerWsMessage({ type: 'unknown-event', data: 123 })).toBeNull();
-	});
-
-	it('strictly parses reconnect processing outcomes', () => {
-		const snapshot = parseServerWsMessage({
-			type: 'reconnect-state',
-			clientRequestId: 'req-reconnect',
-			processing: {
-				outcome: 'snapshot',
-				runningChatIds: [' chat-2 ', 'chat-1', 'chat-2'],
-			},
-			controlResults: [],
-		});
-		expect(snapshot).toBeInstanceOf(ReconnectStateMessage);
-		expect((snapshot as ReconnectStateMessage).processing).toEqual({
-			outcome: 'snapshot',
-			runningChatIds: ['chat-2', 'chat-1'],
-		});
-		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
-
-		const unavailable = parseServerWsMessage({
-			type: 'reconnect-state',
-			processing: { outcome: 'unavailable' },
-			controlResults: [],
-		});
-		expect(unavailable).toBeInstanceOf(ReconnectStateMessage);
-		expect((unavailable as ReconnectStateMessage).processing).toEqual({ outcome: 'unavailable' });
-
-		for (const processing of [
-			undefined,
-			null,
-			[],
-			{},
-			{ outcome: 'unknown' },
-			{ outcome: 'snapshot' },
-			{ outcome: 'snapshot', runningChatIds: 'chat-1' },
-			{ outcome: 'snapshot', runningChatIds: [42] },
-			{ outcome: 'snapshot', runningChatIds: [' '] },
-		]) {
-			expect(
-				parseServerWsMessage({
-					type: 'reconnect-state',
-					processing,
-					controlResults: [],
-				}),
-			).toBeNull();
-		}
-		expect(
-			parseServerWsMessage({
-				type: 'reconnect-state',
-				sessions: { claude: [{ id: 'legacy' }] },
-				controlResults: [],
-			}),
-		).toBeNull();
 	});
 });
 describe('parseClientWsMessage', () => {
@@ -694,12 +842,12 @@ describe('parseClientWsMessage', () => {
 			type: 'chat-subscribe',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: 'generation-1',
-			afterSeq: 7,
+			transcriptViewId: 'generation-1',
+			afterOrdinal: 7,
 		});
 		expect(subscribe).toBeInstanceOf(ChatSubscribeRequest);
-		expect((subscribe as ChatSubscribeRequest).generationId).toBe('generation-1');
-		expect((subscribe as ChatSubscribeRequest).afterSeq).toBe(7);
+		expect((subscribe as ChatSubscribeRequest).transcriptViewId).toBe('generation-1');
+		expect((subscribe as ChatSubscribeRequest).afterOrdinal).toBe(7);
 
 		expect(
 			parseClientWsMessage({
@@ -718,18 +866,16 @@ describe('parseClientWsMessage', () => {
 		expect((ping as WsPingRequest).sentAt).toBe(1234);
 	});
 
-	it('defaults malformed subscribe cursors to an empty cursor', () => {
+	it('rejects malformed subscribe cursors', () => {
 		const subscribe = parseClientWsMessage({
 			type: 'chat-subscribe',
 			clientRequestId: 'req-subscribe',
 			chatId: 'c-1',
-			generationId: 123,
-			afterSeq: -1,
+			transcriptViewId: 123,
+			afterOrdinal: -1,
 		});
 
-		expect(subscribe).toBeInstanceOf(ChatSubscribeRequest);
-		expect((subscribe as ChatSubscribeRequest).generationId).toBe('');
-		expect((subscribe as ChatSubscribeRequest).afterSeq).toBe(0);
+		expect(subscribe).toBeNull();
 	});
 
 	it('rejects unknown client request messages', () => {

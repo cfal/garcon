@@ -13,48 +13,51 @@ import type { ConversationLifecycleState } from '$lib/chat/conversation/conversa
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import type { ChatViewMessage } from '$shared/chat-view';
-import type {
-	ChatTranscriptApplyResult,
-	ChatTranscriptCache,
-} from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-import type { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
+import type { ResendCandidate } from '$shared/chat-view';
+import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
+import type { ConversationLifecyclePort } from './conversation-lifecycle-registry.svelte.js';
 
 export interface ConversationRouterStoreDeps {
 	sessions: Pick<
 		ChatSessionsPort,
+		| 'byId'
 		| 'selectedChat'
 		| 'selectedChatId'
-		| 'byId'
 		| 'order'
 		| 'hasChat'
 		| 'patchPreview'
+		| 'patchActivity'
 		| 'patchChat'
 		| 'patchLastReadAt'
 		| 'removeChat'
 		| 'setSelectedChatId'
+		| 'isChatProcessing'
 		| 'applyProcessingEvent'
 		| 'reconcileProcessing'
 		| 'quietRefreshChats'
 	>;
-	chatState: ActiveTranscriptPort;
+	chatState: ActiveTranscriptPort & { discardChat(chatId: string): void };
 	agentState: AgentState;
-	lifecycle: ConversationLifecycleState;
+	lifecycle: Pick<
+		ConversationLifecycleState,
+		| 'currentChatId'
+		| 'setCurrentChatId'
+		| 'markTurnRunning'
+		| 'clearTurnStatus'
+		| 'setLoadingStatus'
+		| 'pushLoadingStatus'
+		| 'popLoadingStatus'
+		| 'setIsSystemChatChange'
+	>;
+	lifecycles: Pick<ConversationLifecyclePort, 'forChat' | 'get'>;
 	conversationUi: ConversationUiPort;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
-	transcriptCache?: ChatTranscriptCache;
-	backgroundTranscriptLoader?: Pick<BackgroundTranscriptLoader, 'queueLoad'>;
-	visiblePreviews?: {
-		isVisible: (chatId: string) => boolean;
-		applyMessages: (
-			chatId: string,
-			generationId: string,
-			messages: ChatViewMessage[],
-		) => boolean | void;
-		loadSnapshot: (chatId: string) => Promise<void> | void;
-		markStale: (chatId: string) => void;
-	};
+	notifyCompletion: () => void;
+	chatDrafts?: Pick<ChatDraftStore, 'discardChat'>;
+	panels: ConversationPanelRegistry;
+	clearDeletedChat: (chatId: string) => void;
 }
 
 export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
@@ -62,85 +65,85 @@ export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
 	drainHandle: DrainHandle;
 }
 
-function routerApplyStatus(
-	result: ChatTranscriptApplyResult,
-): 'applied' | 'generation-changed' | 'gap-detected' {
-	if (result.status === 'applied') return 'applied';
-	if (result.status === 'generation-changed') return 'generation-changed';
-	return 'gap-detected';
-}
-
-// Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRouterStores {
-	const transcriptCache = deps.transcriptCache ?? deps.chatState.transcriptCache;
-	const queueBackgroundLoad = (
-		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	): void => {
-		deps.backgroundTranscriptLoader?.queueLoad(chatId, { generationId, messages });
-	};
-	const applyBackgroundTranscript = (
-		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	): ChatTranscriptApplyResult => {
-		const result = transcriptCache.applyMessages(chatId, generationId, messages);
-		if (result.status !== 'applied') {
-			queueBackgroundLoad(chatId, generationId, messages);
-		}
-		return result;
-	};
+	const transcriptCache = deps.panels.transcriptCache;
 	return {
 		agentSettings: {
-			permissionMode: () => deps.agentState.permissionMode,
-			setPermissionMode: (mode) => {
-				deps.agentState.permissionMode = mode;
+			permissionMode: (chatId) => {
+				const chat = deps.sessions.byId[chatId];
+				if (!chat) return null;
+				return deps.sessions.selectedChatId === chatId
+					? deps.agentState.permissionMode
+					: chat.permissionMode;
+			},
+			setPermissionMode: (chatId, mode) => {
+				if (!deps.sessions.byId[chatId]) return;
+				deps.sessions.patchChat(chatId, { permissionMode: mode });
+				if (deps.sessions.selectedChatId === chatId) deps.agentState.permissionMode = mode;
 			},
 		},
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
-			applyChatMessages: (chatId, generationId, messages) => {
-				if (deps.sessions.selectedChatId !== chatId) {
-					return routerApplyStatus(applyBackgroundTranscript(chatId, generationId, messages));
+			getChatCursor: (chatId) => transcriptCache.readAppliedCursor(chatId),
+			applyChatMessages: (
+				chatId,
+				transcriptViewId,
+				messages,
+				firstOrdinal,
+				lastOrdinal,
+				resendCandidates: ResendCandidate[],
+			) => {
+				const result = deps.panels.applyCommittedBatch({
+					chatId,
+					transcriptViewId,
+					messages,
+					firstOrdinal,
+					lastOrdinal,
+					resendCandidates,
+					noticeRevision: deps.panels.noticeRevisionFor(chatId),
+				});
+				if (result.kind === 'applied') {
+					return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
 				}
-				return deps.chatState.applyMessages(chatId, generationId, messages);
+				return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 			},
 			reloadChatTranscript: (chatId) => {
-				if (deps.sessions.selectedChatId !== chatId) return;
-				void deps.chatState.loadMessages(chatId).catch(() => {
-					// Leaves current visible state until a later retry succeeds.
-				});
+				void deps.panels.loadChatSnapshot(chatId).catch(() => {});
 			},
-			warmBackgroundTranscript: (chatId, generationId, messages) =>
-				applyBackgroundTranscript(chatId, generationId, messages).status === 'applied',
-			isVisiblePreviewChat: (chatId) => deps.visiblePreviews?.isVisible(chatId) ?? false,
-			warmVisibleChatPreview: (chatId, generationId, messages) =>
-				deps.visiblePreviews?.applyMessages(chatId, generationId, messages) ?? undefined,
-			loadVisibleChatPreview: (chatId) => deps.visiblePreviews?.loadSnapshot(chatId),
-			markVisibleChatPreviewStale: (chatId) => {
-				deps.visiblePreviews?.markStale(chatId);
+			isRenderedChat: (chatId) => deps.panels.panelsForChat(chatId).length > 0,
+			loadRenderedChat: async (chatId) => {
+				try {
+					await deps.panels.loadChatSnapshot(chatId);
+				} catch {
+					// Leaves the stale cache flag set so a later activation retries.
+				}
 			},
-			appendLocalNotice: (noticeType, content) =>
-				deps.chatState.appendLocalNotice(noticeType, content),
-			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
-			clearPendingUserInput: (clientRequestId) =>
-				deps.chatState.clearPendingUserInput(clientRequestId),
-			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
-				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
+			markRenderedChatStale: (chatId) => deps.panels.handleViewReplacement(chatId),
+			appendLocalNotice: (noticeType, content) => {
+				const chatId = deps.sessions.selectedChatId;
+				if (chatId) deps.panels.appendLocalNotice(chatId, noticeType, content);
+				else deps.chatState.appendLocalNotice(noticeType, content);
+			},
+			appendServerNotice: (chatId, noticeType, content) =>
+				deps.panels.appendServerNotice(chatId, noticeType, content),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
-			removeChatTranscript: (chatId) => transcriptCache.remove(chatId),
-			markChatTranscriptStale: (chatId) => transcriptCache.markStale(chatId),
+			removeChatTranscript: (chatId) => {
+				deps.chatState.discardChat(chatId);
+				deps.panels.removeChat(chatId);
+				deps.chatDrafts?.discardChat(chatId);
+			},
+			markChatTranscriptStale: (chatId) => deps.panels.markChatStale(chatId),
 			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,
 			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
 			markTurnRunning: (chatId) => deps.lifecycle.markTurnRunning(chatId),
-			clearTurnStatus: () => deps.lifecycle.clearTurnStatus(),
+			clearTurnStatus: (chatId) => deps.lifecycle.clearTurnStatus(chatId),
 			setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
-			pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
-			popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),
+			pushLoadingStatus: (chatId, entry) =>
+				deps.lifecycles.forChat(chatId).pushLoadingStatus(entry),
+			popLoadingStatus: (chatId, id) => deps.lifecycles.get(chatId)?.popLoadingStatus(id),
 			setIsSystemChatChange: (v) => deps.lifecycle.setIsSystemChatChange(v),
 		},
 		conversationUi: deps.conversationUi,
@@ -176,6 +179,10 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.sessions.patchLastReadAt(chatId, readAt);
 			},
 		},
+		chatPresentations: {
+			clearDeletedChat: deps.clearDeletedChat,
+		},
+		notifyCompletion: deps.notifyCompletion,
 	};
 }
 

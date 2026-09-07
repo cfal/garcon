@@ -1,114 +1,75 @@
-import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import {
-  AgentIntegrationError,
-  type AgentExecution,
-} from '@garcon/server-agent-interface';
-import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
-import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
+  runtimeOperation,
+  type AgentRuntimeExecution,
+  type AgentRuntimePublisher,
+} from '@garcon/server-agent-common/execution/runtime-events';
 import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
 import type { AmpCliRuntime } from './amp-cli.js';
 
-export class AmpExecution implements AgentExecution {
-  readonly #events = new AgentExecutionEventChannel();
-  readonly #operations = new AgentOperationTracker();
-
+export class AmpExecution implements AgentRuntimeExecution {
   constructor(
     private readonly runtime: AmpCliRuntime,
     private readonly nativeSessions: PathNativeSessionCodec,
-  ) {
-    runtime.onMessages((chatId, messages, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (operation) this.#events.emit({ type: 'messages', chatId, messages, operation });
-    });
-    runtime.onProcessing((chatId, processing) => {
-      const operation = this.#operations.current(chatId);
-      if (operation) this.#events.emit({ type: 'processing', chatId, processing, operation });
-    });
-    runtime.onFinished((chatId, exitCode, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({ type: 'finished', chatId, exitCode, operation });
-      this.#operations.finish(chatId, operation);
-    });
-    runtime.onFailed((chatId, message, metadata) => {
-      const operation = this.#operations.current(chatId, metadata);
-      if (!operation) return;
-      this.#events.emit({
-        type: 'failed',
-        chatId,
-        error: new AgentIntegrationError('PROVIDER_FAILURE', message, false),
-        operation,
-      });
-      this.#operations.finish(chatId, operation);
-    });
-  }
+  ) {}
 
-  async start(request: Parameters<AgentExecution['start']>[0]) {
-    this.#operations.register(request.chatId, request.operation);
+  async start(
+    request: Parameters<AgentRuntimeExecution['start']>[0],
+    publish: AgentRuntimePublisher,
+  ) {
     request.admission.signal.throwIfAborted();
-    const seed = request.carryOver.length > 0
-      ? `${renderTranscriptSeed([...request.carryOver])}\n\n`
-      : '';
-    try {
-      const result = await this.runtime.startSession({
-        chatId: request.chatId,
-        projectPath: request.projectPath,
-        model: request.model,
-        permissionMode: request.permissionMode,
-        thinkingMode: request.thinkingMode,
-        command: `${seed}${request.prompt}`,
-        clientRequestId: request.operation.clientRequestId ?? undefined,
-        turnId: request.operation.turnId,
-        executionAdmission: {
-          signal: request.admission.signal,
-          markStarted: () => request.admission.markStarted(),
-        },
-        onAbortable: () => request.admission.markAbortable(),
-      });
-      const session = {
+    const seed = request.carriedContext?.prefix ?? '';
+    let established: AgentEstablishedSession | null = null;
+    const establish = (result: { readonly agentSessionId: string; readonly nativePath: string | null }) => {
+      if (established) return established;
+      established = {
         agentSessionId: result.agentSessionId,
         nativeSession: this.nativeSessions.encode({
           path: result.nativePath,
           agentSessionId: result.agentSessionId,
           modelEndpointId: null,
         }),
+        nativeSeedReceipt: receiptForCarriedContext(request.carriedContext, result.agentSessionId),
       };
-      this.#events.emit({
-        type: 'session-created',
-        chatId: request.chatId,
-        session,
-        operation: request.operation,
-      });
-      return session;
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+      publish({ type: 'session', session: established });
+      return established;
+    };
+    const result = await this.runtime.startSession({
+      chatId: request.chatId,
+      projectPath: request.projectPath,
+      model: request.model,
+      permissionMode: request.permissionMode,
+      attachments: request.attachments,
+      command: `${seed}${request.prompt}`,
+      operation: runtimeOperation(request.runId, publish),
+      onSessionActivated: (session) => void establish(session),
+      executionAdmission: {
+        signal: request.admission.signal,
+        markStarted: () => request.admission.markStarted(),
+      },
+    });
+    return established ?? establish(result);
   }
 
-  async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
-    this.#operations.register(request.chatId, request.operation);
-    try {
-      await this.runtime.runTurn({
-        chatId: request.chatId,
-        projectPath: request.projectPath,
-        model: request.model,
-        permissionMode: request.permissionMode,
-        thinkingMode: request.thinkingMode,
-        command: request.prompt,
-        agentSessionId: request.agentSessionId,
-        clientRequestId: request.operation.clientRequestId ?? undefined,
-        turnId: request.operation.turnId,
-        executionAdmission: {
-          signal: request.admission.signal,
-          markStarted: () => request.admission.markStarted(),
-        },
-        onAbortable: () => request.admission.markAbortable(),
-      });
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+  async resume(
+    request: Parameters<AgentRuntimeExecution['resume']>[0],
+    publish: AgentRuntimePublisher,
+  ): Promise<void> {
+    await this.runtime.runTurn({
+      chatId: request.chatId,
+      projectPath: request.projectPath,
+      model: request.model,
+      permissionMode: request.permissionMode,
+      attachments: request.attachments,
+      command: request.prompt,
+      agentSessionId: request.agentSessionId,
+      operation: runtimeOperation(request.runId, publish),
+      executionAdmission: {
+        signal: request.admission.signal,
+        markStarted: () => request.admission.markStarted(),
+      },
+    });
   }
 
   async abort(agentSessionId: string): Promise<boolean> {
@@ -125,9 +86,5 @@ export class AmpExecution implements AgentExecution {
       status: session.status ?? null,
       startedAt: session.startedAt ?? null,
     }));
-  }
-
-  subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
-    return this.#events.subscribe(listener);
   }
 }

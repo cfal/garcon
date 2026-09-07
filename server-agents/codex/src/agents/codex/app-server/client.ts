@@ -1,8 +1,10 @@
 import { EventEmitter } from 'events';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
+import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from './protocol.js';
 import type {
   InitializeResponse,
   JsonRpcFailure,
+  JsonRpcId,
   JsonRpcNotification,
   JsonRpcServerRequest,
   JsonRpcSuccess,
@@ -14,8 +16,13 @@ import type {
   ThreadInjectItemsParams,
   ThreadInjectItemsResponse,
   ThreadLoadedListResponse,
+  ThreadItemsListParams,
+  ThreadItemsListResponse,
+  ThreadTurnsListParams,
+  ThreadTurnsListResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
+  ThreadSettingsUpdateParams,
   CodexThreadGoalStatus,
   ThreadUnsubscribeResponse,
   TurnStartResponse,
@@ -32,7 +39,7 @@ export interface CodexAppServerProcess {
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
   exited: Promise<number>;
-  kill(signal?: string): void;
+  kill(): void;
 }
 
 export type SpawnCodexAppServer = (
@@ -44,6 +51,8 @@ export type SpawnCodexAppServer = (
 interface PendingRequest<T> {
   resolve: (value: T) => void;
   reject: (error: Error) => void;
+  timeout?: ReturnType<typeof setTimeout>;
+  deliveryOutcome?: 'unknown';
 }
 
 export class CodexAppServerRpcError extends Error {
@@ -56,12 +65,38 @@ export class CodexAppServerRpcError extends Error {
   }
 }
 
+export class CodexAppServerDeliveryError extends Error {
+  readonly safeMessage: string;
+
+  constructor(
+    public readonly outcome: 'not-sent' | 'unknown',
+    cause: unknown,
+  ) {
+    super(
+      outcome === 'unknown'
+        ? 'Codex steering outcome could not be confirmed'
+        : 'Codex steering input was not sent',
+      { cause },
+    );
+    this.name = 'CodexAppServerDeliveryError';
+    this.safeMessage = this.message;
+  }
+}
+
+export interface CodexSteerRequestOptions {
+  readonly prepareDelivery: () => Promise<void>;
+  readonly acknowledgementTimeoutMs?: number;
+}
+
+export const CODEX_STEER_ACKNOWLEDGEMENT_TIMEOUT_MS = 15_000;
+
 export interface CodexAppServerClientOptions {
   env?: Record<string, string>;
   spawn?: SpawnCodexAppServer;
   resolveCli?: () => Promise<ResolvedCodexCli>;
   resolveCommand?: () => Promise<string>;
   clientVersion?: () => string;
+  shutdownGraceMs?: number;
 }
 
 export interface CodexAppServerMetric {
@@ -78,12 +113,19 @@ function defaultSpawnCodexAppServer(
   args: string[],
   options: { env: Record<string, string> },
 ): CodexAppServerProcess {
-  return Bun.spawn([command, ...args], {
+  const process = Bun.spawn([command, ...args], {
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
     env: options.env,
-  }) as unknown as CodexAppServerProcess;
+  });
+  return {
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    exited: process.exited,
+    kill: () => { process.kill(); },
+  };
 }
 
 function mergedEnv(overrides?: Record<string, string>): Record<string, string> {
@@ -103,6 +145,8 @@ export class CodexAppServerClient extends EventEmitter {
   #resolveCli: () => Promise<ResolvedCodexCli>;
   #env: Record<string, string>;
   #clientVersion: () => string;
+  #shutdownGraceMs: number;
+  #shutdownPromise: Promise<void> | null = null;
 
   constructor(options: CodexAppServerClientOptions = {}) {
     super();
@@ -114,6 +158,7 @@ export class CodexAppServerClient extends EventEmitter {
         : resolveCodexCli);
     this.#env = mergedEnv(options.env);
     this.#clientVersion = options.clientVersion ?? (() => '0.1.0');
+    this.#shutdownGraceMs = options.shutdownGraceMs ?? 2_000;
   }
 
   async connect(): Promise<InitializeResponse> {
@@ -127,9 +172,13 @@ export class CodexAppServerClient extends EventEmitter {
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     await this.connect();
+    return this.#withRequestMetric(method, () => this.#sendRequest<T>(method, params));
+  }
+
+  async #withRequestMetric<T>(method: string, operation: () => Promise<T>): Promise<T> {
     const startedAt = performance.now();
     try {
-      const result = await this.#sendRequest<T>(method, params);
+      const result = await operation();
       this.#emitMetric({
         name: 'codex.app_server.request',
         method,
@@ -152,11 +201,11 @@ export class CodexAppServerClient extends EventEmitter {
     this.#write(params === undefined ? { method } : { method, params });
   }
 
-  respond(id: number, result: unknown): void {
+  respond(id: JsonRpcId, result: unknown): void {
     this.#write({ id, result });
   }
 
-  reject(id: number, code: number, message: string): void {
+  reject(id: JsonRpcId, code: number, message: string): void {
     this.#write({ id, error: { code, message } });
   }
 
@@ -170,6 +219,10 @@ export class CodexAppServerClient extends EventEmitter {
 
   forkThread(params: Record<string, unknown>): Promise<ThreadForkResponse> {
     return this.request<ThreadForkResponse>('thread/fork', params);
+  }
+
+  updateThreadSettings(params: ThreadSettingsUpdateParams): Promise<Record<string, never>> {
+    return this.request<Record<string, never>>('thread/settings/update', params);
   }
 
   setThreadGoal(
@@ -202,6 +255,16 @@ export class CodexAppServerClient extends EventEmitter {
     return this.request<ThreadListResponse>('thread/list', params);
   }
 
+  async listThreadTurns(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
+    const response = await this.request<unknown>('thread/turns/list', params);
+    return parseThreadTurnsListResponse(response);
+  }
+
+  async listThreadItems(params: ThreadItemsListParams): Promise<ThreadItemsListResponse> {
+    const response = await this.request<unknown>('thread/items/list', params);
+    return parseThreadItemsListResponse(response);
+  }
+
   loadedThreads(): Promise<ThreadLoadedListResponse> {
     return this.request<ThreadLoadedListResponse>('thread/loaded/list', {});
   }
@@ -219,8 +282,25 @@ export class CodexAppServerClient extends EventEmitter {
     expectedTurnId: string;
     input: Array<Record<string, unknown>>;
     clientUserMessageId?: string;
-  }): Promise<TurnSteerResponse> {
-    return this.request<TurnSteerResponse>('turn/steer', params);
+  }, options?: CodexSteerRequestOptions): Promise<TurnSteerResponse> {
+    if (!options) return this.request<TurnSteerResponse>('turn/steer', params);
+    return this.#strictSteerRequest(params, options);
+  }
+
+  async #strictSteerRequest(
+    params: {
+      threadId: string;
+      expectedTurnId: string;
+      input: Array<Record<string, unknown>>;
+      clientUserMessageId?: string;
+    },
+    options: CodexSteerRequestOptions,
+  ): Promise<TurnSteerResponse> {
+    await this.connect();
+    return this.#withRequestMetric(
+      'turn/steer',
+      () => this.#sendStrictRequest<TurnSteerResponse>('turn/steer', params, options),
+    );
   }
 
   interruptTurn(threadId: string, turnId: string): Promise<Record<string, never>> {
@@ -281,6 +361,61 @@ export class CodexAppServerClient extends EventEmitter {
     return promise;
   }
 
+  async #sendStrictRequest<T>(
+    method: string,
+    params: unknown,
+    options: CodexSteerRequestOptions,
+  ): Promise<T> {
+    const id = this.#nextId++;
+    let frame: string;
+    try {
+      frame = `${JSON.stringify({ id, method, params })}\n`;
+    } catch (error) {
+      throw new CodexAppServerDeliveryError('not-sent', error);
+    }
+    const stdin = this.#proc?.stdin;
+    if (!stdin) {
+      throw new CodexAppServerDeliveryError(
+        'not-sent',
+        new Error('Codex app-server stdin is unavailable'),
+      );
+    }
+
+    await options.prepareDelivery();
+    const promise = new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        const pending = this.#pending.get(id);
+        if (!pending) return;
+        this.#pending.delete(id);
+        pending.reject(new CodexAppServerDeliveryError(
+          'unknown',
+          new Error('Codex steering acknowledgement timed out'),
+        ));
+      }, options.acknowledgementTimeoutMs ?? CODEX_STEER_ACKNOWLEDGEMENT_TIMEOUT_MS);
+      this.#pending.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timeout,
+        deliveryOutcome: 'unknown',
+      });
+    });
+
+    try {
+      stdin.write(frame);
+    } catch (error) {
+      this.#clearPendingRequest(id);
+      throw new CodexAppServerDeliveryError('unknown', error);
+    }
+    return promise;
+  }
+
+  #clearPendingRequest(id: number): PendingRequest<unknown> | undefined {
+    const pending = this.#pending.get(id);
+    this.#pending.delete(id);
+    if (pending?.timeout) clearTimeout(pending.timeout);
+    return pending;
+  }
+
   #write(payload: unknown): void {
     const stdin = this.#proc?.stdin;
     if (!stdin) throw new Error('Codex app-server stdin is unavailable');
@@ -301,7 +436,15 @@ export class CodexAppServerClient extends EventEmitter {
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
-          if (line.trim()) this.#handleLine(line.trim());
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            this.#handleLine(trimmed);
+          } catch (error) {
+            // One throwing handler must not abandon the read loop and leave
+            // the writer deaf until its turn timeouts expire.
+            this.emit('warning', `Codex app-server message handler failed: ${(error as Error).message}`);
+          }
         }
       }
     } catch (error) {
@@ -323,17 +466,23 @@ export class CodexAppServerClient extends EventEmitter {
 
     if (typeof obj.id === 'number' && 'result' in obj) {
       const success = message as JsonRpcSuccess;
-      const pending = this.#pending.get(success.id);
-      this.#pending.delete(success.id);
-      pending?.resolve(success.result);
+      const pending = this.#clearPendingRequest(obj.id);
+      if (!pending) {
+        this.emit('warning', `Ignoring late Codex app-server response: ${success.id}`);
+        return;
+      }
+      pending.resolve(success.result);
       return;
     }
 
     if (typeof obj.id === 'number' && 'error' in obj) {
       const failure = message as JsonRpcFailure;
-      const pending = this.#pending.get(failure.id);
-      this.#pending.delete(failure.id);
-      pending?.reject(new CodexAppServerRpcError(
+      const pending = this.#clearPendingRequest(obj.id);
+      if (!pending) {
+        this.emit('warning', `Ignoring late Codex app-server response: ${failure.id}`);
+        return;
+      }
+      pending.reject(new CodexAppServerRpcError(
         failure.error.message,
         failure.error.code,
         failure.error.data,
@@ -341,7 +490,7 @@ export class CodexAppServerClient extends EventEmitter {
       return;
     }
 
-    if (typeof obj.id === 'number' && typeof obj.method === 'string') {
+    if ((typeof obj.id === 'number' || typeof obj.id === 'string') && typeof obj.method === 'string') {
       this.emit('serverRequest', message as JsonRpcServerRequest);
       return;
     }
@@ -372,16 +521,46 @@ export class CodexAppServerClient extends EventEmitter {
   async #watchExit(exited: Promise<number>): Promise<void> {
     const code = await exited;
     const error = new Error(`Codex app-server exited with code ${code}`);
-    for (const pending of this.#pending.values()) pending.reject(error);
+    for (const pending of this.#pending.values()) {
+      if (pending.timeout) clearTimeout(pending.timeout);
+      pending.reject(pending.deliveryOutcome
+        ? new CodexAppServerDeliveryError(pending.deliveryOutcome, error)
+        : error);
+    }
     this.#pending.clear();
     this.#proc = null;
     this.#ready = null;
     this.emit('exit', code);
   }
 
-  shutdown(): void {
-    this.#proc?.kill();
+  async shutdown(): Promise<void> {
+    if (this.#shutdownPromise) return this.#shutdownPromise;
+    const proc = this.#proc;
     this.#proc = null;
     this.#ready = null;
+    if (!proc) return;
+
+    const shutdown = (async () => {
+      try {
+        // Codex closes its sole stdio connection on EOF, then shuts down loaded
+        // threads and their persistence writers before exiting.
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server-transport/src/transport/stdio.rs#L43-L79
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server/src/lib.rs#L1156-L1165
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/core/src/session/handlers.rs#L648-L667
+        proc.stdin?.end?.();
+        await Promise.race([
+          proc.exited.then(() => undefined),
+          Bun.sleep(this.#shutdownGraceMs),
+        ]);
+      } finally {
+        proc.kill();
+      }
+    })();
+    this.#shutdownPromise = shutdown;
+    try {
+      await shutdown;
+    } finally {
+      if (this.#shutdownPromise === shutdown) this.#shutdownPromise = null;
+    }
   }
 }

@@ -1,6 +1,7 @@
 // Core HTTP client with auth token injection and typed request helpers.
 
 import type { HttpErrorResponse } from '$shared/http-error';
+import { isRecord } from '$shared/json';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -22,10 +23,11 @@ export function clearAuthToken(): void {
 	removeLocalStorageItem(LOCAL_STORAGE_KEYS.authToken);
 }
 
-export type ApiFetchOptions = RequestInit & { timeoutMs?: number };
+export type ApiFetchOptions = RequestInit & { timeoutMs?: number | null };
 
-/** Merges a default timeout signal with any caller-provided signal. */
-function withTimeout(options: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): RequestInit {
+/** Merges a default timeout signal with any caller-provided signal unless disabled. */
+function withTimeout(options: RequestInit, timeoutMs: number | null = DEFAULT_TIMEOUT_MS): RequestInit {
+	if (timeoutMs === null) return options;
 	const timeoutSignal = AbortSignal.timeout(timeoutMs);
 	const callerSignal = options.signal;
 	return {
@@ -63,6 +65,12 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 	);
 }
 
+/** Wraps an unauthenticated fetch with the standard configurable timeout. */
+export function publicApiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
+	const { timeoutMs, ...fetchOptions } = options;
+	return globalThis.fetch(url, withTimeout(fetchOptions, timeoutMs));
+}
+
 export class ApiError extends Error {
 	status: number;
 	errorCode?: string;
@@ -85,10 +93,6 @@ export class ApiError extends Error {
 		this.retryable = retryable;
 		this.payload = payload;
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null;
 }
 
 function isHttpErrorResponse(value: unknown): value is HttpErrorResponse {

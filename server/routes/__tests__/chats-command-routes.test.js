@@ -1,11 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { QUEUE_ENTRY_ID_MAX_BYTES } from '../../../common/chat-command-contracts.ts';
+import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../../common/handoff-timeouts.ts';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 let testBasePath;
 let workspaceDir;
+const routeLogger = {
+  debug: mock(() => undefined),
+  info: mock(() => undefined),
+  warn: mock(() => undefined),
+  error: mock(() => undefined),
+};
 
 class MalformedJsonError extends Error {
   constructor() {
@@ -25,6 +34,10 @@ mock.module('../../config.js', () => ({
   isHttpCompressionEnabled: mock(() => true),
 }));
 
+mock.module('../../lib/log.js', () => ({
+  createLogger: mock(() => routeLogger),
+}));
+
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
   generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: CHAT_ID, title: 'Generated Title' })),
@@ -38,9 +51,14 @@ mock.module('../../chats/fork-chat.js', () => ({
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { CommandValidationError } from '../../lib/command-validation-error.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
-import { AgentSwitchError } from '../../agents/agent-switch-service.js';
-import { DomainError } from '../../lib/domain-error.js';
+import {
+  DomainError,
+  QueueEntrySteerError,
+  SteerDeliveryError,
+  TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
+} from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
   QueuePauseChangedError,
@@ -49,8 +67,6 @@ import {
   createRouteChatListProjector,
   createRouteCommandLedger,
   createRouteCommandService,
-  createRoutePathCache,
-  createRoutePendingInputs,
 } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000700';
@@ -69,10 +85,13 @@ function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
 
 function storedQueue(entries = [], overrides = {}) {
   return {
+    serverInstanceId: 'server-instance-test',
     entries,
+    controlEntries: [],
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    reorderRevision: 0,
     version: 0,
     updatedAt: null,
     ...overrides,
@@ -94,10 +113,14 @@ function createSession(overrides = {}) {
       value: { path: '/tmp/session.jsonl', agentSessionId: 'provider-session-123' },
     },
     agentOwnershipEpoch: 'epoch-1',
+    carryOverSegments: [],
+    nativeSeedReceipt: null,
+    carryOverMigrationQuarantine: null,
     agentSettingsById: {
       claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
     },
     projectPath: '/workspace/project',
+    tags: [],
     model: 'opus',
     permissionMode: 'default',
     thinkingMode: 'none',
@@ -110,6 +133,7 @@ function createRouteAgent(sessionOverrides = {}) {
   const sessions = new Map([[CHAT_ID, createSession(sessionOverrides)]]);
   const registry = {
     getChat: mock((chatId) => sessions.get(chatId) ?? null),
+    hasChat: mock((chatId) => sessions.has(chatId)),
     addChat: mock((entry) => {
       if (sessions.has(entry.id)) return false;
       sessions.set(entry.id, entry);
@@ -134,6 +158,7 @@ function createRouteAgent(sessionOverrides = {}) {
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
     listAllChats: mock(() => Object.fromEntries(sessions.entries())),
+    flush: mock(() => Promise.resolve(undefined)),
   };
   const settings = {
     getChatName: mock(() => null),
@@ -142,6 +167,7 @@ function createRouteAgent(sessionOverrides = {}) {
       normalIds.unshift(chatId);
       return Promise.resolve(undefined);
     }),
+    setSessionName: mock(() => Promise.resolve(undefined)),
     recordChatStartup: mock(() => Promise.resolve(undefined)),
     removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
     removeSessionName: mock(() => Promise.resolve(undefined)),
@@ -150,8 +176,10 @@ function createRouteAgent(sessionOverrides = {}) {
     getPinnedChatIds: mock(() => []),
     getNormalChatIds: mock(() => [...normalIds]),
     getArchivedChatIds: mock(() => []),
-    reorderWindow: mock(() => Promise.resolve({ success: true })),
-    reorderRelative: mock(() => Promise.resolve({ success: true })),
+	reorderChat: mock(() => Promise.resolve({
+		success: true,
+		response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+	})),
   };
   const queue = {
     scheduleDirectInput: mock(async (input) => {
@@ -161,7 +189,10 @@ function createRouteAgent(sessionOverrides = {}) {
         if (control.entries.length > 0 || control.pause) {
           throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
         }
-        await input.preparation?.prepare();
+        await input.preparation?.prepare({
+          signal: reservation.executionAdmission.signal,
+          assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
+        });
         await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
       } catch (error) {
@@ -177,7 +208,10 @@ function createRouteAgent(sessionOverrides = {}) {
     }),
     runInitialInput: mock(async (input) => {
       const reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
-      await input.preparation?.prepare();
+      await input.preparation?.prepare({
+        signal: reservation.executionAdmission.signal,
+        assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
+      });
       await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
       await input.settlement.markScheduled(input.command, input.options.turnId);
       await input.dispatch?.(reservation.executionAdmission);
@@ -233,25 +267,64 @@ function createRouteAgent(sessionOverrides = {}) {
         throw error;
       }
     }),
-    deliverAcceptedActiveInput: mock(async (input) => {
-      const delivered = await queue.deliverActiveInput(
+    moveAccepted: mock(async (input) => {
+      try {
+        const result = await queue.moveChatQueueEntry(
+          input.command.chatId,
+          {
+            entryId: input.command.entryId,
+            targetEntryId: input.targetEntryId,
+            placement: input.placement,
+            expectedReorderRevision: input.expectedReorderRevision,
+            expectedSourceRevision: input.expectedSourceRevision,
+            expectedTargetRevision: input.expectedTargetRevision,
+          },
+          { key: input.command.key, entryId: input.command.entryId },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    deliverAcceptedGoalControl: mock(async (input) => {
+      const delivered = await queue.deliverGoalControlInput(
         input.command.chatId,
         input.content,
         { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
         () => input.settlement.markScheduled(input.command, input.command.turnId),
       );
       if (delivered) {
-        await input.settlement.settleActiveInput(input.command);
+        await input.settlement.settleGoalControl(input.command);
         return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
       }
       const result = await queue.enqueueAccepted(input);
       return { delivery: 'queued', entryId: result.entryId, control: result.control };
     }),
-    recoverAcceptedActiveInput: mock(async (input) => ({
+    recoverAcceptedGoalControl: mock(async (input) => ({
       delivery: 'queued',
       entryId: input.command.entryId,
       control: await queue.readChatExecutionControl(input.command.chatId),
     })),
+    captureSteerTarget: mock(() => ({
+      attempt: {},
+      identity: { turnId: 'turn-active' },
+    })),
+    deliverAcceptedSteer: mock(async (input) => {
+      await input.settlement.markScheduled(input.command, input.target.identity.turnId);
+      await input.settlement.settleSteerSuccess(input.command, input.target.identity.turnId);
+      return { turnId: input.target.identity.turnId };
+    }),
+    deliverAcceptedQueueEntrySteer: mock(async (input) => {
+      await input.settlement.markScheduled(input.command, input.target.identity.turnId);
+      await input.settlement.settleSteerSuccess(input.command, input.target.identity.turnId);
+      return {
+        turnId: input.target.identity.turnId,
+        control: await queue.readChatExecutionControl(input.command.chatId),
+      };
+    }),
+    recoverQueueEntrySteer: mock((chatId) => queue.readChatExecutionControl(chatId)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
@@ -269,14 +342,22 @@ function createRouteAgent(sessionOverrides = {}) {
     failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
     stopActiveTurn: mock(() => Promise.resolve({
-      stopped: true,
+      outcome: 'interrupt-requested',
       control: storedQueue([], { version: 1 }),
     })),
-    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
-    isChatExecutionReserved: mock(() => false),
-    hasChatExecutionOwner: mock(() => false),
+    ownsExecution: mock(() => false),
+    reserveTranscriptSnapshot: mock((chatId) => {
+      const source = registry.getChat(chatId);
+      if (agents.isAgentSessionRunning(source?.agentId, source?.agentSessionId)) {
+        throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
+      }
+      return { chatId, reservationId: 'snapshot-reservation' };
+    }),
+    releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
+    discardPendingChatInput: mock(() => Promise.resolve(storedQueue())),
     readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -304,7 +385,18 @@ function createRouteAgent(sessionOverrides = {}) {
         duplicate: false,
       }),
     ),
-    deliverActiveInput: mock(async (_chatId, _content, _options, beforeDelivery) => {
+    moveChatQueueEntry: mock((_chatId, input) =>
+      Promise.resolve({
+        entryId: input.entryId,
+        control: storedQueue([
+          queueEntry(input.entryId),
+          queueEntry(input.targetEntryId, 'target', 'queued', input.expectedTargetRevision),
+        ], { version: 2, reorderRevision: input.expectedReorderRevision + 1 }),
+        duplicate: false,
+        rebased: false,
+      }),
+    ),
+    deliverGoalControlInput: mock(async (_chatId, _content, _options, beforeDelivery) => {
       await beforeDelivery();
       return true;
     }),
@@ -321,19 +413,19 @@ function createRouteAgent(sessionOverrides = {}) {
     }),
     waitForDispatches: mock(() => Promise.resolve(undefined)),
   };
-  const pathCache = createRoutePathCache();
   const metadata = {
     addNewChatMetadata: mock(() => undefined),
     listAllChatMetadata: mock(() => new Map()),
     getChatMetadata: mock(() => null),
   };
   const chatViews = {
-    getOrCreatePage: mock(() =>
+    page: mock(() =>
       Promise.resolve({
+        transcriptViewId: 'view-1',
         messages: [],
-        generationId: 'generation-1',
-        lastSeq: 0,
-        pageOldestSeq: 0,
+        lastOrdinal: 0,
+        pageOldestOrdinal: 0,
+        pageNewestOrdinal: 0,
         hasMore: false,
       }),
     ),
@@ -346,50 +438,43 @@ function createRouteAgent(sessionOverrides = {}) {
     supportsUpdateProjectPath: mock(() => true),
     supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),
+    currentTranscriptViewId: mock(() => Promise.resolve('view-current')),
     getRunningSessions: mock(() => ({ claude: [{ id: CHAT_ID }] })),
     startSession: mock(() => Promise.resolve(undefined)),
     modelSupportsImages: mock(() => Promise.resolve(true)),
+    getAgentCatalogEntry: mock(() => Promise.resolve({
+      supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
+      supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    })),
+    assertExecutionModeSelectionSupported: mock(() => undefined),
+    normalizeThinkingModeForAgent: mock((_agentId, value) => value),
     runSingleQuery: mock(() => Promise.resolve('title')),
-    forkAgentSession: mock(() => Promise.resolve({})),
+    forkAgentSession: mock(() => Promise.resolve({
+      kind: 'materialized',
+      session: { agentSessionId: 'forked-session', nativeSession: null },
+    })),
+    discardForkedAgentSession: mock(() => Promise.resolve(undefined)),
     resolvePermission: mock(() => undefined),
     resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
+    publishSessionFact: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
-  const agentSwitch = {
-    switchAgentModel: mock((req) =>
-      Promise.resolve(
-        registry.updateChat(req.chatId, {
-          agentId: req.agentId,
-          model: req.model,
-          apiProviderId: req.apiProviderId ?? null,
-          modelEndpointId: req.modelEndpointId ?? null,
-          modelProtocol: req.modelProtocol ?? null,
-          permissionMode: 'default',
-          thinkingMode: 'none',
-        }),
-      ),
-    ),
-  };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
-  const pendingInputs = createRoutePendingInputs();
   const chatListProjector = createRouteChatListProjector({
     registry,
     settings,
     metadata,
     agents,
-    pathCache,
   });
   const routes = createChatRoutes({
     registry,
     settings,
     queue,
-    pathCache,
+    processing: { phase: mock(() => null) },
     metadata,
     chatViews,
     agents,
-    pendingInputs,
-    agentSwitch,
     chatListProjector,
     commandService: createRouteCommandService({
       registry,
@@ -398,8 +483,6 @@ function createRouteAgent(sessionOverrides = {}) {
       metadata,
       agents,
       commandLedger,
-      pendingInputs,
-      pathCache,
       chatListProjector,
       forkChatFileCopy: async (args) => {
         await forkChatFileCopy(args);
@@ -414,6 +497,12 @@ function createRouteAgent(sessionOverrides = {}) {
             value: { id: 'forked-session' },
           },
           agentOwnershipEpoch: 'forked-epoch',
+          parentChat: {
+            chatId: sourceSession.id,
+            relation: 'fork',
+            transcriptViewId: 'view-source',
+            ordinal: 1,
+          },
         });
         await settings.ensureInNormal(targetChatId);
         return {
@@ -430,19 +519,32 @@ function createRouteAgent(sessionOverrides = {}) {
     registry,
     settings,
     queue,
-    pathCache,
     metadata,
     chatViews,
     agents,
-    agentSwitch,
+    commandLedger,
     routes,
   };
 }
 
-async function callJson(handler, body, method = 'POST') {
-  parseJsonBody.mockResolvedValueOnce(body);
-  const response = await handler(new Request('http://localhost/test', { method }));
-  return { response, body: await response.json() };
+async function callJson(handler, body, method = 'POST', server) {
+  const inputBody = body && typeof body === 'object' && 'chatId' in body
+    ? {
+        ...body,
+        ...((('clientMessageId' in body) || ('content' in body))
+          && !('transcriptViewId' in body)
+          ? { transcriptViewId: 'view-current' }
+          : {}),
+        ...('content' in body && 'clientRequestId' in body && !('clientMessageId' in body)
+          ? { clientMessageId: `message-${body.clientRequestId}` }
+          : {}),
+      }
+    : body;
+  const requestBody = inputBody;
+  parseJsonBody.mockResolvedValueOnce(requestBody);
+  const request = new Request('http://localhost/test', { method });
+  const response = await handler(request, new URL(request.url), server);
+  return { request, response, body: await response.json() };
 }
 
 function agentRunBody(overrides = {}) {
@@ -467,6 +569,10 @@ describe('REST chat command routes', () => {
     await fs.mkdir(workspaceDir, { recursive: true });
     parseJsonBody.mockClear();
     forkChatFileCopy.mockClear();
+    routeLogger.debug.mockClear();
+    routeLogger.info.mockClear();
+    routeLogger.warn.mockClear();
+    routeLogger.error.mockClear();
   });
 
   afterEach(async () => {
@@ -476,6 +582,7 @@ describe('REST chat command routes', () => {
 
   it('POST /run returns before agent completion and persists before running', async () => {
     const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
     const order = [];
     let resolveRun;
     const runPromise = new Promise((resolve) => {
@@ -490,7 +597,12 @@ describe('REST chat command routes', () => {
       return runPromise;
     });
 
-    const { response, body } = await callJson(agent.routes['/api/v1/chats/run'].POST, agentRunBody());
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody(),
+      'POST',
+      server,
+    );
 
     expect(response.status).toBe(202);
     expect(body).toMatchObject({
@@ -501,7 +613,11 @@ describe('REST chat command routes', () => {
       status: 'accepted',
     });
     expect(typeof body.turnId).toBe('string');
+    expect(response.headers.get('Location')).toBe(
+      `/api/v1/chats/turn-receipt?chatId=${CHAT_ID}&turnId=${body.turnId}`,
+    );
     expect(order).toEqual(['pending', 'run']);
+    expect(server.timeout).not.toHaveBeenCalled();
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       CHAT_ID,
       'hello',
@@ -514,6 +630,45 @@ describe('REST chat command routes', () => {
     );
 
     resolveRun();
+  });
+
+  it('[TLV5-ADOPT.10-RUN-ROUTE-UNIT-01] maps retryable transcript adoption failure to the typed run response', async () => {
+    const agent = createRouteAgent();
+    agent.agents.currentTranscriptViewId.mockRejectedValueOnce(new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Transcript adoption source failed',
+      true,
+      { provider: 'claude', phase: 'legacy-history-import' },
+    ));
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody(),
+    );
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      success: false,
+      error: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+    });
+    expect(agent.queue.scheduleDirectInput).not.toHaveBeenCalled();
+    expect(agent.queue.reserveDirectTurn).not.toHaveBeenCalled();
+    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(agent.queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(await agent.commandLedger.getRecord(`agent-run:${CHAT_ID}:req-run-1`)).toBeNull();
+
+    const retry = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody(),
+    );
+    expect(retry.response.status).toBe(202);
+    expect(retry.body).toMatchObject({ success: true, status: 'accepted' });
+    expect(agent.queue.scheduleDirectInput).toHaveBeenCalledTimes(1);
+    expect(agent.queue.reserveDirectTurn).toHaveBeenCalledTimes(1);
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(agent.queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run deduplicates same payload retries without re-running side effects', async () => {
@@ -600,9 +755,93 @@ describe('REST chat command routes', () => {
     });
   });
 
-  it('POST /fork-run forks once and schedules the target turn', async () => {
+  it('POST /run rejects a handoff before preparation when the chat is not idle', async () => {
     const agent = createRouteAgent();
-    const { response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
+    const server = { timeout: mock(() => undefined) };
+    const control = storedQueue([queueEntry('entry-1')], { version: 5 });
+    agent.queue.ownsExecution.mockReturnValue(true);
+    agent.queue.readChatExecutionControl.mockResolvedValue(control);
+
+    const { request, response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      {
+        clientRequestId: 'req-handoff-busy',
+        clientMessageId: 'msg-handoff-busy',
+        chatId: CHAT_ID,
+        command: 'delegate this work',
+        handoff: {
+          expectedAgentOwnershipEpoch: 'epoch-1',
+          target: {
+            agentId: 'codex',
+            model: 'gpt-5.5',
+            permissionMode: 'default',
+            thinkingMode: 'high',
+            agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+          },
+        },
+      },
+      'POST',
+      server,
+    );
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({
+      success: false,
+      errorCode: 'AGENT_HANDOFF_REQUIRES_IDLE',
+      retryable: true,
+      control: { version: 5, queue: { entries: [{ id: 'entry-1' }] } },
+    });
+    expect(agent.queue.reserveDirectTurn).not.toHaveBeenCalled();
+    expect(server.timeout).toHaveBeenCalledWith(
+      request,
+      AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS,
+    );
+  });
+
+  it('POST /run disables the Bun idle timeout for an accepted handoff', async () => {
+    const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
+
+    const { request, response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      {
+        clientRequestId: 'req-handoff-accepted',
+        clientMessageId: 'msg-handoff-accepted',
+        chatId: CHAT_ID,
+        command: 'delegate this work',
+        handoff: {
+          expectedAgentOwnershipEpoch: 'epoch-1',
+          target: {
+            agentId: 'codex',
+            model: 'gpt-5.5',
+            permissionMode: 'default',
+            thinkingMode: 'high',
+            agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+          },
+        },
+      },
+      'POST',
+      server,
+    );
+
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({
+      success: true,
+      commandType: 'agent-run',
+      clientRequestId: 'req-handoff-accepted',
+      status: 'accepted',
+    });
+    expect(AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS).toBe(0);
+    expect(server.timeout).toHaveBeenCalledWith(
+      request,
+      AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS,
+    );
+  });
+
+  it('POST /fork-run disables the Bun idle timeout, forks once, and schedules the target turn', async () => {
+    const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
+    const { request, response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
       ...agentRunBody({
         clientRequestId: 'req-fork-run-1',
         clientMessageId: 'msg-fork-run-1',
@@ -610,7 +849,7 @@ describe('REST chat command routes', () => {
         chatId: TARGET_CHAT_ID,
         command: 'continue here',
       }),
-    });
+    }, 'POST', server);
     expect(response.status).toBe(202);
     expect(body.commandType).toBe('fork-run');
     expect(body.chatId).toBe(TARGET_CHAT_ID);
@@ -619,6 +858,8 @@ describe('REST chat command routes', () => {
       orderGroup: 'normal',
     });
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(forkChatFileCopy.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(server.timeout).toHaveBeenCalledWith(request, 0);
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       TARGET_CHAT_ID,
       'continue here',
@@ -629,7 +870,7 @@ describe('REST chat command routes', () => {
     );
   });
 
-  it('POST /fork-run rejects busy source sessions before copying', async () => {
+  it('POST /fork-run copies committed source rows while the source is running', async () => {
     const agent = createRouteAgent();
     agent.agents.isAgentSessionRunning.mockReturnValue(true);
 
@@ -643,10 +884,87 @@ describe('REST chat command routes', () => {
       }),
     });
 
+    expect(response.status).toBe(202);
+    expect(body.chatId).toBe(TARGET_CHAT_ID);
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledOnce();
+  });
+
+  it('POST /fork-run carries handoff-fork consent and rejects a non-boolean', async () => {
+    const agent = createRouteAgent();
+    const request = agentRunBody({
+      clientRequestId: 'req-fork-run-consent',
+      clientMessageId: 'msg-fork-run-consent',
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue',
+    });
+
+    const accepted = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
+      ...request,
+      allowHandoffFork: true,
+    });
+
+    expect(accepted.response.status).toBe(202);
+    expect(forkChatFileCopy).toHaveBeenCalledWith(
+      expect.objectContaining({ allowHandoffFork: true }),
+    );
+
+    const rejected = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
+      ...request,
+      allowHandoffFork: 'yes',
+    });
+
+    expect(rejected.response.status).toBe(400);
+    expect(rejected.body).toMatchObject({ error: 'allowHandoffFork must be a boolean' });
+  });
+
+  it('POST /fork disables the Bun idle timeout and preserves retryable refusals', async () => {
+    const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
+    forkChatFileCopy.mockRejectedValueOnce(new CommandValidationError(
+      'TRANSCRIPT_NOT_YET_PERSISTED',
+      "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+      409,
+      true,
+    ));
+
+    const { request, response, body } = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+    }, 'POST', server);
+
     expect(response.status).toBe(409);
-    expect(body.errorCode).toBe('SESSION_BUSY');
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
-    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(body).toEqual({
+      success: false,
+      error: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+      errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      retryable: true,
+    });
+    expect(forkChatFileCopy.mock.calls.at(-1)[0].signal).toBe(request.signal);
+    expect(server.timeout).toHaveBeenCalledWith(request, 0);
+  });
+
+  it('POST /fork carries handoff-fork consent and rejects a non-boolean', async () => {
+    const agent = createRouteAgent();
+
+    const accepted = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      allowHandoffFork: true,
+    });
+
+    expect(accepted.response.status).toBe(200);
+    expect(forkChatFileCopy.mock.calls.at(-1)[0]).toMatchObject({ allowHandoffFork: true });
+
+    const rejected = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      allowHandoffFork: 'yes',
+    });
+
+    expect(rejected.response.status).toBe(400);
+    expect(rejected.body).toMatchObject({ error: 'allowHandoffFork must be a boolean' });
   });
 
   it('POST /queue/entries creates, deduplicates, and preserves queue state', async () => {
@@ -723,22 +1041,337 @@ describe('REST chat command routes', () => {
     });
   });
 
-  it('POST /active-input uses the independent active delivery command', async () => {
+  it('PUT /queue/entries/move sends explicit order and entry revisions', async () => {
     const agent = createRouteAgent();
-    const result = await callJson(agent.routes['/api/v1/chats/active-input'].POST, {
-      clientRequestId: 'req-steer-1',
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-1',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 2,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 4,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(200);
+    expect(result.body).toMatchObject({
+      commandType: 'queue-entry-move',
+      entryId: 'entry-3',
+      control: { queue: { reorderRevision: 3 } },
+    });
+    expect(agent.queue.moveChatQueueEntry).toHaveBeenCalledWith(
+      CHAT_ID,
+      {
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 2,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 4,
+      },
+      {
+        key: 'queue-entry-move:1783725900000700:req-move-1',
+        entryId: 'entry-3',
+      },
+    );
+  });
+
+  it('PUT /queue/entries/move rejects malformed revisions before mutation', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-invalid',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: -1,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 4,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(400);
+    expect(result.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.moveChatQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it('PUT /queue/entries/move rejects a source that started processing', async () => {
+    const agent = createRouteAgent();
+    const currentQueue = storedQueue([
+      queueEntry('entry-1'),
+    ], {
+      version: 5,
+      recentlyDispatched: [{
+        entryId: 'entry-3',
+        revision: 1,
+        dispatchedAt: '2026-08-02T00:00:01.000Z',
+      }],
+    });
+    agent.queue.moveChatQueueEntry.mockRejectedValueOnce(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_ALREADY_SENT',
+        'This queued message has already been sent',
+        currentQueue,
+      ),
+    );
+
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-sent',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('QUEUE_ENTRY_ALREADY_SENT');
+    expect(result.body.control.queue.recentlyDispatched).toContainEqual(
+      expect.objectContaining({ entryId: 'entry-3' }),
+    );
+  });
+
+  it('POST /goal-control preserves immediate goal delivery', async () => {
+    const agent = createRouteAgent();
+	    const result = await callJson(agent.routes['/api/v1/chats/goal-control'].POST, {
+	      clientRequestId: 'req-goal-1',
+	      chatId: CHAT_ID,
+	      content: '/goal pause',
+	    });
+
+	    expect(result.response.status).toBe(202);
+	    expect(result.body.delivery).toBe('active');
+	    expect(agent.queue.deliverGoalControlInput).toHaveBeenCalledWith(
+	      CHAT_ID,
+	      '/goal pause',
+	      expect.objectContaining({ clientRequestId: 'req-goal-1' }),
+	      expect.any(Function),
+	    );
+	  });
+
+	  it('POST /steer returns the captured current turn without queue state', async () => {
+	    const agent = createRouteAgent();
+	    const result = await callJson(agent.routes['/api/v1/chats/steer'].POST, {
+	      clientRequestId: 'req-steer-1',
+	      clientMessageId: 'message-steer-1',
+	      chatId: CHAT_ID,
+	      content: 'focus here',
+	    });
+
+	    expect(result.response.status).toBe(202);
+	    expect(result.body).toMatchObject({
+	      commandType: 'steer',
+	      chatId: CHAT_ID,
+	      turnId: 'turn-active',
+	    });
+	    expect(result.body.delivery).toBeUndefined();
+	    expect(result.body.control).toBeUndefined();
+	    expect(agent.queue.deliverAcceptedSteer).toHaveBeenCalledOnce();
+	    expect(agent.routes['/api/v1/chats/active-input']).toBeUndefined();
+	  });
+
+  it('POST /queue/entries/steer consumes the authoritative queue head idempotently', async () => {
+    const agent = createRouteAgent();
+    const queued = storedQueue([
+      {
+        ...queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+        submission: {
+          clientMessageId: 'message-queue-steer',
+          transcriptViewId: 'view-current',
+        },
+      },
+    ], { reorderRevision: 7, version: 4 });
+    const consumed = storedQueue([], {
+      reorderRevision: 7,
+      version: 6,
+      recentlyDispatched: [{
+        entryId: 'entry-head',
+        revision: 3,
+        dispatchedAt: '2026-08-02T00:00:01.000Z',
+      }],
+    });
+    let currentControl = queued;
+    agent.queue.readChatExecutionControl.mockImplementation(async () => currentControl);
+    agent.queue.deliverAcceptedQueueEntrySteer.mockImplementation(async (input) => {
+      expect(input).toMatchObject({
+        content: 'authoritative guidance',
+        clientMessageId: 'message-queue-steer',
+        expectedRevision: 3,
+        expectedReorderRevision: 7,
+      });
+      await input.settlement.markScheduled(input.command, 'turn-active');
+      currentControl = consumed;
+      await input.settlement.settleSteerSuccess(input.command, 'turn-active');
+      return { turnId: 'turn-active', control: consumed };
+    });
+    const request = {
+      clientRequestId: 'request-queue-steer',
+      clientMessageId: 'message-queue-steer',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: 3,
+      expectedReorderRevision: 7,
+    };
+
+    const accepted = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/steer'].POST,
+      request,
+    );
+    const duplicate = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/steer'].POST,
+      request,
+    );
+
+    expect(accepted.response.status).toBe(202);
+    expect(accepted.body).toMatchObject({
+      commandType: 'steer',
+      status: 'accepted',
+      turnId: 'turn-active',
+      serverInstanceId: 'server-instance-test',
+      control: { queue: { entries: [], steeringEntryId: null } },
+    });
+    expect(duplicate.response.status).toBe(202);
+    expect(duplicate.body).toMatchObject({
+      status: 'duplicate',
+      turnId: 'turn-active',
+      serverInstanceId: 'server-instance-test',
+      control: { queue: { entries: [], steeringEntryId: null } },
+    });
+    expect(agent.queue.deliverAcceptedQueueEntrySteer).toHaveBeenCalledOnce();
+  });
+
+  it('POST /queue/entries/steer rejects malformed revisions before command delivery', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-invalid',
+      clientMessageId: 'message-queue-steer-invalid',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: -1,
+      expectedReorderRevision: 7,
+    });
+
+    expect(result.response.status).toBe(400);
+    expect(result.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
+  it('POST /queue/entries/steer identifies control-free errors by server instance', async () => {
+    const agent = createRouteAgent();
+    agent.registry.getChat.mockReturnValue(null);
+
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-missing-chat',
+      clientMessageId: 'message-queue-steer-missing-chat',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    });
+
+    expect(result.response.status).toBe(404);
+    expect(result.body).toMatchObject({
+      errorCode: 'SESSION_NOT_FOUND',
+      deliveryOutcome: 'not-sent',
+      serverInstanceId: 'server-instance-test',
+    });
+    expect(result.body.control).toBeUndefined();
+  });
+
+  it('POST /queue/entries/steer rejects oversized source identities before command delivery', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-invalid-entry',
+      clientMessageId: 'message-queue-steer-invalid-entry',
+      chatId: CHAT_ID,
+      entryId: 'x'.repeat(QUEUE_ENTRY_ID_MAX_BYTES + 1),
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    });
+
+    expect(result.response.status).toBe(400);
+    expect(result.body).toMatchObject({
+      errorCode: 'VALIDATION_FAILED',
+      error: `entryId must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`,
+    });
+    expect(agent.queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
+  it('POST /queue/entries/steer preserves typed finalization failure state', async () => {
+    const agent = createRouteAgent();
+    const queued = storedQueue([
+      queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+    ], { reorderRevision: 7, version: 4 });
+    const paused = storedQueue([
+      queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+    ], {
+      reorderRevision: 7,
+      version: 6,
+      pause: { kind: 'completion-uncertain', entryId: 'entry-head' },
+    });
+    agent.queue.readChatExecutionControl.mockResolvedValue(queued);
+    agent.queue.deliverAcceptedQueueEntrySteer.mockRejectedValue(new QueueEntrySteerError(
+      'QUEUE_STEER_FINALIZATION_FAILED',
+      'finalization failed',
+      500,
+      'accepted',
+      paused,
+    ));
+
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-finalization',
+      clientMessageId: 'message-queue-steer-finalization',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: 3,
+      expectedReorderRevision: 7,
+    });
+
+    expect(result.response.status).toBe(500);
+    expect(result.body).toMatchObject({
+      success: false,
+      errorCode: 'QUEUE_STEER_FINALIZATION_FAILED',
+      deliveryOutcome: 'accepted',
+      serverInstanceId: 'server-instance-test',
+      control: {
+        queue: {
+          entries: [{ id: 'entry-head' }],
+          steeringEntryId: null,
+          pause: { kind: 'completion-uncertain', entryId: 'entry-head' },
+        },
+      },
+    });
+  });
+
+  it('POST /steer does not duplicate command-boundary delivery logging', async () => {
+    const agent = createRouteAgent();
+    agent.queue.deliverAcceptedSteer.mockImplementationOnce(() => Promise.reject(
+      new SteerDeliveryError(new Error('transport closed'), 'unknown'),
+    ));
+
+    const result = await callJson(agent.routes['/api/v1/chats/steer'].POST, {
+      clientRequestId: 'req-steer-unknown',
+      clientMessageId: 'message-steer-unknown',
       chatId: CHAT_ID,
       content: 'focus here',
     });
 
-    expect(result.response.status).toBe(202);
-    expect(result.body.delivery).toBe('active');
-    expect(agent.queue.deliverActiveInput).toHaveBeenCalledWith(
-      CHAT_ID,
-      'focus here',
-      expect.objectContaining({ clientRequestId: 'req-steer-1' }),
-      expect.any(Function),
-    );
+    expect(result.response.status).toBe(500);
+    expect(routeLogger.error).not.toHaveBeenCalled();
   });
 
   it('POST /queue/entries rejects conflicting retries', async () => {
@@ -788,6 +1421,43 @@ describe('REST chat command routes', () => {
     expect(result.body.errorCode).toBe('QUEUE_ENTRY_REVISION_CONFLICT');
     expect(result.body.control.queue.entries).toEqual([expect.objectContaining({ id: 'entry-1', revision: 5 })]);
     expect(result.body.control.queue.entries[0]).not.toHaveProperty('status');
+  });
+
+  it('returns the latest queue snapshot with reorder conflicts', async () => {
+    const agent = createRouteAgent();
+    const currentQueue = storedQueue(
+      [queueEntry('entry-1'), queueEntry('entry-3')],
+      { version: 9, reorderRevision: 4 },
+    );
+    agent.queue.moveChatQueueEntry.mockRejectedValueOnce(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_REORDER_CONFLICT',
+        'The queue order changed before the item could be moved',
+        currentQueue,
+      ),
+    );
+
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-conflict',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 3,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('QUEUE_ENTRY_REORDER_CONFLICT');
+    expect(result.body.control).toMatchObject({
+      version: 9,
+      queue: { reorderRevision: 4 },
+    });
   });
 
   it('queue mutations return normalized authoritative state', async () => {
@@ -840,10 +1510,16 @@ describe('REST chat command routes', () => {
     const decision = {
       clientRequestId: 'req-permission-1',
       chatId: CHAT_ID,
-      permissionRequestId: 'perm-1',
+      permissionOccurrenceId: 'incarnation-1',
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },
+      control: {
+        serverInstanceId: 'server-instance-test',
+        chatId: CHAT_ID,
+        runId: 'run-1',
+        permissionOccurrenceId: 'incarnation-1',
+      },
     };
 
     const first = await callJson(handler, decision);
@@ -855,11 +1531,11 @@ describe('REST chat command routes', () => {
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
     expect(agent.agents.resolvePermission).toHaveBeenCalledTimes(1);
-    expect(agent.agents.resolvePermission).toHaveBeenCalledWith(CHAT_ID, 'perm-1', {
+    expect(agent.agents.resolvePermission).toHaveBeenCalledWith(CHAT_ID, 'incarnation-1', {
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },
-    });
+    }, decision.control);
   });
 
   it('POST /stop deduplicates pause-and-stop requests', async () => {
@@ -874,10 +1550,10 @@ describe('REST chat command routes', () => {
     const first = await callJson(handler, payload);
     const retry = await callJson(handler, payload);
 
-    expect(first.body.stopped).toBe(true);
+    expect(first.body.outcome).toBe('interrupt-requested');
     expect(first.body.control.version).toBe(1);
     expect(retry.body.status).toBe('duplicate');
-    expect(retry.body.stopped).toBe(true);
+    expect(retry.body.outcome).toBe('interrupt-requested');
     expect(agent.queue.stopActiveTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -895,7 +1571,7 @@ describe('REST chat command routes', () => {
     );
 
     expect(result.response.status).toBe(200);
-    expect(result.body.stopped).toBe(true);
+    expect(result.body.outcome).toBe('interrupt-requested');
     expect(agent.queue.interruptActiveTurn).toHaveBeenCalledTimes(1);
     expect(agent.queue.stopActiveTurn).not.toHaveBeenCalled();
   });
@@ -1035,24 +1711,6 @@ describe('REST chat command routes', () => {
     expect(body.error).toBe('Endpoint not found');
   });
 
-  it('PATCH /agent-model maps active-turn switch conflicts to 409', async () => {
-    const agent = createRouteAgent();
-    agent.agentSwitch.switchAgentModel.mockRejectedValueOnce(
-      new AgentSwitchError('Stop the current turn before switching agents.', 409, 'SESSION_BUSY'),
-    );
-
-    const { response, body } = await callJson(
-      agent.routes['/api/v1/chats/agent-model'].PATCH,
-      { chatId: CHAT_ID, agentId: 'codex', model: 'gpt-5' },
-      'PATCH',
-    );
-
-    expect(response.status).toBe(409);
-    expect(body.errorCode).toBe('SESSION_BUSY');
-    expect(body.error).toBe('Stop the current turn before switching agents.');
-    expect(body.retryable).toBe(false);
-  });
-
   it('PATCH /project-path validates, prepares the agent, and patches the registry', async () => {
     const agent = createRouteAgent();
     const nextPath = path.join(testBasePath, 'repo-worktree');
@@ -1072,7 +1730,6 @@ describe('REST chat command routes', () => {
       projectPath: realNextPath,
       effectiveProjectKey: realNextPath,
       previousProjectPath: '/workspace/project',
-      previousEffectiveProjectKey: '/workspace/project',
     });
     expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledWith(
       'claude',
@@ -1113,22 +1770,17 @@ describe('REST chat command routes', () => {
     expect(agent.agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
-  it('PATCH /project-path rejects chats with queued messages', async () => {
-    const agent = createRouteAgent();
-    const nextPath = path.join(testBasePath, 'repo-worktree');
+  it('PATCH /project-path returns provider destination rejections', async () => {
+    const agent = createRouteAgent({ agentId: 'opencode' });
+    const nextPath = path.join(testBasePath, 'different-provider-project');
     await fs.mkdir(nextPath, { recursive: true });
-    agent.queue.readChatExecutionControl.mockResolvedValueOnce({
-      entries: [
-        {
-          id: 'entry-1',
-          content: 'queued',
-          status: 'queued',
-          createdAt: '2026-05-14T00:00:00.000Z',
-        },
-      ],
-      pause: null,
-      version: 1,
-    });
+    agent.agents.prepareProjectPathUpdate.mockRejectedValueOnce(
+      new AgentIntegrationError(
+        'PROJECT_PATH_DESTINATION_REJECTED',
+        'Destination directory belongs to another project',
+        false,
+      ),
+    );
 
     const { response, body } = await callJson(
       agent.routes['/api/v1/chats/project-path'].PATCH,
@@ -1136,8 +1788,31 @@ describe('REST chat command routes', () => {
       'PATCH',
     );
 
-    expect(response.status).toBe(409);
-    expect(body.errorCode).toBe('CHAT_NOT_IDLE');
-    expect(agent.agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      errorCode: 'PROJECT_PATH_DESTINATION_REJECTED',
+      retryable: false,
+    });
+    expect(agent.registry.updateProjectPath).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /project-path clears queued messages after the update commits', async () => {
+    const agent = createRouteAgent();
+    const nextPath = path.join(testBasePath, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    agent.queue.readChatExecutionControl.mockResolvedValueOnce(
+      storedQueue([queueEntry('entry-1')], { version: 1 }),
+    );
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/project-path'].PATCH,
+      { chatId: CHAT_ID, projectPath: nextPath },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, projectPath: await fs.realpath(nextPath) });
+    expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
+    expect(agent.queue.discardPendingChatInput).toHaveBeenCalledWith(CHAT_ID);
   });
 });

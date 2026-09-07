@@ -1,12 +1,47 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildSidebarChatOrderMap,
-	buildSidebarDisplayChatIds,
+	buildSidebarDisplayChatIds as buildSidebarDisplayChatIdsBase,
 	buildSidebarProjectKeys,
-	buildSidebarRowModel,
+	buildSidebarRowModel as buildSidebarRowModelBase,
+	sidebarActivitySection,
 	sidebarProjectKey,
 } from '../sidebar-row-model';
+import { SIDEBAR_INACTIVITY_DURATION_MS } from '../chat-inactivity';
+import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+
+const TEST_NOW = new Date('2025-06-01T12:00:00.000Z');
+const TEST_INACTIVITY_DURATION: SidebarInactivityDuration = '3-days';
+
+function buildSidebarRowModel(
+	input: Omit<Parameters<typeof buildSidebarRowModelBase>[0], 'inactivityDuration'> & {
+		inactivityDuration?: SidebarInactivityDuration;
+	},
+) {
+	return buildSidebarRowModelBase({
+		inactivityDuration: TEST_INACTIVITY_DURATION,
+		...input,
+	});
+}
+
+function buildSidebarDisplayChatIds(
+	input: Omit<
+		Parameters<typeof buildSidebarDisplayChatIdsBase>[0],
+		'inactivityDuration' | 'sortMode' | 'pinnedInsertPosition'
+	> & {
+		inactivityDuration?: SidebarInactivityDuration;
+		sortMode?: 'manual' | 'recent';
+		pinnedInsertPosition?: 'top' | 'bottom';
+	},
+) {
+	return buildSidebarDisplayChatIdsBase({
+		inactivityDuration: TEST_INACTIVITY_DURATION,
+		sortMode: 'manual',
+		pinnedInsertPosition: 'top',
+		...input,
+	});
+}
 
 function chat(
 	id: string,
@@ -16,8 +51,6 @@ function chat(
 	return {
 		id,
 		projectPath,
-		effectiveProjectKey: projectPath,
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: id,
 		agentId: 'claude',
@@ -31,19 +64,25 @@ function chat(
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: '',
 		tags: [],
 		firstMessage: '',
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
+		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
 
 function rowLabels(model: ReturnType<typeof buildSidebarRowModel>): string[] {
-	return model.rows.map((row) =>
-		row.type === 'project-header' ? `header:${row.projectPath}` : row.chat.id,
-	);
+	return model.rows.map((row) => {
+		if (row.type === 'project-header') return `header:${row.projectPath}`;
+		if (row.type === 'section-header') return `section:${row.section}`;
+		return row.chat.id;
+	});
 }
 
 describe('sidebar row model', () => {
@@ -57,7 +96,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			groupByProject: false,
+			grouping: 'none',
+			currentTime: TEST_NOW,
 		});
 
 		expect(rowLabels(model)).toEqual(['pinned-a', 'normal-a', 'normal-b', 'archived-a']);
@@ -87,7 +127,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			groupByProject: true,
+			grouping: 'project',
+			currentTime: TEST_NOW,
 		});
 
 		expect(rowLabels(model)).toEqual([
@@ -125,7 +166,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: filteredChats,
 			orders: buildSidebarChatOrderMap(allChats),
-			groupByProject: true,
+			grouping: 'project',
+			currentTime: TEST_NOW,
 		});
 
 		expect(rowLabels(model)).toEqual(['header:/workspace/p1', 'normal-p1-a', 'normal-p1-b']);
@@ -144,7 +186,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			groupByProject: true,
+			grouping: 'project',
+			currentTime: TEST_NOW,
 			collapsedProjectKeys,
 		});
 
@@ -177,7 +220,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			groupByProject: true,
+			grouping: 'project',
+			currentTime: TEST_NOW,
 			groupNestedProjectPaths: true,
 		});
 
@@ -208,7 +252,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			groupByProject: true,
+			grouping: 'project',
+			currentTime: TEST_NOW,
 			groupNestedProjectPaths: true,
 		});
 
@@ -241,7 +286,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			groupByProject: true,
+			grouping: 'project',
+			currentTime: TEST_NOW,
 			groupNestedProjectPaths: true,
 		});
 
@@ -261,7 +307,8 @@ describe('sidebar row model', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			groupByProject: true,
+			grouping: 'project',
+			currentTime: TEST_NOW,
 			groupNestedProjectPaths: true,
 		});
 
@@ -300,18 +347,70 @@ describe('sidebar row model', () => {
 			chat('normal-p1-b', '/workspace/p1'),
 		];
 
-		expect(buildSidebarDisplayChatIds({ displayedChats: chats, groupByProject: true })).toEqual([
-			'normal-p1-a',
-			'normal-p1-b',
-			'normal-p2-a',
-		]);
 		expect(
 			buildSidebarDisplayChatIds({
 				displayedChats: chats,
-				groupByProject: true,
+				grouping: 'project',
+				currentTime: TEST_NOW,
+			}),
+		).toEqual(['normal-p1-a', 'normal-p1-b', 'normal-p2-a']);
+		expect(
+			buildSidebarDisplayChatIds({
+				displayedChats: chats,
+				grouping: 'project',
+				currentTime: TEST_NOW,
 				collapsedProjectKeys: new Set([sidebarProjectKey('/workspace/p1')]),
 			}),
 		).toEqual(['normal-p2-a']);
+	});
+
+	it('keeps optimistic archive order in recent-sorted display ids', () => {
+		const optimistic = chat('optimistic', '/workspace/p1', {
+			isArchived: true,
+			orderGroup: 'archived',
+			lastActivityAt: '2025-01-01T00:00:00.000Z',
+		});
+		const archived = chat('archived', '/workspace/p1', {
+			isArchived: true,
+			orderGroup: 'archived',
+			lastActivityAt: '2025-02-01T00:00:00.000Z',
+		});
+
+		expect(
+			buildSidebarDisplayChatIds({
+				displayedChats: [optimistic, archived],
+				optimisticArchiveOrder: [optimistic, archived],
+				isChatOptimisticallyArchived: (chatId) => chatId === optimistic.id,
+				grouping: 'none',
+				currentTime: TEST_NOW,
+				sortMode: 'recent',
+			}),
+		).toEqual(['optimistic', 'archived']);
+	});
+
+	it('is unchanged when rebuilt from its visible orders', () => {
+		const chats = [
+			chat('pinned', '/workspace/repo', { orderGroup: 'pinned', isPinned: true }),
+			chat('outer-active', '/workspace/repo', {
+				lastActivityAt: '2025-06-01T11:00:00.000Z',
+			}),
+			chat('nested-inactive', '/workspace/repo/packages/app'),
+			chat('other-archived', '/workspace/other', {
+				orderGroup: 'archived',
+				isArchived: true,
+			}),
+		];
+		const input = {
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity' as const,
+			currentTime: TEST_NOW,
+			groupNestedProjectPaths: true,
+			collapsedProjectKeys: new Set([sidebarProjectKey('/workspace/repo')]),
+		};
+		const base = buildSidebarRowModel(input);
+
+		expect(buildSidebarRowModel({ ...input, orders: base.visibleOrders })).toEqual(base);
 	});
 
 	it('builds display chat ids with collapsed nested groups', () => {
@@ -324,10 +423,375 @@ describe('sidebar row model', () => {
 		expect(
 			buildSidebarDisplayChatIds({
 				displayedChats: chats,
-				groupByProject: true,
+				grouping: 'project',
+				currentTime: TEST_NOW,
 				groupNestedProjectPaths: true,
 				collapsedProjectKeys: new Set([sidebarProjectKey('/workspace/repo')]),
 			}),
 		).toEqual(['other']);
+	});
+});
+
+describe('sidebar row model with project activity grouping', () => {
+	const activeActivity = new Date(TEST_NOW.getTime() - 60 * 60 * 1000).toISOString();
+	const inactiveActivity = new Date(
+		TEST_NOW.getTime() - SIDEBAR_INACTIVITY_DURATION_MS['3-days'] - 60 * 60 * 1000,
+	).toISOString();
+
+	function timeGroupedChats(): ChatSessionRecord[] {
+		return [
+			chat('active-p1', '/p1', { status: 'running', lastActivityAt: activeActivity }),
+			chat('active-p2', '/p2', { status: 'running', lastActivityAt: activeActivity }),
+			chat('inactive-p1', '/p1', { status: 'running', lastActivityAt: inactiveActivity }),
+			chat('inactive-p2', '/p2', { status: 'running', lastActivityAt: inactiveActivity }),
+			chat('pinned-old-p1', '/p1', {
+				status: 'running',
+				isPinned: true,
+				lastActivityAt: inactiveActivity,
+			}),
+			chat('archived-recent-p1', '/p1', {
+				status: 'running',
+				isArchived: true,
+				lastActivityAt: activeActivity,
+			}),
+			chat('archived-old-p2', '/p2', {
+				status: 'running',
+				isArchived: true,
+				lastActivityAt: inactiveActivity,
+			}),
+		];
+	}
+
+	it('moves inactive and archived chats into cross-project sections', () => {
+		const chats = timeGroupedChats();
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity',
+			currentTime: TEST_NOW,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'header:/p1',
+			'pinned-old-p1',
+			'active-p1',
+			'header:/p2',
+			'active-p2',
+			'section:inactive',
+			'inactive-p1',
+			'inactive-p2',
+			'section:archived',
+			'archived-recent-p1',
+			'archived-old-p2',
+		]);
+		expect(model.visibleChatIds).toEqual([
+			'pinned-old-p1',
+			'active-p1',
+			'active-p2',
+			'inactive-p1',
+			'inactive-p2',
+			'archived-recent-p1',
+			'archived-old-p2',
+		]);
+		expect(model.projectKeys).toEqual([sidebarProjectKey('/p1'), sidebarProjectKey('/p2')]);
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'active-p1'),
+		).toMatchObject({
+			reorderScopeKey: 'normal:project:path:/p1',
+			showProjectPathInGroup: false,
+		});
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'inactive-p2'),
+		).toMatchObject({
+			list: 'normal',
+			reorderScopeKey: 'normal:section:inactive',
+			showProjectPathInGroup: true,
+		});
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'archived-old-p2'),
+		).toMatchObject({
+			list: 'archived',
+			reorderScopeKey: 'archived:section:archived',
+			showProjectPathInGroup: true,
+		});
+		expect(model.reorderScopesByChatId.get('inactive-p1')).toEqual(['inactive-p1', 'inactive-p2']);
+		expect(model.reorderScopesByChatId.get('archived-recent-p1')).toEqual([
+			'archived-recent-p1',
+			'archived-old-p2',
+		]);
+		expect(model.visibleOrders).toEqual({
+			pinned: ['pinned-old-p1'],
+			normal: ['active-p1', 'active-p2', 'inactive-p1', 'inactive-p2'],
+			archived: ['archived-recent-p1', 'archived-old-p2'],
+		});
+		});
+
+	it('groups all chats by activity while preserving persisted order boundaries', () => {
+		const chats = timeGroupedChats();
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'activity',
+			currentTime: TEST_NOW,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'section:active',
+			'pinned-old-p1',
+			'active-p1',
+			'active-p2',
+			'section:inactive',
+			'inactive-p1',
+			'inactive-p2',
+			'section:archived',
+			'archived-recent-p1',
+			'archived-old-p2',
+		]);
+		expect(model.projectKeys).toEqual([]);
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'pinned-old-p1'),
+		).toMatchObject({
+			list: 'pinned',
+			reorderScopeKey: 'pinned:section:active',
+			reorderScopeIds: ['pinned-old-p1'],
+			showProjectPathInGroup: true,
+		});
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'active-p1'),
+		).toMatchObject({
+			list: 'normal',
+			reorderScopeKey: 'normal:section:active',
+			reorderScopeIds: ['active-p1', 'active-p2'],
+			showProjectPathInGroup: true,
+		});
+		expect(model.rows[0]).toMatchObject({
+			type: 'section-header',
+			section: 'active',
+			count: 3,
+			chatIds: ['pinned-old-p1', 'active-p1', 'active-p2'],
+		});
+		expect(model.visibleOrders).toEqual({
+			pinned: ['pinned-old-p1'],
+			normal: ['active-p1', 'active-p2', 'inactive-p1', 'inactive-p2'],
+			archived: ['archived-recent-p1', 'archived-old-p2'],
+		});
+	});
+
+	it('uses the configured inactivity boundary', () => {
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'boundary',
+					status: 'running',
+					isPinned: false,
+					isArchived: false,
+					lastActivityAt: new Date(
+						TEST_NOW.getTime() - SIDEBAR_INACTIVITY_DURATION_MS['2-weeks'],
+					).toISOString(),
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+				TEST_NOW,
+				'2-weeks',
+			),
+		).toBe('inactive');
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'just-active',
+					status: 'running',
+					isPinned: false,
+					isArchived: false,
+					lastActivityAt: new Date(
+						TEST_NOW.getTime() - SIDEBAR_INACTIVITY_DURATION_MS['2-weeks'] + 1,
+					).toISOString(),
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+				TEST_NOW,
+				'2-weeks',
+			),
+		).toBe('active');
+	});
+
+	it('uses fixed 30-day elapsed month durations', () => {
+		const dayMs = 24 * 60 * 60 * 1000;
+		expect(SIDEBAR_INACTIVITY_DURATION_MS['1-month']).toBe(30 * dayMs);
+		expect(SIDEBAR_INACTIVITY_DURATION_MS['2-months']).toBe(60 * dayMs);
+		expect(SIDEBAR_INACTIVITY_DURATION_MS['3-months']).toBe(90 * dayMs);
+	});
+
+	it('falls back to creation time and counts missing timestamps as inactive', () => {
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'created-recently',
+					status: 'running',
+					isPinned: false,
+					isArchived: false,
+					lastActivityAt: null,
+					createdAt: activeActivity,
+				},
+				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
+			),
+		).toBe('active');
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'no-timestamps',
+					status: 'running',
+					isPinned: false,
+					isArchived: false,
+					lastActivityAt: null,
+					createdAt: null,
+				},
+				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
+			),
+		).toBe('inactive');
+	});
+
+	it('classifies timestamp-less local drafts as active', () => {
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'local-draft',
+					status: 'draft',
+					isPinned: false,
+					isArchived: false,
+					lastActivityAt: null,
+					createdAt: null,
+				},
+				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
+			),
+		).toBe('active');
+	});
+
+	it('keeps pinned chats in their project group and archived chats out of the inactive section', () => {
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'pinned-old',
+					status: 'running',
+					isPinned: true,
+					isArchived: false,
+					lastActivityAt: inactiveActivity,
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
+			),
+		).toBe('active');
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'pinned-archived-overlap',
+					status: 'running',
+					isPinned: true,
+					isArchived: true,
+					lastActivityAt: inactiveActivity,
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
+			),
+		).toBe('active');
+		expect(
+			sidebarActivitySection(
+				{
+					id: 'archived-old',
+					status: 'running',
+					isPinned: false,
+					isArchived: true,
+					lastActivityAt: inactiveActivity,
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
+			),
+		).toBe('archived');
+	});
+
+	it('omits empty sections and hides collapsed section chats from visible anchors', () => {
+		const chats = [
+			chat('active-p1', '/p1', { status: 'running', lastActivityAt: activeActivity }),
+			chat('inactive-p1', '/p1', { status: 'running', lastActivityAt: inactiveActivity }),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity',
+			currentTime: TEST_NOW,
+			collapsedProjectKeys: new Set(['section:inactive']),
+		});
+
+		expect(rowLabels(model)).toEqual(['header:/p1', 'active-p1', 'section:inactive']);
+		expect(model.visibleChatIds).toEqual(['active-p1']);
+		expect(model.visibleOrders).toEqual({
+			pinned: [],
+			normal: ['active-p1'],
+			archived: [],
+		});
+		expect(model.rows[2]).toMatchObject({
+			type: 'section-header',
+			section: 'inactive',
+			count: 1,
+			chatIds: ['inactive-p1'],
+			isCollapsed: true,
+		});
+	});
+
+	it('omits project groups whose chats all moved to sections', () => {
+		const chats = [
+			chat('active-p1', '/p1', { status: 'running', lastActivityAt: activeActivity }),
+			chat('inactive-p2', '/p2', { status: 'running', lastActivityAt: inactiveActivity }),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity',
+			currentTime: TEST_NOW,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'header:/p1',
+			'active-p1',
+			'section:inactive',
+			'inactive-p2',
+		]);
+		expect(model.projectKeys).toEqual([sidebarProjectKey('/p1')]);
+	});
+
+	it('builds display chat ids with activity sections', () => {
+		const chats = timeGroupedChats();
+		expect(
+			buildSidebarDisplayChatIds({
+				displayedChats: chats,
+				grouping: 'project-and-activity',
+				currentTime: TEST_NOW,
+			}),
+		).toEqual([
+			'pinned-old-p1',
+			'active-p1',
+			'active-p2',
+			'inactive-p1',
+			'inactive-p2',
+			'archived-recent-p1',
+			'archived-old-p2',
+		]);
+		expect(
+			buildSidebarDisplayChatIds({
+				displayedChats: chats,
+				grouping: 'project-and-activity',
+				currentTime: TEST_NOW,
+				collapsedProjectKeys: new Set(['section:archived']),
+			}),
+		).toEqual([
+			'pinned-old-p1',
+			'active-p1',
+			'active-p2',
+			'inactive-p1',
+			'inactive-p2',
+		]);
 	});
 });

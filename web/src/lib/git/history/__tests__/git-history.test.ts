@@ -5,14 +5,29 @@ import {
 	getGitHistoryCommits,
 	type GitCommitFileSummary,
 } from '$lib/api/git.js';
+import {
+	getGitComparisonFileBodies,
+	getGitComparisonSnapshot,
+	type GitComparisonSnapshotReady,
+} from '$lib/api/git-comparison.js';
 import { GitHistoryController } from '$lib/git/history/git-history.svelte.js';
-import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitHistoryCommits: vi.fn(),
 	getGitCommitSnapshot: vi.fn(),
 	getGitCommitFileBodies: vi.fn(),
 }));
+
+vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
+	return {
+		...actual,
+		getGitComparisonFreshness: vi.fn(),
+		getGitComparisonSnapshot: vi.fn(),
+		getGitComparisonFileBodies: vi.fn(),
+	};
+});
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -99,41 +114,26 @@ function snapshot(
 
 function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => `fp-${path}`) {
 	return {
+		status: 'ready' as const,
 		documentId: 'doc',
 		files: Object.fromEntries(
 			paths.map((path) => [
 				path,
-				{
-					path,
-					bodyFingerprint: fingerprintForPath(path),
-					bodyState: 'loaded' as const,
-					category: 'normal' as const,
-					isBinary: false,
-					isTooLarge: false,
-					rows: [
-						{
-							key: `hunk-0:${path}`,
-							kind: 'hunk' as const,
-							text: '@@ -1 +1 @@',
-							beforeLine: null,
-							afterLine: null,
-							hunkId: 'h0',
-							hunkIndex: 0,
-							diffLineIndex: -1,
-						},
-						{
-							key: `add-0:${path}`,
-							kind: 'add' as const,
-							text: 'next',
-							beforeLine: null,
-							afterLine: 1,
-							hunkId: 'h0',
-							hunkIndex: 0,
-							diffLineIndex: 0,
-						},
-					],
-					hunks: [],
-				},
+				(() => {
+					const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1 @@\n+next\n`;
+					return {
+						path,
+						bodyFingerprint: fingerprintForPath(path),
+						bodyState: 'loaded' as const,
+						category: 'normal' as const,
+						isBinary: false,
+						isTooLarge: false,
+						renderedRowCount: 2,
+						patchBytes: patch.length,
+						patch,
+						patchIndex: createGitPatchIndex(patch),
+					};
+				})(),
 			]),
 		),
 		errors: {},
@@ -144,10 +144,54 @@ function body(fingerprint = 'fp-a') {
 	return bodiesForPaths(['a.ts'], () => fingerprint);
 }
 
+function comparisonSnapshot(): GitComparisonSnapshotReady {
+	return {
+		status: 'ready',
+		project: '/project',
+		repoRoot: '/repo',
+		documentId: 'comparison-doc',
+		mode: 'direct',
+		from: {
+			kind: 'revision',
+			requestedRevision: 'older',
+			label: 'older',
+			hash: 'a'.repeat(40),
+			shortHash: 'aaaaaaa',
+		},
+		to: {
+			kind: 'revision',
+			requestedRevision: 'newer',
+			label: 'newer',
+			hash: 'b'.repeat(40),
+			shortHash: 'bbbbbbb',
+		},
+		effectiveFromHash: 'a'.repeat(40),
+		files: [],
+		limits: {
+			maxSummaryFiles: 1000,
+			maxBodyBatchFiles: 24,
+			maxLoadedRows: 10_000,
+			maxLoadedPatchBytes: 1024 * 1024,
+			maxFileRows: 10_000,
+			maxFilePatchBytes: 1024 * 1024,
+			maxLineBytes: 20_000,
+			maxContextLines: 50,
+			bodyConcurrency: 4,
+		},
+		firstBodyCandidates: [],
+	};
+}
+
 describe('GitHistoryController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(getGitCommitFileBodies).mockResolvedValue(body());
+		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
+			status: 'ready',
+			documentId: 'comparison-doc',
+			files: {},
+			errors: {},
+		});
 	});
 
 	it('loads the initial commit list', async () => {
@@ -171,6 +215,87 @@ describe('GitHistoryController', () => {
 				offset: 0,
 			}),
 		);
+		expect(history.listChange).toEqual({ revision: 2, kind: 'replace' });
+	});
+
+	it('signals append pages and deduplicates their commit hashes', async () => {
+		vi.mocked(getGitHistoryCommits)
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commit('newest123', 'newest')],
+				nextOffset: 50,
+			})
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commit('newest123', 'duplicate'), commit('older1234', 'older')],
+				nextOffset: null,
+			});
+		const history = new GitHistoryController();
+		history.loadInitial('/project');
+		await flushPromises();
+		const replacementRevision = history.listChange.revision;
+
+		history.loadMore('/project');
+		await flushPromises();
+
+		expect(history.commits.map((entry) => entry.subject)).toEqual(['newest', 'older']);
+		expect(history.listChange).toEqual({
+			revision: replacementRevision + 1,
+			kind: 'append',
+		});
+		expect(getGitHistoryCommits).toHaveBeenLastCalledWith(
+			'/project',
+			expect.objectContaining({ limit: 50, offset: 50 }),
+		);
+	});
+
+	it('validates saved list positions and resets them with the target', () => {
+		const history = new GitHistoryController();
+		history.saveListPosition({
+			scrollTop: Number.NaN,
+			anchorHash: 'anchor',
+			anchorOffset: Number.POSITIVE_INFINITY,
+			activeHash: 'active',
+		});
+
+		expect(history.listPosition).toEqual({
+			scrollTop: 0,
+			anchorHash: 'anchor',
+			anchorOffset: 0,
+			activeHash: 'active',
+		});
+		const revision = history.listChange.revision;
+
+		history.resetForProject('/next-project');
+
+		expect(history.listPosition).toEqual({
+			scrollTop: 0,
+			anchorHash: null,
+			anchorOffset: 0,
+			activeHash: null,
+		});
+		expect(history.listChange).toEqual({ revision: revision + 1, kind: 'reset' });
+	});
+
+	it('preserves loaded pages when the History view remounts', async () => {
+		vi.mocked(getGitHistoryCommits).mockResolvedValue({
+			project: '/project',
+			ref: 'HEAD',
+			commits: [commit('abcdef123', 'initial')],
+			nextOffset: null,
+		});
+		const history = new GitHistoryController();
+
+		history.ensureInitialLoaded('/project');
+		await flushPromises();
+		history.commits = [...history.commits, commit('older1234', 'older page')];
+
+		history.ensureInitialLoaded('/project');
+
+		expect(getGitHistoryCommits).toHaveBeenCalledOnce();
+		expect(history.commits.map((entry) => entry.subject)).toEqual(['initial', 'older page']);
 	});
 
 	it('opens a commit screen and loads first body candidates', async () => {
@@ -188,54 +313,98 @@ describe('GitHistoryController', () => {
 			'/project',
 			'doc-abcdef123',
 			'abcdef123',
-			['a.ts'],
+			[{ path: 'a.ts' }],
 			expect.objectContaining({ parent: 'parent', context: 5 }),
 		);
 		expect(history.fileBodies['a.ts']?.bodyState).toBe('loaded');
-		expect(history.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
+		expect(
+			history.rowSource
+				.rowsInRange(0, history.rowSource.rowCount)
+				.some((row) => row.kind === 'unified-row'),
+		).toBe(true);
 	});
 
-	it('finishes the initial body batch when visible demand adds another file', async () => {
+	it('refreshes an expired commit document once without retrying indefinitely', async () => {
+		vi.mocked(getGitCommitSnapshot)
+			.mockResolvedValueOnce(snapshot('abcdef123', 'fp-a'))
+			.mockResolvedValueOnce(snapshot('abcdef123', 'fp-b'));
+		vi.mocked(getGitCommitFileBodies).mockResolvedValue({
+			status: 'document-expired',
+			documentId: 'expired-doc',
+			message: 'This review expired.',
+		});
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+
+		history.openCommit('/project', 'abcdef123');
+
+		await vi.waitFor(() => expect(getGitCommitSnapshot).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
+		expect(getGitCommitSnapshot).toHaveBeenCalledTimes(2);
+		expect(history.commitError).toBe('This review expired.');
+	});
+
+	it('keeps an open comment when a context change is requested', async () => {
+		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+		history.openCommit('/project', 'abcdef123');
+		await flushPromises();
+		await flushPromises();
+		history.document.openCommentComposer('a.ts', 'after', 1);
+		history.document.setCommentBody('Keep this draft');
+		history.document.setCommentSeverity('warning');
+
+		history.setDisplayOptions('/project', 'unified', 12);
+
+		expect(getGitCommitSnapshot).toHaveBeenCalledOnce();
+		expect(history.contextLines).toBe(5);
+		expect(history.document.commentComposer).toMatchObject({
+			open: true,
+			body: 'Keep this draft',
+			severity: 'warning',
+		});
+		expect(history.document.commentError).toBe(
+			'Add or close the open comment in this or another Git view before changing context lines.',
+		);
+	});
+
+	it('loads newly visible files after the active visible request without waiting for prefetch', async () => {
 		const files = Array.from({ length: 9 }, (_, index) => commitFile(`file-${index}.ts`));
 		const firstBodyCandidates = files.slice(0, 8).map((file) => file.path);
-		const firstBatch = deferred<ReturnType<typeof bodiesForPaths>>();
+		const firstVisible = deferred<ReturnType<typeof bodiesForPaths>>();
+		const prefetch = deferred<ReturnType<typeof bodiesForPaths>>();
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(
 			snapshot('abcdef123', 'fp-a', { files, firstBodyCandidates }),
 		);
 		vi.mocked(getGitCommitFileBodies)
-			.mockReturnValueOnce(firstBatch.promise)
+			.mockReturnValueOnce(firstVisible.promise)
+			.mockReturnValueOnce(prefetch.promise)
 			.mockResolvedValueOnce(bodiesForPaths(['file-8.ts']));
 		const history = new GitHistoryController();
 		history.resetForProject('/project');
 
 		history.openCommit('/project', 'abcdef123');
-		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[3]).toEqual([{ path: 'file-0.ts' }]);
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.purpose).toBe('visible');
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[4]?.purpose).toBe('prefetch');
 		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
-		const ninthFile = files[8];
-		history.setVisibleRows('/project', [
-			{
-				kind: 'file-header',
-				filePath: ninthFile.path,
-				id: `header:${ninthFile.path}`,
-				estimatedHeight: 42,
-				file: {
-					...ninthFile,
-					indexStatus: 'M',
-					workTreeStatus: ' ',
-				},
-				isFocused: false,
-			} satisfies GitVirtualFileHeaderRow,
-		]);
+		history.handleBodyDemand({
+			kind: 'viewport',
+			documentId: history.commitSnapshot!.documentId,
+			filePaths: [files[8].path],
+		});
 
 		expect(firstSignal?.aborted).toBe(false);
-		expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1);
-
-		firstBatch.resolve(bodiesForPaths(firstBodyCandidates));
+		expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
+		firstVisible.resolve(bodiesForPaths(['file-0.ts']));
 		await vi.waitFor(() => {
-			expect(history.fileBodies['file-0.ts']?.bodyState).toBe('loaded');
-			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
+			expect(history.fileBodies['file-8.ts']?.bodyState).toBe('loaded');
+			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(3);
 		});
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[3]).toEqual(['file-8.ts']);
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[2]?.[3]).toEqual([{ path: 'file-8.ts' }]);
+		prefetch.resolve(bodiesForPaths(firstBodyCandidates.slice(1)));
 	});
 
 	it('still aborts an active body batch when leaving commit details', async () => {
@@ -259,6 +428,99 @@ describe('GitHistoryController', () => {
 		pendingBody.resolve(body());
 		await flushPromises();
 		expect(history.fileBodies).toEqual({});
+	});
+
+	it('opens a selected revision comparison locally and preserves list state on back', async () => {
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(comparisonSnapshot());
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+		history.saveListPosition({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
+
+		history.openComparison(
+			'/project',
+			{
+				fromRevision: 'older',
+				toKind: 'revision',
+				toRevision: 'newer',
+			},
+			{ diffMode: 'split', contextLines: 8 },
+		);
+
+		expect(history.screen).toBe('comparison');
+		await vi.waitFor(() => expect(history.comparison.snapshot).not.toBeNull());
+		expect(getGitComparisonSnapshot).toHaveBeenCalledWith(
+			'/project',
+			{ kind: 'revision', revision: 'older' },
+			{ kind: 'revision', revision: 'newer' },
+			'direct',
+			expect.objectContaining({ context: 8 }),
+		);
+		expect(history.activeDocument).toBe(history.comparison.document);
+		expect(history.comparison.document.diffMode).toBe('split');
+
+		history.backToList();
+
+		expect(history.screen).toBe('list');
+		expect(history.listPosition).toEqual({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
+		expect(history.comparison.snapshot).toBeNull();
+		expect(history.activeDocument).toBe(history.document);
+	});
+
+	it('reports loading only for the active History screen', () => {
+		const history = new GitHistoryController();
+
+		history.screen = 'list';
+		history.listLoading = true;
+		history.commitLoading = false;
+		history.comparison.isLoading = false;
+		expect(history.activeScreenLoading).toBe(true);
+
+		history.screen = 'commit';
+		history.listLoading = true;
+		expect(history.activeScreenLoading).toBe(false);
+		history.commitLoading = true;
+		expect(history.activeScreenLoading).toBe(true);
+
+		history.screen = 'comparison';
+		history.commitLoading = true;
+		expect(history.activeScreenLoading).toBe(false);
+		history.comparison.isLoading = true;
+		expect(history.activeScreenLoading).toBe(true);
+	});
+
+	it('aborts a local comparison when returning to the commit list', async () => {
+		const pending = deferred<GitComparisonSnapshotReady>();
+		vi.mocked(getGitComparisonSnapshot).mockReturnValueOnce(pending.promise);
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+		history.openComparison(
+			'/project',
+			{
+				fromRevision: 'older',
+				toKind: 'revision',
+				toRevision: 'newer',
+			},
+			{ diffMode: 'unified', contextLines: 5 },
+		);
+		const signal = vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]?.signal;
+
+		history.backToList();
+		pending.resolve(comparisonSnapshot());
+		await flushPromises();
+
+		expect(signal?.aborted).toBe(true);
+		expect(history.screen).toBe('list');
+		expect(history.comparison.snapshot).toBeNull();
 	});
 
 	it('ignores stale commit snapshots after selecting another commit', async () => {
@@ -285,29 +547,30 @@ describe('GitHistoryController', () => {
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(commitSnapshot);
 		const history = new GitHistoryController();
 		history.resetForProject('/project');
-		history.listScrollTop = 320;
+		history.saveListPosition({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
 
 		history.openCommit('/project', 'abcdef123');
 		await flushPromises();
-		history.setVisibleRows('/project', [
-			{
-				kind: 'file-header',
-				filePath: 'a.ts',
-				id: 'row',
-				estimatedHeight: 42,
-				file: {
-					...commitSnapshot.files[0],
-					indexStatus: 'M',
-					workTreeStatus: ' ',
-				},
-				isFocused: true,
-			} satisfies GitVirtualFileHeaderRow,
-		]);
+		history.handleBodyDemand({
+			kind: 'viewport',
+			documentId: commitSnapshot.documentId,
+			filePaths: ['a.ts'],
+		});
 		await flushPromises();
 		history.backToList();
 
 		expect(getGitCommitFileBodies).toHaveBeenCalled();
 		expect(history.screen).toBe('list');
-		expect(history.listScrollTop).toBe(320);
+		expect(history.listPosition).toEqual({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
 	});
 });

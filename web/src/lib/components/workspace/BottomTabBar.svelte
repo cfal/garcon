@@ -25,10 +25,10 @@
 	class="flex-shrink-0 border-t border-border bg-card pb-safe"
 	aria-label={m.mobile_workspace_navigation()}
 >
-	<div class="flex items-center justify-around px-2 py-1">
+	<div class="flex items-center justify-around px-1 py-1">
 		<button
 			type="button"
-			class="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+			class="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
 			onclick={onMenuClick}
 		>
 			<Menu class="w-5 h-5" />
@@ -39,7 +39,7 @@
 			<button
 				type="button"
 				class={cn(
-					'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-md transition-colors',
+					'flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-md transition-colors',
 					activeItem === tab.id ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
 				)}
 				onclick={() => onTabChange(tab.id)}

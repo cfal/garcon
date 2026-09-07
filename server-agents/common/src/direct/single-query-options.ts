@@ -1,5 +1,5 @@
 export const DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS = 30_000;
-export const MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS = 120_000;
+export const MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS = 5 * 60_000;
 
 export function directSingleQueryTimeoutMs(options: Record<string, unknown>): number {
   const value = options.timeoutMs;

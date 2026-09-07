@@ -2,16 +2,14 @@
 	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
-	import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 	import {
 		draggable,
 		dropTargetForElements,
-	} from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-	import {
-		attachClosestEdge,
-		type Edge,
-	} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
+	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
+	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import SidebarChatItem from './SidebarChatItem.svelte';
 	import {
 		getSidebarChatDragData,
@@ -25,6 +23,9 @@
 	} from './sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarVirtualSortableChatRowProps {
 		row: SidebarVirtualChatRow;
@@ -36,15 +37,20 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		displayOptions: SidebarDisplayOptions;
+		// The row can always be dragged to workspace windows when dragEnabled;
+		// reorderEnabled additionally allows it as a sidebar reorder target.
 		dragEnabled?: boolean;
+		reorderEnabled?: boolean;
 		isDragging?: boolean;
 		dropIndicatorEdge?: Edge | null;
 		onDragStart: (row: SidebarVirtualChatRow) => void;
+		onDragSourceUnmount: (chatId: string) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chat: ChatSessionRecord) => void;
 		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: boolean;
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
 		onShareChat: (chat: ChatSessionRecord) => void;
@@ -55,6 +61,9 @@
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowEdges: WorkspaceSplitAdmissions;
 		onDragUpdate: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
 		onDropOnRow: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
 	}
@@ -70,14 +79,17 @@
 		isMultiSelected = false,
 		displayOptions,
 		dragEnabled = true,
+		reorderEnabled = true,
 		isDragging = false,
 		dropIndicatorEdge = null,
 		onDragStart,
+		onDragSourceUnmount,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = false,
 		onShowDetails,
 		onForkChat,
 		onShareChat,
@@ -87,6 +99,9 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
+		onOpenInNewWindow,
+		newWindowEdges,
 		onDragUpdate,
 		onDropOnRow,
 		hasPinnedChats = false,
@@ -97,7 +112,8 @@
 
 	onMount(() => {
 		if (!rowEl) return;
-		return combine(
+		const mountedChatId = row.chat.id;
+		const cleanupDragAndDrop = combine(
 			draggable({
 				element: rowEl,
 				canDrag: () => dragEnabled && !isMobile,
@@ -108,14 +124,14 @@
 						index,
 						instanceId,
 						reorderScopeKey: row.reorderScopeKey,
-					}) as unknown as Record<string, unknown>,
+					}),
 				getInitialDataForExternal: () => ({ 'text/plain': row.chat.id }),
 				onDragStart: () => onDragStart(row),
 			}),
 			dropTargetForElements({
 				element: rowEl,
 				canDrop: ({ source }) => {
-					if (!dragEnabled || !isSidebarChatDragData(source.data)) return false;
+					if (!reorderEnabled || !isSidebarChatDragData(source.data)) return false;
 					const target = getSidebarChatDropTargetData({
 						chatId: row.chat.id,
 						list: row.list,
@@ -133,7 +149,7 @@
 							index,
 							instanceId,
 							reorderScopeKey: row.reorderScopeKey,
-						}) as unknown as Record<string | symbol, unknown>,
+						}),
 						{ element, input, allowedEdges: ['top', 'bottom'] },
 					),
 				getDropEffect: () => 'move',
@@ -149,6 +165,11 @@
 				},
 			}),
 		);
+
+		return () => {
+			cleanupDragAndDrop();
+			onDragSourceUnmount(mountedChatId);
+		};
 	});
 </script>
 
@@ -181,7 +202,11 @@
 			'overflow-hidden',
 			isActiveChat ? 'bg-sidebar-chat-item-selected-bg' : 'bg-sidebar-chat-item-bg',
 		)}
-		style={`height:calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px);`}
+		style={`height:${
+			displayOptions.chatItemLayout === 'single-line'
+				? '100%'
+				: `calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px)`
+		};`}
 		data-sidebar-virtual-row-content
 	>
 		<svelte:boundary>
@@ -203,6 +228,7 @@
 				{onStartRenameChat}
 				{onTogglePinned}
 				{onToggleArchive}
+				{isArchiveMutationPending}
 				{onShowDetails}
 				{onForkChat}
 				{onShareChat}
@@ -212,6 +238,9 @@
 				{onMultiSelectToggle}
 				{onMoveToTop}
 				{onMoveToBottom}
+				{onSortChatOrder}
+				{onOpenInNewWindow}
+				{newWindowEdges}
 				{hasPinnedChats}
 			/>
 			{#snippet failed()}

@@ -1,33 +1,37 @@
-import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { AMP_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentIntegration,
   type AgentHost,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
 import { AmpCliRuntime, runSingleQuery } from './agents/amp/amp-cli.js';
 import { AmpExecution } from './agents/amp/execution.js';
-import { getAmpPreview, loadAmpChatMessages } from './agents/amp/history-loader.js';
+import { loadAmpChatMessages } from './agents/amp/history-loader.js';
 
 const AMP_DESCRIPTOR = {
   id: 'amp',
   label: 'Amp',
   icon: null,
-  supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: THINKING_MODE_VALUES,
-  supportsImages: false,
+  supportedPermissionModes: ['bypassPermissions'],
+  supportedThinkingModes: [],
+  supportsImages: true,
   supportsProjectPathUpdate: false,
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: [],
@@ -36,26 +40,28 @@ const AMP_DESCRIPTOR = {
 
 export default class AmpAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'amp';
-  static readonly apiVersion = 2 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 1,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'amp',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
+  static readonly apiVersion = 5 as const;
   readonly descriptor = AMP_DESCRIPTOR;
+  readonly attachments = {
+    fileMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+  } as const;
   readonly execution;
-  readonly transcript: AgentTranscript;
+  readonly legacyHistoryImport;
+  readonly nativeHistoryImport;
+  readonly nativeActivity = null;
+  readonly nativeSessions;
+  readonly sessionConfiguration = null;
+  readonly projectPathUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
+  readonly compaction = null;
   readonly forking = null;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
+  readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
@@ -67,21 +73,29 @@ export default class AmpAgentIntegration implements AgentIntegration {
 
     this.settings = createVersionedSettings({
       ownerId: 'amp',
-      schemaVersion: 1,
-      defaults: { ampAgentMode: 'smart' },
-      descriptors: [{
-        key: 'ampAgentMode',
-        type: 'enum',
-        label: 'Mode',
-        labelKey: 'mode',
-        options: [
-          { value: 'smart', label: 'Smart', labelKey: 'smart' },
-          { value: 'deep', label: 'Deep', labelKey: 'deep' },
-        ],
-      }],
+      schemaVersion: 2,
+      defaults: {},
+      descriptors: [],
+      migrateValues: async () => ({}),
     });
-    this.execution = new AmpExecution(runtime, nativeSessions);
-    this.transcript = createAmpTranscript(runtime, nativeSessions, config.binary);
+    const providerExecution = new AmpExecution(runtime, nativeSessions);
+    const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
+    this.nativeSessions = nativeEvidence;
+    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({
+      async load({ chat, signal }) {
+        signal.throwIfAborted();
+        const id = ampThreadId(chat, nativeSessions);
+        if (!id) return { messages: [] };
+        return {
+          messages: loadAmpChatMessages(await runtime.exportThread(id, {
+            cwd: chat.projectPath,
+            signal,
+          })),
+        };
+      },
+    });
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: AMP_MODELS.DEFAULT,
@@ -89,7 +103,15 @@ export default class AmpAgentIntegration implements AgentIntegration {
       requiresStrictModelDiscovery: false,
       generation: { priority: 70, model: AMP_MODELS.DEFAULT },
     });
-    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
+    this.migration = createVersion1RecordMigration({
+      settings: this.settings,
+      nativeSessions,
+      translateLegacyModel: (model) => model === 'smart'
+        ? AMP_MODELS.DEFAULT
+        : model === 'deep'
+          ? AMP_MODELS.DEFAULT
+          : model,
+    });
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
@@ -103,13 +125,16 @@ export default class AmpAgentIntegration implements AgentIntegration {
       },
     };
     this.singleQuery = {
+      // `runSingleQuery` spawns with `--dangerously-allow-all -x` in the chat
+      // project, so a prompt reaching it can act on the workspace.
+      runsToolsWithoutPermission: true,
       async run(request) {
         request.signal.throwIfAborted();
         try {
           return await runSingleQuery(request.prompt, {
             cwd: request.projectPath,
             model: request.model,
-            ...request.settings.values,
+            ...singleQueryRuntimeOptions(request),
           }, config, logger);
         } catch (error) {
           if (error instanceof AgentIntegrationError) throw error;
@@ -121,6 +146,10 @@ export default class AmpAgentIntegration implements AgentIntegration {
         }
       },
     };
+    this.steering = {
+      captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
+      steer: (request) => runtime.steer(request),
+    };
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
@@ -130,34 +159,14 @@ export default class AmpAgentIntegration implements AgentIntegration {
   }
 }
 
-function createAmpTranscript(
+function createAmpNativeEvidence(
   runtime: AmpCliRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
-  binary: () => string,
-): AgentTranscript {
-  const threadId = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const native = nativeSessions.decode(chat.nativeSession);
-    return chat.agentSessionId
-      ?? native.agentSessionId
-      ?? getArtificialAgentSessionId(native.path, 'amp');
-  };
-  const loadMessages = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const id = threadId(chat);
-    if (!id) return [];
-    return loadAmpChatMessages(await runtime.exportThread(id, { cwd: chat.projectPath }));
-  };
-  const resolveIndexSource = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const id = threadId(chat);
-    return id ? {
-      ownerId: 'amp',
-      schemaVersion: 1,
-      value: { threadId: id, projectPath: chat.projectPath, binary: binary() },
-    } as const : null;
-  };
+): AgentNativeEvidenceSource {
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
-      const id = threadId(chat);
+      const id = ampThreadId(chat, nativeSessions);
       return id ? nativeSessions.encode({
         path: `!amp:${id}`,
         agentSessionId: id,
@@ -166,34 +175,38 @@ function createAmpTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      const id = threadId(chat);
-      if (!id) return null;
-      return getAmpPreview(await runtime.exportThread(id, { cwd: chat.projectPath }));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      const id = ampThreadId(chat, nativeSessions);
+      if (!id) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Amp native transcript has no selected thread',
+          false,
+        );
+      }
+      return {
+        messages: loadAmpChatMessages(await runtime.exportThread(id, {
+          cwd: chat.projectPath,
+          signal,
+        })),
+      };
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
-      const id = threadId(chat);
+      const id = ampThreadId(chat, nativeSessions);
       return id ? { kind: 'provider-reference', value: id } : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();
     },
   };
+}
+
+function ampThreadId(
+  chat: AgentChatReference,
+  nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
+): string | null {
+  const native = nativeSessions.decode(chat.nativeSession);
+  return chat.agentSessionId
+    ?? native.agentSessionId
+    ?? getArtificialAgentSessionId(native.path, 'amp');
 }

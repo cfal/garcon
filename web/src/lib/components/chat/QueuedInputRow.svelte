@@ -1,6 +1,24 @@
 <script lang="ts">
+	import { tick } from 'svelte';
+	import {
+		draggable,
+		dropTargetForElements,
+	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
+	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+	import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import type { QueueEntry } from '$lib/types/chat';
+	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
+	import {
+		isQueuedInputDragData,
+		placementFromEdge,
+		queuedInputDragData,
+	} from './queued-input-dnd.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import ChevronUp from '@lucide/svelte/icons/chevron-up';
+	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -9,28 +27,188 @@
 		entry: QueueEntry;
 		position: number;
 		error?: string;
+		steering: boolean;
 		deleting: boolean;
 		editDisabled: boolean;
 		deleteDisabled: boolean;
+		movePending: boolean;
+		moveBlocked: boolean;
+		canMoveUp: boolean;
+		canMoveDown: boolean;
+		dragEnabled: boolean;
 		onEdit: (entry: QueueEntry) => void;
 		onDelete: (entryId: string) => void;
+		onMove: (entryId: string, delta: -1 | 1) => Promise<void>;
+		onMoveSettled: (
+			entryId: string,
+			preferredDirection: 'up' | 'down',
+		) => void;
+		onDrop: (
+			sourceEntryId: string,
+			targetEntryId: string,
+			placement: QueueEntryPlacement,
+		) => Promise<void>;
 	}
 
-	let { entry, position, error, deleting, editDisabled, deleteDisabled, onEdit, onDelete }: Props =
-		$props();
+	let {
+		entry,
+		position,
+		error,
+		steering,
+		deleting,
+		editDisabled,
+		deleteDisabled,
+		movePending,
+		moveBlocked,
+		canMoveUp,
+		canMoveDown,
+		dragEnabled,
+		onEdit,
+		onDelete,
+		onMove,
+		onMoveSettled,
+		onDrop,
+	}: Props = $props();
+
+	let rowElement: HTMLLIElement | null = $state(null);
+	let dragHandleElement: HTMLSpanElement | null = $state(null);
+	let requestedDirection = $state<-1 | 1 | null>(null);
+	let isDragging = $state(false);
+	let dropIndicatorEdge = $state<Edge | null>(null);
+
+	$effect(() => {
+		if (!rowElement || !dragHandleElement || !dragEnabled) return;
+		return combine(
+			draggable({
+				element: rowElement,
+				dragHandle: dragHandleElement,
+				getInitialData: () => queuedInputDragData(entry.id),
+				canDrag: () => !moveBlocked,
+				onDragStart: () => (isDragging = true),
+				onDrop: () => (isDragging = false),
+			}),
+			dropTargetForElements({
+				element: rowElement,
+				canDrop: ({ source }) =>
+					!moveBlocked &&
+					isQueuedInputDragData(source.data) &&
+					source.data.entryId !== entry.id,
+				getData: ({ input, element }) =>
+					attachClosestEdge(queuedInputDragData(entry.id), {
+						input,
+						element,
+						allowedEdges: ['top', 'bottom'],
+					}),
+				getDropEffect: () => 'move',
+				onDragEnter: ({ self }) => (dropIndicatorEdge = extractClosestEdge(self.data)),
+				onDrag: ({ self }) => (dropIndicatorEdge = extractClosestEdge(self.data)),
+				onDragLeave: () => (dropIndicatorEdge = null),
+				onDrop: ({ source, self }) => {
+					const placement = placementFromEdge(extractClosestEdge(self.data));
+					dropIndicatorEdge = null;
+					if (isQueuedInputDragData(source.data) && placement) {
+						void onDrop(source.data.entryId, entry.id, placement);
+					}
+				},
+			}),
+		);
+	});
+
+	async function move(delta: -1 | 1): Promise<void> {
+		if (moveBlocked || (delta === -1 ? !canMoveUp : !canMoveDown)) return;
+		const entryId = entry.id;
+		requestedDirection = delta;
+		try {
+			await onMove(entryId, delta);
+		} finally {
+			requestedDirection = null;
+			await tick();
+			onMoveSettled(entryId, delta === -1 ? 'up' : 'down');
+		}
+	}
 </script>
 
-<div class="flex items-start gap-3 px-5 py-4 sm:px-6">
+<li
+	bind:this={rowElement}
+	aria-busy={steering}
+	class="relative flex items-start gap-3 px-5 py-4 transition-opacity sm:px-6"
+	class:opacity-50={isDragging}
+>
+	{#if dropIndicatorEdge === 'top'}
+		<div class="pointer-events-none absolute inset-x-5 top-0 h-0.5 bg-primary sm:inset-x-6"></div>
+	{:else if dropIndicatorEdge === 'bottom'}
+		<div class="pointer-events-none absolute inset-x-5 bottom-0 h-0.5 bg-primary sm:inset-x-6"></div>
+	{/if}
+	{#if dragEnabled}
+		<span
+			bind:this={dragHandleElement}
+			data-queue-drag-id={entry.id}
+			class="mt-0.5 flex size-8 shrink-0 items-center justify-center text-muted-foreground"
+			class:cursor-grab={!moveBlocked}
+			class:cursor-default={moveBlocked}
+			class:opacity-50={moveBlocked}
+			aria-label={m.chat_queue_drag_handle({ position })}
+			role="img"
+			title={m.chat_queue_drag_handle({ position })}
+		>
+			<GripVertical class="size-4" />
+		</span>
+	{/if}
 	<span class="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
 		{position}
 	</span>
 	<div class="min-w-0 flex-1">
 		<p class="whitespace-pre-wrap break-words text-sm leading-5">{entry.content}</p>
+		{#if steering}
+			<p
+				class="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"
+				role="status"
+			>
+				<Loader2 class="size-3.5 animate-spin" aria-hidden="true" />
+				{m.chat_queue_steering()}
+			</p>
+		{/if}
 		{#if error}
 			<p class="mt-2 text-xs text-destructive" role="alert">{error}</p>
 		{/if}
 	</div>
 	<div class="flex shrink-0 items-center gap-0.5">
+		<button
+			type="button"
+			data-queue-move-id={entry.id}
+			data-queue-move-direction="up"
+			onclick={() => void move(-1)}
+			disabled={!canMoveUp}
+			aria-disabled={moveBlocked}
+			aria-busy={movePending && requestedDirection === -1}
+			class="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"
+			title={m.chat_queue_move_up({ position })}
+			aria-label={m.chat_queue_move_up({ position })}
+		>
+			{#if movePending && requestedDirection === -1}
+				<Loader2 class="h-4 w-4 animate-spin" />
+			{:else}
+				<ChevronUp class="h-4 w-4" />
+			{/if}
+		</button>
+		<button
+			type="button"
+			data-queue-move-id={entry.id}
+			data-queue-move-direction="down"
+			onclick={() => void move(1)}
+			disabled={!canMoveDown}
+			aria-disabled={moveBlocked}
+			aria-busy={movePending && requestedDirection === 1}
+			class="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"
+			title={m.chat_queue_move_down({ position })}
+			aria-label={m.chat_queue_move_down({ position })}
+		>
+			{#if movePending && requestedDirection === 1}
+				<Loader2 class="h-4 w-4 animate-spin" />
+			{:else}
+				<ChevronDown class="h-4 w-4" />
+			{/if}
+		</button>
 		<button
 			type="button"
 			data-queue-edit-id={entry.id}
@@ -57,4 +235,4 @@
 			{/if}
 		</button>
 	</div>
-</div>
+</li>

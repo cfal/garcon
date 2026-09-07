@@ -8,6 +8,7 @@ import { ApiError } from '$lib/api/client';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
+import { ProjectPathDialogState } from '../project-path-dialog-state.svelte.js';
 
 vi.mock('$lib/api/chats', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/chats')>();
@@ -57,6 +58,53 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 }
 
 describe('Sidebar dialogs', () => {
+	it('explains rejected and unconfirmed project path updates', () => {
+		const dialog = new ProjectPathDialogState();
+
+		dialog.setSubmitFailure(
+			new ApiError(422, 'destination rejected', 'PROJECT_PATH_DESTINATION_REJECTED'),
+		);
+		expect(dialog.submitError).toMatch(/stayed at its current path/i);
+
+		dialog.setSubmitFailure(
+			new ApiError(504, 'outcome unknown', 'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN'),
+		);
+		expect(dialog.submitError).toMatch(/retry the same destination/i);
+
+		dialog.setSubmitFailure(new ApiError(503, 'raw provider failure', 'PROJECT_PATH_UPDATE_FAILED'));
+		expect(dialog.submitError).toBe('Failed to update project path.');
+	});
+
+	it('constrains long chat titles in the project path dialog header', async () => {
+		const longTitle = 'A'.repeat(500);
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: longTitle,
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+		});
+
+		try {
+			const title = screen.getByText(longTitle);
+			const header = title.closest('[data-slot="dialog-header"]');
+			const content = title.closest('[data-slot="dialog-content"]');
+
+			expect(title.className).toContain('truncate');
+			expect(title.className).toContain('max-w-full');
+			expect(header?.className).toContain('min-w-0');
+			expect(header?.className).toContain('overflow-hidden');
+			expect(content?.className).toContain('overflow-hidden');
+			expect(screen.getByRole('textbox', { name: /new path/i })).toBeTruthy();
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
 	it('submits a validated project path and keeps server errors inline', async () => {
 		vi.useFakeTimers();
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });

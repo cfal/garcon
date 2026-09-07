@@ -3,6 +3,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationWorkspaceEscapeHost from './ConversationWorkspaceEscapeHost.svelte';
 import { getChatExecutionControl, getChatMessages, stopChat } from '$lib/api/chats.js';
+import { getGitRefs } from '$lib/api/git.js';
+import { ToolResultMessage } from '$shared/chat-types';
+import type { TranscriptMessage } from '$shared/chat-view';
+import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
+
+type BackgroundMessagesHandler = (
+	chatId: string,
+	transcriptViewId: string,
+	messages: TranscriptMessage[],
+	firstOrdinal: number,
+	lastOrdinal: number,
+) => boolean;
+
+const reconnectHarness = vi.hoisted(() => ({
+	onBackgroundMessages: null as BackgroundMessagesHandler | null,
+}));
 
 vi.mock('$lib/api/chats.js', () => ({
 	compactChat: vi.fn(),
@@ -10,13 +26,16 @@ vi.mock('$lib/api/chats.js', () => ({
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
+	selfHandoffRunChat: vi.fn(),
 	getChatMessages: vi.fn(),
 	getChatExecutionControl: vi.fn(),
 	interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
-	sendActiveInput: vi.fn(),
+	steerChat: vi.fn(),
+	steerQueuedEntry: vi.fn(),
+	submitGoalControl: vi.fn(),
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
 	stopChat: vi.fn(),
@@ -25,12 +44,21 @@ vi.mock('$lib/api/chats.js', () => ({
 	updateExecutionSettings: vi.fn(),
 }));
 
+vi.mock('$lib/api/git.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/git.js')>();
+	return { ...actual, getGitRefs: vi.fn() };
+});
+
 vi.mock('$lib/chat/conversation/conversation-router-adapter.svelte.js', () => ({
 	mountConversationRouter: vi.fn(),
 }));
 
 vi.mock('$lib/ws/reconnect-coordinator.svelte', () => ({
 	ChatReconnectCoordinator: class {
+		constructor(options: { onBackgroundMessages: BackgroundMessagesHandler }) {
+			reconnectHarness.onBackgroundMessages = options.onBackgroundMessages;
+		}
+
 		mount(): void {}
 	},
 }));
@@ -48,55 +76,189 @@ vi.mock('$lib/components/git/NewBranchModal.svelte', async () => ({
 }));
 
 vi.mock('$lib/components/chat/QueueControls.svelte', async () => ({
-	default: (await import('./GenericStub.svelte')).default,
+	default: (await import('./QueueControlsCapabilityStub.svelte')).default,
 }));
 
 vi.mock('$lib/components/chat/QueuedInputsDialog.svelte', async () => ({
 	default: (await import('./GenericStub.svelte')).default,
 }));
 
-vi.mock('$lib/components/chat/SubagentManagementBar.svelte', async () => ({
-	default: (await import('./GenericStub.svelte')).default,
-}));
-
 const mockGetChatMessages = vi.mocked(getChatMessages);
 const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
 const mockStopChat = vi.mocked(stopChat);
+const mockGetGitRefs = vi.mocked(getGitRefs);
 
 describe('ConversationWorkspace Escape abort handling', () => {
 	beforeEach(() => {
+		reconnectHarness.onBackgroundMessages = null;
 		mockGetChatMessages.mockResolvedValue({
+			historyState: { kind: 'complete' },
 			chatId: 'chat-1',
-			generationId: 'gen-1',
+			transcriptViewId: 'gen-1',
 			messages: [],
-			lastSeq: 0,
-			pageOldestSeq: 0,
+			lastOrdinal: 0,
+			pageOldestOrdinal: 0,
+			pageNewestOrdinal: 0,
+			nextBeforeOrdinal: null,
 			hasMore: false,
 			limit: 50,
-			pendingUserInputs: [],
+			resendCandidates: [],
 		});
 		mockGetChatExecutionControl.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			control: {
-				queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+				serverInstanceId: 'server-instance-test',
+				queue: {
+					entries: [],
+					steeringEntryId: null,
+					recentlyDispatched: [],
+					pause: null,
+					reorderRevision: 0,
+				},
 				version: 0,
 				updatedAt: null,
 			},
 		});
 		mockStopChat.mockResolvedValue({
 			success: true,
-			stopped: true,
+			outcome: 'interrupt-requested',
 			commandType: 'stop',
 			clientRequestId: 'cmd-stop',
 			status: 'accepted',
 			acceptedAt: '2026-01-01T00:00:00.000Z',
 			control: {
-				queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+				serverInstanceId: 'server-instance-test',
+				queue: {
+					entries: [],
+					steeringEntryId: null,
+					recentlyDispatched: [],
+					pause: null,
+					reorderRevision: 0,
+				},
 				version: 0,
 				updatedAt: null,
 			},
 		});
+		mockGetGitRefs.mockReset();
+		mockGetGitRefs.mockResolvedValue({ refs: [] });
+	});
+
+	it('patches activity for a tool-only background reconnect batch', () => {
+		const patchActivity = vi.fn();
+		render(ConversationWorkspaceEscapeHost, { onPatchActivity: patchActivity });
+		const onBackgroundMessages = reconnectHarness.onBackgroundMessages;
+		if (!onBackgroundMessages) throw new Error('Expected reconnect background message handler');
+		const timestamp = '2026-01-01T00:00:01.000Z';
+
+		expect(
+			onBackgroundMessages(
+				'chat-background',
+				'view-background',
+				[
+					{
+						ordinal: 1,
+						message: new ToolResultMessage(timestamp, 'tool-1', { content: 'result' }, false),
+					},
+				],
+				1,
+				1,
+			),
+		).toBe(true);
+		expect(patchActivity).toHaveBeenCalledWith('chat-background', timestamp);
+	});
+
+	it('does not publish branch state after the initiating surface loses command ownership', async () => {
+		let resolveProject!: (value: ProjectResolutionResponse) => void;
+		let target!: ProjectTarget;
+		const fetchProjectResolution = vi.fn((requestedTarget: ProjectTarget) => {
+			target = requestedTarget;
+			return new Promise<ProjectResolutionResponse>((resolve) => {
+				resolveProject = resolve;
+			});
+		});
+		const { component } = render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
+		await fireEvent.click(screen.getByRole('button', { name: 'Move command ownership' }));
+		resolveProject({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		});
+		await component.waitForBranchAction();
+
+		expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false');
+		expect(mockGetGitRefs).not.toHaveBeenCalled();
+	});
+
+	it('does not resurrect a branch action after command ownership leaves and returns', async () => {
+		let resolveProject!: (value: ProjectResolutionResponse) => void;
+		let target!: ProjectTarget;
+		const fetchProjectResolution = vi.fn((requestedTarget: ProjectTarget) => {
+			target = requestedTarget;
+			return new Promise<ProjectResolutionResponse>((resolve) => {
+				resolveProject = resolve;
+			});
+		});
+		const { component } = render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
+		await fireEvent.click(screen.getByRole('button', { name: 'Move command ownership' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Restore command ownership' }));
+		resolveProject({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		});
+		await component.waitForBranchAction();
+
+		expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('false');
+		expect(mockGetGitRefs).not.toHaveBeenCalled();
+	});
+
+	it('keeps a branch action owned when focus repeats within the same surface', async () => {
+		let resolveProject!: (value: ProjectResolutionResponse) => void;
+		let target!: ProjectTarget;
+		const fetchProjectResolution = vi.fn((requestedTarget: ProjectTarget) => {
+			target = requestedTarget;
+			return new Promise<ProjectResolutionResponse>((resolve) => {
+				resolveProject = resolve;
+			});
+		});
+		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
+		await fireEvent.click(screen.getByRole('button', { name: 'Refocus command surface' }));
+		resolveProject({
+			target,
+			resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		});
+
+		await waitFor(() =>
+			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('true'),
+		);
+		expect(mockGetGitRefs).toHaveBeenCalledOnce();
+	});
+
+	it('opens create branch after the selector closes its branch dropdown', async () => {
+		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+		}));
+		render(ConversationWorkspaceEscapeHost, { fetchProjectResolution });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open branch dropdown' }));
+		await waitFor(() =>
+			expect(screen.getByTestId('branch-dropdown-open').textContent).toBe('true'),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('new-branch-dialog-open').textContent).toBe('true'),
+		);
+		expect(fetchProjectResolution).toHaveBeenCalledTimes(2);
 	});
 
 	afterEach(() => {
@@ -124,6 +286,33 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		});
 	});
 
+	it('derives queued steering from the selected agent capability and processing state', async () => {
+		render(ConversationWorkspaceEscapeHost);
+
+		expect(screen.getByTestId('queue-can-steer').textContent).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle processing' }));
+		await waitFor(() => expect(screen.getByTestId('queue-can-steer').textContent).toBe('false'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Use Codex' }));
+		expect(screen.getByTestId('queue-can-steer').textContent).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle processing' }));
+		await waitFor(() => expect(screen.getByTestId('queue-can-steer').textContent).toBe('true'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Use unsupported agent' }));
+		await waitFor(() => expect(screen.getByTestId('queue-can-steer').textContent).toBe('false'));
+	});
+
+	it('uses the submit classifier processing predicate for composer queue mode', async () => {
+		render(ConversationWorkspaceEscapeHost);
+
+		expect(screen.getByTestId('composer-requires-queued-submission').textContent).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Set draft status' }));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('composer-requires-queued-submission').textContent).toBe('false'),
+		);
+	});
+
 	it('does not abort when an Escape handler already prevented default', async () => {
 		render(ConversationWorkspaceEscapeHost);
 
@@ -136,5 +325,73 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		window.dispatchEvent(event);
 
 		expect(mockStopChat).not.toHaveBeenCalled();
+	});
+
+	it('routes the configurable expanded composer command as a monotonic request', async () => {
+		render(ConversationWorkspaceEscapeHost);
+		const request = screen.getByTestId('composer-editor-open-request');
+		const open = new KeyboardEvent('keydown', {
+			key: 'e',
+			ctrlKey: true,
+			shiftKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		window.dispatchEvent(open);
+
+		expect(open.defaultPrevented).toBe(true);
+		await waitFor(() => expect(request.textContent).toBe('1'));
+
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'e',
+				ctrlKey: true,
+				shiftKey: true,
+				repeat: true,
+			}),
+		);
+		expect(request.textContent).toBe('1');
+	});
+
+	it('does not open the composer editor underneath a top modal', async () => {
+		render(ConversationWorkspaceEscapeHost);
+		await fireEvent.click(screen.getByRole('button', { name: 'Open test layer' }));
+
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'e',
+				ctrlKey: true,
+				shiftKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(screen.getByTestId('composer-editor-open-request').textContent).toBe('0');
+	});
+
+	it('routes repeat-open from the presented composer editor chrome while Chat is inert', async () => {
+		render(ConversationWorkspaceEscapeHost);
+		await fireEvent.click(screen.getByRole('button', { name: 'Open composer editor layer' }));
+		const chrome = screen.getByRole('button', { name: 'Composer editor chrome' });
+
+		for (const expectedRequest of ['1', '2']) {
+			const open = new KeyboardEvent('keydown', {
+				key: 'e',
+				ctrlKey: true,
+				shiftKey: true,
+				bubbles: true,
+				cancelable: true,
+			});
+			chrome.dispatchEvent(open);
+
+			expect(open.defaultPrevented).toBe(true);
+			await waitFor(() =>
+				expect(screen.getByTestId('composer-editor-open-request').textContent).toBe(
+					expectedRequest,
+				),
+			);
+		}
 	});
 });

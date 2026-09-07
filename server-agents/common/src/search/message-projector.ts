@@ -1,7 +1,7 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import { getNativeMessageSource } from '@garcon/server-agent-interface';
 import type { ChatSearchSnippetRole } from '@garcon/common/chat-search';
 import type { SearchMessageRowInput } from './rows.js';
+import { SEARCH_TIMESTAMP_MAX_BYTES } from './schema.js';
 
 const MAX_BODY_CHARS = 64_000;
 const MAX_TOOL_INPUT_CHARS = 16_000;
@@ -10,8 +10,6 @@ const MAX_TOOL_RESULT_TAIL_CHARS = 512;
 const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
 const MAX_RECURSIVE_NODES = 512;
-
-export const TRANSCRIPT_SEARCH_PROJECTOR_VERSION = 1;
 
 interface ExtractionBudget {
   remaining: number;
@@ -158,8 +156,10 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'user-message':
     case 'assistant-message':
     case 'thinking':
-    case 'error':
       return joinBounded(MAX_BODY_CHARS, [message.content], budget);
+    case 'error':
+    case 'cli-row':
+      return '';
     case 'compaction':
       return joinBounded(MAX_BODY_CHARS, [message.summary], budget);
     case 'agent-switch':
@@ -262,8 +262,10 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'todo-read-tool-use':
     case 'enter-plan-mode-tool-use':
     case 'amp-mermaid-tool-use':
+    case 'transcript-notice':
     case 'permission-resolved':
     case 'permission-cancelled':
+    case 'permission-expired':
       return '';
   }
   return assertNever(message);
@@ -293,16 +295,16 @@ function projectOne(message: ChatMessage): {
   };
   const raw = messageText(message, budget);
   const body = raw.replace(/\s+/g, ' ').trim();
+  const timestamp = typeof message.timestamp === 'string'
+    && Buffer.byteLength(message.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES
+    ? message.timestamp
+    : null;
   return {
     truncated: budget.truncated,
     row: body ? {
       role: roleForMessage(message),
-      timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
+      timestamp,
       body,
-      sourceAnchor: (() => {
-        const source = getNativeMessageSource(message);
-        return source ? JSON.stringify(source) : null;
-      })(),
     } : null,
   };
 }

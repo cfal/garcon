@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/svelte';
-import { ChatInteractionGate } from '../chat-interaction-gate.svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
 import TransientLayerRegistrationHost from './TransientLayerRegistrationHost.svelte';
 
@@ -16,7 +16,7 @@ describe('TransientLayerRegistry', () => {
 	it('does not subscribe a registering effect to internal layer mutations', async () => {
 		const onRun = vi.fn();
 		render(TransientLayerRegistrationHost, {
-			layers: new TransientLayerRegistry(new ChatInteractionGate()),
+			layers: new TransientLayerRegistry(new WorkspaceInteractionGate()),
 			onRun,
 		});
 		await Promise.resolve();
@@ -24,9 +24,21 @@ describe('TransientLayerRegistry', () => {
 		expect(onRun).toHaveBeenCalledOnce();
 	});
 
-	it('makes the main view inert before open state mutates and through registration', () => {
+	it('stops making the workspace inert as soon as a mounted layer closes', async () => {
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+		const onRun = vi.fn();
+		render(TransientLayerRegistrationHost, { layers, onRun });
+		await waitFor(() => expect(screen.getByTestId('main-inert').textContent).toBe('true'));
+
+		await fireEvent.click(screen.getByTestId('close-layer'));
+
+		expect(screen.getByTestId('main-inert').textContent).toBe('false');
+		expect(onRun).toHaveBeenCalledOnce();
+	});
+
+	it('cancels application drag before the workspace becomes inert', () => {
 		vi.useFakeTimers();
-		const gate = new ChatInteractionGate();
+		const gate = new WorkspaceInteractionGate();
 		const cancel = vi.fn();
 		gate.register({ cancelApplicationDrag: cancel });
 		const layers = new TransientLayerRegistry(gate);
@@ -34,7 +46,6 @@ describe('TransientLayerRegistry', () => {
 
 		layers.open('main-inert', () => {
 			inertDuringMutation = layers.makesMainInert;
-			expect(gate.isChatDropEligible).toBe(false);
 		});
 		expect(cancel).toHaveBeenCalledOnce();
 		expect(inertDuringMutation).toBe(true);
@@ -46,6 +57,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => element,
 			onEscape: () => true,
 			restoreFocus: () => undefined,
@@ -57,12 +69,11 @@ describe('TransientLayerRegistry', () => {
 		unregister();
 		element.remove();
 		expect(layers.makesMainInert).toBe(false);
-		expect(gate.isChatDropEligible).toBe(true);
 	});
 
 	it('releases a failed-to-mount pending layer on the next task', () => {
 		vi.useFakeTimers();
-		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		layers.open('main-inert', () => undefined);
 		expect(layers.makesMainInert).toBe(true);
 		vi.runAllTimers();
@@ -70,7 +81,7 @@ describe('TransientLayerRegistry', () => {
 	});
 
 	it('dispatches Escape to the top priority visible layer only', async () => {
-		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');
 		const menu = document.createElement('div');
 		document.body.append(dialog, menu);
@@ -81,6 +92,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => dialog,
 			onEscape: closeDialog,
 			restoreFocus: () => undefined,
@@ -89,6 +101,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'menu',
 			kind: 'menu',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => menu,
 			onEscape: closeMenu,
 			restoreFocus: restoreMenu,
@@ -106,7 +119,7 @@ describe('TransientLayerRegistry', () => {
 	});
 
 	it('leaves composing Escape to the active input method', () => {
-		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');
 		document.body.append(dialog);
 		const closeDialog = vi.fn(() => true);
@@ -114,6 +127,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => dialog,
 			onEscape: closeDialog,
 			restoreFocus: () => undefined,
@@ -127,7 +141,7 @@ describe('TransientLayerRegistry', () => {
 	});
 
 	it('ignores an exiting menu when routing Escape to a newly opened dialog', () => {
-		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');
 		const menu = document.createElement('div');
 		menu.dataset.state = 'closed';
@@ -142,6 +156,7 @@ describe('TransientLayerRegistry', () => {
 				id,
 				kind,
 				modality,
+				isOpen: () => true,
 				element: () => element,
 				onEscape,
 				restoreFocus: () => undefined,
@@ -156,7 +171,7 @@ describe('TransientLayerRegistry', () => {
 	});
 
 	it('stacks a prompt transform above its dialog and below a menu', () => {
-		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');
 		const transform = document.createElement('div');
 		const menu = document.createElement('div');
@@ -168,6 +183,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => dialog,
 			onEscape: closeDialog,
 			restoreFocus: () => undefined,
@@ -176,6 +192,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'transform',
 			kind: 'prompt-transform',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => transform,
 			onEscape: cancelTransform,
 			restoreFocus: () => undefined,
@@ -184,6 +201,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'menu',
 			kind: 'menu',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => menu,
 			onEscape: closeMenu,
 			restoreFocus: () => undefined,
@@ -203,7 +221,7 @@ describe('TransientLayerRegistry', () => {
 	});
 
 	it('recognizes targets only within the top visible modal layer', () => {
-		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');
 		const dialogInput = document.createElement('input');
 		const confirmation = document.createElement('div');
@@ -221,6 +239,7 @@ describe('TransientLayerRegistry', () => {
 				id,
 				kind,
 				modality,
+				isOpen: () => true,
 				element: () => element,
 				onEscape: () => true,
 				restoreFocus: () => undefined,

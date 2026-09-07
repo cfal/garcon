@@ -1,8 +1,13 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { ClaudeCliVersionProbe, isVersionBefore, parseClaudeCliVersion, THINKING_FLAG_REMOVED_VERSION } from '../cli-version.js';
+import {
+  ClaudeCliVersionProbe,
+  isVersionBefore,
+  MINIMUM_CLAUDE_CLI_VERSION,
+  parseClaudeCliVersion,
+} from '../cli-version.js';
 
 // Writes an executable fake `claude` binary that logs each invocation and
 // prints the given --version output.
@@ -11,6 +16,23 @@ async function createFakeClaudeBinary(versionOutput) {
   const binaryPath = path.join(dir, 'claude');
   const callLogPath = path.join(dir, 'calls.log');
   await fs.writeFile(binaryPath, `#!/bin/sh\necho probe >> ${callLogPath}\necho "${versionOutput}"\n`, { mode: 0o755 });
+  return { binaryPath, callLogPath };
+}
+
+async function createFlakyClaudeBinary() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-cli-version-flaky-'));
+  const binaryPath = path.join(dir, 'claude');
+  const callLogPath = path.join(dir, 'calls.log');
+  const successMarker = path.join(dir, 'failed-once');
+  await fs.writeFile(binaryPath, `#!/bin/sh
+echo probe >> ${callLogPath}
+if [ ! -f ${successMarker} ]; then
+  touch ${successMarker}
+  echo "transient failure" >&2
+  exit 1
+fi
+echo "2.1.220 (Claude Code)"
+`, { mode: 0o755 });
   return { binaryPath, callLogPath };
 }
 
@@ -28,48 +50,46 @@ describe('parseClaudeCliVersion', () => {
 
 describe('isVersionBefore', () => {
   it('compares versions numerically per component', () => {
-    expect(isVersionBefore([2, 1, 197], THINKING_FLAG_REMOVED_VERSION)).toBe(true);
-    expect(isVersionBefore([1, 9, 999], THINKING_FLAG_REMOVED_VERSION)).toBe(true);
-    expect(isVersionBefore([2, 1, 198], THINKING_FLAG_REMOVED_VERSION)).toBe(false);
-    expect(isVersionBefore([2, 2, 0], THINKING_FLAG_REMOVED_VERSION)).toBe(false);
-    expect(isVersionBefore([3, 0, 0], THINKING_FLAG_REMOVED_VERSION)).toBe(false);
+    expect(isVersionBefore([2, 1, 219], MINIMUM_CLAUDE_CLI_VERSION)).toBe(true);
+    expect(isVersionBefore([1, 9, 999], MINIMUM_CLAUDE_CLI_VERSION)).toBe(true);
+    expect(isVersionBefore([2, 1, 220], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
+    expect(isVersionBefore([2, 2, 0], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
+    expect(isVersionBefore([3, 0, 0], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
   });
 });
 
 function createProbe() {
-  return new ClaudeCliVersionProbe({
-    debug: mock(() => undefined),
-    info: mock(() => undefined),
-    warn: mock(() => undefined),
-    error: mock(() => undefined),
-  });
+  return new ClaudeCliVersionProbe();
 }
 
 describe('ClaudeCliVersionProbe', () => {
-  it('reports support for CLIs older than the flag removal', async () => {
-    const { binaryPath } = await createFakeClaudeBinary('2.1.150 (Claude Code)');
-    expect(await createProbe().supportsLegacyThinkingFlag(binaryPath)).toBe(true);
-  });
+  it('requires the tested persistent protocol version', async () => {
+    const supported = await createFakeClaudeBinary('2.1.220 (Claude Code)');
+    const unsupported = await createFakeClaudeBinary('2.1.219 (Claude Code)');
 
-  it('reports no support for CLIs at or beyond the flag removal', async () => {
-    const removed = await createFakeClaudeBinary('2.1.198 (Claude Code)');
-    const newer = await createFakeClaudeBinary('2.2.0 (Claude Code)');
-    expect(await createProbe().supportsLegacyThinkingFlag(removed.binaryPath)).toBe(false);
-    expect(await createProbe().supportsLegacyThinkingFlag(newer.binaryPath)).toBe(false);
-  });
-
-  it('defaults to no support when the version cannot be determined', async () => {
-    const { binaryPath } = await createFakeClaudeBinary('mystery build');
-    expect(await createProbe().supportsLegacyThinkingFlag(binaryPath)).toBe(false);
-    expect(await createProbe().supportsLegacyThinkingFlag('/nonexistent/claude-binary')).toBe(false);
+    await expect(createProbe().assertCompatible(supported.binaryPath))
+      .resolves.toEqual(MINIMUM_CLAUDE_CLI_VERSION);
+    await expect(createProbe().assertCompatible(unsupported.binaryPath))
+      .rejects.toThrow('Upgrade to 2.1.220 or newer');
   });
 
   it('probes each binary path only once', async () => {
-    const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.0.0 (Claude Code)');
+    const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.1.220 (Claude Code)');
     const probe = createProbe();
-    expect(await probe.supportsLegacyThinkingFlag(binaryPath)).toBe(true);
-    expect(await probe.supportsLegacyThinkingFlag(binaryPath)).toBe(true);
+    expect(await probe.assertCompatible(binaryPath)).toEqual(MINIMUM_CLAUDE_CLI_VERSION);
+    expect(await probe.assertCompatible(binaryPath)).toEqual(MINIMUM_CLAUDE_CLI_VERSION);
     const calls = await fs.readFile(callLogPath, 'utf8');
     expect(calls.trim().split('\n')).toHaveLength(1);
+  });
+
+  it('retries a binary after a transient probe failure', async () => {
+    const { binaryPath, callLogPath } = await createFlakyClaudeBinary();
+    const probe = createProbe();
+
+    await expect(probe.assertCompatible(binaryPath)).rejects.toThrow('transient failure');
+    await expect(probe.assertCompatible(binaryPath)).resolves.toEqual(MINIMUM_CLAUDE_CLI_VERSION);
+
+    const calls = await fs.readFile(callLogPath, 'utf8');
+    expect(calls.trim().split('\n')).toHaveLength(2);
   });
 });

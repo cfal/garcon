@@ -1,17 +1,35 @@
 import { describe, expect, test } from 'bun:test';
-import { applyChatViewMessages, type ChatViewMessage } from '../../../common/chat-view.js';
-import type { ChatGenerationResetMessage } from '../../../common/ws-events.js';
-import { countUserContent, userContents } from '../../support/chat-assertions.js';
-import { GarconWsRequestError } from '../../support/garcon-client.js';
+import { join } from 'node:path';
+import {
+  applyTranscriptAppend,
+  type TranscriptMessage,
+} from '../../../common/chat-view.js';
+import { CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT } from '../../../common/chat-snapshot.js';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  CompactionMessage,
+  ToolResultMessage,
+  UserMessage,
+  type ChatMessage,
+} from '../../../common/chat-types.js';
+import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import {
+  assistantContents,
+  countUserContent,
+  userContents,
+} from '../../support/chat-assertions.js';
+import type { GarconTestClient } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
-function transcriptProjection(messages: readonly ChatViewMessage[]): Array<{
-  seq: number;
+function transcriptProjection(messages: readonly TranscriptMessage[]): Array<{
+  ordinal: number;
   type: string;
   content?: string;
 }> {
   return messages.map((entry) => ({
-    seq: entry.seq,
+    ordinal: entry.ordinal,
     type: entry.message.type,
     ...('content' in entry.message && typeof entry.message.content === 'string'
       ? { content: entry.message.content }
@@ -19,8 +37,229 @@ function transcriptProjection(messages: readonly ChatViewMessage[]): Array<{
   }));
 }
 
+interface ExactTranscriptRow {
+  readonly ordinal: number;
+  readonly type: string;
+  readonly text: string;
+}
+
+interface ReplayPage {
+  readonly messages: readonly TranscriptMessage[];
+  readonly nextAfterOrdinal: number;
+  readonly throughOrdinal: number;
+  readonly hasMore: boolean;
+  readonly frameBytes: number;
+}
+
+const REPLAY_BYTE_STRESS_ROW_COUNT = 24;
+const REPLAY_BYTE_STRESS_TEXT = '\u{1F642}'.repeat(32 * 1024);
+
+function exactTranscriptRow(entry: TranscriptMessage): ExactTranscriptRow {
+  return {
+    ordinal: entry.ordinal,
+    type: entry.message.type,
+    text: exactMessageText(entry.message),
+  };
+}
+
+function exactMessageText(message: ChatMessage): string {
+  switch (message.type) {
+    case 'user-message':
+    case 'assistant-message':
+    case 'thinking':
+    case 'error':
+    case 'transcript-notice':
+      return message.content;
+    case 'bash-tool-use':
+      return `$ ${message.command}`;
+    case 'tool-result':
+      return typeof message.content.raw === 'string'
+        ? message.content.raw
+        : JSON.stringify(message.content);
+    case 'compaction':
+      return message.summary;
+    default:
+      return JSON.stringify(message);
+  }
+}
+
+function mixedReplayRows(
+  firstOrdinal: number,
+  count: number,
+): { drafts: LedgerRowDraft[]; presented: ExactTranscriptRow[] } {
+  const drafts: LedgerRowDraft[] = [];
+  const presented: ExactTranscriptRow[] = [];
+  const hiddenPrefixLength = Math.max(0, count - 1_000);
+
+  for (let index = 0; index < count; index += 1) {
+    const ordinal = firstOrdinal + index;
+    const timestamp = new Date(Date.UTC(2026, 7, 15) + index).toISOString();
+    if (index < hiddenPrefixLength) {
+      drafts.push({
+        kind: 'run-ended',
+        at: timestamp,
+        outcome: index % 2 === 0 ? 'finished' : 'interrupted',
+        origin: index % 2 === 0 ? 'provider' : 'core',
+        providerMeta: null,
+      });
+      continue;
+    }
+
+    const occurrence = index - hiddenPrefixLength;
+    const toolId = `replay-tool-${occurrence}`;
+    const byteStress = occurrence < REPLAY_BYTE_STRESS_ROW_COUNT
+      ? `-${REPLAY_BYTE_STRESS_TEXT}`
+      : '';
+    let message: ChatMessage;
+    let draft: LedgerRowDraft;
+    switch (occurrence % 6) {
+      case 0:
+        message = new UserMessage(timestamp, `replay-user-${occurrence}${byteStress}`);
+        draft = {
+          kind: 'user-input',
+          at: timestamp,
+          detail: {
+            clientMessageId: `replay-client-${occurrence}`,
+            message,
+            attachments: [],
+            steer: false,
+            preambleBoundary: null,
+            preamblePrefixReceipt: null,
+          },
+          providerMeta: null,
+        };
+        break;
+      case 1:
+        message = new AssistantMessage(timestamp, `replay-assistant-${occurrence}${byteStress}`);
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      case 2:
+        message = new BashToolUseMessage(
+          timestamp,
+          toolId,
+          `printf replay-${occurrence}${byteStress}`,
+        );
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      case 3:
+        message = new ToolResultMessage(
+          timestamp,
+          `replay-tool-${occurrence - 1}`,
+          { raw: `replay-result-${occurrence}${byteStress}` },
+          false,
+        );
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      case 4:
+        message = new CompactionMessage(
+          timestamp,
+          'auto',
+          `replay-compaction-${occurrence}${byteStress}`,
+        );
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+      default:
+        message = new AssistantMessage(
+          timestamp,
+          `repeated-equal-assistant-content${byteStress}`,
+        );
+        draft = { kind: 'provider-row', at: timestamp, message, providerMeta: null };
+        break;
+    }
+    drafts.push(draft);
+    presented.push({ ordinal, type: message.type, text: exactMessageText(message) });
+  }
+
+  return { drafts, presented };
+}
+
+async function subscribeReplayPage(
+  client: GarconTestClient,
+  chatId: string,
+  transcriptViewId: string,
+  afterOrdinal: number,
+  throughOrdinal?: number,
+): Promise<ReplayPage> {
+  const rawCursor = client.rawEvents().length;
+  const response = await client.subscribe(
+    chatId,
+    transcriptViewId,
+    afterOrdinal,
+    throughOrdinal,
+  );
+  const raw = client.rawEvents().slice(rawCursor).find((event): event is Record<string, unknown> => (
+    isRecord(event)
+    && event.type === 'chat-subscribed'
+    && event.clientRequestId === response.clientRequestId
+  ));
+  if (!raw) throw new Error('The raw transcript replay response was not recorded.');
+  if (
+    !Number.isSafeInteger(raw.nextAfterOrdinal)
+    || !Number.isSafeInteger(raw.throughOrdinal)
+    || typeof raw.hasMore !== 'boolean'
+  ) {
+    throw new Error(
+      `Transcript replay response is not a bounded page: ${JSON.stringify({
+        firstOrdinal: raw.firstOrdinal,
+        lastOrdinal: raw.lastOrdinal,
+        messageCount: response.messages.length,
+        nextAfterOrdinal: raw.nextAfterOrdinal ?? null,
+        throughOrdinal: raw.throughOrdinal ?? null,
+        hasMore: raw.hasMore ?? null,
+      })}`,
+    );
+  }
+  return {
+    messages: response.messages,
+    nextAfterOrdinal: replayInteger(raw.nextAfterOrdinal, 'nextAfterOrdinal'),
+    throughOrdinal: replayInteger(raw.throughOrdinal, 'throughOrdinal'),
+    hasMore: raw.hasMore as boolean,
+    frameBytes: new TextEncoder().encode(JSON.stringify(raw)).byteLength,
+  };
+}
+
+async function replayAllPages(
+  client: GarconTestClient,
+  chatId: string,
+  transcriptViewId: string,
+): Promise<{ rows: ExactTranscriptRow[]; throughOrdinal: number }> {
+  const rows: ExactTranscriptRow[] = [];
+  let afterOrdinal = 0;
+  let throughOrdinal: number | undefined;
+  for (let pageCount = 0; pageCount < 1_000; pageCount += 1) {
+    const page = await subscribeReplayPage(
+      client,
+      chatId,
+      transcriptViewId,
+      afterOrdinal,
+      throughOrdinal,
+    );
+    throughOrdinal ??= page.throughOrdinal;
+    expect(page.throughOrdinal).toBe(throughOrdinal);
+    expect(page.nextAfterOrdinal).toBeGreaterThan(afterOrdinal);
+    expect(page.nextAfterOrdinal - afterOrdinal)
+      .toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+    expect(page.frameBytes).toBeLessThanOrEqual(1_048_576);
+    rows.push(...page.messages.map(exactTranscriptRow));
+    afterOrdinal = page.nextAfterOrdinal;
+    if (!page.hasMore) return { rows, throughOrdinal };
+  }
+  throw new Error('Restarted transcript replay did not converge.');
+}
+
+function replayInteger(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`Replay response has an invalid ${field}.`);
+  }
+  return Number(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 describe('reconnect and transcript stability', () => {
-  test('reconnects while processing with correlated processing, queue, and pending snapshots', async () => {
+  test('reconnects while processing with view-qualified transcript and control snapshots', async () => {
     await withIntegrationFixture('reconnect-while-processing', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reconnect-a' });
@@ -33,40 +272,43 @@ describe('reconnect and transcript stability', () => {
       await held.received;
       const beforeReconnect = await fixture.client.getMessages(chatId);
       expect(countUserContent(beforeReconnect.messages, 'reconnect-a')).toBe(1);
-      expect(beforeReconnect.pendingUserInputs).toHaveLength(1);
-      expect(beforeReconnect.pendingUserInputs[0].deliveryStatus).toBe('accepted');
+      expect(beforeReconnect.resendCandidates).toEqual([]);
 
       await fixture.client.disconnect();
       await fixture.client.reconnect();
       const reconnectCursor = fixture.client.markEvents();
       const state = await fixture.client.reconnectState([chatId]);
-      expect(state.processing).toEqual({ outcome: 'snapshot', runningChatIds: [chatId] });
-      expect(state.controlResults).toHaveLength(1);
-      expect(state.controlResults[0]).toMatchObject({ chatId, outcome: 'snapshot' });
+      expect(state.processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId, phase: 'running' }],
+      });
+      expect(state.controlResults).toMatchObject([{ chatId, outcome: 'snapshot' }]);
 
       const subscription = await fixture.client.subscribe(
         chatId,
-        beforeReconnect.generationId,
-        beforeReconnect.lastSeq,
+        beforeReconnect.transcriptViewId,
+        beforeReconnect.lastOrdinal,
       );
-      expect(subscription.mode).toBe('delta');
-      expect(subscription.generationId).toBe(beforeReconnect.generationId);
-      expect(subscription.pendingUserInputs).toHaveLength(1);
-      expect(fixture.client.events().slice(reconnectCursor).filter((event) =>
-        event.type === 'chat-generation-reset' && event.chatId === chatId)).toEqual([]);
+      expect(subscription).toMatchObject({
+        transcriptViewId: beforeReconnect.transcriptViewId,
+        messages: [],
+        firstOrdinal: beforeReconnect.lastOrdinal + 1,
+        lastOrdinal: beforeReconnect.lastOrdinal,
+        resendCandidates: [],
+      });
 
       held.releaseEcho();
       expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
         afterIndex: reconnectCursor,
       })).type).toBe('agent-run-finished');
       const completed = await fixture.client.getMessages(chatId);
-      expect(completed.generationId).toBe(beforeReconnect.generationId);
+      expect(completed.transcriptViewId).toBe(beforeReconnect.transcriptViewId);
       expect(countUserContent(completed.messages, 'reconnect-a')).toBe(1);
-      expect(completed.pendingUserInputs).toEqual([]);
+      expect(completed.resendCandidates).toEqual([]);
     });
   });
 
-  test('repeated message reads do not reload generations or duplicate optimistic users', async () => {
+  test('[TLV5-L02.04-SERVER-01] repeated reads preserve one view and one committed user row', async () => {
     await withIntegrationFixture('repeated-messages-while-processing', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'repeated-read' });
@@ -77,32 +319,28 @@ describe('reconnect and transcript stability', () => {
         agent: fixture.directAgents.openAi,
       });
       await held.received;
-      const eventCursor = fixture.client.markEvents();
 
-      const pages = await Promise.all(Array.from({ length: 5 }, () => fixture.client.getMessages(chatId)));
-      expect(new Set(pages.map((page) => page.generationId)).size).toBe(1);
+      const pages = await Promise.all(
+        Array.from({ length: 5 }, () => fixture.client.getMessages(chatId)),
+      );
+      expect(new Set(pages.map((page) => page.transcriptViewId)).size).toBe(1);
       for (const page of pages) {
         expect(countUserContent(page.messages, 'repeated-read')).toBe(1);
-        expect(page.pendingUserInputs).toHaveLength(1);
-        expect(page.pendingUserInputs[0].deliveryStatus).toBe('accepted');
+        expect(page.resendCandidates).toEqual([]);
       }
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
-      await fixture.client.ping();
-      expect(fixture.client.events().slice(eventCursor).filter((event) =>
-        event.type === 'chat-generation-reset' && event.chatId === chatId)).toEqual([]);
 
       held.releaseEcho();
-      expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
-        afterIndex: eventCursor,
-      })).type).toBe('agent-run-finished');
+      expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId)).type)
+        .toBe('agent-run-finished');
       const completed = await fixture.client.getMessages(chatId);
-      expect(completed.generationId).toBe(pages[0].generationId);
-      expect(countUserContent(completed.messages, 'repeated-read')).toBe(1);
-      expect(completed.messages.filter((entry) => entry.message.type === 'assistant-message')).toHaveLength(1);
+      expect(completed.transcriptViewId).toBe(pages[0]!.transcriptViewId);
+      expect(completed.messages.filter((entry) =>
+        entry.message.type === 'assistant-message')).toHaveLength(1);
     });
   });
 
-  test('replays missed same-generation messages after a socket disconnect', async () => {
+  test('[TLV5-L03.03-SERVER-01] replays missed rows after a socket disconnect', async () => {
     await withIntegrationFixture('reconnect-replay-delta', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'missed-delta' });
@@ -120,30 +358,179 @@ describe('reconnect and transcript stability', () => {
 
       const reconnectCursor = fixture.client.markEvents();
       const state = await fixture.client.reconnectState([]);
-      if (state.processing.outcome === 'snapshot' && state.processing.runningChatIds.includes(chatId)) {
-        await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, { afterIndex: reconnectCursor });
+      if (
+        state.processing.outcome === 'snapshot'
+        && state.processing.chats.some((entry) => entry.chatId === chatId)
+      ) {
+        await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
+          afterIndex: reconnectCursor,
+        });
       }
-      const replay = await fixture.client.subscribe(chatId, initial.generationId, initial.lastSeq);
-      expect(replay.mode).toBe('delta');
-      expect(replay.generationId).toBe(initial.generationId);
+      const replay = await fixture.client.subscribe(
+        chatId,
+        initial.transcriptViewId,
+        initial.lastOrdinal,
+      );
       expect(replay.messages).toHaveLength(1);
-      expect(replay.messages[0].message).toMatchObject({
+      expect(replay.messages[0]!.message).toMatchObject({
         type: 'assistant-message',
         content: 'echo:missed-delta',
       });
 
-      const applied = applyChatViewMessages(initial.messages, replay.messages, initial.lastSeq);
+      const applied = applyTranscriptAppend(initial.messages, replay, initial.lastOrdinal);
       expect(applied.status).toBe('applied');
       const canonical = await fixture.client.getMessages(chatId);
       expect(applied.messages).toEqual(canonical.messages);
-      const requestCount = fixture.fakeProviders.openAi.requests().length;
-      const repeatedReplay = await fixture.client.subscribe(chatId, initial.generationId, initial.lastSeq);
-      expect(repeatedReplay.messages).toEqual(replay.messages);
-      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
+      expect((await fixture.client.subscribe(
+        chatId,
+        initial.transcriptViewId,
+        initial.lastOrdinal,
+      )).messages).toEqual(replay.messages);
     });
   });
 
-  test('requires a snapshot for an obsolete generation cursor', async () => {
+  test('[TLV5-REPLAY.03-SERVER-01] replays fifty thousand mixed rows in bounded fixed-watermark pages', async () => {
+    await withIntegrationFixture('reconnect-bounded-replay', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const started = await fixture.client.startDirectChat({
+        chatId,
+        content: 'bounded-replay-initial',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+      const initial = await fixture.client.getMessages(chatId);
+      const generated = mixedReplayRows(initial.lastOrdinal + 1, 50_000);
+
+      await fixture.restartGarcon({
+        beforeStart: async () => {
+          const store = new TranscriptLedgerStore(
+            join(fixture.dirs.workspace, 'transcript-ledgers'),
+          );
+          try {
+            const view = store.currentView(chatId);
+            if (view?.viewId !== initial.transcriptViewId) {
+              throw new Error('The replay fixture opened a different transcript view.');
+            }
+            for (let offset = 0; offset < generated.drafts.length; offset += 1_000) {
+              store.append(
+                chatId,
+                view.viewId,
+                generated.drafts.slice(offset, offset + 1_000),
+              );
+            }
+          } finally {
+            store.close();
+          }
+        },
+      });
+
+      const injectedThroughOrdinal = initial.lastOrdinal + generated.drafts.length;
+      const expectedBeforeLive = [
+        ...initial.messages.map(exactTranscriptRow),
+        ...generated.presented,
+      ];
+      const liveContent = 'bounded-replay-concurrent-live';
+      let liveTurn: Awaited<ReturnType<typeof fixture.client.runDirectChat>> | null = null;
+      let liveCursor = -1;
+      let afterOrdinal = 0;
+      let throughOrdinal: number | undefined;
+      let pageCount = 0;
+      let sawHiddenOnlyPage = false;
+      let sawByteLimitedPage = false;
+      const replayed: ExactTranscriptRow[] = [];
+
+      while (true) {
+        const page = await subscribeReplayPage(
+          fixture.client,
+          chatId,
+          initial.transcriptViewId,
+          afterOrdinal,
+          throughOrdinal,
+        );
+        pageCount += 1;
+        throughOrdinal ??= page.throughOrdinal;
+        expect(page.throughOrdinal).toBe(throughOrdinal);
+        expect(throughOrdinal).toBe(injectedThroughOrdinal);
+        expect(page.nextAfterOrdinal).toBeGreaterThan(afterOrdinal);
+        expect(page.nextAfterOrdinal - afterOrdinal)
+          .toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+        expect(page.frameBytes).toBeLessThanOrEqual(1_048_576);
+        expect(page.messages.length).toBeLessThanOrEqual(CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT);
+        if (page.messages.length === 0) sawHiddenOnlyPage = true;
+        if (
+          page.hasMore
+          && page.messages.length > 0
+          && page.nextAfterOrdinal - afterOrdinal < CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT
+        ) {
+          sawByteLimitedPage = true;
+        }
+        for (const message of page.messages) {
+          expect(message.ordinal).toBeGreaterThan(afterOrdinal);
+          expect(message.ordinal).toBeLessThanOrEqual(page.nextAfterOrdinal);
+        }
+        replayed.push(...page.messages.map(exactTranscriptRow));
+
+        if (pageCount === 1) {
+          liveCursor = fixture.client.markEvents();
+          liveTurn = await fixture.client.runDirectChat({
+            chatId,
+            content: liveContent,
+            agent: fixture.directAgents.openAi,
+          });
+        }
+
+        afterOrdinal = page.nextAfterOrdinal;
+        if (!page.hasMore) break;
+        if (pageCount > 1_000) throw new Error('Bounded transcript replay did not converge.');
+      }
+
+      expect(afterOrdinal).toBe(throughOrdinal);
+      expect(pageCount).toBeGreaterThan(1);
+      expect(sawHiddenOnlyPage).toBe(true);
+      expect(sawByteLimitedPage).toBe(true);
+      expect(replayed).toEqual(expectedBeforeLive);
+      expect(new Set(replayed.map((row) => row.ordinal)).size).toBe(replayed.length);
+
+      expect(liveTurn).not.toBeNull();
+      await fixture.client.waitForTurnTerminal(chatId, liveTurn!.turnId, {
+        afterIndex: liveCursor,
+      });
+      const liveRows = fixture.client.eventsSince(liveCursor).flatMap((event) => (
+        event.type === 'chat-messages' && event.chatId === chatId
+          ? event.messages.filter((message) => message.ordinal > throughOrdinal!)
+          : []
+      ));
+      expect(liveRows.map(exactTranscriptRow)).toEqual([
+        expect.objectContaining({ type: 'user-message', text: liveContent }),
+        expect.objectContaining({ type: 'assistant-message', text: `echo:${liveContent}` }),
+      ]);
+      expect(new Set(liveRows.map((message) => message.ordinal)).size).toBe(liveRows.length);
+
+      const interrupted = await subscribeReplayPage(
+        fixture.client,
+        chatId,
+        initial.transcriptViewId,
+        0,
+      );
+      expect(interrupted.hasMore).toBe(true);
+      await fixture.client.disconnect();
+      await fixture.client.reconnect();
+
+      const restarted = await replayAllPages(
+        fixture.client,
+        chatId,
+        initial.transcriptViewId,
+      );
+      expect(restarted.rows).toEqual([
+        ...expectedBeforeLive,
+        ...liveRows.map(exactTranscriptRow),
+      ]);
+      expect(restarted.throughOrdinal).toBeGreaterThan(throughOrdinal!);
+    });
+  }, 60_000);
+
+  test('rejects an obsolete view cursor with a typed stale-view error', async () => {
     await withIntegrationFixture('reconnect-stale-cursor', async (fixture) => {
       const chatId = fixture.newChatId();
       const accepted = await fixture.client.startDirectChat({
@@ -153,126 +540,112 @@ describe('reconnect and transcript stability', () => {
         agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
-      const snapshotRequired = await fixture.client.subscribe(chatId, crypto.randomUUID(), 99_999);
-      expect(snapshotRequired.mode).toBe('snapshot-required');
-      expect(snapshotRequired.messages).toEqual([]);
+
+      await expect(fixture.client.subscribe(chatId, crypto.randomUUID(), 99_999))
+        .rejects.toMatchObject({
+          response: {
+            requestType: 'chat-subscribe',
+            code: 'STALE_TRANSCRIPT_VIEW',
+            retryable: false,
+            chatId,
+          },
+        });
 
       const canonical = await fixture.client.getMessages(chatId);
-      expect(canonical.generationId).toBeString();
       expect(userContents(canonical.messages)).toEqual(['stale-cursor']);
-      const subscribed = await fixture.client.subscribe(chatId, canonical.generationId, canonical.lastSeq);
-      expect(subscribed.mode).toBe('delta');
-      expect(subscribed.messages).toEqual([]);
+      expect((await fixture.client.subscribe(
+        chatId,
+        canonical.transcriptViewId,
+        canonical.lastOrdinal,
+      )).messages).toEqual([]);
     });
   });
-  test('scopes manual reload responses and preserves a paged transcript across generations', async () => {
-    await withIntegrationFixture('manual-reload-contract', async (fixture) => {
+
+  test('pages one stable view and reloads it from Direct native history', async () => {
+    await withIntegrationFixture('view-qualified-paging', async (fixture) => {
       const chatId = fixture.newChatId();
-      const observer = await fixture.connectObserver('reload-observer');
-      const first = await fixture.client.startDirectChat({
-        chatId,
-        content: 'reload-first',
-        projectPath: fixture.dirs.project,
-        agent: fixture.directAgents.openAi,
-      });
-      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
-      const second = await fixture.client.runDirectChat({
-        chatId,
-        content: 'reload-second',
-        agent: fixture.directAgents.openAi,
-      });
-      await fixture.client.waitForTurnTerminal(chatId, second.turnId);
-
-      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reload-third' });
-      const third = await fixture.client.runDirectChat({
-        chatId,
-        content: 'reload-third',
-        agent: fixture.directAgents.openAi,
-      });
-      await held.received;
-      const failedObserverCursor = observer.markEvents();
-
-      let reloadFailure: unknown;
-      try {
-        await fixture.client.reloadChat(chatId);
-      } catch (error) {
-        reloadFailure = error;
+      for (const content of ['page-first', 'page-second', 'page-third']) {
+        const accepted = content === 'page-first'
+          ? await fixture.client.startDirectChat({
+              chatId,
+              content,
+              projectPath: fixture.dirs.project,
+              agent: fixture.directAgents.openAi,
+            })
+          : await fixture.client.runDirectChat({
+              chatId,
+              content,
+              agent: fixture.directAgents.openAi,
+            });
+        await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
       }
-      expect(reloadFailure).toBeInstanceOf(GarconWsRequestError);
-      const requestError = (reloadFailure as GarconWsRequestError).response;
-      expect(requestError).toMatchObject({
-        type: 'client-request-error',
-        requestType: 'chat-reload',
-        code: 'CHAT_RUNNING',
-        retryable: true,
-        chatId,
-      });
-      expect(requestError.clientRequestId).toBeString();
-      await Promise.all([fixture.client.ping(), observer.ping()]);
-      expect(observer.eventsSince(failedObserverCursor).some((event) =>
-        event.type === 'chat-generation-reset' && event.chatId === chatId)).toBe(false);
-
-      held.releaseEcho();
-      await Promise.all([
-        fixture.client.waitForTurnTerminal(chatId, third.turnId),
-        observer.waitForTurnTerminal(chatId, third.turnId),
-      ]);
-      const beforeReload = await fixture.client.getMessages(chatId);
-      expect(beforeReload.pendingUserInputs).toEqual([]);
-      const observerCursor = observer.markEvents();
-
-      const reloaded = await fixture.client.reloadChat(chatId);
-      expect(reloaded).toMatchObject({
-        type: 'chat-reloaded',
-        chatId,
-        hasMore: false,
-      });
-      expect(reloaded.generationId).not.toBe(beforeReload.generationId);
-      expect(transcriptProjection(reloaded.messages)).toEqual(
-        transcriptProjection(beforeReload.messages),
-      );
-      const reset = await observer.waitForEvent(
-        (event): event is ChatGenerationResetMessage =>
-          event.type === 'chat-generation-reset'
-          && event.chatId === chatId
-          && event.generationId === reloaded.generationId,
-        'manual reload generation reset',
-        { afterIndex: observerCursor },
-      );
-      expect(reset).toMatchObject({ reason: 'manual-reload', lastSeq: reloaded.lastSeq });
-      expect(observer.eventsSince(observerCursor).some((event) =>
-        event.type === 'chat-reloaded'
-        && event.clientRequestId === reloaded.clientRequestId)).toBe(false);
-
-      const stale = await observer.subscribe(
-        chatId,
-        beforeReload.generationId,
-        beforeReload.lastSeq,
-      );
-      expect(stale.mode).toBe('snapshot-required');
-      expect(stale.generationId).toBe(reloaded.generationId);
 
       let page = await fixture.client.getMessages(chatId, { limit: 2 });
+      const viewId = page.transcriptViewId;
       let reconstructed = [...page.messages];
       let pageCount = 1;
       while (page.hasMore) {
+        const nextBeforeOrdinal = page.nextBeforeOrdinal;
+        if (nextBeforeOrdinal === null) {
+          throw new Error('A paginated transcript page is missing its raw continuation cursor.');
+        }
         page = await fixture.client.getMessages(chatId, {
           limit: 2,
-          beforeSeq: page.pageOldestSeq,
+          beforeOrdinal: nextBeforeOrdinal,
+          transcriptViewId: viewId,
         });
-        expect(page.pendingUserInputs).toEqual([]);
+        expect(page.transcriptViewId).toBe(viewId);
         reconstructed = [...page.messages, ...reconstructed];
         pageCount += 1;
         if (pageCount > 10) throw new Error('Transcript pagination did not converge.');
       }
       expect(pageCount).toBeGreaterThan(1);
-      expect(reconstructed.map((entry) => entry.seq)).toEqual(
-        Array.from({ length: reconstructed.length }, (_, index) => index + 1),
-      );
-      expect(transcriptProjection(reconstructed)).toEqual(transcriptProjection(beforeReload.messages));
-      for (const content of ['reload-first', 'reload-second', 'reload-third']) {
+      const ordinals = reconstructed.map((entry) => entry.ordinal);
+      expect(ordinals).toEqual([...ordinals].sort((left, right) => left - right));
+      expect(new Set(ordinals).size).toBe(ordinals.length);
+      for (const content of ['page-first', 'page-second', 'page-third']) {
         expect(countUserContent(reconstructed, content)).toBe(1);
       }
+
+      const reloaded = await fixture.client.reloadChat(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(viewId);
+      expect(userContents(reloaded.messages)).toEqual([
+        'page-first',
+        'page-second',
+        'page-third',
+      ]);
+      expect(assistantContents(reloaded.messages)).toEqual([
+        'echo:page-first',
+        'echo:page-second',
+        'echo:page-third',
+      ]);
+    });
+  });
+
+  test('[TLV5-PAGE.02-SERVER-01] rejects an HTTP page cursor from another transcript view', async () => {
+    await withIntegrationFixture('view-qualified-http-paging', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const accepted = await fixture.client.startDirectChat({
+        chatId,
+        content: 'view-qualified-page',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      const latest = await fixture.client.getMessages(chatId, { limit: 1 });
+      expect(typeof latest.nextBeforeOrdinal).toBe('number');
+      const query = new URLSearchParams({
+        chatId,
+        transcriptViewId: crypto.randomUUID(),
+        limit: '1',
+        beforeOrdinal: String(latest.nextBeforeOrdinal),
+      });
+
+      const response = await fetch(`${fixture.client.baseUrl}/api/v1/chats/messages?${query}`);
+      const body = await response.json() as { errorCode?: unknown };
+
+      expect(response.status).toBe(409);
+      expect(body.errorCode).toBe('STALE_TRANSCRIPT_VIEW');
     });
   });
 });

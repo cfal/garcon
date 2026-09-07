@@ -1,0 +1,304 @@
+<script lang="ts">
+	import type { Snippet } from 'svelte';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import X from '@lucide/svelte/icons/x';
+	import type { GitCommitFileSummary } from '$lib/api/git.js';
+	import type {
+		CommentComposerState,
+		GitDiffSeverity,
+	} from '$lib/git/review/git-inline-comment.svelte.js';
+	import {
+		containerPresentationForWidth,
+		observeContainerWidth,
+	} from '$lib/components/shared/container-presentation.js';
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
+	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+	import {
+		clampGitFileTreeWidth,
+		DEFAULT_GIT_FILE_TREE_WIDTH,
+		persistGitDiffDocumentFileTreeVisible,
+		persistGitFileTreeWidth,
+		readGitDiffDocumentFileTreeVisible,
+		readGitFileTreeWidth,
+	} from '$lib/git/surface/git-file-tree-preferences.js';
+	import { cn } from '$lib/utils/cn';
+	import GitChangedFileTree from './GitChangedFileTree.svelte';
+	import GitCommitVirtualDiffSurface from './GitCommitVirtualDiffSurface.svelte';
+	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
+	import { gitContainerBreakpoints } from './git-container-presentation.js';
+	import * as m from '$lib/paraglide/messages.js';
+
+	interface GitDiffDocumentScreenProps {
+		header: Snippet<
+			[showFileTreeToggle: boolean, fileTreeVisible: boolean, onToggleFileTree: () => void]
+		>;
+		documentId: string | null;
+		documentAvailable: boolean;
+		files: GitCommitFileSummary[];
+		isLoading: boolean;
+		error: string | null;
+		onDismissError?: () => void;
+		source: GitVirtualReviewRowSource;
+		scrollRequest: { filePath: string; token: number } | null;
+		fileFilter: string;
+		focusedFilePath: string | null;
+		isMobile: boolean;
+		active?: boolean;
+		fontSize: number;
+		loadingLabel: string;
+		emptyErrorLabel: string;
+		emptyDocumentLabel: string;
+		onBack?: () => void;
+		onRetry?: () => void;
+		fallbackActions?: Snippet;
+		onSelectFile: (file: string) => void;
+		onFileFilterChange: (value: string) => void;
+		onBodyDemand: (demand: GitReviewBodyDemand) => void;
+		onOpenInEditor?: (relativePath: string, line: number) => void;
+		composerState: CommentComposerState;
+		commentFeedback: {
+			filePath: string;
+			side: 'before' | 'after';
+			line: number;
+			message: string;
+		} | null;
+		commentError: string | null;
+		commentCopyText: string | null;
+		onAddComment: (filePath: string, side: 'before' | 'after', line: number) => void;
+		onComposerBodyChange: (body: string) => void;
+		onComposerSeverityChange: (severity: GitDiffSeverity) => void;
+		onComposerSubmit: () => void;
+		onComposerClose: () => void;
+		onComposerFocusHandled: () => void;
+		onOpenChat: () => void;
+	}
+
+	let {
+		header,
+		documentId,
+		documentAvailable,
+		files,
+		isLoading,
+		error,
+		onDismissError,
+		source,
+		scrollRequest,
+		fileFilter,
+		focusedFilePath,
+		isMobile,
+		active = true,
+		fontSize,
+		loadingLabel,
+		emptyErrorLabel,
+		emptyDocumentLabel,
+		onBack,
+		onRetry,
+		fallbackActions,
+		onSelectFile,
+		onFileFilterChange,
+		onBodyDemand,
+		onOpenInEditor,
+		composerState,
+		commentFeedback,
+		commentError,
+		commentCopyText,
+		onAddComment,
+		onComposerBodyChange,
+		onComposerSeverityChange,
+		onComposerSubmit,
+		onComposerClose,
+		onComposerFocusHandled,
+		onOpenChat,
+	}: GitDiffDocumentScreenProps = $props();
+
+	type SinglePane = 'files' | 'diff';
+	let containerWidth = $state(0);
+	let singlePane = $state<SinglePane>('files');
+	let treePaneWidthPx = $state(readGitFileTreeWidth() ?? DEFAULT_GIT_FILE_TREE_WIDTH);
+	let fileTreeVisible = $state(readGitDiffDocumentFileTreeVisible());
+	const observeDetailsWidth = observeContainerWidth((width) => {
+		containerWidth = width;
+	});
+	// Matches GitWorkbench: below the wide breakpoint the panes collapse into a
+	// single segmented pane, so the resizable tree and its toggle only exist in wide.
+	let containerPresentation = $derived<'narrow' | 'wide'>(
+		isMobile || containerPresentationForWidth(containerWidth, gitContainerBreakpoints) !== 'wide'
+			? 'narrow'
+			: 'wide',
+	);
+	let isSinglePane = $derived(containerPresentation === 'narrow');
+	let isWide = $derived(containerPresentation === 'wide');
+	let filePaneHidden = $derived(
+		(isSinglePane && singlePane !== 'files') || (isWide && !fileTreeVisible),
+	);
+	let diffViewportActive = $derived(active && (!isSinglePane || singlePane === 'diff'));
+	let virtualEmptyMessage = $derived(
+		fileFilter.trim() ? m.git_diff_document_no_filter_matches() : emptyDocumentLabel,
+	);
+
+	function singlePaneClass(pane: SinglePane): string {
+		return singlePane === pane
+			? 'text-interactive-accent border-b-2 border-interactive-accent'
+			: 'text-muted-foreground hover:text-foreground';
+	}
+
+	function handleSelectFile(filePath: string): void {
+		onSelectFile(filePath);
+		if (isSinglePane) singlePane = 'diff';
+	}
+
+	function previewTreePaneWidth(width: number): void {
+		treePaneWidthPx = clampGitFileTreeWidth(width);
+	}
+
+	function commitTreePaneWidth(width: number): void {
+		treePaneWidthPx = persistGitFileTreeWidth(width);
+	}
+
+	function toggleFileTree(): void {
+		fileTreeVisible = !fileTreeVisible;
+		persistGitDiffDocumentFileTreeVisible(fileTreeVisible);
+	}
+</script>
+
+<div
+	class="flex min-h-0 flex-1 flex-col bg-background"
+	data-git-diff-document
+	data-git-history-layout={containerPresentation}
+	{@attach observeDetailsWidth}
+>
+	{#if documentAvailable}
+		{@render header(isWide, fileTreeVisible, toggleFileTree)}
+		{#if error}
+			<div
+				class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
+			>
+				<span class="min-w-0 flex-1">{error}</span>
+				{#if onDismissError}<button
+						type="button"
+						class="rounded p-1 hover:bg-status-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-status-error-border"
+						aria-label={m.git_action_dismiss_error()}
+						onclick={onDismissError}><X class="h-3.5 w-3.5" /></button
+					>{/if}
+			</div>
+		{/if}
+		{#if isLoading}
+			<div
+				class="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted-foreground"
+			>
+				<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+				{loadingLabel}
+			</div>
+		{/if}
+		{#if isSinglePane}
+			<div class="flex shrink-0 border-b border-border" data-git-history-segmented-navigation>
+				{#each ['files', 'diff'] as const as pane (pane)}
+					<button
+						type="button"
+						class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {singlePaneClass(pane)}"
+						aria-pressed={singlePane === pane}
+						onclick={() => (singlePane = pane)}
+					>
+						{pane === 'files' ? m.git_diff_document_files() : m.git_diff_document_diff()}
+						{#if pane === 'files'}<span class="text-[10px] opacity-70">({files.length})</span>{/if}
+					</button>
+				{/each}
+			</div>
+		{/if}
+		<div
+			class={cn('relative min-h-0 flex-1 overflow-hidden', isWide ? 'grid' : 'flex')}
+			style={isWide
+				? `grid-template-columns: ${fileTreeVisible ? `${treePaneWidthPx}px 6px minmax(0,1fr)` : '0px minmax(0,1fr)'}; grid-template-rows: minmax(0,1fr);`
+				: undefined}
+			data-git-diff-document-panes
+		>
+			<div
+				class={cn(
+					'flex min-h-0 flex-col overflow-hidden bg-background',
+					isWide && fileTreeVisible && 'border-r border-border',
+					isSinglePane && 'absolute inset-0',
+					filePaneHidden && 'invisible pointer-events-none',
+				)}
+				aria-hidden={filePaneHidden}
+				inert={filePaneHidden}
+				data-git-history-files-pane
+			>
+				<GitChangedFileTree
+					{files}
+					{fileFilter}
+					{focusedFilePath}
+					{onFileFilterChange}
+					onSelectFile={handleSelectFile}
+				/>
+			</div>
+			{#if isWide && fileTreeVisible}
+				<GitFileTreeResizeHandle
+					width={treePaneWidthPx}
+					onResize={previewTreePaneWidth}
+					onResizeCommit={commitTreePaneWidth}
+				/>
+			{/if}
+			<div
+				class={cn(
+					'flex min-h-0 min-w-0 flex-col overflow-hidden',
+					isSinglePane ? 'absolute inset-0' : 'flex-1',
+					isSinglePane && singlePane !== 'diff' && 'invisible pointer-events-none',
+				)}
+				aria-hidden={isSinglePane && singlePane !== 'diff'}
+				inert={isSinglePane && singlePane !== 'diff'}
+				data-git-history-diff-pane
+			>
+				<GitCommitVirtualDiffSurface
+					{documentId}
+					active={diffViewportActive}
+					{source}
+					{fontSize}
+					scrollToRequest={scrollRequest}
+					overscan={isSinglePane ? 3 : 18}
+					{onBodyDemand}
+					onSelectFile={handleSelectFile}
+					{onOpenInEditor}
+					{composerState}
+					{commentFeedback}
+					{commentError}
+					{commentCopyText}
+					{onAddComment}
+					{onComposerBodyChange}
+					{onComposerSeverityChange}
+					{onComposerSubmit}
+					{onComposerClose}
+					{onComposerFocusHandled}
+					{onOpenChat}
+					emptyMessage={virtualEmptyMessage}
+				/>
+			</div>
+		</div>
+	{:else if isLoading}
+		<div class="flex h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+			<div class="flex items-center gap-2">
+				<LoaderCircle class="h-5 w-5 animate-spin" />
+				{loadingLabel}
+			</div>
+			{@render fallbackActions?.()}
+		</div>
+	{:else}
+		<div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+			<div class="max-w-md text-sm text-status-error-foreground">{error ?? emptyErrorLabel}</div>
+			<div class="flex items-center gap-2">
+				{#if onBack}
+					<button
+						type="button"
+						class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						onclick={onBack}>{m.git_diff_document_back()}</button
+					>
+				{/if}
+				{@render fallbackActions?.()}
+				{#if onRetry}<button
+						type="button"
+						class="rounded bg-interactive-accent px-3 py-1.5 text-sm text-interactive-accent-foreground hover:bg-interactive-accent/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						onclick={onRetry}>{m.git_diff_document_retry()}</button
+					>{/if}
+			</div>
+		</div>
+	{/if}
+</div>

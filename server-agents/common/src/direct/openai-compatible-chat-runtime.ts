@@ -1,31 +1,22 @@
 // OpenAI-compatible chat-completions protocol adapter for direct runtimes.
 
-import type { SharedModelOption } from '@garcon/common/models';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
-import type { AgentLogger } from '@garcon/server-agent-interface';
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import {
   DirectChatRuntimeBase,
+  type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
-  type DirectUserTurn,
+  type DirectTurnCompletion,
 } from "./direct-chat-runtime-base.js";
-import type { DirectConversationMessage } from "./session-store.js";
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
-  DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
   directSingleQuerySignal,
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
+import { isJsonResponse } from './response-media-type.js';
+import { stripThinkBlocks } from './strip-think-blocks.js';
 
-const SILENT_LOGGER: AgentLogger = Object.freeze({
-  debug() {},
-  info() {},
-  warn() {},
-  error() {},
-});
-
-const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
 interface OpenAiCompatibleContentPart {
@@ -39,25 +30,10 @@ interface ConversationMessage {
   content: string | OpenAiCompatibleContentPart[];
 }
 
-interface ModelFetchContext {
-  apiKey: string;
-  baseUrl: string;
-  requestTimeoutMs: number;
-  fallbackModels: SharedModelOption[];
-}
-
-export interface OpenAiCompatibleChatRuntimeConfig {
-  runtimeId: string;
-  runtimeLabel: string;
-  defaultModel: string;
-  fallbackModels: SharedModelOption[];
+export interface OpenAiCompatibleChatRuntimeConfig extends DirectChatRuntimeBaseConfig {
   getApiKey: () => string;
   getBaseUrl: () => string;
-  getSessionDir: () => string;
-  getSessionFilePath: (sessionId: string) => string;
-  logger?: AgentLogger;
   buildHeaders?: (apiKey: string) => Record<string, string>;
-  fetchModels?: (ctx: ModelFetchContext) => Promise<SharedModelOption[]>;
 }
 
 function buildHeaders(config: OpenAiCompatibleChatRuntimeConfig, apiKey: string): Record<string, string> {
@@ -97,22 +73,6 @@ export function buildOpenAiCompatibleUserContent(
     parts.push({ type: 'image_url', image_url: { url: image.data } });
   }
   return parts;
-}
-
-export function extractOpenAiCompatibleTextContent(content: ConversationMessage['content']): string {
-  if (typeof content === 'string') return content;
-
-  return content
-    .filter((part) => part.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text!)
-    .join('\n');
-}
-
-function persistedToOpenAiMessage(message: DirectConversationMessage): ConversationMessage {
-  return {
-    role: message.role,
-    content: message.content,
-  };
 }
 
 async function readOpenAiCompatibleTextStream(
@@ -158,23 +118,25 @@ async function readOpenAiCompatibleTextStream(
   return accumulated;
 }
 
-async function readOpenAiCompatibleSingleQueryResponse(
+async function readOpenAiCompatibleResponse(
   response: Response,
   runtimeLabel: string,
 ): Promise<string> {
-  const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (mediaType !== 'application/json' && !mediaType?.endsWith('+json')) {
-    return readOpenAiCompatibleTextStream(response, runtimeLabel);
+  let text: string;
+  if (!isJsonResponse(response)) {
+    text = await readOpenAiCompatibleTextStream(response, runtimeLabel);
+  } else {
+    const parsed = await response.json() as {
+      choices?: Array<{ message?: { content?: unknown } }>;
+      error?: { message?: string };
+    };
+    if (parsed.error?.message) {
+      throw new Error(`${runtimeLabel} response error: ${parsed.error.message}`);
+    }
+    text = appendDeltaText('', parsed.choices?.[0]?.message?.content);
   }
 
-  const parsed = await response.json() as {
-    choices?: Array<{ message?: { content?: unknown } }>;
-    error?: { message?: string };
-  };
-  if (parsed.error?.message) {
-    throw new Error(`${runtimeLabel} response error: ${parsed.error.message}`);
-  }
-  return appendDeltaText('', parsed.choices?.[0]?.message?.content);
+  return stripThinkBlocks(text);
 }
 
 export async function runOpenAiCompatibleSingleQuery(
@@ -209,7 +171,7 @@ export async function runOpenAiCompatibleSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return (await readOpenAiCompatibleSingleQueryResponse(response, config.runtimeLabel)).trim();
+    return await readOpenAiCompatibleResponse(response, config.runtimeLabel);
   } finally {
     clearTimeout(timer);
   }
@@ -219,34 +181,25 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
   ConversationMessage,
   OpenAiCompatibleChatRuntimeConfig
 > {
-  #modelCache: SharedModelOption[] | null = null;
-  #modelCacheTime = 0;
-  #modelFetchPromise: Promise<SharedModelOption[]> | null = null;
-
   constructor(config: OpenAiCompatibleChatRuntimeConfig) {
     super(config);
   }
 
-  protected buildUserTurn(
+  protected buildUserMessage(
     command: string,
     images?: readonly AgentAttachment[],
-  ): DirectUserTurn<ConversationMessage> {
+  ): ConversationMessage {
     const content = buildOpenAiCompatibleUserContent(command, images);
-    return {
-      message: { role: 'user', content },
-      persistedContent: extractOpenAiCompatibleTextContent(content),
-    };
+    return { role: 'user', content };
   }
 
   protected buildAssistantMessage(content: string): ConversationMessage {
     return { role: 'assistant', content };
   }
 
-  protected persistedToMessage(message: DirectConversationMessage): ConversationMessage {
-    return persistedToOpenAiMessage(message);
-  }
-
-  protected async streamSession(session: DirectRuntimeSession<ConversationMessage>): Promise<string> {
+  protected async streamSession(
+    session: DirectRuntimeSession<ConversationMessage>,
+  ): Promise<DirectTurnCompletion> {
     const apiKey = this.config.getApiKey();
     const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
@@ -271,59 +224,14 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
         const errorText = await response.text();
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      return await readOpenAiCompatibleTextStream(response, this.config.runtimeLabel);
+      return {
+        content: await readOpenAiCompatibleResponse(response, this.config.runtimeLabel),
+        checkpoint: null,
+      };
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;
     }
   }
 
-  override async getModels(): Promise<SharedModelOption[]> {
-    if (!this.config.fetchModels) {
-      return this.config.fallbackModels;
-    }
-
-    if (this.#modelCache && Date.now() - this.#modelCacheTime < MODEL_CACHE_TTL_MS) {
-      return this.#modelCache;
-    }
-
-    if (this.#modelFetchPromise) {
-      return this.#modelFetchPromise;
-    }
-
-    this.#modelFetchPromise = this.#fetchModels();
-    try {
-      return await this.#modelFetchPromise;
-    } finally {
-      this.#modelFetchPromise = null;
-    }
-  }
-
-  async #fetchModels(): Promise<SharedModelOption[]> {
-    const apiKey = this.config.getApiKey();
-    if (!apiKey) {
-      return this.config.fallbackModels;
-    }
-
-    try {
-      const models = await this.config.fetchModels!({
-        apiKey,
-        baseUrl: this.config.getBaseUrl(),
-        requestTimeoutMs: DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
-        fallbackModels: this.config.fallbackModels,
-      });
-      if (models.length > 0) {
-        this.#modelCache = models;
-        this.#modelCacheTime = Date.now();
-        return models;
-      }
-    } catch (error) {
-      (this.config.logger ?? SILENT_LOGGER).warn('Direct model fetch failed', {
-        runtimeId: this.config.runtimeId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    return this.config.fallbackModels;
-  }
 }

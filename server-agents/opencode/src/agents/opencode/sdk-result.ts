@@ -20,6 +20,16 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+export class OpenCodeSdkResultError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+  ) {
+    super(message);
+    this.name = 'OpenCodeSdkResultError';
+  }
+}
+
 export function openCodeResultErrorMessage(result: unknown, fallback: string): string {
   const record = asRecord(result);
   const error = asRecord(record.error);
@@ -46,6 +56,10 @@ export function isOpenCodeNotFoundResult(result: unknown): boolean {
 
 export function throwOpenCodeResultError(result: unknown, fallback: string): void {
   if (hasOpenCodeResultError(result)) {
-    throw new Error(openCodeResultErrorMessage(result, fallback));
+    const response = asRecord(asRecord(result).response);
+    throw new OpenCodeSdkResultError(
+      openCodeResultErrorMessage(result, fallback),
+      typeof response.status === 'number' ? response.status : null,
+    );
   }
 }

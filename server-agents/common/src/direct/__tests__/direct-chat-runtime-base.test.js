@@ -1,61 +1,70 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { DirectChatRuntimeBase } from '../direct-chat-runtime-base.ts';
+import {
+  createTestDirectSessionStore,
+  removeTestDirectSessionStores,
+} from './session-store-fixture.ts';
 
-const createdDirs = [];
 const runtimes = [];
-
-async function tempDir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-direct-base-runtime-'));
-  createdDirs.push(dir);
-  return dir;
-}
-
-function waitForMessages(runtime) {
-  return new Promise((resolve) => {
-    runtime.onMessages((_chatId, messages) => resolve(messages));
-  });
-}
 
 class CapturingDirectRuntime extends DirectChatRuntimeBase {
   captured = [];
+  onStreamSession;
+  responses = [];
 
-  constructor(dir) {
+  constructor(sessions = createTestDirectSessionStore(), overrides = {}) {
     super({
-      runtimeId: 'capturing-direct',
       runtimeLabel: 'Capturing Direct',
       defaultModel: 'default-model',
-      fallbackModels: [],
-      getSessionDir: () => dir,
-      getSessionFilePath: (sessionId) => path.join(dir, `${sessionId}.jsonl`),
+      sessions,
+      ...overrides,
     });
     runtimes.push(this);
   }
 
-  buildUserTurn(command) {
-    return {
-      message: { role: 'user', content: command },
-      persistedContent: command,
-    };
+  buildUserMessage(command) {
+    return { role: 'user', content: command };
   }
 
   buildAssistantMessage(content) {
     return { role: 'assistant', content };
   }
 
-  persistedToMessage(message) {
-    return message;
-  }
-
   async streamSession(session) {
+    this.onStreamSession?.(session);
     this.captured.push({
       thinkingMode: session.thinkingMode,
       messages: structuredClone(session.messages),
     });
-    return 'OK';
+    return {
+      content: await (this.responses.shift() ?? 'OK'),
+      checkpoint: null,
+    };
   }
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
+function capturingOperation(runId) {
+  const events = [];
+  const terminal = deferred();
+  return {
+    events,
+    operation: {
+      runId,
+      publish(event) {
+        events.push(event);
+        if (event.type === 'run-ended') terminal.resolve();
+      },
+    },
+    terminal: terminal.promise,
+  };
 }
 
 function startRequest(overrides = {}) {
@@ -67,6 +76,7 @@ function startRequest(overrides = {}) {
     permissionMode: 'default',
     thinkingMode: 'high',
     claudeThinkingMode: 'auto',
+    operation: { runId: 'run-start', publish() {} },
     ...overrides,
   };
 }
@@ -81,6 +91,7 @@ function resumeRequest(agentSessionId, overrides = {}) {
     permissionMode: 'default',
     thinkingMode: 'low',
     claudeThinkingMode: 'auto',
+    operation: { runId: 'run-resume', publish() {} },
     ...overrides,
   };
 }
@@ -88,17 +99,15 @@ function resumeRequest(agentSessionId, overrides = {}) {
 describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   afterEach(async () => {
     for (const runtime of runtimes.splice(0)) runtime.shutdown();
-    for (const dir of createdDirs.splice(0)) {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
+    await removeTestDirectSessionStores();
   });
 
   it('captures effort before initial provider work', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
-    const messages = waitForMessages(runtime);
+    const runtime = new CapturingDirectRuntime();
+    const observed = capturingOperation('run-high');
 
-    await runtime.startSession(startRequest({ thinkingMode: 'high' }));
-    await messages;
+    await runtime.startSession(startRequest({ thinkingMode: 'high', operation: observed.operation }));
+    await observed.terminal;
 
     expect(runtime.captured).toEqual([{
       thinkingMode: 'high',
@@ -106,19 +115,46 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     }]);
   });
 
+  it('activates a durable session before starting provider work', async () => {
+    const runtime = new CapturingDirectRuntime();
+    const observed = capturingOperation('run-activation');
+    const order = [];
+    let activated;
+    runtime.onStreamSession = () => order.push('provider');
+
+    const started = await runtime.startSession(startRequest({
+      operation: observed.operation,
+      onSessionActivated(session) {
+        activated = session;
+        order.push('activation');
+      },
+    }));
+    await observed.terminal;
+
+    expect(activated).toEqual(started);
+    expect(order).toEqual(['activation', 'provider']);
+  });
+
   it('replaces effort on every in-memory resume, including Default', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
-    const firstMessages = waitForMessages(runtime);
-    const started = await runtime.startSession(startRequest({ thinkingMode: 'high' }));
-    await firstMessages;
+    const runtime = new CapturingDirectRuntime();
+    const first = capturingOperation('run-first');
+    const started = await runtime.startSession(startRequest({
+      thinkingMode: 'high',
+      operation: first.operation,
+    }));
+    await first.terminal;
 
     await runtime.runTurn(resumeRequest(started.agentSessionId, {
       command: 'second message',
       thinkingMode: 'low',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-second', publish() {} },
     }));
     await runtime.runTurn(resumeRequest(started.agentSessionId, {
       command: 'third message',
       thinkingMode: 'none',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-third', publish() {} },
     }));
 
     expect(runtime.captured.map((entry) => entry.thinkingMode)).toEqual([
@@ -135,19 +171,26 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     ]);
   });
 
-  it('uses the current resume effort when hydrating persisted messages', async () => {
-    const dir = await tempDir();
-    const sessionId = 'persisted-session';
-    await fs.writeFile(path.join(dir, `${sessionId}.jsonl`), [
-      JSON.stringify({ role: 'user', content: 'first message' }),
-      JSON.stringify({ role: 'assistant', content: 'first response' }),
-      '',
-    ].join('\n'));
+  it('uses the current resume effort with persisted native history', async () => {
+    const sessionId = '10000000-0000-4000-8000-000000000001';
+    const sessions = createTestDirectSessionStore();
+    await sessions.create({
+      sessionId,
+      runId: 'run-first',
+      content: 'first message',
+      attachments: [],
+    });
+    await sessions.appendAssistant({
+      sessionId,
+      runId: 'run-first',
+      content: 'first response',
+    });
 
-    const runtime = new CapturingDirectRuntime(dir);
+    const runtime = new CapturingDirectRuntime(sessions);
     await runtime.runTurn(resumeRequest(sessionId, {
       command: 'resumed message',
       thinkingMode: 'max',
+      nativeSession: sessions.nativeReference(sessionId),
     }));
 
     expect(runtime.captured).toEqual([{
@@ -161,12 +204,181 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
   });
 
   it('normalizes invalid untyped effort to Default', async () => {
-    const runtime = new CapturingDirectRuntime(await tempDir());
-    const messages = waitForMessages(runtime);
+    const runtime = new CapturingDirectRuntime();
+    const observed = capturingOperation('run-invalid');
 
-    await runtime.startSession(startRequest({ thinkingMode: 'invalid' }));
-    await messages;
+    await runtime.startSession(startRequest({
+      thinkingMode: 'invalid',
+      operation: observed.operation,
+    }));
+    await observed.terminal;
 
     expect(runtime.captured[0].thinkingMode).toBe('none');
+  });
+
+  it('retains the first seeded input when bounding provider request history', async () => {
+    const sessions = createTestDirectSessionStore();
+    const runtime = new CapturingDirectRuntime(sessions, { maxMessagesPerSession: 3 });
+    const first = capturingOperation('run-first');
+    const started = await runtime.startSession(startRequest({
+      command: '<carried-context>seed</carried-context>\n\nfirst message',
+      operation: first.operation,
+    }));
+    await first.terminal;
+
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'second message',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-second', publish() {} },
+    }));
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'third message',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-third', publish() {} },
+    }));
+
+    expect(runtime.captured.at(-1)?.messages).toEqual([
+      { role: 'user', content: '<carried-context>seed</carried-context>\n\nfirst message' },
+      { role: 'assistant', content: 'OK' },
+      { role: 'user', content: 'third message' },
+    ]);
+    expect((await sessions.load(started.agentSessionId)).records).toHaveLength(6);
+  });
+
+  it('publishes no assistant row when durable assistant storage fails', async () => {
+    const sessions = createTestDirectSessionStore();
+    sessions.appendAssistant = async () => {
+      throw new Error('injected append failure');
+    };
+    const runtime = new CapturingDirectRuntime(sessions);
+    const observed = capturingOperation('run-failure');
+
+    await runtime.startSession(startRequest({ operation: observed.operation }));
+    await observed.terminal;
+
+    expect(observed.events).toEqual([{
+      type: 'run-ended',
+      runId: 'run-failure',
+      outcome: 'failed',
+      error: {
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        message: 'This conversation cannot be loaded because its Direct history is unavailable.',
+      },
+    }]);
+  });
+
+  it('retains an input when admission closes after its durable append', async () => {
+    const sessions = createTestDirectSessionStore();
+    const runtime = new CapturingDirectRuntime(sessions);
+    const first = capturingOperation('run-first');
+    const started = await runtime.startSession(startRequest({ operation: first.operation }));
+    await first.terminal;
+
+    const admission = new AbortController();
+    const appendUser = sessions.appendUser.bind(sessions);
+    let closeAdmission = true;
+    sessions.appendUser = async (input) => {
+      const record = await appendUser(input);
+      if (closeAdmission) {
+        closeAdmission = false;
+        admission.abort(new DOMException('Stopped', 'AbortError'));
+      }
+      return record;
+    };
+
+    await expect(runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'admitted then stopped',
+      nativeSession: started.nativeSession,
+      executionAdmission: {
+        signal: admission.signal,
+        async markStarted() {},
+      },
+      operation: { runId: 'run-stopped', publish() {} },
+    }))).rejects.toMatchObject({ name: 'AbortError' });
+
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'following message',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-following', publish() {} },
+    }));
+
+    expect(runtime.captured.at(-1)?.messages).toEqual([
+      { role: 'user', content: 'first message' },
+      { role: 'assistant', content: 'OK' },
+      { role: 'user', content: 'admitted then stopped' },
+      { role: 'user', content: 'following message' },
+    ]);
+  });
+
+  it('[TLV5-L05.03-DIRECT-UNIT-01] admits a successor after abort and refreshes it after late output', async () => {
+    const runtime = new CapturingDirectRuntime();
+    const firstResponse = deferred();
+    runtime.responses.push(firstResponse.promise, 'second response', 'third response');
+    const first = capturingOperation('run-first');
+    const second = capturingOperation('run-second');
+
+    const started = await runtime.startSession(startRequest({ operation: first.operation }));
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'second message',
+      nativeSession: started.nativeSession,
+      operation: second.operation,
+    }));
+    firstResponse.resolve('late first response');
+    await first.terminal;
+
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'third message',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-third', publish() {} },
+    }));
+
+    expect([
+      second.events[0].rows[0].message.content,
+      first.events[0].rows[0].message.content,
+    ]).toEqual([
+      'second response',
+      'late first response',
+    ]);
+    expect(runtime.captured.at(-1)?.messages).toEqual([
+      { role: 'user', content: 'first message' },
+      { role: 'user', content: 'second message' },
+      { role: 'assistant', content: 'second response' },
+      { role: 'assistant', content: 'late first response' },
+      { role: 'user', content: 'third message' },
+    ]);
+  });
+
+  it('publishes a delayed response through the request that started it', async () => {
+    const runtime = new CapturingDirectRuntime();
+    const firstResponse = deferred();
+    runtime.responses.push(firstResponse.promise, 'second response');
+    const first = capturingOperation('run-1');
+    const second = capturingOperation('run-2');
+
+    const started = await runtime.startSession(startRequest({
+      operation: first.operation,
+    }));
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'second message',
+      nativeSession: started.nativeSession,
+      operation: second.operation,
+    }));
+    await second.terminal;
+
+    firstResponse.resolve('late first response');
+    await first.terminal;
+
+    expect(first.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
+    expect(first.events[0].rows.map((row) => row.message.content)).toEqual([
+      'late first response',
+    ]);
+    expect(first.events[1]).toMatchObject({ type: 'run-ended', runId: 'run-1' });
+    expect(second.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
+    expect(second.events[0].rows.map((row) => row.message.content)).toEqual([
+      'second response',
+    ]);
+    expect(second.events[1]).toMatchObject({ type: 'run-ended', runId: 'run-2' });
   });
 });

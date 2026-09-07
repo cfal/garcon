@@ -9,22 +9,34 @@
 	);
 	const fileRenderer = lazyRenderer(() => import('$lib/components/files/FileSurface.svelte'));
 	const filesRenderer = lazyRenderer(() => import('$lib/components/files/FilesPanel.svelte'));
-	const gitRenderer = lazyRenderer(() => import('$lib/components/git/GitPanel.svelte'));
+	const gitWorkbenchRenderer = lazyRenderer(
+		() => import('$lib/components/git/GitWorkbenchPanel.svelte'),
+	);
+	const gitHistoryRenderer = lazyRenderer(
+		() => import('$lib/components/git/GitHistoryPanel.svelte'),
+	);
+	const gitCompareRenderer = lazyRenderer(
+		() => import('$lib/components/git/GitComparePanel.svelte'),
+	);
 	const pullRequestsRenderer = lazyRenderer(
 		() => import('$lib/components/pr/PullRequestsPanel.svelte'),
 	);
 	const commitRenderer = lazyRenderer(() => import('$lib/components/git/CommitSurface.svelte'));
+	const chatMapRenderer = lazyRenderer(
+		() => import('$lib/components/chat-map/ChatMapPanel.svelte'),
+	);
 </script>
 
 <script lang="ts">
 	import {
+		getChatSessions,
 		getFileSessions,
 		getGhCapability,
 		getSingletonSurfaces,
 		getWorkspaceContext,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import type { HostId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		setSurfaceFrameBridge,
@@ -33,18 +45,23 @@
 	import X from '@lucide/svelte/icons/x';
 	import ProjectSurfaceGate from './ProjectSurfaceGate.svelte';
 	import SurfaceErrorState from './SurfaceErrorState.svelte';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	let {
 		surface,
 		presentation,
 		visible,
 		onSendToChat,
+		onAppendToChatDraft,
+		onChooseProjectFolder,
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
-		presentation: HostId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		visible: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
+		onAppendToChatDraft: ChatDraftAppend;
+		onChooseProjectFolder?: () => void;
 		frameBridge: SurfaceFrameBridge;
 	} = $props();
 	setSurfaceFrameBridge(() => frameBridge);
@@ -53,6 +70,7 @@
 	const ghCapability = getGhCapability();
 	const singletonSurfaces = getSingletonSurfaces();
 	const files = getFileSessions();
+	const sessions = getChatSessions();
 	const projectState = $derived(workspaceContext.projectState);
 </script>
 
@@ -63,17 +81,24 @@
 					{m.workspace_loading_terminal()}
 				</div>{/if}
 		{:then TerminalSurface}
-			<TerminalSurface terminalId={surface.terminalId} host={presentation} {visible} />
+			<TerminalSurface terminalId={surface.terminalId} host={presentation} />
 		{/await}
 	{:else if surface.type === 'terminal-launcher'}
 		{#await terminalLauncherRenderer() then TerminalLauncherSurface}
-			<TerminalLauncherSurface host={presentation === 'mobile' ? 'main' : presentation} />
+			<TerminalLauncherSurface
+				host={presentation === 'mobile' ? workspace.defaultWindowId : presentation}
+			/>
 		{/await}
 	{:else if surface.type === 'file'}
 		{@const session = files.get(surface.fileSessionId)}
 		{#if session}
 			{#await fileRenderer() then FileSurface}
-				<FileSurface {session} {presentation} />
+				<FileSurface
+					{session}
+					{presentation}
+					onClose={() => void workspace.closeSurface(surface.id)}
+					closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
+				/>
 			{/await}
 		{:else if visible}
 			<div class="grid h-full place-items-center text-sm text-muted-foreground">
@@ -94,49 +119,62 @@
 		{@const controller = singletonSurfaces.files()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.tree.projectPath}
 			retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await filesRenderer() then FilesPanel}
-				<FilesPanel presentation={presentation} />
+				<FilesPanel {presentation} />
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'git'}
-		{@const controller = singletonSurfaces.git()}
-		{@const projectPath =
-			projectState.kind === 'available'
-				? projectState.project.projectPath
-				: projectState.kind === 'resolving'
-					? controller.baseProjectPath
-					: null}
-		{@const effectiveProjectKey =
-			projectState.kind === 'available'
-				? projectState.project.effectiveProjectKey
-				: projectState.kind === 'resolving'
-					? controller.effectiveProjectKey
-					: null}
+		{@const controller = singletonSurfaces.gitWorkbench()}
 		<ProjectSurfaceGate
 			{projectState}
-			retainedProjectPath={controller.baseProjectPath}
-			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+			target={workspaceContext.currentTarget}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
-			{#await gitRenderer() then GitPanel}
-				<GitPanel
-					{projectPath}
-					{effectiveProjectKey}
-					isMobile={presentation === 'mobile'}
-					{presentation}
-					isVisible={visible}
-					{onSendToChat}
-				/>
+			{#await gitWorkbenchRenderer() then GitWorkbenchPanel}
+				<GitWorkbenchPanel {controller} {presentation} {visible} {onAppendToChatDraft} />
+			{/await}
+		</ProjectSurfaceGate>
+	{:else if surface.type === 'singleton' && surface.kind === 'git-history'}
+		{@const controller = singletonSurfaces.gitHistory()}
+		<ProjectSurfaceGate
+			{projectState}
+			target={workspaceContext.currentTarget}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
+		>
+			{#await gitHistoryRenderer() then GitHistoryPanel}
+				<GitHistoryPanel {controller} {presentation} {visible} {onAppendToChatDraft} />
+			{/await}
+		</ProjectSurfaceGate>
+	{:else if surface.type === 'singleton' && surface.kind === 'git-compare'}
+		{@const controller = singletonSurfaces.gitCompare()}
+		<ProjectSurfaceGate
+			{projectState}
+			target={workspaceContext.currentTarget}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
+		>
+			{#await gitCompareRenderer() then GitComparePanel}
+				<GitComparePanel {controller} {presentation} {visible} {onAppendToChatDraft} />
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'pull-requests'}
 		{@const controller = singletonSurfaces.pullRequests()}
 		<ProjectSurfaceGate
 			{projectState}
+			target={workspaceContext.currentTarget}
 			retainedProjectPath={controller.projectPath}
 			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await pullRequestsRenderer() then PullRequestsPanel}
 				<PullRequestsPanel
@@ -152,13 +190,26 @@
 		{@const controller = singletonSurfaces.commit()}
 		<ProjectSurfaceGate
 			{projectState}
-			retainedProjectPath={controller.projectPath}
-			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+			target={workspaceContext.currentTarget}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+			onChooseFolder={onChooseProjectFolder}
 		>
 			{#await commitRenderer() then CommitSurface}
 				<CommitSurface {controller} {presentation} />
 			{/await}
 		</ProjectSurfaceGate>
+	{:else if surface.type === 'singleton' && surface.kind === 'chat-map'}
+		{@const controller = singletonSurfaces.chatMap()}
+		{#await chatMapRenderer() then ChatMapPanel}
+			<ChatMapPanel
+				{controller}
+				chats={sessions.orderedChats}
+				selectedChatId={sessions.selectedChatId}
+				{visible}
+				{presentation}
+			/>
+		{/await}
 	{/if}
 
 	{#snippet failed(error, reset)}

@@ -1,21 +1,25 @@
 import * as m from '$lib/paraglide/messages.js';
+import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
+import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatActionDialogsState } from './chat-action-dialogs-state.svelte';
 import type { ChatListEntry } from '$shared/chat-list';
 
 export interface ChatActionControllerDeps {
 	get chats(): ChatSessionRecord[];
+	get displayedChatIds(): readonly string[];
 	get selectedChatId(): string | null;
+	projectPathRevision: (chatId: string) => number;
 	onQuietRefresh: () => Promise<void> | void;
+	isArchiveMutationPending: (chatId: string) => boolean;
+	startArchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
+	startUnarchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
 	onSelectChat: (chatId: string) => void;
 	onNewChat: () => void;
 	onDeleteChat: (chatId: string) => Promise<void> | void;
 	onRenameChat: (chatId: string, newTitle: string) => Promise<void> | void;
-	onProjectPathUpdated: (
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	) => void;
+	onProjectPathUpdated: (chatId: string, patch: { projectPath: string }) => void;
 	onUpsertServerChat: (entry: ChatListEntry) => void;
 	onReloadChat?: (chatId: string) => Promise<void> | void;
 	notifyError: (message: string) => void;
@@ -25,16 +29,27 @@ export interface ChatActionControllerDeps {
 
 export class ChatActionController {
 	#sidebarController: SidebarController;
+	#projectPathRequestGeneration = new Map<string, number>();
 
 	constructor(private readonly deps: ChatActionControllerDeps) {
 		this.#sidebarController = new SidebarController({
 			get onQuietRefresh() {
 				return deps.onQuietRefresh;
 			},
+			get isArchiveMutationPending() {
+				return deps.isArchiveMutationPending;
+			},
+			get startArchivingChats() {
+				return deps.startArchivingChats;
+			},
+			get startUnarchivingChats() {
+				return deps.startUnarchivingChats;
+			},
 		});
 	}
 
 	async togglePinned(chatId: string): Promise<void> {
+		if (this.deps.isArchiveMutationPending(chatId)) return;
 		const chat = this.deps.chats.find((entry) => entry.id === chatId);
 		const wasPinned = chat?.isPinned === true;
 		await this.run('Failed to toggle pinned:', m.notifications_pin_chat_failed(), async () => {
@@ -47,23 +62,31 @@ export class ChatActionController {
 
 	async toggleArchive(chatId: string): Promise<void> {
 		const chat = this.deps.chats.find((entry) => entry.id === chatId);
-		const wasArchived = chat?.isArchived === true;
-		const isSelectedChat = this.deps.selectedChatId === chatId;
-		const isArchivingSelectedChat = !wasArchived && isSelectedChat;
-		const chatIndex = this.deps.chats.findIndex((entry) => entry.id === chatId);
-		const neighborId =
-			isArchivingSelectedChat && chatIndex >= 0
-				? (this.deps.chats[chatIndex + 1]?.id ?? this.deps.chats[chatIndex - 1]?.id ?? null)
-				: null;
+		if (!chat || this.deps.isArchiveMutationPending(chatId)) return;
+		const wasArchived = chat.isArchived;
+		const isArchivingSelectedChat = !wasArchived && this.deps.selectedChatId === chatId;
+		let replacementChatId: string | null = null;
+		if (isArchivingSelectedChat) {
+			replacementChatId = resolveArchiveReplacementChatId({
+				archivingChatId: chatId,
+				displayedChatIds: this.deps.displayedChatIds,
+				isSelectableChat: (candidateId) => !this.deps.isArchiveMutationPending(candidateId),
+			});
+		}
+
+		const mutation = wasArchived
+			? this.deps.startUnarchivingChats([chatId])
+			: this.deps.startArchivingChats([chatId]);
+		if (!mutation.chatIds.includes(chatId)) return;
+
+		if (isArchivingSelectedChat) {
+			if (replacementChatId) this.deps.onSelectChat(replacementChatId);
+			else this.deps.onNewChat();
+		}
 
 		await this.run('Failed to toggle archive:', m.notifications_archive_chat_failed(), async () => {
-			await this.#sidebarController.toggleArchive(chatId);
-			if (isArchivingSelectedChat) {
-				if (neighborId) this.deps.onSelectChat(neighborId);
-				else this.deps.onNewChat();
-				return;
-			}
-			if (wasArchived && isSelectedChat) {
+			await mutation.completion;
+			if (wasArchived && this.deps.selectedChatId === chatId) {
 				this.deps.requestSidebarRecenter();
 			}
 		});
@@ -95,6 +118,7 @@ export class ChatActionController {
 				lastActivityAt: details.lastActivityAt,
 				agentSessionId: details.agentSessionId,
 				transcriptSource: details.transcriptSource,
+				carryOverSegments: details.carryOver.segments,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -107,10 +131,22 @@ export class ChatActionController {
 	}
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<void> {
+		const expectedProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
+		if (!expectedProjectPath) throw new Error(m.sidebar_project_path_errors_update_failed());
+		const expectedRevision = this.deps.projectPathRevision(chatId);
+		const generation = (this.#projectPathRequestGeneration.get(chatId) ?? 0) + 1;
+		this.#projectPathRequestGeneration.set(chatId, generation);
 		const result = await this.#sidebarController.updateProjectPath(chatId, projectPath);
+		if (this.#projectPathRequestGeneration.get(chatId) !== generation) return;
+		const currentProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
+		if (
+			currentProjectPath !== result.projectPath &&
+			(currentProjectPath !== expectedProjectPath ||
+				this.deps.projectPathRevision(chatId) !== expectedRevision)
+		)
+			return;
 		this.deps.onProjectPathUpdated(chatId, {
 			projectPath: result.projectPath,
-			effectiveProjectKey: result.effectiveProjectKey,
 		});
 	}
 

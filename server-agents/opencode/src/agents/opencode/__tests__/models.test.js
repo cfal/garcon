@@ -15,6 +15,14 @@ function never() {
   return new Promise(() => {});
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function configuredProvidersResult() {
   return {
     data: {
@@ -46,16 +54,27 @@ async function importProvider() {
 }
 
 describe('OpenCodeRuntime model discovery', () => {
-  it('disables OpenCode autoupdate in the spawned server environment', async () => {
-    const { buildOpenCodeServerEnv } = await import('../opencode.js');
+  it('isolates the spawned server environment and disables provider-managed updates', async () => {
+    const { buildOpenCodeServerEnv } = await import('../server-instance.js');
 
     expect(buildOpenCodeServerEnv({
       KEEP_ME: 'yes',
-      OPENCODE_CONFIG_CONTENT: '{"mode":"user"}',
+      OPENCODE_CONFIG_CONTENT:
+        '{"mode":"user","plugin":["file:///tmp/user-opencode-plugin.js"]}',
+      OPENCODE_DISABLE_AUTOCOMPACT: '0',
       OPENCODE_DISABLE_AUTOUPDATE: '0',
-    })).toEqual({
+      OPENCODE_PURE: '1',
+      OPENCODE_SESSION_ID: 'ambient-session',
+    }, 'file:///tmp/garcon-opencode-plugin.js')).toEqual({
       KEEP_ME: 'yes',
-      OPENCODE_CONFIG_CONTENT: '{}',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        mode: 'user',
+        plugin: [
+          'file:///tmp/user-opencode-plugin.js',
+          'file:///tmp/garcon-opencode-plugin.js',
+        ],
+      }),
+      OPENCODE_DISABLE_AUTOCOMPACT: '0',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     });
   });
@@ -82,6 +101,161 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(createInstance).toHaveBeenCalledTimes(1);
     expect(configProviders).toHaveBeenCalledTimes(1);
     expect(providerList).not.toHaveBeenCalled();
+  });
+
+  it('carries each model image capability from server capabilities with raw fallbacks', async () => {
+    const configProviders = mock(() => Promise.resolve({
+      data: {
+        providers: [{
+          id: 'mixed',
+          name: 'Mixed',
+          models: {
+            visual: {
+              id: 'visual',
+              name: 'Visual',
+              capabilities: { input: { text: true, image: true } },
+            },
+            textual: {
+              id: 'textual',
+              name: 'Textual',
+              capabilities: { input: { text: true, image: false } },
+            },
+            declared: {
+              id: 'declared',
+              name: 'Declared',
+              modalities: { input: ['text', 'image'] },
+            },
+            attach: { id: 'attach', name: 'Attach', attachment: true },
+            unknown: { id: 'unknown', name: 'Unknown' },
+          },
+        }],
+      },
+    }));
+    const createInstance = mock(() => Promise.resolve({
+      client: {
+        config: { providers: configProviders },
+        permission: { reply: mock(() => Promise.resolve({})) },
+        provider: { list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })) },
+      },
+      server: { close: mock(() => {}) },
+    }));
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
+
+    expect(await provider.getModels()).toEqual([
+      { value: 'mixed/visual', label: 'Mixed: Visual', supportsImages: true },
+      { value: 'mixed/textual', label: 'Mixed: Textual', supportsImages: false },
+      { value: 'mixed/declared', label: 'Mixed: Declared', supportsImages: true },
+      { value: 'mixed/attach', label: 'Mixed: Attach', supportsImages: true },
+      { value: 'mixed/unknown', label: 'Mixed: Unknown' },
+    ]);
+  });
+
+  it('downgrades effort against a cold catalog by discovering once per turn', async () => {
+    const promptCalls = [];
+    const configProviders = mock(() => Promise.resolve({
+      data: {
+        providers: [{
+          id: 'mixed',
+          name: 'Mixed',
+          models: {
+            reasoned: {
+              id: 'reasoned',
+              name: 'Reasoned',
+              variants: { low: {}, high: {} },
+            },
+          },
+        }],
+      },
+    }));
+    const createInstance = mock(() => Promise.resolve({
+      client: {
+        config: { providers: configProviders },
+        permission: { reply: mock(() => Promise.resolve({})) },
+        provider: { list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })) },
+        global: { event: mock(() => Promise.resolve({
+          stream: (async function* () {
+            yield { payload: { id: 'evt_c', type: 'server.connected', properties: {} } };
+            await new Promise(() => {});
+          })(),
+        })) },
+        session: {
+          create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+          prompt: mock((body) => {
+            promptCalls.push(body);
+            return new Promise(() => {});
+          }),
+          promptAsync: mock(() => Promise.resolve({})),
+          abort: mock(() => Promise.resolve({ data: true })),
+          delete: mock(() => Promise.resolve({})),
+        },
+      },
+      server: { close: mock(() => {}) },
+    }));
+
+    const OpenCodeRuntime = await importProvider();
+    const runtime = new OpenCodeRuntime({ createInstance });
+
+    // The catalog was never warmed: resolving max against a model whose
+    // declared variants stop at high must discover once and downgrade.
+    await runtime.startSession({
+      command: 'hello',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'max',
+      model: 'mixed/reasoned',
+      operation: { runId: 'run-cold', publish: mock(() => {}) },
+    });
+
+    expect(configProviders).toHaveBeenCalledTimes(1);
+    expect(promptCalls).toHaveLength(1);
+    expect(promptCalls[0]?.variant).toBe('high');
+    await runtime.shutdown();
+  });
+
+  it('carries declared thinking variants as ladder-ordered thinking modes', async () => {
+    const configProviders = mock(() => Promise.resolve({
+      data: {
+        providers: [{
+          id: 'mixed',
+          name: 'Mixed',
+          models: {
+            reasoned: {
+              id: 'reasoned',
+              name: 'Reasoned',
+              variants: { high: {}, medium: {}, thinking: {}, xhigh: {} },
+            },
+            disabled: {
+              id: 'disabled',
+              name: 'Disabled',
+              variants: { none: {}, low: {} },
+            },
+            plain: { id: 'plain', name: 'Plain', variants: { thinking: {} } },
+            bare: { id: 'bare', name: 'Bare' },
+          },
+        }],
+      },
+    }));
+    const createInstance = mock(() => Promise.resolve({
+      client: {
+        config: { providers: configProviders },
+        permission: { reply: mock(() => Promise.resolve({})) },
+        provider: { list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })) },
+      },
+      server: { close: mock(() => {}) },
+    }));
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
+
+    expect(await provider.getModels()).toEqual([
+      { value: 'mixed/reasoned', label: 'Mixed: Reasoned', thinkingModes: ['medium', 'high', 'xhigh'] },
+      { value: 'mixed/disabled', label: 'Mixed: Disabled', thinkingModes: ['none', 'low'] },
+      { value: 'mixed/plain', label: 'Mixed: Plain' },
+      { value: 'mixed/bare', label: 'Mixed: Bare' },
+    ]);
   });
 
   it('falls back to provider.list when the SDK has no config.providers method', async () => {
@@ -251,6 +425,28 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(createInstance).toHaveBeenCalledTimes(1);
   });
 
+  it('closes an instance that resolves after startup timed out', async () => {
+    const created = deferred();
+    const close = mock(() => {});
+    const createInstance = mock(() => created.promise);
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance, startupTimeoutMs: 5 });
+
+    await expect(provider.getClient()).rejects.toThrow('OpenCode startup timed out after 5ms');
+    expect(close).not.toHaveBeenCalled();
+
+    created.resolve({
+      client: { permission: { reply: mock(() => Promise.resolve({})) } },
+      server: { close },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(provider.getClientIfInitialized()).toBeNull();
+  });
+
   it('closes the SDK v2 server during shutdown', async () => {
     const close = mock(() => {});
     const createInstance = mock(() => Promise.resolve({
@@ -265,9 +461,89 @@ describe('OpenCodeRuntime model discovery', () => {
     const provider = new OpenCodeRuntime({ createInstance });
 
     await provider.getClient();
-    provider.shutdown();
+    await provider.shutdown();
 
     expect(close).toHaveBeenCalledTimes(1);
     expect(provider.getClientIfInitialized()).toBeNull();
+  });
+
+  it('closes an incompatible SDK instance before rejecting startup', async () => {
+    const close = mock(() => {});
+    const createInstance = mock(() => Promise.resolve({
+      client: { permission: {} },
+      server: { close },
+    }));
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
+
+    await expect(provider.getClient()).rejects.toThrow('missing permission.reply');
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(provider.getClientIfInitialized()).toBeNull();
+  });
+
+  it('waits for and closes an instance that resolves during the shutdown grace window', async () => {
+    const created = deferred();
+    const close = mock(() => {});
+    let startupSignal;
+    const createInstance = mock(({ signal }) => {
+      startupSignal = signal;
+      return created.promise;
+    });
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance, shutdownStartupGraceMs: 20 });
+    const starting = provider.getClient();
+    const observedStartup = starting.then(
+      () => null,
+      (error) => error,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(createInstance).toHaveBeenCalledTimes(1);
+    const stopping = provider.shutdown();
+    expect(startupSignal.aborted).toBe(true);
+    created.resolve({
+      client: { permission: { reply: mock(() => Promise.resolve({})) } },
+      server: { close },
+    });
+    await stopping;
+    const startupError = await observedStartup;
+    expect(startupError).toBeInstanceOf(Error);
+    expect(startupError.message).toContain('OpenCode runtime shutting down');
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(provider.getClientIfInitialized()).toBeNull();
+  });
+
+  it('bounds shutdown when an instance factory ignores abort indefinitely', async () => {
+    const created = deferred();
+    const close = mock(() => {});
+    const createInstance = mock(() => created.promise);
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({
+      createInstance,
+      shutdownStartupGraceMs: 5,
+    });
+    const starting = provider.getClient();
+    const observedStartup = starting.catch((error) => error);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await provider.shutdown();
+    expect(await observedStartup).toBeInstanceOf(Error);
+    expect(close).not.toHaveBeenCalled();
+
+    created.resolve({
+      client: { permission: { reply: mock(() => Promise.resolve({})) } },
+      server: { close },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(provider.getClientIfInitialized()).toBeNull();
+    await expect(provider.getClient()).rejects.toThrow('OpenCode runtime is shutting down');
+    expect(createInstance).toHaveBeenCalledTimes(1);
   });
 });

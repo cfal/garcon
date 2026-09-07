@@ -1,3 +1,5 @@
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
 
@@ -8,24 +10,49 @@ export interface GarconProcessOptions {
   repoRoot: string;
   configDir: string;
   workspaceDir: string;
+  workspaceName?: string;
   projectDir: string;
   homeDir: string;
   startupTimeoutMs?: number;
+  environment?: Record<string, string>;
+  redactEnvironmentValues?: boolean;
+  disableAuth?: boolean;
+  port?: number;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+const SENSITIVE_ENVIRONMENT_NAME =
+  /(?:api[_-]?key|auth[_-]?token|credential|password|secret|token)/i;
 
-function isolatedEnvironment(homeDir: string): Record<string, string> {
+export function redactSensitiveEnvironmentText(
+  text: string,
+  environment: Record<string, string> = {},
+): string {
+  const values = Object.entries(environment)
+    .filter(([name, value]) => SENSITIVE_ENVIRONMENT_NAME.test(name) && value.length > 0)
+    .map(([, value]) => value)
+    .sort((left, right) => right.length - left.length);
+  return values.reduce(
+    (redacted, value) => redacted.replaceAll(value, '[REDACTED]'),
+    text,
+  );
+}
+
+function isolatedEnvironment(
+  homeDir: string,
+  overrides: Record<string, string> = {},
+): Record<string, string> {
   return {
     HOME: homeDir,
     XDG_CONFIG_HOME: `${homeDir}/.config`,
     XDG_DATA_HOME: `${homeDir}/.local/share`,
+    TMPDIR: join(homeDir, 'tmp'),
     PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
     NO_COLOR: '1',
     ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
     ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
     ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
-    ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+    ...overrides,
   };
 }
 
@@ -70,7 +97,11 @@ export class GarconProcess {
   #unexpectedExit: string | null = null;
   #exitCode: number | null = null;
 
-  private constructor(child: GarconChild, ready: Deferred<string>) {
+  private constructor(
+    child: GarconChild,
+    ready: Deferred<string>,
+    redactedEnvironment: Record<string, string>,
+  ) {
     this.#child = child;
     let readinessText = '';
     const inspectText = (text: string) => {
@@ -78,8 +109,11 @@ export class GarconProcess {
       const match = SERVER_READY_PATTERN.exec(readinessText);
       if (match) ready.resolve(match[1]);
     };
-    this.#stdoutPump = pumpLines(child.stdout, 'stdout', inspectText, (line) => this.#logs.push(line));
-    this.#stderrPump = pumpLines(child.stderr, 'stderr', inspectText, (line) => this.#logs.push(line));
+    const captureLine = (line: string) => {
+      this.#logs.push(redactSensitiveEnvironmentText(line, redactedEnvironment));
+    };
+    this.#stdoutPump = pumpLines(child.stdout, 'stdout', inspectText, captureLine);
+    this.#stderrPump = pumpLines(child.stderr, 'stderr', inspectText, captureLine);
     void child.exited.then((exitCode) => {
       this.#exitCode = exitCode;
       if (!this.#expectedExit) {
@@ -91,29 +125,37 @@ export class GarconProcess {
 
   static async start(options: GarconProcessOptions): Promise<GarconProcess> {
     const ready = new Deferred<string>();
+    const environment = isolatedEnvironment(options.homeDir, options.environment);
+    await mkdir(environment.TMPDIR, { recursive: true });
+    const workspaceArguments = options.workspaceName
+      ? ['--workspace', options.workspaceName]
+      : ['--workspace-dir', options.workspaceDir];
     const child = Bun.spawn({
       cmd: [
         process.execPath,
         'server/main.ts',
         '--port',
-        '0',
+        String(options.port ?? 0),
         '--bind-address',
         '127.0.0.1',
-        '--disable-auth',
+        ...(options.disableAuth === false ? [] : ['--disable-auth']),
         '--config-dir',
         options.configDir,
-        '--workspace-dir',
-        options.workspaceDir,
+        ...workspaceArguments,
         '--project-base-dir',
         options.projectDir,
       ],
       cwd: options.repoRoot,
-      env: isolatedEnvironment(options.homeDir),
+      env: environment,
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
     });
-    const instance = new GarconProcess(child, ready);
+    const instance = new GarconProcess(
+      child,
+      ready,
+      options.redactEnvironmentValues ? options.environment ?? {} : {},
+    );
 
     try {
       instance.#baseUrl = await withTimeout(
@@ -130,6 +172,10 @@ export class GarconProcess {
 
   get baseUrl(): string {
     return this.#baseUrl;
+  }
+
+  get pid(): number | null {
+    return this.#exitCode === null ? this.#child.pid : null;
   }
 
   get logs(): readonly string[] {
@@ -188,6 +234,10 @@ export class GarconProcess {
   describeLogs(): string {
     const logs = this.logs;
     return logs.length > 0 ? logs.join('\n') : '(no Garcon logs captured)';
+  }
+
+  capturedOutput(): string {
+    return this.logs.join('\n');
   }
 
   async #terminateAfterStartupFailure(): Promise<void> {

@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import type { SessionAgentId } from '$lib/types/app';
 
 vi.mock(
 	'$lib/components/model-selector/ComposerModelSelector.svelte',
@@ -11,10 +12,12 @@ vi.mock(
 
 const ScheduledNewChatComposer = (await import('../ScheduledNewChatComposer.svelte')).default;
 
-function makeStartup(): NewChatFormState {
+function makeStartup(modelSelectionError: string | null = null): NewChatFormState {
 	return {
 		agentId: 'claude',
 		modelValue: 'opus',
+		modelSelectionTarget: null,
+		modelSelectionError,
 		projectPath: '/workspace/project',
 		projectBasePath: '/workspace',
 		browseStartPath: '/workspace',
@@ -56,14 +59,22 @@ function makeStartup(): NewChatFormState {
 		setThinkingMode: vi.fn(),
 		setAgentSetting: vi.fn(),
 		selectAgent: vi.fn(),
-		handleModelChange: vi.fn(),
+		selectModel: vi.fn(),
 	} as unknown as NewChatFormState;
 }
 
-function renderComposer(overrides: { prompt?: string; promptError?: string | null } = {}) {
+function renderComposer(
+	overrides: {
+		prompt?: string;
+		promptError?: string | null;
+		modelSelectionError?: string | null;
+		selectableAgentIds?: readonly SessionAgentId[];
+		isMobile?: boolean;
+	} = {},
+) {
 	const onPromptChange = vi.fn();
 	const onPromptKeydown = vi.fn();
-	const startup = makeStartup();
+	const startup = makeStartup(overrides.modelSelectionError);
 	const modelCatalog = {
 		getSelectableAgents: () => [],
 	} as unknown as ModelCatalogStore;
@@ -75,10 +86,11 @@ function renderComposer(overrides: { prompt?: string; promptError?: string | nul
 		startup,
 		modelCatalog,
 		remoteSettings,
+		selectableAgentIds: overrides.selectableAgentIds ?? ['claude', 'codex'],
 		prompt: overrides.prompt ?? '',
 		promptError: overrides.promptError ?? null,
 		knownTags: ['qa', 'review-needed'],
-		isMobile: false,
+		isMobile: overrides.isMobile ?? false,
 		onPromptChange,
 		onPromptKeydown,
 	});
@@ -102,7 +114,9 @@ describe('ScheduledNewChatComposer', () => {
 		expect(composer?.className).not.toContain('pb-1.5');
 		expect(composer?.contains(prompt)).toBe(true);
 		expect(composer?.contains(controls)).toBe(true);
-		expect(controls?.contains(screen.getByRole('button', { name: 'Model selector' }))).toBe(true);
+		const modelSelector = screen.getByRole('button', { name: 'Model selector' });
+		expect(controls?.contains(modelSelector)).toBe(true);
+		expect(modelSelector.dataset.selectableAgentIds).toBe('claude,codex');
 		expect(composer?.contains(projectPath)).toBe(false);
 
 		await fireEvent.click(selectWorktree);
@@ -125,5 +139,21 @@ describe('ScheduledNewChatComposer', () => {
 
 		expect(onPromptChange).toHaveBeenCalledWith('Review the build');
 		expect(onPromptKeydown).toHaveBeenCalledOnce();
+	});
+
+	it('releases input focus before opening the directory browser on mobile', async () => {
+		const { startup } = renderComposer({ isMobile: true });
+		const projectPath = screen.getByRole('textbox', { name: 'Project Path' });
+
+		projectPath.focus();
+
+		expect(document.activeElement).not.toBe(projectPath);
+		expect(startup.handlePathFocus).toHaveBeenCalledOnce();
+	});
+
+	it('renders unavailable scheduled model feedback', () => {
+		renderComposer({ modelSelectionError: 'Model unavailable' });
+
+		expect(screen.getByText('Model unavailable')).toBeTruthy();
 	});
 });

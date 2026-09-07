@@ -116,6 +116,88 @@ describe("TerminalManager", () => {
     });
   });
 
+  it("renames running and exited sessions and broadcasts the current metadata", async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ spawnPty: () => pty });
+    const alice = principal("alice");
+    const bob = principal("bob");
+    const created = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+
+    expect(created.terminal.title).toBeNull();
+    expect(manager.rename(alice, terminalId, "Build logs")).toEqual({
+      success: true,
+      terminalId,
+      title: "Build logs",
+    });
+    expect(manager.list(alice)[0].title).toBe("Build logs");
+    expect(() => manager.rename(bob, terminalId, "Other")).toThrow(
+      TerminalManagerError,
+    );
+
+    const browser = peer("socket-1");
+    manager.attach(alice, browser, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "client-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    expect(browser.messages.at(-1)).toMatchObject({
+      type: "terminal-attached",
+      terminal: { title: "Build logs" },
+    });
+
+    pty.emitExit(0);
+    expect(manager.rename(alice, terminalId, null)).toEqual({
+      success: true,
+      terminalId,
+      title: null,
+    });
+    expect(browser.messages.at(-1)).toMatchObject({
+      type: "terminal-status",
+      terminal: { terminalId, title: null, processStatus: "exited" },
+    });
+  });
+
+  it("settles the operation chain when the error notification send fails", async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ spawnPty: () => pty });
+    const alice = principal("alice");
+    const created = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+    const failingPeer = peer("socket-1");
+    const originalSend = failingPeer.sendTerminalMessage;
+    failingPeer.sendTerminalMessage = (message) => {
+      if (message.type === "terminal-error") throw new Error("peer gone");
+      originalSend.call(failingPeer, message);
+    };
+    manager.attach(alice, failingPeer, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "client-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    pty.write = () => {
+      throw new Error("pty write failed");
+    };
+    manager.input(alice, failingPeer, terminalId, "x");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // The chain must stay usable and no unhandled rejection may escape.
+    pty.write = FakePty.prototype.write;
+    manager.input(alice, failingPeer, terminalId, "y");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(pty.writes).toEqual(["y"]);
+  });
+
   it("enforces the principal cap under concurrent creation", async () => {
     const manager = new TerminalManager({ spawnPty: () => new FakePty() });
     const alice = principal("alice");

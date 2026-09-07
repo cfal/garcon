@@ -1,80 +1,172 @@
 <script lang="ts">
 	import PromptComposer from '../PromptComposer.svelte';
+	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
+	import { onDestroy } from 'svelte';
 	import {
 		setAgentState,
 		setAppShell,
-		setConversationLifecycle,
 		setChatSessions,
 		setComposerState,
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
+		setProjectResolution,
 		setRemoteSettings,
 		setSnippets,
 		setTransientLayers,
+		setWorkspaceShortcuts,
+		setChatDrafts,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import type { ChatSessionRecord, ChatStatus } from '$lib/types/chat-session';
 	import type { SessionAgentId } from '$lib/types/app';
-	import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
+	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
+	import {
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+	} from '$shared/agents';
+	import {
+		WorkspaceShortcutDispatcher,
+		type WorkspaceShortcutDeps,
+	} from '$lib/workspace/workspace-shortcuts.js';
+	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
+	import type { ProjectTarget } from '$shared/project-resolution';
 
 	interface Props {
 		selectedChatId?: string;
 		projectPath?: string;
 		selectedAgentId?: SessionAgentId;
+		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
 		selectedStatus?: ChatStatus;
 		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
 		isVisible?: boolean;
+		isPresented?: boolean;
 		focusRequestToken?: number;
+		composerEditorOpenRequestId?: number;
 		selectableAgents?: SessionAgentId[];
 		recentAgentSettings?: RecentAgentSetting[];
+		allowDirectChats?: boolean;
+		reduceMotion?: boolean;
+		steerWithCtrlEnter?: boolean;
+		chatMaxWidth?: ChatMaxWidth;
+		snippetTrigger?: string;
+		snippetTemplate?: string;
+		snippetDefaultArguments?: string;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
+		directAdmissionPending?: boolean;
+		requiresQueuedSubmission?: boolean;
+		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 		onsubmit?: () => void;
+		onSteerPreferredSubmit?: () => void;
 		onAbort?: () => void;
 		onQuickCommit?: () => void;
+		onChooseProjectFolder?: (chatId: string) => void;
 	}
 
 	let {
 		selectedChatId = 'chat-1',
 		projectPath = '/workspace/project',
 		selectedAgentId = 'claude',
+		selectedThinkingMode = 'none',
 		selectedStatus = 'running',
 		selectedIsProcessing = false,
 		isSubmitting = false,
 		isVisible = true,
+		isPresented,
 		focusRequestToken = 0,
+		composerEditorOpenRequestId = 0,
 		selectableAgents = ['claude'],
 		recentAgentSettings = [],
+		allowDirectChats = false,
+		reduceMotion = false,
+		steerWithCtrlEnter = true,
+		chatMaxWidth = 'medium',
+		snippetTrigger = ';;',
+		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
+		snippetDefaultArguments = '',
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
+		directAdmissionPending = false,
+		requiresQueuedSubmission: requiresQueuedSubmissionOverride,
+		fetchProjectResolution,
 		onsubmit = () => {},
+		onSteerPreferredSubmit = () => {},
 		onAbort = () => {},
 		onQuickCommit = () => {},
+		onChooseProjectFolder,
 	}: Props = $props();
 
-	const composer = new ComposerState();
+	const chatDrafts = new ChatDraftStore();
+	const composer = new ComposerState(chatDrafts, {
+		get activeChatId() {
+			return selectedChatId;
+		},
+	});
+	const transcript = new ActiveTranscriptState();
+
+	export function getComposerContentRevision(): number {
+		return composer.contentRevision;
+	}
 	const agent = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const appShell = new AppShellStore();
+	let sidebarRecenterRequestCount = $state(0);
+	const unsubscribeSidebarRecenter = appShell.onSidebarRecenterRequested(() => {
+		sidebarRecenterRequestCount += 1;
+	});
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
+	let projectResolutionRequestCount = 0;
+	export function getProjectResolutionRequestCount(): number {
+		return projectResolutionRequestCount;
+	}
+	function getInitialProjectResolver() {
+		return (
+			fetchProjectResolution ??
+			(async (target: ProjectTarget) => {
+				projectResolutionRequestCount += 1;
+				return {
+					target,
+					resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+				};
+			})
+		);
+	}
+	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver());
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
-		amp: [{ value: 'amp-smart', label: 'Amp Smart', supportsImages: true }],
+		amp: [{ value: 'medium', label: 'Amp Medium', supportsImages: true }],
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: [
+			{ value: 'chat-model', label: 'Chat Model', supportsImages: true },
+		],
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: [
+			{ value: 'responses-model', label: 'Responses Model', supportsImages: true },
+		],
+		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: [
+			{ value: 'anthropic-model', label: 'Anthropic Model', supportsImages: true },
+		],
 	};
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -82,9 +174,15 @@
 		amp: 'Amp',
 	};
 	const selectedModel = $derived(modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
+	const requiresQueuedSubmission = $derived(
+		requiresQueuedSubmissionOverride ?? selectedIsProcessing,
+	);
 	const remoteSettingsSnapshot = $derived<RemoteSettingsSnapshot>({
 		version: 1,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: {
@@ -116,7 +214,7 @@
 	});
 
 	function labelForAgent(agentId: string): string {
-		return agentLabels[agentId] ?? agentId;
+		return agentLabelFor(agentId, agentLabels[agentId] ?? agentId);
 	}
 
 	function modelOptionsFor(agentId: string): ModelOption[] {
@@ -129,15 +227,14 @@
 
 	const selectedChat = $derived<ChatSessionRecord>({
 		id: selectedChatId,
+		parentChat: null,
 		projectPath,
-		effectiveProjectKey: projectPath,
-		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: selectedChatId,
 		agentId: selectedAgentId,
 		model: selectedModel,
 		permissionMode: 'default',
-		thinkingMode: 'none',
+		thinkingMode: selectedThinkingMode,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		createdAt: '2026-01-01T00:00:00.000Z',
 		lastActivityAt: '2026-01-01T00:00:00.000Z',
@@ -145,8 +242,11 @@
 		isPinned: false,
 		isArchived: false,
 		isProcessing: selectedIsProcessing,
+		processingPhase: selectedIsProcessing ? 'running' : null,
 		isUnread: false,
+		canReloadFromNativeHistory: false,
 		status: selectedStatus,
+		agentOwnershipEpoch: selectedStatus === 'draft' ? null : 'epoch-1',
 		tags: [],
 	});
 
@@ -156,6 +256,7 @@
 
 	$effect(() => {
 		agent.setAgentId(selectedAgentId);
+		agent.setThinkingMode(selectedThinkingMode);
 		agent.setModelSelection({
 			model: selectedModel,
 			apiProviderId: null,
@@ -170,12 +271,31 @@
 	});
 
 	setComposerState(composer);
+	setChatDrafts(chatDrafts);
 	setAgentState(agent);
-	setConversationLifecycle(lifecycle);
 	setAppShell(appShell);
 	setLocalSettings({
-		sendByShiftEnter: false,
-		showQuickCommitTray: true,
+		get sendByShiftEnter() {
+			return false;
+		},
+		get steerWithCtrlEnter() {
+			return steerWithCtrlEnter;
+		},
+		get reduceMotion() {
+			return reduceMotion;
+		},
+		get snippetTrigger() {
+			return snippetTrigger;
+		},
+		get chatMaxWidth() {
+			return chatMaxWidth;
+		},
+		get showQuickCommitTray() {
+			return true;
+		},
+		get allowDirectChats() {
+			return allowDirectChats;
+		},
 	} as never);
 	setChatSessions({
 		get selectedChatId() {
@@ -199,6 +319,8 @@
 			supportsFork: agentId !== 'amp',
 			supportsForkAtMessage: agentId !== 'amp',
 			supportsForkWhileRunning: agentId !== 'amp',
+			supportsSteering: agentId === 'codex',
+			supportsGoals: agentId === 'codex',
 			supportsUpdateProjectPath: true,
 			supportsImages: true,
 			acceptsApiProviderEndpoints: true,
@@ -216,7 +338,8 @@
 			'bypassPermissions',
 			'plan',
 		],
-		getThinkingModes: () => ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+		getThinkingModes: (agentId: string) =>
+			agentId === 'amp' ? [] : ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 		getAgentSettingsDescriptors: () => [],
 		getDefaultAgentSettings: (agentId: string) => ({
 			ownerId: agentId,
@@ -228,6 +351,9 @@
 			modelForSelection(agentId, model)?.supportsImages ?? true,
 		supportsFork: (agentId: string) => agentId !== 'amp',
 		supportsForkWhileRunning: () => true,
+		supportsSteering: (agentId: string) => agentId === 'codex',
+		supportsGoals: (agentId: string) => agentId === 'codex',
+		supportsUpdateProjectPath: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,
 			apiProviderId: null,
@@ -254,6 +380,7 @@
 		applyOptimisticSnapshot: () => () => {},
 	} as never);
 	setNotifications(notifications);
+	setProjectResolution(projectResolution);
 	setSnippets(
 		createSnippetsStore({
 			get: async () => {
@@ -264,7 +391,8 @@
 						{
 							id: 'snippet-review',
 							shortName: 'review',
-							template: 'Review {{arguments}} in {{project_path}}',
+							template: snippetTemplate,
+							defaultArguments: snippetDefaultArguments,
 							createdAt: '2026-01-01T00:00:00.000Z',
 							updatedAt: '2026-01-01T00:00:00.000Z',
 						},
@@ -273,22 +401,89 @@
 			},
 		}),
 	);
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
+	setCanonicalWorkspaceLayout();
+	onDestroy(() => {
+		unsubscribeSidebarRecenter();
+		chatDrafts.destroy();
+		projectResolution.destroy();
+	});
+	const shortcutWorkspace = {
+		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
+		isSurfacePresented: () => true,
+		focusPreviousTabInFocusedWindow: () => false,
+		focusNextTabInFocusedWindow: () => false,
+		cycleWindowFocus: () => undefined,
+		layout: {
+			surface: () => ({
+				id: CANONICAL_CHAT_SURFACE_ID,
+				type: 'chat' as const,
+				chatId: 'chat-1',
+			}),
+		},
+	} satisfies WorkspaceShortcutDeps['workspace'];
+	setWorkspaceShortcuts(
+		new WorkspaceShortcutDispatcher({
+			workspace: shortcutWorkspace,
+			transients: transientLayers,
+			appShell,
+			navigation: {
+				requestNavigateChatAbove: () => undefined,
+				requestNavigateChatBelow: () => undefined,
+			},
+			files: { save: async () => true },
+			localSettings: { globalShortcuts: {} },
+		}),
+	);
 </script>
 
-<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
-<PromptComposer
-	{onsubmit}
-	{isVisible}
+<KeyboardShortcuts />
+<ConversationPanelStatusDock
+	{chatMaxWidth}
+	isProcessing={selectedIsProcessing}
+	status={lifecycle.loadingStatus}
+	agentId={selectedAgentId}
+	spinnerSelectionKey={selectedChatId}
+	quickCommitEnabled={true}
 	{quickCommitTrayVisible}
-	{quickCommitRefreshing}
 	{quickCommitSummary}
+	{quickCommitRefreshing}
+	quickCommitError={null}
+	quickCommitBranchSelector={null}
+	isMobile={false}
+	{reduceMotion}
 	{onAbort}
 	{onQuickCommit}
 />
+<PromptComposer
+	{onsubmit}
+	{onSteerPreferredSubmit}
+	{isVisible}
+	{isPresented}
+	{composerEditorOpenRequestId}
+	{directAdmissionPending}
+	{requiresQueuedSubmission}
+	{onChooseProjectFolder}
+	resendCandidates={transcript.resendCandidates}
+	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
+/>
+
+<button
+	type="button"
+	data-testid="append-draft"
+	onclick={() => composer.appendDraftBlock(selectedChatId, 'Appended review block')}
+	>Append draft</button
+>
+<button
+	type="button"
+	data-testid="clear-draft"
+	onclick={() => composer.clearAfterSubmit(selectedChatId)}>Clear draft</button
+>
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
+<div data-testid="composer-attachment-count">{composer.images.length}</div>
+<div data-testid="sidebar-recenter-request-count">{sidebarRecenterRequestCount}</div>
 {#each notifications.items as notification (notification.id)}
 	<div data-testid="notification">{notification.message}</div>
 {/each}

@@ -1,5 +1,6 @@
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import type { SettingsStore } from '../../settings/store.js';
+import type { FeatureSettings } from '../../settings/types.js';
 import type { TranscriptSearchController } from './controller.js';
 
 const SETTINGS_LOCK_KEY = 'transcript-search-setting';
@@ -24,11 +25,20 @@ export class TranscriptSearchSettingsCoordinator {
     this.#controller = controller;
   }
 
-  async setEnabled(enabled: boolean): Promise<void> {
+  async setEnabled(
+    enabled: boolean,
+    additionalPatch: Partial<FeatureSettings> = {},
+  ): Promise<void> {
     await this.#lock.runExclusive(SETTINGS_LOCK_KEY, async () => {
       const current = this.#settings.getFeatureSettings().transcriptSearch.enabled;
+      const featurePatch = {
+        ...additionalPatch,
+        transcriptSearch: { enabled },
+      };
+      const hasAdditionalPatch = Object.keys(additionalPatch).length > 0;
       if (current === enabled) {
         if (!enabled) {
+          if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
           await this.#disableAndDelete();
         } else {
           try {
@@ -39,13 +49,14 @@ export class TranscriptSearchSettingsCoordinator {
               error instanceof Error ? error.message : String(error),
             );
           }
+          if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
         }
         return;
       }
       if (enabled) {
         try {
           await this.#controller.start();
-          await this.#settings.setTranscriptSearchEnabled(true);
+          await this.#settings.setFeatureSettings(featurePatch);
         } catch (error) {
           await this.#controller.disableAndDelete().catch(() => undefined);
           throw new TranscriptSearchSettingsError(
@@ -56,7 +67,7 @@ export class TranscriptSearchSettingsCoordinator {
         return;
       }
 
-      await this.#settings.setTranscriptSearchEnabled(false);
+      await this.#settings.setFeatureSettings(featurePatch);
       await this.#disableAndDelete();
     });
   }

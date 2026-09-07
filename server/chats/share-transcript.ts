@@ -1,5 +1,6 @@
 import {
   AssistantMessage,
+  CliRowMessage,
   ErrorMessage,
   PermissionCancelledMessage,
   PermissionRequestMessage,
@@ -7,13 +8,19 @@ import {
   ReadToolUseMessage,
   ThinkingMessage,
   ToolResultMessage,
+  TranscriptNoticeMessage,
   UserMessage,
   parseChatMessage,
   type ChatMessage,
   type TodoItem,
   type ToolUseChatMessage,
 } from '../../common/chat-types.ts';
+import type { CliPresentationStyle } from '../../common/cli-presentation.ts';
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
+import {
+  isPreambleApplicationNoticeDetail,
+  isPreambleSelectionChangedNoticeDetail,
+} from '../../common/transcript-notice-details.ts';
 
 interface TranscriptEntry {
   role: string;
@@ -185,10 +192,18 @@ function normalizeImages(images: UserMessage['images']): string {
   return `\n\nAttached images:\n${lines.join('\n')}`;
 }
 
+function cliPresentationName(style: CliPresentationStyle): string {
+  return `${style.charAt(0).toUpperCase()}${style.slice(1)}`;
+}
+
 function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
   if (message instanceof UserMessage) {
+    const presentation = message.presentation;
+    const role = presentation
+      ? `User (CLI${presentation.style ? ` ${cliPresentationName(presentation.style)}` : ''})${presentation.title ? ` — ${presentation.title}` : ''}`
+      : 'User';
     return {
-      role: 'User',
+      role,
       timestamp: message.timestamp,
       content: `${message.content}${normalizeImages(message.images)}`.trim(),
     };
@@ -206,8 +221,33 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
       content: stringifyStructured(message.content),
     };
   }
+  if (message instanceof CliRowMessage) {
+    return {
+      role: `CLI ${cliPresentationName(message.presentation.style)}${message.title === undefined ? '' : ` — ${message.title}`}`,
+      timestamp: message.timestamp,
+      content: message.content || '',
+    };
+  }
   if (message instanceof ErrorMessage) {
-    return { role: 'Error', timestamp: message.timestamp, content: message.content || '' };
+    return {
+      role: 'Error',
+      timestamp: message.timestamp,
+      content: message.content || '',
+    };
+  }
+  if (message instanceof TranscriptNoticeMessage) {
+    const content = isPreambleApplicationNoticeDetail(message.detail)
+      ? `Preambles applied: ${message.detail.preambles.map((preamble) => preamble.title).join('; ')}`
+      : isPreambleSelectionChangedNoticeDetail(message.detail)
+        ? (message.detail.preambles.length === 0
+          ? 'Preambles updated: None enabled'
+          : `Preambles updated: ${message.detail.preambles.map((preamble) => preamble.title).join('; ')}`)
+        : message.content || '';
+    return {
+      role: `Notice${message.title === undefined ? '' : ` — ${message.title}`}`,
+      timestamp: message.timestamp,
+      content,
+    };
   }
   if (message instanceof PermissionRequestMessage) {
     const requested = formatToolUseMessage(message.requestedTool);

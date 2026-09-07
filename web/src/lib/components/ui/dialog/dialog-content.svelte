@@ -40,12 +40,18 @@
 			id: layerId,
 			kind: transientKind,
 			modality: transientModality,
+			isOpen: () => layerControl.isOpen(),
 			element: () => ref,
 			onEscape: () => {
 				layerControl.close();
 				return true;
 			},
-			restoreFocus: () => layerControl.focusReturnTarget()?.focus(),
+			restoreFocus: () => {
+				const active = document.activeElement;
+				if (!active || active === document.body) {
+					layerControl.focusReturnTarget()?.focus();
+				}
+			},
 		});
 	});
 </script>

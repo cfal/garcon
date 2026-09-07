@@ -10,17 +10,37 @@
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		message: CompactionMessage;
 		projectBasePath?: string;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
+		resolveChatReference?: ResolveChatReference;
+		acquireTransientActivity?: (close: () => void) => () => void;
+		open?: boolean;
+		onOpenChange?: (open: boolean) => void;
 	}
 
-	let { message, projectBasePath, onLinkNavigate }: Props = $props();
+	let {
+		message,
+		projectBasePath,
+		onLinkNavigate,
+		resolveChatReference,
+		acquireTransientActivity,
+		open: controlledOpen,
+		onOpenChange,
+	}: Props = $props();
 
-	let open = $state(false);
+	let localOpen = $state(false);
+	let open = $derived(controlledOpen ?? localOpen);
+
+	function toggleOpen(): void {
+		const next = !open;
+		if (onOpenChange) onOpenChange(next);
+		else localOpen = next;
+	}
 
 	const triggerLabel = $derived(
 		message.trigger === 'auto'
@@ -54,9 +74,7 @@
 			<button
 				type="button"
 				class="mt-1 flex items-center gap-1 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
-				onclick={() => {
-					open = !open;
-				}}
+				onclick={toggleOpen}
 				aria-expanded={open}
 			>
 				<ChevronRight class="h-3 w-3 transition-transform {open ? 'rotate-90' : ''}" />
@@ -74,6 +92,9 @@
 						variant="thinking"
 						fileLinkBasePath={projectBasePath}
 						{onLinkNavigate}
+						{resolveChatReference}
+						chatReferencePolicy="explicit"
+						{acquireTransientActivity}
 					/>
 				</div>
 			{/if}

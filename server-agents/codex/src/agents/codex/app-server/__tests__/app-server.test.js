@@ -3,25 +3,82 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
-import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
-import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
+import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
+import {
+  CodexAppServerClient,
+  CodexAppServerRpcError,
+} from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
+import { cleanupOwnedGoalAttachments, materializeGoalDraft } from '../goal-files.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
+import { isRetainedSourceInUse } from '../runtime-support.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
 import { ChatExecutionCoordinator } from '../../../../../../../server/chat-execution/chat-execution-coordinator.ts';
-import { PendingUserInputService } from '../../../../../../../server/chats/pending-user-input-service.ts';
+import { InMemoryChatExecutionControlRepository } from '../../../../../../../server/chat-execution/chat-execution-control-repository.ts';
 import {
   buildThreadForkParams,
   buildThreadResumeParams,
+  buildThreadSettingsUpdateParams,
   buildThreadStartParams,
   buildTurnStartParams,
+  codexThreadSettingsTarget,
   mapThinkingModeToCodexEffort,
 } from '../request-builders.ts';
 
-function makeRequest(overrides = {}) {
+function createRuntime(options) {
+  return new CodexAppServerRuntime(options);
+}
+
+function collectOperation(chatId = 'chat-1', runId = 'run-default') {
+  const events = [];
+  const waiters = new Set();
   return {
+    events,
+    operation: Object.freeze({
+      chatId,
+      runId,
+      publish(event) {
+        events.push(event);
+        for (const waiter of waiters) {
+          if (!waiter.predicate(event)) continue;
+          waiters.delete(waiter);
+          waiter.resolve(event);
+        }
+      },
+    }),
+    waitForEvent(predicate) {
+      const existing = events.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve) => waiters.add({ predicate, resolve }));
+    },
+  };
+}
+
+function publishedMessages(events) {
+  return events.flatMap((event) => (
+    event.type === 'rows' ? event.rows.map((row) => row.message) : []
+  ));
+}
+
+function permissionEvents(events) {
+  return events.filter((event) => event.type === 'permission');
+}
+
+function terminalEvents(events) {
+  return events.filter((event) => event.type === 'run-ended');
+}
+
+function failureMessages(events) {
+  return terminalEvents(events)
+    .filter((event) => event.outcome === 'failed')
+    .map((event) => event.error?.message);
+}
+
+function makeRequest(overrides = {}) {
+  const request = {
     chatId: 'chat-1',
     command: 'hello',
     projectPath: '/repo',
@@ -29,6 +86,11 @@ function makeRequest(overrides = {}) {
     permissionMode: 'default',
     thinkingMode: 'medium',
     ...overrides,
+  };
+  if (request.operation) return request;
+  return {
+    ...request,
+    operation: collectOperation(request.chatId).operation,
   };
 }
 
@@ -65,6 +127,42 @@ function makeTurn(overrides = {}) {
     startedAt: 1_700_000_000_000,
     completedAt: 1_700_000_001_000,
     durationMs: 1000,
+    ...overrides,
+  };
+}
+
+async function waitForMissingPath(targetPath) {
+  const deadline = Date.now() + 1_000;
+  for (;;) {
+    try {
+      await fs.access(targetPath);
+    } catch {
+      return;
+    }
+    if (Date.now() >= deadline) throw new Error(`Path was not removed: ${targetPath}`);
+    await Bun.sleep(5);
+  }
+}
+
+async function waitForCondition(condition) {
+  const deadline = Date.now() + 1_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error('Condition was not met before the deadline');
+    await Bun.sleep(5);
+  }
+}
+
+function usageSession(overrides = {}) {
+  return {
+    threadId: 'thread-1',
+    status: 'completed',
+    interruptAcknowledgement: null,
+    pendingThreadSettings: null,
+    turnStartWaiters: new Set(),
+    activeDeliveryReservations: 0,
+    managesGoalLifecycle: false,
+    activeTurnId: null,
+    goal: null,
     ...overrides,
   };
 }
@@ -130,6 +228,36 @@ async function writeJsonl(filePath, entries) {
   await fs.writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
 }
 
+function commandHistoryEntries(callId, command, output) {
+  return [
+    {
+      type: 'session_meta',
+      timestamp: '2026-07-28T00:00:00.000Z',
+      payload: { id: 'thread-1', history_mode: 'legacy' },
+    },
+    {
+      type: 'event_msg',
+      timestamp: '2026-07-28T00:00:01.000Z',
+      payload: { type: 'user_message', message: 'Run the command' },
+    },
+    {
+      type: 'response_item',
+      timestamp: '2026-07-28T00:00:02.000Z',
+      payload: {
+        type: 'function_call',
+        name: 'exec_command',
+        arguments: JSON.stringify({ cmd: command, workdir: '/repo' }),
+        call_id: callId,
+      },
+    },
+    {
+      type: 'response_item',
+      timestamp: '2026-07-28T00:00:03.000Z',
+      payload: { type: 'function_call_output', call_id: callId, output },
+    },
+  ];
+}
+
 class FakeClient extends EventEmitter {
   constructor(script = {}) {
     super();
@@ -137,6 +265,7 @@ class FakeClient extends EventEmitter {
     this.startThread = mock(script.startThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
     this.resumeThread = mock(script.resumeThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
     this.forkThread = mock(script.forkThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
+    this.updateThreadSettings = mock(script.updateThreadSettings ?? (async () => ({})));
     this.setThreadGoal = mock(script.setThreadGoal ?? (async (threadId, params) => ({
       goal: makeGoal(threadId, params.objective ?? 'Ship the feature', params.status ?? 'active'),
     })));
@@ -145,6 +274,8 @@ class FakeClient extends EventEmitter {
     this.clearThreadGoal = mock(script.clearThreadGoal ?? (async () => ({ cleared: true })));
     this.injectThreadItems = mock(script.injectThreadItems ?? (async () => ({})));
     this.listThreads = mock(script.listThreads ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
+    this.listThreadTurns = mock(script.listThreadTurns ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
+    this.listThreadItems = mock(script.listThreadItems ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
     this.loadedThreads = mock(script.loadedThreads ?? (async () => ({ data: [] })));
     this.unsubscribeThread = mock(script.unsubscribeThread ?? (async () => ({ status: 'notSubscribed' })));
     this.startTurn = mock(script.startTurn ?? (async () => ({ turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } })));
@@ -154,11 +285,11 @@ class FakeClient extends EventEmitter {
     this.connect = mock(script.connect ?? (async () => ({ userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
     this.respond = mock();
     this.reject = mock();
-    this.shutdown = mock();
+    this.shutdown = mock(script.shutdown ?? (() => undefined));
   }
 }
 
-function createRpcClientFixture(responder) {
+function createRpcClientFixture(responder, options = {}) {
   const encoder = new TextEncoder();
   let controller;
   let resolveExit;
@@ -171,6 +302,23 @@ function createRpcClientFixture(responder) {
   const exited = new Promise((resolve) => {
     resolveExit = resolve;
   });
+  const finishExit = () => {
+    try {
+      controller.close();
+    } catch {
+      // The stream may already be closed by the test.
+    }
+    resolveExit(0);
+  };
+  const sendResult = (id, result) => {
+    controller.enqueue(encoder.encode(`${JSON.stringify({ id, result })}\n`));
+  };
+  const sendServerRequest = (id, method, params) => {
+    controller.enqueue(encoder.encode(`${JSON.stringify({ id, method, params })}\n`));
+  };
+  const sendNotification = (method, params) => {
+    controller.enqueue(encoder.encode(`${JSON.stringify({ method, params })}\n`));
+  };
   const proc = {
     stdin: {
       write(data) {
@@ -180,31 +328,29 @@ function createRpcClientFixture(responder) {
         if (typeof message.id !== 'number') return;
 
         const response = responder(message);
+        if (response === undefined && options.allowMissingResponse) return;
         if (response?.error) {
           controller.enqueue(encoder.encode(`${JSON.stringify({ id: message.id, error: response.error })}\n`));
           return;
         }
         controller.enqueue(encoder.encode(`${JSON.stringify({ id: message.id, result: response })}\n`));
       },
+      end: mock(() => {
+        if (options.exitOnEnd !== false) finishExit();
+      }),
     },
     stdout,
     stderr: null,
     exited,
-    kill: mock(() => {
-      try {
-        controller.close();
-      } catch {
-        // The stream may already be closed by the test.
-      }
-      resolveExit(0);
-    }),
+    kill: mock(finishExit),
   };
   const spawn = mock(() => proc);
   const client = new CodexAppServerClient({
     spawn,
     resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
+    shutdownGraceMs: options.shutdownGraceMs,
   });
-  return { client, writes, spawn, proc };
+  return { client, writes, spawn, proc, finishExit, sendResult, sendServerRequest, sendNotification };
 }
 
 const initializeResponse = {
@@ -215,6 +361,321 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('closes stdin and waits for a clean app-server exit before the fallback kill', async () => {
+    const { client, proc, finishExit } = createRpcClientFixture(
+      () => initializeResponse,
+      { exitOnEnd: false, shutdownGraceMs: 100 },
+    );
+    await client.connect();
+
+    const shutdown = client.shutdown();
+    expect(proc.stdin.end).toHaveBeenCalledTimes(1);
+    expect(proc.kill).not.toHaveBeenCalled();
+
+    finishExit();
+    await shutdown;
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('kills the app-server when graceful shutdown exceeds its bound', async () => {
+    const { client, proc } = createRpcClientFixture(
+      () => initializeResponse,
+      { exitOnEnd: false, shutdownGraceMs: 1 },
+    );
+    await client.connect();
+
+    await client.shutdown();
+
+    expect(proc.stdin.end).toHaveBeenCalledTimes(1);
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps reading messages after a notification handler throws', async () => {
+    const { client, sendNotification } = createRpcClientFixture(() => initializeResponse);
+    const warnings = [];
+    const delivered = [];
+    client.on('warning', (message) => warnings.push(message));
+    client.on('notification', (notification) => {
+      delivered.push(notification.method);
+      if (notification.method === 'first') throw new Error('handler exploded');
+    });
+    await client.connect();
+
+    sendNotification('first', { threadId: 'thread-1' });
+    sendNotification('second', { threadId: 'thread-1' });
+    await waitForCondition(() => delivered.length === 2);
+
+    expect(delivered).toEqual(['first', 'second']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('handler failed');
+    await client.shutdown();
+  });
+
+  it('requests full paginated turns with the typed app-server contract', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/turns/list') {
+        return {
+          data: [makeTurn({ id: 'turn-history', items: [{
+            type: 'agentMessage', id: 'message-1', text: 'history', phase: null, memoryCitation: null,
+          }] })],
+          nextCursor: null,
+          backwardsCursor: null,
+        };
+      }
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await expect(client.listThreadTurns({
+      threadId: 'thread-1',
+      cursor: null,
+      limit: 100,
+      sortDirection: 'asc',
+      itemsView: 'full',
+    })).resolves.toMatchObject({ data: [{ id: 'turn-history', itemsView: 'full' }] });
+    await client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/turns/list',
+      params: {
+        threadId: 'thread-1',
+        cursor: null,
+        limit: 100,
+        sortDirection: 'asc',
+        itemsView: 'full',
+      },
+    }));
+  });
+
+  it('requests and validates paginated thread items', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/items/list') {
+        return {
+          data: [{
+            turnId: 'turn-history',
+            item: {
+              type: 'functionCallOutput',
+              id: 'result-1',
+              name: 'lookup',
+              namespace: 'tools',
+              output: [{ type: 'input_text', text: 'history result' }],
+            },
+          }],
+          nextCursor: 'next-item-page',
+          backwardsCursor: null,
+        };
+      }
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await expect(client.listThreadItems({
+      threadId: 'thread-1',
+      cursor: null,
+      limit: 100,
+      sortDirection: 'asc',
+    })).resolves.toEqual({
+      data: [{
+        turnId: 'turn-history',
+        item: {
+          type: 'functionCallOutput',
+          id: 'result-1',
+          name: 'lookup',
+          namespace: 'tools',
+          output: [{ type: 'input_text', text: 'history result' }],
+        },
+      }],
+      nextCursor: 'next-item-page',
+      backwardsCursor: null,
+    });
+    await client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/items/list',
+      params: {
+        threadId: 'thread-1',
+        cursor: null,
+        limit: 100,
+        sortDirection: 'asc',
+      },
+    }));
+  });
+
+  it('sends a combined thread settings update', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/settings/update') return {};
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await client.connect();
+    await expect(client.updateThreadSettings({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    })).resolves.toEqual({});
+    await client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/settings/update',
+      params: {
+        threadId: 'thread-1',
+        model: 'gpt-5.4-mini',
+        effort: 'high',
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: [],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+      },
+    }));
+  });
+
+  it('accepts 0.153 collaboration and error shapes in paginated turns', async () => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return {
+        data: [makeTurn({
+          error: {
+            message: 'Blocked by policy',
+            codexErrorInfo: 'misalignmentPolicyViolation',
+            additionalDetails: null,
+            misalignment: {
+              errorType: 'policy_mismatch',
+              detailedExplanation: 'The request conflicts with policy.',
+              steer: { message: 'Continue without the restricted action.' },
+            },
+          },
+          items: [
+            {
+              type: 'collabAgentToolCall',
+              id: 'collab-1',
+              tool: 'followupTask',
+              status: 'interrupted',
+              senderThreadId: 'thread-1',
+              receiverThreadIds: ['thread-2'],
+              prompt: 'Continue review',
+              model: null,
+              reasoningEffort: null,
+              agentsStates: {},
+            },
+            {
+              type: 'subAgentActivity',
+              id: 'activity-1',
+              kind: 'completed',
+              agentThreadId: 'thread-2',
+              agentPath: '/root/reviewer',
+            },
+          ],
+        })],
+        nextCursor: null,
+        backwardsCursor: null,
+      };
+    });
+
+    await expect(client.listThreadTurns({
+      threadId: 'thread-1',
+      sortDirection: 'asc',
+      itemsView: 'full',
+    })).resolves.toMatchObject({
+      data: [{
+        error: { codexErrorInfo: 'misalignmentPolicyViolation' },
+        items: [
+          { tool: 'followupTask', status: 'interrupted' },
+          { kind: 'completed' },
+        ],
+      }],
+    });
+    await client.shutdown();
+  });
+
+  it('preserves string JSON-RPC ids on server requests and responses', async () => {
+    const fixture = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+    const request = new Promise((resolve) => fixture.client.once('serverRequest', resolve));
+    await fixture.client.connect();
+
+    fixture.sendServerRequest('approval-request-1', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      startedAtMs: 1_700_000_000_000,
+    });
+
+    await expect(request).resolves.toMatchObject({ id: 'approval-request-1' });
+    fixture.client.respond('approval-request-1', { decision: 'accept' });
+    expect(fixture.writes).toContainEqual({
+      id: 'approval-request-1',
+      result: { decision: 'accept' },
+    });
+    await fixture.client.shutdown();
+  });
+
+    it('rejects unknown paginated public item discriminators', async () => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return {
+        data: [makeTurn({ items: [{ type: 'futureItem', id: 'item-1' }] })],
+        nextCursor: null,
+        backwardsCursor: null,
+      };
+    });
+
+    await expect(client.listThreadTurns({
+      threadId: 'thread-1',
+      sortDirection: 'asc',
+      itemsView: 'full',
+    })).rejects.toThrow('Unsupported Codex thread item type: futureItem');
+      await client.shutdown();
+    });
+
+    it('accepts canonical sleep items and validates their duration', async () => {
+      const valid = createRpcClientFixture((message) => {
+        if (message.method === 'initialize') return initializeResponse;
+        return {
+          data: [makeTurn({ items: [{ type: 'sleep', id: 'sleep-1', durationMs: 250 }] })],
+          nextCursor: null,
+          backwardsCursor: null,
+        };
+      });
+      await expect(valid.client.listThreadTurns({
+        threadId: 'thread-1',
+        sortDirection: 'asc',
+        itemsView: 'full',
+      })).resolves.toMatchObject({ data: [{ items: [{ type: 'sleep', durationMs: 250 }] }] });
+      await valid.client.shutdown();
+
+      const invalid = createRpcClientFixture((message) => {
+        if (message.method === 'initialize') return initializeResponse;
+        return {
+          data: [makeTurn({ items: [{ type: 'sleep', id: 'sleep-1', durationMs: -1 }] })],
+          nextCursor: null,
+          backwardsCursor: null,
+        };
+      });
+      await expect(invalid.client.listThreadTurns({
+        threadId: 'thread-1',
+        sortDirection: 'asc',
+        itemsView: 'full',
+      })).rejects.toThrow('durationMs');
+      await invalid.client.shutdown();
+    });
+
   it('sends loaded-list and unsubscribe requests with metrics', async () => {
     const { client, writes, spawn } = createRpcClientFixture((message) => {
       if (message.method === 'initialize') return initializeResponse;
@@ -227,7 +688,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
 
     await expect(client.loadedThreads()).resolves.toEqual({ data: ['thread-1'] });
     await expect(client.unsubscribeThread('thread-1')).resolves.toEqual({ status: 'notSubscribed' });
-    client.shutdown();
+    await client.shutdown();
 
     expect(spawn).toHaveBeenCalledWith('/tmp/codex', ['app-server', '--listen', 'stdio://'], expect.any(Object));
     expect(writes).toContainEqual(expect.objectContaining({ method: 'thread/loaded/list', params: {} }));
@@ -279,7 +740,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       clientUserMessageId: 'message-1',
       input: [{ type: 'text', text: 'Steer now' }],
     })).resolves.toEqual({ turnId: 'turn-1' });
-    client.shutdown();
+    await client.shutdown();
 
     expect(writes).toContainEqual(expect.objectContaining({
       method: 'thread/goal/set',
@@ -322,6 +783,133 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
     }));
   });
 
+  it('prepares strict steering immediately before the native write', async () => {
+    const events = [];
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      events.push('written');
+      return { turnId: message.params.expectedTurnId };
+    });
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      clientUserMessageId: 'message-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => { events.push('prepared'); },
+      acknowledgementTimeoutMs: 100,
+    })).resolves.toEqual({ turnId: 'turn-1' });
+
+    expect(events).toEqual(['prepared', 'written']);
+    expect(writes.at(-1)).toMatchObject({
+      method: 'turn/steer',
+      params: {
+        expectedTurnId: 'turn-1',
+        clientUserMessageId: 'message-1',
+      },
+    });
+    await client.shutdown();
+  });
+
+  it('classifies strict steering serialization failure as definitely not sent', async () => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+    await client.connect();
+    const circular = {};
+    circular.self = circular;
+    const prepareDelivery = mock(async () => undefined);
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [circular],
+    }, { prepareDelivery })).rejects.toMatchObject({
+      outcome: 'not-sent',
+      name: 'CodexAppServerDeliveryError',
+    });
+    expect(prepareDelivery).not.toHaveBeenCalled();
+    await client.shutdown();
+  });
+
+  it('classifies a strict steering write failure as outcome unknown', async () => {
+    const { client, proc } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+    await client.connect();
+    proc.stdin.write = mock(() => {
+      throw new Error('pipe write failed');
+    });
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => undefined,
+      acknowledgementTimeoutMs: 100,
+    })).rejects.toMatchObject({
+      outcome: 'unknown',
+      name: 'CodexAppServerDeliveryError',
+    });
+    await client.shutdown();
+  });
+
+  it('classifies app-server exit after a strict steering write as outcome unknown', async () => {
+    const { client, writes, finishExit } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return undefined;
+    }, { allowMissingResponse: true });
+    await client.connect();
+
+    const steering = client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => undefined,
+      acknowledgementTimeoutMs: 100,
+    });
+    while (!writes.some((write) => write.method === 'turn/steer')) await Bun.sleep(0);
+    finishExit();
+
+    await expect(steering).rejects.toMatchObject({
+      outcome: 'unknown',
+      name: 'CodexAppServerDeliveryError',
+    });
+    await client.shutdown();
+  });
+
+  it('bounds strict steering acknowledgement and ignores its late response', async () => {
+    const { client, writes, sendResult } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return undefined;
+    }, { allowMissingResponse: true });
+    const warnings = [];
+    client.on('warning', (warning) => warnings.push(warning));
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => undefined,
+      acknowledgementTimeoutMs: 5,
+    })).rejects.toMatchObject({
+      outcome: 'unknown',
+      name: 'CodexAppServerDeliveryError',
+    });
+
+    const request = writes.find((write) => write.method === 'turn/steer');
+    sendResult(request.id, { turnId: 'turn-1' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(warnings).toContain(`Ignoring late Codex app-server response: ${request.id}`);
+    await client.shutdown();
+  });
+
   it('emits a failed request metric when the app-server rejects a request', async () => {
     const { client } = createRpcClientFixture((message) => {
       if (message.method === 'initialize') return initializeResponse;
@@ -331,7 +919,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
     client.on('metric', (metric) => metrics.push(metric));
 
     await expect(client.loadedThreads()).rejects.toThrow('Server overloaded');
-    client.shutdown();
+    await client.shutdown();
 
     expect(metrics).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: false }),
@@ -349,6 +937,7 @@ describe('Codex app-server request builders', () => {
     expect(params).toMatchObject({
       model: 'gpt-5.4-codex',
       cwd: '/repo',
+      historyMode: 'paginated',
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
       approvalsReviewer: 'user',
@@ -387,15 +976,91 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('medium')).toBe('medium');
     expect(mapThinkingModeToCodexEffort('high')).toBe('high');
     expect(mapThinkingModeToCodexEffort('xhigh')).toBe('xhigh');
-    expect(mapThinkingModeToCodexEffort('max')).toBe('xhigh');
+    expect(mapThinkingModeToCodexEffort('max', 'gpt-5.5')).toBe('xhigh');
+    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra']) {
+      expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
+    }
     expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
   });
 
-  it('preserves the interactive max effort mapping in turn params', () => {
+  it.each([
+    'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
+    'gpt-5.5', 'gpt-5.4', 'custom-model',
+  ])('leaves provider-default effort unset for %s', (model) => {
     const params = buildTurnStartParams({
       threadId: 'thread-1',
       command: 'hello',
-      model: 'gpt-5.4-codex',
+      model,
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    expect(params).not.toHaveProperty('effort');
+    const target = codexThreadSettingsTarget({
+      model,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+    expect(target.effort).toBeNull();
+    expect(buildThreadSettingsUpdateParams('thread-1', target)).not.toHaveProperty('effort');
+    expect(mapThinkingModeToCodexEffort('none', model)).toBeUndefined();
+    expect(mapThinkingModeToCodexEffort(undefined, model)).toBeUndefined();
+    expect(mapThinkingModeToCodexEffort('ultra', model)).toBe('ultra');
+  });
+
+  it('builds one complete subsequent-turn settings update', () => {
+    const target = codexThreadSettingsTarget({
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    });
+
+    expect(buildThreadSettingsUpdateParams('thread-1', target)).toEqual({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    });
+    expect(buildThreadSettingsUpdateParams('thread-1', codexThreadSettingsTarget({
+      model: 'gpt-5.4-mini',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'none',
+    }))).toEqual({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    });
+  });
+
+  it('uses max effort for GPT-5.6 turn params', () => {
+    const params = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'hello',
+      model: 'gpt-5.6-luna',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'max',
+    });
+
+    expect(params.effort).toBe('max');
+  });
+
+  it('keeps max compatible with models that only support xhigh', () => {
+    const params = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'hello',
+      model: 'gpt-5.5',
       projectPath: '/repo',
       permissionMode: 'default',
       thinkingMode: 'max',
@@ -421,7 +1086,7 @@ describe('Codex app-server request builders', () => {
     expect(params).not.toHaveProperty('persistExtendedHistory');
   });
 
-  it('builds thread/fork params from durable thread identity', () => {
+  it('builds thread/fork params from durable thread identity and path', () => {
     const params = buildThreadForkParams({
       agentSessionId: 'thread-1',
       nativePath: '/tmp/jsonl.jsonl',
@@ -435,6 +1100,7 @@ describe('Codex app-server request builders', () => {
       model: 'gpt-5.4-codex',
       ephemeral: false,
       excludeTurns: true,
+      path: '/tmp/jsonl.jsonl',
     });
   });
 
@@ -450,6 +1116,25 @@ describe('Codex app-server request builders', () => {
       threadId: 'thread-1',
       config: { model_provider: 'custom-openai' },
     });
+  });
+
+  it('includes the fork turn boundary only when a point fork names one', () => {
+    expect(buildThreadForkParams({
+      agentSessionId: 'thread-1',
+      projectPath: '/repo',
+    })).not.toHaveProperty('lastTurnId');
+
+    expect(buildThreadForkParams({
+      agentSessionId: 'thread-1',
+      projectPath: '/repo',
+      lastTurnId: 'turn-1',
+    })).toMatchObject({ lastTurnId: 'turn-1' });
+
+    expect(buildThreadForkParams({
+      agentSessionId: 'thread-1',
+      projectPath: '/repo',
+      lastTurnId: null,
+    })).not.toHaveProperty('lastTurnId');
   });
 
   it('builds turn/start input and thinking effort', () => {
@@ -528,7 +1213,7 @@ describe('Codex app-server durability', () => {
 
 describe('Codex app-server converter', () => {
   it('normalizes only tracked raw Exec calls and outputs', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     const code = '// @exec: {"yield_time_ms": 1000}\ntext("ok")';
 
     expect(convertCodexRawCodeModeItem({
@@ -536,19 +1221,19 @@ describe('Codex app-server converter', () => {
       name: 'other',
       call_id: 'call-other',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-other',
       output: 'ignored',
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
 
     const input = convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds);
     expect(input).toHaveLength(1);
     expect(input[0]).toBeInstanceOf(ExecToolUseMessage);
     expect(input[0]).toMatchObject({
@@ -556,20 +1241,20 @@ describe('Codex app-server converter', () => {
       code,
       language: 'javascript',
     });
-    expect(activeCodeModeCallIds.has('call-exec')).toBe(true);
+    expect(activeCodeModeResultToolIds.get('call-exec')).toBe('call-exec');
 
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
 
     const output = convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec',
       output: [{ type: 'input_text', text: 'ok' }],
-    }, '2026-07-10T21:34:09.150Z', activeCodeModeCallIds);
+    }, '2026-07-10T21:34:09.150Z', activeCodeModeResultToolIds);
     expect(output).toHaveLength(1);
     expect(output[0]).toBeInstanceOf(ToolResultMessage);
     expect(output[0]).toMatchObject({
@@ -577,46 +1262,92 @@ describe('Codex app-server converter', () => {
       content: { items: [{ type: 'input_text', text: 'ok' }] },
       isError: false,
     });
-    expect(activeCodeModeCallIds.has('call-exec')).toBe(false);
+    expect(activeCodeModeResultToolIds.has('call-exec')).toBe(false);
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec',
       output: 'duplicate',
-    }, '2026-07-10T21:34:09.151Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.151Z', activeCodeModeResultToolIds)).toEqual([]);
 
     convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec-string',
       input: 'text("done")',
-    }, '2026-07-10T21:34:09.152Z', activeCodeModeCallIds);
+    }, '2026-07-10T21:34:09.152Z', activeCodeModeResultToolIds);
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec-string',
       output: 'Script completed',
-    }, '2026-07-10T21:34:09.153Z', activeCodeModeCallIds)[0]).toMatchObject({
+    }, '2026-07-10T21:34:09.153Z', activeCodeModeResultToolIds)[0]).toMatchObject({
       content: { raw: 'Script completed' },
     });
   });
 
+  it('projects shell-only raw Exec calls and associates output with the final command', () => {
+    const activeCodeModeResultToolIds = new Map();
+    const code = `
+      const results = await Promise.all([
+        tools.exec_command({cmd: "git status"}),
+        tools.exec_command({cmd: "git diff --stat"}),
+      ]);
+      results.forEach(result => text(result.output));
+    `;
+
+    const input = convertCodexRawCodeModeItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-bash',
+      input: code,
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds);
+
+    expect(input).toHaveLength(2);
+    expect(input.every((message) => message instanceof BashToolUseMessage)).toBe(true);
+    expect(input).toMatchObject([
+      { toolId: 'codex-code-mode:call-bash:0', command: 'git status' },
+      { toolId: 'codex-code-mode:call-bash:1', command: 'git diff --stat' },
+    ]);
+    expect(activeCodeModeResultToolIds.get('call-bash')).toBe('codex-code-mode:call-bash:1');
+
+    expect(convertCodexRawCodeModeItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-bash',
+      input: code,
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
+
+    const output = convertCodexRawCodeModeItem({
+      type: 'custom_tool_call_output',
+      call_id: 'call-bash',
+      output: 'aggregate output',
+    }, '2026-07-10T21:34:09.150Z', activeCodeModeResultToolIds);
+
+    expect(output).toMatchObject([{
+      type: 'tool-result',
+      toolId: 'codex-code-mode:call-bash:1',
+      content: { raw: 'aggregate output' },
+    }]);
+    expect(activeCodeModeResultToolIds.size).toBe(0);
+  });
+
   it('ignores malformed raw Exec calls', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
-    expect(activeCodeModeCallIds.size).toBe(0);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
+    expect(activeCodeModeResultToolIds.size).toBe(0);
   });
 
   it('normalizes only tracked raw Wait calls and outputs', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     const input = convertCodexRawCodeModeItem({
       type: 'function_call',
       name: 'wait',
       call_id: 'call-wait',
       arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000}',
-    }, '2026-07-11T00:27:03.417Z', activeCodeModeCallIds);
+    }, '2026-07-11T00:27:03.417Z', activeCodeModeResultToolIds);
 
     expect(input).toHaveLength(1);
     expect(input[0]).toBeInstanceOf(WaitToolUseMessage);
@@ -626,13 +1357,13 @@ describe('Codex app-server converter', () => {
       yieldTimeMs: 30000,
       maxTokens: 12000,
     });
-    expect(activeCodeModeCallIds.has('call-wait')).toBe(true);
+    expect(activeCodeModeResultToolIds.get('call-wait')).toBe('call-wait');
 
     const output = convertCodexRawCodeModeItem({
       type: 'function_call_output',
       call_id: 'call-wait',
       output: 'Script completed',
-    }, '2026-07-11T00:27:33.417Z', activeCodeModeCallIds);
+    }, '2026-07-11T00:27:33.417Z', activeCodeModeResultToolIds);
 
     expect(output[0]).toBeInstanceOf(ToolResultMessage);
     expect(output[0]).toMatchObject({
@@ -640,23 +1371,28 @@ describe('Codex app-server converter', () => {
       content: { raw: 'Script completed' },
       isError: false,
     });
-    expect(activeCodeModeCallIds.has('call-wait')).toBe(false);
+    expect(activeCodeModeResultToolIds.has('call-wait')).toBe(false);
   });
 
   it('ignores malformed raw Wait calls', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     expect(convertCodexRawCodeModeItem({
       type: 'function_call',
       name: 'wait',
       call_id: 'call-wait',
       arguments: '{"yield_time_ms":30000}',
-    }, '2026-07-11T00:27:03.417Z', activeCodeModeCallIds)).toEqual([]);
-    expect(activeCodeModeCallIds.size).toBe(0);
+    }, '2026-07-11T00:27:03.417Z', activeCodeModeResultToolIds)).toEqual([]);
+    expect(activeCodeModeResultToolIds.size).toBe(0);
   });
 
   it('converts app-server live item families to shared chat messages', () => {
     const items = [
-      { type: 'userMessage', id: 'u1', content: [{ type: 'text', text: 'Hi', text_elements: [] }] },
+      {
+        type: 'userMessage',
+        id: 'u1',
+        clientId: 'message-1',
+        content: [{ type: 'text', text: 'Hi', text_elements: [] }],
+      },
       { type: 'reasoning', id: 'r1', summary: ['thinking'], content: [] },
       { type: 'agentMessage', id: 'a1', text: 'Hello', phase: null, memoryCitation: null },
       { type: 'commandExecution', id: 'c1', command: 'ls', cwd: '/repo', processId: null, source: 'agent', status: 'completed', commandActions: [], aggregatedOutput: 'ok', exitCode: 0, durationMs: 12 },
@@ -677,7 +1413,35 @@ describe('Codex app-server converter', () => {
       'web-search-tool-use',
       'tool-result',
     ]);
+    expect(messages[0]).toMatchObject({
+      metadata: { upstreamRequestId: 'message-1' },
+    });
     expect(messages.find((message) => message.type === 'web-search-tool-use')?.query).toBe('codex app server');
+  });
+
+  it('normalizes Codex shell wrappers for loaded and live command executions', () => {
+    const item = {
+      type: 'commandExecution',
+      id: 'command-1',
+      command: "/bin/zsh -lc 'git status --short'",
+      cwd: '/repo',
+      processId: null,
+      source: 'agent',
+      status: 'inProgress',
+      commandActions: [],
+      aggregatedOutput: null,
+      exitCode: null,
+      durationMs: null,
+    };
+
+    expect(convertCodexAppServerItem(item, '2026-02-21T10:00:00.000Z')[0]).toMatchObject({
+      type: 'bash-tool-use',
+      command: 'git status --short',
+    });
+    expect(convertCodexAppServerLiveItem(item, '2026-02-21T10:00:00.000Z')[0]).toMatchObject({
+      type: 'bash-tool-use',
+      command: 'git status --short',
+    });
   });
 
   it('suppresses echoed user messages on the live notification path', () => {
@@ -797,6 +1561,70 @@ describe('Codex app-server converter', () => {
     ]);
   });
 
+  it('maps function call output items to one standalone result', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'functionCallOutput',
+      id: 'function-result-1',
+      name: 'lookup',
+      namespace: 'tools',
+      output: [{ type: 'input_text', text: 'result text' }],
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toBeInstanceOf(ToolResultMessage);
+    expect(messages[0]).toMatchObject({
+      toolId: 'function-result-1',
+      content: { items: [{ type: 'input_text', text: 'result text' }] },
+      isError: false,
+    });
+  });
+
+  it('maps all 0.153 collaboration tools and interrupted results', () => {
+    const expectedActions = {
+      sendMessage: 'send_message',
+      followupTask: 'followup_task',
+      interruptAgent: 'interrupt_agent',
+      listAgents: 'list_agents',
+    };
+
+    for (const [tool, action] of Object.entries(expectedActions)) {
+      const messages = convertCodexAppServerItem({
+        type: 'collabAgentToolCall',
+        id: `collab-${tool}`,
+        tool,
+        status: 'interrupted',
+        senderThreadId: 'root-thread',
+        receiverThreadIds: [],
+        prompt: null,
+        model: null,
+        reasoningEffort: null,
+        agentsStates: {},
+      }, '2026-02-21T10:00:00.000Z');
+
+      expect(messages[0]).toMatchObject({ action });
+      expect(messages[1]).toMatchObject({ type: 'tool-result', isError: false });
+    }
+  });
+
+  it('maps completed subagent activity to completed status', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'subAgentActivity',
+      id: 'activity-completed-1',
+      kind: 'completed',
+      agentThreadId: 'worker-thread-1',
+      agentPath: '/root/reviewer',
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        threadId: 'worker-thread-1',
+        agentStates: { '/root/reviewer': { status: 'completed' } },
+      },
+    });
+  });
+
   it('maps Codex subagent dynamic tool calls to explicit tool-use messages', () => {
     const items = [
       { type: 'dynamicToolCall', id: 'd-sub-1', namespace: null, tool: 'spawn_agent', arguments: { task_name: 'review-auth', message: 'Review auth boundaries', model: 'gpt-5.5' }, status: 'completed', contentItems: [{ type: 'text', text: 'spawned /root/review-auth' }], success: true, durationMs: 10 },
@@ -907,7 +1735,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: envelope,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(activity[0]).toMatchObject({
       action: 'agent_status',
@@ -940,7 +1768,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(completion[0]).toMatchObject({
       action: 'agent_status',
@@ -961,7 +1789,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(completion[0]).toMatchObject({
       action: 'agent_status',
@@ -983,19 +1811,19 @@ describe('Codex app-server converter', () => {
       author: '/root/other',
       recipient: '/root',
       content,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
     expect(convertCodexRawCodeModeItem({
       type: 'agent_message',
       author: '/root/reviewer',
       recipient: 'root',
       content,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
     expect(convertCodexRawCodeModeItem({
       type: 'agent_message',
       author: '/root/reviewer',
       recipient: '/root/other',
       content,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
 
     const nestedContent = [{
       type: 'input_text',
@@ -1006,7 +1834,7 @@ describe('Codex app-server converter', () => {
       author: '/root/parent/child',
       recipient: '/root',
       content: nestedContent,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
   });
 
   it('maps nested v2 terminal response items to their immediate parent', () => {
@@ -1018,7 +1846,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: 'Message Type: FINAL_ANSWER\nTask name: /root/parent\nSender: /root/parent/child\nPayload:\nDone',
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(completion[0]).toMatchObject({
       action: 'agent_status',
@@ -1046,7 +1874,7 @@ describe('Codex app-server converter', () => {
       type: 'message',
       role: 'assistant',
       content: [{ type: 'output_text', text }],
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
   });
 
   it('does not interpret structured user messages as legacy lifecycle notifications', () => {
@@ -1072,7 +1900,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: envelope,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(messages[0]).toMatchObject({
       action: 'agent_status',
@@ -1117,6 +1945,63 @@ describe('Codex app-server approvals', () => {
     expect(buildApprovalResponse(pending, { allow: false })).toEqual({ decision: 'decline' });
   });
 
+  it('uses approval identity for command and write-stdin reviews', () => {
+    const command = createPendingApproval('chat-1', {
+      id: 'command-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'parent-command',
+        approvalId: 'zsh-review',
+        command: 'printf ready',
+      },
+    });
+    const writeStdin = createPendingApproval('chat-1', {
+      id: 'stdin-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'parent-command',
+        approvalId: 'stdin-approval',
+        kind: 'writeStdin',
+        reason: 'Send confirmation',
+      },
+    });
+
+    expect(buildApprovalMessage(command).requestedTool).toMatchObject({
+      type: 'bash-tool-use',
+      toolId: 'zsh-review',
+      command: 'printf ready',
+    });
+    expect(buildApprovalMessage(writeStdin).requestedTool).toMatchObject({
+      type: 'write-stdin-tool-use',
+      toolId: 'stdin-approval',
+      input: { itemId: 'parent-command', reason: 'Send confirmation' },
+    });
+    expect(buildApprovalResponse(writeStdin, { allow: true, alwaysAllow: true }))
+      .toEqual({ decision: 'accept' });
+    expect(buildApprovalResponse(writeStdin, { allow: false }))
+      .toEqual({ decision: 'cancel' });
+  });
+
+  it('rejects write-stdin reviews without distinct approval identity', () => {
+    const pending = createPendingApproval('chat-1', {
+      id: 'stdin-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'parent-command',
+        kind: 'writeStdin',
+      },
+    });
+
+    expect(() => buildApprovalMessage(pending)).toThrow('requires approvalId and itemId');
+    expect(() => buildApprovalResponse(pending, { allow: true })).toThrow('requires approvalId');
+  });
+
   it('maps permission grants and denials', () => {
     const pending = createPendingApproval('chat-1', {
       id: 6,
@@ -1148,29 +2033,36 @@ describe('CodexAppServerRuntime', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  function createActiveGoalQueue(provider, codexGoalCommand, markUnconfirmed) {
+  function availableQueueOptions() {
+    return {
+      projectAdmission: { assertAvailable: async () => undefined },
+      unsettledQueueReceiptKeys: () => new Set(),
+      appendControlReceipt: () => {},
+    };
+  }
+
+  function createActiveGoalQueue(provider, codexGoalCommand, operation) {
     return new ChatExecutionCoordinator(
       tmpDir,
       {
         runAgentTurn: async () => { throw new Error('must use active delivery'); },
-        submitActiveInput: (_chatId, command, options, beforeDelivery) => provider.submitActiveInput(makeRequest({
+        submitGoalControl: (_chatId, command, options, beforeDelivery) => provider.submitGoalControl(makeRequest({
           ...options,
           agentSessionId: 'thread-1',
           command,
           codexGoalCommand,
           nativePath: null,
+          ...(operation ? { operation } : {}),
         }), beforeDelivery),
         abortSession: async () => false,
         isChatRunning: () => provider.isRunning('thread-1'),
-        waitUntilTurnAbortable: async () => true,
       },
       {
-        register: async () => {},
-        discard: () => true,
-        markFailed: () => true,
-        markUnconfirmed,
+        hasMatchingInput: async () => false,
+        admitInput: async () => ({ inserted: true }),
+        admitQueuedInput: () => ({ inserted: true }),
+        discardPreparedInput: () => {},
       },
-      { appendMessages: async () => ({ generationId: 'generation-1', messages: [] }) },
       () => ({
         model: 'gpt-5.4-codex',
         permissionMode: 'default',
@@ -1179,7 +2071,81 @@ describe('CodexAppServerRuntime', () => {
         ampAgentMode: 'default',
       }),
       () => true,
+      new InMemoryChatExecutionControlRepository('server-instance-test'),
+      availableQueueOptions(),
     );
+  }
+
+  function makeThreadSettings(overrides = {}) {
+    return {
+      cwd: '/repo',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: ['/repo'],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+      activePermissionProfile: null,
+      model: 'gpt-5.4-codex',
+      modelProvider: 'openai',
+      serviceTier: null,
+      effort: 'medium',
+      summary: 'auto',
+      collaborationMode: null,
+      multiAgentMode: 'explicitRequestOnly',
+      personality: null,
+      ...overrides,
+    };
+  }
+
+  async function startSettingsSession(runtimeOptions = {}, requestOverrides = {}) {
+    const nativePath = path.join(tmpDir, 'settings-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: 'thread-1',
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandbox: { type: 'workspaceWrite' },
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      ...runtimeOptions,
+    });
+    const published = collectOperation();
+    const started = await provider.startSession(makeRequest({
+      ...requestOverrides,
+      operation: published.operation,
+    }));
+    return { fake, provider, published, started };
+  }
+
+  function emitThreadSettings(fake, overrides = {}, threadId = 'thread-1') {
+    fake.emit('notification', {
+      method: 'thread/settings/updated',
+      params: {
+        threadId,
+        threadSettings: makeThreadSettings(overrides),
+      },
+    });
   }
 
   it('starts a turn and waits for the app-server transcript path before resolving', async () => {
@@ -1191,7 +2157,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await expect(provider.startSession(makeRequest())).resolves.toEqual({
       agentSessionId: 'thread-1',
@@ -1200,6 +2166,313 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('keeps app-server stderr content out of diagnostics', async () => {
+    const privateContent = 'private-codex-transcript-content';
+    const diagnostics = [];
+    const nativePath = path.join(tmpDir, 'private-diagnostics.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-private-diagnostics', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-private-diagnostics', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      logger: {
+        debug(...args) { diagnostics.push(args); },
+        info(...args) { diagnostics.push(args); },
+        warn(...args) { diagnostics.push(args); },
+        error(...args) { diagnostics.push(args); },
+      },
+    });
+
+    await provider.startSession(makeRequest());
+    fake.emit('stderr', privateContent);
+
+    expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
+  });
+
+  it('steers an ordinary active turn once with its expected native identity', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-thread.jsonl');
+    const prepared = mock(async () => undefined);
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async ({ expectedTurnId }, options) => {
+        await options.prepareDelivery();
+        return { turnId: expectedTurnId };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'focus on the failing test',
+      clientMessageId: 'message-steer',
+      prepareDelivery: prepared,
+    })).resolves.toEqual({ kind: 'accepted' });
+
+    expect(prepared).toHaveBeenCalledOnce();
+    expect(fake.steerTurn).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-active',
+      input: [{ type: 'text', text: 'focus on the failing test', text_elements: [] }],
+      clientUserMessageId: 'message-steer',
+    }, expect.objectContaining({ prepareDelivery: prepared }));
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a native expected-turn mismatch without retrying another turn', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-mismatch.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async () => {
+        throw new CodexAppServerRpcError(
+          'expected active turn id `turn-active` but found `turn-replacement`',
+          -32602,
+        );
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'too late',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'turn-changed',
+      message: 'The active Codex turn changed',
+    });
+    expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects when the native turn changes after target capture but before delivery', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-captured-turn.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-captured', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+    const target = provider.captureSteerTarget('thread-1');
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-replacement', status: 'inProgress' }),
+      },
+    });
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target,
+      input: 'must stay on the captured turn',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'turn-changed',
+      message: 'The active Codex turn changed',
+    });
+    expect(fake.steerTurn).not.toHaveBeenCalled();
+  });
+
+  it('maps native review and compaction rejection without waiting or retrying', async () => {
+    for (const turnKind of ['review', 'compact']) {
+      const nativePath = path.join(tmpDir, `strict-steer-${turnKind}.jsonl`);
+      const fake = new FakeClient({
+        startThread: async () => ({
+          thread: makeThread({ id: `thread-${turnKind}`, path: nativePath }),
+          model: 'gpt',
+          modelProvider: 'openai',
+          serviceTier: null,
+          cwd: '/repo',
+        }),
+        startTurn: async () => {
+          await fs.writeFile(nativePath, '{}\n');
+          return { turn: makeTurn({ id: `turn-${turnKind}`, status: 'inProgress' }) };
+        },
+        steerTurn: async () => {
+          throw new CodexAppServerRpcError(
+            `cannot steer a ${turnKind} turn`,
+            -32602,
+            { codexErrorInfo: { activeTurnNotSteerable: { turnKind } } },
+          );
+        },
+      });
+      const provider = createRuntime({
+        createClient: () => fake,
+        materializationTimeoutMs: 20,
+      });
+      await provider.startSession(makeRequest({ chatId: `chat-${turnKind}` }));
+
+      await expect(provider.steer({
+        chatId: `chat-${turnKind}`,
+        projectPath: '/repo',
+        agentSessionId: `thread-${turnKind}`,
+        nativeSession: null,
+        target: provider.captureSteerTarget(`thread-${turnKind}`),
+        input: 'focus here',
+        clientMessageId: `message-${turnKind}`,
+        prepareDelivery: async () => undefined,
+      })).resolves.toEqual({
+        kind: 'rejected',
+        reason: 'turn-not-steerable',
+        message: 'The active Codex turn cannot be steered',
+      });
+      expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+      expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('maps the pinned structured oversized-input rejection to validation', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-input-too-large.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async () => {
+        throw new CodexAppServerRpcError(
+          'Input exceeds the maximum length of 1048576 bytes.',
+          -32602,
+          { input_error_code: 'input_too_large' },
+        );
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'oversized input',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'invalid-input',
+      message: 'Codex rejected the steering input',
+    });
+  });
+
+  it('treats an unexpected native acknowledgement identity as unknown without retrying', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-unexpected-ack.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async (_params, options) => {
+        await options.prepareDelivery();
+        return { turnId: 'turn-unexpected' };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'focus here',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'failed',
+      outcome: 'unknown',
+      message: 'Codex acknowledged steering for an unexpected turn',
+    });
+    expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
   });
 
   it('does not create a thread when admission closes during client startup', async () => {
@@ -1212,7 +2485,7 @@ describe('CodexAppServerRuntime', () => {
         return { userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     const admission = new AbortController();
     const markStarted = mock();
     const start = provider.startSession(makeRequest({
@@ -1229,33 +2502,183 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
-  it('reports abortability only after the provider turn id is available', async () => {
-    let resolveTurn;
-    const turn = new Promise((resolve) => { resolveTurn = resolve; });
-    let startRequested;
-    const requested = new Promise((resolve) => { startRequested = resolve; });
-    const fake = new FakeClient({
-      startTurn: async () => {
-        startRequested();
-        return turn;
-      },
-    });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const onAbortable = mock(() => undefined);
-    const run = provider.runTurn(makeRequest({
+  it('emits pre-session failures before waiting for graceful shutdown', async () => {
+    const operations = [
+      (provider, operation) => provider.startSession(makeRequest({ operation })),
+      (provider, operation) => provider.runTurn(makeRequest({
+        agentSessionId: 'thread-1',
+        nativePath: null,
+        operation,
+      })),
+      (provider, operation) => provider.compact(makeRequest({
+        agentSessionId: 'thread-1',
+        nativePath: null,
+        operation,
+      })),
+    ];
+
+    for (const operate of operations) {
+      const shutdown = createDeferred();
+      const fake = new FakeClient({
+        connect: async () => {
+          throw new Error('app-server startup failed');
+        },
+        shutdown: () => shutdown.promise,
+      });
+      const provider = createRuntime({ createClient: () => fake });
+      const published = collectOperation();
+      const failed = published.waitForEvent(
+        (event) => event.type === 'run-ended' && event.outcome === 'failed',
+      );
+
+      const operation = operate(provider, published.operation);
+      await expect(failed).resolves.toMatchObject({
+        error: { message: 'Codex error: app-server startup failed' },
+      });
+      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      shutdown.resolve();
+      await expect(operation).rejects.toThrow('app-server startup failed');
+    }
+  });
+
+  it('keeps an interrupted turn attached until the provider terminal notification', async () => {
+    const commandItem = {
+      type: 'commandExecution',
+      id: 'command-after-interrupt',
+      command: 'printf persisted',
+      cwd: '/repo',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'persisted',
+      exitCode: 0,
+      durationMs: 12,
+    };
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+
+    await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
-      onAbortable,
+      operation: published.operation,
     }));
-
-    await requested;
-    expect(onAbortable).not.toHaveBeenCalled();
-    resolveTurn({ turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) });
-    await run;
-
-    expect(onAbortable).toHaveBeenCalledTimes(1);
     await expect(provider.abort('thread-1')).resolves.toBe(true);
-    expect(fake.interruptTurn).toHaveBeenCalledWith('thread-1', 'turn-1');
+
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'interrupting' }]);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: commandItem,
+      },
+    });
+
+    const emitted = publishedMessages(published.events);
+    expect(emitted).toHaveLength(2);
+    expect(emitted[0]).toBeInstanceOf(BashToolUseMessage);
+    expect(emitted[1]).toBeInstanceOf(ToolResultMessage);
+    expect(emitted[1]).toMatchObject({
+      toolId: 'command-after-interrupt',
+      content: { raw: 'persisted' },
+      isError: false,
+    });
+    expect(emitted.map(getNativeMessageRevisionSource)).toEqual([
+      {
+        entryId: 'turn:turn-1:tool:command-after-interrupt',
+        withinSourceOrdinal: 0,
+      },
+      {
+        entryId: 'turn:turn-1:tool:command-after-interrupt',
+        withinSourceOrdinal: 1,
+      },
+    ]);
+
+    const terminal = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ status: 'interrupted' }),
+      },
+    });
+    await terminal;
+
+    expect(terminalEvents(published.events)).toEqual([
+      expect.objectContaining({ outcome: 'finished' }),
+    ]);
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+
+
+  // The terminal can arrive inside interruptTurn(). The turn must still settle exactly once,
+  // and the native rows this races against are never recovered into the live tail.
+  it('settles once when a completed terminal notification wins the interrupt response race', async () => {
+    const nativePath = path.join(tmpDir, 'interrupt-response-race.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
+    let fake;
+    fake = new FakeClient({
+      interruptTurn: async () => {
+        await writeJsonl(nativePath, [
+          ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
+          ...commandHistoryEntries('race-command', 'printf raced', 'raced').slice(2),
+        ]);
+        fake.emit('notification', {
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-1',
+            turn: makeTurn({ status: 'completed' }),
+          },
+        });
+        return {};
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      operation: published.operation,
+    }));
+    const terminal = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await terminal;
+
+    expect(publishedMessages(published.events).filter(
+      (message) => message.toolId === 'race-command',
+    )).toEqual([]);
+    expect(terminalEvents(published.events)).toEqual([
+      expect.objectContaining({ outcome: 'finished' }),
+    ]);
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('restores running status when the interrupt request is rejected', async () => {
+    const fake = new FakeClient({
+      interruptTurn: async () => {
+        throw new Error('interrupt rejected');
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
+
+    await expect(provider.abort('thread-1')).resolves.toBe(false);
+    expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'running' }]);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('does not restore a managed goal turn that completes before its start response', async () => {
@@ -1284,10 +2707,13 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
@@ -1301,7 +2727,7 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes a resumed unmanaged turn that completes before its start response', async () => {
@@ -1319,17 +2745,21 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps the turn running when Codex reports a retryable stream error', async () => {
@@ -1341,14 +2771,9 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failures = [];
-    const processing = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onFailed((chatId, message) => failures.push({ chatId, message }));
-    provider.onProcessing((_chatId, value) => processing.push(value));
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'error',
@@ -1377,22 +2802,23 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emitted.map((message) => message.content)).toEqual([
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'Reconnecting... 1/5',
       'Reconnecting... 2/5',
     ]);
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(processing.at(-1)).toBe(true);
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn() },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('ignores lifecycle notifications emitted by a stale app-server client', async () => {
@@ -1412,20 +2838,20 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const clients = [staleClient, activeClient];
-    const provider = new CodexAppServerRuntime({ createClient: () => clients.shift(), materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failures = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onFailed((_chatId, message) => failures.push(message));
+    const provider = createRuntime({ createClient: () => clients.shift(), materializationTimeoutMs: 20 });
+    const oldPublished = collectOperation('chat-1', 'run-old');
+    const activePublished = collectOperation('chat-1', 'run-active');
 
-    await provider.startSession(makeRequest());
-    const oldFinished = new Promise((resolve) => provider.onFinished(resolve));
+    await provider.startSession(makeRequest({ operation: oldPublished.operation }));
+    const oldFinished = oldPublished.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     staleClient.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'old-turn' }) },
     });
     await oldFinished;
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: activePublished.operation }));
 
     staleClient.emit('notification', {
       method: 'turn/started',
@@ -1469,12 +2895,16 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
     });
 
-    expect(emitted).toEqual([]);
-    expect(failures).toEqual([]);
+    expect(publishedMessages(oldPublished.events)).toEqual([]);
+    expect(publishedMessages(activePublished.events)).toEqual([]);
+    expect(failureMessages(oldPublished.events)).toEqual([]);
+    expect(failureMessages(activePublished.events)).toEqual([]);
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(activeClient.shutdown).not.toHaveBeenCalled();
 
-    const activeFinished = new Promise((resolve) => provider.onFinished(resolve));
+    const activeFinished = activePublished.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     activeClient.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
@@ -1491,12 +2921,9 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'active-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failures = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    provider.onFailed((_chatId, message) => failures.push(message));
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'error',
@@ -1532,12 +2959,14 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'stale-turn' }) },
     });
 
-    expect(emitted).toEqual([]);
-    expect(failures).toEqual([]);
+    expect(publishedMessages(published.events)).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
@@ -1559,29 +2988,30 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
     });
-    const failures = [];
-    provider.onFailed((_chatId, message) => failures.push(message));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     emitCapacityFailure(fake, 'turn-1');
 
     await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [] });
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
     });
     await finished;
     expect(fake.startTurn).toHaveBeenCalledTimes(2);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('resumes a blocked goal after a capacity failure without duplicating input', async () => {
@@ -1612,14 +3042,13 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
     });
-    const failures = [];
-    provider.onFailed((_chatId, message) => failures.push(message));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
@@ -1635,9 +3064,11 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'active');
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(failures).toEqual([]);
+    expect(failureMessages(published.events)).toEqual([]);
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-2', goal: makeGoal('thread-1', 'Finish the work', 'complete') },
@@ -1647,7 +3078,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('retries when the initial unmanaged turn fails before its start response resolves', async () => {
@@ -1675,21 +3106,24 @@ describe('CodexAppServerRuntime', () => {
         return { turn };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
+    const published = collectOperation();
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(fake.startTurn).toHaveBeenCalledTimes(2);
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
@@ -1746,7 +3180,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
@@ -1757,10 +3191,12 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    const controlPublished = collectOperation('chat-1', 'run-control');
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Continue through capacity recovery',
       nativePath: null,
+      operation: controlPublished.operation,
     }))).resolves.toBe(true);
     await retryStarted.promise;
 
@@ -1769,7 +3205,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = controlPublished.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: {
@@ -1819,16 +3257,18 @@ describe('CodexAppServerRuntime', () => {
         return { goal: activeGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
+    const published = collectOperation();
 
     const running = provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'resume' },
       nativePath: null,
+      operation: published.operation,
     }));
     await retryStarted.promise;
     await running;
@@ -1837,7 +3277,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: {
@@ -1855,6 +3297,7 @@ describe('CodexAppServerRuntime', () => {
 
   it('continues an unmanaged retry when its turn fails before the retry response resolves', async () => {
     const nativePath = path.join(tmpDir, 'same-chunk-capacity-retry-thread.jsonl');
+    const finalRetryStarted = createDeferred();
     let fake;
     let turnNumber = 0;
     fake = new FakeClient({
@@ -1874,26 +3317,35 @@ describe('CodexAppServerRuntime', () => {
             params: { threadId: 'thread-1', turn },
           });
           emitCapacityFailure(fake, turn.id);
+        } else if (turnNumber === 3) {
+          fake.emit('notification', {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn },
+          });
+          finalRetryStarted.resolve();
         }
         return { turn };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     emitCapacityFailure(fake, 'turn-1');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await finalRetryStarted.promise;
 
     expect(fake.startTurn).toHaveBeenCalledTimes(3);
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-3' }) },
@@ -1936,13 +3388,14 @@ describe('CodexAppServerRuntime', () => {
         return { goal: activeGoal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
       capacityRetryDelay: () => Promise.resolve(),
     });
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
@@ -1959,7 +3412,9 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
 
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-3', goal: makeGoal('thread-1', 'Finish the work', 'complete') },
@@ -2011,16 +3466,18 @@ describe('CodexAppServerRuntime', () => {
           goal: makeGoal(threadId, 'Finish the work', status),
         }),
       });
-      const provider = new CodexAppServerRuntime({
+      const provider = createRuntime({
         createClient: () => fake,
         capacityRetryDelaysMs: [25],
         capacityRetryDelay: controlledDelay.wait,
       });
+      const published = collectOperation();
 
       const running = provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         command: 'Deliver this before retrying',
         nativePath: null,
+        operation: published.operation,
       }));
       await expect(initialDeliveryStarted.promise).resolves.toMatchObject({
         threadId: 'thread-1',
@@ -2040,7 +3497,9 @@ describe('CodexAppServerRuntime', () => {
       expect(fake.startTurn).toHaveBeenCalledTimes(1);
       expect(fake.setThreadGoalStatus).not.toHaveBeenCalled();
 
-      const finished = new Promise((resolve) => provider.onFinished(resolve));
+      const finished = published.waitForEvent(
+        (event) => event.type === 'run-ended' && event.outcome === 'finished',
+      );
       fake.emit('notification', {
         method: 'turn/completed',
         params: { threadId: 'thread-1', turn: makeTurn({ id: 'user-turn' }) },
@@ -2069,7 +3528,7 @@ describe('CodexAppServerRuntime', () => {
           return { cleared: true };
         },
       });
-      const provider = new CodexAppServerRuntime({
+      const provider = createRuntime({
         createClient: () => fake,
         materializationTimeoutMs: 20,
         capacityRetryDelaysMs: [25],
@@ -2087,7 +3546,7 @@ describe('CodexAppServerRuntime', () => {
       emitCapacityFailure(fake, 'turn-1');
       await expect(controlledDelay.started).resolves.toBe(25);
 
-      await expect(provider.submitActiveInput(makeRequest({
+      await expect(provider.submitGoalControl(makeRequest({
         agentSessionId: 'thread-1',
         command: `/goal ${control}`,
         codexGoalCommand: { kind: control },
@@ -2098,7 +3557,7 @@ describe('CodexAppServerRuntime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(goalCalls).toEqual([control === 'pause' ? 'paused' : 'clear']);
       expect(provider.isRunning('thread-1')).toBe(false);
-      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      expect(fake.shutdown).not.toHaveBeenCalled();
     }
   });
 
@@ -2114,7 +3573,7 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [25],
@@ -2132,7 +3591,7 @@ describe('CodexAppServerRuntime', () => {
     emitCapacityFailure(fake, 'turn-1');
     await expect(controlledDelay.started).resolves.toBe(25);
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Investigate the next failure',
       nativePath: null,
@@ -2164,13 +3623,16 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0, 0],
     });
-    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    const failed = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       emitCapacityFailure(fake, `turn-${attempt + 1}`);
@@ -2179,13 +3641,12 @@ describe('CodexAppServerRuntime', () => {
       }
     }
 
-    await expect(failed).resolves.toEqual({
-      chatId: 'chat-1',
-      message: 'Selected model is at capacity. Please try a different model.',
+    await expect(failed).resolves.toMatchObject({
+      error: { message: 'Selected model is at capacity. Please try a different model.' },
     });
     expect(fake.startTurn).toHaveBeenCalledTimes(4);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('fails a blocked goal after three capacity retries', async () => {
@@ -2218,13 +3679,16 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       materializationTimeoutMs: 20,
       capacityRetryDelaysMs: [0, 0, 0],
     });
-    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
-    await provider.startSession(makeRequest());
+    const published = collectOperation();
+    const failed = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
@@ -2242,14 +3706,13 @@ describe('CodexAppServerRuntime', () => {
       }
     }
 
-    await expect(failed).resolves.toEqual({
-      chatId: 'chat-1',
-      message: 'Selected model is at capacity. Please try a different model.',
+    await expect(failed).resolves.toMatchObject({
+      error: { message: 'Selected model is at capacity. Please try a different model.' },
     });
     expect(fake.setThreadGoalStatus).toHaveBeenCalledTimes(3);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('ends the turn when Codex reports a non-retryable error', async () => {
@@ -2261,11 +3724,12 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const published = collectOperation();
+    const failed = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'error',
@@ -2281,11 +3745,12 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    await expect(failed).resolves.toEqual({ chatId: 'chat-1', message: 'Codex turn failed' });
+    await expect(failed).resolves.toMatchObject({ error: { message: 'Codex turn failed' } });
+    const emitted = publishedMessages(published.events);
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ type: 'error', content: 'Codex turn failed' });
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('streams raw Code Mode calls and their paired outputs through the shared contract', async () => {
@@ -2297,10 +3762,9 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'rawResponseItem/completed',
@@ -2311,7 +3775,7 @@ describe('CodexAppServerRuntime', () => {
           type: 'custom_tool_call',
           name: 'exec',
           call_id: 'call-exec-1',
-          input: 'const value = 1; text(value);',
+          input: 'const result = await tools.exec_command({cmd: "pwd"}); text(result.output);',
         },
       },
     });
@@ -2366,19 +3830,19 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
+    const emitted = publishedMessages(published.events);
     expect(emitted.map((message) => message.type)).toEqual([
-      'exec-tool-use',
+      'bash-tool-use',
       'tool-result',
       'wait-tool-use',
       'tool-result',
     ]);
     expect(emitted[0]).toMatchObject({
-      toolId: 'call-exec-1',
-      code: 'const value = 1; text(value);',
-      language: 'javascript',
+      toolId: 'codex-code-mode:call-exec-1:0',
+      command: 'pwd',
     });
     expect(emitted[1]).toMatchObject({
-      toolId: 'call-exec-1',
+      toolId: 'codex-code-mode:call-exec-1:0',
       content: { items: [{ type: 'input_text', text: '1' }] },
       isError: false,
     });
@@ -2404,10 +3868,9 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
     fake.emit('notification', {
       method: 'rawResponseItem/completed',
@@ -2427,6 +3890,7 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
+    const emitted = publishedMessages(published.events);
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({
       type: 'codex-subagent-tool-use',
@@ -2449,15 +3913,21 @@ describe('CodexAppServerRuntime', () => {
         }));
         return { goal: makeGoal(threadId, params.objective) };
       },
+      steerTurn: async ({ expectedTurnId }, options) => {
+        await options.prepareDelivery();
+        return { turnId: expectedTurnId };
+      },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Keep the session active' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     fake.emit('notification', {
@@ -2491,7 +3961,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emitted.map((message) => message.type)).toEqual(['wait-tool-use']);
+    expect(publishedMessages(published.events).map((message) => message.type)).toEqual([
+      'wait-tool-use',
+    ]);
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: {
@@ -2526,7 +3998,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await provider.startSession(makeRequest({ codexGoalCommand: { kind: 'set', objective: 'Ship the feature' } }));
 
@@ -2556,7 +4028,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const provider = createRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
 
     await provider.startSession(makeRequest({
       command: 'Ship seeded work',
@@ -2569,7 +4041,7 @@ describe('CodexAppServerRuntime', () => {
         threadId: 'thread-1',
         items: [{
           type: 'message',
-          role: 'user',
+          role: 'developer',
           content: [{ type: 'input_text', text: '<carried-context>Earlier work</carried-context>' }],
         }],
       }],
@@ -2583,18 +4055,20 @@ describe('CodexAppServerRuntime', () => {
       const fake = new FakeClient({
         getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing work', status) }),
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
-      const emitted = [];
-      provider.onMessages((_chatId, messages) => emitted.push(...messages));
+      const provider = createRuntime({ createClient: () => fake });
+      const published = collectOperation();
       await provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         codexGoalCommand: { kind: 'set', objective: 'Replacement work' },
         nativePath: null,
+        operation: published.operation,
       }));
 
       expect(fake.setThreadGoal).not.toHaveBeenCalled();
       expect(fake.clearThreadGoal).not.toHaveBeenCalled();
-      expect(emitted.at(-1)?.content).toContain('/goal replace <objective>');
+      expect(publishedMessages(published.events).at(-1)?.content).toContain(
+        '/goal replace <objective>',
+      );
       expect(provider.isRunning('thread-1')).toBe(status === 'active');
     }
   });
@@ -2617,7 +4091,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -2647,7 +4121,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -2674,14 +4148,14 @@ describe('CodexAppServerRuntime', () => {
         return { goal: { ...previous, threadId, ...params } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'replace', objective: 'Replacement work' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     expect(calls).toEqual([
@@ -2689,9 +4163,9 @@ describe('CodexAppServerRuntime', () => {
       { objective: 'Replacement work', status: 'active' },
       { objective: 'Existing work', status: 'paused', tokenBudget: 50_000 },
     ]);
-    expect(fake.getThreadGoal).toHaveBeenCalledTimes(2);
+    expect(fake.getThreadGoal).toHaveBeenCalledTimes(3);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(emitted.at(-1)?.content).toContain('replacement rejected');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('replacement rejected');
   });
 
   it('keeps an active restored goal alive when replacement set fails', async () => {
@@ -2704,7 +4178,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: { ...previous, threadId, ...params } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -2741,7 +4215,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -2774,13 +4248,17 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'replace', objective: 'Replacement work' },
       nativePath: null,
+      operation: published.operation,
     }));
     fake.emit('notification', {
       method: 'thread/goal/cleared',
@@ -2793,7 +4271,7 @@ describe('CodexAppServerRuntime', () => {
     await finished;
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('restores an active goal when replacement clear commits but its response is lost', async () => {
@@ -2815,7 +4293,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -2823,7 +4301,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    expect(fake.getThreadGoal).toHaveBeenCalledTimes(2);
+    expect(fake.getThreadGoal).toHaveBeenCalledTimes(3);
     expect(fake.setThreadGoal).toHaveBeenCalledTimes(1);
     expect(fake.setThreadGoal).toHaveBeenCalledWith('thread-1', {
       objective: 'Existing work',
@@ -2839,7 +4317,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1' },
     });
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes cleanly when replacement and rollback both fail', async () => {
@@ -2850,7 +4328,7 @@ describe('CodexAppServerRuntime', () => {
       clearThreadGoal: async () => ({ cleared: true }),
       setThreadGoal: async () => { throw new Error('goal set unavailable'); },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -2859,9 +4337,9 @@ describe('CodexAppServerRuntime', () => {
     }));
 
     expect(fake.setThreadGoal).toHaveBeenCalledTimes(2);
-    expect(fake.getThreadGoal).toHaveBeenCalledTimes(2);
+    expect(fake.getThreadGoal).toHaveBeenCalledTimes(3);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('reports the current Codex goal without starting a turn', async () => {
@@ -2870,22 +4348,22 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Ship the feature'),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal',
       codexGoalCommand: { kind: 'status' },
       nativePath: null,
+      operation: published.operation,
     }));
 
     expect(fake.getThreadGoal).toHaveBeenCalledWith('thread-1');
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
-    expect(emitted.map((message) => message.content)).toEqual([
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'Goal\nStatus: active\nObjective: Ship the feature\nTime used: 0s\nTokens used: 0\n\nCommands: /goal edit <objective>, /goal pause, /goal clear',
     ]);
   });
@@ -2894,44 +4372,50 @@ describe('CodexAppServerRuntime', () => {
     const fake = new FakeClient({
       clearThreadGoal: async () => ({ cleared: true }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
     expect(fake.clearThreadGoal).toHaveBeenCalledWith('thread-1');
     expect(fake.startTurn).not.toHaveBeenCalled();
-    expect(emitted.map((message) => message.content)).toEqual(['Codex goal cleared.']);
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
+      'Codex goal cleared.',
+    ]);
   });
 
   it('pauses the current Codex goal without starting a turn', async () => {
     const fake = new FakeClient({
       setThreadGoalStatus: async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal pause',
       codexGoalCommand: { kind: 'pause' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
     expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'paused');
     expect(fake.startTurn).not.toHaveBeenCalled();
-    expect(emitted.map((message) => message.content)).toEqual([
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'Codex goal paused.\nObjective: Ship the feature\nUsage: time 0s, tokens 0.',
     ]);
   });
@@ -2947,7 +4431,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, 'Ship the feature', status) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const running = provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -2976,23 +4460,25 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Ship the feature', 'budgetLimited'),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal resume',
       codexGoalCommand: { kind: 'resume' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(emitted.at(-1)?.content).toContain('Codex goal updated.');
-    expect(emitted.at(-1)?.content).toContain('Ship the feature');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Codex goal updated.');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Ship the feature');
   });
 
   it('replays continuation notifications received during thread resume', async () => {
@@ -3016,7 +4502,7 @@ describe('CodexAppServerRuntime', () => {
       },
       setThreadGoalStatus: async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3050,7 +4536,7 @@ describe('CodexAppServerRuntime', () => {
           return { cleared: false };
         },
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const provider = createRuntime({ createClient: () => fake });
 
       await provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
@@ -3061,7 +4547,7 @@ describe('CodexAppServerRuntime', () => {
 
       expect(calls).toEqual(['resume', 'get', control]);
       expect(provider.isRunning('thread-1')).toBe(false);
-      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      expect(fake.shutdown).not.toHaveBeenCalled();
     }
   });
 
@@ -3088,18 +4574,20 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Ship the feature', status),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'pause' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    expect(emitted.at(-1)?.content).toContain('Codex goal paused.');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Codex goal paused.');
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(fake.shutdown).not.toHaveBeenCalled();
     fake.emit('notification', {
@@ -3116,7 +4604,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps a restored active turn through a clear response and its turn boundary', async () => {
@@ -3140,18 +4628,20 @@ describe('CodexAppServerRuntime', () => {
       getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Ship the feature', 'active') }),
       clearThreadGoal: async () => ({ cleared: true }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'clear' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    expect(emitted.at(-1)?.content).toBe('Codex goal cleared.');
+    expect(publishedMessages(published.events).at(-1)?.content).toBe('Codex goal cleared.');
     expect(provider.isRunning('thread-1')).toBe(true);
     fake.emit('notification', {
       method: 'thread/goal/cleared',
@@ -3163,7 +4653,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps a resumed goal turn after buffered terminal replay defers the prior finish', async () => {
@@ -3204,7 +4694,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3242,24 +4732,26 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal('thread-1', 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Continue after approval',
       nativePath: null,
+      operation: published.operation,
     }));
 
-    const request = emitted.find((message) => message instanceof PermissionRequestMessage);
-    expect(request).toBeTruthy();
+    const request = permissionEvents(published.events).find(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    expect(request).toBeDefined();
     expect(fake.respond).not.toHaveBeenCalled();
     expect(fake.getThreadGoal).toHaveBeenCalledWith('thread-1');
     expect(fake.steerTurn).toHaveBeenCalledWith(expect.objectContaining({
       expectedTurnId: 'automatic-turn',
     }));
-    await provider.resolvePermission(request.permissionRequestId, { allow: true });
+    await request.decision.respond({ allow: true });
     expect(fake.respond).toHaveBeenCalledWith(77, { decision: 'accept' });
   });
 
@@ -3284,7 +4776,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal('thread-1', 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3326,7 +4818,7 @@ describe('CodexAppServerRuntime', () => {
       },
       getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Ship the feature', 'active') }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3356,17 +4848,17 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal('thread-1', 'Ship the feature', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'status' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    expect(emitted.at(-1)?.content).toContain('Status: complete');
+    expect(publishedMessages(published.events).at(-1)?.content).toContain('Status: complete');
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(fake.steerTurn).not.toHaveBeenCalled();
   });
@@ -3403,9 +4895,7 @@ describe('CodexAppServerRuntime', () => {
         return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const processing = [];
-    provider.onProcessing((_chatId, value) => processing.push(value));
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -3414,7 +4904,6 @@ describe('CodexAppServerRuntime', () => {
     }));
 
     expect(provider.isRunning('thread-1')).toBe(true);
-    expect(processing).toContain(true);
     expect(fake.startTurn).toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread-1',
       input: [{ type: 'text', text: 'Do not dispatch after terminal replay', text_elements: [] }],
@@ -3423,8 +4912,9 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
-  it('settles goal-turn waiters immediately when sessions terminate', async () => {
-    for (const termination of ['finish', 'abort', 'exit']) {
+  it.each(['finish', 'abort', 'exit'])(
+    'settles goal-turn waiters immediately when sessions terminate via %s',
+    async (termination) => {
       let setCalled;
       const ready = new Promise((resolve) => { setCalled = resolve; });
       const fake = new FakeClient({
@@ -3434,13 +4924,13 @@ describe('CodexAppServerRuntime', () => {
           return { goal: makeGoal(threadId, params.objective) };
         },
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
-      const emitted = [];
-      provider.onMessages((_chatId, messages) => emitted.push(...messages));
+      const provider = createRuntime({ createClient: () => fake });
+      const published = collectOperation();
       const running = provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         codexGoalCommand: { kind: 'set', objective: `Wait for ${termination}` },
         nativePath: null,
+        operation: published.operation,
       }));
       await ready;
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -3455,9 +4945,11 @@ describe('CodexAppServerRuntime', () => {
       await running;
 
       expect(provider.isRunning('thread-1')).toBe(false);
-      expect(emitted.some((message) => String(message.content).includes('timed out waiting'))).toBe(false);
-    }
-  });
+      expect(publishedMessages(published.events).some(
+        (message) => String(message.content).includes('timed out waiting'),
+      )).toBe(false);
+    },
+  );
 
   it('edits a paused goal while preserving its status and token budget', async () => {
     const existing = {
@@ -3470,14 +4962,18 @@ describe('CodexAppServerRuntime', () => {
       getThreadGoal: async () => ({ goal: existing }),
       setThreadGoal: async (threadId, params) => ({ goal: { ...existing, threadId, ...params } }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal edit Better objective',
       codexGoalCommand: { kind: 'edit', objective: 'Better objective' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
@@ -3497,13 +4993,17 @@ describe('CodexAppServerRuntime', () => {
         goal: { ...current, threadId, objective: params.objective, status: 'budgetLimited' },
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'edit', objective: 'Better objective' },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
@@ -3517,20 +5017,24 @@ describe('CodexAppServerRuntime', () => {
 
   it('shows actionable usage for a bare goal edit', async () => {
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal edit',
       codexGoalCommand: { kind: 'edit', objective: null },
       nativePath: null,
+      operation: published.operation,
     }));
     await finished;
 
-    expect(emitted.at(-1)?.content).toBe('Usage: /goal edit <objective>');
+    expect(publishedMessages(published.events).at(-1)?.content).toBe(
+      'Usage: /goal edit <objective>',
+    );
     expect(fake.getThreadGoal).toHaveBeenCalledTimes(1);
   });
 
@@ -3546,13 +5050,17 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Finish all rounds' },
       nativePath: null,
+      operation: published.operation,
     }));
     fake.emit('notification', {
       method: 'turn/completed',
@@ -3581,7 +5089,7 @@ describe('CodexAppServerRuntime', () => {
     await finished;
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
     expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
@@ -3597,14 +5105,14 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Prioritize the failing test',
       clientMessageId: 'message-steer',
@@ -3622,9 +5130,54 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
-  it('reconciles active input through the delivered payload and native history loader', async () => {
-    const content = 'Preserve active input & literal markup <exactly>';
-    const nativePath = path.join(tmpDir, 'active-input.jsonl');
+  it('strictly steers the current regular turn inside a managed goal', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async (_params, options) => {
+        await options.prepareDelivery();
+        return { turnId: 'goal-turn' };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+    const prepareDelivery = mock(async () => undefined);
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'Prioritize the failing test',
+      clientMessageId: 'message-strict-steer',
+      prepareDelivery,
+    })).resolves.toEqual({ kind: 'accepted' });
+
+    expect(prepareDelivery).toHaveBeenCalledOnce();
+    expect(fake.steerTurn).toHaveBeenLastCalledWith({
+      threadId: 'thread-1',
+      expectedTurnId: 'goal-turn',
+      clientUserMessageId: 'message-strict-steer',
+      input: [{ type: 'text', text: 'Prioritize the failing test', text_elements: [] }],
+    }, expect.objectContaining({ prepareDelivery }));
+    expect(fake.startTurn).not.toHaveBeenCalled();
+  });
+
+  it('reconciles goal control through the delivered payload and native history loader', async () => {
+    const content = 'Preserve goal control & literal markup <exactly>';
+    const nativePath = path.join(tmpDir, 'goal-control.jsonl');
     let fake;
     fake = new FakeClient({
       getThreadGoal: async () => ({ goal: null }),
@@ -3645,36 +5198,28 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: () => loadCodexChatMessages(nativePath),
-      getRetainedHistoryMessages: () => [],
-    });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: content,
       clientMessageId: 'message-steer',
       nativePath,
-    }), async () => {
-      await pendingInputs.register('chat-1', content, {
-        clientRequestId: 'request-steer',
-        clientMessageId: 'message-steer',
-        createdAt: '2026-06-01T00:00:00.000Z',
-      });
+    }), async (handoff) => {
+      handoff.validate();
+      handoff.commit();
     })).resolves.toBe(true);
 
-    expect(pendingInputs.listForChat('chat-1')).toHaveLength(1);
+    // The goal-control steer delivers its text to the running goal client and
+    // the client persists it to native history.
     expect(await loadCodexChatMessages(nativePath)).toMatchObject([
       { type: 'user-message', content },
     ]);
-    await pendingInputs.reconcileNativeHistory('chat-1');
-    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
   });
 
   it('routes a running-chat queue submission into the active goal client', async () => {
@@ -3694,7 +5239,7 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -3704,7 +5249,7 @@ describe('CodexAppServerRuntime', () => {
       tmpDir,
       {
         runAgentTurn: async () => { throw new Error('must use active delivery'); },
-        submitActiveInput: (_chatId, command, options, beforeDelivery) => provider.submitActiveInput(makeRequest({
+        submitGoalControl: (_chatId, command, options, beforeDelivery) => provider.submitGoalControl(makeRequest({
           ...options,
           agentSessionId: 'thread-1',
           command,
@@ -3712,15 +5257,15 @@ describe('CodexAppServerRuntime', () => {
         }), beforeDelivery),
         abortSession: async () => false,
         isChatRunning: () => provider.isRunning('thread-1'),
-        waitUntilTurnAbortable: async () => true,
       },
       {
-        register: async () => { registered = true; },
-        discard: () => true,
-        markFailed: () => true,
-      },
-      {
-        appendMessages: async () => ({ generationId: 'generation-1', messages: [] }),
+        hasMatchingInput: async () => false,
+        admitInput: async () => {
+          registered = true;
+          return { inserted: true };
+        },
+        admitQueuedInput: () => ({ inserted: true }),
+        discardPreparedInput: () => {},
       },
       () => ({
         model: 'gpt-5.4-codex',
@@ -3730,9 +5275,11 @@ describe('CodexAppServerRuntime', () => {
         ampAgentMode: 'default',
       }),
       () => true,
+      new InMemoryChatExecutionControlRepository('server-instance-test'),
+      availableQueueOptions(),
     );
 
-    const result = await queue.deliverActiveInput('chat-1', 'Steer from the queue', {
+    const result = await queue.deliverGoalControlInput('chat-1', 'Steer from the queue', {
       clientRequestId: 'request-queue',
       clientMessageId: 'message-queue',
       turnId: 'turn-queue',
@@ -3760,18 +5307,20 @@ describe('CodexAppServerRuntime', () => {
       },
       setThreadGoalStatus: async () => { throw new Error('goal status unavailable'); },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    const markUnconfirmed = mock(() => true);
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
-    const queue = createActiveGoalQueue(provider, { kind: 'pause' }, markUnconfirmed);
+    const published = collectOperation('chat-1', 'run-goal-failure');
+    const queue = createActiveGoalQueue(
+      provider,
+      { kind: 'pause' },
+      published.operation,
+    );
 
-    await expect(queue.deliverActiveInput('chat-1', '/goal pause', {
+    await expect(queue.deliverGoalControlInput('chat-1', '/goal pause', {
       clientRequestId: 'request-goal-failure',
       clientMessageId: 'message-goal-failure',
       turnId: 'turn-goal-failure',
@@ -3781,8 +5330,9 @@ describe('CodexAppServerRuntime', () => {
       cause: expect.objectContaining({ message: 'goal status unavailable' }),
     });
 
-    expect(markUnconfirmed).toHaveBeenCalledWith('chat-1', 'request-goal-failure');
-    expect(emitted.at(-1)?.content).toBe('Codex error: goal status unavailable');
+    expect(publishedMessages(published.events).at(-1)?.content).toBe(
+      'Codex error: goal status unavailable',
+    );
   });
 
   it('reports accepted active goal cancellation through the queue delivery contract', async () => {
@@ -3803,8 +5353,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, 'Long-running work', 'active') };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const markUnconfirmed = mock(() => true);
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -3814,9 +5363,9 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
-    const queue = createActiveGoalQueue(provider, { kind: 'resume' }, markUnconfirmed);
+    const queue = createActiveGoalQueue(provider, { kind: 'resume' });
 
-    const delivery = queue.deliverActiveInput('chat-1', '/goal resume', {
+    const delivery = queue.deliverGoalControlInput('chat-1', '/goal resume', {
       clientRequestId: 'request-goal-cancelled',
       clientMessageId: 'message-goal-cancelled',
       turnId: 'turn-goal-cancelled',
@@ -3830,10 +5379,9 @@ describe('CodexAppServerRuntime', () => {
       retryable: false,
       cause: expect.any(Error),
     });
-    expect(markUnconfirmed).toHaveBeenCalledWith('chat-1', 'request-goal-cancelled');
   });
 
-  it('declines active input without accepting its user row after the Codex session ends', async () => {
+  it('declines goal control without accepting its user row after the Codex session ends', async () => {
     const nativePath = path.join(tmpDir, 'ended-before-acceptance.jsonl');
     const fake = new FakeClient({
       startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
@@ -3842,9 +5390,12 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
@@ -3852,7 +5403,7 @@ describe('CodexAppServerRuntime', () => {
     await finished;
     let accepted = false;
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'too late',
       nativePath: null,
@@ -3864,11 +5415,11 @@ describe('CodexAppServerRuntime', () => {
 
   it('keeps compact and other unmanaged turns on the persisted queue path', async () => {
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.compact(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
     let accepted = false;
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'queue after compact',
       nativePath: null,
@@ -3893,14 +5444,14 @@ describe('CodexAppServerRuntime', () => {
       steerTurn: async () => { throw new Error('no active turn to steer'); },
       startTurn: async () => ({ turn: makeTurn({ id: 'priority-turn', status: 'inProgress' }) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Take this next',
       nativePath: null,
@@ -3940,14 +5491,14 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('active turn already in progress');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Do this exactly once',
       nativePath: null,
@@ -3980,14 +5531,14 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Steer across rollover',
       nativePath: null,
@@ -4025,14 +5576,14 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Deliver across the boundary',
       nativePath: null,
@@ -4075,14 +5626,14 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Deliver to the continuation',
       nativePath: null,
@@ -4132,7 +5683,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal };
       },
     });
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: () => fake,
       capacityRetryDelaysMs: [25],
       capacityRetryDelay: controlledDelay.wait,
@@ -4143,7 +5694,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Do not drop this input',
       nativePath: null,
@@ -4194,7 +5745,7 @@ describe('CodexAppServerRuntime', () => {
           return { turnId: expectedTurnId };
         },
       });
-      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const provider = createRuntime({ createClient: () => fake });
       await provider.runTurn(makeRequest({
         agentSessionId: 'thread-1',
         codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4202,11 +5753,15 @@ describe('CodexAppServerRuntime', () => {
       }));
       let accepted = false;
 
-      const delivery = provider.submitActiveInput(makeRequest({
+      const delivery = provider.submitGoalControl(makeRequest({
         agentSessionId: 'thread-1',
         command: `Deliver after ${turnKind}`,
         nativePath: null,
-      }), async () => { accepted = true; });
+      }), async (handoff) => {
+        accepted = true;
+        handoff.validate();
+        handoff.commit();
+      });
       await nonSteerableRejected;
       expect(accepted).toBe(true);
       fake.emit('notification', {
@@ -4246,14 +5801,14 @@ describe('CodexAppServerRuntime', () => {
       },
       startTurn: async () => ({ turn: makeTurn({ id: 'user-turn', status: 'inProgress' }) }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Start after the boundary',
       nativePath: null,
@@ -4290,14 +5845,14 @@ describe('CodexAppServerRuntime', () => {
         return { turnId: expectedTurnId };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Steer the fresh turn',
       nativePath: null,
@@ -4307,7 +5862,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
-  it('declines active delivery before acceptance when a terminal finish is pending', async () => {
+  it('keeps the predecessor publisher when persistence fails with a terminal finish pending', async () => {
     let fake;
     fake = new FakeClient({
       getThreadGoal: async () => ({ goal: null }),
@@ -4319,17 +5874,24 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
+    const predecessor = collectOperation('chat-1', 'turn-a');
+    const successor = collectOperation('chat-1', 'turn-b');
+    const failed = predecessor.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
+      operation: predecessor.operation,
     }));
 
-    const first = provider.submitActiveInput(makeRequest({
+    const first = provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'First input',
       nativePath: null,
+      operation: successor.operation,
     }), async () => {
       fake.emit('notification', {
         method: 'error',
@@ -4340,10 +5902,16 @@ describe('CodexAppServerRuntime', () => {
           error: { message: 'terminal failure', codexErrorInfo: null, additionalDetails: null },
         },
       });
+      throw new Error('registration failed');
     });
-    await expect(first).rejects.toThrow('terminal failure');
+    await expect(first).rejects.toThrow('registration failed');
+    await expect(failed).resolves.toMatchObject({
+      runId: 'turn-a',
+      error: { message: 'terminal failure' },
+    });
+    expect(terminalEvents(successor.events)).toEqual([]);
     let accepted = false;
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Must fall back',
       nativePath: null,
@@ -4369,15 +5937,19 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Long-running work', status),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal pause',
       codexGoalCommand: { kind: 'pause' },
@@ -4392,7 +5964,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps the current turn alive when an active goal is cleared before its boundary', async () => {
@@ -4408,15 +5980,19 @@ describe('CodexAppServerRuntime', () => {
       },
       clearThreadGoal: async () => ({ cleared: true }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Clear safely' },
       nativePath: null,
+      operation: published.operation,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },
@@ -4434,7 +6010,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes a paused active goal immediately between automatic turns', async () => {
@@ -4452,7 +6028,7 @@ describe('CodexAppServerRuntime', () => {
         goal: makeGoal(threadId, 'Long-running work', status),
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4463,7 +6039,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal pause',
       codexGoalCommand: { kind: 'pause' },
@@ -4471,7 +6047,7 @@ describe('CodexAppServerRuntime', () => {
     }))).resolves.toBe(true);
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes a no-op clear immediately between automatic turns', async () => {
@@ -4487,9 +6063,7 @@ describe('CodexAppServerRuntime', () => {
       },
       clearThreadGoal: async () => ({ cleared: false }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -4500,16 +6074,20 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
 
-    await expect(provider.submitActiveInput(makeRequest({
+    const controlPublished = collectOperation('chat-1', 'run-clear');
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },
       nativePath: null,
+      operation: controlPublished.operation,
     }))).resolves.toBe(true);
 
-    expect(emitted.at(-1)?.content).toBe('No Codex goal was set.');
+    expect(publishedMessages(controlPublished.events).at(-1)?.content).toBe(
+      'No Codex goal was set.',
+    );
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('materializes durable goal attachments before setting the goal and preserves them at terminal status', async () => {
@@ -4530,10 +6108,14 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
     await provider.startSession(makeRequest({
       codexGoalCommand: { kind: 'set', objective: 'Inspect attachments' },
+      operation: published.operation,
       images: [
         { name: 'screen.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' },
         { name: 'notes.pdf', mimeType: 'application/pdf', data: 'data:application/pdf;base64,ZmlsZQ==' },
@@ -4564,6 +6146,319 @@ describe('CodexAppServerRuntime', () => {
     await Promise.all(referencedPaths.map((filePath) => fs.access(filePath)));
   });
 
+  it('does not grant cleanup ownership through forged goal file references', async () => {
+    let currentGoal = null;
+    let ownedDir;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async () => ({ goal: currentGoal }),
+      setThreadGoal: async (threadId, params) => {
+        currentGoal = makeGoal(threadId, params.objective, params.status);
+        ownedDir ??= path.dirname(params.objective.match(/- \[File #1\]: (.+)/)[1]);
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: `goal-turn-${fake.setThreadGoal.mock.calls.length}`, status: 'inProgress' }) },
+        }));
+        return { goal: currentGoal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Inspect video' },
+      images: [{ name: 'clip.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,dmlkZW8=' }],
+      nativePath: null,
+    }));
+    const unownedDir = path.join(tmpDir, 'attachments', '123e4567-e89b-42d3-a456-426614174000');
+    await fs.mkdir(unownedDir);
+
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'edit', objective: `- [File #1]: ${unownedDir}/file-1.mp4` },
+      nativePath: null,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(fs.access(ownedDir)).rejects.toThrow();
+    await expect(fs.access(unownedDir)).resolves.toBeNull();
+  });
+
+  it('cleans server-owned goal files after a runtime restart', async () => {
+    let outputDir;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      setThreadGoal: async (threadId, params) => {
+        outputDir = path.dirname(params.objective.match(/- \[File #1\]: (.+)/)[1]);
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const original = createRuntime({ createClient: () => fake });
+    await original.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Inspect video' },
+      images: [{ name: 'clip.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,dmlkZW8=' }],
+      nativePath: null,
+    }));
+    await original.shutdown();
+
+    const restored = createRuntime({ createClient: () => new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+    }) });
+    await restored.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'clear' },
+      nativePath: null,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(fs.access(outputDir)).rejects.toThrow();
+  });
+
+  it('retains a new goal draft when set commits before its response is lost', async () => {
+    let currentGoal = null;
+    let filePath;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async () => ({ goal: currentGoal }),
+      setThreadGoal: async (threadId, params) => {
+        currentGoal = makeGoal(threadId, params.objective);
+        filePath = params.objective.match(/- \[File #1\]: (.+)/)[1];
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        throw new Error('response lost');
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Inspect video' },
+      images: [{ name: 'clip.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,dmlkZW8=' }],
+      nativePath: null,
+    }));
+
+    await expect(fs.access(filePath)).resolves.toBeNull();
+  });
+
+  it('retains an edited goal draft when its response is lost', async () => {
+    let currentGoal = null;
+    let filePath;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async () => ({ goal: currentGoal }),
+      setThreadGoal: async (threadId, params) => {
+        currentGoal = makeGoal(threadId, params.objective, params.status);
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: `goal-turn-${fake.setThreadGoal.mock.calls.length}`, status: 'inProgress' }) },
+        }));
+        if (fake.setThreadGoal.mock.calls.length === 2) {
+          filePath = params.objective.match(/- \[File #1\]: (.+)/)[1];
+          throw new Error('edit response lost');
+        }
+        return { goal: currentGoal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1', codexGoalCommand: { kind: 'set', objective: 'Initial goal' }, nativePath: null,
+    }));
+
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'edit', objective: 'Inspect video' },
+      images: [{ name: 'clip.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,dmlkZW8=' }],
+      nativePath: null,
+    }));
+
+    await expect(fs.access(filePath)).resolves.toBeNull();
+  });
+
+  it('retains a replacement draft when replacement commits before its response is lost', async () => {
+    let currentGoal = null;
+    let filePath;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async () => ({ goal: currentGoal }),
+      clearThreadGoal: async () => { currentGoal = null; return { cleared: true }; },
+      setThreadGoal: async (threadId, params) => {
+        const call = fake.setThreadGoal.mock.calls.length;
+        if (call === 3) throw new Error('rollback response lost');
+        currentGoal = makeGoal(threadId, params.objective, params.status);
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: `goal-turn-${call}`, status: 'inProgress' }) },
+        }));
+        if (call === 2) {
+          filePath = params.objective.match(/- \[File #1\]: (.+)/)[1];
+          throw new Error('replacement response lost');
+        }
+        return { goal: currentGoal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1', codexGoalCommand: { kind: 'set', objective: 'Initial goal' }, nativePath: null,
+    }));
+
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'replace', objective: 'Inspect video' },
+      images: [{ name: 'clip.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,dmlkZW8=' }],
+      nativePath: null,
+    }));
+
+    await expect(fs.access(filePath)).resolves.toBeNull();
+  });
+
+  it('preserves an externally selected goal when a failed mutation reconciles to a third objective', async () => {
+    const external = await materializeGoalDraft(tmpDir, 'thread-1', 'External goal', [
+      { name: 'external.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,ZXh0ZXJuYWw=' },
+    ]);
+    let attemptedDir;
+    let goalReadCount = 0;
+    const fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async (threadId) => ({
+        goal: goalReadCount++ === 0 ? null : makeGoal(threadId, external.objective),
+      }),
+      setThreadGoal: async (_threadId, params) => {
+        attemptedDir = path.dirname(params.objective.match(/- \[File #1\]: (.+)/)[1]);
+        throw new Error('mutation response lost');
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Attempted goal' },
+      images: [{ name: 'attempt.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,YXR0ZW1wdA==' }],
+      nativePath: null,
+    }));
+
+    await expect(fs.access(attemptedDir)).rejects.toThrow();
+    await expect(fs.access(external.outputDir)).resolves.toBeNull();
+  });
+
+  it('serializes goal cleanup before materializing the next edited goal', async () => {
+    let currentGoal = null;
+    let fake;
+    let releaseCleanup;
+    let signalCleanupStarted;
+    const cleanupStarted = new Promise((resolve) => { signalCleanupStarted = resolve; });
+    const cleanupGate = new Promise((resolve) => { releaseCleanup = resolve; });
+    let cleanupCount = 0;
+    const referencedFiles = [];
+    const delayedCleanup = mock(async (...args) => {
+      cleanupCount += 1;
+      if (cleanupCount === 2) {
+        signalCleanupStarted();
+        await cleanupGate;
+      }
+      await cleanupOwnedGoalAttachments(...args);
+    });
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async () => ({ goal: currentGoal }),
+      setThreadGoal: async (threadId, params) => {
+        currentGoal = makeGoal(threadId, params.objective, params.status);
+        const reference = params.objective.match(/- \[File #1\]: (.+)/)?.[1];
+        if (reference) referencedFiles.push(reference);
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: `goal-turn-${fake.setThreadGoal.mock.calls.length}`, status: 'inProgress' }) },
+        }));
+        return { goal: currentGoal };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      cleanupOwnedGoalAttachments: delayedCleanup,
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1', codexGoalCommand: { kind: 'set', objective: 'Initial goal' }, nativePath: null,
+    }));
+
+    const firstEdit = provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'edit', objective: 'First edit' },
+      images: [{ name: 'first.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,Zmlyc3Q=' }],
+      nativePath: null,
+    }));
+    await cleanupStarted;
+    const secondEdit = provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'edit', objective: 'Second edit' },
+      images: [{ name: 'second.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,c2Vjb25k' }],
+      nativePath: null,
+    }));
+    await Promise.resolve();
+
+    expect(fake.setThreadGoal).toHaveBeenCalledTimes(2);
+    releaseCleanup();
+    await Promise.all([firstEdit, secondEdit]);
+
+    expect(fake.setThreadGoal).toHaveBeenCalledTimes(3);
+    await expect(fs.access(referencedFiles[0])).rejects.toThrow();
+    await expect(fs.access(referencedFiles[1])).resolves.toBeNull();
+  });
+
+  it('ignores a delayed explicit-clear notification after a new attached goal commits', async () => {
+    let currentGoal = null;
+    let replacementFile;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async () => ({ goal: currentGoal }),
+      clearThreadGoal: async () => {
+        currentGoal = null;
+        return { cleared: true };
+      },
+      setThreadGoal: async (threadId, params) => {
+        currentGoal = makeGoal(threadId, params.objective, params.status);
+        replacementFile = params.objective.match(/- \[File #1\]: (.+)/)?.[1] ?? replacementFile;
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: `goal-turn-${fake.setThreadGoal.mock.calls.length}`, status: 'inProgress' }) },
+        }));
+        return { goal: currentGoal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1', codexGoalCommand: { kind: 'set', objective: 'Initial goal' }, nativePath: null,
+    }));
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1', codexGoalCommand: { kind: 'clear' }, nativePath: null,
+    }));
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Replacement goal' },
+      images: [{ name: 'replacement.mp4', mimeType: 'video/mp4', data: 'data:video/mp4;base64,cmVwbGFjZW1lbnQ=' }],
+      nativePath: null,
+    }));
+
+    fake.emit('notification', {
+      method: 'thread/goal/cleared',
+      params: { threadId: 'thread-1' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(fs.access(replacementFile)).resolves.toBeNull();
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
   it('stores oversized goal objectives in a durable Codex attachment file', async () => {
     const nativePath = path.join(tmpDir, 'large-goal.jsonl');
     const largeObjective = 'x'.repeat(4_001);
@@ -4583,7 +6478,7 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.startSession(makeRequest({
       command: largeObjective,
@@ -4608,7 +6503,7 @@ describe('CodexAppServerRuntime', () => {
         throw new Error('goal set rejected');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -4627,7 +6522,7 @@ describe('CodexAppServerRuntime', () => {
       getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing goal', 'blocked') }),
       clearThreadGoal: async () => { throw new Error('goal clear rejected'); },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
@@ -4643,6 +6538,11 @@ describe('CodexAppServerRuntime', () => {
   it('loads history from native Codex JSONL, including raw tool calls', async () => {
     const nativePath = path.join(tmpDir, 'history-thread.jsonl');
     await writeJsonl(nativePath, [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-21T09:59:59.000Z',
+        payload: { id: 'thread-1', history_mode: 'legacy' },
+      },
       {
         type: 'event_msg',
         timestamp: '2026-02-21T10:00:00.000Z',
@@ -4674,7 +6574,7 @@ describe('CodexAppServerRuntime', () => {
       },
     ]);
     const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const messages = await provider.loadMessages({
       provider: 'codex',
@@ -4693,6 +6593,113 @@ describe('CodexAppServerRuntime', () => {
     expect(messages[3].content).toBe('Loaded from JSONL');
   });
 
+  it('loads paginated history through canonical turn shells and item pages', async () => {
+    const nativePath = path.join(tmpDir, 'paginated-thread.jsonl');
+    await writeJsonl(nativePath, [{
+      type: 'session_meta',
+      timestamp: '2026-07-20T00:00:00.000Z',
+      payload: { id: 'thread-1', history_mode: 'paginated', history_base: null },
+    }, {
+      type: 'response_item',
+      timestamp: '2026-07-20T00:00:01.000Z',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'raw duplicate' }] },
+    }]);
+    const fake = new FakeClient({
+      listThreadTurns: async () => ({
+        data: [makeTurn({ items: [], itemsView: 'notLoaded' })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+      listThreadItems: async () => ({
+        data: [
+          {
+            turnId: 'turn-1',
+            item: { type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: 'canonical prompt' }] },
+          },
+          {
+            turnId: 'turn-1',
+            item: { type: 'agentMessage', id: 'assistant-1', text: 'canonical answer', phase: null, memoryCitation: null },
+          },
+        ],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
+    const provider = createRuntime({ createClient: () => fake });
+
+    const messages = await provider.loadMessages({
+      provider: 'codex',
+      agentSessionId: 'thread-1',
+      nativePath,
+      projectPath: '/repo',
+    });
+
+    expect(messages.map((message) => message.content)).toEqual([
+      'canonical prompt',
+      'canonical answer',
+    ]);
+    expect(messages.some((message) => message.content === 'raw duplicate')).toBe(false);
+    expect(fake.listThreadTurns).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      sortDirection: 'asc',
+      itemsView: 'notLoaded',
+    }));
+    expect(fake.listThreadItems).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      turnId: null,
+      sortDirection: 'asc',
+    }));
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads inherited paginated history through the leaf thread', async () => {
+    const nativePath = path.join(tmpDir, 'inherited-paginated-thread.jsonl');
+    await writeJsonl(nativePath, [{
+      type: 'session_meta',
+      timestamp: '2026-07-20T00:00:00.000Z',
+      payload: {
+        id: 'thread-1',
+        history_mode: 'paginated',
+        history_base: { thread_id: 'thread-0', end_ordinal_exclusive: 1, end_byte_offset: 10 },
+      },
+    }]);
+    const fake = new FakeClient({
+      listThreadTurns: async () => ({
+        data: [makeTurn({ id: 'turn-inherited', items: [], itemsView: 'notLoaded' })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+      listThreadItems: async () => ({
+        data: [{
+          turnId: 'turn-inherited',
+          item: {
+            type: 'agentMessage',
+            id: 'assistant-inherited',
+            text: 'inherited answer',
+            phase: null,
+            memoryCitation: null,
+          },
+        }],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
+    const provider = createRuntime({ createClient: () => fake });
+
+    await expect(provider.loadMessages({
+      provider: 'codex',
+      agentSessionId: 'thread-1',
+      nativePath,
+      projectPath: '/repo',
+    })).resolves.toMatchObject([{ type: 'assistant-message', content: 'inherited answer' }]);
+    expect(fake.listThreadTurns).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+    }));
+    expect(fake.listThreadItems).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+    }));
+  });
+
   it('resolves missing native paths through thread/list without loading threads', async () => {
     const nativePath = path.join(tmpDir, 'resolved-thread.jsonl');
     await fs.writeFile(nativePath, '{}\n');
@@ -4703,7 +6710,7 @@ describe('CodexAppServerRuntime', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const resolvedPath = await provider.resolveNativePath({
       provider: 'codex',
@@ -4716,13 +6723,128 @@ describe('CodexAppServerRuntime', () => {
     expect(resolvedPath).toBe(nativePath);
   });
 
+  it('shares cached discovery misses until an explicit transcript load requests a refresh', async () => {
+    const nativePath = path.join(tmpDir, 'later-resolved-thread.jsonl');
+    await fs.writeFile(nativePath, '{}\n');
+    let discoverable = false;
+    const fake = new FakeClient({
+      listThreads: async () => ({
+        data: discoverable ? [makeThread({ id: 'thread-1', path: nativePath })] : [],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const session = {
+      provider: 'codex',
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      projectPath: '/repo',
+    };
+
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    discoverable = true;
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    expect(fake.listThreads).toHaveBeenCalledTimes(1);
+
+    provider.requestNativePathDiscoveryRefresh('thread-1');
+    await expect(provider.resolveNativePath(session)).resolves.toBe(nativePath);
+
+    expect(fake.listThreads).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses one discovery snapshot for sequential missing-session resolutions', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+
+    for (let index = 0; index < 100; index += 1) {
+      await expect(provider.resolveNativePath({
+        provider: 'codex',
+        agentSessionId: `missing-thread-${index}`,
+        nativePath: null,
+        projectPath: '/repo',
+      })).resolves.toBeNull();
+    }
+
+    expect(fake.listThreads).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds repeated native path discovery refresh requests', async () => {
+    let now = 0;
+    const fake = new FakeClient();
+    const provider = createRuntime({
+      createClient: () => fake,
+      nativePathDiscoveryRefresh: {
+        sessionIntervalMs: 30_000,
+        globalIntervalMs: 1_000,
+        now: () => now,
+      },
+    });
+    const session = {
+      provider: 'codex',
+      agentSessionId: 'missing-thread',
+      nativePath: null,
+      projectPath: '/repo',
+    };
+
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    provider.requestNativePathDiscoveryRefresh('missing-thread');
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    provider.requestNativePathDiscoveryRefresh('missing-thread');
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    expect(fake.listThreads).toHaveBeenCalledTimes(2);
+
+    now = 30_000;
+    provider.requestNativePathDiscoveryRefresh('missing-thread');
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    expect(fake.listThreads).toHaveBeenCalledTimes(3);
+
+    now = 0;
+    provider.requestNativePathDiscoveryRefresh('missing-thread');
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    expect(fake.listThreads).toHaveBeenCalledTimes(4);
+  });
+
+  it('lets another session request a refresh after the global minimum interval', async () => {
+    let now = 0;
+    const fake = new FakeClient();
+    const provider = createRuntime({
+      createClient: () => fake,
+      nativePathDiscoveryRefresh: {
+        sessionIntervalMs: 30_000,
+        globalIntervalMs: 1_000,
+        now: () => now,
+      },
+    });
+    const session = {
+      provider: 'codex',
+      agentSessionId: 'missing-thread',
+      nativePath: null,
+      projectPath: '/repo',
+    };
+
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    provider.requestNativePathDiscoveryRefresh('background-thread');
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+
+    now = 100;
+    provider.requestNativePathDiscoveryRefresh('user-thread');
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    expect(fake.listThreads).toHaveBeenCalledTimes(2);
+
+    now = 1_000;
+    provider.requestNativePathDiscoveryRefresh('user-thread');
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    expect(fake.listThreads).toHaveBeenCalledTimes(3);
+  });
+
   it('surfaces thread/list failures during native path reconciliation', async () => {
     const fake = new FakeClient({
       listThreads: async () => {
         throw new Error('app-server unavailable');
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     await expect(provider.resolveNativePath({
       provider: 'codex',
@@ -4731,39 +6853,6 @@ describe('CodexAppServerRuntime', () => {
       projectPath: '/repo',
     })).rejects.toThrow('app-server unavailable');
 
-  });
-
-  it('loads previews from native Codex JSONL', async () => {
-    const nativePath = path.join(tmpDir, 'preview-thread.jsonl');
-    await writeJsonl(nativePath, [
-      {
-        type: 'event_msg',
-        timestamp: '2026-02-21T10:00:00.000Z',
-        payload: { type: 'user_message', message: 'Preview prompt' },
-      },
-      {
-        type: 'response_item',
-        timestamp: '2026-02-21T10:00:01.000Z',
-        payload: {
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: 'Preview answer' }],
-        },
-      },
-    ]);
-    const fake = new FakeClient();
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-
-    const preview = await provider.getPreview({
-      provider: 'codex',
-      agentSessionId: 'thread-1',
-      nativePath,
-      projectPath: '/repo',
-    });
-
-    expect(preview.firstMessage).toBe('Preview prompt');
-    expect(preview.lastMessage).toBe('Preview answer');
-    expect(fake.connect).toHaveBeenCalledTimes(0);
   });
 
   it('uses an operation-scoped client with effective env and config for forks', async () => {
@@ -4776,7 +6865,7 @@ describe('CodexAppServerRuntime', () => {
       unsubscribeThread: async () => ({ status: 'unsubscribed' }),
     });
     const clientOptions = [];
-    const provider = new CodexAppServerRuntime({
+    const provider = createRuntime({
       createClient: (options) => {
         clientOptions.push(options);
         return operationClient;
@@ -4812,6 +6901,37 @@ describe('CodexAppServerRuntime', () => {
     expect(operationClient.shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it('passes the fork turn boundary to thread/fork for a point fork', async () => {
+    const nativePath = path.join(tmpDir, 'point-forked-thread.jsonl');
+    const forkParams = [];
+    const operationClient = new FakeClient({
+      forkThread: async (params) => {
+        forkParams.push(params);
+        await fs.writeFile(nativePath, '{}\n');
+        return { thread: makeThread({ id: 'point-forked-thread', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+      },
+      unsubscribeThread: async () => ({ status: 'unsubscribed' }),
+    });
+    const provider = createRuntime({
+      createClient: () => operationClient,
+      materializationTimeoutMs: 20,
+    });
+
+    const forked = await provider.forkSession({
+      sourceSession: {
+        provider: 'codex',
+        agentSessionId: 'thread-1',
+        nativePath: null,
+        model: 'gpt-5.4-codex',
+        projectPath: '/repo',
+      },
+      lastTurnId: 'turn-1',
+    });
+
+    expect(forked).toEqual({ agentSessionId: 'point-forked-thread', nativePath });
+    expect(forkParams[0]).toMatchObject({ threadId: 'thread-1', lastTurnId: 'turn-1' });
+  });
+
   it('clears thread/list native path caches when a session finishes', async () => {
     const runningNativePath = path.join(tmpDir, 'finished-thread.jsonl');
     const firstResolvedPath = path.join(tmpDir, 'first-resolved-thread.jsonl');
@@ -4831,15 +6951,18 @@ describe('CodexAppServerRuntime', () => {
         backwardsCursor: null,
       }),
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
     const session = {
       provider: 'codex',
       agentSessionId: 'thread-1',
       nativePath: null,
       projectPath: '/repo',
     };
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
     const before = await provider.resolveNativePath(session);
     listedPath = secondResolvedPath;
@@ -4872,19 +6995,20 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
     });
     await finished;
 
-    expect(emitted).toEqual([]);
+    expect(publishedMessages(published.events)).toEqual([]);
   });
 
   it('uses live streaming as the source of truth on successful turn completion', async () => {
@@ -4907,23 +7031,160 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    const finished = new Promise((resolve) => provider.onFinished(resolve));
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'item/completed',
       params: { threadId: 'thread-1', turnId: 'turn-1', item: liveItem },
     });
     fake.emit('notification', {
       method: 'turn/completed',
-      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', items: [liveItem], itemsView: 'summary' }),
+      },
     });
     await finished;
 
+    const emitted = publishedMessages(published.events);
     expect(emitted.map((message) => message.content)).toEqual(['Already emitted']);
+    expect(getNativeMessageRevisionSource(emitted[0])).toEqual({
+      entryId: 'turn:turn-1:item:a1',
+      withinSourceOrdinal: 0,
+    });
+  });
+
+  it('uses the terminal agent summary when its item completion notification is absent', async () => {
+    const terminalItem = {
+      type: 'agentMessage',
+      id: 'terminal-agent-message',
+      text: 'Recovered final line',
+      phase: null,
+      memoryCitation: null,
+    };
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
+
+    await provider.runTurn(makeRequest({ operation: published.operation }));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', items: [terminalItem], itemsView: 'summary' }),
+      },
+    });
+    await finished;
+
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
+      'Recovered final line',
+    ]);
+  });
+
+  it('does not append native-only interrupted tools behind live assistant output', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-native-tail.jsonl');
+    const liveCommand = {
+      type: 'commandExecution',
+      id: 'live-command',
+      command: 'printf observed-before-answer',
+      cwd: '/repo',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'observed command output',
+      exitCode: 0,
+      durationMs: 12,
+    };
+    const liveItem = {
+      type: 'agentMessage',
+      id: 'live-assistant',
+      text: 'The live answer is already visible',
+      phase: null,
+      memoryCitation: null,
+    };
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await writeJsonl(nativePath, [
+          {
+            timestamp: '2026-08-15T00:00:00.000Z',
+            type: 'response_item',
+            payload: {
+              type: 'function_call',
+              name: 'shell',
+              call_id: 'native-only-command',
+              arguments: JSON.stringify({ command: ['echo', 'ran-before-the-answer'] }),
+            },
+          },
+        ]);
+        return {
+          turn: makeTurn({
+            id: 'turn-1',
+            status: 'inProgress',
+            completedAt: null,
+            durationMs: null,
+          }),
+        };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'finished',
+    );
+
+    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: { threadId: 'thread-1', turnId: 'turn-1', item: liveCommand },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: { threadId: 'thread-1', turnId: 'turn-1', item: liveItem },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({
+          id: 'turn-1',
+          status: 'interrupted',
+          items: [liveCommand, liveItem],
+          itemsView: 'summary',
+        }),
+      },
+    });
+    await finished;
+
+    const emitted = publishedMessages(published.events);
+    expect(emitted.map((message) => {
+      if (message.type === 'bash-tool-use') {
+        return [message.type, message.toolId, message.command];
+      }
+      if (message.type === 'tool-result') {
+        return [message.type, message.toolId, message.content];
+      }
+      return [message.type, message.content];
+    })).toEqual([
+      ['bash-tool-use', 'live-command', 'printf observed-before-answer'],
+      ['tool-result', 'live-command', { raw: 'observed command output' }],
+      ['assistant-message', 'The live answer is already visible'],
+    ]);
   });
 
   it('retries retryable utility app-server overload responses while resolving native paths', async () => {
@@ -4943,7 +7204,7 @@ describe('CodexAppServerRuntime', () => {
         };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const provider = createRuntime({ createClient: () => fake });
 
     const resolvedPath = await provider.resolveNativePath({
       provider: 'codex',
@@ -4965,23 +7226,1449 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    await provider.startSession(makeRequest());
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
 
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
     fake.emit('serverRequest', {
       id: 7,
       method: 'item/commandExecution/requestApproval',
       params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-1', command: 'ls' },
     });
 
-    const request = emitted.find((message) => message instanceof PermissionRequestMessage);
-    expect(request).toBeTruthy();
-    await provider.resolvePermission(request.permissionRequestId, { allow: true });
+    const request = permissionEvents(published.events).find(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    expect(request).toBeDefined();
+    await request.decision.respond({ allow: true });
 
     expect(fake.respond).toHaveBeenCalledWith(7, { decision: 'accept' });
-    expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(true);
+    expect(permissionEvents(published.events)).toHaveLength(1);
+  });
+
+  it('keeps write-stdin reviews distinct when they share a parent command', async () => {
+    const nativePath = path.join(tmpDir, 'stdin-approval-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+
+    for (const [requestId, approvalId] of [['stdin-request-a', 'stdin-approval-a'], ['stdin-request-b', 'stdin-approval-b']]) {
+      fake.emit('serverRequest', {
+        id: requestId,
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'parent-command',
+          approvalId,
+          kind: 'writeStdin',
+        },
+      });
+    }
+
+    const requests = permissionEvents(published.events).filter(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    expect(requests.map((event) => event.lifecycle.requestedTool.toolId)).toEqual([
+      'stdin-approval-a',
+      'stdin-approval-b',
+    ]);
+    await requests[0].decision.respond({ allow: true, alwaysAllow: true });
+    await requests[1].decision.respond({ allow: false });
+    expect(fake.respond.mock.calls).toEqual([
+      ['stdin-request-a', { decision: 'accept' }],
+      ['stdin-request-b', { decision: 'cancel' }],
+    ]);
+  });
+
+  it('expires only the matching client request after external resolution', async () => {
+    const paths = [
+      path.join(tmpDir, 'approval-client-a.jsonl'),
+      path.join(tmpDir, 'approval-client-b.jsonl'),
+    ];
+    const clients = paths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: `thread-${index + 1}`, path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${index + 1}`, status: 'inProgress' }) };
+      },
+    }));
+    let clientIndex = 0;
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const operations = [collectOperation('chat-1', 'run-a'), collectOperation('chat-2', 'run-b')];
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: operations[0].operation }));
+    await provider.startSession(makeRequest({ chatId: 'chat-2', operation: operations[1].operation }));
+
+    clients.forEach((client, index) => client.emit('serverRequest', {
+      id: 'shared-request-id',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: `thread-${index + 1}`,
+        turnId: `turn-${index + 1}`,
+        itemId: `command-${index + 1}`,
+        command: 'printf ready',
+      },
+    }));
+    clients[0].emit('notification', {
+      method: 'serverRequest/resolved',
+      params: { threadId: 'thread-1', requestId: 'shared-request-id' },
+    });
+
+    expect(permissionEvents(operations[0].events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested', 'expired']);
+    expect(permissionEvents(operations[1].events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+    const first = permissionEvents(operations[0].events)[0];
+    await expect(first.decision.respond({ allow: true }))
+      .rejects.toThrow('no longer pending');
+    const second = permissionEvents(operations[1].events)[0];
+    await second.decision.respond({ allow: true });
+    expect(clients[0].respond).not.toHaveBeenCalled();
+    expect(clients[1].respond).toHaveBeenCalledWith('shared-request-id', { decision: 'accept' });
+  });
+
+  it('ignores external resolution after a local response', async () => {
+    const nativePath = path.join(tmpDir, 'resolved-after-response.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.emit('serverRequest', {
+      id: 81,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'command-1', command: 'ls' },
+    });
+    const request = permissionEvents(published.events)[0];
+    await request.decision.respond({ allow: true });
+    fake.emit('notification', {
+      method: 'serverRequest/resolved',
+      params: { threadId: 'thread-1', requestId: 81 },
+    });
+
+    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+    expect(fake.respond).toHaveBeenCalledTimes(1);
+  });
+
+  it('[TLV5-PERM.09-CODEX-UNIT-01] denies and logs an approval without a concrete turn route', async () => {
+    const nativePath = path.join(tmpDir, 'unowned-approval-thread.jsonl');
+    const logger = {
+      debug: mock(() => undefined),
+      info: mock(() => undefined),
+      warn: mock(() => undefined),
+      error: mock(() => undefined),
+    };
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake, logger });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+
+    fake.emit('serverRequest', {
+      id: 91,
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'missing-turn',
+        itemId: 'sensitive-item-id',
+        command: 'sensitive-command-must-not-be-logged',
+      },
+    });
+
+    expect(permissionEvents(published.events)).toEqual([]);
+    expect(fake.respond).toHaveBeenCalledWith(91, { decision: 'decline' });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0]).toEqual([
+      'Dropped an unowned Codex approval request',
+      {
+        threadId: 'thread-1',
+        nativeTurnId: 'missing-turn',
+        method: 'item/commandExecution/requestApproval',
+      },
+    ]);
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('sensitive-item-id');
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('sensitive-command-must-not-be-logged');
+  });
+
+  it('cancels approvals for one native turn through its captured turn operation', async () => {
+    const nativePath = path.join(tmpDir, 'approval-routing-thread.jsonl');
+    let goal = null;
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal }),
+      setThreadGoal: async (threadId, params) => {
+        goal = makeGoal(threadId, params.objective, 'active');
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }),
+          },
+        }));
+        return { goal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+    await provider.startSession(makeRequest({
+      command: 'Keep working',
+      codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+      operation: first.operation,
+    }));
+
+    fake.emit('serverRequest', {
+      id: 71,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'goal-turn', itemId: 'cmd-a', command: 'command-a' },
+    });
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      codexGoalCommand: { kind: 'status' },
+      operation: second.operation,
+    }));
+    fake.emit('serverRequest', {
+      id: 72,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'goal-turn', itemId: 'cmd-b', command: 'command-b' },
+    });
+
+    goal = makeGoal('thread-1', 'Keep working', 'complete');
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'goal-turn', goal },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+    });
+    await Promise.resolve();
+
+    const requests = permissionEvents(first.events).filter(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    const requestByCommand = new Map(requests.map((event) => [
+      event.lifecycle.requestedTool.command,
+      event.lifecycle.permissionOccurrenceId,
+    ]));
+    expect(requestByCommand.has('command-a')).toBe(true);
+    expect(requestByCommand.has('command-b')).toBe(true);
+    expect(permissionEvents(second.events)).toEqual([]);
+
+    const cancelledOccurrenceIds = permissionEvents(first.events)
+      .filter((event) => event.lifecycle.kind === 'cancelled')
+      .map((event) => event.lifecycle.permissionOccurrenceId);
+    expect(cancelledOccurrenceIds).toEqual([
+      requestByCommand.get('command-a'),
+      requestByCommand.get('command-b'),
+    ]);
+    expect(fake.respond.mock.calls).toEqual([
+      [71, { decision: 'decline' }],
+      [72, { decision: 'decline' }],
+    ]);
+  });
+
+  it('binds each native turn once across later operations and delayed starts', async () => {
+    const nativePath = path.join(tmpDir, 'immutable-turn-routes.jsonl');
+    let goal = null;
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal }),
+      setThreadGoal: async (threadId, params) => {
+        goal = makeGoal(threadId, params.objective, 'active');
+        await fs.writeFile(nativePath, '{}\n');
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'turn-a', status: 'inProgress' }) },
+        });
+        return { goal };
+      },
+      setThreadGoalStatus: async (threadId) => {
+        goal = makeGoal(threadId, 'Keep working', 'active');
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'turn-b', status: 'inProgress' }) },
+        });
+        return { goal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    await provider.startSession(makeRequest({
+      codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+      operation: first.operation,
+    }));
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      codexGoalCommand: { kind: 'resume' },
+      operation: second.operation,
+    }));
+
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a', status: 'inProgress' }) },
+    });
+    for (const [turnId, itemId, text] of [
+      ['turn-a', 'item-a', 'late from turn A'],
+      ['turn-b', 'item-b', 'current from turn B'],
+    ]) {
+      fake.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-1',
+          turnId,
+          item: { type: 'agentMessage', id: itemId, text, phase: null, memoryCitation: null },
+        },
+      });
+    }
+    for (const [id, turnId, command] of [
+      [81, 'turn-a', 'approval-a'],
+      [82, 'turn-b', 'approval-b'],
+    ]) {
+      fake.emit('serverRequest', {
+        id,
+        method: 'item/commandExecution/requestApproval',
+        params: { threadId: 'thread-1', turnId, itemId: `cmd-${id}`, command },
+      });
+    }
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
+    });
+
+    expect(publishedMessages(first.events).map((message) => message.content)).toContain(
+      'late from turn A',
+    );
+    expect(publishedMessages(second.events).map((message) => message.content)).toContain(
+      'current from turn B',
+    );
+    expect(permissionEvents(first.events)).toEqual([]);
+    expect(fake.respond).toHaveBeenCalledWith(81, { decision: 'decline' });
+    expect(permissionEvents(second.events).map(
+      (event) => event.lifecycle.requestedTool?.command,
+    )).toContain('approval-b');
+    expect(terminalEvents(first.events)).toContainEqual(
+      expect.objectContaining({ runId: 'run-a', outcome: 'finished' }),
+    );
+    expect(terminalEvents(second.events)).toEqual([]);
+    expect(provider.captureSteerTarget('thread-1')).toBeTruthy();
+  });
+
+  it('[TLV5-L07.06-CODEX-UNIT-01] retains named turn routes through terminal publication until source retirement', async () => {
+    const nativePath = path.join(tmpDir, 'post-terminal-route.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-a', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation('chat-1', 'run-a');
+    await provider.startSession(makeRequest({
+      operation: published.operation,
+    }));
+
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-a',
+        item: {
+          type: 'subAgentActivity',
+          id: 'subagent-completed-worker',
+          kind: 'completed',
+          agentThreadId: 'worker-thread',
+          agentPath: '/root/worker',
+        },
+      },
+    });
+
+    expect(publishedMessages(published.events)).toContainEqual(expect.objectContaining({
+      action: 'agent_status',
+      details: expect.objectContaining({
+        target: '/root/worker',
+        agentStates: { '/root/worker': { status: 'completed' } },
+      }),
+    }));
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    fake.emit('serverRequest', {
+      id: 'late-stdin-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-a',
+        itemId: 'parent-command',
+        approvalId: 'late-stdin-approval',
+        kind: 'writeStdin',
+      },
+    });
+    expect(fake.respond).toHaveBeenCalledWith('late-stdin-review', { decision: 'cancel' });
+    expect(permissionEvents(published.events)).toEqual([]);
+
+    fake.emit('exit', 0);
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-a',
+        item: { type: 'agentMessage', id: 'retired-item', text: 'after retirement', phase: null, memoryCitation: null },
+      },
+    });
+    expect(publishedMessages(published.events).some(
+      (message) => message.content === 'after retirement',
+    )).toBe(false);
+  });
+
+  it('reactivates a retained source for the next turn without replacing old turn routes', async () => {
+    const nativePath = path.join(tmpDir, 'reactivated-source.jsonl');
+    let turnNumber = 0;
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        turnNumber += 1;
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
+      },
+    });
+    const createClient = mock(() => fake);
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }));
+
+    for (const [turnId, itemId, text] of [
+      ['turn-1', 'late-old-item', 'late old output'],
+      ['turn-2', 'current-item', 'current output'],
+    ]) {
+      fake.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-1',
+          turnId,
+          item: { type: 'agentMessage', id: itemId, text, phase: null, memoryCitation: null },
+        },
+      });
+    }
+
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(fake.connect).toHaveBeenCalledTimes(1);
+    expect(fake.resumeThread).not.toHaveBeenCalled();
+    expect(fake.startTurn).toHaveBeenCalledTimes(2);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(publishedMessages(first.events).map((message) => message.content))
+      .toContain('late old output');
+    expect(publishedMessages(second.events).map((message) => message.content))
+      .toContain('current output');
+
+    fake.emit('serverRequest', {
+      id: 'old-turn-approval',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'old-command',
+        command: 'printf old',
+      },
+    });
+    expect(fake.respond).toHaveBeenCalledWith('old-turn-approval', { decision: 'decline' });
+    expect(permissionEvents(second.events)).toEqual([]);
+  });
+
+  it.each([
+    'turn', 'settings update', 'goal',
+  ])('replaces a retained source after explicit %s effort before Default', async (explicitSource) => {
+    const nativePath = path.join(tmpDir, `default-after-explicit-${explicitSource}.jsonl`);
+    let turnNumber = 0;
+    let firstClient;
+    firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: 'thread-1',
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        turnNumber += 1;
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
+      },
+      updateThreadSettings: async (params) => {
+        queueMicrotask(() => emitThreadSettings(firstClient, {
+          model: params.model,
+          effort: params.effort,
+          approvalPolicy: params.approvalPolicy,
+          approvalsReviewer: params.approvalsReviewer,
+          sandboxPolicy: params.sandboxPolicy,
+        }));
+        return {};
+      },
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => firstClient.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective, 'active') };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => {
+        expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+        return {
+          thread: makeThread({
+            id: 'thread-1',
+            path: nativePath,
+            model: 'gpt-5.4-codex',
+            reasoningEffort: 'medium',
+          }),
+          model: 'gpt-5.4-codex',
+          modelProvider: 'openai',
+          serviceTier: null,
+          cwd: '/repo',
+          reasoningEffort: 'medium',
+        };
+      },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-3', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+
+    if (explicitSource === 'turn') {
+      await provider.runTurn(makeRequest({
+        agentSessionId: started.agentSessionId,
+        nativePath,
+        thinkingMode: 'high',
+      }));
+      firstClient.emit('notification', {
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
+      });
+    } else if (explicitSource === 'settings update') {
+      await provider.updateSessionSettings(started.agentSessionId, {
+        model: 'gpt-5.4-codex',
+        permissionMode: 'default',
+        thinkingMode: 'high',
+      });
+    } else {
+      await provider.runTurn(makeRequest({
+        agentSessionId: started.agentSessionId,
+        nativePath,
+        thinkingMode: 'high',
+        codexGoalCommand: { kind: 'set', objective: 'Use explicit effort' },
+      }));
+      await expect(provider.submitGoalControl(makeRequest({
+        agentSessionId: started.agentSessionId,
+        nativePath,
+        thinkingMode: 'none',
+        codexGoalCommand: { kind: 'status' },
+      }))).resolves.toBe(true);
+      firstClient.emit('notification', {
+        method: 'thread/goal/updated',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'goal-turn',
+          goal: makeGoal('thread-1', 'Use explicit effort', 'complete'),
+        },
+      });
+      firstClient.emit('notification', {
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+      });
+    }
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      thinkingMode: 'none',
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    if (explicitSource === 'turn') {
+      expect(firstClient.startTurn).toHaveBeenCalledTimes(2);
+      expect(firstClient.startTurn.mock.calls[1][0]).toMatchObject({ effort: 'high' });
+    } else {
+      expect(firstClient.updateThreadSettings).toHaveBeenCalledTimes(1);
+      expect(firstClient.updateThreadSettings.mock.calls[0][0]).toMatchObject({ effort: 'high' });
+    }
+    if (explicitSource === 'goal') expect(firstClient.setThreadGoal).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('replaces a retained source after explicit goal-control effort before Default', async () => {
+    let firstClient;
+    firstClient = new FakeClient({
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => firstClient.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async () => { throw new Error('no active turn to steer'); },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'priority-turn', status: 'inProgress' }),
+      }),
+    });
+    const replacementClient = new FakeClient({
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'default-turn', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      thinkingMode: 'none',
+      codexGoalCommand: { kind: 'set', objective: 'Continue automatically' },
+    }));
+
+    await expect(provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      command: 'Prioritize this input',
+      thinkingMode: 'high',
+    }))).resolves.toBe(true);
+    expect(firstClient.startTurn).toHaveBeenCalledWith(expect.objectContaining({ effort: 'high' }));
+
+    firstClient.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'priority-turn',
+        goal: makeGoal('thread-1', 'Continue automatically', 'complete'),
+      },
+    });
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'priority-turn' }) },
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      thinkingMode: 'none',
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('waits for interrupt acknowledgement before reusing the writer without awaiting its terminal event', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-writer.jsonl');
+    let turnNumber = 0;
+    let firstAttachmentPath;
+    const interruptAcknowledgement = createDeferred();
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async (params) => {
+        if (turnNumber === 0) {
+          firstAttachmentPath = params.input.find((item) => item.type === 'localImage')?.path;
+        }
+        turnNumber += 1;
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
+      },
+      interruptTurn: async () => {
+        await interruptAcknowledgement.promise;
+        return {};
+      },
+    });
+    const createClient = mock(() => fake);
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({
+      operation: first.operation,
+      images: [{
+        name: 'first.png',
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,Zmlyc3Q=',
+      }],
+    }));
+    expect(firstAttachmentPath).toBeDefined();
+    await expect(fs.access(firstAttachmentPath)).resolves.toBeNull();
+    const aborting = provider.abort(started.agentSessionId);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }));
+    await Bun.sleep(0);
+
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    expect(fake.resumeThread).not.toHaveBeenCalled();
+
+    interruptAcknowledgement.resolve();
+    await expect(aborting).resolves.toBe(true);
+    await resumed;
+
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).toHaveBeenCalledTimes(2);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+    await waitForMissingPath(path.dirname(firstAttachmentPath));
+
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', status: 'interrupted' }),
+      },
+    });
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('rechecks Default reuse after an explicit settings update during interruption', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-writer-settings-race.jsonl');
+    const interruptAcknowledgement = createDeferred();
+    const settingsResponse = createDeferred();
+    let firstClient;
+    firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+      interruptTurn: async () => {
+        await interruptAcknowledgement.promise;
+        return {};
+      },
+      updateThreadSettings: async (params) => {
+        queueMicrotask(() => emitThreadSettings(firstClient, { effort: params.effort }));
+        await settingsResponse.promise;
+        return {};
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => {
+        expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+        return {
+          thread: makeThread({ id: 'thread-1', path: nativePath }),
+          model: 'gpt-5.4-codex',
+          modelProvider: 'openai',
+          serviceTier: null,
+          cwd: '/repo',
+        };
+      },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-2', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+
+    const aborting = provider.abort(started.agentSessionId);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      thinkingMode: 'none',
+    }));
+    await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
+    const settingsUpdate = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    await waitForCondition(() => firstClient.updateThreadSettings.mock.calls.length === 1);
+    await Bun.sleep(0);
+
+    interruptAcknowledgement.resolve();
+    await expect(aborting).resolves.toBe(true);
+    await Bun.sleep(0);
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(firstClient.shutdown).not.toHaveBeenCalled();
+    expect(firstClient.startTurn).toHaveBeenCalledTimes(1);
+
+    settingsResponse.resolve();
+    await settingsUpdate;
+
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', status: 'interrupted' }),
+      },
+    });
+    await resumed;
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('does not wait on a source superseded during interrupt acknowledgement', async () => {
+    const firstPath = path.join(tmpDir, 'superseded-during-interrupt-first.jsonl');
+    const supersedingPath = path.join(tmpDir, 'superseded-during-interrupt-second.jsonl');
+    const interruptAcknowledgement = createDeferred();
+    let firstClient;
+    firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: firstPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(firstPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+      interruptTurn: async () => {
+        await interruptAcknowledgement.promise;
+        return {};
+      },
+      updateThreadSettings: async (params) => {
+        queueMicrotask(() => emitThreadSettings(firstClient, { effort: params.effort }));
+        return {};
+      },
+    });
+    const supersedingClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-2', path: supersedingPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(supersedingPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-2', status: 'inProgress' }) };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: firstPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-3', status: 'inProgress' }),
+      }),
+    });
+    const clients = [firstClient, supersedingClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const started = await provider.startSession(makeRequest({ thinkingMode: 'none' }));
+
+    const aborting = provider.abort(started.agentSessionId);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath: firstPath,
+      thinkingMode: 'none',
+    }));
+    await waitForCondition(() => firstClient.interruptTurn.mock.calls.length === 1);
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    await provider.startSession(makeRequest({
+      chatId: 'chat-1',
+      command: 'Supersede the interrupted source',
+      thinkingMode: 'none',
+    }));
+
+    interruptAcknowledgement.resolve();
+    await expect(aborting).resolves.toBe(true);
+    await resumed;
+
+    expect(createClient).toHaveBeenCalledTimes(3);
+    expect(firstClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(supersedingClient.shutdown).toHaveBeenCalledTimes(1);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn.mock.calls[0][0]).not.toHaveProperty('effort');
+  });
+
+  it('rejects genuinely concurrent same-thread use without opening a second writer', async () => {
+    const nativePath = path.join(tmpDir, 'concurrent-writer.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const createClient = mock(() => fake);
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    await expect(provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }))).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(fake.resumeThread).not.toHaveBeenCalled();
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('retires an incompatible retained writer before resuming it in a new process', async () => {
+    const nativePath = path.join(tmpDir, 'replaced-writer.jsonl');
+    const oldClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => {
+        expect(oldClient.shutdown).toHaveBeenCalledTimes(1);
+        return {
+          thread: makeThread({ id: 'thread-1', path: nativePath }),
+          model: 'gpt-5.4-codex',
+          modelProvider: 'custom-openai',
+          serviceTier: null,
+          cwd: '/repo',
+        };
+      },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-2', status: 'inProgress' }),
+      }),
+    });
+    const clients = [oldClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    oldClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      codexConfig: { config: { model_provider: 'custom-openai' } },
+      operation: second.operation,
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires an idle retained source and resumes the thread in a fresh process', async () => {
+    const nativePath = path.join(tmpDir, 'idle-retired-source.jsonl');
+    const firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => ({ turn: makeTurn({ id: 'turn-2', status: 'inProgress' }) }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({
+      createClient,
+      retainedSourceIdlePurge: { intervalMs: 5, maxIdleMs: 0 },
+    });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    provider.startPurgeTimer();
+    await waitForCondition(() => firstClient.shutdown.mock.calls.length > 0);
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reclaims a retained goal source whose loop ended while its goal stayed active', async () => {
+    const nativePath = path.join(tmpDir, 'idle-goal-source.jsonl');
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn-1', status: 'inProgress', completedAt: null, durationMs: null }),
+          },
+        }));
+        return { goal: makeGoal(threadId, params.objective ?? 'Long-running work', 'active') };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      retainedSourceIdlePurge: { intervalMs: 5, maxIdleMs: 0 },
+    });
+    const first = collectOperation('chat-1', 'run-a');
+    await provider.startSession(makeRequest({
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      operation: first.operation,
+    }));
+
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn-1', status: 'interrupted' }) },
+    });
+
+    provider.startPurgeTimer();
+    await waitForCondition(() => fake.shutdown.mock.calls.length > 0);
+  });
+
+  it('keeps an active session writer out of the idle retained-source sweep', async () => {
+    const nativePath = path.join(tmpDir, 'active-source-sweep.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      retainedSourceIdlePurge: { intervalMs: 5, maxIdleMs: 0 },
+    });
+    const first = collectOperation('chat-1', 'run-a');
+    await provider.startSession(makeRequest({ operation: first.operation }));
+
+    provider.startPurgeTimer();
+    await Bun.sleep(30);
+
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+  });
+
+  it('marks a quiescent terminal retained source as reclaimable', () => {
+    expect(isRetainedSourceInUse(usageSession(), new Map())).toBe(false);
+  });
+
+  it('keeps a retained source in use while it is the active writer for its thread', () => {
+    const session = usageSession();
+    expect(isRetainedSourceInUse(session, new Map([['thread-1', session]]))).toBe(true);
+  });
+
+  it.each([
+    ['its status is still active', { status: 'interrupting' }],
+    ['an interrupt acknowledgement is pending', { interruptAcknowledgement: Promise.resolve(true) }],
+    ['a settings confirmation is pending', {
+      pendingThreadSettings: { target: {}, timeout: null, resolve() {}, reject() {} },
+    }],
+    ['a turn start waiter is registered', (session) => {
+      session.turnStartWaiters.add({ resolve() {}, reject() {} });
+    }],
+    ['a delivery is reserved', { activeDeliveryReservations: 1 }],
+    ['a goal continuation is active', { managesGoalLifecycle: true, activeTurnId: 'turn-goal' }],
+  ])('keeps a retained source in use while %s', (_label, mutate) => {
+    const session = usageSession();
+    if (typeof mutate === 'function') mutate(session);
+    else Object.assign(session, mutate);
+    expect(isRetainedSourceInUse(session, new Map())).toBe(true);
+  });
+
+  it('retires the previous same-chat source only after replacement activation succeeds', async () => {
+    const nativePaths = [
+      path.join(tmpDir, 'superseded-source-a.jsonl'),
+      path.join(tmpDir, 'superseded-source-b.jsonl'),
+    ];
+    const clients = nativePaths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: `thread-${index + 1}`, path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${index + 1}`, status: 'inProgress' }) };
+      },
+    }));
+    let clientIndex = 0;
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: first.operation }));
+    clients[0].emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    expect(clients[0].shutdown).not.toHaveBeenCalled();
+
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: second.operation }));
+    expect(clients[0].shutdown).toHaveBeenCalledTimes(1);
+    clients[0].emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'retired-item', text: 'retired output', phase: null, memoryCitation: null },
+      },
+    });
+    clients[1].emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-2',
+        turnId: 'turn-2',
+        item: { type: 'agentMessage', id: 'current-item', text: 'current output', phase: null, memoryCitation: null },
+      },
+    });
+    expect(publishedMessages(first.events).some((message) => message.content === 'retired output'))
+      .toBe(false);
+    expect(publishedMessages(second.events).map((message) => message.content)).toContain('current output');
+
+    await provider.shutdown();
+    expect(clients[0].shutdown).toHaveBeenCalledTimes(1);
+    expect(clients[1].shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves a retained source when replacement activation fails', async () => {
+    const oldPath = path.join(tmpDir, 'preserved-source.jsonl');
+    const oldClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: oldPath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(oldPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const failedClient = new FakeClient({
+      startThread: async () => { throw new Error('replacement unavailable'); },
+    });
+    let clientIndex = 0;
+    const clients = [oldClient, failedClient];
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: first.operation }));
+    oldClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await expect(provider.startSession(makeRequest({
+      chatId: 'chat-1',
+      operation: second.operation,
+    }))).rejects.toThrow('replacement unavailable');
+    expect(oldClient.shutdown).not.toHaveBeenCalled();
+    expect(failedClient.shutdown).toHaveBeenCalledTimes(1);
+
+    oldClient.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'late-old-item', text: 'retained after failure', phase: null, memoryCitation: null },
+      },
+    });
+    expect(publishedMessages(first.events).map((message) => message.content))
+      .toContain('retained after failure');
+  });
+
+  it('[TLV5-L07.04-CODEX-UNIT-01] keeps identical native turn ids isolated by client and thread', async () => {
+    const nativePaths = [
+      path.join(tmpDir, 'shared-turn-a.jsonl'),
+      path.join(tmpDir, 'shared-turn-b.jsonl'),
+    ];
+    const clients = nativePaths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: `thread-${index}`, path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'shared-turn', status: 'inProgress' }) };
+      },
+    }));
+    let clientIndex = 0;
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const first = collectOperation('chat-a', 'run-a');
+    const second = collectOperation('chat-b', 'run-b');
+    await provider.startSession(makeRequest({
+      chatId: 'chat-a',
+      operation: first.operation,
+    }));
+    await provider.startSession(makeRequest({
+      chatId: 'chat-b',
+      operation: second.operation,
+    }));
+
+    for (const [index, text] of ['from chat A', 'from chat B'].entries()) {
+      clients[index].emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: `thread-${index}`,
+          turnId: 'shared-turn',
+          item: { type: 'agentMessage', id: `item-${index}`, text, phase: null, memoryCitation: null },
+        },
+      });
+    }
+
+    expect(publishedMessages(first.events).map((message) => message.content)).toEqual([
+      'from chat A',
+    ]);
+    expect(publishedMessages(second.events).map((message) => message.content)).toEqual([
+      'from chat B',
+    ]);
+  });
+
+  it('keeps a native turn with the run that started it after a later operation takes the session', async () => {
+    const nativePath = path.join(tmpDir, 'turn-route-thread.jsonl');
+    let goal = null;
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal }),
+      setThreadGoal: async (threadId, params) => {
+        goal = makeGoal(threadId, params.objective, 'active');
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }),
+          },
+        }));
+        return { goal };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+    await provider.startSession(makeRequest({
+      command: 'Keep working',
+      codexGoalCommand: { kind: 'set', objective: 'Keep working' },
+      operation: first.operation,
+    }));
+    await provider.submitGoalControl(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      codexGoalCommand: { kind: 'status' },
+      operation: second.operation,
+    }));
+
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn',
+        item: { type: 'agentMessage', id: 'goal-turn-item', text: 'still working', phase: null, memoryCitation: null },
+      },
+    });
+
+    expect(publishedMessages(first.events).map((message) => message.content)).toContain(
+      'still working',
+    );
+    expect(publishedMessages(second.events).some(
+      (message) => typeof message.content === 'string' && message.content.includes('Keep working'),
+    )).toBe(true);
+  });
+
+  it('[TLV5-L07.09-CODEX-UNIT-01] publishes compaction through the operation that requested it', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation('chat-1', 'run-compact');
+
+    await provider.compact(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      operation: published.operation,
+    }));
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'compaction-note', text: 'compacted', phase: null, memoryCitation: null },
+      },
+    });
+
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
+      'compacted',
+    ]);
   });
 
   it('auto-approves app-server approvals in manual bypass without emitting a permission row', async () => {
@@ -4993,11 +8680,13 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
 
-    await provider.startSession(makeRequest({ permissionMode: 'manualBypass' }));
+    await provider.startSession(makeRequest({
+      permissionMode: 'manualBypass',
+      operation: published.operation,
+    }));
     fake.emit('serverRequest', {
       id: 9,
       method: 'item/commandExecution/requestApproval',
@@ -5005,33 +8694,396 @@ describe('CodexAppServerRuntime', () => {
     });
 
     expect(fake.respond).toHaveBeenCalledWith(9, { decision: 'accept' });
-    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
-    expect(emitted.some((message) => message instanceof PermissionResolvedMessage)).toBe(false);
+    expect(permissionEvents(published.events)).toEqual([]);
   });
 
-  it('applies live manual bypass updates to app-server approvals', async () => {
-    const nativePath = path.join(tmpDir, 'manual-bypass-updated-thread.jsonl');
-    const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
-      startTurn: async () => {
-        await fs.writeFile(nativePath, '{}\n');
-        return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
+  it('confirms combined settings when notification precedes the RPC response', async () => {
+    const { fake, provider, published, started } = await startSettingsSession();
+    const response = createDeferred();
+    fake.updateThreadSettings.mockImplementation(async () => {
+      emitThreadSettings(fake, {
+        model: 'gpt-5.4-mini',
+        effort: 'high',
+        approvalPolicy: 'on-request',
+      });
+      await response.promise;
+      return {};
+    });
+    let settled = false;
+
+    const update = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    }).finally(() => { settled = true; });
+    await Promise.resolve();
+
+    expect(fake.updateThreadSettings).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    expect(settled).toBe(false);
+    response.resolve();
+    await update;
 
-    const started = await provider.startSession(makeRequest());
-    provider.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
-    fake.emit('serverRequest', {
-      id: 10,
-      method: 'item/commandExecution/requestApproval',
-      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-1', command: 'ls' },
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    });
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        goal: makeGoal('thread-1', 'Continue automatically'),
+      },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn', status: 'inProgress' }) },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'automatic-turn',
+        item: {
+          type: 'agentMessage',
+          id: 'automatic-result',
+          text: 'continued with confirmed settings',
+          phase: null,
+          memoryCitation: null,
+        },
+      },
     });
 
-    expect(fake.respond).toHaveBeenCalledWith(10, { decision: 'accept' });
-    expect(emitted.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(publishedMessages(published.events).at(-1)?.content)
+      .toBe('continued with confirmed settings');
+  });
+
+  it('updates a retained idle source while preserving provider-default effort', async () => {
+    const { fake, provider, started } = await startSettingsSession({}, { thinkingMode: 'none' });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(provider.hasSource('thread-1')).toBe(true);
+    fake.updateThreadSettings.mockImplementation(async () => {
+      emitThreadSettings(fake, {
+        approvalPolicy: 'on-request',
+        effort: 'medium',
+      });
+      return {};
+    });
+
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'none',
+    });
+
+    expect(fake.updateThreadSettings).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-codex',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    });
+  });
+
+  it('confirms requested effort before starting an automatic goal turn', async () => {
+    const nativePath = path.join(tmpDir, 'goal-effort-thread.jsonl');
+    const calls = [];
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: 'thread-1',
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandbox: { type: 'workspaceWrite' },
+        reasoningEffort: 'medium',
+      }),
+      updateThreadSettings: async () => {
+        calls.push('settings');
+        emitThreadSettings(fake, { effort: 'high' });
+        return {};
+      },
+      setThreadGoal: async (threadId, params) => {
+        calls.push('goal');
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }),
+          },
+        }));
+        return { goal: makeGoal(threadId, params.objective, 'active') };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+
+    await provider.startSession(makeRequest({
+      thinkingMode: 'high',
+      codexGoalCommand: { kind: 'set', objective: 'Continue automatically' },
+    }));
+
+    expect(calls).toEqual(['settings', 'goal']);
+    expect(fake.updateThreadSettings).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      effort: 'high',
+    }));
+  });
+
+  it('ignores wrong-source, wrong-thread, and stale settings snapshots', async () => {
+    const paths = [
+      path.join(tmpDir, 'settings-source-a.jsonl'),
+      path.join(tmpDir, 'settings-source-b.jsonl'),
+    ];
+    const clients = paths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: `thread-${index + 1}`,
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${index + 1}`, status: 'inProgress' }) };
+      },
+    }));
+    let nextClient = 0;
+    const provider = createRuntime({
+      createClient: () => clients[nextClient++],
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest({ chatId: 'chat-1' }));
+    await provider.startSession(makeRequest({ chatId: 'chat-2' }));
+    let settled = false;
+    const update = provider.updateSessionSettings('thread-1', {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    }).finally(() => { settled = true; });
+    await Promise.resolve();
+
+    emitThreadSettings(clients[1], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-1');
+    emitThreadSettings(clients[0], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-2');
+    emitThreadSettings(clients[0]);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], {
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'untrusted',
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], {
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: { reject: { sandbox: true } },
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], {
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalsReviewer: 'auto_review',
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], { model: 'gpt-5.4-mini', effort: 'high' });
+    await update;
+    expect(settled).toBe(true);
+  });
+
+  it('serializes settings updates for one app-server source', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    const first = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    const second = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'low',
+    });
+    await Promise.resolve();
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+
+    emitThreadSettings(fake, { model: 'gpt-5.4-mini', effort: 'high' });
+    await first;
+    await Promise.resolve();
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(2);
+
+    emitThreadSettings(fake, {
+      model: 'gpt-5.4-mini',
+      effort: 'low',
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    });
+    await second;
+  });
+
+  it('changes approval behavior only after settings confirmation', async () => {
+    const { fake, provider, published, started } = await startSettingsSession();
+    const update = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'medium',
+    });
+    await Promise.resolve();
+
+    fake.emit('serverRequest', {
+      id: 'before-confirmation',
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-before', command: 'ls' },
+    });
+    expect(fake.respond).not.toHaveBeenCalled();
+    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+
+    emitThreadSettings(fake, { approvalPolicy: 'on-request' });
+    await update;
+    fake.emit('serverRequest', {
+      id: 'after-confirmation',
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-after', command: 'pwd' },
+    });
+
+    expect(fake.respond).toHaveBeenCalledWith('after-confirmation', { decision: 'accept' });
+    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+  });
+
+  it('rejects RPC failure and source exit while settings are pending', async () => {
+    const first = await startSettingsSession();
+    first.fake.updateThreadSettings.mockRejectedValue(new Error('settings rejected'));
+    await expect(first.provider.updateSessionSettings(first.started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    })).rejects.toThrow('settings rejected');
+
+    const secondPath = path.join(tmpDir, 'settings-exit-thread.jsonl');
+    const secondFake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-exit', path: secondPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(secondPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-exit', status: 'inProgress' }) };
+      },
+      updateThreadSettings: () => new Promise(() => {}),
+    });
+    const secondProvider = createRuntime({
+      createClient: () => secondFake,
+      materializationTimeoutMs: 20,
+    });
+    await secondProvider.startSession(makeRequest({ chatId: 'chat-exit' }));
+    const pending = secondProvider.updateSessionSettings('thread-exit', {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    await Promise.resolve();
+    secondFake.emit('exit', 0);
+
+    await expect(pending).rejects.toThrow('retired before settings were confirmed');
+    expect(secondProvider.isRunning('thread-exit')).toBe(false);
+  });
+
+  it('fences automatic turns after an ambiguous settings timeout', async () => {
+    const { fake, provider, published, started } = await startSettingsSession({
+      settingsUpdateTimeoutMs: 5,
+    });
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        goal: makeGoal('thread-1', 'Continue automatically'),
+      },
+    });
+
+    await expect(provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    })).rejects.toMatchObject({ code: 'TIMEOUT' });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    expect(provider.isRunning('thread-1')).toBe(true);
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'automatic-after-timeout', status: 'inProgress' }),
+      },
+    });
+    await Promise.resolve();
+
+    expect(fake.interruptTurn).toHaveBeenCalledWith('thread-1', 'automatic-after-timeout');
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(failureMessages(published.events)).toContain(
+      'Codex automatic turn blocked after an ambiguous settings update',
+    );
   });
 
   it('does not re-emit the submitted prompt when app-server echoes userMessage items', async () => {
@@ -5043,11 +9095,10 @@ describe('CodexAppServerRuntime', () => {
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
       },
     });
-    const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const emitted = [];
-    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
 
-    await provider.startSession(makeRequest());
+    await provider.startSession(makeRequest({ operation: published.operation }));
     fake.emit('notification', {
       method: 'item/completed',
       params: {
@@ -5065,7 +9116,9 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emitted.map((message) => message.type)).toEqual(['assistant-message']);
-    expect(emitted[0].content).toBe('Hi there');
+    expect(publishedMessages(published.events).map((message) => message.type)).toEqual([
+      'assistant-message',
+    ]);
+    expect(publishedMessages(published.events)[0].content).toBe('Hi there');
   });
 });

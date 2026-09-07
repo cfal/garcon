@@ -4,7 +4,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import type { SharedChatSnapshot } from '../../common/share-types.ts';
+import type { SharedChatOrigin, SharedChatSnapshot } from '../../common/share-types.ts';
+import { isRecord } from '../../common/json.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 
@@ -13,6 +14,17 @@ const logger = createLogger('chats:share-store');
 const SHARE_INDEX_VERSION = 2;
 const SHARE_SNAPSHOT_CACHE_LIMIT = 50;
 const SHARE_SNAPSHOT_CACHE_TTL_MS = 10 * 60 * 1000;
+
+async function repairSharePermissions(
+  targetPath: string,
+  mode: number,
+  description: string,
+): Promise<void> {
+  if (process.platform === 'win32') return;
+  await fs.chmod(targetPath, mode).catch((error: unknown) => {
+    logger.warn(`share-store: failed to repair ${description} permissions:`, (error as Error).message);
+  });
+}
 
 type ShareIndexEntry = Omit<SharedChatSnapshot, 'messages'>;
 
@@ -43,10 +55,6 @@ export interface IShareStore {
 
 function createEmptyIndex(): ShareStoreIndex {
   return { version: SHARE_INDEX_VERSION, shares: {} };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isValidShareToken(token: string): boolean {
@@ -86,12 +94,25 @@ function normalizeIndexEntry(token: string, value: unknown): ShareIndexEntry | n
   return { shareToken, chatId, title, agentId, model, projectPath, sharedAt };
 }
 
+function normalizeOrigin(value: unknown): SharedChatOrigin | undefined {
+  if (!isRecord(value)) return undefined;
+  const transcriptViewId = typeof value.transcriptViewId === 'string'
+    ? value.transcriptViewId
+    : null;
+  const lastOrdinal = typeof value.lastOrdinal === 'number' && Number.isSafeInteger(value.lastOrdinal)
+    ? value.lastOrdinal
+    : null;
+  if (!transcriptViewId || lastOrdinal === null || lastOrdinal < 0) return undefined;
+  return { transcriptViewId, lastOrdinal };
+}
+
 function normalizeSnapshot(token: string, value: unknown): SharedChatSnapshot | null {
   if (!isRecord(value)) return null;
   const entry = normalizeIndexEntry(token, value);
   if (!entry) return null;
   const messages = Array.isArray(value.messages) ? value.messages : [];
-  return { ...entry, messages };
+  const origin = normalizeOrigin(value.origin);
+  return { ...entry, ...(origin ? { origin } : {}), messages };
 }
 
 export class ShareStore implements IShareStore {
@@ -127,23 +148,27 @@ export class ShareStore implements IShareStore {
 
   async init(): Promise<void> {
     if (this.#index) return;
+    await fs.mkdir(this.#sharesDir(), { recursive: true, mode: 0o700 });
+    await repairSharePermissions(this.#sharesDir(), 0o700, 'shares directory');
+    let parsed: unknown;
     try {
       const raw = await fs.readFile(this.#filePath(), 'utf8');
-      const parsed: unknown = JSON.parse(raw);
-      if (isRecord(parsed) && parsed.version === SHARE_INDEX_VERSION && isRecord(parsed.shares)) {
-        this.#index = this.#normalizeIndex(parsed.shares);
-      } else if (isRecord(parsed) && isRecord(parsed.shares)) {
-        this.#index = await this.#migrateLegacyShares(parsed.shares);
-      } else {
-        this.#index = createEmptyIndex();
+      await repairSharePermissions(this.#filePath(), 0o600, 'shared-chats.json');
+      parsed = JSON.parse(raw);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn('share-store: failed to read shared-chats.json:', (error as Error).message);
       }
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        this.#index = createEmptyIndex();
-      } else {
-        logger.warn('share-store: failed to read shared-chats.json:', (err as Error).message);
-        this.#index = createEmptyIndex();
-      }
+      this.#index = createEmptyIndex();
+      this.#rebuildIndex();
+      return;
+    }
+    if (isRecord(parsed) && parsed.version === SHARE_INDEX_VERSION && isRecord(parsed.shares)) {
+      this.#index = this.#normalizeIndex(parsed.shares);
+    } else if (isRecord(parsed) && isRecord(parsed.shares)) {
+      this.#index = await this.#migrateLegacyShares(parsed.shares);
+    } else {
+      this.#index = createEmptyIndex();
     }
     this.#rebuildIndex();
   }
@@ -165,8 +190,8 @@ export class ShareStore implements IShareStore {
       index.shares[snapshot.shareToken] = indexEntryFromSnapshot(snapshot);
       await this.#writeSnapshot(snapshot);
     }
+    await writeJsonFileAtomic(this.#filePath(), index, { mode: 0o600 });
     this.#index = index;
-    await this.#persist();
     return index;
   }
 
@@ -180,11 +205,11 @@ export class ShareStore implements IShareStore {
 
   async #persist(): Promise<void> {
     if (!this.#index) return;
-    await writeJsonFileAtomic(this.#filePath(), this.#index);
+    await writeJsonFileAtomic(this.#filePath(), this.#index, { mode: 0o600 });
   }
 
   async #writeSnapshot(snapshot: SharedChatSnapshot): Promise<void> {
-    await writeJsonFileAtomic(this.#snapshotFilePath(snapshot.shareToken), snapshot);
+    await writeJsonFileAtomic(this.#snapshotFilePath(snapshot.shareToken), snapshot, { mode: 0o600 });
   }
 
   #cacheSnapshot(snapshot: SharedChatSnapshot): SharedChatSnapshot {
@@ -265,7 +290,9 @@ export class ShareStore implements IShareStore {
     this.#snapshotCache.delete(token);
 
     try {
-      const raw = await fs.readFile(this.#snapshotFilePath(token), 'utf8');
+      const snapshotPath = this.#snapshotFilePath(token);
+      const raw = await fs.readFile(snapshotPath, 'utf8');
+      await repairSharePermissions(snapshotPath, 0o600, 'share snapshot');
       const snapshot = normalizeSnapshot(token, JSON.parse(raw));
       return snapshot ? this.#cacheSnapshot(snapshot) : null;
     } catch (error: unknown) {

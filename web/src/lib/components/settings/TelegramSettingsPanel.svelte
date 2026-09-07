@@ -12,6 +12,7 @@
 		testTelegramBotToken,
 	} from '$lib/api/settings.js';
 	import { ApiError } from '$lib/api/client.js';
+	import { errorMessage } from '$lib/utils/error-message.js';
 	import { getRemoteSettings } from '$lib/context';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import SaveIcon from '@lucide/svelte/icons/save';
@@ -74,7 +75,7 @@
 		});
 	}
 
-	function errorMessage(error: unknown): string {
+	function telegramErrorMessage(error: unknown): string {
 		if (error instanceof ApiError) {
 			const message =
 				error.errorCode === 'telegram_token_test_failed'
@@ -86,7 +87,7 @@
 			const code = error.errorCode ? ` (${error.errorCode})` : '';
 			return `${message}${detail}${code}`;
 		}
-		return error instanceof Error ? error.message : m.settings_telegram_request_failed();
+		return errorMessage(error, m.settings_telegram_request_failed());
 	}
 
 	async function handleTokenSave() {
@@ -101,7 +102,7 @@
 			telegramBotToken = '';
 			tokenResult = null;
 		} catch (error) {
-			tokenResult = { ok: false, message: errorMessage(error) };
+			tokenResult = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
 			tokenBusy = false;
 		}
@@ -118,7 +119,7 @@
 				message: m.settings_telegram_token_valid_for({ username: `@${res.bot.username}` }),
 			};
 		} catch (error) {
-			tokenResult = { ok: false, message: errorMessage(error) };
+			tokenResult = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
 			tokenTestBusy = false;
 		}
@@ -135,7 +136,7 @@
 			telegramBotToken = '';
 			tokenResult = { ok: true, message: m.settings_telegram_token_cleared() };
 		} catch (error) {
-			tokenResult = { ok: false, message: errorMessage(error) };
+			tokenResult = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
 			tokenBusy = false;
 		}
@@ -149,7 +150,7 @@
 			const res = await beginTelegramRecipientLink();
 			remoteSettings.applySnapshot(res.settings);
 		} catch (error) {
-			recipientResult = { ok: false, message: errorMessage(error) };
+			recipientResult = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
 			recipientLinkBusy = false;
 		}
@@ -166,7 +167,7 @@
 				? { ok: true, message: m.settings_telegram_recipient_linked() }
 				: { ok: false, message: res.error ?? m.settings_telegram_link_not_found() };
 		} catch (error) {
-			recipientResult = { ok: false, message: errorMessage(error) };
+			recipientResult = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
 			recipientResolveBusy = false;
 		}
@@ -181,7 +182,7 @@
 			remoteSettings.applySnapshot(res.settings);
 			recipientResult = { ok: true, message: m.settings_telegram_recipient_cleared() };
 		} catch (error) {
-			recipientResult = { ok: false, message: errorMessage(error) };
+			recipientResult = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
 			recipientClearBusy = false;
 		}
@@ -197,7 +198,7 @@
 				? { ok: true, message: m.settings_telegram_test_sent() }
 				: { ok: false, message: res.error ?? m.settings_telegram_send_failed() };
 		} catch (error) {
-			testMessageResult = { ok: false, message: errorMessage(error) };
+			testMessageResult = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
 			testMessageBusy = false;
 		}

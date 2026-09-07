@@ -4,15 +4,37 @@ import type {
   ThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
-import type { TranscriptSearchFeatureSettings } from '../../common/settings.js';
+import type {
+  PersistedChatOrderGroup,
+  ReorderChatErrorCode,
+  ReorderChatResponse,
+} from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
+import type {
+  AppIdentityUiSettings,
+  AgentCommandsFeatureSettings,
+  ChatTitleUiSettings,
+  CommitMessageUiSettings,
+  PromptRefinementUiSettings,
+  TranscriptSearchFeatureSettings,
+  AgentSwitchCompactionUiSettings,
+} from '../../common/settings.js';
+import type { HiddenBashCommandPattern } from '../../common/hidden-bash-command-patterns.js';
 
 export interface UiSettings {
   pinnedInsertPosition?: 'top' | 'bottom';
-  chatTitle?: unknown;
-  commitMessage?: unknown;
-  appIdentity?: unknown;
+  hiddenBashCommandPatterns?: HiddenBashCommandPattern[];
+  chatTitle?: ChatTitleUiSettings;
+  agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
+  commitMessage?: CommitMessageUiSettings;
+  promptRefinement?: PromptRefinementUiSettings;
+  appIdentity?: AppIdentityUiSettings;
   [key: string]: unknown;
 }
+
+export type ChatOrderComparatorOverrides = Partial<
+  Record<PersistedChatOrderGroup, ChatOrderIdComparator>
+>;
 
 export type PathSettings = Record<string, unknown>;
 
@@ -59,6 +81,7 @@ export interface ProjectSettings {
 
 export interface FeatureSettings {
   transcriptSearch: TranscriptSearchFeatureSettings;
+  agentCommands: AgentCommandsFeatureSettings;
 }
 
 export interface RecentAgentSetting {
@@ -82,6 +105,21 @@ export interface ExecutionDefaultsSettings {
 
 export type SettingsMutation<T> = () => T | Promise<T>;
 
+// Chat-start records carry startup preferences as unsanitized fields; the
+// store reads only these and ignores the rest of the start command.
+export interface ChatStartupPreferences {
+  agentId?: unknown;
+  projectPath?: unknown;
+  model?: unknown;
+  apiProviderId?: unknown;
+  modelEndpointId?: unknown;
+  modelProtocol?: unknown;
+  permissionMode?: unknown;
+  thinkingMode?: unknown;
+  agentSettings?: unknown;
+  agentSettingsById?: unknown;
+}
+
 export interface SettingsStoreContext {
   readSettings(): ProjectSettings;
   mutate<T>(fn: SettingsMutation<T>): Promise<T>;
@@ -92,9 +130,6 @@ export interface SettingsStoreContext {
 }
 
 export type ReorderErrorCode =
-  | 'ORDER_ITEM_NOT_FOUND'
-  | 'ORDER_CROSS_GROUP'
-  | 'ORDER_POSITION_UNRESOLVED'
   | 'ORDER_INVALID_INPUT';
 
 export interface SuccessfulReorder {
@@ -121,3 +156,17 @@ export interface InvalidWindowReorder extends FailedReorder {
 }
 
 export type WindowReorderValidation = ValidatedWindowReorder | InvalidWindowReorder;
+
+export interface SuccessfulChatReorder {
+  success: true;
+  response: ReorderChatResponse;
+}
+
+export interface FailedChatReorder {
+  success: false;
+  error: string;
+  errorCode: ReorderChatErrorCode;
+  status: number;
+}
+
+export type ChatReorderResult = SuccessfulChatReorder | FailedChatReorder;

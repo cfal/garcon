@@ -14,6 +14,7 @@ import createAgentRoutes from '../agents.js';
 import createApiProviderRoutes from '../api-providers.js';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { CorruptStateFileError } from '../../lib/json-file-store.ts';
 
 describe('agent auth login routes', () => {
   const agents = {
@@ -267,6 +268,24 @@ describe('agent auth login routes', () => {
     expect(response.status).toBe(201);
     expect(apiProviders.create).toHaveBeenCalledWith(input);
     expect(body.id).toBe('custom_one');
+  });
+
+  it('reports corrupt provider state as an opaque server error', async () => {
+    apiProviders.create.mockRejectedValueOnce(new CorruptStateFileError(
+      '/server/config/api-providers.json',
+      '/server/config/api-providers.json.corrupt-test',
+    ));
+    const handler = routes['/api/v1/api-providers'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/api-providers', { method: 'POST' }));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
   });
 
   it('tests API providers without persisting them', async () => {

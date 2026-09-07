@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { getSharedChat } from '$lib/api/shares.js';
+	import { ApiError } from '$lib/api/client.js';
 	import { parseChatMessage } from '$shared/chat-types';
 	import type { ChatMessage } from '$shared/chat-types';
 	import {
@@ -8,12 +9,21 @@
 		AssistantMessage,
 		ThinkingMessage,
 		ErrorMessage,
+		TranscriptNoticeMessage,
+		CliRowMessage,
 		isToolUseMessage,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
+	import CliRow from '$lib/components/chat/rows/CliRow.svelte';
+	import CliPresentationHeader from '$lib/components/chat/rows/CliPresentationHeader.svelte';
+	import CollapsibleBody from '$lib/components/chat/rows/CollapsibleBody.svelte';
+	import TranscriptNoticeRow from '$lib/components/chat/rows/TranscriptNoticeRow.svelte';
+	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
+	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
+	import { cn } from '$lib/utils/cn';
 	import { getAppTitle } from '$lib/context';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -28,13 +38,38 @@
 
 	const appTitle = getAppTitle();
 
-	let messages = $state<ChatMessage[]>([]);
+	interface SharedMessageEntry {
+		index: number;
+		message: ChatMessage;
+	}
+
+	type SharedViewError = 'not-found' | 'load-failed';
+
+	let messages = $state<SharedMessageEntry[]>([]);
 	let title = $state('');
 	let agentId = $state('');
 	let sharedAt = $state('');
 	let isLoading = $state(true);
-	let errorMsg = $state<string | null>(null);
+	let isLoadingEarlier = $state(false);
+	let loadError = $state<SharedViewError | null>(null);
+	let olderPageError = $state(false);
+	let nextBefore = $state<number | null>(null);
+	let totalMessages = $state(0);
+	let snapshotVersion = $state<string | null>(null);
 	let thinkingStates = $state<Record<number, boolean>>({});
+
+	function parseMessages(rawMessages: unknown[], startIndex: number): SharedMessageEntry[] {
+		return rawMessages
+			.map((raw: unknown, offset): SharedMessageEntry | null => {
+				try {
+					const message = parseChatMessage(raw as Record<string, unknown>);
+					return message ? { index: startIndex + offset, message } : null;
+				} catch {
+					return null;
+				}
+			})
+			.filter((entry): entry is SharedMessageEntry => entry !== null);
+	}
 
 	onMount(() => {
 		const mql = window.matchMedia('(prefers-color-scheme: dark)');
@@ -48,37 +83,77 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
-	onMount(async () => {
+	async function loadSharedSnapshot(): Promise<void> {
 		if (!token) {
-			errorMsg = m.shared_view_not_found();
+			loadError = 'not-found';
 			isLoading = false;
 			return;
 		}
 
+		isLoading = true;
+		loadError = null;
 		try {
 			const resp = await getSharedChat(token);
 			const snapshot = resp.snapshot;
 			title = snapshot.title;
 			agentId = snapshot.agentId;
 			sharedAt = snapshot.sharedAt;
-			messages = (snapshot.messages ?? [])
-				.map((raw: unknown) => {
-					try {
-						return parseChatMessage(raw as Record<string, unknown>);
-					} catch {
-						return null;
-					}
-				})
-				.filter((msg): msg is ChatMessage => msg !== null);
-		} catch {
-			errorMsg = m.shared_view_not_found();
-		} finally {
+			messages = parseMessages(snapshot.messages ?? [], resp.page.start);
+			totalMessages = resp.page.totalMessages;
+			nextBefore = resp.page.nextBefore;
+			snapshotVersion = resp.page.snapshotVersion;
+		} catch (error) {
+			loadError = error instanceof ApiError && error.status === 404 ? 'not-found' : 'load-failed';
 			isLoading = false;
-			// Scroll to bottom after messages render so shared links open at the latest message.
-			await tick();
-			window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+			return;
 		}
+		isLoading = false;
+		// Scrolls after rendering so shared links open at the latest message.
+		await tick();
+		window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+	}
+
+	onMount(() => {
+		void loadSharedSnapshot();
 	});
+
+	async function loadEarlier(): Promise<void> {
+		if (nextBefore === null || isLoadingEarlier) return;
+		isLoadingEarlier = true;
+		olderPageError = false;
+		try {
+			const resp = await getSharedChat(token, nextBefore, snapshotVersion);
+			const olderMessages = parseMessages(resp.snapshot.messages ?? [], resp.page.start);
+			if (resp.page.reset || resp.page.snapshotVersion !== snapshotVersion) {
+				const snapshot = resp.snapshot;
+				title = snapshot.title;
+				agentId = snapshot.agentId;
+				sharedAt = snapshot.sharedAt;
+				messages = olderMessages;
+				totalMessages = resp.page.totalMessages;
+				nextBefore = resp.page.nextBefore;
+				snapshotVersion = resp.page.snapshotVersion;
+				await tick();
+				window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+				return;
+			}
+			// Capture the live viewport immediately before prepending. The reader may
+			// scroll while the request is in flight.
+			const previousHeight = document.documentElement.scrollHeight;
+			const previousScrollY = window.scrollY;
+			messages = [...olderMessages, ...messages];
+			nextBefore = resp.page.nextBefore;
+			totalMessages = resp.page.totalMessages;
+			snapshotVersion = resp.page.snapshotVersion;
+			await tick();
+			const addedHeight = document.documentElement.scrollHeight - previousHeight;
+			window.scrollTo({ top: previousScrollY + addedHeight, behavior: 'instant' });
+		} catch {
+			olderPageError = true;
+		} finally {
+			isLoadingEarlier = false;
+		}
+	}
 
 	function formattedSharedDate(): string {
 		if (!sharedAt) return '';
@@ -91,15 +166,8 @@
 		});
 	}
 
-	function toggleThinking(idx: number) {
-		thinkingStates[idx] = !thinkingStates[idx];
-	}
-
-	function isGroupedWith(prev: ChatMessage | null, current: ChatMessage): boolean {
-		if (!prev) return false;
-		const prevCategory = prev instanceof AssistantMessage ? 'assistant' : prev.type;
-		const currentCategory = current instanceof AssistantMessage ? 'assistant' : current.type;
-		return prevCategory === currentCategory;
+	function toggleThinking(messageIndex: number) {
+		thinkingStates[messageIndex] = !thinkingStates[messageIndex];
 	}
 </script>
 
@@ -110,6 +178,7 @@
 	{/if}
 	<!-- Overrides the app-wide overflow:hidden on html/body for this standalone page.
 	     html stays at 100% height so body overflows within it, enabling trackpad scroll. -->
+	<!-- eslint-disable-next-line svelte/no-at-html-tags -- The value is a static style literal with no external input. -->
 	{@html '<style>html { overflow: auto !important; } body { overflow: visible !important; height: auto !important; }</style>'}
 </svelte:head>
 
@@ -151,44 +220,101 @@
 				<Loader2 class="w-5 h-5 animate-spin" />
 				<span>{m.shared_view_loading()}</span>
 			</div>
-		{:else if errorMsg}
+		{:else if loadError}
 			<div class="flex flex-col items-center justify-center py-16 gap-4">
 				<div class="w-16 h-16 bg-muted rounded-full flex items-center justify-center">
 					<AlertTriangle class="w-8 h-8 text-muted-foreground" />
 				</div>
 				<div class="text-center">
 					<h2 class="text-lg font-semibold text-foreground mb-1">
-						{m.shared_view_not_found_title()}
+						{loadError === 'not-found'
+							? m.shared_view_not_found_title()
+							: m.shared_view_load_failed_title()}
 					</h2>
-					<p class="text-sm text-muted-foreground max-w-md">{errorMsg}</p>
+					<p class="text-sm text-muted-foreground max-w-md">
+						{loadError === 'not-found' ? m.shared_view_not_found() : m.shared_view_load_failed()}
+					</p>
 				</div>
-				<a href="/" class="text-sm text-primary hover:underline">{m.shared_view_back_to_app()}</a>
+				<div class="flex items-center gap-3">
+					{#if loadError === 'load-failed'}
+						<button
+							type="button"
+							class="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
+							onclick={loadSharedSnapshot}
+						>
+							{m.common_retry()}
+						</button>
+					{/if}
+					<a href="/" class="text-sm text-primary hover:underline">{m.shared_view_back_to_app()}</a>
+				</div>
 			</div>
 		{:else}
 			<div class="space-y-1">
-				{#each messages as message, idx}
-					{@const prevMessage = idx > 0 ? messages[idx - 1] : null}
-					{@const isGrouped = isGroupedWith(prevMessage, message)}
+				{#if nextBefore !== null || olderPageError}
+					<div class="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+						<div class="h-px flex-1 bg-border/70"></div>
+						<button
+							type="button"
+							class="h-8 rounded-md px-3 hover:bg-muted disabled:cursor-wait disabled:opacity-60"
+							disabled={isLoadingEarlier}
+							aria-busy={isLoadingEarlier}
+							onclick={loadEarlier}
+						>
+							{#if isLoadingEarlier}
+								{m.chat_transcript_loading_earlier()}
+							{:else if olderPageError}
+								{m.chat_transcript_retry_earlier()}
+							{:else}
+								{m.chat_transcript_load_earlier()}
+							{/if}
+						</button>
+						<div class="h-px flex-1 bg-border/70"></div>
+					</div>
+				{/if}
+				{#each messages as entry (entry.index)}
+					{@const message = entry.message}
+					{@const userPresentation = message instanceof UserMessage ? message.presentation : undefined}
+					{@const customUserStyle = userPresentation?.style === 'custom' ? userPresentation.customStyle : null}
 					<svelte:boundary>
 						{#snippet failed(error)}
 							<MessageRenderFallback {error} />
 						{/snippet}
 						<div
-							class="chat-message {message instanceof UserMessage
-								? 'flex justify-start'
-								: ''} {isGrouped ? '' : 'mt-3'}"
+							class="chat-message {message instanceof UserMessage ? 'flex justify-start' : ''} mt-3"
 						>
 							{#if message instanceof UserMessage}
 								<div class="sm:max-w-[85%] min-w-0">
 									<div
-										class="mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm"
+										class={cn(
+											'mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm',
+											userPresentation?.style &&
+												cliPresentationSurfaceClass(userPresentation.style),
+										)}
+										data-user-message-presentation={userPresentation?.style}
+										style:--cli-presentation-accent-light={customUserStyle?.lightAccent}
+										style:--cli-presentation-accent-dark={customUserStyle?.darkAccent}
 									>
-										<div class="text-sm">
-											<Markdown source={message.content} variant="user" />
-										</div>
+										{#if userPresentation?.style}
+											<CliPresentationHeader
+												style={userPresentation.style}
+												title={userPresentation.title}
+											/>
+										{/if}
+										<CollapsibleBody
+											disclosure={userMessageBodyDisclosure(userPresentation)}
+											previewHeight={userPresentation?.style ? 'default' : 'tall'}
+										>
+											<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+												<Markdown
+													source={message.content}
+													variant={userPresentation?.style ? 'presented' : 'user'}
+													chatReferencePolicy="explicit"
+												/>
+											</div>
+										</CollapsibleBody>
 										{#if message.images && message.images.length > 0}
 											<div class="mt-2 grid grid-cols-2 gap-2">
-												{#each message.images as image, imageIndex (image.name || imageIndex)}
+												{#each message.images as image, imageIndex (imageIndex)}
 													<img
 														src={image.data}
 														alt={image.name}
@@ -201,7 +327,11 @@
 								</div>
 							{:else if message instanceof AssistantMessage}
 								<div class="text-sm text-foreground">
-									<Markdown source={String(message.content || '')} variant="assistant" />
+									<Markdown
+										source={String(message.content || '')}
+										variant="assistant"
+										chatReferencePolicy="explicit"
+									/>
 								</div>
 							{:else if message instanceof ThinkingMessage}
 								<ChatEventCard variant="thinking" compact>
@@ -209,31 +339,42 @@
 										<button
 											type="button"
 											class="flex w-full items-center gap-2 text-left cursor-pointer"
-											onclick={() => toggleThinking(idx)}
-											aria-expanded={thinkingStates[idx] ?? true}
+											onclick={() => toggleThinking(entry.index)}
+											aria-expanded={thinkingStates[entry.index] ?? true}
 										>
 											<span class="text-xs font-medium text-muted-foreground"
 												>{m.chat_message_thinking()}</span
 											>
 											<ChevronRight
-												class="ml-auto w-3 h-3 transition-transform {(thinkingStates[idx] ?? true)
+												class="ml-auto w-3 h-3 transition-transform {(thinkingStates[entry.index] ??
+												true)
 													? 'rotate-90'
 													: ''}"
 											/>
 										</button>
-										{#if thinkingStates[idx] ?? true}
+										{#if thinkingStates[entry.index] ?? true}
 											<div class="mt-0.5 text-sm text-foreground/90">
-												<Markdown source={message.content} variant="thinking" />
+												<Markdown
+													source={message.content}
+													variant="thinking"
+													chatReferencePolicy="explicit"
+												/>
 											</div>
 										{/if}
 									{/snippet}
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
 								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
+							{:else if message instanceof CliRowMessage}
+								<CliRow {message} />
+							{:else if message instanceof TranscriptNoticeMessage}
+								<TranscriptNoticeRow {message} />
 							{:else if message instanceof ErrorMessage}
 								<ChatEventCard variant="error">
 									{#snippet body()}
-										<div class="text-sm whitespace-pre-wrap break-words">{message.content}</div>
+										<div class="text-sm whitespace-pre-wrap break-words">
+											{message.content}
+										</div>
 									{/snippet}
 								</ChatEventCard>
 							{/if}
@@ -249,7 +390,7 @@
 			class="max-w-4xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-muted-foreground"
 		>
 			<span>{m.shared_view_via_app()}</span>
-			<span>{messages.length} messages</span>
+			<span>{messages.length} of {totalMessages} messages</span>
 		</div>
 	</footer>
 </div>

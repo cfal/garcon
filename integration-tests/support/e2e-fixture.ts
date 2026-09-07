@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -7,12 +7,18 @@ import {
   type BrowserContext,
   type Page,
 } from 'puppeteer-core';
-import { createIntegrationFixture, type IntegrationFixture } from './integration-fixture.js';
+import type { ServerWsMessage } from '../../common/ws-events.js';
+import {
+  createIntegrationFixture,
+  type IntegrationFixture,
+  type IntegrationFixtureOptions,
+} from './integration-fixture.js';
 import { LightpandaProcess } from './lightpanda-process.js';
+import { installLightpandaWorkspaceGeometry } from './lightpanda-workspace-geometry.js';
 import { withTimeout } from './deferred.js';
+import { requireCurrentWebBuild } from './web-build-gate.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const WEB_BUILD_INDEX = join(REPO_ROOT, 'web', 'build', 'index.html');
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'e2e');
 
 export class E2eFixture {
@@ -44,9 +50,9 @@ export class E2eFixture {
     });
   }
 
-  static async create(): Promise<E2eFixture> {
-    await access(WEB_BUILD_INDEX);
-    const integration = await createIntegrationFixture();
+  static async create(options: IntegrationFixtureOptions = {}): Promise<E2eFixture> {
+    await requireCurrentWebBuild();
+    const integration = await createIntegrationFixture(options);
     let lightpanda: LightpandaProcess | null = null;
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
@@ -55,13 +61,33 @@ export class E2eFixture {
       browser = await connect({ browserWSEndpoint: lightpanda.browserWsEndpoint });
       context = await browser.createBrowserContext();
       const page = await context.newPage();
+      await installLightpandaWorkspaceGeometry(page);
       await page.evaluateOnNewDocument(() => {
+        const localSettingsKey = 'pref_local_settings';
+        try {
+          const stored = JSON.parse(globalThis.localStorage.getItem(localSettingsKey) ?? '{}');
+          const snapshot =
+            stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+          if (typeof snapshot.allowDirectChats !== 'boolean') {
+            globalThis.localStorage.setItem(
+              localSettingsKey,
+              JSON.stringify({ ...snapshot, allowDirectChats: true }),
+            );
+          }
+        } catch {
+          globalThis.localStorage.setItem(
+            localSettingsKey,
+            JSON.stringify({ allowDirectChats: true }),
+          );
+        }
         const scope = globalThis as typeof globalThis & {
           __garconSpaWsOpenCount?: number;
+          __garconSpaWsEvents?: unknown[];
         };
         const storageKey = '__garconSpaWsOpenCount';
         const NativeWebSocket = globalThis.WebSocket;
         scope.__garconSpaWsOpenCount = Number(globalThis.sessionStorage.getItem(storageKey)) || 0;
+        scope.__garconSpaWsEvents = [];
         globalThis.WebSocket = new Proxy(NativeWebSocket, {
           construct(Target, args: ConstructorParameters<typeof WebSocket>) {
             const socket = new Target(...args);
@@ -73,6 +99,13 @@ export class E2eFixture {
                   storageKey,
                   String(scope.__garconSpaWsOpenCount),
                 );
+              });
+              socket.addEventListener('message', (event) => {
+                try {
+                  scope.__garconSpaWsEvents?.push(JSON.parse(String(event.data)));
+                } catch {
+                  // Product code owns protocol validation; the fixture only records parseable events.
+                }
               });
             }
             return socket;
@@ -137,6 +170,36 @@ export class E2eFixture {
       this.integration.garcon.describeLogs(),
       this.lightpanda.describeLogs(),
     ].join('\n'));
+  }
+
+  async spaWebSocketEventCount(): Promise<number> {
+    return await this.page.evaluate(() => {
+      const scope = globalThis as typeof globalThis & {
+        __garconSpaWsEvents?: unknown[];
+      };
+      return scope.__garconSpaWsEvents?.length ?? 0;
+    });
+  }
+
+  async waitForSpaWebSocketEvent(input: {
+    afterIndex: number;
+    type: ServerWsMessage['type'];
+    chatId?: string;
+  }): Promise<void> {
+    await this.page.waitForFunction(
+      ({ afterIndex, type, chatId }) => {
+        const scope = globalThis as typeof globalThis & {
+          __garconSpaWsEvents?: unknown[];
+        };
+        return (scope.__garconSpaWsEvents ?? []).slice(afterIndex).some((event) => {
+          if (!event || typeof event !== 'object' || Array.isArray(event)) return false;
+          const record = event as Record<string, unknown>;
+          return record.type === type && (chatId === undefined || record.chatId === chatId);
+        });
+      },
+      { timeout: 20_000 },
+      input,
+    );
   }
 
   async writeDiagnostics(testName: string, error: unknown): Promise<string> {
@@ -205,8 +268,9 @@ export class E2eFixture {
 export async function withE2eFixture<T>(
   testName: string,
   run: (fixture: E2eFixture) => Promise<T>,
+  options: IntegrationFixtureOptions = {},
 ): Promise<T> {
-  const fixture = await E2eFixture.create();
+  const fixture = await E2eFixture.create(options);
   let failure: unknown;
   try {
     return await run(fixture);

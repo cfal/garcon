@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
-	import { getAppShell, getModelCatalog, getSplitLayout } from '$lib/context';
+	import { getAppShell, getModelCatalog, getWorkspaceWindowDnd } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -20,6 +20,10 @@
 	} from './sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import { WORKSPACE_DRAG_MIME } from '$lib/workspace/window-dnd.svelte.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatItemProps {
 		session: ChatSessionRecord;
@@ -39,6 +43,7 @@
 		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: boolean;
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
 		onShareChat: (chat: ChatSessionRecord) => void;
@@ -49,6 +54,9 @@
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowEdges: WorkspaceSplitAdmissions;
 	}
 
 	let {
@@ -69,6 +77,7 @@
 		onStartRenameChat,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = false,
 		onShowDetails,
 		onForkChat,
 		onShareChat,
@@ -78,6 +87,9 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onSortChatOrder,
+		onOpenInNewWindow,
+		newWindowEdges,
 	}: SidebarChatItemProps = $props();
 
 	let isProcessing = $derived(session.isProcessing);
@@ -85,6 +97,7 @@
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
+	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
 
 	function handleItemClick(e: MouseEvent) {
 		if (isMultiSelectMode) {
@@ -148,8 +161,9 @@
 
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
-	const splitLayout = getSplitLayout();
+	const windowDnd = getWorkspaceWindowDnd();
 	const canFork = $derived(modelCatalog.supportsFork(agentId));
+	const hasChatPlacement = $derived(windowDnd.hasChatPlacement(session.id));
 	const canForkNow = $derived(
 		canUseForkAction({
 			supportsFork: canFork,
@@ -161,12 +175,12 @@
 	function handleDragStart(e: DragEvent) {
 		if (!e.dataTransfer) return;
 		e.dataTransfer.effectAllowed = 'move';
-		e.dataTransfer.setData('text/plain', session.id);
-		splitLayout.startDrag(session.id);
+		e.dataTransfer.setData(WORKSPACE_DRAG_MIME, '1');
+		windowDnd.beginChatDrag(session.id);
 	}
 
 	function handleDragEnd() {
-		splitLayout.endDrag();
+		windowDnd.endDrag();
 	}
 
 	let itemEl: HTMLDivElement | undefined = $state();
@@ -187,7 +201,7 @@
 		}
 	}
 
-	// Scroll-to-selected on explicit recenter requests (chat focus).
+	// Scroll-to-selected on explicit chat navigation requests.
 	onMount(() =>
 		appShell.onSidebarRecenterRequested(() => {
 			if (!enableRecenterOnRequest) return;
@@ -203,18 +217,24 @@
 	{#if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
-				'pointer-events-none absolute bottom-0 right-0 z-10 flex h-4 w-4 items-center justify-center rounded-full border',
+				'flex h-4 w-4 items-center justify-center rounded-full border',
+				isSingleLineLayout
+					? 'relative shrink-0'
+					: 'pointer-events-none absolute bottom-0 right-0 z-10',
 				isPinned
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
 			)}
-			aria-hidden="true"
+			data-slot="sidebar-chat-state-badge"
 		>
 			{#if isPinned}
 				<Pin class="size-2.5 text-sidebar-badge-pinned-foreground" />
 			{:else}
 				<Archive class="size-2.5 text-sidebar-badge-archived-foreground" />
 			{/if}
+			<span class="sr-only">
+				{isPinned ? m.sidebar_chat_pinned_status() : m.sidebar_chat_archived_status()}
+			</span>
 		</div>
 	{/if}
 {/snippet}
@@ -223,9 +243,6 @@
 	{#if isMultiSelectMode}
 		<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
 			<div
-				role="checkbox"
-				aria-checked={isMultiSelected}
-				aria-label={m.sidebar_select_chat({ name: chatName })}
 				class={cn(
 					'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
 					isMultiSelected
@@ -256,37 +273,51 @@
 		<SidebarChatSummary
 			{session}
 			{isSelected}
-			{isPinned}
-			{isArchived}
 			{currentTime}
 			showTimestamp={true}
-			showProjectPath={!displayOptions.groupByProject || showProjectPathInGroup}
-			compactChatItem={displayOptions.compactChatItems}
+			showProjectPath={displayOptions.grouping === 'none' || showProjectPathInGroup}
+			chatItemLayout={displayOptions.chatItemLayout}
+			titleBadge={isSingleLineLayout ? stateBadge : undefined}
+			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		/>
-		{@render stateBadge()}
+		{#if !isSingleLineLayout}
+			{@render stateBadge()}
+		{/if}
 	</div>
 {/snippet}
 
-<div class="chat-item-root group relative" bind:this={itemEl}>
+<div
+	class={cn(
+		'chat-item-root group relative',
+		isSingleLineLayout && 'flex h-full flex-col justify-center',
+	)}
+	bind:this={itemEl}
+>
 	{#if isMobile}
 		<div
 			class={cn(
 				'flex items-stretch bg-sidebar-chat-item-bg',
+				isSingleLineLayout && 'flex-1 min-h-0',
 				!isMultiSelectMode &&
 					isSelected &&
 					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
-				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 			)}
 		>
 			<button
+				type="button"
 				class={cn(
 					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
 					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
+					isSingleLineLayout && 'py-[2px]',
 				)}
 				onclick={handleItemClick}
+				role={isMultiSelectMode ? 'checkbox' : undefined}
+				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
 				{@render chatSummary()}
@@ -304,7 +335,7 @@
 			{/if}
 		</div>
 	{:else}
-		<div>
+		<div class={cn(isSingleLineLayout && 'flex-1 min-h-0')}>
 			<Button
 				variant="ghost"
 				draggable={canNativeDrag ? true : undefined}
@@ -315,14 +346,20 @@
 					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
 					isMultiSelectMode
 						? 'py-[5px] pl-1 border-l-0'
-						: 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
+						: isSingleLineLayout
+							? 'py-[2px] pl-[9px]'
+							: 'py-[5px] pl-[9px]',
+					isSingleLineLayout && 'h-full',
 					!isMultiSelectMode &&
 						isSelected &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-					!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
 				onclick={handleItemClick}
+				role={isMultiSelectMode ? 'checkbox' : undefined}
+				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
 				{@render chatSummary()}
@@ -336,7 +373,10 @@
 			class={cn(
 				'absolute z-20',
 				!isAtCursor &&
-					'sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
+					'sidebar-item-menu-anchor right-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
+				!isAtCursor && !isSingleLineLayout && 'top-1',
+				// Centered so equal space sits above and below the hover trigger.
+				!isAtCursor && isSingleLineLayout && 'top-1/2 -translate-y-1/2',
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>
@@ -363,8 +403,13 @@
 						{onEnterMultiSelect}
 						{onMoveToTop}
 						{onMoveToBottom}
+						{onSortChatOrder}
+						{onOpenInNewWindow}
+						{newWindowEdges}
+						{hasChatPlacement}
 						{onTogglePinned}
 						{onToggleArchive}
+						{isArchiveMutationPending}
 						onRename={requestRename}
 						onDetails={requestDetails}
 						onShare={() => onShareChat(session)}

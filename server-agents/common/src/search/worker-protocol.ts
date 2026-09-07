@@ -1,16 +1,34 @@
-import type { ChatMessage } from '@garcon/common/chat-types';
-import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
-import { CHAT_SEARCH_MIN_PREFIX_CHARS } from '@garcon/common/chat-search';
 import type {
-  TranscriptSearchCatalogSnapshot,
-  TranscriptSearchGeneration,
-} from './transcript-search-service.js';
+  ChatSearchIndexStatus,
+  ChatSearchPage,
+  ChatSearchQueryV1,
+  ChatSearchResult,
+  ChatSearchResultMode,
+  TranscriptSearchAllowedChat,
+} from '@garcon/common/chat-search';
+import {
+  CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_PREFIX_SIZE,
+  CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS,
+  CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
+  CHAT_SEARCH_MAX_TERMS,
+  CHAT_SEARCH_MAX_WORDS,
+  CHAT_SEARCH_MIN_PREFIX_CHARS,
+} from '@garcon/common/chat-search';
+import type { HistoricalSearchMessageRow } from './rows.js';
+import {
+  SEARCH_INGEST_ROW_MAX_BYTES,
+  SEARCH_TIMESTAMP_MAX_BYTES,
+  type SearchChatState,
+  type SearchStatusCounts,
+} from './schema.js';
 
-export interface TranscriptIndexModuleRegistration {
-  readonly agentId: string;
-  readonly moduleUrl: string;
-  readonly apiVersion: 1;
-}
+export const MAX_ROWS_PER_FRAME = 250;
+export const MAX_FRAME_BYTES = 8 * 1024 * 1024;
+export const MAX_ALLOWLIST_PER_FRAME = 2_000;
+
+export type TranscriptSearchOrder = 'relevance' | 'allowlist';
 
 interface RequestBase {
   readonly requestId: number;
@@ -18,109 +36,80 @@ interface RequestBase {
 }
 
 export type IndexerRequest =
+  | (RequestBase & { readonly type: 'open'; readonly dbPath: string })
+  | (RequestBase & { readonly type: 'chat-states' })
   | (RequestBase & {
-      readonly type: 'open';
-      readonly operationEpoch: string;
-      readonly dbPath: string;
-      readonly scratchDirectory: string;
-      readonly modules: readonly TranscriptIndexModuleRegistration[];
-      readonly quarantines: readonly { readonly chatId: string; readonly sourceSignature: string }[];
-    })
-  | (RequestBase & {
-      readonly type: 'catalog-chunk';
-      readonly generation: TranscriptSearchGeneration;
-      readonly chunkIndex: number;
-      readonly chats: TranscriptSearchCatalogSnapshot['chats'];
-      readonly done: boolean;
-    })
-  | (RequestBase & {
-      readonly type: 'source-dirty';
+      readonly type: 'sync-begin';
+      readonly mode: 'replace' | 'append';
       readonly chatId: string;
-      readonly generation: TranscriptSearchGeneration;
+      readonly transcriptViewId: string;
+      readonly expectedAfterOrdinal: number;
+      readonly targetThrough: number;
     })
+  | (RequestBase & { readonly type: 'sync-cleanup' })
   | (RequestBase & {
-      readonly type: 'delete-chat';
+      readonly type: 'sync-rows';
+      readonly frameIndex: number;
+      readonly rows: readonly HistoricalSearchMessageRow[];
+      readonly advanceTo: number;
+    })
+  | (RequestBase & { readonly type: 'sync-finish' })
+  | (RequestBase & {
+      readonly type: 'mark-failed';
       readonly chatId: string;
-      readonly generation: TranscriptSearchGeneration;
+      readonly transcriptViewId: string;
+      readonly errorCode: string;
     })
-  | (RequestBase & {
-      readonly type: 'carry-over-chunk';
-      readonly chunkIndex: number;
-      readonly revision: string;
-      readonly messages: readonly ChatMessage[];
-      readonly done: boolean;
-      readonly code?: string;
-      readonly retryable?: boolean;
-    })
+  | (RequestBase & { readonly type: 'delete-chat'; readonly chatId: string })
+  | (RequestBase & { readonly type: 'maintenance' })
+  | (RequestBase & { readonly type: 'status-snapshot' })
+  | (RequestBase & { readonly type: 'checkpoint' })
   | (RequestBase & { readonly type: 'close' });
 
 export type IndexerEvent =
-  | (RequestBase & { readonly type: 'opened' | 'ack' | 'closed' })
+  | (RequestBase & { readonly type: 'opened'; readonly recreated: boolean })
   | (RequestBase & {
-      readonly type: 'error';
-      readonly code: string;
-      readonly retryable: boolean;
+      readonly type: 'chat-states-result';
+      readonly states: readonly SearchChatState[];
     })
-  | {
-      readonly type: 'progress';
-      readonly lifecycleEpoch: string;
-      readonly status: ChatSearchIndexStatus;
-      readonly queueDepth: number;
-      readonly oldestPendingMs: number;
-    }
-  | {
-      readonly type: 'source-status';
-      readonly lifecycleEpoch: string;
-      readonly chatId: string;
-      readonly agentId: string;
-      readonly generation: TranscriptSearchGeneration;
-      readonly state: 'sealed' | 'pending' | 'failed' | 'unsupported';
-      readonly errorCode: string | null;
-      readonly retryable: boolean | null;
-    }
-  | {
-      readonly type: 'refresh-source-reference';
-      readonly lifecycleEpoch: string;
-      readonly chatId: string;
-      readonly agentId: string;
-      readonly generation: TranscriptSearchGeneration;
-      readonly sourceDescriptorHash: string;
-      readonly reasonCode: string;
-      readonly retryAfterMs: number;
-    }
-  | {
-      readonly type: 'job-state';
-      readonly lifecycleEpoch: string;
-      readonly state: 'started' | 'finished';
-      readonly chatId: string;
-      readonly sourceSignature: string;
-    }
-  | {
-      readonly type: 'fatal';
-      readonly lifecycleEpoch: string;
-      readonly code: string;
-    }
   | (RequestBase & {
-      readonly type: 'carry-over-open';
-      readonly chatId: string;
-      readonly expectedRevision: string;
-      readonly currentAgentId: string;
-      readonly currentModel: string;
+      readonly type: 'sync-accepted';
+      readonly indexedThrough: number;
+      readonly current: boolean;
+      readonly staleRows: boolean;
     })
-  | (RequestBase & { readonly type: 'carry-over-pull' })
-  | (RequestBase & { readonly type: 'carry-over-cancel' });
+  | (RequestBase & {
+      readonly type: 'cleanup-progress';
+      readonly deletedRows: number;
+      readonly remaining: boolean;
+    })
+  | (RequestBase & {
+      readonly type: 'sync-progress';
+      readonly frameIndex: number;
+      readonly indexedThrough: number;
+    })
+  | (RequestBase & { readonly type: 'sync-complete'; readonly state: SearchChatState })
+  | (RequestBase & { readonly type: 'delete-progress'; readonly deletedRows: number })
+  | (RequestBase & { readonly type: 'status-result'; readonly counts: SearchStatusCounts })
+  | (RequestBase & { readonly type: 'checkpoint-complete'; readonly busy: number })
+  | (RequestBase & { readonly type: 'ack' | 'closed' })
+  | (RequestBase & { readonly type: 'error'; readonly code: string; readonly retryable: boolean });
 
 export type ReaderRequest =
   | (RequestBase & { readonly type: 'open'; readonly dbPath: string })
   | (RequestBase & {
       readonly type: 'search-start';
       readonly query: ChatSearchQueryV1;
+      readonly order: TranscriptSearchOrder;
+      readonly mode: ChatSearchResultMode;
+      readonly offset: number;
       readonly limit: number;
+      readonly snippetLimit: number;
     })
   | (RequestBase & {
       readonly type: 'search-allowlist-chunk';
       readonly chunkIndex: number;
-      readonly allowedChatIds: readonly string[];
+      readonly allowedChats: readonly TranscriptSearchAllowedChat[];
       readonly done: boolean;
     })
   | (RequestBase & { readonly type: 'close' });
@@ -129,12 +118,17 @@ export type ReaderEvent =
   | (RequestBase & { readonly type: 'opened' | 'closed' })
   | (RequestBase & {
       readonly type: 'search-result';
+      readonly mode: ChatSearchResultMode;
+      readonly snippetLimit: number;
       readonly results: readonly ChatSearchResult[];
+      readonly page: ChatSearchPage;
       readonly index: ChatSearchIndexStatus;
     })
   | (RequestBase & { readonly type: 'error'; readonly code: string; readonly retryable: boolean });
 
 type UnknownRecord = Record<string, unknown>;
+
+const BASE_KEYS = ['lifecycleEpoch', 'requestId', 'type'] as const;
 
 function record(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -142,27 +136,36 @@ function record(value: unknown): UnknownRecord | null {
     : null;
 }
 
+function exactKeys(candidate: UnknownRecord, ...keys: readonly string[]): boolean {
+  const expected = new Set([...BASE_KEYS, ...keys]);
+  return Object.keys(candidate).length === expected.size
+    && Object.keys(candidate).every((key) => expected.has(key));
+}
+
 function requestBase(value: unknown): UnknownRecord | null {
   const candidate = record(value);
   return candidate
-    && Number.isSafeInteger(candidate.requestId) && Number(candidate.requestId) > 0
-    && typeof candidate.lifecycleEpoch === 'string' && candidate.lifecycleEpoch.length > 0
+    && Number.isSafeInteger(candidate.requestId)
+    && Number(candidate.requestId) > 0
+    && typeof candidate.lifecycleEpoch === 'string'
+    && candidate.lifecycleEpoch.length > 0
     && typeof candidate.type === 'string'
     ? candidate
     : null;
 }
 
-function generation(value: unknown): boolean {
-  const candidate = record(value);
-  return Boolean(candidate)
-    && typeof candidate!.epoch === 'string'
-    && candidate!.epoch.length > 0
-    && Number.isSafeInteger(candidate!.sequence)
-    && Number(candidate!.sequence) > 0;
+function boundedIdentifier(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && Buffer.byteLength(value, 'utf8') <= 256;
 }
 
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+function nonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function positiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 function failureCode(value: unknown): value is string {
@@ -177,55 +180,175 @@ function jsonBytesWithin(value: unknown, maximum: number): boolean {
   }
 }
 
-function indexStatus(value: unknown): boolean {
-  const candidate = record(value);
-  return Boolean(candidate)
-    && ['indexedChatCount', 'pendingChatCount', 'failedChatCount', 'unsupportedChatCount']
-      .every((key) => Number.isSafeInteger(candidate![key]) && Number(candidate![key]) >= 0);
+function searchRow(value: unknown): value is HistoricalSearchMessageRow {
+  const row = record(value);
+  return Boolean(row)
+    && Object.keys(row!).length === 4
+    && ['ordinal', 'role', 'timestamp', 'body'].every((key) => Object.hasOwn(row!, key))
+    && positiveInteger(row!.ordinal)
+    && ['user', 'assistant', 'tool', 'system'].includes(String(row!.role))
+    && (row!.timestamp === null || (
+      typeof row!.timestamp === 'string'
+      && Buffer.byteLength(row!.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES
+    ))
+    && typeof row!.body === 'string';
 }
 
-function searchResult(value: unknown): boolean {
+function searchRowsValid(value: unknown): value is HistoricalSearchMessageRow[] {
+  return Array.isArray(value) && value.every(searchRow);
+}
+
+function chatStateValid(value: unknown): value is SearchChatState {
   const candidate = record(value);
   if (!candidate
-      || typeof candidate.chatId !== 'string'
-      || candidate.chatId.length === 0
-      || typeof candidate.score !== 'number'
-      || !Number.isFinite(candidate.score)
-      || !Number.isSafeInteger(candidate.matchedMessageCount)
-      || Number(candidate.matchedMessageCount) < 0
-      || !Array.isArray(candidate.snippets)
-      || candidate.snippets.length > 3) return false;
-  return candidate.snippets.every((valueSnippet) => {
-    const snippet = record(valueSnippet);
-    return Boolean(snippet)
-      && Number.isSafeInteger(snippet!.messageOrdinal)
-      && Number(snippet!.messageOrdinal) >= 0
-      && ['user', 'assistant', 'tool', 'system'].includes(String(snippet!.role))
-      && (snippet!.timestamp === null || typeof snippet!.timestamp === 'string')
-      && typeof snippet!.text === 'string';
+      || Object.keys(candidate).length !== 6
+      || !['chatId', 'transcriptViewId', 'status', 'indexedThrough', 'targetThrough', 'lastErrorCode']
+        .every((key) => Object.hasOwn(candidate, key))
+      || !boundedIdentifier(candidate.chatId)
+      || !boundedIdentifier(candidate.transcriptViewId)
+      || !['pending', 'indexed', 'failed'].includes(String(candidate.status))
+      || !nonNegativeInteger(candidate.indexedThrough)
+      || !nonNegativeInteger(candidate.targetThrough)
+      || (candidate.lastErrorCode !== null && !failureCode(candidate.lastErrorCode))) {
+    return false;
+  }
+  if (candidate.status === 'indexed') return candidate.indexedThrough === candidate.targetThrough;
+  if (candidate.status === 'pending') return candidate.indexedThrough <= candidate.targetThrough;
+  return true;
+}
+
+function statusCountsValid(value: unknown): value is SearchStatusCounts {
+  const candidate = record(value);
+  return Boolean(candidate)
+    && Object.keys(candidate!).length === 4
+    && ['indexed', 'pending', 'failed', 'backlogRows'].every(
+      (key) => Object.hasOwn(candidate!, key) && nonNegativeInteger(candidate![key]),
+    );
+}
+
+function syncRowsValid(candidate: UnknownRecord): boolean {
+  return exactKeys(candidate, 'frameIndex', 'rows', 'advanceTo')
+    && nonNegativeInteger(candidate.frameIndex)
+    && searchRowsValid(candidate.rows)
+    && candidate.rows.length <= MAX_ROWS_PER_FRAME
+    && jsonBytesWithin(candidate.rows, MAX_FRAME_BYTES)
+    && candidate.rows.every(
+      (row) => Buffer.byteLength(row.body, 'utf8') <= SEARCH_INGEST_ROW_MAX_BYTES,
+    )
+    && positiveInteger(candidate.advanceTo);
+}
+
+function allowedChatsValid(value: unknown): value is TranscriptSearchAllowedChat[] {
+  return Array.isArray(value) && value.every((entry) => {
+    const candidate = record(entry);
+    return Boolean(candidate)
+      && Object.keys(candidate!).length === 3
+      && ['chatId', 'transcriptViewId', 'throughOrdinal'].every(
+        (key) => Object.hasOwn(candidate!, key),
+      )
+      && boundedIdentifier(candidate!.chatId)
+      && boundedIdentifier(candidate!.transcriptViewId)
+      && nonNegativeInteger(candidate!.throughOrdinal);
   });
 }
 
 function searchQuery(value: unknown): boolean {
   const candidate = record(value);
-  if (!candidate || candidate.version !== 1
-      || !Array.isArray(candidate.clauses) || candidate.clauses.length > 16
+  if (!candidate
+      || Object.keys(candidate).length !== 2
+      || candidate.version !== 1
+      || !Array.isArray(candidate.clauses)
+      || candidate.clauses.length > CHAT_SEARCH_MAX_TERMS
       || !jsonBytesWithin(candidate, 64 * 1024)) return false;
   let tokenCount = 0;
   for (const valueClause of candidate.clauses) {
     const clause = record(valueClause);
-    if (!clause || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
-        || !Array.isArray(clause.tokens) || clause.tokens.length === 0) return false;
+    if (!clause
+        || Object.keys(clause).length !== 2
+        || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
+        || !Array.isArray(clause.tokens)
+        || clause.tokens.length === 0) return false;
     tokenCount += clause.tokens.length;
-    if (tokenCount > 32) return false;
+    if (tokenCount > CHAT_SEARCH_MAX_WORDS) return false;
     for (const valueToken of clause.tokens) {
       const token = record(valueToken);
-      if (!token || typeof token.text !== 'string' || typeof token.normalized !== 'string'
+      if (!token
+          || Object.keys(token).length !== 3
+          || typeof token.text !== 'string'
+          || typeof token.normalized !== 'string'
           || (token.match !== 'exact' && token.match !== 'prefix')
           || (clause.kind === 'phrase' && token.match !== 'exact')
           || (token.match === 'prefix'
             && [...token.text].length < CHAT_SEARCH_MIN_PREFIX_CHARS)) return false;
     }
+  }
+  return true;
+}
+
+function indexStatus(value: unknown): value is ChatSearchIndexStatus {
+  const candidate = record(value);
+  return Boolean(candidate)
+    && Object.keys(candidate!).length === 6
+    && [
+      'indexedChatCount',
+      'pendingChatCount',
+      'failedChatCount',
+      'unindexedChatCount',
+      'unsupportedChatCount',
+    ].every((key) => Object.hasOwn(candidate!, key) && nonNegativeInteger(candidate![key]))
+    && typeof candidate!.resultsTruncated === 'boolean';
+}
+
+function searchResult(value: unknown, snippetLimit: number): value is ChatSearchResult {
+  const candidate = record(value);
+  if (!candidate
+      || Object.keys(candidate).length !== 5
+      || !['chatId', 'transcriptViewId', 'score', 'matchedMessageCount', 'snippets']
+        .every((key) => Object.hasOwn(candidate, key))
+      || !boundedIdentifier(candidate.chatId)
+      || !boundedIdentifier(candidate.transcriptViewId)
+      || typeof candidate.score !== 'number'
+      || !Number.isFinite(candidate.score)
+      || !nonNegativeInteger(candidate.matchedMessageCount)
+      || !Array.isArray(candidate.snippets)
+      || candidate.snippets.length > snippetLimit) return false;
+  return candidate.snippets.every((valueSnippet) => {
+    const snippet = record(valueSnippet);
+    return Boolean(snippet)
+      && Object.keys(snippet!).length === 4
+      && ['ordinal', 'role', 'timestamp', 'text'].every((key) => Object.hasOwn(snippet!, key))
+      && positiveInteger(snippet!.ordinal)
+      && ['user', 'assistant', 'tool', 'system'].includes(String(snippet!.role))
+      && (snippet!.timestamp === null || (typeof snippet!.timestamp === 'string'
+        && Buffer.byteLength(snippet!.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES))
+      && typeof snippet!.text === 'string'
+      && [...snippet!.text].length <= CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS;
+  });
+}
+
+function searchPage(value: unknown, mode: ChatSearchResultMode): value is ChatSearchPage {
+  const candidate = record(value);
+  const maximumLimit = mode === 'prefix' ? CHAT_SEARCH_MAX_PREFIX_SIZE : CHAT_SEARCH_MAX_PAGE_SIZE;
+  if (!candidate
+      || Object.keys(candidate).length !== 5
+      || !['offset', 'limit', 'total', 'hasMore', 'nextOffset']
+        .every((key) => Object.hasOwn(candidate, key))
+      || !nonNegativeInteger(candidate.offset)
+      || Number(candidate.offset) > CHAT_SEARCH_MAX_OFFSET
+      || !positiveInteger(candidate.limit)
+      || Number(candidate.limit) > maximumLimit
+      || !nonNegativeInteger(candidate.total)
+      || typeof candidate.hasMore !== 'boolean'
+      || (candidate.nextOffset !== null && !positiveInteger(candidate.nextOffset))) {
+    return false;
+  }
+  if (mode === 'prefix' && Number(candidate.offset) !== 0) return false;
+  if (candidate.hasMore !== (candidate.nextOffset !== null)) return false;
+  if (candidate.nextOffset !== null) {
+    return Number(candidate.nextOffset) > Number(candidate.offset)
+      && Number(candidate.nextOffset) <= CHAT_SEARCH_MAX_OFFSET
+      && Number(candidate.nextOffset) <= Number(candidate.offset) + Number(candidate.limit)
+      && Number(candidate.nextOffset) <= Number(candidate.total);
   }
   return true;
 }
@@ -244,44 +367,88 @@ export function isIndexerRequest(value: unknown): value is IndexerRequest {
   if (!candidate) return false;
   switch (candidate.type) {
     case 'open':
-      return typeof candidate.operationEpoch === 'string'
+      return exactKeys(candidate, 'dbPath')
         && typeof candidate.dbPath === 'string'
-        && typeof candidate.scratchDirectory === 'string'
-        && Array.isArray(candidate.modules) && candidate.modules.length <= 256
-        && candidate.modules.every((entry) => {
-          const module = record(entry);
-          return Boolean(module)
-            && typeof module!.agentId === 'string'
-            && typeof module!.moduleUrl === 'string' && module!.moduleUrl.length <= 64 * 1024
-            && module!.apiVersion === 1;
-        })
-        && Array.isArray(candidate.quarantines) && candidate.quarantines.length <= 10_000
-        && candidate.quarantines.every((entry) => {
-          const quarantine = record(entry);
-          return Boolean(quarantine)
-            && typeof quarantine!.chatId === 'string'
-            && typeof quarantine!.sourceSignature === 'string';
-        });
-    case 'catalog-chunk':
-      return generation(candidate.generation)
-        && Number.isSafeInteger(candidate.chunkIndex)
-        && Array.isArray(candidate.chats) && candidate.chats.length <= 500
-        && jsonBytesWithin(candidate.chats, 8 * 1024 * 1024)
-        && typeof candidate.done === 'boolean';
-    case 'source-dirty':
-    case 'delete-chat':
-      return typeof candidate.chatId === 'string' && candidate.chatId.length > 0
-        && generation(candidate.generation);
-    case 'carry-over-chunk':
-      return Number.isSafeInteger(candidate.chunkIndex)
-        && typeof candidate.revision === 'string'
-        && Array.isArray(candidate.messages) && candidate.messages.length <= 250
-        && jsonBytesWithin(candidate.messages, 8 * 1024 * 1024)
-        && typeof candidate.done === 'boolean'
-        && (candidate.code === undefined || failureCode(candidate.code))
-        && (candidate.retryable === undefined || typeof candidate.retryable === 'boolean');
+        && candidate.dbPath.length > 0;
+    case 'chat-states':
+    case 'sync-cleanup':
+    case 'sync-finish':
+    case 'maintenance':
+    case 'status-snapshot':
+    case 'checkpoint':
     case 'close':
-      return true;
+      return exactKeys(candidate);
+    case 'sync-begin':
+      return exactKeys(
+        candidate,
+        'mode',
+        'chatId',
+        'transcriptViewId',
+        'expectedAfterOrdinal',
+        'targetThrough',
+      )
+        && (candidate.mode === 'replace' || candidate.mode === 'append')
+        && boundedIdentifier(candidate.chatId)
+        && boundedIdentifier(candidate.transcriptViewId)
+        && nonNegativeInteger(candidate.expectedAfterOrdinal)
+        && nonNegativeInteger(candidate.targetThrough)
+        && candidate.targetThrough >= candidate.expectedAfterOrdinal;
+    case 'sync-rows':
+      return syncRowsValid(candidate);
+    case 'mark-failed':
+      return exactKeys(candidate, 'chatId', 'transcriptViewId', 'errorCode')
+        && boundedIdentifier(candidate.chatId)
+        && boundedIdentifier(candidate.transcriptViewId)
+        && failureCode(candidate.errorCode);
+    case 'delete-chat':
+      return exactKeys(candidate, 'chatId') && boundedIdentifier(candidate.chatId);
+    default:
+      return false;
+  }
+}
+
+export function isIndexerEvent(value: unknown): value is IndexerEvent {
+  const candidate = requestBase(value);
+  if (!candidate) return false;
+  switch (candidate.type) {
+    case 'opened':
+      return exactKeys(candidate, 'recreated') && typeof candidate.recreated === 'boolean';
+    case 'chat-states-result':
+      return exactKeys(candidate, 'states')
+        && Array.isArray(candidate.states)
+        && candidate.states.every(chatStateValid)
+        && jsonBytesWithin(candidate.states, MAX_FRAME_BYTES);
+    case 'sync-accepted':
+      return exactKeys(candidate, 'indexedThrough', 'current', 'staleRows')
+        && nonNegativeInteger(candidate.indexedThrough)
+        && typeof candidate.current === 'boolean'
+        && typeof candidate.staleRows === 'boolean'
+        && (!candidate.current || !candidate.staleRows);
+    case 'cleanup-progress':
+      return exactKeys(candidate, 'deletedRows', 'remaining')
+        && nonNegativeInteger(candidate.deletedRows)
+        && typeof candidate.remaining === 'boolean';
+    case 'sync-progress':
+      return exactKeys(candidate, 'frameIndex', 'indexedThrough')
+        && nonNegativeInteger(candidate.frameIndex)
+        && nonNegativeInteger(candidate.indexedThrough);
+    case 'sync-complete':
+      return exactKeys(candidate, 'state') && chatStateValid(candidate.state);
+    case 'delete-progress':
+      return exactKeys(candidate, 'deletedRows') && positiveInteger(candidate.deletedRows);
+    case 'status-result':
+      return exactKeys(candidate, 'counts') && statusCountsValid(candidate.counts);
+    case 'checkpoint-complete':
+      return exactKeys(candidate, 'busy')
+        && nonNegativeInteger(candidate.busy)
+        && candidate.busy <= 1;
+    case 'ack':
+    case 'closed':
+      return exactKeys(candidate);
+    case 'error':
+      return exactKeys(candidate, 'code', 'retryable')
+        && failureCode(candidate.code)
+        && typeof candidate.retryable === 'boolean';
     default:
       return false;
   }
@@ -292,74 +459,33 @@ export function isReaderRequest(value: unknown): value is ReaderRequest {
   if (!candidate) return false;
   switch (candidate.type) {
     case 'open':
-      return typeof candidate.dbPath === 'string' && candidate.dbPath.length > 0;
+      return exactKeys(candidate, 'dbPath')
+        && typeof candidate.dbPath === 'string'
+        && candidate.dbPath.length > 0;
     case 'search-start':
-      return searchQuery(candidate.query)
-        && Number.isSafeInteger(candidate.limit)
-        && Number(candidate.limit) >= 1
-        && Number(candidate.limit) <= 100;
+      return exactKeys(candidate, 'query', 'order', 'mode', 'offset', 'limit', 'snippetLimit')
+        && searchQuery(candidate.query)
+        && (candidate.order === 'relevance' || candidate.order === 'allowlist')
+        && (candidate.mode === 'page' || candidate.mode === 'prefix')
+        && nonNegativeInteger(candidate.offset)
+        && Number(candidate.offset) <= CHAT_SEARCH_MAX_OFFSET
+        && positiveInteger(candidate.limit)
+        && Number(candidate.limit) <= (candidate.mode === 'prefix'
+          ? CHAT_SEARCH_MAX_PREFIX_SIZE
+          : CHAT_SEARCH_MAX_PAGE_SIZE)
+        && positiveInteger(candidate.snippetLimit)
+        && Number(candidate.snippetLimit) <= CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT
+        && (candidate.mode !== 'prefix'
+          || (Number(candidate.offset) === 0 && Number(candidate.snippetLimit) === 1));
     case 'search-allowlist-chunk':
-      return Number.isSafeInteger(candidate.chunkIndex)
-        && stringArray(candidate.allowedChatIds)
-        && candidate.allowedChatIds.length <= 2_000
-        && jsonBytesWithin(candidate.allowedChatIds, 8 * 1024 * 1024)
+      return exactKeys(candidate, 'chunkIndex', 'allowedChats', 'done')
+        && nonNegativeInteger(candidate.chunkIndex)
+        && allowedChatsValid(candidate.allowedChats)
+        && candidate.allowedChats.length <= MAX_ALLOWLIST_PER_FRAME
+        && jsonBytesWithin(candidate.allowedChats, MAX_FRAME_BYTES)
         && typeof candidate.done === 'boolean';
     case 'close':
-      return true;
-    default:
-      return false;
-  }
-}
-
-export function isIndexerEvent(value: unknown): value is IndexerEvent {
-  const candidate = record(value);
-  if (!candidate || typeof candidate.type !== 'string'
-      || typeof candidate.lifecycleEpoch !== 'string'
-      || candidate.lifecycleEpoch.length === 0) return false;
-  if (candidate.type === 'progress') {
-    return indexStatus(candidate.status)
-      && Number.isSafeInteger(candidate.queueDepth) && Number(candidate.queueDepth) >= 0
-      && typeof candidate.oldestPendingMs === 'number' && candidate.oldestPendingMs >= 0;
-  }
-  if (candidate.type === 'source-status') {
-    return typeof candidate.chatId === 'string'
-      && typeof candidate.agentId === 'string'
-      && generation(candidate.generation)
-      && ['sealed', 'pending', 'failed', 'unsupported'].includes(String(candidate.state))
-      && (candidate.errorCode === null || failureCode(candidate.errorCode))
-      && (candidate.retryable === null || typeof candidate.retryable === 'boolean');
-  }
-  if (candidate.type === 'refresh-source-reference') {
-    return typeof candidate.chatId === 'string'
-      && typeof candidate.agentId === 'string'
-      && typeof candidate.sourceDescriptorHash === 'string'
-      && /^[a-f0-9]{64}$/.test(candidate.sourceDescriptorHash)
-      && failureCode(candidate.reasonCode)
-      && generation(candidate.generation)
-      && typeof candidate.retryAfterMs === 'number' && candidate.retryAfterMs >= 0;
-  }
-  if (candidate.type === 'job-state') {
-    return (candidate.state === 'started' || candidate.state === 'finished')
-      && typeof candidate.chatId === 'string'
-      && typeof candidate.sourceSignature === 'string'
-      && /^[a-f0-9]{64}$/.test(candidate.sourceSignature);
-  }
-  if (candidate.type === 'fatal') return failureCode(candidate.code);
-  if (!requestBase(candidate)) return false;
-  switch (candidate.type) {
-    case 'opened':
-    case 'ack':
-    case 'closed':
-    case 'carry-over-pull':
-    case 'carry-over-cancel':
-      return true;
-    case 'error':
-      return failureCode(candidate.code) && typeof candidate.retryable === 'boolean';
-    case 'carry-over-open':
-      return typeof candidate.chatId === 'string'
-        && typeof candidate.expectedRevision === 'string'
-        && typeof candidate.currentAgentId === 'string'
-        && typeof candidate.currentModel === 'string';
+      return exactKeys(candidate);
     default:
       return false;
   }
@@ -371,22 +497,38 @@ export function isReaderEvent(value: unknown): value is ReaderEvent {
   switch (candidate.type) {
     case 'opened':
     case 'closed':
-      return true;
+      return exactKeys(candidate);
     case 'error':
-      return failureCode(candidate.code) && typeof candidate.retryable === 'boolean';
+      return exactKeys(candidate, 'code', 'retryable')
+        && failureCode(candidate.code)
+        && typeof candidate.retryable === 'boolean';
     case 'search-result':
-      return Array.isArray(candidate.results) && candidate.results.length <= 100
-        && candidate.results.every(searchResult)
-        && indexStatus(candidate.index);
+      if (!(exactKeys(candidate, 'mode', 'snippetLimit', 'results', 'page', 'index')
+        && (candidate.mode === 'page' || candidate.mode === 'prefix')
+        && positiveInteger(candidate.snippetLimit)
+        && Number(candidate.snippetLimit) <= CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT
+        && (candidate.mode !== 'prefix' || Number(candidate.snippetLimit) === 1)
+        && Array.isArray(candidate.results)
+        && candidate.results.length <= (candidate.mode === 'prefix'
+          ? CHAT_SEARCH_MAX_PREFIX_SIZE
+          : CHAT_SEARCH_MAX_PAGE_SIZE)
+        && candidate.results.every((result) => searchResult(
+          result,
+          Number(candidate.snippetLimit),
+        ))
+        && searchPage(candidate.page, candidate.mode)
+        && candidate.results.length <= candidate.page.limit
+        && indexStatus(candidate.index)
+        && jsonBytesWithin(candidate, MAX_FRAME_BYTES))) return false;
+      if (candidate.page.hasMore) {
+        return candidate.page.nextOffset === candidate.page.offset + candidate.results.length
+          && candidate.page.nextOffset < candidate.page.total;
+      }
+      return candidate.page.nextOffset === null
+        && (candidate.page.offset >= candidate.page.total
+          ? candidate.results.length === 0
+          : candidate.page.offset + candidate.results.length >= candidate.page.total);
     default:
       return false;
   }
-}
-
-export function compareGeneration(
-  left: TranscriptSearchGeneration,
-  right: TranscriptSearchGeneration,
-): number | null {
-  if (left.epoch !== right.epoch) return null;
-  return left.sequence - right.sequence;
 }

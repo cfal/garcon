@@ -1,6 +1,7 @@
-// Parses a raw WebSocket message object into a typed event with a dispatch key.
+// Parses generic WebSocket events while excluding frames owned by the terminal transport.
 // Drops unknown or malformed payloads with a diagnostic log.
 
+import { parseTerminalStreamServerMessage } from '$shared/terminal';
 import type { ServerWsMessage, EventKey } from '$shared/ws-events';
 import { parseServerWsMessage } from '$shared/ws-events';
 
@@ -10,6 +11,7 @@ export interface NormalizedEvent {
 }
 
 export function normalizeEvent(raw: Record<string, unknown>): NormalizedEvent | null {
+	if (parseTerminalStreamServerMessage(raw)) return null;
 	const message = parseServerWsMessage(raw);
 	if (!message) {
 		console.error('[ws-events] Unknown message type, dropping:', raw.type, raw);

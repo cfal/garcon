@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-	applyChatViewMessages,
-	parseChatViewMessage,
-	parseChatViewMessages,
-	type ChatViewMessage,
+	applyTranscriptAppend,
+	parseTranscriptMessage,
+	parseTranscriptMessages,
+	type TranscriptMessage,
 } from '$shared/chat-view';
 import { AssistantMessage, ErrorMessage } from '$shared/chat-types';
 
@@ -11,86 +11,93 @@ const message = { type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', 
 
 describe('chat view helpers', () => {
 	it('parses a valid chat view message envelope', () => {
-		const entry = parseChatViewMessage({ seq: 1, message });
+		const entry = parseTranscriptMessage({ ordinal: 1, message });
 
-		expect(entry?.seq).toBe(1);
+		expect(entry?.ordinal).toBe(1);
 		expect(entry?.message).toBeInstanceOf(AssistantMessage);
 		expect((entry?.message as AssistantMessage).content).toBe('hi');
 	});
 
 	it('rejects malformed or non-increasing batches', () => {
-		expect(parseChatViewMessages([{ seq: 0, message }])).toBeNull();
+		expect(parseTranscriptMessages([{ ordinal: 0, message }])).toBeNull();
 		expect(
-			parseChatViewMessages([
-				{ seq: 1, message },
-				{ seq: 1, message },
+			parseTranscriptMessages([
+				{ ordinal: 1, message },
+				{ ordinal: 1, message },
 			]),
 		).toBeNull();
 	});
 
 	it('keeps unknown inner messages as error placeholders', () => {
-		const entries = parseChatViewMessages([
-			{ seq: 1, message: { type: 'future-message', timestamp: '2025-01-01T00:00:00Z' } },
+		const entries = parseTranscriptMessages([
+			{ ordinal: 1, message: { type: 'future-message', timestamp: '2025-01-01T00:00:00Z' } },
 		]);
 
 		expect(entries?.[0].message).toBeInstanceOf(ErrorMessage);
 	});
 
 	it('applies only messages beyond the current cursor', () => {
-		const current: ChatViewMessage[] = [
-			{ seq: 1, message: parseChatViewMessage({ seq: 1, message })!.message },
+		const current: TranscriptMessage[] = [
+			{ ordinal: 1, message: parseTranscriptMessage({ ordinal: 1, message })!.message },
 		];
-		const incoming: ChatViewMessage[] = [
-			{ seq: 1, message: parseChatViewMessage({ seq: 1, message })!.message },
-			{ seq: 2, message: parseChatViewMessage({ seq: 2, message })!.message },
+		const incoming: TranscriptMessage[] = [
+			{ ordinal: 1, message: parseTranscriptMessage({ ordinal: 1, message })!.message },
+			{ ordinal: 2, message: parseTranscriptMessage({ ordinal: 2, message })!.message },
 		];
 
-		const applied = applyChatViewMessages(current, incoming, 1);
+		const applied = applyTranscriptAppend(current, {
+			firstOrdinal: 1,
+			lastOrdinal: 2,
+			messages: incoming,
+		}, 1);
 
 		expect(applied.status).toBe('applied');
 		expect(applied.changed).toBe(true);
-		expect(applied.messages.map((entry) => entry.seq)).toEqual([1, 2]);
-		expect(applied.lastSeq).toBe(2);
+		expect(applied.messages.map((entry) => entry.ordinal)).toEqual([1, 2]);
+		expect(applied.lastOrdinal).toBe(2);
 	});
 
 	it('detects a gap before the first new message', () => {
-		const current: ChatViewMessage[] = [
-			{ seq: 1, message: parseChatViewMessage({ seq: 1, message })!.message },
+		const current: TranscriptMessage[] = [
+			{ ordinal: 1, message: parseTranscriptMessage({ ordinal: 1, message })!.message },
 		];
-		const incoming: ChatViewMessage[] = [
-			{ seq: 3, message: parseChatViewMessage({ seq: 3, message })!.message },
+		const incoming: TranscriptMessage[] = [
+			{ ordinal: 3, message: parseTranscriptMessage({ ordinal: 3, message })!.message },
 		];
 
-		const applied = applyChatViewMessages(current, incoming, 1);
+		const applied = applyTranscriptAppend(current, {
+			firstOrdinal: 3,
+			lastOrdinal: 3,
+			messages: incoming,
+		}, 1);
 
 		expect(applied).toMatchObject({
 			status: 'gap-detected',
 			changed: false,
-			lastSeq: 1,
-			expectedSeq: 2,
-			receivedSeq: 3,
+			lastOrdinal: 1,
+			expectedOrdinal: 2,
+			receivedOrdinal: 3,
 		});
 		expect(applied.messages).toBe(current);
 	});
 
-	it('detects an internal gap in a new message batch', () => {
-		const current: ChatViewMessage[] = [
-			{ seq: 1, message: parseChatViewMessage({ seq: 1, message })!.message },
+	it('allows hidden ledger rows between rendered messages', () => {
+		const current: TranscriptMessage[] = [
+			{ ordinal: 1, message: parseTranscriptMessage({ ordinal: 1, message })!.message },
 		];
-		const incoming: ChatViewMessage[] = [
-			{ seq: 2, message: parseChatViewMessage({ seq: 2, message })!.message },
-			{ seq: 4, message: parseChatViewMessage({ seq: 4, message })!.message },
+		const incoming: TranscriptMessage[] = [
+			{ ordinal: 2, message: parseTranscriptMessage({ ordinal: 2, message })!.message },
+			{ ordinal: 4, message: parseTranscriptMessage({ ordinal: 4, message })!.message },
 		];
 
-		const applied = applyChatViewMessages(current, incoming, 1);
+		const applied = applyTranscriptAppend(current, {
+			firstOrdinal: 2,
+			lastOrdinal: 4,
+			messages: incoming,
+		}, 1);
 
-		expect(applied).toMatchObject({
-			status: 'gap-detected',
-			changed: false,
-			lastSeq: 1,
-			expectedSeq: 3,
-			receivedSeq: 4,
-		});
-		expect(applied.messages).toBe(current);
+		expect(applied.status).toBe('applied');
+		expect(applied.lastOrdinal).toBe(4);
+		expect(applied.messages.map((entry) => entry.ordinal)).toEqual([1, 2, 4]);
 	});
 });

@@ -11,7 +11,6 @@ vi.stubGlobal('localStorage', {
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitStatus: vi.fn(),
-	getGitDiff: vi.fn().mockResolvedValue({}),
 	getGitRefs: vi.fn().mockResolvedValue({ refs: [] }),
 	getRemoteStatus: vi.fn().mockResolvedValue({}),
 	getGitRemotes: vi
@@ -75,7 +74,10 @@ describe('GitRepositoryController', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		controller = new GitRepositoryController(new GitBranchSelectorState());
+		controller = new GitRepositoryController({
+			branches: new GitBranchSelectorState(),
+			surfaceId: 'singleton:git',
+		});
 		controller.resetForProject('/project', { deferMetadata: true });
 	});
 
@@ -115,7 +117,8 @@ describe('GitRepositoryController', () => {
 
 	describe('deferred metadata', () => {
 		it('does not fetch branch list or remote status during deferred project reset', () => {
-			controller.resetForProject('/project', { deferMetadata: true, currentBranch: 'main' });
+			controller.currentBranch = 'main';
+			controller.resetForProject('/project', { deferMetadata: true });
 
 			expect(controller.currentBranch).toBe('main');
 			expect(getGitStatus).not.toHaveBeenCalled();
@@ -127,7 +130,19 @@ describe('GitRepositoryController', () => {
 			await controller.openBranchDropdown('/project');
 
 			expect(controller.showBranchDropdown).toBe(true);
-			expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
+			expect(getGitRefs).toHaveBeenCalledWith('/project', {
+				query: '',
+				limit: 200,
+				sort: { key: 'name', direction: 'asc' },
+				signal: expect.any(AbortSignal),
+			});
+		});
+
+		it('keeps full and deferred metadata refreshes free of ref loads', () => {
+			controller.refreshAll('/project');
+			controller.refreshDeferredMetadata('/project');
+
+			expect(getGitRefs).not.toHaveBeenCalled();
 		});
 	});
 
@@ -177,7 +192,8 @@ describe('GitRepositoryController', () => {
 		});
 
 		it('does not overwrite an explicit current branch from remote status', async () => {
-			controller.resetForProject('/project', { deferMetadata: true, currentBranch: 'feature' });
+			controller.currentBranch = 'feature';
+			controller.resetForProject('/project', { deferMetadata: true });
 			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
 
 			await controller.fetchRemoteStatus('/project');
@@ -251,7 +267,12 @@ describe('GitRepositoryController', () => {
 
 	describe('handleCommit', () => {
 		it('commits selected files and resets on success', async () => {
-			vi.mocked(gitCommit).mockResolvedValue({ success: true });
+			vi.mocked(gitCommit).mockResolvedValue({
+				success: true,
+				output: 'committed',
+				commitScope: 'selected-files',
+				indexSynchronized: true,
+			});
 			vi.mocked(getGitStatus).mockResolvedValue({
 				branch: 'main',
 				hasCommits: true,

@@ -1,9 +1,12 @@
 import type {
-  ActiveInputCommandRequest,
   ForkChatCommandRequest,
+  GoalControlCommandRequest,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
+  QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
+  QueueEntrySteerCommandRequest,
+  SteerCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import {
   CommandSupport,
@@ -20,10 +23,13 @@ import {
   type SubmitRunInput,
   type UpdateProjectPathInput,
 } from './command-support.js';
+import type { SelfHandoffRunCommandRequest } from '../../common/self-handoff-contracts.js';
 import { ForkCommands } from './fork-commands.js';
+import { SelfHandoffCommands } from './self-handoff-commands.js';
 import { QueueCommands } from './queue-commands.js';
 import { SessionCommands } from './session-commands.js';
 import { StartCommands } from './start-commands.js';
+import { SteerCommands } from './steer-commands.js';
 
 export {
   CommandExecutionControlError,
@@ -40,15 +46,19 @@ export type {
 export class ChatCommandService {
   readonly #start: StartCommands;
   readonly #fork: ForkCommands;
+  readonly #selfHandoff: SelfHandoffCommands;
   readonly #queue: QueueCommands;
   readonly #session: SessionCommands;
+  readonly #steer: SteerCommands;
 
   constructor(private readonly deps: ChatCommandServiceDeps) {
     const support = new CommandSupport(deps);
     this.#start = new StartCommands(support);
     this.#fork = new ForkCommands(support);
+    this.#selfHandoff = new SelfHandoffCommands(support);
     this.#queue = new QueueCommands(support);
     this.#session = new SessionCommands(support);
+    this.#steer = new SteerCommands(support);
   }
 
   async waitForBackgroundTasks(): Promise<void> {
@@ -67,8 +77,8 @@ export class ChatCommandService {
     return this.#session.submitRun(input);
   }
 
-  forkChat(input: ForkChatCommandRequest) {
-    return this.#fork.forkChat(input);
+  forkChat(input: ForkChatCommandRequest, signal?: AbortSignal) {
+    return this.#fork.forkChat(input, signal);
   }
 
   deleteChat(input: DeleteChatInput) {
@@ -77,6 +87,10 @@ export class ChatCommandService {
 
   submitForkRun(input: SubmitForkRunInput) {
     return this.#fork.submitForkRun(input);
+  }
+
+  submitSelfHandoffRun(input: SelfHandoffRunCommandRequest) {
+    return this.#selfHandoff.submitSelfHandoffRun(input);
   }
 
   submitQueueEntryCreate(input: QueueEntryCreateCommandRequest) {
@@ -91,8 +105,20 @@ export class ChatCommandService {
     return this.#queue.submitQueueEntryDelete(input);
   }
 
-  submitActiveInput(input: ActiveInputCommandRequest) {
-    return this.#queue.submitActiveInput(input);
+  submitQueueEntryMove(input: QueueEntryMoveCommandRequest) {
+    return this.#queue.submitQueueEntryMove(input);
+  }
+
+  submitGoalControl(input: GoalControlCommandRequest) {
+    return this.#queue.submitGoalControl(input);
+  }
+
+  submitSteer(input: SteerCommandRequest) {
+    return this.#steer.submit(input);
+  }
+
+  submitQueueEntrySteer(input: QueueEntrySteerCommandRequest) {
+    return this.#steer.submitQueueEntry(input);
   }
 
   submitScheduledExistingChat(input: ScheduledExistingChatInput) {

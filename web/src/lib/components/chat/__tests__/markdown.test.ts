@@ -14,6 +14,16 @@ describe('Markdown', () => {
 		expect(code.className).toContain('border-border');
 	});
 
+	it.each([
+		['internal backticks', 'Use `` foo`bar ``.', 'foo`bar'],
+		['multiline content', 'Use `line\nbreak`.', 'line break'],
+		['matching edge spaces', 'Use ` foo `.', 'foo'],
+	])('preserves Marked codespan normalization for %s', (_name, source, expected) => {
+		const { container } = render(Markdown, { source });
+
+		expect(container.querySelector('code')?.textContent).toBe(expected);
+	});
+
 	it('renders links with target="_blank" and rel attributes', () => {
 		render(Markdown, { source: 'Visit [docs](https://example.com).' });
 
@@ -97,6 +107,92 @@ describe('Markdown', () => {
 
 		const lineBreak = container.querySelector('br');
 		expect(lineBreak).toBeFalsy();
+	});
+
+	describe('literal HTML policy', () => {
+		it.each([
+			['Promise<void>', 'Promise<void>'],
+			['Vec<Vec<u8>>', 'Vec<Vec<u8>>'],
+			['# Result<T>', 'Result<T>'],
+			['- Promise<void>', 'Promise<void>'],
+			['> Promise<void>', 'Promise<void>'],
+			['[Promise<void>](https://example.com)', 'Promise<void>'],
+			['| Type |\n| --- |\n| Promise<void> |', 'Promise<void>'],
+		])('preserves angle-bracket types in %s', (source, expectedText) => {
+			const { container } = render(Markdown, { source });
+
+			expect(container.textContent).toContain(expectedText);
+			expect(container.querySelector('void, t, u8')).toBeNull();
+		});
+
+		it.each(['assistant', 'user'] as const)(
+			'keeps raw HTML and XML visible and inert for the %s variant',
+			(variant) => {
+				const source = '<config>\n  <item name="primary" />\n</config>';
+				const { container } = render(Markdown, { source, variant });
+
+				expect(container.textContent).toContain('<config>');
+				expect(container.textContent).toContain('<item name="primary" />');
+				expect(container.textContent).toContain('</config>');
+				expect(container.querySelector('config, item')).toBeNull();
+			},
+		);
+
+		it('never creates elements or event attributes from hostile HTML', () => {
+			const source = [
+				'<script>alert(1)</script>',
+				'<img src=x onerror=alert(1)>',
+				'<iframe src="javascript:alert(1)"></iframe>',
+				'<svg onload=alert(1)></svg>',
+				'<!-- c --><img src=x onerror=alert(1)>',
+				'<!-- c --><unknowntag onclick="alert(1)">x</unknowntag>',
+			].join('\n');
+			const { container } = render(Markdown, { source });
+
+			expect(container.textContent).toContain('<script>alert(1)</script>');
+			expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
+			expect(
+				container.querySelectorAll('script, img, iframe, svg, object, embed, unknowntag'),
+			).toHaveLength(0);
+			expect(
+				[...container.querySelectorAll('*')].flatMap((element) =>
+					[...element.attributes].filter((attribute) => attribute.name.startsWith('on')),
+				),
+			).toHaveLength(0);
+		});
+
+		it('keeps HTML comments hidden', () => {
+			const { container } = render(Markdown, {
+				source: '<!-- template guidance -->Visible Promise<void>',
+			});
+
+			expect(container.textContent).toContain('Visible Promise<void>');
+			expect(container.textContent).not.toContain('template guidance');
+			expect(container.querySelector('void')).toBeNull();
+		});
+
+		it('renders unterminated HTML comments as literal text', () => {
+			const { container } = render(Markdown, {
+				source: '<!-- template guidance\n\nVisible Promise<void>',
+			});
+
+			expect(container.textContent).toContain('<!-- template guidance');
+			expect(container.textContent).toContain('Visible Promise<void>');
+			expect(container.querySelector('void')).toBeNull();
+		});
+
+		it('preserves code and autolink behavior', () => {
+			const { container } = render(Markdown, {
+				source:
+					'Visit <https://example.com> or <user@example.com>. Use `Promise<void>`.\n\n```ts\nPromise<void>\n```',
+			});
+
+			expect(container.querySelectorAll('a')).toHaveLength(2);
+			expect(container.querySelector('code')?.textContent).toBe('Promise<void>');
+			expect(container.querySelector('.markdown-code-block code')?.textContent).toBe(
+				'Promise<void>',
+			);
+		});
 	});
 
 	describe('math rendering', () => {
@@ -281,5 +377,115 @@ describe('Markdown', () => {
 
 			expect(handler).not.toHaveBeenCalled();
 		});
+	});
+
+	describe('chat references', () => {
+		const chatId = '1788592720180699';
+		const resolution = { title: 'Chat links design', isCurrent: false } as const;
+		const resolveChatReference = vi.fn(() => resolution);
+
+		it('keeps exact chat destinations on the previous absolute-path path by default', () => {
+			render(Markdown, { source: `[${chatId}](/chat/${chatId})` });
+
+			const link = screen.getByRole('link', { name: chatId });
+			const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+			link.dispatchEvent(event);
+			expect(event.defaultPrevented).toBe(true);
+		});
+
+		it('resolves an explicit ID label before absolute file paths', () => {
+			render(Markdown, {
+				source: `[${chatId}](/chat/${chatId})`,
+				chatReferencePolicy: 'explicit',
+				resolveChatReference,
+				fileLinkBasePath: '/',
+			});
+
+			const link = screen.getByRole('link', { name: `Chat links design (${chatId})` });
+			expect(link.getAttribute('href')).toBe(`/chat/${chatId}`);
+			expect(link.getAttribute('target')).toBeNull();
+			expect(link.getAttribute('rel')).toBeNull();
+		});
+
+		it('preserves structured custom labels for explicit references', () => {
+			render(Markdown, {
+				source: `[**Design chat**](/chat/${chatId} "Authored title")`,
+				chatReferencePolicy: 'explicit',
+				resolveChatReference,
+			});
+
+			const link = screen.getByRole('link', { name: 'Design chat' });
+			expect(link.querySelector('strong')?.textContent).toBe('Design chat');
+			expect(link.getAttribute('title')).toBe('Authored title');
+		});
+
+		it('renders unresolved explicit references as inert text with a durable ID', () => {
+			const { container } = render(Markdown, {
+				source: `[custom](/chat/${chatId})`,
+				chatReferencePolicy: 'explicit',
+			});
+
+			expect(container.querySelector(`a[href="/chat/${chatId}"]`)).toBeNull();
+			expect(container.textContent?.replace(/\s+/g, ' ').trim()).toBe(`custom (${chatId})`);
+		});
+
+		it('autolinks a known bare ID only under the bare policy', () => {
+			const explicit = render(Markdown, {
+				source: `Continue in ${chatId}.`,
+				chatReferencePolicy: 'explicit',
+				resolveChatReference,
+			});
+			expect(explicit.container.querySelector('a[data-chat-reference-id]')).toBeNull();
+			explicit.unmount();
+
+			render(Markdown, {
+				source: `Continue in ${chatId}.`,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+			expect(screen.getByRole('link', { name: `Chat links design (${chatId})` })).toBeTruthy();
+		});
+
+		it.each([
+			['user', 'text-current opacity-70'],
+			['presented', 'text-current opacity-70'],
+			['assistant', 'text-muted-foreground/80'],
+			['thinking', 'text-muted-foreground/80'],
+		] as const)('uses contrast-aware ID styling for the %s variant', (variant, classes) => {
+			render(Markdown, {
+				source: chatId,
+				variant,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+
+			const id = screen.getByText(`(${chatId})`);
+			for (const className of classes.split(' ')) expect(id.className).toContain(className);
+		});
+
+		it('corrects a transient end-of-stream match when the next digit arrives', async () => {
+			const view = render(Markdown, {
+				source: chatId,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+			expect(view.container.querySelector('a[data-chat-reference-id]')).toBeTruthy();
+
+			await view.rerender({
+				source: `${chatId}7`,
+				chatReferencePolicy: 'explicit-and-bare',
+				resolveChatReference,
+			});
+			expect(view.container.querySelector('a[data-chat-reference-id]')).toBeNull();
+			expect(view.container.textContent).toContain(`${chatId}7`);
+		});
+
+		it.each(['javascript:alert(1)', 'data:text/html,unsafe', 'JaVaScRiPt:alert(1)'])(
+			'keeps the unsafe %s destination without an href',
+			(destination) => {
+				render(Markdown, { source: `[unsafe](${destination})` });
+				expect(screen.getByText('unsafe').closest('a')?.getAttribute('href')).toBeNull();
+			},
+		);
 	});
 });

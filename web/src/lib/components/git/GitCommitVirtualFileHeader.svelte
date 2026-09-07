@@ -58,9 +58,9 @@
 		</span>
 	{/if}
 	<span class="hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-git-added sm:inline">
-		+{row.file.additions}
+		+{row.file.statsKnown === false ? '?' : row.file.additions}
 	</span>
 	<span class="hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-git-deleted sm:inline">
-		-{row.file.deletions}
+		-{row.file.statsKnown === false ? '?' : row.file.deletions}
 	</span>
 </div>

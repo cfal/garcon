@@ -1,6 +1,6 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
-import { apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
+import { ApiError, apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizePermissionMode,
@@ -9,9 +9,24 @@ import {
 	type ThinkingMode,
 } from '$shared/chat-modes';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
+import {
+	parseChatSnapshotResponse,
+	type ChatSnapshotResponse,
+} from '$shared/chat-snapshot';
 import type { ApiProtocol } from '$shared/api-providers';
-import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
+import {
+	CHAT_MESSAGES_MAX_LIMIT,
+	isRelationallyValidBoundedTranscriptPage,
+	isRelationallyValidTranscriptPage,
+	parseChatHistoryState,
+	parseResendCandidates,
+	parseTranscriptMessages,
+	type ChatHistoryResponse,
+	type TranscriptMessage,
+	type TranscriptReadPurpose,
+} from '$shared/chat-view';
 import type {
+	ChatListEntry,
 	ChatListResponse,
 	MarkChatsReadEntry,
 	MarkChatsReadRequest,
@@ -19,11 +34,11 @@ import type {
 	SetLastSelectedChatRequest,
 	SetLastSelectedChatResponse,
 } from '$shared/chat-list';
-import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import type {
 	AgentInterruptAndSendCommandRequest,
 	AgentInterruptAndSendResponse,
 	AgentRunCommandRequest,
+	AgentTurnCommandResponse,
 	AgentStopCommandRequest,
 	AgentStopResponse,
 	CompactCommandRequest,
@@ -38,13 +53,18 @@ import type {
 	PermissionDecisionCommandRequest,
 	ProjectPathPatchRequest,
 	ProjectPathPatchResponse,
-	ActiveInputCommandRequest,
-	ActiveInputCommandResponse,
+	GoalControlCommandRequest,
+	GoalControlCommandResponse,
+	SteerCommandRequest,
+	SteerCommandResponse,
 	QueueEntryCommandResponse,
 	QueueEntryCreateCommandRequest,
 	QueueEntryDeleteCommandRequest,
 	QueueEntryDeleteResponse,
+	QueueEntryMoveCommandRequest,
 	QueueEntryReplaceCommandRequest,
+	QueueEntrySteerCommandRequest,
+	QueueEntrySteerCommandResponse,
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
@@ -54,17 +74,37 @@ import type {
 	GenerateChatTitleRequest,
 	GenerateChatTitleResponse,
 } from '$shared/chat-title-contracts';
-import type {
-	AgentModelPatchRequest,
-	AgentModelPatchResponse,
-} from '$shared/chat-command-contracts';
-import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
+import {
+	CHAT_SEARCH_DEFAULT_PAGE_SIZE,
+	CHAT_SEARCH_MAX_OFFSET,
+	CHAT_SEARCH_MAX_PAGE_SIZE,
+	CHAT_SEARCH_MAX_PREFIX_SIZE,
+	CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
+	type ChatSearchIndexStatus,
+	type ChatSearchNavigateRequest,
+	type ChatSearchNavigateResponse,
+	type ChatSearchRequest,
+	type ChatSearchResult,
+	type ChatSearchResponse,
+	type TranscriptSearchStatusResponse,
+} from '$shared/chat-search';
 import type { ChatDetailsResponse } from '$shared/chat-details';
 import {
 	parseChatExecutionControlState,
+	parseExecutionControlServerInstanceId,
 	type ChatExecutionControlState,
 } from '$shared/chat-execution-control';
+import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '$shared/chat-types';
 import type { AgentCommandImage } from '$shared/ws-requests';
+import { AGENT_HANDOFF_HTTP_TIMEOUT_MS } from '$shared/handoff-timeouts';
+import {
+	parseReorderChatResponse,
+	parseSortChatOrderResponse,
+	type ReorderChatRequest,
+	type ReorderChatResponse,
+	type SortChatOrderRequest,
+	type SortChatOrderResponse,
+} from '$shared/chat-order-contracts';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
 
@@ -72,6 +112,14 @@ function withParsedControl<T extends { control: ChatExecutionControlState }>(res
 	const control = parseChatExecutionControlState(response.control);
 	if (!control) throw new Error('Invalid chat execution control response');
 	return { ...response, control };
+}
+
+function withParsedStopOutcome<
+	T extends { control: ChatExecutionControlState; outcome: ChatStopOutcome },
+>(response: T): T {
+	const outcome = CHAT_STOP_OUTCOMES.find((entry) => entry === response.outcome);
+	if (!outcome) throw new Error('Invalid chat Stop outcome response');
+	return { ...withParsedControl(response), outcome };
 }
 
 export interface StartChatParams {
@@ -90,15 +138,41 @@ export interface StartChatParams {
 	command: string;
 	images?: AgentCommandImage[];
 	tags?: string[];
+	orderedPreambleIds?: readonly string[];
 }
 
 export type { ChatDetailsResponse } from '$shared/chat-details';
 
 export type ListChatsResponse = ChatListResponse;
 
+function hasConsistentProcessingPhase(
+	entry: Pick<ChatListEntry, 'isProcessing' | 'processingPhase'>,
+): boolean {
+	return (
+		(entry.processingPhase === null ||
+			entry.processingPhase === 'running' ||
+			entry.processingPhase === 'stopping') &&
+		entry.isProcessing === (entry.processingPhase !== null)
+	);
+}
+
 /** Lists all chat sessions. */
 export async function listChats(): Promise<ListChatsResponse> {
-	return apiGet<ListChatsResponse>('/api/v1/chats');
+	const response = await apiGet<ListChatsResponse>('/api/v1/chats');
+	if (
+		!response ||
+		!Array.isArray(response.sessions) ||
+		response.sessions.some(
+			(entry) =>
+				!entry ||
+				typeof entry !== 'object' ||
+				typeof entry.isProcessing !== 'boolean' ||
+				!hasConsistentProcessingPhase(entry),
+		)
+	) {
+		throw new Error('Invalid chat list processing response');
+	}
+	return response;
 }
 
 export async function setLastSelectedChat(
@@ -109,17 +183,36 @@ export async function setLastSelectedChat(
 }
 
 /** Starts a new chat session. */
-export async function startChat(params: StartChatParams): Promise<StartChatCommandResponse> {
+export async function startChat(
+	params: StartChatParams,
+): Promise<StartChatCommandResponse & { chat: ChatListEntry }> {
 	const { permissionMode, thinkingMode, ...rest } = params;
-	return apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
+	const response = await apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
+		origin: 'interactive',
 		...rest,
 		permissionMode: normalizePermissionMode(permissionMode),
 		thinkingMode: normalizeThinkingMode(thinkingMode),
 	});
+	if (!response.chat) {
+		throw new ApiError(
+			410,
+			'The chat was deleted before the recovered start response was received',
+			'SESSION_NOT_FOUND',
+		);
+	}
+	return { ...response, chat: response.chat };
 }
 
-export async function runChat(params: AgentRunCommandRequest): Promise<CommandAcceptedResponse> {
-	return apiPost<CommandAcceptedResponse>('/api/v1/chats/run', params);
+export async function runChat(params: AgentRunCommandRequest): Promise<AgentTurnCommandResponse> {
+	const response = await apiPost<AgentTurnCommandResponse>(
+		'/api/v1/chats/run',
+		params,
+		params.handoff ? { timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS } : undefined,
+	);
+	if (params.handoff && !response.chat) {
+		throw new Error('Invalid handoff response: durable chat projection is missing');
+	}
+	return response;
 }
 
 export async function generateChatTitle(
@@ -131,17 +224,25 @@ export async function generateChatTitle(
 }
 
 export async function forkRunChat(params: ForkRunCommandRequest): Promise<ForkRunCommandResponse> {
-	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params);
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params, { timeoutMs: null });
+}
+
+import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
+
+export async function selfHandoffRunChat(
+	params: SelfHandoffRunCommandRequest,
+): Promise<ForkRunCommandResponse> {
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/handoff-run', params);
 }
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
-	return withParsedControl(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params));
+	return withParsedStopOutcome(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params));
 }
 
 export async function interruptAndSendChat(
 	params: AgentInterruptAndSendCommandRequest,
 ): Promise<AgentInterruptAndSendResponse> {
-	return withParsedControl(
+	return withParsedStopOutcome(
 		await apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params),
 	);
 }
@@ -154,6 +255,16 @@ export async function sendPermissionDecision(
 	params: PermissionDecisionCommandRequest,
 ): Promise<CommandAcceptedResponse> {
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
+}
+
+export async function getChatSnapshot(
+	chatId: string,
+	messageLimit = 1,
+): Promise<ChatSnapshotResponse> {
+	const value = await apiGet<unknown>(
+		`/api/v1/chats/snapshot?chatId=${encodeURIComponent(chatId)}&limit=${messageLimit}`,
+	);
+	return parseChatSnapshotResponse(value);
 }
 
 export async function createQueuedInput(
@@ -180,12 +291,42 @@ export async function deleteQueuedInput(
 	);
 }
 
-export async function sendActiveInput(
-	params: ActiveInputCommandRequest,
-): Promise<ActiveInputCommandResponse> {
+export async function moveQueuedInput(
+	params: QueueEntryMoveCommandRequest,
+): Promise<QueueEntryCommandResponse> {
 	return withParsedControl(
-		await apiPost<ActiveInputCommandResponse>('/api/v1/chats/active-input', params),
+		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries/move', params),
 	);
+}
+
+export async function submitGoalControl(
+	params: GoalControlCommandRequest,
+): Promise<GoalControlCommandResponse> {
+	return withParsedControl(
+		await apiPost<GoalControlCommandResponse>('/api/v1/chats/goal-control', params),
+	);
+}
+
+export async function steerChat(params: SteerCommandRequest): Promise<SteerCommandResponse> {
+	return apiPost<SteerCommandResponse>('/api/v1/chats/steer', params);
+}
+
+export async function steerQueuedEntry(
+	params: QueueEntrySteerCommandRequest,
+): Promise<QueueEntrySteerCommandResponse> {
+	const response = await apiPost<QueueEntrySteerCommandResponse>(
+		'/api/v1/chats/queue/entries/steer',
+		params,
+	);
+	const serverInstanceId = parseExecutionControlServerInstanceId(response.serverInstanceId);
+	if (!serverInstanceId) throw new Error('Invalid queued steer server instance response');
+	if (!response.control) return { ...response, serverInstanceId };
+	const control = parseChatExecutionControlState(response.control);
+	if (!control) throw new Error('Invalid queued steer execution control response');
+	if (control.serverInstanceId !== serverInstanceId) {
+		throw new Error('Mismatched queued steer server instance response');
+	}
+	return { ...response, serverInstanceId, control };
 }
 
 export async function getChatExecutionControl(
@@ -233,16 +374,6 @@ export async function updateChatModel(params: ModelPatchRequest): Promise<ModelP
 	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params);
 }
 
-// Continues a chat under a different agent. The server seeds the new runtime
-// from the canonical transcript and returns the normalized execution modes for
-// the target agent, which the client mirrors optimistically. The request and
-// response types are the shared contract imported above.
-export async function updateChatAgentModel(
-	params: AgentModelPatchRequest,
-): Promise<AgentModelPatchResponse> {
-	return apiPatch<AgentModelPatchResponse>('/api/v1/chats/agent-model', params);
-}
-
 export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
 ): Promise<ProjectPathPatchResponse> {
@@ -257,77 +388,178 @@ function requireNonEmptyString(value: unknown, fieldName: string): string {
 }
 
 function requireNonNegativeInteger(value: unknown, fieldName: string): number {
-	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
 		throw new Error(`Invalid chat messages page: ${fieldName}`);
 	}
 	return value;
 }
 
 function requirePositiveInteger(value: unknown, fieldName: string): number {
-	if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
 		throw new Error(`Invalid chat messages page: ${fieldName}`);
 	}
 	return value;
 }
 
-function parsePendingUserInputs(value: unknown): PendingUserInput[] {
-	if (!Array.isArray(value)) {
-		throw new Error('Invalid chat messages page: pendingUserInputs');
-	}
-	const pendingInputs: PendingUserInput[] = [];
-	for (const item of value) {
-		const pendingInput = normalizePendingUserInput(item);
-		if (pendingInput === null) {
-			throw new Error('Invalid chat messages page: pendingUserInputs');
-		}
-		pendingInputs.push(pendingInput);
-	}
-	return pendingInputs;
+function requireNullablePositiveInteger(value: unknown, fieldName: string): number | null {
+	return value === null ? null : requirePositiveInteger(value, fieldName);
 }
 
-export async function getChatMessages(params: {
+export type ChatMessagesRequest = {
 	chatId: string;
 	limit?: number;
-	beforeSeq?: number;
-}): Promise<{
+} & (
+	| {
+			beforeOrdinal?: undefined;
+			transcriptViewId?: string;
+			purpose?: TranscriptReadPurpose;
+		}
+	| {
+			beforeOrdinal: number;
+			transcriptViewId: string;
+			purpose?: never;
+		}
+);
+
+interface ValidatedChatMessagesPage {
 	chatId: string;
-	messages: ChatViewMessage[];
-	generationId: string;
-	lastSeq: number;
-	pageOldestSeq: number;
-	pendingUserInputs: PendingUserInput[];
+	transcriptViewId: string;
+	messages: TranscriptMessage[];
+	lastOrdinal: number;
+	pageOldestOrdinal: number;
+	pageNewestOrdinal: number;
+	nextBeforeOrdinal: number | null;
 	hasMore: boolean;
 	limit: number;
-}> {
+}
+
+function invalidChatMessagesPage(reason: string): never {
+	throw new Error(`Invalid chat messages page: ${reason}`);
+}
+
+function validateChatMessagesPage(
+	request: ChatMessagesRequest,
+	page: ValidatedChatMessagesPage,
+): void {
+	if (page.chatId !== request.chatId) invalidChatMessagesPage('chatId does not match request');
+	const expectedLimit = Math.min(request.limit ?? 50, CHAT_MESSAGES_MAX_LIMIT);
+	if (page.limit !== expectedLimit) invalidChatMessagesPage('limit does not match request');
+	if (
+		request.transcriptViewId !== undefined
+		&& page.transcriptViewId !== request.transcriptViewId
+	) {
+		invalidChatMessagesPage('transcriptViewId does not match request');
+	}
+	const effectiveBefore = Math.min(
+		request.beforeOrdinal ?? page.lastOrdinal + 1,
+		page.lastOrdinal + 1,
+	);
+	if (page.pageNewestOrdinal !== effectiveBefore - 1) {
+		invalidChatMessagesPage('pageNewestOrdinal does not match the effective request boundary');
+	}
+	if (page.messages.length > page.limit) invalidChatMessagesPage('messages exceed limit');
+	if (!isRelationallyValidTranscriptPage(page)) {
+		invalidChatMessagesPage('ordinal relations are inconsistent');
+	}
+	if (!isRelationallyValidBoundedTranscriptPage(page, page.limit)) {
+		invalidChatMessagesPage('raw continuation does not match the bounded interval');
+	}
+}
+
+export async function getChatMessages(params: ChatMessagesRequest): Promise<ChatHistoryResponse> {
 	const query = new URLSearchParams({
 		chatId: params.chatId,
 		limit: String(params.limit ?? 50),
 	});
-	if (params.beforeSeq !== undefined) query.set('beforeSeq', String(params.beforeSeq));
+	if (params.beforeOrdinal !== undefined) {
+		query.set('beforeOrdinal', String(params.beforeOrdinal));
+	}
+	if (params.transcriptViewId !== undefined) {
+		query.set('transcriptViewId', params.transcriptViewId);
+	}
+	if (params.purpose !== undefined) {
+		query.set('purpose', params.purpose);
+	}
 	const response = await apiGet<{
+		historyState?: unknown;
 		chatId?: unknown;
 		messages?: unknown;
-		generationId?: unknown;
-		lastSeq?: unknown;
-		pageOldestSeq?: unknown;
-		pendingUserInputs?: unknown;
+		transcriptViewId?: unknown;
+		lastOrdinal?: unknown;
+		pageOldestOrdinal?: unknown;
+		pageNewestOrdinal?: unknown;
+		nextBeforeOrdinal?: unknown;
+		resendCandidates?: unknown;
 		hasMore?: unknown;
 		limit?: unknown;
 	}>(`/api/v1/chats/messages?${query.toString()}`);
-	const messages = parseChatViewMessages(response.messages);
+	const historyState = parseChatHistoryState(response.historyState);
+	if (historyState === null) throw new Error('Invalid chat messages page: historyState');
+	const chatId = requireNonEmptyString(response.chatId, 'chatId');
+	if (chatId !== params.chatId) invalidChatMessagesPage('chatId does not match request');
+	if (historyState.kind !== 'complete') {
+		if (!Array.isArray(response.messages) || response.messages.length !== 0) {
+			throw new Error('Invalid unavailable chat history: messages');
+		}
+		for (const field of [
+			'transcriptViewId',
+			'lastOrdinal',
+			'pageOldestOrdinal',
+			'pageNewestOrdinal',
+			'nextBeforeOrdinal',
+			'hasMore',
+			'limit',
+		] as const) {
+			if (response[field] !== undefined) {
+				throw new Error(`Invalid unavailable chat history: ${field}`);
+			}
+		}
+		return { historyState, chatId, messages: [] };
+	}
+	const messages = parseTranscriptMessages(response.messages);
 	if (messages === null) throw new Error('Invalid chat messages page: messages');
+	const resendCandidates = parseResendCandidates(response.resendCandidates);
+	if (resendCandidates === null) {
+		throw new Error('Invalid chat messages page: resendCandidates');
+	}
 	if (typeof response.hasMore !== 'boolean') {
 		throw new Error('Invalid chat messages page: hasMore');
 	}
-	return {
-		chatId: requireNonEmptyString(response.chatId, 'chatId'),
+	const page = {
+		historyState,
+		chatId,
 		messages,
-		generationId: requireNonEmptyString(response.generationId, 'generationId'),
-		lastSeq: requireNonNegativeInteger(response.lastSeq, 'lastSeq'),
-		pageOldestSeq: requireNonNegativeInteger(response.pageOldestSeq, 'pageOldestSeq'),
-		pendingUserInputs: parsePendingUserInputs(response.pendingUserInputs),
+		resendCandidates,
+		transcriptViewId: requireNonEmptyString(response.transcriptViewId, 'transcriptViewId'),
+		lastOrdinal: requireNonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
+		pageOldestOrdinal: requireNonNegativeInteger(response.pageOldestOrdinal, 'pageOldestOrdinal'),
+		pageNewestOrdinal: requireNonNegativeInteger(response.pageNewestOrdinal, 'pageNewestOrdinal'),
+		nextBeforeOrdinal: requireNullablePositiveInteger(
+			response.nextBeforeOrdinal,
+			'nextBeforeOrdinal',
+		),
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
+	};
+	validateChatMessagesPage(params, page);
+	return page;
+}
+
+// Resolves one search result to a browser ordinal under its composite content
+// epoch. A stale result rejects with SEARCH_RESULT_STALE instead of scrolling
+// to a possibly reused ordinal.
+export async function navigateToSearchResult(
+	request: ChatSearchNavigateRequest,
+	options?: ApiFetchOptions,
+): Promise<ChatSearchNavigateResponse> {
+	const response = await apiPost<{ chatId?: unknown; ordinal?: unknown }>(
+		'/api/v1/chats/search/navigate',
+		request,
+		options,
+	);
+	return {
+		chatId: requireNonEmptyString(response.chatId, 'chatId'),
+		ordinal: requirePositiveInteger(response.ordinal, 'ordinal'),
 	};
 }
 
@@ -335,7 +567,166 @@ export async function searchChatTranscripts(
 	request: ChatSearchRequest,
 	options?: ApiFetchOptions,
 ): Promise<ChatSearchResponse> {
-	return apiPost<ChatSearchResponse>('/api/v1/chats/search', request, options);
+	const response = await apiPost<unknown>('/api/v1/chats/search', request, options);
+	return parseChatSearchResponse(request, response);
+}
+
+function parseChatSearchResponse(
+	request: ChatSearchRequest,
+	value: unknown,
+): ChatSearchResponse {
+	const response = searchRecord(value);
+	if (!response || typeof response.query !== 'string') invalidChatSearchResponse('response');
+	const expectedMode = request.mode ?? 'page';
+	const expectedSnippetLimit = request.snippetLimit ?? CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
+	const expectedOffset = request.offset ?? 0;
+	const expectedLimit = request.limit ?? CHAT_SEARCH_DEFAULT_PAGE_SIZE;
+	if (response.mode !== expectedMode) invalidChatSearchResponse('mode does not match request');
+	if (response.snippetLimit !== expectedSnippetLimit) {
+		invalidChatSearchResponse('snippetLimit does not match request');
+	}
+	if (!Array.isArray(response.results)) invalidChatSearchResponse('results');
+	const results = response.results.map((result) => parseChatSearchResult(
+		result,
+		expectedSnippetLimit,
+	));
+	const page = searchRecord(response.page);
+	if (!page) invalidChatSearchResponse('page');
+	const maximumLimit = expectedMode === 'prefix'
+		? CHAT_SEARCH_MAX_PREFIX_SIZE
+		: CHAT_SEARCH_MAX_PAGE_SIZE;
+	if (!isNonNegativeSafeInteger(page.offset)
+		|| page.offset > CHAT_SEARCH_MAX_OFFSET
+		|| page.offset !== expectedOffset) {
+		invalidChatSearchResponse('offset does not match request');
+	}
+	if (!isPositiveSafeInteger(page.limit)
+		|| page.limit > maximumLimit
+		|| page.limit !== expectedLimit) {
+		invalidChatSearchResponse('limit does not match request');
+	}
+	if (expectedMode === 'prefix'
+		&& (page.offset !== 0 || expectedSnippetLimit !== 1)) {
+		invalidChatSearchResponse('prefix projection');
+	}
+	if (!isNonNegativeSafeInteger(page.total)
+		|| typeof page.hasMore !== 'boolean'
+		|| (page.nextOffset !== null && !isPositiveSafeInteger(page.nextOffset))) {
+		invalidChatSearchResponse('page fields');
+	}
+	if (page.hasMore !== (page.nextOffset !== null)) {
+		invalidChatSearchResponse('cursor presence');
+	}
+	if (page.nextOffset !== null
+		&& (page.nextOffset <= page.offset
+			|| page.nextOffset > CHAT_SEARCH_MAX_OFFSET
+			|| page.nextOffset > page.offset + page.limit
+			|| page.nextOffset > page.total)) {
+		invalidChatSearchResponse('cursor bounds');
+	}
+	if (results.length > page.limit
+		|| results.length > Math.max(0, page.total - page.offset)) {
+		invalidChatSearchResponse('result window');
+	}
+	const index = parseChatSearchIndexStatus(response.index);
+	return {
+		query: response.query,
+		mode: expectedMode,
+		snippetLimit: expectedSnippetLimit,
+		results,
+		page: {
+			offset: page.offset,
+			limit: page.limit,
+			total: page.total,
+			hasMore: page.hasMore,
+			nextOffset: page.nextOffset,
+		},
+		index,
+	};
+}
+
+function parseChatSearchResult(value: unknown, snippetLimit: number): ChatSearchResult {
+	const result = searchRecord(value);
+	if (!result
+		|| typeof result.chatId !== 'string'
+		|| result.chatId.length === 0
+		|| typeof result.transcriptViewId !== 'string'
+		|| result.transcriptViewId.length === 0
+		|| typeof result.score !== 'number'
+		|| !Number.isFinite(result.score)
+		|| !isNonNegativeSafeInteger(result.matchedMessageCount)
+		|| !Array.isArray(result.snippets)
+		|| result.snippets.length > snippetLimit) {
+		invalidChatSearchResponse('result');
+	}
+	const snippets = result.snippets.map((valueSnippet) => {
+		const snippet = searchRecord(valueSnippet);
+		if (!snippet
+			|| !isPositiveSafeInteger(snippet.ordinal)
+			|| !['user', 'assistant', 'tool', 'system'].includes(String(snippet.role))
+			|| (snippet.timestamp !== null && typeof snippet.timestamp !== 'string')
+			|| typeof snippet.text !== 'string') {
+			invalidChatSearchResponse('snippet');
+		}
+		return {
+			ordinal: snippet.ordinal,
+			role: snippet.role as ChatSearchResult['snippets'][number]['role'],
+			timestamp: snippet.timestamp,
+			text: snippet.text,
+		};
+	});
+	return {
+		chatId: result.chatId,
+		transcriptViewId: result.transcriptViewId,
+		score: result.score,
+		matchedMessageCount: result.matchedMessageCount,
+		snippets,
+	};
+}
+
+function parseChatSearchIndexStatus(value: unknown): ChatSearchIndexStatus {
+	const index = searchRecord(value);
+	if (!index
+		|| !isNonNegativeSafeInteger(index.indexedChatCount)
+		|| !isNonNegativeSafeInteger(index.pendingChatCount)
+		|| !isNonNegativeSafeInteger(index.failedChatCount)
+		|| !isNonNegativeSafeInteger(index.unindexedChatCount)
+		|| !isNonNegativeSafeInteger(index.unsupportedChatCount)
+		|| typeof index.resultsTruncated !== 'boolean') {
+		invalidChatSearchResponse('index');
+	}
+	return {
+		indexedChatCount: index.indexedChatCount,
+		pendingChatCount: index.pendingChatCount,
+		failedChatCount: index.failedChatCount,
+		unindexedChatCount: index.unindexedChatCount,
+		unsupportedChatCount: index.unsupportedChatCount,
+		resultsTruncated: index.resultsTruncated,
+	};
+}
+
+function searchRecord(value: unknown): Record<string, unknown> | null {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+		? value as Record<string, unknown>
+		: null;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+	return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function invalidChatSearchResponse(reason: string): never {
+	throw new Error(`Invalid chat search response: ${reason}`);
+}
+
+export async function getTranscriptSearchStatus(
+	options?: ApiFetchOptions,
+): Promise<TranscriptSearchStatusResponse> {
+	return apiGet<TranscriptSearchStatusResponse>('/api/v1/chats/search/status', options);
 }
 
 export interface DeleteChatResponse {
@@ -406,36 +797,33 @@ export async function validateStart(
 export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
-	upToSeq?: number;
+	upToOrdinal?: number;
+	transcriptViewId?: string;
+	// Set only after the user confirms a handoff fork, so an unconfirmed request still
+	// surfaces the refusal the confirmation is asked about.
+	allowHandoffFork?: boolean;
 }
 
 /** Forks (clones) an existing chat session into a new chat. */
 export async function forkChat(params: ForkChatParams): Promise<ForkChatResponse> {
-	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params);
+	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params, { timeoutMs: null });
 }
 
-export type ChatOrderList = 'pinned' | 'normal' | 'archived';
-
-export interface ReorderChatsRequest {
-	list: ChatOrderList;
-	oldOrder: string[];
-	newOrder: string[];
+/** Persists a chat placement within its server-resolved section. */
+export async function reorderChat(request: ReorderChatRequest): Promise<ReorderChatResponse> {
+	const response = await apiPost<unknown>('/api/v1/chats/reorder', request);
+	const parsed = parseReorderChatResponse(response);
+	if (!parsed) throw new Error('Invalid chat reorder response');
+	return parsed;
 }
 
-export type ReorderQuickTarget =
-	| { chatIdAbove: string; chatIdBelow?: never }
-	| { chatIdBelow: string; chatIdAbove?: never };
-
-export type ReorderQuickRequest = { chatId: string } & ReorderQuickTarget;
-
-/** Persists a window reorder within a group. */
-export async function reorderChats(body: ReorderChatsRequest): Promise<{ success: boolean }> {
-	return apiPost('/api/v1/chats/reorder', body);
-}
-
-/** Moves a single chat relative to a neighbor within the same group. */
-export async function reorderChatsQuick(body: ReorderQuickRequest): Promise<{ success: boolean }> {
-	return apiPost('/api/v1/chats/reorder-quick', body);
+export async function sortChatOrder(
+	request: SortChatOrderRequest,
+): Promise<SortChatOrderResponse> {
+	const response = await apiPost<unknown>('/api/v1/chats/sort', request);
+	const parsed = parseSortChatOrderResponse(response);
+	if (!parsed) throw new Error('Invalid chat order sort response');
+	return parsed;
 }
 
 export interface SetChatTagsResponse {

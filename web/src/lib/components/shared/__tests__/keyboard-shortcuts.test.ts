@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
+import { CANONICAL_CHAT_SURFACE_ID as CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
 import KeyboardShortcutsHost from './KeyboardShortcutsHost.svelte';
 
 function createMockAppShell() {
@@ -59,7 +60,7 @@ describe('KeyboardShortcuts', () => {
 		}
 	});
 
-	it('requests delete on Ctrl-D', async () => {
+	it('requests delete on Ctrl-Shift-D', async () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
@@ -69,12 +70,297 @@ describe('KeyboardShortcuts', () => {
 			onToggleCommandMenu: vi.fn(),
 		});
 
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }));
 
 		expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledTimes(1);
 	});
 
-	it('does not request delete while Chat owns focus', async () => {
+	it('consumes Ctrl-D without deleting while the chat list owns focus', () => {
+		const appShell = createMockAppShell();
+		const event = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			cancelable: true,
+		});
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+		});
+		window.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
+	});
+
+	it('scrolls the primary region by half a page from surface chrome', () => {
+		const onPrimaryScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			onPrimaryScroll,
+		});
+		const toolbar = screen.getByRole('button', { name: 'Surface toolbar' });
+		toolbar.focus();
+
+		const down = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		toolbar.dispatchEvent(down);
+		const up = new KeyboardEvent('keydown', {
+			key: 'u',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		toolbar.dispatchEvent(up);
+
+		expect(onPrimaryScroll).toHaveBeenNthCalledWith(1, 'later');
+		expect(onPrimaryScroll).toHaveBeenNthCalledWith(2, 'earlier');
+		expect(down.defaultPrevented).toBe(true);
+		expect(up.defaultPrevented).toBe(true);
+	});
+
+	it('uses customized half-page bindings in every non-terminal surface', () => {
+		const onPrimaryScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			onPrimaryScroll,
+			globalShortcuts: {
+				'scroll-half-page-down': { key: 'j', alt: true },
+			},
+		});
+		const region = screen.getByRole('button', { name: 'Primary scroll region' });
+
+		region.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'd',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		region.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'j',
+				altKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onPrimaryScroll).toHaveBeenCalledOnce();
+		expect(onPrimaryScroll).toHaveBeenCalledWith('later');
+	});
+
+	it('keeps scrolling the last interacted contextual region within a surface', () => {
+		const onPrimaryScroll = vi.fn();
+		const onContextualScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			onPrimaryScroll,
+			onContextualScroll,
+		});
+		const contextual = screen.getByRole('button', { name: 'Contextual scroll region' });
+		contextual.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'd',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onContextualScroll).toHaveBeenCalledWith('later');
+		expect(onPrimaryScroll).not.toHaveBeenCalled();
+	});
+
+	it('keeps a contextual pointer choice through its enclosing frame focus fallback', async () => {
+		const onPrimaryScroll = vi.fn();
+		const onContextualScroll = vi.fn();
+		const { container } = render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			onPrimaryScroll,
+			onContextualScroll,
+		});
+		const frame = container.querySelector<HTMLElement>('[data-workspace-surface-id]');
+		expect(frame).toBeTruthy();
+
+		screen
+			.getByTestId('contextual-content')
+			.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		await Promise.resolve();
+		frame?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+		frame?.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'd',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onContextualScroll).toHaveBeenCalledWith('later');
+		expect(onPrimaryScroll).not.toHaveBeenCalled();
+	});
+
+	it('returns to the primary region after interaction leaves a contextual viewport', () => {
+		const onPrimaryScroll = vi.fn();
+		const onContextualScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			onPrimaryScroll,
+			onContextualScroll,
+		});
+		const contextual = screen.getByRole('button', { name: 'Contextual scroll region' });
+		const toolbar = screen.getByRole('button', { name: 'Surface toolbar' });
+		contextual.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		toolbar.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+
+		window.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'd',
+				ctrlKey: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onPrimaryScroll).toHaveBeenCalledWith('later');
+		expect(onContextualScroll).not.toHaveBeenCalled();
+	});
+
+	it('stops non-terminal view handlers after consuming a half-page shortcut', () => {
+		const onPrimaryScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			onPrimaryScroll,
+		});
+		const region = screen.getByRole('button', { name: 'Primary scroll region' });
+		const localHandler = vi.fn();
+		region.addEventListener('keydown', localHandler);
+
+		region.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'd',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onPrimaryScroll).toHaveBeenCalledWith('later');
+		expect(localHandler).not.toHaveBeenCalled();
+	});
+
+	it('uses half-page scrolling from editable targets outside the terminal', () => {
+		const onPrimaryScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			onPrimaryScroll,
+		});
+		const editor = screen.getByRole('textbox', { name: 'File editor input' });
+		const localHandler = vi.fn();
+		editor.addEventListener('keydown', localHandler);
+		const event = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		editor.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(onPrimaryScroll).toHaveBeenCalledWith('later');
+		expect(localHandler).not.toHaveBeenCalled();
+	});
+
+	it('scrolls only the top file dialog region while the workspace is inert', () => {
+		const onPrimaryScroll = vi.fn();
+		const onTransientScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			transientKind: 'file-dialog',
+			transientSurface: true,
+			onPrimaryScroll,
+			onTransientScroll,
+		});
+		const dialogShortcut = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		screen.getByRole('button', { name: 'Transient toolbar' }).dispatchEvent(dialogShortcut);
+
+		expect(dialogShortcut.defaultPrevented).toBe(true);
+		expect(onTransientScroll).toHaveBeenCalledWith('later');
+		expect(onPrimaryScroll).not.toHaveBeenCalled();
+
+		const backgroundShortcut = new KeyboardEvent('keydown', {
+			key: 'u',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		screen.getByRole('button', { name: 'Surface toolbar' }).dispatchEvent(backgroundShortcut);
+
+		expect(backgroundShortcut.defaultPrevented).toBe(false);
+		expect(onTransientScroll).toHaveBeenCalledOnce();
+		expect(onPrimaryScroll).not.toHaveBeenCalled();
+	});
+
+	it('uses a customized delete shortcut immediately', () => {
+		const appShell = createMockAppShell();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			globalShortcuts: { 'delete-chat': { key: 'x', ctrl: true } },
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', ctrlKey: true }));
+
+		expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledOnce();
+	});
+
+	it('does not route a disabled shortcut', () => {
+		const appShell = createMockAppShell();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			globalShortcuts: { 'delete-chat': null },
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }));
+
+		expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
+	});
+
+	it('leaves Ctrl-D to feed scrolling while Chat owns focus', async () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
@@ -97,7 +383,67 @@ describe('KeyboardShortcuts', () => {
 		}
 	});
 
-	it('moves left between tabs on Ctrl-Shift-J while a workspace pane owns focus', () => {
+	it('requests delete on Ctrl-Shift-D while Chat owns focus', async () => {
+		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
+
+		const input = document.createElement('input');
+		document.body.appendChild(input);
+		input.focus();
+
+		try {
+			input.dispatchEvent(
+				new KeyboardEvent('keydown', {
+					key: 'D',
+					ctrlKey: true,
+					shiftKey: true,
+					bubbles: true,
+				}),
+			);
+			expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledOnce();
+		} finally {
+			input.remove();
+		}
+	});
+
+	it('requests rename on Ctrl-R while Chat owns focus and consumes the browser default', async () => {
+		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
+
+		const input = document.createElement('input');
+		document.body.appendChild(input);
+		input.focus();
+
+		try {
+			const event = new KeyboardEvent('keydown', {
+				key: 'r',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			});
+			input.dispatchEvent(event);
+			expect(appShell.requestRenameSelectedChat).toHaveBeenCalledOnce();
+			expect(event.defaultPrevented).toBe(true);
+		} finally {
+			input.remove();
+		}
+	});
+
+	it('moves left between tabs on Ctrl-Shift-J while a workspace window owns focus', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 		const onFocusPreviousTab = vi.fn(() => true);
@@ -123,7 +469,7 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
 	});
 
-	it('moves right between tabs on Ctrl-Shift-L while a workspace pane owns focus', () => {
+	it('moves right between tabs on Ctrl-Shift-L while a workspace window owns focus', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 		const onFocusNextTab = vi.fn(() => true);
@@ -142,8 +488,8 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
-	it('toggles focus between the main view and right sidebar on Ctrl-Shift-O', () => {
-		const onToggleMainSidebarFocus = vi.fn();
+	it('cycles workspace window focus on Ctrl-Shift-O', () => {
+		const onCycleWindowFocus = vi.fn();
 		const event = new KeyboardEvent('keydown', {
 			key: 'o',
 			ctrlKey: true,
@@ -154,12 +500,12 @@ describe('KeyboardShortcuts', () => {
 		render(KeyboardShortcutsHost, {
 			appShell: createMockAppShell(),
 			navigation: createMockNavigation(),
-			onToggleMainSidebarFocus,
+			onCycleWindowFocus,
 		});
 
 		window.dispatchEvent(event);
 
-		expect(onToggleMainSidebarFocus).toHaveBeenCalledOnce();
+		expect(onCycleWindowFocus).toHaveBeenCalledOnce();
 		expect(event.defaultPrevented).toBe(true);
 	});
 
@@ -195,6 +541,172 @@ describe('KeyboardShortcuts', () => {
 		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true }));
 
 		expect(onToggleCommandMenu).toHaveBeenCalledOnce();
+	});
+
+	it('defers locally owned editor chords before global commands run', () => {
+		const appShell = createMockAppShell();
+		const onToggleCommandMenu = vi.fn();
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			onToggleCommandMenu,
+			focusOwner: 'chat',
+			localShortcutOwner: (event) =>
+				event.ctrlKey && ['a', 'e', 'p', 'n'].includes(event.key.toLowerCase()),
+			onLocalKeydown,
+		});
+		const target = screen.getByRole('button', { name: 'Local shortcut target' });
+		const previousLine = new KeyboardEvent('keydown', {
+			key: 'p',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		const nextLine = new KeyboardEvent('keydown', {
+			key: 'n',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		target.dispatchEvent(previousLine);
+		target.dispatchEvent(nextLine);
+
+		expect(previousLine.defaultPrevented).toBe(false);
+		expect(nextLine.defaultPrevented).toBe(false);
+		expect(onLocalKeydown).toHaveBeenCalledTimes(2);
+		expect(onToggleCommandMenu).not.toHaveBeenCalled();
+		expect(appShell.requestNewChat).not.toHaveBeenCalled();
+	});
+
+	it('lets the top transient consume Escape before a local editor owner', () => {
+		const onTransientEscape = vi.fn();
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			transientKind: 'application-dialog',
+			transientSurface: true,
+			localShortcutOwner: () => true,
+			onLocalKeydown,
+			onTransientEscape,
+		});
+
+		screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'Escape',
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onTransientEscape).toHaveBeenCalledOnce();
+		expect(onLocalKeydown).not.toHaveBeenCalled();
+	});
+
+	it('keeps composing Escape inside a modal editor', () => {
+		const onTransientEscape = vi.fn();
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			transientKind: 'application-dialog',
+			transientSurface: true,
+			localShortcutOwner: (event) => event.isComposing,
+			onLocalKeydown,
+			onTransientEscape,
+		});
+		const escape = new KeyboardEvent('keydown', {
+			key: 'Escape',
+			bubbles: true,
+			cancelable: true,
+		});
+		Object.defineProperty(escape, 'isComposing', { value: true });
+
+		screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(escape);
+
+		expect(onTransientEscape).not.toHaveBeenCalled();
+		expect(onLocalKeydown).toHaveBeenCalledOnce();
+		expect(escape.defaultPrevented).toBe(false);
+		expect(screen.getByRole('dialog')).toBeTruthy();
+	});
+
+	it('leaves global shortcuts to a main-inert modal without a surface owner', () => {
+		const appShell = createMockAppShell();
+		const onToggleCommandMenu = vi.fn();
+		const onTransientScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			onToggleCommandMenu,
+			transientKind: 'application-dialog',
+			onTransientScroll,
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+		const events = [
+			new KeyboardEvent('keydown', {
+				key: 'p',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+			new KeyboardEvent('keydown', {
+				key: ',',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+			new KeyboardEvent('keydown', {
+				key: 'n',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+			new KeyboardEvent('keydown', {
+				key: 'd',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		];
+
+		for (const event of events) input.dispatchEvent(event);
+
+		expect(events.every((event) => !event.defaultPrevented)).toBe(true);
+		expect(onToggleCommandMenu).not.toHaveBeenCalled();
+		expect(appShell.openSettings).not.toHaveBeenCalled();
+		expect(appShell.requestNewChat).not.toHaveBeenCalled();
+		expect(onTransientScroll).not.toHaveBeenCalled();
+	});
+
+	it('stops local handlers after scrolling a Chat-owned main-inert modal', () => {
+		const onTransientScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			transientKind: 'application-dialog',
+			transientSurfaceId: CHAT_SURFACE_ID,
+			onTransientScroll,
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+		const localHandler = vi.fn();
+		input.addEventListener('keydown', localHandler);
+		const event = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		input.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(onTransientScroll).toHaveBeenCalledOnce();
+		expect(onTransientScroll).toHaveBeenCalledWith('later');
+		expect(localHandler).not.toHaveBeenCalled();
 	});
 
 	it('does not navigate chat items while a workspace surface owns focus', () => {
@@ -260,6 +772,57 @@ describe('KeyboardShortcuts', () => {
 		expect(nextHistory.defaultPrevented).toBe(false);
 		expect(onToggleCommandMenu).not.toHaveBeenCalled();
 		expect(appShell.requestNewChat).not.toHaveBeenCalled();
+	});
+
+	it('leaves Ctrl-Comma to an explicitly targeted terminal surface', () => {
+		const appShell = createMockAppShell();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			focusOwner: 'terminal',
+		});
+		const terminalInput = screen.getByRole('textbox', { name: 'Terminal input' });
+		const event = new KeyboardEvent('keydown', {
+			key: ',',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		terminalInput.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(false);
+		expect(appShell.openSettings).not.toHaveBeenCalled();
+	});
+
+	it('leaves Ctrl-U and Ctrl-D untouched inside a terminal surface', () => {
+		const onPrimaryScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'terminal',
+			onPrimaryScroll,
+		});
+		const terminalInput = screen.getByRole('textbox', { name: 'Terminal input' });
+		const up = new KeyboardEvent('keydown', {
+			key: 'u',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		const down = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		terminalInput.dispatchEvent(up);
+		terminalInput.dispatchEvent(down);
+
+		expect(up.defaultPrevented).toBe(false);
+		expect(down.defaultPrevented).toBe(false);
+		expect(onPrimaryScroll).not.toHaveBeenCalled();
 	});
 
 	it('keeps Meta-P global while a terminal owns input', () => {

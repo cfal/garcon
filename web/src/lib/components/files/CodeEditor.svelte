@@ -2,18 +2,22 @@
 	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { getLocalSettings } from '$lib/context';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
+	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	let { session }: { session: FileSession } = $props();
 	const localSettings = getLocalSettings();
 	const frame = getSurfaceFrameBridge();
 	let editorContainer = $state<HTMLDivElement | null>(null);
 	let lease: number | null = null;
+	let unregisterScrollRegion: (() => void) | null = null;
 
 	$effect(() => {
 		const controller = session.editor;
 		const element = editorContainer;
 		if (!controller || !element) return;
 		const detach = () => {
+			unregisterScrollRegion?.();
+			unregisterScrollRegion = null;
 			if (lease !== null) controller.detach(lease);
 			lease = null;
 		};
@@ -21,6 +25,13 @@
 			attach: () => {
 				detach();
 				lease = controller.attach(element);
+				const scrollElement = controller.scrollElement;
+				if (scrollElement) {
+					unregisterScrollRegion = registerNativeWorkspaceScrollRegion(
+						scrollElement,
+						'primary',
+					);
+				}
 			},
 			detach,
 			focusPrimary: () => controller.focus(),

@@ -1,5 +1,11 @@
 // Shared types for the chat sharing feature.
 
+// Identity of the transcript view copied into the self-contained share.
+export interface SharedChatOrigin {
+  transcriptViewId: string;
+  lastOrdinal: number;
+}
+
 export interface SharedChatSnapshot {
   shareToken: string;
   chatId: string;
@@ -8,6 +14,7 @@ export interface SharedChatSnapshot {
   model: string;
   projectPath: string;
   sharedAt: string;
+  origin?: SharedChatOrigin;
   messages: unknown[];
 }
 
@@ -26,6 +33,16 @@ export interface ShareStatusResponse {
 
 export interface GetSharedChatResponse {
   snapshot: SharedChatSnapshot;
+  page: SharedChatMessagePage;
+}
+
+export interface SharedChatMessagePage {
+  snapshotVersion: string;
+  totalMessages: number;
+  start: number;
+  end: number;
+  nextBefore: number | null;
+  reset?: boolean;
 }
 
 export interface RevokeShareResponse {

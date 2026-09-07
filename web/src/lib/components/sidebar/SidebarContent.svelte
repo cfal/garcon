@@ -2,11 +2,18 @@
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
+	import type {
+		PersistedChatOrderGroup,
+		RelativeChatOrderPlacement,
+	} from '$shared/chat-order-contracts';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
+	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
@@ -16,6 +23,7 @@
 		isMobile?: boolean;
 		currentTime: Date;
 		searchFilter: string;
+		onNewChat?: () => void;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
 		displayOptions?: SidebarDisplayOptions;
@@ -31,15 +39,20 @@
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowEdges: WorkspaceSplitAdmissions;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: (chatId: string) => boolean;
+		isChatOptimisticallyArchived?: (chatId: string) => boolean;
 		onQuickMove: (
-			list: ChatOrderList,
+			list: PersistedChatOrderGroup,
 			chatId: string,
-			target: ReorderQuickTarget,
+			placement: RelativeChatOrderPlacement,
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
+		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
@@ -50,6 +63,7 @@
 		isMobile = false,
 		currentTime,
 		searchFilter,
+		onNewChat,
 		isMultiSelectMode,
 		isMultiSelected,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -65,12 +79,23 @@
 		onShareChat,
 		onTagClick,
 		onManageTags,
+		onOpenInNewWindow,
+		newWindowEdges,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = () => false,
+		isChatOptimisticallyArchived = () => false,
 		onQuickMove,
+		onSortChatOrder,
 	}: SidebarContentProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+
+	$effect(() => {
+		const region = viewportRef;
+		if (!region) return;
+		return registerNativeWorkspaceScrollRegion(region, 'primary');
+	});
 </script>
 
 <ScrollArea
@@ -87,6 +112,7 @@
 		{isMobile}
 		{currentTime}
 		{searchFilter}
+		{onNewChat}
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{displayOptions}
@@ -102,8 +128,13 @@
 		{onShareChat}
 		{onTagClick}
 		{onManageTags}
+		{onOpenInNewWindow}
+		{newWindowEdges}
 		{onTogglePinned}
 		{onToggleArchive}
+		{isArchiveMutationPending}
+		{isChatOptimisticallyArchived}
 		{onQuickMove}
+		{onSortChatOrder}
 	/>
 </ScrollArea>

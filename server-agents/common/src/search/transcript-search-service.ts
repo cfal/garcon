@@ -1,173 +1,173 @@
-import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { ChatMessage } from '@garcon/common/chat-types';
-import type { ChatSearchIndexStatus, ChatSearchQueryV1, ChatSearchResult } from '@garcon/common/chat-search';
 import type {
-  AgentLogger,
-  AgentTranscriptIndexModuleReference,
-  AgentTranscriptIndexSourceRef,
-} from '@garcon/server-agent-interface';
+  ChatSearchIndexStatus,
+  ChatSearchPage,
+  ChatSearchQueryV1,
+  ChatSearchResult,
+  ChatSearchResultMode,
+  TranscriptSearchAllowedChat,
+  TranscriptSearchQueryStatsV1,
+  TranscriptSearchStatusV1,
+} from '@garcon/common/chat-search';
+import type { JsonObject } from '@garcon/common/json';
+import type { AgentLogger } from '@garcon/server-agent-interface';
+import { resolveSearchWorkerEntrypoints } from '../build/standalone-entrypoint.js';
+import { searchFrames } from './query-frames.js';
+import { QueryLatencyStats } from './query-latency-stats.js';
 import {
-  isEmbeddedStandaloneEntrypoint,
-  resolveSearchWorkerEntrypoints,
-} from '../build/standalone-entrypoint.js';
+  enqueueReaderWaiter,
+  raceAgainstSignal,
+  type ReaderWaiter,
+} from './reader-admission.js';
+import type { HistoricalSearchMessageRow } from './rows.js';
+import { SEARCH_INGEST_ROW_MAX_BYTES, type SearchChatState } from './schema.js';
 import type {
   IndexerEvent,
   IndexerRequest,
   ReaderEvent,
   ReaderRequest,
-  TranscriptIndexModuleRegistration,
 } from './worker-protocol.js';
-import { compareGeneration, isIndexerEvent, isReaderEvent } from './worker-protocol.js';
-import { canonicalDigest } from './digest.js';
+import type { TranscriptSearchOrder } from './worker-protocol.js';
+import {
+  MAX_FRAME_BYTES,
+  MAX_ROWS_PER_FRAME,
+  isIndexerEvent,
+  isReaderEvent,
+} from './worker-protocol.js';
 import {
   SearchWorkerSupervisor,
   type WorkerRequestInput,
 } from './worker-supervisor.js';
+import { workerEventError } from './worker-error.js';
+
+export { TranscriptSearchWorkerError } from './worker-error.js';
 
 const SEARCH_DIRECTORY = 'transcript-search';
 const REQUEST_TIMEOUT_MS = 30_000;
-const SEARCH_TIMEOUT_MS = 5_000;
-const MAX_CARRY_MESSAGES = 250;
-const MAX_CARRY_BYTES = 8 * 1024 * 1024;
-const MAX_FRAME_BYTES = 8 * 1024 * 1024;
-const MAX_CATALOG_ENTRIES_PER_FRAME = 500;
-const MAX_ALLOWLIST_IDS_PER_FRAME = 2_000;
-const DIRTY_HINT_COALESCE_MS = 100;
-const READER_ADMISSION_RETRY_DELAYS_MS = [0, 50, 250, 1_000] as const;
-const CLEANUP_RETRY_DELAYS_MS = [0, 100, 1_000] as const;
+const FRAME_TIMEOUT_MS = 30_000;
+const SEARCH_READER_REQUEST_TIMEOUT_MS = 30_000;
 const WORKER_CLOSE_TIMEOUT_MS = 5_000;
-const POISON_CHAT_CRASH_LIMIT = 3;
-
-export interface TranscriptSearchGeneration {
-  readonly epoch: string;
-  readonly sequence: number;
-}
-
-export interface TranscriptSearchCatalogEntry {
-  readonly chatId: string;
-  readonly agentId: string;
-  readonly model: string;
-  readonly updatedAt: string | null;
-  readonly source:
-    | { readonly state: 'ready'; readonly reference: AgentTranscriptIndexSourceRef }
-    | { readonly state: 'absent' }
-    | { readonly state: 'failed'; readonly code: string; readonly retryable: boolean };
-  readonly carryOverRevision: string;
-}
-
-export interface TranscriptSearchCatalogSnapshot {
-  readonly generation: TranscriptSearchGeneration;
-  readonly chats: readonly TranscriptSearchCatalogEntry[];
-}
-
-export interface TranscriptSearchCarryOverRequest {
-  readonly chatId: string;
-  readonly expectedRevision: string;
-  readonly currentAgentId: string;
-  readonly currentModel: string;
-  readonly signal: AbortSignal;
-  readonly limits: {
-    readonly maxMessagesPerBatch: number;
-    readonly maxBatchBytes: number;
-  };
-}
-
-export interface TranscriptSearchCarryOverStream {
-  readonly revision: string;
-  readonly batches: AsyncIterable<readonly ChatMessage[]>;
-}
-
-export type TranscriptSearchCarryOverFailure =
-  | { readonly kind: 'transcript-search-carry-over-failure'; readonly code: 'CARRY_OVER_REVISION_CHANGED'; readonly retryable: true }
-  | { readonly kind: 'transcript-search-carry-over-failure'; readonly code: 'CARRY_OVER_MESSAGE_TOO_LARGE'; readonly retryable: false }
-  | { readonly kind: 'transcript-search-carry-over-failure'; readonly code: 'CARRY_OVER_UNAVAILABLE'; readonly retryable: boolean };
-
-export class TranscriptSearchCarryOverError extends Error {
-  override readonly name = 'TranscriptSearchCarryOverError';
-  constructor(readonly failure: TranscriptSearchCarryOverFailure) {
-    super(failure.code);
-  }
-}
+const SEARCH_READER_POOL_SIZE = 2;
+const SEARCH_MAX_QUEUED = 4;
+const SEARCH_MAINTENANCE_PASSES = 4;
+const STATUS_COALESCE_MS = 250;
 
 export interface TranscriptSearchServiceOptions {
   readonly workspaceDirectory: string;
   readonly logger: AgentLogger;
-  readonly openCarryOverStream: (
-    request: TranscriptSearchCarryOverRequest,
-  ) => Promise<TranscriptSearchCarryOverStream>;
   readonly workerFactory?: (role: 'indexer' | 'reader', moduleUrl: string) => Worker;
+  readonly readerRequestTimeoutMs?: number;
 }
 
-type CarryState = {
-  readonly controller: AbortController;
-  readonly iterator: AsyncIterator<readonly ChatMessage[]>;
-  readonly revision: string;
-  readonly lifecycleEpoch: string;
-  nextChunkIndex: number;
-  pulling: boolean;
-};
+export interface TranscriptSearchSyncFrame {
+  readonly rows: readonly HistoricalSearchMessageRow[];
+  readonly advanceTo: number;
+}
 
-type SearchQueueItem = {
-  readonly query: ChatSearchQueryV1;
-  readonly allowedChatIds: readonly string[];
-  readonly limit: number;
-  readonly deadline: number;
-  readonly controller: AbortController;
-  readonly removeExternalAbort: () => void;
-  removeInternalAbort: () => void;
-  readonly timer: ReturnType<typeof setTimeout>;
-  resolve(event: Extract<ReaderEvent, { type: 'search-result' }>): void;
-  reject(error: Error): void;
-};
-
-export interface TranscriptSearchSourceRefreshRequest {
+export interface TranscriptSearchSyncRequest {
+  readonly mode: 'replace' | 'append';
   readonly chatId: string;
-  readonly agentId: string;
-  readonly failedSource: AgentTranscriptIndexSourceRef;
-  readonly failureCode: string;
-  readonly signal: AbortSignal;
+  readonly transcriptViewId: string;
+  readonly expectedAfterOrdinal: number;
+  readonly targetThrough: number;
+  readonly source: (
+    afterOrdinal: number,
+  ) => AsyncGenerator<TranscriptSearchSyncFrame, void, void>;
+}
+
+export type TranscriptSearchQueryStats = TranscriptSearchQueryStatsV1;
+
+export interface TranscriptSearchResyncScope {
+  chatSettled(): void;
+  complete(): void;
+  fail(errorCode: string): void;
+}
+
+const DISABLED_STATUS: TranscriptSearchStatusV1 = {
+  version: 1,
+  phase: 'disabled',
+  chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
+  queuedJobs: 0,
+  resync: null,
+  backlogRows: 0,
+  activeChat: null,
+  lastErrorCode: null,
+  updatedAt: new Date(0).toISOString(),
+};
+
+type IngestJob =
+  | {
+      readonly kind: 'sync';
+      readonly chatId: string;
+      readonly request: TranscriptSearchSyncRequest;
+      resolve(): void;
+      reject(error: Error): void;
+    }
+  | {
+      readonly kind: 'delete';
+      readonly chatId: string;
+      resolve(): void;
+      reject(error: Error): void;
+    }
+  | {
+      readonly kind: 'fail';
+      readonly chatId: string;
+      readonly transcriptViewId: string;
+      readonly errorCode: string;
+      resolve(): void;
+      reject(error: Error): void;
+    };
+
+interface ReaderSlot {
+  readonly supervisor: SearchWorkerSupervisor<ReaderRequest, ReaderEvent>;
+  state: 'idle' | 'busy' | 'quarantined';
 }
 
 export class TranscriptSearchService {
-  readonly #options: TranscriptSearchServiceOptions;
-  readonly #operationEpoch = crypto.randomUUID();
   readonly #searchDirectory: string;
   readonly #dbPath: string;
-  readonly #scratchDirectory: string;
+  readonly #logger: AgentLogger;
+  readonly #readerRequestTimeoutMs: number;
   readonly #indexer: SearchWorkerSupervisor<IndexerRequest, IndexerEvent>;
-  readonly #reader: SearchWorkerSupervisor<ReaderRequest, ReaderEvent>;
-  readonly #carryStreams = new Map<number, CarryState>();
-  readonly #dirtyReplay = new Map<string, TranscriptSearchGeneration>();
-  readonly #dirtyDispatchTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  readonly #deleteTombstones = new Map<string, TranscriptSearchGeneration>();
-  readonly #refreshControllers = new Set<AbortController>();
-  readonly #refreshTasks = new Set<Promise<void>>();
-  readonly #searchQueue: SearchQueueItem[] = [];
-  readonly #indexerCrashHistory = new Map<string, { sourceSignature: string; count: number }>();
-  readonly #indexerQuarantines = new Map<string, string>();
-  #modules: readonly TranscriptIndexModuleRegistration[] = [];
-  #latestCatalog: TranscriptSearchCatalogSnapshot | null = null;
-  #latestStatus: ChatSearchIndexStatus = {
-    indexedChatCount: 0,
-    pendingChatCount: 0,
-    failedChatCount: 0,
-    unsupportedChatCount: 0,
-  };
+  readonly #readers: ReaderSlot[] = [];
+  readonly #deleteQueue: IngestJob[] = [];
+  readonly #buildQueue: IngestJob[] = [];
+  readonly #jobChatIds = new Set<string>();
+  readonly #searchWaiters: ReaderWaiter<ReaderSlot>[] = [];
+  readonly #statusListeners = new Set<(status: TranscriptSearchStatusV1) => void>();
+  readonly #queryStats = new QueryLatencyStats();
+  readonly #lastLogAt = new Map<string, number>();
+  #durableCounts = { indexed: 0, pending: 0, failed: 0 };
+  #durableBacklogRows = 0;
+  #activeJob: IngestJob | null = null;
+  #activeProgress: { position: number; total: number } | null = null;
+  #ingestPumpActive = false;
+  #phaseOverride: 'opening' | 'failed' | null = null;
+  #lastErrorCode: string | null = null;
+  #indexRecreated = false;
+  #resync: { completed: number; total: number } | null = null;
+  #catalogChatTotal = 0;
+  #catalogCurrent = false;
+  #countsDirty = false;
+  #countsRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  #countsRetryArmed = false;
+  #statusDirty = false;
+  #statusWorkerActive = false;
+  #lastStatusContent = '';
+  #lastStatus: TranscriptSearchStatusV1 = DISABLED_STATUS;
+  #emitTimer: ReturnType<typeof setTimeout> | null = null;
+  #emitPending = false;
   #enabled = false;
   #closed = false;
-  #sourceRefreshHandler: ((request: TranscriptSearchSourceRefreshRequest) => Promise<void>) | null = null;
-  #catalogRefreshHandler: ((chatId: string) => void) | null = null;
-  #activeSearch: SearchQueueItem | null = null;
-  #activeIndexerJob: { chatId: string; sourceSignature: string } | null = null;
+  #resyncHandler: (() => void | Promise<void>) | null = null;
 
   constructor(options: TranscriptSearchServiceOptions) {
-    this.#options = options;
     this.#searchDirectory = path.join(options.workspaceDirectory, SEARCH_DIRECTORY);
     this.#dbPath = path.join(this.#searchDirectory, 'index.sqlite');
-    this.#scratchDirectory = path.join(this.#searchDirectory, 'scratch');
+    this.#logger = options.logger;
+    this.#readerRequestTimeoutMs =
+      options.readerRequestTimeoutMs ?? SEARCH_READER_REQUEST_TIMEOUT_MS;
     const entrypoints = resolveSearchWorkerEntrypoints({
       indexerSourceUrl: new URL('./indexer-main.ts', import.meta.url),
       readerSourceUrl: new URL('./reader-main.ts', import.meta.url),
@@ -177,754 +177,823 @@ export class TranscriptSearchService {
       moduleUrl: entrypoints.indexer,
       logger: options.logger,
       workerFactory: options.workerFactory,
+      createRequest: (input, envelope) => ({ ...input, ...envelope }),
       isEvent: isIndexerEvent,
       eventError: workerEventError,
+      isProgress: (event) => event.type === 'delete-progress',
       shouldRestart: () => this.#enabled && !this.#closed,
       admit: async (signal) => {
-        const event = await this.#requestIndexer({
-          type: 'open',
-          operationEpoch: this.#operationEpoch,
-          dbPath: this.#dbPath,
-          scratchDirectory: this.#scratchDirectory,
-          modules: this.#modules,
-          quarantines: [...this.#indexerQuarantines].map(([chatId, sourceSignature]) => ({
-            chatId,
-            sourceSignature,
-          })),
-        }, signal);
+        const event = await this.#indexer.request(
+          [{ type: 'open', dbPath: this.#dbPath }],
+          signal,
+          REQUEST_TIMEOUT_MS,
+        );
         if (event.type !== 'opened') throw new Error('Transcript indexer admission failed');
+        this.#indexRecreated = event.recreated;
       },
-      afterRestart: () => this.#replayIndexerState(),
-      onEvent: (event) => this.#handleIndexerEvent(event),
-      onCrash: () => this.#handleIndexerCrash(),
-    });
-    this.#reader = new SearchWorkerSupervisor({
-      role: 'reader',
-      moduleUrl: entrypoints.reader,
-      logger: options.logger,
-      workerFactory: options.workerFactory,
-      isEvent: isReaderEvent,
-      eventError: workerEventError,
-      shouldRestart: () => this.#enabled && !this.#closed,
-      admit: async (signal) => {
-        const event = await this.#requestReader({ type: 'open', dbPath: this.#dbPath }, signal);
-        if (event.type !== 'opened') throw new Error('Transcript reader admission failed');
+      afterRestart: async () => {
+        this.#logRestart('SEARCH_INDEXER_RESTARTED');
+        if (this.#indexRecreated) this.#retireReadersForRecreatedIndex();
+        await this.#resyncHandler?.();
       },
-      afterRestart: async () => this.#drainSearchQueue(),
-      onEvent: (event) => this.#handleReaderEvent(event),
-      onCrash: () => {},
+      onAdmitted: () => {
+        this.#clearCountsRetry();
+        if (this.#countsDirty) void this.#statusWorker();
+      },
+      onEvent: () => {},
+      onCrash: () => this.#noteStatusMaybeChanged(),
     });
+    for (let index = 0; index < SEARCH_READER_POOL_SIZE; index += 1) {
+      this.#readers.push(this.#createReaderSlot(options, entrypoints.reader));
+    }
   }
 
-  async enable(request: {
-    readonly modules: readonly { agentId: string; reference: AgentTranscriptIndexModuleReference }[];
-    readonly signal: AbortSignal;
-  }): Promise<void> {
+  #createReaderSlot(options: TranscriptSearchServiceOptions, moduleUrl: string): ReaderSlot {
+    let slot: ReaderSlot;
+    const supervisor: SearchWorkerSupervisor<ReaderRequest, ReaderEvent> =
+      new SearchWorkerSupervisor({
+        role: 'reader',
+        moduleUrl,
+        logger: options.logger,
+        workerFactory: options.workerFactory,
+        createRequest: (input, envelope) => ({ ...input, ...envelope }),
+        isEvent: isReaderEvent,
+        eventError: workerEventError,
+        shouldRestart: () => this.#enabled && !this.#closed,
+        admit: async (signal) => {
+          const event = await supervisor.request(
+            [{ type: 'open', dbPath: this.#dbPath }],
+            signal,
+            REQUEST_TIMEOUT_MS,
+          );
+          if (event.type !== 'opened') throw new Error('Transcript reader admission failed');
+        },
+        afterRestart: async () => this.#logRestart('SEARCH_READER_RESTARTED'),
+        onAdmitted: () => this.#onReaderAdmitted(slot),
+        onEvent: () => {},
+        onCrash: () => this.#noteStatusMaybeChanged(),
+      });
+    slot = { supervisor, state: 'idle' };
+    return slot;
+  }
+
+  setResyncHandler(handler: () => void | Promise<void>): void {
+    this.#resyncHandler = handler;
+  }
+
+  async enable(signal: AbortSignal): Promise<void> {
     if (this.#closed) throw new Error('Transcript search service is closed');
     if (this.#enabled) return;
-    request.signal.throwIfAborted();
-    this.#modules = request.modules.map(({ agentId, reference }) => ({
-      agentId,
-      moduleUrl: reference.moduleUrl,
-      apiVersion: reference.apiVersion,
-    }));
-    await cleanupObsoleteSearchArtifacts(this.#options.workspaceDirectory, this.#options.logger);
-    await Promise.all(this.#modules.map((module) => validateModuleAsset(module.moduleUrl)));
+    signal.throwIfAborted();
+    const startedAt = performance.now();
     await fs.mkdir(this.#searchDirectory, { recursive: true, mode: 0o700 });
-    await fs.chmod(this.#searchDirectory, 0o700);
+    this.#phaseOverride = 'opening';
+    this.#noteStatusMaybeChanged();
     try {
-      await this.#startIndexer(request.signal);
-      await this.#startReader(request.signal);
-      request.signal.throwIfAborted();
+      await this.#indexer.start(signal);
+      for (const slot of this.#readers) await slot.supervisor.start(signal);
       this.#enabled = true;
+      this.#phaseOverride = null;
+      this.#lastErrorCode = null;
+      this.#noteDurableProgress();
+      this.#logger.info('Transcript search enabled', {
+        code: 'SEARCH_ENABLED',
+        openMs: Math.round(performance.now() - startedAt),
+        recreated: this.#indexRecreated,
+      });
     } catch (error) {
+      this.#phaseOverride = 'failed';
+      this.#lastErrorCode = 'SEARCH_INDEX_ADMISSION_FAILED';
       await this.#stopWorkers();
       throw error;
+    } finally {
+      this.#noteStatusMaybeChanged();
     }
   }
 
-  async reconcile(snapshot: TranscriptSearchCatalogSnapshot): Promise<void> {
-    if (!this.#enabled || this.#closed) return;
-    if (snapshot.generation.epoch !== this.#operationEpoch) {
-      throw new Error('Transcript search catalog epoch is invalid');
-    }
-    if (this.#latestCatalog
-        && snapshot.generation.sequence < this.#latestCatalog.generation.sequence) return;
-    const chats = snapshot.chats.filter((entry) => {
-      const tombstone = this.#deleteTombstones.get(entry.chatId);
-      if (!tombstone) return true;
-      const ordering = compareGeneration(snapshot.generation, tombstone);
-      if (ordering !== null && ordering > 0) {
-        this.#deleteTombstones.delete(entry.chatId);
-        return true;
-      }
-      return false;
-    });
-    const allowed = new Set(chats.map((entry) => entry.chatId));
-    for (const [chatId, tombstone] of this.#deleteTombstones) {
-      const ordering = compareGeneration(snapshot.generation, tombstone);
-      if (ordering !== null && ordering > 0 && !allowed.has(chatId)) {
-        this.#deleteTombstones.delete(chatId);
-      }
-    }
-    const filteredSnapshot = { ...snapshot, chats };
-    this.#latestCatalog = filteredSnapshot;
-    for (const chatId of this.#dirtyReplay.keys()) {
-      if (!allowed.has(chatId)) this.#dirtyReplay.delete(chatId);
-    }
-    await this.#requestIndexerFrames(catalogFrames(filteredSnapshot));
+  async chatStates(): Promise<readonly SearchChatState[]> {
+    const event = await this.#requestIndexer({ type: 'chat-states' });
+    if (event.type !== 'chat-states-result') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    return event.states;
   }
 
-  sourceMayHaveChanged(request: {
-    readonly chatId: string;
-    readonly generation: TranscriptSearchGeneration;
-  }): void {
-    if (!this.#enabled || this.#closed) return;
-    const tombstone = this.#deleteTombstones.get(request.chatId);
-    if (tombstone && (compareGeneration(request.generation, tombstone) ?? -1) <= 0) return;
-    const current = this.#dirtyReplay.get(request.chatId);
-    if (!current || (compareGeneration(request.generation, current) ?? -1) > 0) {
-      this.#dirtyReplay.set(request.chatId, request.generation);
-    }
-    if (this.#dirtyDispatchTimers.has(request.chatId)) return;
-    const timer = setTimeout(() => {
-      this.#dirtyDispatchTimers.delete(request.chatId);
-      const generation = this.#dirtyReplay.get(request.chatId);
-      if (!generation || !this.#enabled || this.#closed) return;
-      void this.#requestIndexer({ type: 'source-dirty', chatId: request.chatId, generation })
-        .catch(() => undefined);
-    }, DIRTY_HINT_COALESCE_MS);
-    timer.unref?.();
-    this.#dirtyDispatchTimers.set(request.chatId, timer);
+  syncChat(request: TranscriptSearchSyncRequest): Promise<void> {
+    return this.#enqueueIngest(
+      request.chatId,
+      (resolve, reject) => ({
+        kind: 'sync',
+        chatId: request.chatId,
+        request,
+        resolve,
+        reject,
+      }),
+      this.#buildQueue,
+    );
   }
 
-  deleteChat(request: {
-    readonly chatId: string;
-    readonly generation: TranscriptSearchGeneration;
-  }): void {
-    if (!this.#enabled || this.#closed) return;
-    this.#dirtyReplay.delete(request.chatId);
-    const dirtyTimer = this.#dirtyDispatchTimers.get(request.chatId);
-    if (dirtyTimer) clearTimeout(dirtyTimer);
-    this.#dirtyDispatchTimers.delete(request.chatId);
-    this.#indexerCrashHistory.delete(request.chatId);
-    this.#indexerQuarantines.delete(request.chatId);
-    const currentTombstone = this.#deleteTombstones.get(request.chatId);
-    if (!currentTombstone || (compareGeneration(request.generation, currentTombstone) ?? -1) > 0) {
-      this.#deleteTombstones.set(request.chatId, request.generation);
+  deleteChat(chatId: string): Promise<void> {
+    return this.#enqueueIngest(
+      chatId,
+      (resolve, reject) => ({ kind: 'delete', chatId, resolve, reject }),
+      this.#deleteQueue,
+    );
+  }
+
+  markChatUnavailable(
+    chatId: string,
+    transcriptViewId: string,
+    errorCode: string,
+  ): Promise<void> {
+    return this.#enqueueIngest(
+      chatId,
+      (resolve, reject) => ({
+        kind: 'fail',
+        chatId,
+        transcriptViewId,
+        errorCode,
+        resolve,
+        reject,
+      }),
+      this.#deleteQueue,
+    );
+  }
+
+  beginResync(totalChats: number): TranscriptSearchResyncScope {
+    if (!Number.isSafeInteger(totalChats) || totalChats < 0) {
+      throw new Error('SEARCH_RESYNC_INVARIANT');
     }
-    if (this.#latestCatalog) {
-      this.#latestCatalog = {
-        ...this.#latestCatalog,
-        chats: this.#latestCatalog.chats.filter((entry) => entry.chatId !== request.chatId),
-      };
+    const scope = { completed: 0, total: totalChats };
+    this.#catalogChatTotal = totalChats;
+    this.#resync = scope;
+    this.#noteStatusMaybeChanged();
+    return {
+      chatSettled: () => {
+        if (this.#resync !== scope) return;
+        if (scope.completed >= scope.total) throw new Error('SEARCH_RESYNC_INVARIANT');
+        scope.completed += 1;
+        this.#noteStatusMaybeChanged();
+      },
+      complete: () => {
+        if (this.#resync !== scope) return;
+        if (scope.completed !== scope.total) throw new Error('SEARCH_RESYNC_INVARIANT');
+        this.#resync = null;
+        this.#catalogCurrent = true;
+        this.#lastErrorCode = null;
+        this.#noteDurableProgress();
+      },
+      fail: (errorCode) => {
+        if (this.#resync !== scope) return;
+        this.#resync = null;
+        this.#recordCatalogFailure(errorCode);
+      },
+    };
+  }
+
+  setCatalogChatTotal(totalChats: number): void {
+    if (!Number.isSafeInteger(totalChats) || totalChats < 0) {
+      throw new Error('SEARCH_RESYNC_INVARIANT');
     }
-    void this.#requestIndexer({ type: 'delete-chat', ...request }).catch(() => undefined);
+    if (this.#catalogChatTotal === totalChats) return;
+    this.#catalogChatTotal = totalChats;
+    this.#noteStatusMaybeChanged();
+  }
+
+  recordResyncFailure(errorCode: string): void {
+    this.#recordCatalogFailure(errorCode);
+  }
+
+  #recordCatalogFailure(errorCode: string): void {
+    const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(errorCode)
+      ? errorCode
+      : 'SEARCH_RESYNC_FAILED';
+    this.#catalogCurrent = false;
+    this.#lastErrorCode = code;
+    this.#noteStatusMaybeChanged();
+  }
+
+  status(): TranscriptSearchStatusV1 {
+    return this.#lastStatus;
+  }
+
+  queryStats(): TranscriptSearchQueryStats {
+    return this.#queryStats.snapshot();
+  }
+
+  onStatusChanged(listener: (status: TranscriptSearchStatusV1) => void): () => void {
+    this.#statusListeners.add(listener);
+    return () => this.#statusListeners.delete(listener);
   }
 
   async search(request: {
     readonly query: ChatSearchQueryV1;
-    readonly allowedChatIds: readonly string[];
+    readonly allowedChats: readonly TranscriptSearchAllowedChat[];
+    readonly order: TranscriptSearchOrder;
+    readonly mode: ChatSearchResultMode;
+    readonly offset: number;
     readonly limit: number;
-    readonly signal: AbortSignal;
-  }): Promise<{ readonly results: readonly ChatSearchResult[]; readonly index: ChatSearchIndexStatus }> {
-    if (!this.#enabled || this.#closed || !this.#reader.available) {
-      throw new Error('SEARCH_INDEX_UNAVAILABLE');
+    readonly snippetLimit: number;
+    readonly admissionSignal?: AbortSignal;
+    readonly executionSignal: AbortSignal;
+  }): Promise<{
+    readonly mode: ChatSearchResultMode;
+    readonly snippetLimit: number;
+    readonly results: readonly ChatSearchResult[];
+    readonly page: ChatSearchPage;
+    readonly index: ChatSearchIndexStatus;
+  }> {
+    if (!this.#enabled || this.#closed) throw new Error('SEARCH_INDEX_UNAVAILABLE');
+    if (request.admissionSignal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
     }
-    request.signal.throwIfAborted();
-    const event = await this.#enqueueSearch(request);
-    const allowed = new Set(request.allowedChatIds);
-    if (event.results.some((result) => !allowed.has(result.chatId))) {
+    if (request.executionSignal.aborted) throw new Error('SEARCH_TIMEOUT');
+    const totalStarted = performance.now();
+    const slot = await this.#acquireReaderSlot(
+      request.admissionSignal,
+      request.executionSignal,
+    );
+    const executionStarted = performance.now();
+    const admissionMs = executionStarted - totalStarted;
+    const session = slot.supervisor.beginRequestSession();
+    const frames = searchFrames(
+      request.query,
+      request.allowedChats,
+      request.order,
+      request.mode,
+      request.offset,
+      request.limit,
+      request.snippetLimit,
+    );
+    const pending = session.request(frames, undefined, this.#readerRequestTimeoutMs, {
+      isComplete: (candidate) => candidate.type === 'search-result',
+    });
+    void pending.then(
+      () => this.#settleReaderSlot(slot),
+      () => this.#settleReaderSlot(slot),
+    );
+    let event: ReaderEvent;
+    try {
+      event = await raceAgainstSignal(pending, request.executionSignal);
+    } catch (error) {
+      if ((error instanceof Error && error.name === 'AbortError')
+          || (error instanceof Error && error.message === 'SEARCH_TIMEOUT')) {
+        this.#retireAbandonedReader(slot);
+        this.#queryStats.recordTimedOut();
+        this.#rateLimitedWarn('Transcript search query timeout', {
+          code: 'SEARCH_TIMEOUT',
+          admissionMs: Math.round(admissionMs),
+          executeMs: Math.round(performance.now() - executionStarted),
+          order: request.order,
+          offset: request.offset,
+          limit: request.limit,
+        });
+        throw new Error('SEARCH_TIMEOUT');
+      }
+      throw error;
+    }
+    if (event.type !== 'search-result') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    if (event.mode !== request.mode
+        || event.snippetLimit !== request.snippetLimit
+        || event.page.offset !== request.offset
+        || event.page.limit !== request.limit
+        || event.results.some((result) => result.snippets.length > request.snippetLimit)) {
       throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
     }
-    return { results: event.results, index: event.index };
-  }
-
-  #enqueueSearch(request: {
-    readonly query: ChatSearchQueryV1;
-    readonly allowedChatIds: readonly string[];
-    readonly limit: number;
-    readonly signal: AbortSignal;
-  }): Promise<Extract<ReaderEvent, { type: 'search-result' }>> {
-    const controller = new AbortController();
-    const deadline = Date.now() + SEARCH_TIMEOUT_MS;
-    const abortFromRequest = () => controller.abort(request.signal.reason);
-    request.signal.addEventListener('abort', abortFromRequest, { once: true });
-    if (request.signal.aborted) abortFromRequest();
-    const removeExternalAbort = () => request.signal.removeEventListener('abort', abortFromRequest);
-    const timer = setTimeout(
-      () => controller.abort(new Error('SEARCH_TIMEOUT')),
-      SEARCH_TIMEOUT_MS,
+    const allowed = new Map(
+      request.allowedChats.map((entry) => [entry.chatId, entry.transcriptViewId]),
     );
-    timer.unref?.();
-    return new Promise((resolve, reject) => {
-      const item: SearchQueueItem = {
-        query: request.query,
-        allowedChatIds: request.allowedChatIds,
-        limit: request.limit,
-        deadline,
-        controller,
-        removeExternalAbort,
-        timer,
-        removeInternalAbort: () => {},
-        resolve,
-        reject,
-      };
-      const abortQueued = (): void => {
-        if (this.#activeSearch === item) return;
-        const index = this.#searchQueue.indexOf(item);
-        if (index >= 0) this.#searchQueue.splice(index, 1);
-        this.#finishSearchItem(item);
-        reject(controller.signal.reason instanceof Error
-          ? controller.signal.reason
-          : new DOMException('Aborted', 'AbortError'));
-      };
-      controller.signal.addEventListener('abort', abortQueued, { once: true });
-      item.removeInternalAbort = () => controller.signal.removeEventListener('abort', abortQueued);
-      this.#searchQueue.push(item);
-      if (controller.signal.aborted) abortQueued();
-      this.#drainSearchQueue();
-    });
-  }
-
-  #drainSearchQueue(): void {
-    if (this.#activeSearch || !this.#reader.available || !this.#enabled || this.#closed) return;
-    const item = this.#searchQueue.shift();
-    if (!item) return;
-    if (item.controller.signal.aborted || item.deadline <= Date.now()) {
-      this.#finishSearchItem(item);
-      item.reject(new Error('SEARCH_TIMEOUT'));
-      this.#drainSearchQueue();
-      return;
+    if (event.results.some((result) => allowed.get(result.chatId) !== result.transcriptViewId)) {
+      throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
     }
-    this.#activeSearch = item;
-    void this.#requestReaderFrames(
-      searchFrames(item.query, item.allowedChatIds, item.limit),
-      item.controller.signal,
-      Math.max(1, item.deadline - Date.now()),
-    ).then((event) => {
-      if (event.type !== 'search-result') throw new Error('SEARCH_INDEX_UNAVAILABLE');
-      item.resolve(event);
-    }).catch((error) => {
-      item.reject(error instanceof Error ? error : new Error(String(error)));
-    }).finally(() => {
-      this.#finishSearchItem(item);
-      if (this.#activeSearch === item) this.#activeSearch = null;
-      this.#drainSearchQueue();
+    const completed = performance.now();
+    this.#queryStats.recordServed({
+      admissionMs,
+      executionMs: completed - executionStarted,
+      totalMs: completed - totalStarted,
     });
+    return {
+      mode: event.mode,
+      snippetLimit: event.snippetLimit,
+      results: event.results,
+      page: event.page,
+      index: event.index,
+    };
   }
 
-  #finishSearchItem(item: SearchQueueItem): void {
-    clearTimeout(item.timer);
-    item.removeExternalAbort();
-    item.removeInternalAbort();
-  }
-
-  #cancelSearchQueue(message: string): void {
-    this.#activeSearch?.controller.abort(new Error(message));
-    for (const item of this.#searchQueue.splice(0)) {
-      this.#finishSearchItem(item);
-      item.reject(new Error(message));
+  #retireReadersForRecreatedIndex(): void {
+    for (const slot of this.#readers) {
+      slot.state = 'quarantined';
+      slot.supervisor.crash();
     }
+    this.#noteStatusMaybeChanged();
   }
 
   async disableAndDelete(signal: AbortSignal): Promise<void> {
     this.#enabled = false;
-    this.#cancelSearchQueue('Transcript search disabled');
-    this.#clearDirtyDispatchTimers();
-    for (const controller of this.#refreshControllers) controller.abort();
-    await Promise.allSettled(this.#refreshTasks);
-    signal.throwIfAborted();
+    this.#rejectQueues(new Error('SEARCH_INDEX_UNAVAILABLE'));
     await this.#stopWorkers();
-    await removeDirectoryWithRetry(this.#searchDirectory, signal);
-    await cleanupObsoleteSearchArtifacts(this.#options.workspaceDirectory, this.#options.logger);
-    this.#latestCatalog = null;
-    this.#latestStatus = {
-      indexedChatCount: 0,
-      pendingChatCount: 0,
-      failedChatCount: 0,
-      unsupportedChatCount: 0,
-    };
-    this.#dirtyReplay.clear();
-    this.#deleteTombstones.clear();
-    this.#indexerCrashHistory.clear();
-    this.#indexerQuarantines.clear();
+    signal.throwIfAborted();
+    await fs.rm(this.#searchDirectory, { recursive: true, force: true });
+    this.#durableCounts = { indexed: 0, pending: 0, failed: 0 };
+    this.#durableBacklogRows = 0;
+    this.#catalogChatTotal = 0;
+    this.#resync = null;
+    this.#catalogCurrent = false;
+    this.#activeProgress = null;
+    this.#lastErrorCode = null;
+    this.#countsDirty = false;
+    this.#clearCountsRetry();
+    this.#noteStatusMaybeChanged();
   }
 
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     this.#enabled = false;
-    this.#cancelSearchQueue('Transcript search closed');
-    this.#clearDirtyDispatchTimers();
-    for (const controller of this.#refreshControllers) controller.abort();
-    await Promise.allSettled(this.#refreshTasks);
+    this.#rejectQueues(new Error('SEARCH_INDEX_UNAVAILABLE'));
+    if (this.#emitTimer) clearTimeout(this.#emitTimer);
+    this.#clearCountsRetry();
     await this.#stopWorkers();
   }
 
-  setSourceRefreshHandler(
-    handler: (request: TranscriptSearchSourceRefreshRequest) => Promise<void>,
-  ): void {
-    if (this.#enabled) throw new Error('Transcript search refresh handler must be set before enablement');
-    this.#sourceRefreshHandler = handler;
-  }
-
-  setCatalogRefreshHandler(handler: (chatId: string) => void): void {
-    if (this.#enabled) throw new Error('Transcript search catalog handler must be set before enablement');
-    this.#catalogRefreshHandler = handler;
-  }
-
-  operationEpoch(): string {
-    return this.#operationEpoch;
-  }
-
-  indexStatus(): ChatSearchIndexStatus {
-    return this.#latestStatus;
-  }
-
-  #clearDirtyDispatchTimers(): void {
-    for (const timer of this.#dirtyDispatchTimers.values()) clearTimeout(timer);
-    this.#dirtyDispatchTimers.clear();
-  }
-
-  async #startIndexer(signal: AbortSignal): Promise<void> {
-    await this.#indexer.start(signal);
-  }
-
-  async #startReader(signal: AbortSignal): Promise<void> {
-    let lastError: unknown = new Error('Transcript reader admission failed');
-    for (const delayMs of READER_ADMISSION_RETRY_DELAYS_MS) {
-      if (delayMs > 0) await abortableDelay(delayMs, signal);
-      try {
-        await this.#startReaderOnce(signal);
-        return;
-      } catch (error) {
-        lastError = error;
-      }
+  #clearCountsRetry(): void {
+    this.#countsRetryArmed = false;
+    if (this.#countsRetryTimer) {
+      clearTimeout(this.#countsRetryTimer);
+      this.#countsRetryTimer = null;
     }
-    throw lastError;
   }
 
-  async #startReaderOnce(signal: AbortSignal): Promise<void> {
-    await this.#reader.start(signal);
-  }
-
-  #handleIndexerEvent(event: IndexerEvent): void {
-    if (event.type === 'progress') {
-      this.#latestStatus = event.status;
-      return;
+  #acquireReaderSlot(
+    admissionSignal: AbortSignal | undefined,
+    executionSignal: AbortSignal,
+  ): Promise<ReaderSlot> {
+    if (admissionSignal?.aborted) {
+      return Promise.reject(new DOMException('Aborted', 'AbortError'));
     }
-    if (event.type === 'source-status') {
-      this.#handleSourceStatus(event);
-      return;
+    if (executionSignal.aborted) return Promise.reject(new Error('SEARCH_TIMEOUT'));
+    const idle = this.#readers.find(
+      (slot) => slot.state === 'idle' && slot.supervisor.available,
+    );
+    if (idle) {
+      idle.state = 'busy';
+      return Promise.resolve(idle);
     }
-    if (event.type === 'refresh-source-reference') {
-      const task = this.#refreshSourceReference(event).catch(() => {
-        this.#options.logger.warn('Transcript source refresh dispatch failed.', {
-          code: 'SEARCH_SOURCE_REFRESH_DISPATCH_FAILED',
-        });
+    if (!this.#readers.some((slot) => slot.supervisor.available)) {
+      return Promise.reject(new Error('SEARCH_INDEX_UNAVAILABLE'));
+    }
+    if (this.#searchWaiters.length >= SEARCH_MAX_QUEUED) {
+      this.#queryStats.recordRejectedBusy();
+      this.#rateLimitedWarn('Transcript search queue overflow', {
+        code: 'SEARCH_INDEX_BUSY',
+        depth: this.#searchWaiters.length,
       });
-      this.#refreshTasks.add(task);
-      void task.finally(() => this.#refreshTasks.delete(task));
-      return;
+      return Promise.reject(new Error('SEARCH_INDEX_BUSY'));
     }
-    if (event.type === 'job-state') {
-      if (event.state === 'started') {
-        this.#activeIndexerJob = {
-          chatId: event.chatId,
-          sourceSignature: event.sourceSignature,
-        };
-        const quarantined = this.#indexerQuarantines.get(event.chatId);
-        if (quarantined && quarantined !== event.sourceSignature) {
-          this.#indexerQuarantines.delete(event.chatId);
-          this.#indexerCrashHistory.delete(event.chatId);
-        }
-        const crashHistory = this.#indexerCrashHistory.get(event.chatId);
-        if (crashHistory && crashHistory.sourceSignature !== event.sourceSignature) {
-          this.#indexerCrashHistory.delete(event.chatId);
-        }
-      } else if (this.#activeIndexerJob?.chatId === event.chatId
-          && this.#activeIndexerJob.sourceSignature === event.sourceSignature) {
-        this.#activeIndexerJob = null;
-        this.#indexerCrashHistory.delete(event.chatId);
-      }
-      return;
-    }
-    if (event.type === 'fatal') {
-      this.#options.logger.warn('Transcript indexer reported a fatal storage failure.', {
-        code: event.code,
-      });
-      this.#activeIndexerJob = null;
-      this.#indexer.crash();
-      return;
-    }
-    if (event.type === 'carry-over-open') {
-      void this.#openCarryStream(event);
-      return;
-    }
-    if (event.type === 'carry-over-pull') {
-      void this.#pullCarryStream(event.requestId);
-      return;
-    }
-    if (event.type === 'carry-over-cancel') {
-      void this.#closeCarryStream(event.requestId);
-      return;
-    }
-  }
-
-  #handleSourceStatus(event: Extract<IndexerEvent, { type: 'source-status' }>): void {
-    if (event.state === 'failed' && event.errorCode === 'CARRY_OVER_REVISION_CHANGED') {
-      this.#catalogRefreshHandler?.(event.chatId);
-    }
-    const dirty = this.#dirtyReplay.get(event.chatId);
-    if (!dirty) return;
-    const ordering = compareGeneration(event.generation, dirty);
-    if (ordering === null || ordering < 0) return;
-    if (event.state === 'sealed' || event.state === 'unsupported'
-        || (event.state === 'failed' && event.retryable === false)) {
-      this.#dirtyReplay.delete(event.chatId);
-    }
-  }
-
-  async #refreshSourceReference(
-    event: Extract<IndexerEvent, { type: 'refresh-source-reference' }>,
-  ): Promise<void> {
-    const handler = this.#sourceRefreshHandler;
-    const catalogEntry = this.#latestCatalog?.chats.find((entry) => entry.chatId === event.chatId);
-    if (!handler || !catalogEntry || catalogEntry.agentId !== event.agentId
-        || catalogEntry.source.state !== 'ready'
-        || canonicalDigest(catalogEntry.source.reference) !== event.sourceDescriptorHash) return;
-    const dirtyGeneration = this.#dirtyReplay.get(event.chatId);
-    if (dirtyGeneration && (compareGeneration(event.generation, dirtyGeneration) ?? -1) < 0) return;
-    const controller = new AbortController();
-    this.#refreshControllers.add(controller);
-    try {
-      await handler({
-        chatId: event.chatId,
-        agentId: event.agentId,
-        failedSource: catalogEntry.source.reference,
-        failureCode: event.reasonCode,
-        signal: controller.signal,
-      });
-    } catch {
-      this.#options.logger.warn('Transcript source refresh failed.', {
-        code: 'SEARCH_SOURCE_REFRESH_FAILED',
-        agentId: event.agentId,
-      });
-    } finally {
-      this.#refreshControllers.delete(controller);
-    }
-  }
-
-  #handleReaderEvent(event: ReaderEvent): void {
-    if (event.type === 'error' && event.code === 'READER_INTERNAL') {
-      this.#reader.crash();
-    }
-  }
-
-  async #openCarryStream(event: Extract<IndexerEvent, { type: 'carry-over-open' }>): Promise<void> {
-    const controller = new AbortController();
-    try {
-      const stream = await this.#options.openCarryOverStream({
-        chatId: event.chatId,
-        expectedRevision: event.expectedRevision,
-        currentAgentId: event.currentAgentId,
-        currentModel: event.currentModel,
-        signal: controller.signal,
-        limits: { maxMessagesPerBatch: MAX_CARRY_MESSAGES, maxBatchBytes: MAX_CARRY_BYTES },
-      });
-      if (stream.revision !== event.expectedRevision) throw new Error('CARRY_OVER_REVISION_CHANGED');
-      const iterator = stream.batches[Symbol.asyncIterator]();
-      if (!this.#indexer.available || event.lifecycleEpoch !== this.#indexer.epoch) {
-        controller.abort();
-        await iterator.return?.();
-        return;
-      }
-      this.#carryStreams.set(event.requestId, {
-        controller,
-        iterator,
-        revision: stream.revision,
-        lifecycleEpoch: event.lifecycleEpoch,
-        nextChunkIndex: 0,
-        pulling: false,
-      });
-      await this.#pullCarryStream(event.requestId);
-    } catch (error) {
-      controller.abort();
-      this.#postCarryError(event.requestId, event.expectedRevision, error, event.lifecycleEpoch);
-    }
-  }
-
-  async #pullCarryStream(requestId: number): Promise<void> {
-    const stream = this.#carryStreams.get(requestId);
-    if (!stream || stream.pulling || !this.#indexer.available
-        || stream.lifecycleEpoch !== this.#indexer.epoch) return;
-    stream.pulling = true;
-    try {
-      const next = await stream.iterator.next();
-      if (this.#carryStreams.get(requestId) !== stream
-          || stream.lifecycleEpoch !== this.#indexer.epoch || !this.#indexer.available) return;
-      const messages = next.value ? [...next.value] : [];
-      const bytes = Buffer.byteLength(JSON.stringify(messages));
-      if (messages.length > MAX_CARRY_MESSAGES || bytes > MAX_CARRY_BYTES) {
-        throw new Error('CARRY_OVER_MESSAGE_TOO_LARGE');
-      }
-      stream.pulling = false;
-      this.#postIndexer({
-        type: 'carry-over-chunk',
-        requestId,
-        lifecycleEpoch: stream.lifecycleEpoch,
-        chunkIndex: stream.nextChunkIndex,
-        revision: stream.revision,
-        messages,
-        done: Boolean(next.done),
-      });
-      stream.nextChunkIndex += 1;
-      if (next.done) await this.#closeCarryStream(requestId);
-    } catch (error) {
-      this.#postCarryError(requestId, stream.revision, error, stream.lifecycleEpoch);
-      await this.#closeCarryStream(requestId);
-    } finally {
-      stream.pulling = false;
-    }
-  }
-
-  #postCarryError(
-    requestId: number,
-    revision: string,
-    error: unknown,
-    lifecycleEpoch: string,
-  ): void {
-    if (lifecycleEpoch !== this.#indexer.epoch || !this.#indexer.available) return;
-    const typedFailure = error instanceof TranscriptSearchCarryOverError ? error.failure : null;
-    const code = typedFailure?.code
-      ?? (error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)
-        ? error.message
-        : 'CARRY_OVER_UNAVAILABLE');
-    this.#postIndexer({
-      type: 'carry-over-chunk',
-      requestId,
-      lifecycleEpoch,
-      chunkIndex: this.#carryStreams.get(requestId)?.nextChunkIndex ?? 0,
-      revision,
-      messages: [],
-      done: true,
-      code,
-      retryable: typedFailure?.retryable ?? code !== 'CARRY_OVER_MESSAGE_TOO_LARGE',
+    return enqueueReaderWaiter({
+      waiters: this.#searchWaiters,
+      admissionSignal,
+      executionSignal,
+      onExecutionTimeout: () => {
+        this.#queryStats.recordTimedOut();
+      },
     });
   }
 
-  async #closeCarryStream(requestId: number): Promise<void> {
-    const stream = this.#carryStreams.get(requestId);
-    if (!stream) return;
-    this.#carryStreams.delete(requestId);
-    stream.controller.abort();
-    await stream.iterator.return?.().catch(() => undefined);
+  #settleReaderSlot(slot: ReaderSlot): void {
+    if (slot.supervisor.available) {
+      this.#dispatchOrIdle(slot);
+    } else {
+      slot.state = 'quarantined';
+      this.#noteStatusMaybeChanged();
+    }
   }
 
-  #requestIndexer(
-    input: WorkerRequestInput<IndexerRequest>,
-    signal?: AbortSignal,
-    timeoutMs = REQUEST_TIMEOUT_MS,
-  ): Promise<IndexerEvent> {
-    return this.#indexer.request([input], signal, timeoutMs);
+  #retireAbandonedReader(slot: ReaderSlot): void {
+    if (!slot.supervisor.available) return;
+    slot.state = 'quarantined';
+    slot.supervisor.crash();
+    this.#noteStatusMaybeChanged();
   }
 
-  #requestIndexerFrames(
-    inputs: readonly WorkerRequestInput<IndexerRequest>[],
-    signal?: AbortSignal,
-  ): Promise<IndexerEvent> {
-    return this.#indexer.request(inputs, signal, REQUEST_TIMEOUT_MS);
+  #onReaderAdmitted(slot: ReaderSlot): void {
+    if (slot.state === 'quarantined') slot.state = 'idle';
+    this.#dispatchWaiters();
+    this.#noteStatusMaybeChanged();
   }
 
-  #requestReader(
-    input: WorkerRequestInput<ReaderRequest>,
-    signal?: AbortSignal,
-    timeoutMs = REQUEST_TIMEOUT_MS,
-  ): Promise<ReaderEvent> {
-    return this.#reader.request([input], signal, timeoutMs);
+  #dispatchOrIdle(slot: ReaderSlot): void {
+    const waiter = this.#searchWaiters.shift();
+    if (waiter && slot.supervisor.available) {
+      waiter.resolve(slot);
+      return;
+    }
+    slot.state = 'idle';
+    if (waiter) this.#requeueOrFail(waiter);
   }
 
-  #requestReaderFrames(
-    inputs: readonly WorkerRequestInput<ReaderRequest>[],
-    signal?: AbortSignal,
-    timeoutMs = REQUEST_TIMEOUT_MS,
-  ): Promise<ReaderEvent> {
-    return this.#reader.request(inputs, signal, timeoutMs);
+  #dispatchWaiters(): void {
+    while (this.#searchWaiters.length > 0) {
+      const idle = this.#readers.find(
+        (slot) => slot.state === 'idle' && slot.supervisor.available,
+      );
+      if (!idle) return;
+      idle.state = 'busy';
+      this.#searchWaiters.shift()!.resolve(idle);
+    }
   }
 
-  #postIndexer(message: IndexerRequest): void {
-    this.#indexer.post(message);
+  #requeueOrFail(waiter: ReaderWaiter<ReaderSlot>): void {
+    const idle = this.#readers.find(
+      (slot) => slot.state === 'idle' && slot.supervisor.available,
+    );
+    if (idle) {
+      idle.state = 'busy';
+      waiter.resolve(idle);
+    } else if (this.#readers.some((slot) => slot.supervisor.available)) {
+      this.#searchWaiters.unshift(waiter);
+    } else {
+      waiter.reject(new Error('SEARCH_INDEX_UNAVAILABLE'));
+    }
   }
 
-  #handleIndexerCrash(): void {
-    const active = this.#activeIndexerJob;
-    this.#activeIndexerJob = null;
-    if (active) {
-      const previous = this.#indexerCrashHistory.get(active.chatId);
-      const count = previous?.sourceSignature === active.sourceSignature
-        ? previous.count + 1
-        : 1;
-      this.#indexerCrashHistory.set(active.chatId, {
-        sourceSignature: active.sourceSignature,
-        count,
-      });
-      if (count >= POISON_CHAT_CRASH_LIMIT) {
-        this.#indexerQuarantines.set(active.chatId, active.sourceSignature);
-        this.#options.logger.warn('Transcript source quarantined after repeated indexer crashes.', {
-          code: 'SEARCH_SOURCE_QUARANTINED',
-        });
+  #enqueueIngest(
+    chatId: string,
+    build: (resolve: () => void, reject: (error: Error) => void) => IngestJob,
+    queue: IngestJob[],
+  ): Promise<void> {
+    if (!this.#enabled || this.#closed) return Promise.resolve();
+    if (this.#jobChatIds.has(chatId)) {
+      return Promise.reject(new Error('SEARCH_JOB_CONFLICT'));
+    }
+    this.#jobChatIds.add(chatId);
+    return new Promise<void>((resolve, reject) => {
+      queue.push(build(resolve, reject));
+      this.#noteStatusMaybeChanged();
+      void this.#pumpIngest();
+    });
+  }
+
+  async #pumpIngest(): Promise<void> {
+    if (this.#ingestPumpActive) return;
+    this.#ingestPumpActive = true;
+    try {
+      while (this.#enabled && !this.#closed) {
+        const job = this.#deleteQueue.shift() ?? this.#buildQueue.shift() ?? null;
+        if (!job) break;
+        this.#activeJob = job;
+        this.#noteStatusMaybeChanged();
+        try {
+          if (job.kind === 'delete') await this.#runDelete(job.chatId);
+          else if (job.kind === 'fail') await this.#runMarkFailed(job);
+          else await this.#runSync(job.request);
+          job.resolve();
+        } catch (error) {
+          job.reject(asError(error));
+        } finally {
+          this.#jobChatIds.delete(job.chatId);
+          this.#activeJob = null;
+          this.#activeProgress = null;
+          this.#noteDurableProgress();
+        }
       }
-    }
-    for (const requestId of this.#carryStreams.keys()) {
-      void this.#closeCarryStream(requestId);
+    } finally {
+      this.#ingestPumpActive = false;
     }
   }
 
-  async #replayIndexerState(): Promise<void> {
-    if (this.#latestCatalog) {
-      await this.#requestIndexerFrames(catalogFrames(this.#latestCatalog));
+  async #runSync(request: TranscriptSearchSyncRequest): Promise<void> {
+    const session = this.#indexer.beginRequestSession();
+    const accepted = await session.request([{
+      type: 'sync-begin',
+      mode: request.mode,
+      chatId: request.chatId,
+      transcriptViewId: request.transcriptViewId,
+      expectedAfterOrdinal: request.expectedAfterOrdinal,
+      targetThrough: request.targetThrough,
+    }], undefined, FRAME_TIMEOUT_MS, {
+      isComplete: (event) => event.type === 'sync-accepted',
+    });
+    if (accepted.type !== 'sync-accepted') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    this.#noteDurableProgress();
+    if (accepted.current) return;
+    this.#activeProgress = {
+      position: accepted.indexedThrough,
+      total: request.targetThrough,
+    };
+    try {
+      let staleRows = accepted.staleRows;
+      while (staleRows) {
+        const cleanup = await session.request(
+          [{ type: 'sync-cleanup' }],
+          undefined,
+          FRAME_TIMEOUT_MS,
+          { isComplete: (event) => event.type === 'cleanup-progress' },
+        );
+        if (cleanup.type !== 'cleanup-progress') {
+          throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+        }
+        staleRows = cleanup.remaining;
+        this.#noteDurableProgress();
+      }
+      let frameIndex = 0;
+      let indexedThrough = accepted.indexedThrough;
+      for await (const frame of request.source(accepted.indexedThrough)) {
+        for (const chunk of chunkFrame(frame)) {
+          const currentFrame = frameIndex;
+          const event = await session.request([{
+            type: 'sync-rows',
+            frameIndex: currentFrame,
+            rows: chunk.rows,
+            advanceTo: chunk.advanceTo,
+          }], undefined, FRAME_TIMEOUT_MS, {
+            isComplete: (candidate) => candidate.type === 'sync-progress'
+              && candidate.frameIndex === currentFrame,
+          });
+          if (event.type !== 'sync-progress') {
+            throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+          }
+          frameIndex += 1;
+          indexedThrough = event.indexedThrough;
+          this.#activeProgress = { position: indexedThrough, total: request.targetThrough };
+          this.#noteDurableProgress();
+        }
+      }
+      if (indexedThrough !== request.targetThrough) throw new Error('SEARCH_INDEX_GAP');
+      const complete = await session.request(
+        [{ type: 'sync-finish' }],
+        undefined,
+        FRAME_TIMEOUT_MS,
+        { isComplete: (candidate) => candidate.type === 'sync-complete' },
+      );
+      if (complete.type !== 'sync-complete') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    } catch (error) {
+      const code = indexFailureCode(error);
+      if (!isRepairableIndexPositionError(error)) {
+        await this.#requestIndexer({
+          type: 'mark-failed',
+          chatId: request.chatId,
+          transcriptViewId: request.transcriptViewId,
+          errorCode: code,
+        }).catch(() => undefined);
+      }
+      throw error;
     }
-    for (const [chatId, generation] of this.#deleteTombstones) {
-      await this.#requestIndexer({ type: 'delete-chat', chatId, generation });
+  }
+
+  async #runDelete(chatId: string): Promise<void> {
+    const event = await this.#requestIndexer({ type: 'delete-chat', chatId });
+    if (event.type !== 'ack') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+    this.#noteDurableProgress();
+    const checkpoint = await this.#requestIndexer({ type: 'checkpoint' }).catch(() => null);
+    if (!checkpoint || checkpoint.type !== 'checkpoint-complete' || checkpoint.busy !== 0) {
+      this.#rateLimitedWarn('Transcript search checkpoint deferred.', {
+        code: 'SEARCH_WAL_TRUNCATE_DEFERRED',
+      });
     }
-    for (const [chatId, generation] of this.#dirtyReplay) {
-      await this.#requestIndexer({ type: 'source-dirty', chatId, generation });
+    for (let pass = 0; pass < SEARCH_MAINTENANCE_PASSES; pass += 1) {
+      const maintained = await this.#requestIndexer({ type: 'maintenance' }).catch(() => null);
+      if (!maintained || maintained.type !== 'ack') break;
     }
+  }
+
+  async #runMarkFailed(job: Extract<IngestJob, { kind: 'fail' }>): Promise<void> {
+    const event = await this.#requestIndexer({
+      type: 'mark-failed',
+      chatId: job.chatId,
+      transcriptViewId: job.transcriptViewId,
+      errorCode: job.errorCode,
+    });
+    if (event.type !== 'ack') throw new Error('SEARCH_INDEX_INVALID_RESPONSE');
+  }
+
+  #noteDurableProgress(): void {
+    this.#countsDirty = true;
+    this.#noteStatusMaybeChanged();
+  }
+
+  #noteStatusMaybeChanged(): void {
+    this.#statusDirty = true;
+    void this.#statusWorker();
+  }
+
+  async #statusWorker(): Promise<void> {
+    if (this.#statusWorkerActive) return;
+    this.#statusWorkerActive = true;
+    try {
+      while (this.#statusDirty || this.#countsDirty) {
+        if (this.#countsDirty) {
+          if (!this.#enabled || this.#closed) {
+            this.#countsDirty = false;
+          } else {
+            const event = await this.#requestIndexer({ type: 'status-snapshot' })
+              .catch(() => null);
+            if (!event || event.type !== 'status-result') {
+              this.#scheduleCountsRetry();
+              return;
+            }
+            this.#countsDirty = false;
+            this.#countsRetryArmed = false;
+            this.#durableCounts = {
+              indexed: event.counts.indexed,
+              pending: event.counts.pending,
+              failed: event.counts.failed,
+            };
+            this.#durableBacklogRows = event.counts.backlogRows;
+          }
+        }
+        this.#statusDirty = false;
+        this.#publishIfChanged();
+      }
+    } finally {
+      this.#statusWorkerActive = false;
+    }
+  }
+
+  #scheduleCountsRetry(): void {
+    if (this.#countsRetryArmed || this.#countsRetryTimer) return;
+    this.#countsRetryArmed = true;
+    this.#countsRetryTimer = setTimeout(() => {
+      this.#countsRetryTimer = null;
+      void this.#statusWorker();
+    }, 1_000);
+    this.#countsRetryTimer.unref?.();
+  }
+
+  #publishIfChanged(): void {
+    const accountedChats = this.#durableCounts.indexed
+      + this.#durableCounts.pending
+      + this.#durableCounts.failed;
+    const content = {
+      version: 1 as const,
+      phase: this.#phase(),
+      chats: {
+        total: this.#catalogChatTotal,
+        ...this.#durableCounts,
+        unindexed: Math.max(0, this.#catalogChatTotal - accountedChats),
+      },
+      queuedJobs: this.#queuedJobCount(),
+      resync: this.#resync
+        ? { completedChats: this.#resync.completed, totalChats: this.#resync.total }
+        : null,
+      backlogRows: this.#durableBacklogRows,
+      activeChat: this.#activeProgress ? { ...this.#activeProgress } : null,
+      lastErrorCode: this.#lastErrorCode,
+    };
+    const serialized = JSON.stringify(content);
+    if (serialized === this.#lastStatusContent) return;
+    const phaseChanged = this.#lastStatus.phase !== content.phase;
+    this.#lastStatusContent = serialized;
+    this.#lastStatus = { ...content, updatedAt: new Date().toISOString() };
+    this.#scheduleEmit(phaseChanged);
+  }
+
+  #scheduleEmit(immediate: boolean): void {
+    this.#emitPending = true;
+    if (immediate) {
+      if (this.#emitTimer) {
+        clearTimeout(this.#emitTimer);
+        this.#emitTimer = null;
+      }
+      this.#emitNow();
+      return;
+    }
+    if (this.#emitTimer) return;
+    this.#emitTimer = setTimeout(() => {
+      this.#emitTimer = null;
+      this.#emitNow();
+    }, STATUS_COALESCE_MS);
+    this.#emitTimer.unref?.();
+  }
+
+  #emitNow(): void {
+    if (!this.#emitPending) return;
+    this.#emitPending = false;
+    const snapshot = this.#lastStatus;
+    if (snapshot.phase === 'rebuilding') {
+      this.#rateLimitedInfo('Transcript search ingest progress', {
+        code: 'SEARCH_INGEST_PROGRESS',
+        chatsTotal: snapshot.chats.total,
+        chatsIndexed: snapshot.chats.indexed,
+        chatsPending: snapshot.chats.pending,
+        chatsFailed: snapshot.chats.failed,
+        chatsUnindexed: snapshot.chats.unindexed,
+        resyncCompleted: snapshot.resync?.completedChats ?? null,
+        resyncTotal: snapshot.resync?.totalChats ?? null,
+        backlogRows: snapshot.backlogRows,
+        queuedJobs: snapshot.queuedJobs,
+        activePosition: snapshot.activeChat?.position ?? null,
+        activeTotal: snapshot.activeChat?.total ?? null,
+      });
+    }
+    for (const listener of this.#statusListeners) listener(snapshot);
+  }
+
+  #queuedJobCount(): number {
+    return this.#deleteQueue.length + this.#buildQueue.length + (this.#activeJob ? 1 : 0);
+  }
+
+  #phase(): TranscriptSearchStatusV1['phase'] {
+    if (this.#closed || (!this.#enabled && this.#phaseOverride === null)) return 'disabled';
+    if (this.#phaseOverride) return this.#phaseOverride;
+    const readersDown = this.#readers.some((slot) => !slot.supervisor.available);
+    if (!this.#indexer.available || readersDown) return 'degraded';
+    if (this.#resync !== null || this.#queuedJobCount() > 0) return 'rebuilding';
+    if (
+      !this.#catalogCurrent
+      || this.#durableCounts.failed > 0
+      || this.#durableCounts.pending > 0
+      || this.#catalogChatTotal > (
+        this.#durableCounts.indexed + this.#durableCounts.pending + this.#durableCounts.failed
+      )
+    ) return 'degraded';
+    return 'ready';
+  }
+
+  #rejectQueues(error: Error): void {
+    for (const job of [...this.#deleteQueue.splice(0), ...this.#buildQueue.splice(0)]) {
+      this.#jobChatIds.delete(job.chatId);
+      job.reject(error);
+    }
+    for (const waiter of this.#searchWaiters.splice(0)) waiter.reject(error);
+  }
+
+  #requestIndexer(input: WorkerRequestInput<IndexerRequest>): Promise<IndexerEvent> {
+    return this.#indexer.request([input], undefined, REQUEST_TIMEOUT_MS);
+  }
+
+  #logRestart(code: 'SEARCH_INDEXER_RESTARTED' | 'SEARCH_READER_RESTARTED'): void {
+    this.#logger.warn('Transcript search worker restarted.', { code });
+    this.#noteStatusMaybeChanged();
+  }
+
+  #rateLimitedWarn(message: string, fields: JsonObject & { readonly code: string }): void {
+    if (!this.#shouldLog(fields.code)) return;
+    this.#logger.warn(message, fields);
+  }
+
+  #rateLimitedInfo(message: string, fields: JsonObject & { readonly code: string }): void {
+    if (!this.#shouldLog(fields.code)) return;
+    this.#logger.info(message, fields);
+  }
+
+  #shouldLog(code: string): boolean {
+    const now = performance.now();
+    const last = this.#lastLogAt.get(code) ?? Number.NEGATIVE_INFINITY;
+    if (now - last < 10_000) return false;
+    this.#lastLogAt.set(code, now);
+    return true;
   }
 
   async #stopWorkers(): Promise<void> {
-    this.#activeIndexerJob = null;
-    await Promise.all([...this.#carryStreams.keys()].map((requestId) => this.#closeCarryStream(requestId)));
-    await this.#reader.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS);
-    await this.#indexer.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS);
+    await Promise.all([
+      ...this.#readers.map(
+        (slot) => slot.supervisor.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS),
+      ),
+      this.#indexer.stop({ type: 'close' }, WORKER_CLOSE_TIMEOUT_MS),
+    ]);
   }
 }
 
-function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {
-  return event.type === 'error'
-    ? Object.assign(new Error(event.code), { retryable: event.retryable })
-    : null;
-}
-
-async function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(finish, delayMs);
-    timer.unref?.();
-    const onAbort = (): void => finish(signal.reason instanceof Error
-      ? signal.reason
-      : new DOMException('Aborted', 'AbortError'));
-    function finish(error?: Error): void {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      if (error) reject(error);
-      else resolve();
+function chunkFrame(frame: TranscriptSearchSyncFrame): Array<{
+  rows: readonly HistoricalSearchMessageRow[];
+  advanceTo: number;
+}> {
+  const chunks: HistoricalSearchMessageRow[][] = [];
+  let current: HistoricalSearchMessageRow[] = [];
+  let bytes = 2;
+  for (const row of frame.rows) {
+    if (Buffer.byteLength(row.body, 'utf8') > SEARCH_INGEST_ROW_MAX_BYTES) {
+      throw new Error('SEARCH_ROW_TOO_LARGE');
     }
-    signal.addEventListener('abort', onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
-}
-
-async function removeDirectoryWithRetry(directory: string, signal: AbortSignal): Promise<void> {
-  let lastError: unknown = new Error('Transcript search cleanup failed');
-  for (const delayMs of CLEANUP_RETRY_DELAYS_MS) {
-    if (delayMs > 0) await abortableDelay(delayMs, signal);
-    try {
-      await fs.rm(directory, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
+    const rowBytes = Buffer.byteLength(JSON.stringify(row)) + (current.length > 0 ? 1 : 0);
+    if (current.length >= MAX_ROWS_PER_FRAME || bytes + rowBytes > MAX_FRAME_BYTES) {
+      chunks.push(current);
+      current = [];
+      bytes = 2;
     }
+    current.push(row);
+    bytes += rowBytes;
   }
-  throw lastError;
-}
-
-async function validateModuleAsset(moduleUrl: string): Promise<void> {
-  const filePath = moduleUrl.startsWith('file:') ? fileURLToPath(moduleUrl) : moduleUrl;
-  if (isEmbeddedStandaloneEntrypoint(filePath)) return;
-  await fs.access(filePath);
-}
-
-export async function cleanupObsoleteSearchArtifacts(
-  workspaceDirectory: string,
-  logger: AgentLogger,
-): Promise<void> {
-  const candidates = [
-    'chat-search.sqlite', 'chat-search.sqlite-wal', 'chat-search.sqlite-shm',
-    'chat-search-v3.sqlite', 'chat-search-v3.sqlite-wal', 'chat-search-v3.sqlite-shm',
-    '.chat-search-v3-tmp',
-  ].map((name) => path.join(workspaceDirectory, name));
-  const agentData = path.join(workspaceDirectory, 'agent-data');
-  try {
-    const children = await fs.readdir(agentData, { withFileTypes: true });
-    for (const child of children) {
-      if (child.isDirectory() && !child.isSymbolicLink()) {
-        candidates.push(path.join(agentData, child.name, 'transcript-search'));
-      }
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.warn('Obsolete transcript search discovery failed.', { code: 'SEARCH_CLEANUP_DISCOVERY_FAILED' });
-    }
-  }
-  await Promise.all(candidates.map(async (candidate) => {
-    try {
-      await fs.rm(candidate, { recursive: true, force: true });
-    } catch {
-      logger.warn('Obsolete transcript search cleanup failed.', { code: 'SEARCH_CLEANUP_FAILED' });
-    }
+  chunks.push(current);
+  return chunks.map((rows, index) => ({
+    rows,
+    advanceTo: index === chunks.length - 1
+      ? frame.advanceTo
+      : rows[rows.length - 1]!.ordinal,
   }));
 }
 
-function boundedFrames<T>(
-  values: readonly T[],
-  maxEntries: number,
-): T[][] {
-  const frames: T[][] = [];
-  let frame: T[] = [];
-  let frameBytes = 2;
-  for (const value of values) {
-    const bytes = Buffer.byteLength(JSON.stringify(value)) + 1;
-    if (bytes > MAX_FRAME_BYTES) throw new Error('TRANSCRIPT_SEARCH_FRAME_ENTRY_TOO_LARGE');
-    if (frame.length > 0 && (frame.length >= maxEntries || frameBytes + bytes > MAX_FRAME_BYTES)) {
-      frames.push(frame);
-      frame = [];
-      frameBytes = 2;
-    }
-    frame.push(value);
-    frameBytes += bytes;
-  }
-  if (frame.length > 0 || frames.length === 0) frames.push(frame);
-  return frames;
+function isRepairableIndexPositionError(error: unknown): boolean {
+  return error instanceof Error
+    && (error.message === 'SEARCH_INDEX_GAP' || error.message === 'SEARCH_VIEW_MISMATCH');
 }
 
-function catalogFrames(
-  snapshot: TranscriptSearchCatalogSnapshot,
-): Array<WorkerRequestInput<IndexerRequest>> {
-  const frames = boundedFrames(snapshot.chats, MAX_CATALOG_ENTRIES_PER_FRAME);
-  return frames.map((chats, chunkIndex) => ({
-    type: 'catalog-chunk',
-    generation: snapshot.generation,
-    chunkIndex,
-    chats,
-    done: chunkIndex === frames.length - 1,
-  }));
+function indexFailureCode(error: unknown): string {
+  return error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)
+    ? error.message
+    : 'SEARCH_INDEX_UNAVAILABLE';
 }
 
-function searchFrames(
-  query: ChatSearchQueryV1,
-  allowedChatIds: readonly string[],
-  limit: number,
-): Array<WorkerRequestInput<ReaderRequest>> {
-  const frames = boundedFrames(allowedChatIds, MAX_ALLOWLIST_IDS_PER_FRAME);
-  return [
-    { type: 'search-start', query, limit },
-    ...frames.map((ids, chunkIndex) => ({
-      type: 'search-allowlist-chunk' as const,
-      chunkIndex,
-      allowedChatIds: ids,
-      done: chunkIndex === frames.length - 1,
-    })),
-  ];
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }

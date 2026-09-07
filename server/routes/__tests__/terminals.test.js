@@ -12,6 +12,7 @@ const principal = {
 const metadata = {
   terminalId: 'terminal-1',
   displaySequence: 1,
+  title: null,
   initialWorkingDirectory: '/workspace',
   processStatus: 'running',
   attachmentStatus: 'detached',
@@ -36,9 +37,17 @@ describe('terminal routes', () => {
   it('requires a trusted request principal', async () => {
     const routes = createTerminalRoutes({ list: () => [] });
     const url = new URL('http://localhost/api/v1/terminals');
-    const response = await routes['/api/v1/terminals'].GET(request(url), url);
+    const listResponse = await routes['/api/v1/terminals'].GET(
+      request(url),
+      url,
+    );
+    const renameResponse = await routes['/api/v1/terminals'].PATCH(
+      request(url, 'PATCH', { terminalId: 'terminal-1', title: 'Build logs' }),
+      url,
+    );
 
-    expect(response.status).toBe(401);
+    expect(listResponse.status).toBe(401);
+    expect(renameResponse.status).toBe(401);
   });
 
   it('passes the server-derived principal through every control operation', async () => {
@@ -55,6 +64,10 @@ describe('terminal routes', () => {
       async terminate(receivedPrincipal, terminalId, requestId) {
         calls.push(['terminate', receivedPrincipal, terminalId, requestId]);
         return { success: true, terminalId, terminal: metadata };
+      },
+      rename(receivedPrincipal, terminalId, title) {
+        calls.push(['rename', receivedPrincipal, terminalId, title]);
+        return { success: true, terminalId, title };
       },
     };
     const routes = createTerminalRoutes(manager);
@@ -85,10 +98,20 @@ describe('terminal routes', () => {
       undefined,
       context,
     );
+    const renameResponse = await routes['/api/v1/terminals'].PATCH(
+      request(url, 'PATCH', {
+        terminalId: 'terminal-1',
+        title: '  Build logs  ',
+      }),
+      url,
+      undefined,
+      context,
+    );
 
     expect(listResponse.status).toBe(200);
     expect(createResponse.status).toBe(201);
     expect(terminateResponse.status).toBe(200);
+    expect(renameResponse.status).toBe(200);
     expect(calls).toEqual([
       ['list', principal],
       [
@@ -100,6 +123,7 @@ describe('terminal routes', () => {
         },
       ],
       ['terminate', principal, 'terminal-1', 'terminate-1'],
+      ['rename', principal, 'terminal-1', 'Build logs'],
     ]);
   });
 
@@ -108,6 +132,13 @@ describe('terminal routes', () => {
       list: () => [],
       create: async () => {
         throw new TerminalManagerError('terminal-limit', 'Limit reached.', 409);
+      },
+      rename: () => {
+        throw new TerminalManagerError(
+          'terminal-not-found',
+          'Terminal not found.',
+          404,
+        );
       },
     };
     const routes = createTerminalRoutes(manager);
@@ -127,10 +158,26 @@ describe('terminal routes', () => {
       undefined,
       { principal },
     );
+    const invalidRename = await routes['/api/v1/terminals'].PATCH(
+      request(url, 'PATCH', { terminalId: 'terminal-1', title: 'bad\nname' }),
+      url,
+      undefined,
+      { principal },
+    );
+    const missingTerminal = await routes['/api/v1/terminals'].PATCH(
+      request(url, 'PATCH', { terminalId: 'terminal-1', title: null }),
+      url,
+      undefined,
+      { principal },
+    );
 
     expect(invalid.status).toBe(400);
     expect((await invalid.json()).errorCode).toBe('terminal-validation');
     expect(limited.status).toBe(409);
     expect((await limited.json()).errorCode).toBe('terminal-limit');
+    expect(invalidRename.status).toBe(400);
+    expect((await invalidRename.json()).errorCode).toBe('terminal-validation');
+    expect(missingTerminal.status).toBe(404);
+    expect((await missingTerminal.json()).errorCode).toBe('terminal-not-found');
   });
 });

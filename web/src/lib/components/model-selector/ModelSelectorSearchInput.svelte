@@ -24,7 +24,7 @@
 	}
 </script>
 
-<div class="flex items-center gap-2 border-b border-border px-3">
+<div class="flex min-w-0 items-center gap-2 border-b border-border px-3">
 	<Search class="size-4 shrink-0 text-muted-foreground" />
 	<input
 		bind:this={ref}
@@ -35,7 +35,7 @@
 		aria-label={m.model_selector_filter_placeholder()}
 		aria-controls={modelListId}
 		aria-activedescendant={activeOptionId}
-		class="flex h-10 w-full rounded-md bg-transparent py-2 text-[16px] leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+		class="flex h-10 min-w-0 flex-1 rounded-md bg-transparent py-2 text-[16px] leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
 		oninput={handleQueryInput}
 		onkeydown={onKeydown}
 	/>

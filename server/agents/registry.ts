@@ -1,7 +1,14 @@
-import type { AgentTranscriptPage, AgentTranscriptSourceLocation } from '@garcon/server-agent-interface';
-import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
-import type { ChatMessage } from '@garcon/common/chat-types';
+import type {
+  AgentGoalControlHandoff,
+  AgentNativeSessionRef,
+  AgentProjectPathUpdatePreparation,
+  AgentSteerResult,
+  AgentSteerTarget,
+  AgentTranscriptSourceLocation,
+} from '@garcon/server-agent-interface';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
+import type { ChatMessage } from '@garcon/common/chat-types';
+import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
@@ -12,6 +19,7 @@ import type {
   AgentAuthLoginStatus,
 } from '../../common/agent-auth.js';
 import type { IChatRegistry } from '../chats/store.js';
+import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { IntegrationRegistry } from './integration-registry.js';
@@ -19,7 +27,9 @@ import type {
   AgentChatEntry,
   AgentExecutionAdmission,
   AgentExecutionCommandType,
+  ForkedAgentSessionOutcome,
   AgentSessionSettingsPatch,
+  AgentSteerOptions,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
   StartedAgentSession,
@@ -27,10 +37,36 @@ import type {
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
 import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
-import { AgentRuntimeRouter } from './runtime-router.js';
+import {
+  AgentRuntimeRouter,
+  type CreateCarriedContextInput,
+  type RunSingleQueryOptions,
+} from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../lib/log.js';
+import type { UserMessage } from '@garcon/common/chat-types';
+import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
+import type { TranscriptAdoptionService } from '../ledger/adoption.js';
+import { transcriptViewId } from '../ledger/contracts.js';
+import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
+import type { PreambleService } from '../preambles/service.js';
+import {
+  assertPreambleSelectionComposition,
+  resolvePreambleSelection,
+} from '../preambles/selection.js';
+import {
+  PendingPreambleBoundary,
+  samePreambleBoundary,
+} from '../../common/preambles.js';
+import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
+import { DomainError } from '../lib/domain-error.js';
+import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
+import { dispatchListenersSequentially } from './listener-dispatch.js';
+import {
+  isThinkingModeSupported,
+  normalizeSupportedThinkingMode,
+} from '../../common/execution-defaults.js';
 
 const logger = createLogger('agents:registry');
 
@@ -39,14 +75,37 @@ export interface AgentRegistryServiceContract {
   supportsAuthLogin(agentId: string): boolean;
   supportsAuthLoginCompletion(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
+  singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
   supportsForkAtMessage(agentId: string): boolean;
   supportsForkWhileRunning(agentId: string): boolean;
   supportsUpdateProjectPath(agentId: string): boolean;
   requiresNativePathForProjectPathUpdate(agentId: string): boolean;
   supportsImages(agentId: string): boolean;
+  supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
-  submitActiveInput(chatId: string, command: string, opts: RunAgentTurnOptions, beforeDelivery: () => Promise<void>): Promise<boolean>;
+  currentTranscriptViewId(chatId: string): Promise<string>;
+  hasMatchingInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions,
+  ): boolean;
+  publishSessionFact(chatId: string, session: StartedAgentSession): void;
+  resendCandidates(chatId: string): readonly import('../../common/chat-view.js').ResendCandidate[];
+  captureSteerTarget(chatId: string): AgentSteerTarget | null;
+  steerInput(
+    chatId: string,
+    input: string,
+    options: AgentSteerOptions,
+    target: AgentSteerTarget | null,
+    prepareDelivery: () => Promise<void>,
+  ): Promise<AgentSteerResult>;
+  submitGoalControl(
+    chatId: string,
+    command: string,
+    opts: RunAgentTurnOptions,
+    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
+  ): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   getRunningChatIdsSnapshot(): string[];
   startSession(chatId: string, command: string, opts?: StartSessionOptions): Promise<void>;
@@ -54,14 +113,21 @@ export interface AgentRegistryServiceContract {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
-    messageSequence?: number;
-  }): Promise<StartedAgentSession | null>;
+    messageOrdinal?: number;
+    signal: AbortSignal;
+  }): Promise<ForkedAgentSessionOutcome | null>;
+  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
+  assertExecutionModeSelectionSupported(agentId: string, selection: {
+    readonly permissionMode?: PermissionMode;
+    readonly thinkingMode?: ThinkingMode;
+  }): void;
+  normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode;
   launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult>;
   completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
   getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus>;
@@ -71,10 +137,18 @@ export interface AgentRegistryServiceContract {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean>;
-  runSingleQuery(prompt: string, options: { agentId: string; [key: string]: unknown }): Promise<string>;
+  runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
-  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
-  prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
+  resolvePermission(
+    chatId: string,
+    permissionOccurrenceId: string,
+    decision: PermissionDecisionPayload,
+    control: ChatTransientControlAction,
+  ): Promise<void>;
+  prepareProjectPathUpdate(
+    agentId: string,
+    request: PrepareProjectPathUpdateRequest,
+  ): Promise<AgentProjectPathUpdatePreparation | void>;
   resolveNativeSession(session: AgentChatEntry, chatId?: string): Promise<AgentNativeSessionRef | null>;
   describeTranscriptSource(
     session: AgentChatEntry,
@@ -82,8 +156,6 @@ export interface AgentRegistryServiceContract {
   ): Promise<AgentTranscriptSourceLocation | null>;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
-
-type MutableAgentTranscriptPage = Omit<AgentTranscriptPage, 'messages'> & { messages: ChatMessage[] };
 
 interface StartSessionOptions {
   images?: AgentCommandImage[];
@@ -113,51 +185,124 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #events: AgentEventBus;
   readonly #runtime: AgentRuntimeRouter;
   readonly #settings: AgentSessionSettingsService;
-  readonly #getCarryOverRevision: (chatId: string) => string;
+  readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
+  readonly #ledger: TranscriptLedgerService;
+  readonly #adoption: TranscriptAdoptionService;
+  readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
+  readonly #preambles: Pick<PreambleService, 'snapshot'>;
+  readonly #selectionAdmissionLock: KeyedPromiseLock;
+  readonly #transcriptListeners = new Set<(
+    event: TranscriptCommitEvent,
+  ) => void | Promise<void>>();
+
+  reopenTranscriptProducer(chatId: string): void {
+    this.#runtime.reopenProducer(chatId);
+  }
 
   constructor(args: {
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
     endpointResolver: ApiProviderEndpointResolver;
-    getCarryOverRevision(chatId: string): string;
-    loadCarryOver(chatId: string, entry: AgentChatEntry): readonly ChatMessage[];
+    getCarryOverRevision(entry: AgentChatEntry): string;
+    createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
+    onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
+    ledger: TranscriptLedgerService;
+    adoption: TranscriptAdoptionService;
+    hasPendingOwnershipTransfer(chatId: string): boolean;
+    preambles: Pick<PreambleService, 'snapshot'>;
+    selectionAdmissionLock: KeyedPromiseLock;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
+    this.#ledger = args.ledger;
+    this.#adoption = args.adoption;
     this.#directory = new AgentDirectory(args.integrations);
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
     });
-    this.#events = new AgentEventBus(this.#directory);
+    this.#events = new AgentEventBus();
     this.#runtime = new AgentRuntimeRouter({
       registry: this.#registry,
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       events: this.#events,
       getCarryOverRevision: args.getCarryOverRevision,
-      loadCarryOver: args.loadCarryOver,
+      createCarriedContext: args.createCarriedContext,
+      ledger: this.#ledger,
+      adoption: this.#adoption,
+      hasPendingOwnershipTransfer: args.hasPendingOwnershipTransfer,
     });
+    this.#hasPendingOwnershipTransfer = args.hasPendingOwnershipTransfer;
+    this.#preambles = args.preambles;
+    this.#selectionAdmissionLock = args.selectionAdmissionLock;
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
     });
+    this.#ledger.subscribeSessionCommitted((event) => {
+      this.#registry.updateChat(event.chatId, {
+        agentSessionId: event.row.detail.agentSessionId,
+        nativeSession: event.row.detail.nativeSession,
+        nativeSeedReceipt: event.row.detail.nativeSeedReceipt,
+      });
+    });
+    this.#ledger.subscribe((event) => this.#onTranscriptCommit(event));
   }
 
   hasAgent(agentId: string): boolean { return this.#directory.has(agentId); }
+  assertExecutionModeSelectionSupported(agentId: string, selection: {
+    readonly permissionMode?: PermissionMode;
+    readonly thinkingMode?: ThinkingMode;
+  }): void {
+    const descriptor = this.#directory.get(agentId)?.descriptor;
+    if (!descriptor) throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
+    if (
+      selection.permissionMode !== undefined
+      && !descriptor.supportedPermissionModes.includes(selection.permissionMode)
+    ) {
+      throw new DomainError(
+        'VALIDATION_FAILED',
+        `Permission mode ${selection.permissionMode} is not supported by ${agentId}`,
+        422,
+      );
+    }
+    if (
+      selection.thinkingMode !== undefined
+      && !isThinkingModeSupported(selection.thinkingMode, descriptor.supportedThinkingModes)
+    ) {
+      throw new DomainError(
+        'VALIDATION_FAILED',
+        `Thinking mode ${selection.thinkingMode} is not supported by ${agentId}`,
+        422,
+      );
+    }
+  }
+  normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode {
+    return normalizeSupportedThinkingMode(
+      value,
+      this.#directory.require(agentId).descriptor.supportedThinkingModes,
+    );
+  }
   supportsAuthLogin(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.launchLogin); }
   supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
-  supportsFork(agentId: string): boolean { return this.#directory.get(agentId)?.forking !== null; }
-  supportsForkAtMessage(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessage ?? false; }
-  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsWhileRunning ?? false; }
+  supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }
+  singleQueryRunsToolsWithoutPermission(agentId: string): boolean {
+    return this.#directory.get(agentId)?.singleQuery?.runsToolsWithoutPermission ?? false;
+  }
+  supportsForkAtMessage(agentId: string): boolean { return this.#directory.has(agentId); }
+  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.has(agentId); }
   supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string): boolean {
     return this.#directory.get(agentId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;
   }
   supportsImages(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsImages ?? false; }
+  supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean {
+    return this.#directory.get(agentId)?.attachments?.fileMimeTypes.includes(mimeType.toLowerCase()) ?? false;
+  }
 
   requiresStrictModelDiscovery(agentId: string): boolean {
     return this.#catalog.requiresStrictModelDiscovery(agentId);
@@ -169,79 +314,89 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
   }
-  submitActiveInput(chatId: string, command: string, opts: RunAgentTurnOptions, beforeDelivery: () => Promise<void>): Promise<boolean> {
-    return this.#runtime.submitActiveInput(chatId, command, opts, beforeDelivery);
+  captureSteerTarget(chatId: string): AgentSteerTarget | null {
+    return this.#runtime.captureSteerTarget(chatId);
+  }
+  steerInput(
+    chatId: string,
+    input: string,
+    options: AgentSteerOptions,
+    target: AgentSteerTarget | null,
+    prepareDelivery: () => Promise<void>,
+  ): Promise<AgentSteerResult> {
+    return this.#runtime.steerInput(chatId, input, options, target, prepareDelivery);
+  }
+  submitGoalControl(
+    chatId: string,
+    command: string,
+    opts: RunAgentTurnOptions,
+    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
+  ): Promise<boolean> {
+    return this.#runtime.submitGoalControl(chatId, command, opts, beforeDelivery);
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
   compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
   isChatRunning(chatId: string): boolean { return this.#runtime.isChatRunning(chatId); }
-  waitUntilTurnAbortable(chatId: string, turn: TurnEventMetadata, signal?: AbortSignal): Promise<boolean> {
-    return this.#events.waitUntilTurnAbortable(chatId, turn, signal);
-  }
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
     return this.#runtime.isAgentSessionRunning(agentId, agentSessionId);
   }
   getRunningSessions() { return this.#runtime.getRunningSessions(); }
   getRunningChatIdsSnapshot(): string[] { return this.#runtime.getRunningChatIdsSnapshot(); }
   getRunningSessionCount(): number { return this.#runtime.getRunningSessionCount(); }
-  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
-    this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
+  resolvePermission(
+    chatId: string,
+    permissionOccurrenceId: string,
+    decision: PermissionDecisionPayload,
+    control: ChatTransientControlAction,
+  ): Promise<void> {
+    return this.#runtime.resolvePermission(chatId, permissionOccurrenceId, decision, control);
   }
-  prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void> {
+  prepareProjectPathUpdate(
+    agentId: string,
+    request: PrepareProjectPathUpdateRequest,
+  ): Promise<AgentProjectPathUpdatePreparation | void> {
     return this.#runtime.prepareProjectPathUpdate(agentId, request);
   }
   forkAgentSession(args: {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
-    messageSequence?: number;
+    messageOrdinal?: number;
+    signal: AbortSignal;
   }) {
     return this.#runtime.forkAgentSession(args);
+  }
+  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
+    return this.#runtime.discardForkedAgentSession(agentId, session);
   }
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch) {
     return this.#settings.updateSessionSettings(chatId, patch);
   }
-  runSingleQuery(prompt: string, options: { agentId: string; [key: string]: unknown }) {
+  runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);
   }
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
     return this.#runtime.discoverSlashCommands(agentId, projectPath);
   }
 
-  async getPreview(session: AgentChatEntry | null, chatId = ''): Promise<unknown> {
-    if (!session?.agentId) return null;
-    const integration = this.#directory.get(session.agentId);
-    return integration?.transcript.preview({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
-      signal: new AbortController().signal,
-    }) ?? null;
-  }
-
-  async loadMessages(session: AgentChatEntry | null, chatId = ''): Promise<ChatMessage[]> {
-    if (!session?.agentId) return [];
-    const integration = this.#directory.get(session.agentId);
-    if (!integration) return [];
-    return [...(await integration.transcript.load({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
-      signal: new AbortController().signal,
-    })).messages];
-  }
-
-  async loadMessagePage(
-    session: AgentChatEntry | null,
-    limit: number,
-    offset: number,
-    chatId = '',
-  ): Promise<MutableAgentTranscriptPage | null> {
-    if (!session?.agentId) return null;
-    const integration = this.#directory.get(session.agentId);
-    if (!integration?.transcript.loadPage) return null;
-    const page = await integration.transcript.loadPage({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
-      page: { limit, offset },
-      signal: new AbortController().signal,
-    });
-    return page ? { ...page, messages: [...page.messages] } : null;
+  // Returns the preview from the authoritative conversational ledger fold.
+  async getPreview(session: AgentChatEntry | null, chatId = ''): Promise<{
+    preview: unknown;
+  } | null> {
+    if (!session?.agentId || !chatId) return null;
+    await this.#adoption.ensure(chatId);
+    const messages = this.#ledger.conversationMessages(chatId);
+    const first = messages.find((message) => message.type === 'user-message') ?? messages[0];
+    const last = messages.at(-1);
+    if (!first || !last) return null;
+    return {
+      preview: {
+        firstMessage: messageText(first),
+        lastMessage: messageText(last),
+        createdAt: first.timestamp || null,
+        lastActivity: last.timestamp || null,
+      },
+    };
   }
 
   getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
@@ -255,8 +410,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!session.agentSessionId) return null;
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
-    const reference = await integration.transcript.resolveNativeSession({
-      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+    const nativeSessions = integration.nativeSessions;
+    if (!nativeSessions) return null;
+    const reference = await nativeSessions.resolveNativeSession({
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
       signal: new AbortController().signal,
     });
     if (reference?.ownerId !== session.agentId && reference !== null) {
@@ -272,8 +429,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const integration = this.#directory.get(session.agentId);
     if (!integration) return null;
     try {
-      const source = await integration.transcript.describeSource({
-        chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      const nativeSessions = integration.nativeSessions;
+      if (!nativeSessions) return null;
+      const source = await nativeSessions.describeSource({
+        chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(session)),
         signal: new AbortController().signal,
       });
       if (source === null) return null;
@@ -337,14 +496,242 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }));
   }
 
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void): void { this.#events.onMessages(cb); }
-  onProcessing(cb: (chatId: string, processing: boolean) => void): void { this.#events.onProcessing(cb); }
-  onSessionCreated(cb: (chatId: string) => void): void { this.#events.onSessionCreated(cb); }
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void { this.#events.onFinished(cb); }
-  onFailed(cb: (chatId: string, error: string, metadata?: TurnEventMetadata) => void): void { this.#events.onFailed(cb); }
+  onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }
+  onFinished(cb: Parameters<AgentEventBus['onFinished']>[0]): void { this.#events.onFinished(cb); }
+  onFailed(cb: (
+    chatId: string,
+    error: string,
+    errorCode: string,
+    metadata?: TurnEventMetadata,
+  ) => void | Promise<void>): void { this.#events.onFailed(cb); }
   settleTurn(chatId: string, turn: TurnEventMetadata): void { this.#events.settleTurn(chatId, turn); }
   discardTurn(chatId: string): void { this.#events.clearTurn(chatId); }
   getActiveTurn(chatId: string): TurnEventMetadata | undefined { return this.#events.getActiveTurn(chatId); }
+  onTranscriptCommitted(listener: (event: TranscriptCommitEvent) => void | Promise<void>): void {
+    this.#transcriptListeners.add(listener);
+  }
+
+  async currentTranscriptViewId(chatId: string): Promise<string> {
+    return (await this.#adoption.ensure(chatId)).viewId;
+  }
+
+  publishSessionFact(chatId: string, session: StartedAgentSession): void {
+    this.#runtime.publishSessionFact(chatId, session);
+  }
+
+  resendCandidates(chatId: string) {
+    return this.#ledger.resendCandidates(chatId);
+  }
+
+  discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void {
+    this.#ledger.discardPreparedInput(chatId, clientMessageId);
+  }
+
+  async admitInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions & { readonly clientRequestId: string },
+  ): Promise<{ readonly inserted: boolean }> {
+    // Direct admission shares the narrow selection/admission lock with Save so
+    // an input can never observe a new selection before its update-notice
+    // attempt, and Save can never interleave inside this commit.
+    return this.#selectionAdmissionLock.runExclusive(`chat:${chatId}`, async () => {
+      const session = this.#registry.getChat(chatId);
+      if (!session) throw new Error(`Session not initialized: ${chatId}`);
+      const view = await this.#adoption.ensure(chatId);
+      this.#validateInputAdmission(chatId, session, options);
+      return this.#commitInput(chatId, message, options, view.viewId);
+    });
+  }
+
+  hasMatchingInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions,
+  ): boolean {
+    if (!this.#registry.getChat(chatId)) return false;
+    const current = this.#ledger.existingCurrentView(chatId);
+    if (!current) return false;
+    try {
+      return this.#ledger.hasMatchingInputSubmission({
+        chatId,
+        viewId: options.transcriptViewId
+          ? transcriptViewId(options.transcriptViewId)
+          : current.viewId,
+        message,
+        attachments: inputAttachments(options),
+        clientMessageId: options.clientMessageId ?? null,
+        steer: options.commandType === 'steer',
+      });
+    } catch (error) {
+      throw mapInputSubmissionError(error);
+    }
+  }
+
+  admitQueuedInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions & { readonly clientRequestId: string },
+  ): { readonly inserted: boolean } {
+    const session = this.#registry.getChat(chatId);
+    if (!session) throw new Error(`Session not initialized: ${chatId}`);
+    this.#validateInputAdmission(chatId, session, options);
+    const view = this.#ledger.currentView(chatId);
+    if (!view) throw new Error(`Transcript view is not initialized for ${chatId}`);
+    return this.#commitInput(chatId, message, options, view.viewId);
+  }
+
+  #commitInput(
+    chatId: string,
+    message: UserMessage,
+    options: UserInputAdmissionOptions & { readonly clientRequestId: string },
+    currentViewId: ReturnType<typeof transcriptViewId>,
+  ): { readonly inserted: boolean } {
+    const session = this.#registry.getChat(chatId);
+    if (!session) throw new Error(`Session not initialized: ${chatId}`);
+    const pending = options.commandType === 'steer' || options.commandType === 'goal-control'
+      ? null
+      : session.pendingPreambleBoundary ?? null;
+    const alreadyConsumed = pending
+      ? this.#ledger.hasPreambleBoundaryProof(chatId, pending)
+      : false;
+    const boundary = pending && !alreadyConsumed ? pending : null;
+    const viewId = options.transcriptViewId ? transcriptViewId(options.transcriptViewId) : currentViewId;
+    const attachments = inputAttachments(options);
+    const slashLeading = message.content.trimStart().startsWith('/');
+    let composition;
+    try {
+      // Same-ID retries must return the original committed outcome without
+      // resolving newer selection or catalog state, so the duplicate check
+      // runs ahead of catalog resolution for every pending-boundary input,
+      // not only slash commands. A later catalog change that makes the
+      // current selection unsafe cannot turn an identical retry into a new
+      // rejection (ledger L4).
+      if (pending && this.#ledger.hasMatchingInputSubmission({
+        chatId,
+        viewId,
+        message,
+        attachments,
+        clientMessageId: options.clientMessageId ?? null,
+        steer: options.commandType === 'steer',
+      })) {
+        // The early return must not leave a proven-consumed stale boundary
+        // armed; repair the registry the same way the ordinary path would.
+        if (alreadyConsumed) this.#clearProvenPendingBoundary(chatId, pending);
+        return { inserted: false };
+      }
+      // Application resolves the chat's saved order against one catalog
+      // snapshot; unavailable entries are skipped, and the exact eligible
+      // composition is proven safe immediately before the input commits.
+      const preambles = boundary
+        ? resolvePreambleSelection(
+          session.preambleSelection,
+          this.#preambles.snapshot(),
+          session.projectPath,
+        ).eligible
+        : [];
+      if (boundary && preambles.length > 0 && slashLeading) {
+        throw new DomainError(
+          'PREAMBLE_SLASH_COMMAND_BLOCKED',
+          'Matching preambles haven\u2019t been sent yet. Start with a regular message before using provider slash commands.',
+          422,
+        );
+      }
+      if (boundary) assertPreambleSelectionComposition(chatId, preambles);
+      composition = this.#ledger.appendInputAndCompose({
+        chatId,
+        viewId,
+        message,
+        attachments,
+        clientMessageId: options.clientMessageId ?? null,
+        steer: options.commandType === 'steer',
+        preambleBoundary: boundary,
+        preambles,
+        ...(options.excludedResendOrdinals?.length
+          ? { excludedOrdinals: new Set(options.excludedResendOrdinals) }
+          : {}),
+      });
+    } catch (error) {
+      throw mapInputSubmissionError(error);
+    }
+    if (pending && (alreadyConsumed || composition.inserted)) {
+      this.#clearProvenPendingBoundary(chatId, pending);
+    }
+    return { inserted: composition.inserted };
+  }
+
+  // Compare-and-clear: never clears a boundary a newer ownership epoch or
+  // selection revision replaced.
+  #clearProvenPendingBoundary(
+    chatId: string,
+    consumed: PendingPreambleBoundary,
+  ): void {
+    const current = this.#registry.getChat(chatId);
+    const currentBoundary = current?.pendingPreambleBoundary ?? null;
+    if (currentBoundary && samePreambleBoundary(currentBoundary, consumed)) {
+      this.#registry.updateChat(chatId, { pendingPreambleBoundary: null });
+    }
+  }
+
+  async #onTranscriptCommit(event: TranscriptCommitEvent): Promise<void> {
+    await dispatchListenersSequentially(this.#transcriptListeners, [event], (error) => {
+      logger.error('Transcript listener failed', {
+        chatId: event.chatId,
+        event: event.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    if (event.type === 'session') {
+      await this.#events.publishSession(event.chatId);
+    } else if (event.type === 'run-ended') {
+      await this.#events.publishRunEnded(event.chatId, event.runId, event.row);
+    }
+  }
+
+  #validateInputAdmission(
+    chatId: string,
+    session: AgentChatEntry,
+    options: UserInputAdmissionOptions & { readonly clientRequestId: string },
+  ): void {
+    if (this.#hasPendingOwnershipTransfer(chatId)) throw ownershipTransferPendingError();
+    const commandType = options.commandType
+      ?? (session.agentSessionId ? 'agent-run' : 'chat-start');
+    if (commandType === 'agent-compact') {
+      throw new TypeError('Compaction does not admit a transcript input');
+    }
+    if (commandType === 'steer') {
+      const active = this.#events.getActiveTurn(chatId);
+      if (!active?.turnId) throw new Error('Cannot admit a steer without an active turn');
+      return;
+    }
+    if (!options.turnId) throw new TypeError('Accepted input is missing a turn ID');
+  }
+
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
   getAgentCatalogEntries() { return this.#catalog.getAgentCatalogEntries(); }
+}
+
+function inputAttachments(options: UserInputAdmissionOptions) {
+  return (options.images ?? []).map((image) => ({
+    kind: 'image' as const,
+    data: image.data,
+    name: image.name ?? null,
+    mimeType: image.mimeType ?? 'application/octet-stream',
+  }));
+}
+
+function mapInputSubmissionError(error: unknown): unknown {
+  if (error instanceof StaleTranscriptViewError) {
+    return new DomainError('STALE_TRANSCRIPT_VIEW', error.message, 409, false, { cause: error });
+  }
+  if (error instanceof SubmissionConflictError) {
+    return new DomainError('IDEMPOTENCY_CONFLICT', error.message, 409, false, { cause: error });
+  }
+  return error;
+}
+
+function messageText(message: ChatMessage): string {
+  return 'content' in message && typeof message.content === 'string'
+    ? message.content
+    : message.type;
 }

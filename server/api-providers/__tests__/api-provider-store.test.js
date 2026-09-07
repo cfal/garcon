@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { CorruptStateFileError, QUARANTINE_INFIX } from '../../lib/json-file-store.ts';
 import { ApiProviderStore } from '../store.ts';
 
 const createdDirs = [];
@@ -30,6 +31,21 @@ describe('ApiProviderStore', () => {
     await store.init();
 
     expect(store.redactedList()).toEqual([]);
+  });
+
+  it('quarantines corrupt provider state without overwriting stored secrets', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-api-providers-'));
+    createdDirs.push(dir);
+    const filePath = path.join(dir, 'api-providers.json');
+    const corruptBytes = '{"version":2,"apiProviders":[{"apiKey":"sk-secret"}]}';
+    await fs.writeFile(filePath, corruptBytes, { mode: 0o600 });
+
+    await expect(new ApiProviderStore(filePath).init()).rejects.toBeInstanceOf(CorruptStateFileError);
+
+    const [quarantineName] = (await fs.readdir(dir)).filter((entry) =>
+      entry.startsWith(`api-providers.json${QUARANTINE_INFIX}`));
+    expect(await fs.readFile(path.join(dir, quarantineName), 'utf8')).toBe(corruptBytes);
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('creates user-managed providers from templates without exposing API keys', async () => {
@@ -63,6 +79,32 @@ describe('ApiProviderStore', () => {
     expect(redacted.endpoints[0].hasApiKey).toBe(true);
     expect('apiKey' in redacted.endpoints[0]).toBe(false);
     expect('headers' in redacted.endpoints[0]).toBe(false);
+  });
+
+  it('does not publish provider mutations that fail to persist', async () => {
+    const store = await tempStore();
+    await store.init();
+    const rename = spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk full'));
+
+    try {
+      await expect(store.createApiProvider({
+        templateId: 'custom',
+        label: 'Example',
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: 'sk-secret',
+        capabilities: { chatCompletions: true, responses: false },
+        defaultModel: 'example',
+        models: [{ value: 'example', label: 'Example' }],
+        supportsImages: false,
+        modelDiscovery: 'openai-models',
+      })).rejects.toThrow('disk full');
+    } finally {
+      rename.mockRestore();
+    }
+
+    expect(store.list()).toEqual([]);
+    expect(store.redactedList()).toEqual([]);
   });
 
   it('allows blank API keys for local Ollama templates', async () => {

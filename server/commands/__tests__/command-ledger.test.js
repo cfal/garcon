@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CommandLedger,
+  GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
   LEDGER_RECORD_LIMIT,
   PRE_SCHEDULE_FAILURE_ERROR_CODE,
+  SteerIdentityCapacityError,
   commandLedgerKey,
   commandPayloadHash,
 } from '../command-ledger.ts';
+import { ChatCommandSettlement } from '../chat-command-settlement.ts';
+import { DomainError } from '../../lib/domain-error.ts';
 
 function acceptedInput(overrides = {}) {
   return {
@@ -61,7 +65,6 @@ describe('CommandLedger', () => {
     expect(await ledger.settleTerminal(accepted.record.key, 'failed')).toMatchObject({
       kind: 'conflict',
     });
-    expect(ledger.isTerminal(accepted.record.key)).toBe(true);
   });
 
   it('updates only records outside blocked statuses', async () => {
@@ -110,9 +113,344 @@ describe('CommandLedger', () => {
       commandType: 'queue-entry-delete',
       clientRequestId: 'queue-2',
     }));
+    const goalControl = await ledger.accept(acceptedInput({
+      commandType: 'goal-control',
+      clientRequestId: 'goal-control-1',
+    }));
+    await ledger.accept(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-1',
+    }));
     await ledger.settleTerminal(first.record.key, 'finished');
 
-    expect(ledger.unsettledQueueReceiptKeys('chat-1')).toEqual(new Set([second.record.key]));
+    expect(ledger.unsettledQueueReceiptKeys('chat-1')).toEqual(new Set([
+      second.record.key,
+      goalControl.record.key,
+    ]));
+  });
+
+  it('indexes turn results and exposes them only after the public terminal barrier', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-1', ['first', 'second']);
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    const terminal = await ledger.getTurnRecord('chat-1', 'turn-1');
+    expect(terminal).toMatchObject({
+      status: 'finished',
+      assistantMessages: ['first', 'second'],
+      payload: {},
+    });
+    expect(terminal.publicTerminalAt).toBeUndefined();
+
+    await ledger.markPublicTerminal('chat-1', 'turn-1');
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      publicTerminalAt: expect.any(String),
+      turnResultAvailability: 'available',
+    });
+  });
+
+  it('keeps terminal turns private until chat deletion is committed', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+    ledger.beginChatDeletion('chat-1');
+
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-1');
+    await ledger.markPublicTerminal('chat-1', 'turn-1', 'chat-deleted');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      status: 'finished',
+      interruptionReason: 'chat-deleted',
+    });
+    expect((await ledger.getTurnRecord('chat-1', 'turn-1')).publicTerminalAt).toBeUndefined();
+
+    await ledger.markChatInterrupted('chat-1', 'chat-deleted');
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      status: 'finished',
+      interruptionReason: 'chat-deleted',
+      publicTerminalAt: expect.any(String),
+    });
+  });
+
+  it('publishes an acknowledged stop as user-stop when deletion is rolled back', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+    ledger.beginChatDeletion('chat-1');
+    await ledger.markPublicTerminal('chat-1', 'turn-1', 'chat-deleted');
+
+    await ledger.cancelChatDeletion('chat-1');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      status: 'finished',
+      interruptionReason: 'user-stop',
+      publicTerminalAt: expect.any(String),
+    });
+  });
+
+  it('discards an oversized result instead of retaining a truncated prefix', async () => {
+    const ledger = new CommandLedger(undefined, { turnResultByteLimit: 5 });
+    await ledger.accept(acceptedInput({ turnId: 'turn-large' }));
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-large', ['1234']);
+    await ledger.appendAssistantMessages('chat-1', 'turn-large', ['56']);
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-large')).toMatchObject({
+      turnResultAvailability: 'too-large',
+      assistantBytes: 0,
+    });
+    expect((await ledger.getTurnRecord('chat-1', 'turn-large')).assistantMessages).toBeUndefined();
+  });
+
+  it('ignores empty assistant entries and bounds tiny-message arrays', async () => {
+    const ledger = new CommandLedger(undefined, {
+      turnResultByteLimit: 100,
+      totalTurnResultByteLimit: 100,
+      turnResultMessageLimit: 2,
+      totalTurnResultMessageLimit: 10,
+    });
+    await ledger.accept(acceptedInput({ turnId: 'turn-many' }));
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-many', Array(10_000).fill(''));
+    expect(await ledger.getTurnRecord('chat-1', 'turn-many')).toMatchObject({
+      turnResultAvailability: 'available',
+      assistantMessages: [],
+      assistantBytes: 0,
+    });
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-many', ['a', 'b', 'c']);
+    expect(await ledger.getTurnRecord('chat-1', 'turn-many')).toMatchObject({
+      turnResultAvailability: 'too-large',
+      assistantBytes: 0,
+    });
+    expect((await ledger.getTurnRecord('chat-1', 'turn-many')).assistantMessages).toBeUndefined();
+  });
+
+  it('expires the oldest public result under aggregate pressure', async () => {
+    const ledger = new CommandLedger(undefined, {
+      turnResultByteLimit: 10,
+      totalTurnResultByteLimit: 5,
+    });
+    const first = await ledger.accept(acceptedInput({ clientRequestId: 'first', turnId: 'turn-first' }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
+    await ledger.settleTerminal(first.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-first');
+    const second = await ledger.accept(acceptedInput({ clientRequestId: 'second', turnId: 'turn-second' }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+    await ledger.settleTerminal(second.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-second');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
+      turnResultAvailability: 'expired',
+    });
+    expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
+      turnResultAvailability: 'available',
+      assistantMessages: ['5678'],
+    });
+  });
+
+  it('bounds aggregate result memory while every retained turn is still pending', async () => {
+    const ledger = new CommandLedger(undefined, {
+      turnResultByteLimit: 10,
+      totalTurnResultByteLimit: 5,
+    });
+    await ledger.accept(acceptedInput({ clientRequestId: 'first', turnId: 'turn-first' }));
+    await ledger.accept(acceptedInput({ clientRequestId: 'second', turnId: 'turn-second' }));
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
+    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
+      turnResultAvailability: 'available',
+      assistantMessages: ['1234'],
+      assistantBytes: 4,
+    });
+    expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
+      turnResultAvailability: 'retention-pressure',
+      assistantBytes: 0,
+    });
+  });
+
+  it('moves the turn index when a pre-schedule retry receives a new turn', async () => {
+    const ledger = new CommandLedger();
+    const first = await ledger.accept(acceptedInput({ turnId: 'turn-old' }));
+    await ledger.update(first.record.key, {
+      status: 'failed',
+      errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+    });
+
+    await ledger.accept(acceptedInput({ turnId: 'turn-new' }));
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-old')).toBeNull();
+    expect(await ledger.getTurnRecord('chat-1', 'turn-new')).not.toBeNull();
+  });
+
+  it('bounds private pre-schedule failures and releases their request payloads', async () => {
+    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const settlement = new ChatCommandSettlement(ledger);
+
+    for (let index = 0; index < 3; index += 1) {
+      const accepted = await ledger.accept(acceptedInput({
+        clientRequestId: `request-${index}`,
+        turnId: `turn-${index}`,
+        payload: { chatId: 'chat-1', command: 'x'.repeat(1_024) },
+      }));
+      await settlement.markPreScheduleFailure(accepted.record, {
+        error: new Error('busy'),
+        retryable: true,
+      });
+    }
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-0')).toBeNull();
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toBeNull();
+    expect(await ledger.getTurnRecord('chat-1', 'turn-2')).toMatchObject({
+      payload: {},
+      errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+    });
+    expect(await ledger.accept(acceptedInput({
+      clientRequestId: 'request-2',
+      turnId: 'turn-retry',
+      payload: { chatId: 'chat-1', command: 'changed' },
+    }))).toMatchObject({ kind: 'conflict' });
+    expect(await ledger.accept(acceptedInput({
+      clientRequestId: 'request-2',
+      turnId: 'turn-retry',
+      payload: { chatId: 'chat-1', command: 'x'.repeat(1_024) },
+    }))).toMatchObject({ kind: 'accepted', record: { turnId: 'turn-retry' } });
+  });
+
+  it('retains a non-retryable domain code for deterministic replay', async () => {
+    const ledger = new CommandLedger();
+    const settlement = new ChatCommandSettlement(ledger);
+    const accepted = await ledger.accept(acceptedInput());
+
+    await settlement.markPreScheduleFailure(accepted.record, {
+      error: new DomainError(
+        'PREAMBLE_SLASH_COMMAND_BLOCKED',
+        'Start with a regular message.',
+        422,
+      ),
+      retryable: false,
+    });
+
+    expect(await ledger.getRecord(accepted.record.key)).toMatchObject({
+      status: 'failed',
+      error: 'Start with a regular message.',
+      errorCode: 'PREAMBLE_SLASH_COMMAND_BLOCKED',
+    });
+  });
+
+  it('bounds accepted goal-control receipts with unknown outcomes', async () => {
+    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const settlement = new ChatCommandSettlement(ledger);
+    const records = [];
+
+    for (let index = 0; index < 3; index += 1) {
+      const accepted = await ledger.accept(acceptedInput({
+        commandType: 'goal-control',
+        clientRequestId: `request-${index}`,
+        turnId: `turn-${index}`,
+      }));
+      records.push(accepted.record);
+      await settlement.settleGoalControlFailure(
+        accepted.record,
+        new Error('delivery outcome unknown'),
+        true,
+      );
+    }
+
+    expect(await ledger.getRecord(records[0].key)).toBeNull();
+    expect(await ledger.getRecord(records[1].key)).toBeNull();
+    expect(await ledger.getRecord(records[2].key)).toMatchObject({
+      status: 'accepted',
+      errorCode: GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
+    });
+  });
+
+  it('counts only public terminal records toward the retention limit', async () => {
+    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const first = await ledger.accept(acceptedInput({
+      clientRequestId: 'first',
+      turnId: 'turn-first',
+    }));
+    await ledger.settleTerminal(first.record.key, 'finished');
+
+    await ledger.accept(acceptedInput({
+      clientRequestId: 'second',
+      turnId: 'turn-second',
+    }));
+
+    const privateTerminal = await ledger.getTurnRecord('chat-1', 'turn-first');
+    expect(privateTerminal).toMatchObject({ status: 'finished' });
+    expect(privateTerminal.publicTerminalAt).toBeUndefined();
+
+    await ledger.markPublicTerminal('chat-1', 'turn-first');
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).not.toBeNull();
+
+    const third = await ledger.accept(acceptedInput({
+      clientRequestId: 'third',
+      turnId: 'turn-third',
+    }));
+    await ledger.settleTerminal(third.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-third');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toBeNull();
+    expect(await ledger.getTurnRecord('chat-1', 'turn-third')).not.toBeNull();
+  });
+
+  it('evicts public terminal records by publication order', async () => {
+    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const first = await ledger.accept(acceptedInput({
+      clientRequestId: 'first',
+      turnId: 'turn-first',
+    }));
+    await ledger.settleTerminal(first.record.key, 'finished');
+
+    const second = await ledger.accept(acceptedInput({
+      clientRequestId: 'second',
+      turnId: 'turn-second',
+    }));
+    await ledger.settleTerminal(second.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-second');
+    await ledger.markPublicTerminal('chat-1', 'turn-first');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toBeNull();
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).not.toBeNull();
+  });
+
+  it('expires aggregate results by publication order', async () => {
+    const ledger = new CommandLedger(undefined, { totalTurnResultByteLimit: 8 });
+    const first = await ledger.accept(acceptedInput({
+      clientRequestId: 'first',
+      turnId: 'turn-first',
+    }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
+    await ledger.settleTerminal(first.record.key, 'finished');
+
+    const second = await ledger.accept(acceptedInput({
+      clientRequestId: 'second',
+      turnId: 'turn-second',
+    }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+    await ledger.settleTerminal(second.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-second');
+    await ledger.markPublicTerminal('chat-1', 'turn-first');
+
+    const third = await ledger.accept(acceptedInput({
+      clientRequestId: 'third',
+      turnId: 'turn-third',
+    }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-third', ['abcd']);
+    await ledger.settleTerminal(third.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-third');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
+      turnResultAvailability: 'expired',
+    });
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
+      turnResultAvailability: 'available',
+      assistantMessages: ['1234'],
+    });
   });
 
   it('keeps unsettled and fork-preparation records while trimming old terminal records', async () => {
@@ -135,6 +473,149 @@ describe('CommandLedger', () => {
     expect(await ledger.getRecord(unsettled.record.key)).not.toBeNull();
     expect(await ledger.getRecord(fork.record.key)).not.toBeNull();
     expect(await ledger.getRecord(commandLedgerKey('agent-run', 'chat-1', 'terminal-0'))).toBeNull();
+  });
+
+  it('retains compact steering identities for process-lifetime at-most-once delivery', async () => {
+    const ledger = new CommandLedger();
+    const steerInput = acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-retained',
+      payload: {
+        chatId: 'chat-1',
+        content: 'sensitive steering content',
+        clientMessageId: 'message-retained',
+      },
+    });
+    const steer = await ledger.accept(steerInput);
+    await ledger.settleTerminal(steer.record.key, 'finished', { turnId: 'turn-1' });
+
+    for (let index = 0; index < LEDGER_RECORD_LIMIT + 5; index += 1) {
+      const result = await ledger.accept(acceptedInput({ clientRequestId: `terminal-${index}` }));
+      await ledger.settleTerminal(result.record.key, 'finished');
+    }
+
+    expect(await ledger.accept(steerInput)).toMatchObject({
+      kind: 'duplicate',
+      record: { payload: {}, status: 'finished', turnId: 'turn-1' },
+    });
+    expect(await ledger.observe(steerInput)).toMatchObject({
+      kind: 'duplicate',
+      record: { payload: {}, status: 'finished', turnId: 'turn-1' },
+    });
+    expect(await ledger.accept({
+      ...steerInput,
+      payload: { ...steerInput.payload, content: 'changed content' },
+    })).toMatchObject({ kind: 'conflict' });
+    expect(await ledger.observe({
+      ...steerInput,
+      payload: { ...steerInput.payload, content: 'changed content' },
+    })).toMatchObject({ kind: 'conflict' });
+    expect(await ledger.accept(acceptedInput({
+      commandType: 'agent-run',
+      clientRequestId: 'steer-retained',
+    }))).toMatchObject({ kind: 'conflict' });
+  });
+
+  it('retains queued source identity and delivery outcome in compact steering records', async () => {
+    const ledger = new CommandLedger();
+    const steerInput = acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'queued-steer-retained',
+      entryId: 'entry-head',
+      payload: {
+        chatId: 'chat-1',
+        clientMessageId: 'message-retained',
+        source: {
+          kind: 'queue-entry',
+          entryId: 'entry-head',
+          expectedRevision: 2,
+          expectedReorderRevision: 4,
+        },
+      },
+    });
+    const steer = await ledger.accept(steerInput);
+    await ledger.settleTerminal(steer.record.key, 'failed', {
+      error: 'Delivery uncertain',
+      errorCode: 'STEER_OUTCOME_UNKNOWN',
+      deliveryOutcome: 'unknown',
+    });
+
+    for (let index = 0; index < LEDGER_RECORD_LIMIT + 5; index += 1) {
+      const result = await ledger.accept(acceptedInput({ clientRequestId: `queued-terminal-${index}` }));
+      await ledger.settleTerminal(result.record.key, 'finished');
+    }
+
+    expect(await ledger.accept(steerInput)).toMatchObject({
+      kind: 'duplicate',
+      record: {
+        payload: {},
+        status: 'failed',
+        entryId: 'entry-head',
+        errorCode: 'STEER_OUTCOME_UNKNOWN',
+        deliveryOutcome: 'unknown',
+      },
+    });
+  });
+
+  it('bounds retained steering identities without evicting known outcomes', async () => {
+    const ledger = new CommandLedger(undefined, { steerIdentityLimit: 2 });
+    const first = acceptedInput({ commandType: 'steer', clientRequestId: 'steer-1' });
+    const second = acceptedInput({ commandType: 'steer', clientRequestId: 'steer-2' });
+    const firstResult = await ledger.accept(first);
+    const secondResult = await ledger.accept(second);
+    await ledger.settleTerminal(firstResult.record.key, 'finished', { turnId: 'turn-1' });
+    await ledger.settleTerminal(secondResult.record.key, 'failed', {
+      error: 'No active turn',
+      errorCode: 'STEER_TURN_UNAVAILABLE',
+    });
+
+    await expect(ledger.accept(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-3',
+    }))).rejects.toBeInstanceOf(SteerIdentityCapacityError);
+    expect(await ledger.accept(first)).toMatchObject({
+      kind: 'duplicate',
+      record: { status: 'finished', turnId: 'turn-1' },
+    });
+    expect(await ledger.accept({ ...first, commandType: 'agent-run' })).toMatchObject({
+      kind: 'conflict',
+    });
+    expect(await ledger.accept(acceptedInput({ clientRequestId: 'ordinary-after-capacity' })))
+      .toMatchObject({ kind: 'accepted' });
+    expect(await ledger.observe(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'unseen-after-capacity',
+    }))).toBeNull();
+  });
+
+  it('keeps the original receipt owner when several steers join one turn', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept(acceptedInput({
+      commandType: 'agent-run',
+      clientRequestId: 'owner-request',
+      turnId: 'turn-shared',
+    }));
+    await ledger.accept(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-one',
+      turnId: 'turn-shared',
+    }));
+    await ledger.accept(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-two',
+      turnId: 'turn-shared',
+    }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-shared', ['first', 'second']);
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-shared')).toMatchObject({
+      commandType: 'agent-run',
+      clientRequestId: 'owner-request',
+      assistantMessages: ['first', 'second'],
+    });
+    expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-one')))
+      .toMatchObject({ assistantMessages: [] });
+    expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-two')))
+      .toMatchObject({ assistantMessages: [] });
   });
 
   it('does not share records between process-lifetime ledger instances', async () => {

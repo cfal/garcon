@@ -66,6 +66,21 @@ describe('AcpTransport', () => {
     expect(proc.process.stdin.write).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a request as sent only after the transport writes it', async () => {
+    const proc = createProcess();
+    const transport = new AcpTransport({
+      spawn: () => proc.process,
+      requestTimeoutMs: 50,
+    });
+    await transport.connect({ command: 'agent', args: [], cwd: '/tmp', env: {} });
+    const onSent = mock();
+
+    const result = transport.request('echo', undefined, onSent);
+    expect(onSent).toHaveBeenCalledTimes(1);
+    writeStdout(proc.stdout, { jsonrpc: '2.0', id: 1, result: { ok: true } });
+    await expect(result).resolves.toEqual({ ok: true });
+  });
+
   it('rejects requests on timeout', async () => {
     const proc = createProcess();
     const transport = new AcpTransport({
@@ -106,4 +121,3 @@ describe('AcpTransport', () => {
     await expect(pending).rejects.toThrow('ACP transport process exited with code 7');
   });
 });
-

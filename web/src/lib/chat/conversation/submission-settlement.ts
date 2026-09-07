@@ -6,31 +6,27 @@ import type { SessionControllerDeps } from './conversation-session-controller.sv
 export interface SubmissionSettlementDeps {
 	chatState: Pick<
 		SessionControllerDeps['chatState'],
-		| 'appendLocalNotice'
-		| 'clearPendingUserInput'
-		| 'updatePendingUserInputDeliveryStatus'
+		'appendLocalNoticeForChat' | 'clearOptimisticUserInput'
 	>;
-	composerState: Pick<
-		SessionControllerDeps['composerState'],
-		'inputText' | 'images' | 'saveDraft'
-	>;
+	composerState: Pick<SessionControllerDeps['composerState'], 'restoreDraftIfRevision'>;
 }
 
 export interface SubmissionFailureContext {
 	chatId: string;
 	previousText: string;
 	previousImages: File[];
-	restoreComposerOnFailure: boolean;
+	ownsComposer: boolean;
 }
 
 export interface SubmissionFailureOptions {
-	clientRequestId?: string;
+	clientMessageId?: string;
 	unknownNotice: string;
 	rejectedNotice(error: unknown): string;
-	clearPendingOnAdmissionConflict?: boolean;
+	refreshOnAdmissionConflict?: boolean;
+	composerRevisionAfterClear?: number | null;
 	refreshControl?: () => Promise<void>;
 	restoreRejected?: () => void;
-	onRejected?: () => void | Promise<void>;
+	onRejected?: (error: unknown) => void | Promise<void>;
 }
 
 export async function settleSubmissionFailure(
@@ -41,32 +37,29 @@ export async function settleSubmissionFailure(
 ): Promise<ConversationSubmissionOutcome> {
 	const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
 	const admissionConflict =
-		options.clearPendingOnAdmissionConflict === true && isExecutionControlAdmissionConflict(error);
+		options.refreshOnAdmissionConflict === true && isExecutionControlAdmissionConflict(error);
 
-	if (options.clientRequestId) {
-		if (admissionConflict) {
-			deps.chatState.clearPendingUserInput(options.clientRequestId);
-			if (options.refreshControl) await options.refreshControl();
-		} else {
-			deps.chatState.updatePendingUserInputDeliveryStatus(
-				options.clientRequestId,
-				outcomeUnknown ? 'unconfirmed' : 'failed',
+	if (options.clientMessageId && !outcomeUnknown) {
+		deps.chatState.clearOptimisticUserInput(options.clientMessageId);
+		if (admissionConflict && options.refreshControl) await options.refreshControl();
+	}
+
+	if (!outcomeUnknown) await options.onRejected?.(error);
+	if (context.ownsComposer && !outcomeUnknown) {
+		if (options.restoreRejected) {
+			options.restoreRejected();
+		} else if (typeof options.composerRevisionAfterClear === 'number') {
+			deps.composerState.restoreDraftIfRevision(
+				context.chatId,
+				options.composerRevisionAfterClear,
+				context.previousText,
+				context.previousImages,
 			);
 		}
 	}
 
-	if (!outcomeUnknown) await options.onRejected?.();
-	if (context.restoreComposerOnFailure && !outcomeUnknown) {
-		if (options.restoreRejected) {
-			options.restoreRejected();
-		} else {
-			deps.composerState.inputText = context.previousText;
-			deps.composerState.images = context.previousImages;
-			deps.composerState.saveDraft(context.chatId);
-		}
-	}
-
-	deps.chatState.appendLocalNotice(
+	deps.chatState.appendLocalNoticeForChat(
+		context.chatId,
 		'error',
 		outcomeUnknown ? options.unknownNotice : options.rejectedNotice(error),
 	);
@@ -75,9 +68,5 @@ export async function settleSubmissionFailure(
 }
 
 function isExecutionControlAdmissionConflict(error: unknown): boolean {
-	return (
-		error instanceof ApiError &&
-		error.retryable &&
-		error.errorCode === 'SESSION_BUSY'
-	);
+	return error instanceof ApiError && error.retryable && error.errorCode === 'SESSION_BUSY';
 }

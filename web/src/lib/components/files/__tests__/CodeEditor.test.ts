@@ -1,4 +1,4 @@
-import { render } from '@testing-library/svelte';
+import { render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import CodeEditorFocusTestHost from './CodeEditorFocusTestHost.svelte';
 
@@ -12,6 +12,6 @@ describe('CodeEditor', () => {
 
 		await rerender({ focusRequestToken: 1, onFocus });
 
-		expect(onFocus).toHaveBeenCalledOnce();
+		await waitFor(() => expect(onFocus).toHaveBeenCalledOnce());
 	});
 });

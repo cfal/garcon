@@ -10,19 +10,20 @@ import type {
 	GenerationModelTestResponse,
 	GenerationTestTarget,
 } from '$shared/generation-test-contracts';
+import type {
+	UpdateChatTitleRequest,
+	UpdateChatTitleResponse,
+} from '$shared/chat-title-contracts';
 
 const GENERATION_MODEL_TEST_TIMEOUT_MS = 120_000;
-
-export interface UpdateSessionNameResponse {
-	success: boolean;
-}
 
 /** Renames a chat session. */
 export async function updateSessionName(
 	chatId: string,
 	title: string,
-): Promise<UpdateSessionNameResponse> {
-	return apiPut<UpdateSessionNameResponse>('/api/v1/app/session-name', { chatId, title });
+): Promise<UpdateChatTitleResponse> {
+	const request: UpdateChatTitleRequest = { chatId, title };
+	return apiPut<UpdateChatTitleResponse>('/api/v1/app/session-name', request);
 }
 
 /** Fetches the current remote settings snapshot. */

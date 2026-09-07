@@ -1,6 +1,4 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
-import { UserMessage } from '../../../common/chat-types.js';
 import { AgentEventBus } from '../event-bus.js';
 
 const originalWarn = console.warn;
@@ -16,137 +14,180 @@ function operation(turnId, clientRequestId = `request-${turnId}`, commandType = 
   return { commandType, clientRequestId, clientMessageId: null, turnId };
 }
 
-function makeBus() {
-  let emit;
-  const unsubscribe = mock(() => undefined);
-  const bus = new AgentEventBus({
-    list: () => [{ execution: { subscribe(listener) { emit = listener; return unsubscribe; } } }],
-  });
-  return { bus, emit: (event) => emit(event), unsubscribe };
+function terminalHandoff(overrides = {}) {
+  return {
+    validate: overrides.validate ?? (() => undefined),
+    commit: overrides.commit ?? (() => undefined),
+  };
+}
+
+function runEnded(outcome, error) {
+  return {
+    ordinal: 1,
+    at: '2026-08-12T00:00:00.000Z',
+    providerMeta: null,
+    kind: 'run-ended',
+    outcome,
+    origin: 'provider',
+    ...(error ? { error } : {}),
+  };
 }
 
 describe('AgentEventBus', () => {
-  it('resolves an abortable waiter only for its exact active operation', async () => {
-    const { bus, emit } = makeBus();
-    const forwarded = [];
-    bus.onProcessing((chatId, processing) => forwarded.push({ chatId, processing }));
-    bus.trackTurn('chat-1', operation('turn-1'));
-    let settled = false;
-    const abortable = bus.waitUntilTurnAbortable('chat-1', operation('turn-1')).then((value) => {
-      settled = true;
-      return value;
-    });
-
-    bus.markTurnAbortable('chat-1', operation('turn-old'));
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    bus.markTurnAbortable('chat-1', operation('turn-1'));
-    await expect(abortable).resolves.toBe(true);
-
-    emit({ type: 'processing', chatId: 'chat-1', processing: true, operation: operation('turn-1') });
-    expect(forwarded).toEqual([{ chatId: 'chat-1', processing: true }]);
-  });
-
-  it('removes an abortability waiter when its owner cancels', async () => {
-    const { bus } = makeBus();
-    const controller = new AbortController();
-    bus.trackTurn('chat-1', operation('turn-1'));
-    const waiting = bus.waitUntilTurnAbortable('chat-1', operation('turn-1'), controller.signal);
-    controller.abort();
-    await expect(waiting).resolves.toBe(false);
-  });
-
-  it('does not reuse abortability across operation identities', async () => {
-    const { bus } = makeBus();
-    bus.trackTurn('chat-1', operation('turn-1'));
-    bus.markTurnAbortable('chat-1', operation('turn-1'));
-    bus.trackTurn('chat-1', operation('turn-2'));
-    const controller = new AbortController();
-    const waiting = bus.waitUntilTurnAbortable('chat-1', operation('turn-2'), controller.signal);
-    controller.abort();
-    await expect(waiting).resolves.toBe(false);
-  });
-
-  it('returns a defensive snapshot and warns before overwriting active identity', () => {
-    process.env.GARCON_LOG_LEVEL = 'warn';
-    console.warn = mock(() => undefined);
-    const { bus } = makeBus();
+  it('returns a defensive snapshot and rejects an active identity overwrite', () => {
+    const bus = new AgentEventBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     const snapshot = bus.getActiveTurn('chat-1');
     snapshot.turnId = 'mutated';
-    bus.trackTurn('chat-1', operation('turn-2'));
 
-    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
-    expect(console.warn).toHaveBeenCalledWith(
-      '[agents:event-bus]',
-      'agents: overwriting in-flight turn metadata for chat',
+    expect(() => bus.trackTurn('chat-1', operation('turn-2'))).toThrow(
+      'Cannot track a new turn while chat chat-1 has an active turn',
+    );
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
+  });
+
+  it('commits a goal-control identity handoff at its delivery boundary', () => {
+    const bus = new AgentEventBus();
+    bus.trackTurn('chat-1', operation('turn-1'));
+    const downstream = terminalHandoff({
+      validate: mock(() => undefined),
+      commit: mock(() => undefined),
+    });
+
+    const handoff = bus.handoffTurn(
       'chat-1',
+      operation('turn-1'),
+      operation('turn-2'),
+      downstream,
+    );
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
+    handoff.validate();
+    handoff.commit();
+
+    expect(downstream.validate).toHaveBeenCalledTimes(1);
+    expect(downstream.commit).toHaveBeenCalledTimes(1);
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
+  });
+
+  it('leaves the predecessor active when downstream validation fails', () => {
+    const bus = new AgentEventBus();
+    bus.trackTurn('chat-1', operation('turn-1'));
+    const handoff = bus.handoffTurn(
+      'chat-1',
+      operation('turn-1'),
+      operation('turn-2'),
+      terminalHandoff({ validate: () => { throw new Error('registration failed'); } }),
+    );
+
+    expect(() => handoff.validate()).toThrow('registration failed');
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
+  });
+
+  it('rejects a handoff after the predecessor identity changes', () => {
+    const bus = new AgentEventBus();
+    bus.trackTurn('chat-1', operation('turn-1'));
+    bus.settleTurn('chat-1', operation('turn-1'));
+    bus.trackTurn('chat-1', operation('turn-3'));
+
+    expect(() => bus.handoffTurn(
+      'chat-1',
+      operation('turn-1'),
+      operation('turn-2'),
+      terminalHandoff(),
+    )).toThrow('active turn changed');
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-3');
+  });
+
+  it('publishes one matching terminal and clears the active turn', async () => {
+    const bus = new AgentEventBus();
+    const finished = mock(() => undefined);
+    bus.onFinished(finished);
+    bus.trackTurn('chat-1', operation('turn-1'));
+
+    await bus.publishRunEnded('chat-1', 'turn-1', runEnded('finished'));
+
+    expect(finished).toHaveBeenCalledWith(
+      'chat-1',
+      0,
+      expect.objectContaining({ clientRequestId: 'request-turn-1', turnId: 'turn-1' }),
+      'finished',
+    );
+    expect(bus.getActiveTurn('chat-1')).toBeUndefined();
+  });
+
+  it('routes failed terminal detail after scheduler settlement', async () => {
+    const bus = new AgentEventBus();
+    const failed = mock(() => undefined);
+    bus.onFailed(failed);
+    bus.trackTurn('chat-1', operation('turn-1'));
+    bus.settleTurn('chat-1', operation('turn-1'));
+
+    await bus.publishRunEnded(
+      'chat-1',
+      'turn-1',
+      runEnded('failed', { code: 'START_FAILED', message: 'Could not start' }),
+    );
+
+    expect(failed).toHaveBeenCalledWith(
+      'chat-1',
+      'Could not start',
+      'START_FAILED',
+      expect.objectContaining({ turnId: 'turn-1' }),
     );
   });
 
-  it('retains exact identity through duplicate terminal events until settlement', () => {
-    const { bus, emit } = makeBus();
-    const terminals = [];
-    bus.onFinished((_chatId, _exitCode, turn) => terminals.push({ type: 'finished', turn }));
-    bus.onFailed((_chatId, _message, turn) => terminals.push({ type: 'failed', turn }));
-    const active = operation('turn-a', 'request-a');
-    bus.trackTurn('chat-1', active);
+  it('ignores stale terminal signals instead of assigning them to a successor', async () => {
+    const bus = new AgentEventBus();
+    const finished = mock(() => undefined);
+    bus.onFinished(finished);
+    bus.trackTurn('chat-1', operation('turn-2'));
 
-    emit({ type: 'finished', chatId: 'chat-1', exitCode: 0, operation: active });
-    emit({
-      type: 'failed',
-      chatId: 'chat-1',
-      error: new AgentIntegrationError('PROVIDER_FAILURE', 'duplicate terminal'),
-      operation: active,
-    });
+    await bus.publishRunEnded('chat-1', 'turn-1', runEnded('interrupted'));
 
-    expect(terminals).toEqual([
-      { type: 'finished', turn: { clientRequestId: 'request-a', commandType: 'agent-run', turnId: 'turn-a' } },
-      { type: 'failed', turn: { clientRequestId: 'request-a', commandType: 'agent-run', turnId: 'turn-a' } },
-    ]);
-    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-a');
-    bus.settleTurn('chat-1', active);
-    expect(bus.getActiveTurn('chat-1')).toBeUndefined();
+    expect(finished).not.toHaveBeenCalled();
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
   });
 
-  it('drops stale output and terminals instead of assigning them to a successor', () => {
-    const { bus, emit } = makeBus();
-    const messages = [];
-    const failures = [];
-    bus.onMessages((_chatId, received) => messages.push(...received));
-    bus.onFailed((_chatId, message) => failures.push(message));
-    bus.trackTurn('chat-1', operation('turn-b', 'request-b'));
+  it('publishes session facts independently of run correlation', async () => {
+    const bus = new AgentEventBus();
+    const created = mock(() => undefined);
+    bus.onSessionCreated(created);
 
-    emit({
-      type: 'messages',
-      chatId: 'chat-1',
-      messages: [new UserMessage('2026-07-18T00:00:00.000Z', 'stale')],
-      operation: operation('turn-a', 'request-a'),
-    });
-    emit({
-      type: 'failed',
-      chatId: 'chat-1',
-      error: new AgentIntegrationError('PROVIDER_FAILURE', 'stale failure'),
-      operation: operation('turn-a', 'request-a'),
-    });
-    emit({
-      type: 'messages',
-      chatId: 'chat-1',
-      messages: [new UserMessage('2026-07-18T00:00:01.000Z', 'current')],
-      operation: operation('turn-b', 'request-b'),
-    });
+    await bus.publishSession('chat-1');
 
-    expect(messages.map((message) => message.content)).toEqual(['current']);
-    expect(failures).toEqual([]);
-    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-b');
+    expect(created).toHaveBeenCalledWith('chat-1');
   });
 
-  it('discards retained identity and abortability when a chat is removed', async () => {
-    const { bus } = makeBus();
-    bus.trackTurn('chat-1', operation('turn-a'));
-    const waiting = bus.waitUntilTurnAbortable('chat-1', operation('turn-a'));
-    bus.clearTurn('chat-1');
-    expect(bus.getActiveTurn('chat-1')).toBeUndefined();
-    await expect(waiting).resolves.toBe(false);
+  it('continues session listener delivery after a listener fails', async () => {
+    const bus = new AgentEventBus();
+    const created = mock(() => undefined);
+    bus.onSessionCreated(() => { throw new Error('listener failed'); });
+    bus.onSessionCreated(created);
+
+    await bus.publishSession('chat-1');
+
+    expect(created).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('continues terminal listener delivery after a listener fails', async () => {
+    const bus = new AgentEventBus();
+    const finished = mock(() => undefined);
+    const failed = mock(() => undefined);
+    bus.onFinished(() => { throw new Error('finished listener failed'); });
+    bus.onFinished(finished);
+    bus.onFailed(() => { throw new Error('failed listener failed'); });
+    bus.onFailed(failed);
+
+    bus.trackTurn('chat-1', operation('turn-1'));
+    await bus.publishRunEnded('chat-1', 'turn-1', runEnded('finished'));
+    bus.trackTurn('chat-1', operation('turn-2'));
+    await bus.publishRunEnded(
+      'chat-1',
+      'turn-2',
+      runEnded('failed', { code: 'FAILED', message: 'failed' }),
+    );
+
+    expect(finished).toHaveBeenCalledTimes(1);
+    expect(failed).toHaveBeenCalledTimes(1);
   });
 });

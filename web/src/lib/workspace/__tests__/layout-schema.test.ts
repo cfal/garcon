@@ -1,129 +1,723 @@
+import { WORKSPACE_WINDOW_RESOURCE_CEILING } from '../surface-types';
 import { describe, expect, it } from 'vitest';
-import { parsePersistedWorkspaceLayout, serializeWorkspaceLayout } from '../layout-schema';
-import { canonicalWorkspaceSnapshot } from '../canonical-layout';
+import {
+	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_WINDOW_ID,
+	canonicalWorkspaceSnapshot,
+} from '../canonical-layout';
+import {
+	parsePersistedWorkspaceLayout,
+	serializeWorkspaceLayout,
+	WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
+	WORKSPACE_LAYOUT_MAX_PARSE_NODES,
+	WORKSPACE_LAYOUT_MAX_TAB_REFS,
+	WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS,
+} from '../layout-schema';
+import { portableSingletonDescriptor } from '../surface-types';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
+import { collectWindowNodes, windowNodeById } from '../window-tree';
+import type {
+	PersistedWorkspaceLayoutNode,
+	PersistedWorkspaceSurfaceRef,
+} from '$shared/workspace-layout';
 
-describe('workspace layout persistence', () => {
-	it('distinguishes absent data from corrupt fallback', () => {
-		expect(parsePersistedWorkspaceLayout(null).source).toBe('absent');
-		expect(parsePersistedWorkspaceLayout('{').source).toBe('fallback');
-		expect(parsePersistedWorkspaceLayout('{"version":2}').source).toBe('fallback');
+function persistedWindow(index: number): PersistedWorkspaceLayoutNode {
+	return {
+		type: 'window',
+		id: `window-budget-${index}`,
+		order: [{ type: 'chat', chatId: `chat-budget-${index}` }],
+		active: { type: 'chat', chatId: `chat-budget-${index}` },
+		mru: [],
+	};
+}
+
+function skewedTree(depth: number): PersistedWorkspaceLayoutNode {
+	let root = persistedWindow(1);
+	for (let level = 2; level <= depth; level += 1) {
+		root = {
+			type: 'partition',
+			id: `partition-depth-${level}`,
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [persistedWindow(level), root],
+		};
+	}
+	return root;
+}
+
+function fullTreeWithNodes(nodeCount: number): PersistedWorkspaceLayoutNode {
+	const leafCount = (nodeCount + 1) / 2;
+	let level = Array.from({ length: leafCount }, (_, index) => persistedWindow(index + 1));
+	let partitionIndex = 0;
+	while (level.length > 1) {
+		const next: PersistedWorkspaceLayoutNode[] = [];
+		for (let index = 0; index < level.length; index += 2) {
+			const first = level[index]!;
+			const second = level[index + 1];
+			if (!second) {
+				next.push(first);
+				continue;
+			}
+			partitionIndex += 1;
+			next.push({
+				type: 'partition',
+				id: `partition-node-${partitionIndex}`,
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [first, second],
+			});
+		}
+		level = next;
+	}
+	return level[0]!;
+}
+
+describe('workspace layout V2 schema', () => {
+	it('round-trips mixed window topology, local tab MRU, ratios, terminals, and Chat IDs', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-a' },
+			{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('git'),
+				windowId: CANONICAL_WINDOW_ID,
+			},
+			{
+				type: 'open-chat-in-new-window',
+				chatId: 'chat-b',
+				targetWindowId: CANONICAL_WINDOW_ID,
+				edge: 'right',
+				newWindowId: 'window-two',
+				partitionId: 'partition-root',
+			},
+			{
+				type: 'register-surface-in-new-window',
+				surface: { id: 'terminal:t1', type: 'terminal', terminalId: 't1' },
+				targetWindowId: 'window-two',
+				edge: 'bottom',
+				newWindowId: 'window-three',
+				partitionId: 'partition-nested',
+			},
+			{ type: 'set-partition-ratio', partitionId: 'partition-root', ratio: 0.62 },
+		]);
+		const persisted = serializeWorkspaceLayout({
+			...snapshot,
+			fullscreenWindowId: 'window-two',
+			unplacedTerminalIds: ['spare'],
+		});
+		const result = parsePersistedWorkspaceLayout(JSON.stringify(persisted));
+
+		expect(result.source).toBe('valid');
+		expect(serializeWorkspaceLayout(result.snapshot)).toEqual(persisted);
+		expect(result.snapshot.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: 'chat-a' });
+		expect(result.snapshot.surfaces['chat-view:window-two']).toMatchObject({ chatId: 'chat-b' });
+		expect(result.snapshot.unplacedTerminalIds).toEqual(['spare']);
+		expect(result.snapshot.fullscreenWindowId).toBeNull();
 	});
 
-	it('injects Chat and restores valid singleton and unresolved terminal references', () => {
+	it('restores a null Chat ID and keeps only the first Chat ref in a window', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({
-				version: 1,
-				desiredSidebarWidth: 520,
-				sidebarOpen: true,
-				main: {
+				version: 2,
+				root: {
+					type: 'window',
+					id: 'window-main',
 					order: [
-						{ type: 'terminal', terminalId: 'server-terminal' },
+						{ type: 'chat', chatId: null },
+						{ type: 'chat', chatId: 'ignored' },
 						{ type: 'singleton', kind: 'git' },
 					],
-					active: { type: 'terminal', terminalId: 'server-terminal' },
+					active: { type: 'chat', chatId: 'ignored-active-value' },
+					mru: [
+						{ type: 'singleton', kind: 'git' },
+						{ type: 'chat', chatId: 'ignored-mru-value' },
+					],
 				},
-				sidebar: {
-					order: [{ type: 'singleton', kind: 'files' }],
-					active: { type: 'singleton', kind: 'files' },
-				},
+				unplacedTerminalIds: [],
 			}),
 		);
 
 		expect(result.source).toBe('valid');
-		expect(result.snapshot.main.order).toEqual([
-			'singleton:chat',
-			'terminal:server-terminal',
+		expect(result.snapshot.surfaces[CANONICAL_CHAT_SURFACE_ID]).toEqual({
+			id: CANONICAL_CHAT_SURFACE_ID,
+			type: 'chat',
+			chatId: null,
+		});
+		expect(windowNodeById(result.snapshot.desktopRoot, CANONICAL_WINDOW_ID)?.tabs).toEqual({
+			order: [CANONICAL_CHAT_SURFACE_ID, 'singleton:git'],
+			activeId: CANONICAL_CHAT_SURFACE_ID,
+			mru: [CANONICAL_CHAT_SURFACE_ID, 'singleton:git'],
+		});
+	});
+
+	it('preserves multiple unassigned Chat views', () => {
+		const persisted = {
+			version: 2 as const,
+			root: {
+				type: 'partition' as const,
+				id: 'partition-root',
+				direction: 'horizontal' as const,
+				ratio: 0.5,
+				children: [
+					{
+						type: 'window' as const,
+						id: 'window-a',
+						order: [{ type: 'chat' as const, chatId: null }],
+						active: { type: 'chat' as const, chatId: null },
+						mru: [{ type: 'chat' as const, chatId: null }],
+					},
+					{
+						type: 'window' as const,
+						id: 'window-b',
+						order: [{ type: 'chat' as const, chatId: null }],
+						active: { type: 'chat' as const, chatId: null },
+						mru: [{ type: 'chat' as const, chatId: null }],
+					},
+				],
+			},
+			unplacedTerminalIds: [],
+		};
+
+		const result = parsePersistedWorkspaceLayout(JSON.stringify(persisted));
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: null });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: null });
+		expect(serializeWorkspaceLayout(result.snapshot)).toEqual(persisted);
+	});
+
+	it('deduplicates global surfaces and keeps the first active duplicate Chat assignment', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 0.5,
+					children: [
+						{
+							type: 'window',
+							id: 'window-a',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'terminal', terminalId: 't1' },
+							],
+							active: { type: 'chat', chatId: 'same' },
+							mru: [],
+						},
+						{
+							type: 'window',
+							id: 'window-b',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'terminal', terminalId: 't1' },
+								{ type: 'singleton', kind: 'files' },
+							],
+							active: { type: 'chat', chatId: 'same' },
+							mru: [],
+						},
+					],
+				},
+				unplacedTerminalIds: ['t1', 't2', 't2'],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs.order).toEqual([
+			'chat-view:window-a',
 			'singleton:git',
+			'terminal:t1',
 		]);
-		expect(result.snapshot.main.activeId).toBe('terminal:server-terminal');
-		expect(result.snapshot.sidebar.activeId).toBe('singleton:files');
-		expect(result.snapshot.sidebarOpen).toBe(true);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).toEqual([
+			'chat-view:window-b',
+			'singleton:files',
+		]);
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: 'same' });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: null });
+		expect(result.snapshot.unplacedTerminalIds).toEqual(['t2']);
+		const repaired = serializeWorkspaceLayout(result.snapshot);
+		const reparsed = parsePersistedWorkspaceLayout(JSON.stringify(repaired));
+		expect(reparsed.source).toBe('valid');
+		expect(serializeWorkspaceLayout(reparsed.snapshot)).toEqual(repaired);
 	});
 
-	it('repairs duplicates, unknown refs, invalid active values, and widths', () => {
+	it('prefers a later active duplicate Chat assignment without changing window tab state', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({
-				version: 1,
-				desiredSidebarWidth: -100,
-				sidebarOpen: true,
-				main: {
-					order: [
-						{ type: 'singleton', kind: 'git' },
-						{ type: 'singleton', kind: 'git' },
-						{ type: 'singleton', kind: 'unknown' },
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 0.4,
+					children: [
+						{
+							type: 'window',
+							id: 'window-a',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'git' },
+							],
+							active: { type: 'singleton', kind: 'git' },
+							mru: [
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'chat', chatId: 'same' },
+							],
+						},
+						{
+							type: 'window',
+							id: 'window-b',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'files' },
+							],
+							active: { type: 'chat', chatId: 'same' },
+							mru: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'files' },
+							],
+						},
 					],
-					active: { type: 'singleton', kind: 'files' },
 				},
-				sidebar: {
-					order: [
-						{ type: 'singleton', kind: 'git' },
-						{ type: 'singleton', kind: 'files' },
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: null });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: 'same' });
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs).toEqual({
+			order: ['chat-view:window-a', 'singleton:git'],
+			activeId: 'singleton:git',
+			mru: ['singleton:git', 'chat-view:window-a'],
+		});
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs).toEqual({
+			order: ['chat-view:window-b', 'singleton:files'],
+			activeId: 'chat-view:window-b',
+			mru: ['chat-view:window-b', 'singleton:files'],
+		});
+	});
+
+	it('keeps the first depth-first duplicate when neither Chat tab is active', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 0.5,
+					children: [
+						{
+							type: 'window',
+							id: 'window-a',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'git' },
+							],
+							active: { type: 'singleton', kind: 'git' },
+							mru: [],
+						},
+						{
+							type: 'window',
+							id: 'window-b',
+							order: [
+								{ type: 'chat', chatId: 'same' },
+								{ type: 'singleton', kind: 'files' },
+							],
+							active: { type: 'singleton', kind: 'files' },
+							mru: [],
+						},
 					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.surfaces['chat-view:window-a']).toMatchObject({ chatId: 'same' });
+		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: null });
+	});
+
+	it('round-trips and globally deduplicates the Chat Map singleton', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 0.5,
+					children: [
+						{
+							type: 'window',
+							id: 'window-a',
+							order: [
+								{ type: 'chat', chatId: 'chat-a' },
+								{ type: 'singleton', kind: 'chat-map' },
+							],
+							active: { type: 'singleton', kind: 'chat-map' },
+							mru: [],
+						},
+						{
+							type: 'window',
+							id: 'window-b',
+							order: [
+								{ type: 'chat', chatId: 'chat-b' },
+								{ type: 'singleton', kind: 'chat-map' },
+							],
+							active: { type: 'chat', chatId: 'chat-b' },
+							mru: [],
+						},
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs.order).toContain(
+			'singleton:chat-map',
+		);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).not.toContain(
+			'singleton:chat-map',
+		);
+		expect(serializeWorkspaceLayout(result.snapshot).root).toMatchObject({
+			type: 'partition',
+		});
+		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-map');
+	});
+
+	it('repairs invalid active and MRU refs, clamps ratios, and collapses empty branches', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 9,
+					children: [
+						{
+							type: 'window',
+							id: 'window-main',
+							order: [
+								{ type: 'chat', chatId: 'a' },
+								{ type: 'singleton', kind: 'git' },
+							],
+							active: { type: 'terminal', terminalId: 'missing' },
+							mru: [
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'terminal', terminalId: 'missing' },
+							],
+						},
+						{
+							type: 'window',
+							id: 'window-empty',
+							order: [{ type: 'unknown' }],
+							active: null,
+							mru: [],
+						},
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.desktopRoot.type).toBe('window');
+		const root = result.snapshot.desktopRoot;
+		if (root.type !== 'window') throw new Error('Expected collapsed window');
+		expect(root.tabs.activeId).toBe('chat-view:window-main');
+		expect(root.tabs.mru).toEqual(['chat-view:window-main', 'singleton:git']);
+	});
+
+	it('caps malformed oversized topology before repairing duplicate Chat assignments', () => {
+		const windows: PersistedWorkspaceLayoutNode[] = [
+			{
+				type: 'window',
+				id: 'window-1',
+				order: [{ type: 'singleton', kind: 'git' }],
+				active: { type: 'singleton', kind: 'git' },
+				mru: [],
+			},
+			{
+				type: 'window',
+				id: 'window-2',
+				order: [
+					{ type: 'chat', chatId: 'chat-retained' },
+					{ type: 'singleton', kind: 'files' },
+				],
+				active: { type: 'singleton', kind: 'files' },
+				mru: [],
+			},
+			...Array.from({ length: WORKSPACE_WINDOW_RESOURCE_CEILING - 2 }, (_, index) => ({
+				type: 'window' as const,
+				id: `window-${index + 3}`,
+				order: [{ type: 'chat' as const, chatId: `chat-${index + 3}` }],
+				active: { type: 'chat' as const, chatId: `chat-${index + 3}` },
+				mru: [],
+			})),
+			{
+				type: 'window',
+				id: 'window-overflow',
+				order: [
+					{ type: 'chat', chatId: 'chat-retained' },
+					{ type: 'terminal', terminalId: 'terminal-overflow' },
+				],
+				active: { type: 'chat', chatId: 'chat-retained' },
+				mru: [{ type: 'terminal', terminalId: 'terminal-overflow' }],
+			},
+		];
+		const root = windows.slice(1).reduce<PersistedWorkspaceLayoutNode>(
+			(first, second, index) => ({
+				type: 'partition',
+				id: `partition-${index + 1}`,
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [first, second],
+			}),
+			windows[0]!,
+		);
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({ version: 2, root, unplacedTerminalIds: [] }),
+		);
+		expect(result.source).toBe('valid');
+		expect(collectWindowNodes(result.snapshot.desktopRoot)).toHaveLength(
+			WORKSPACE_WINDOW_RESOURCE_CEILING,
+		);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-1')?.tabs.order).toEqual([
+			'singleton:git',
+			'terminal:terminal-overflow',
+		]);
+		expect(
+			Object.values(result.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
+		).toHaveLength(WORKSPACE_WINDOW_RESOURCE_CEILING - 1);
+		expect(result.snapshot.surfaces['chat-view:window-2']).toMatchObject({
+			chatId: 'chat-retained',
+		});
+		expect(result.snapshot.surfaces['chat-view:window-overflow']).toBeUndefined();
+	});
+
+	it('accepts the maximum restore depth and falls back one level beyond it', () => {
+		const accepted = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: skewedTree(WORKSPACE_LAYOUT_MAX_PARSE_DEPTH),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(accepted.source).toBe('valid');
+
+		const rejected = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: skewedTree(WORKSPACE_LAYOUT_MAX_PARSE_DEPTH + 1),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
+	});
+
+	it('bounds total restored nodes before resource-ceiling repair', () => {
+		const largestFullTreeBelowBudget = WORKSPACE_LAYOUT_MAX_PARSE_NODES - 1;
+		const accepted = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: fullTreeWithNodes(largestFullTreeBelowBudget),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(accepted.source).toBe('valid');
+		expect(collectWindowNodes(accepted.snapshot.desktopRoot)).toHaveLength(
+			WORKSPACE_WINDOW_RESOURCE_CEILING,
+		);
+
+		const firstFullTreeAboveBudget = WORKSPACE_LAYOUT_MAX_PARSE_NODES + 1;
+		const rejected = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: fullTreeWithNodes(firstFullTreeAboveBudget),
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(rejected).toEqual({ source: 'fallback', snapshot: canonicalWorkspaceSnapshot() });
+	});
+
+	it.each(['order', 'mru'] as const)(
+		'accepts the per-window %s budget and truncates the next reference',
+		(field) => {
+			const refs: PersistedWorkspaceSurfaceRef[] = Array.from(
+				{ length: WORKSPACE_LAYOUT_MAX_TAB_REFS },
+				(_, index) =>
+					index === 0
+						? { type: 'chat', chatId: 'chat-budget' }
+						: { type: 'terminal', terminalId: `terminal-budget-${index}` },
+			);
+			const root = {
+				type: 'window' as const,
+				id: 'window-main',
+				order: refs,
+				active: refs[0],
+				mru: field === 'mru' ? refs : [],
+			};
+
+			const accepted = parsePersistedWorkspaceLayout(
+				JSON.stringify({ version: 2, root, unplacedTerminalIds: [] }),
+			);
+			expect(accepted.source).toBe('valid');
+
+			const oversizedRoot = {
+				...root,
+				[field]: [...refs, { type: 'terminal', terminalId: 'terminal-over-budget' }],
+			};
+			const truncated = parsePersistedWorkspaceLayout(
+				JSON.stringify({ version: 2, root: oversizedRoot, unplacedTerminalIds: [] }),
+			);
+			expect(truncated.source).toBe('valid');
+			const restoredWindow = windowNodeById(truncated.snapshot.desktopRoot, 'window-main');
+			expect(restoredWindow?.tabs.order).toHaveLength(WORKSPACE_LAYOUT_MAX_TAB_REFS);
+			expect(restoredWindow?.tabs.mru).toHaveLength(WORKSPACE_LAYOUT_MAX_TAB_REFS);
+			expect(truncated.snapshot.surfaces['terminal:terminal-over-budget']).toBeUndefined();
+		},
+	);
+
+	it('truncates persisted unplaced terminals at the parse budget', () => {
+		const terminalIds = Array.from(
+			{ length: WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS + 1 },
+			(_, index) => `terminal-unplaced-${index}`,
+		);
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: persistedWindow(1),
+				unplacedTerminalIds: terminalIds,
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.unplacedTerminalIds).toEqual(
+			terminalIds.slice(0, WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS),
+		);
+	});
+
+	it('falls back for malformed current roots and unsupported versions', () => {
+		for (const raw of [
+			{ version: 2, root: null, unplacedTerminalIds: [] },
+			{ version: 3, root: null },
+		]) {
+			const result = parsePersistedWorkspaceLayout(JSON.stringify(raw));
+			expect(result.source).toBe('fallback');
+			expect(result.snapshot).toEqual(canonicalWorkspaceSnapshot());
+		}
+	});
+
+	it('falls back when restored topology has no Chat view', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'window',
+					id: 'window-main',
+					order: [{ type: 'singleton', kind: 'git' }],
 					active: { type: 'singleton', kind: 'git' },
+					mru: [],
 				},
+				unplacedTerminalIds: [],
 			}),
 		);
 
-		expect(result.source).toBe('valid');
-		expect(result.snapshot.main.order).toEqual(['singleton:chat', 'singleton:git']);
-		expect(result.snapshot.main.activeId).toBe('singleton:chat');
-		expect(result.snapshot.sidebar.order).toEqual(['singleton:files']);
-		expect(result.snapshot.sidebar.activeId).toBe('singleton:files');
-		expect(result.snapshot.desiredSidebarWidth).toBe(360);
+		expect(result.source).toBe('fallback');
+		expect(result.snapshot).toEqual(canonicalWorkspaceSnapshot());
 	});
 
-	it('repairs an empty sidebar host that was persisted open', () => {
-		const result = parsePersistedWorkspaceLayout(
-			JSON.stringify({
-				version: 1,
-				desiredSidebarWidth: 480,
-				sidebarOpen: true,
-				main: { order: [], active: null },
-				sidebar: { order: [], active: null },
-			}),
+	it('omits fullscreen, files, dialog, mobile, and focus projections from serialization', () => {
+		const fileSnapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'file:f1', type: 'file', fileSessionId: 'f1' },
+				windowId: CANONICAL_WINDOW_ID,
+			},
+		]);
+		const value = serializeWorkspaceLayout({
+			...fileSnapshot,
+			fullscreenWindowId: CANONICAL_WINDOW_ID,
+			dialogFileSurfaceId: 'file:f1',
+			mobileActiveSurfaceId: 'file:f1',
+			mobileOnlySurfaceIds: ['file:f1'],
+		});
+		const serialized = JSON.stringify(value);
+		expect(serialized).not.toContain('fullscreen');
+		expect(serialized).not.toContain('dialog');
+		expect(serialized).not.toContain('mobile');
+		expect(serialized).not.toContain('file:f1');
+	});
+
+	it('uses the one-Chat-window canonical layout when storage is absent', () => {
+		const result = parsePersistedWorkspaceLayout(null);
+		expect(result).toEqual({ source: 'absent', snapshot: canonicalWorkspaceSnapshot() });
+	});
+});
+
+it('preserves a merged window with more than 256 persisted tabs', () => {
+	const terminals = (prefix: string) =>
+		Array.from({ length: 200 }, (_, i) => ({ type: 'terminal' as const, terminalId: prefix + i }));
+	const left = [{ type: 'chat', chatId: null }, ...terminals('left-')];
+	const right = terminals('right-');
+	const raw = JSON.stringify({
+		version: 2,
+		root: {
+			type: 'partition',
+			id: 'partition-root',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'window', id: 'window-left', order: left, active: left[0], mru: left },
+				{ type: 'window', id: 'window-right', order: right, active: right[0], mru: right },
+			],
+		},
+		unplacedTerminalIds: [],
+	});
+	const original = parsePersistedWorkspaceLayout(raw);
+	expect(original.source).toBe('valid');
+	const merged = reduceWorkspaceLayout(original.snapshot, [
+		{ type: 'merge-window', sourceWindowId: 'window-right', destinationWindowId: 'window-left' },
+	]);
+	const restored = parsePersistedWorkspaceLayout(JSON.stringify(serializeWorkspaceLayout(merged)));
+	expect(restored.source).toBe('valid');
+	expect(windowNodeById(restored.snapshot.desktopRoot, 'window-left')?.tabs.order).toHaveLength(
+		401,
+	);
+	expect(restored.snapshot.surfaces).toEqual(merged.surfaces);
+});
+
+it('bounds persisted tab references across the workspace rather than per window', () => {
+	const makeWindow = (id: string) => {
+		const order = Array.from({ length: WORKSPACE_LAYOUT_MAX_TAB_REFS }, (_, index) =>
+			index === 0
+				? { type: 'chat', chatId: null }
+				: { type: 'terminal', terminalId: id + '-' + index },
 		);
-
-		expect(result.source).toBe('valid');
-		expect(result.snapshot.sidebar.order).toEqual([]);
-		expect(result.snapshot.sidebarOpen).toBe(false);
-	});
-
-	it('serializes only singleton and terminal placement data', () => {
-		const file = { id: 'file:a', type: 'file' as const, fileSessionId: 'a' };
-		const terminal = { id: 'terminal:a', type: 'terminal' as const, terminalId: 'a' };
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: file, host: 'main' },
-			{ type: 'place-in-dialog', surfaceId: file.id },
-			{ type: 'register-surface', surface: terminal, host: 'main' },
-			{ type: 'focus-host', host: 'main', surfaceId: terminal.id },
-			{ type: 'set-manual-fullscreen', enabled: true },
-		]);
-		const serialized = serializeWorkspaceLayout(snapshot);
-
-		expect(serialized.main.order).toEqual([
-			{ type: 'singleton', kind: 'git' },
-			{ type: 'singleton', kind: 'pull-requests' },
-			{ type: 'terminal', terminalId: 'a' },
-		]);
-		expect(serialized.main.active).toEqual({ type: 'terminal', terminalId: 'a' });
-		expect(JSON.stringify(serialized)).not.toContain('file:a');
-		expect(JSON.stringify(serialized)).not.toContain('manualFullscreen');
-	});
-
-	it('round-trips intentionally unplaced terminal sessions', () => {
-		const terminal = { id: 'terminal:a', type: 'terminal' as const, terminalId: 'a' };
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: terminal, host: 'main' },
-			{ type: 'unplace-terminal', terminalId: terminal.terminalId },
-		]);
-
-		const serialized = serializeWorkspaceLayout(snapshot);
-		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized));
-
-		expect(serialized.unplacedTerminalIds).toEqual(['a']);
-		expect(restored.source).toBe('valid');
-		expect(restored.snapshot.unplacedTerminalIds).toEqual(['a']);
-		expect(restored.snapshot.surfaces[terminal.id]).toBeUndefined();
-	});
+		return { type: 'window', id, order, mru: order, active: order[0] };
+	};
+	const parsed = parsePersistedWorkspaceLayout(
+		JSON.stringify({
+			version: 2,
+			root: {
+				type: 'partition',
+				id: 'partition-root',
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [makeWindow('window-left'), makeWindow('window-right')],
+			},
+			unplacedTerminalIds: [],
+		}),
+	);
+	expect(parsed.source).toBe('valid');
+	expect(
+		collectWindowNodes(parsed.snapshot.desktopRoot).flatMap((window) => window.tabs.order),
+	).toHaveLength(WORKSPACE_LAYOUT_MAX_TAB_REFS);
 });

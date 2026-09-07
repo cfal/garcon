@@ -1,22 +1,31 @@
 import {
 	createQueuedInput,
 	forkRunChat,
+	selfHandoffRunChat,
 	runChat,
-	sendActiveInput,
+	steerChat,
+	steerQueuedEntry,
+	submitGoalControl,
 	startChat,
 	type StartChatParams,
 } from '$lib/api/chats.js';
+import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
 import type {
-	ActiveInputCommandRequest,
-	ActiveInputCommandResponse,
+	GoalControlCommandRequest,
+	GoalControlCommandResponse,
 	AgentRunCommandRequest,
-	CommandAcceptedResponse,
+	AgentTurnCommandResponse,
 	ForkRunCommandRequest,
 	ForkRunCommandResponse,
 	QueueEntryCommandResponse,
 	QueueEntryCreateCommandRequest,
+	SteerCommandRequest,
+	SteerCommandResponse,
+	QueueEntrySteerCommandRequest,
+	QueueEntrySteerCommandResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
+import type { ChatListEntry } from '$shared/chat-list';
 import { createClientCommandId } from './client-command-id.js';
 import { submitIdempotentCommand } from './idempotent-command.js';
 
@@ -26,22 +35,33 @@ export interface PreparedAcceptedInput<T> {
 	submit(): Promise<T>;
 }
 
+export interface PreparedForkInput extends PreparedAcceptedInput<ForkRunCommandResponse> {
+	clientMessageId: string;
+	submitWithHandoffFork(): Promise<ForkRunCommandResponse>;
+}
+
 type InputFactory<T> = T | (() => T);
 
 export interface AcceptedInputTransport {
-	start(request: StartChatParams): Promise<StartChatCommandResponse>;
-	run(request: AgentRunCommandRequest): Promise<CommandAcceptedResponse>;
+	start(request: StartChatParams): Promise<StartChatCommandResponse & { chat: ChatListEntry }>;
+	run(request: AgentRunCommandRequest): Promise<AgentTurnCommandResponse>;
 	fork(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse>;
+	selfHandoff(request: SelfHandoffRunCommandRequest): Promise<ForkRunCommandResponse>;
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;
-	active(request: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse>;
+	steer(request: SteerCommandRequest): Promise<SteerCommandResponse>;
+	steerQueuedEntry(request: QueueEntrySteerCommandRequest): Promise<QueueEntrySteerCommandResponse>;
+	goalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse>;
 }
 
 const defaultTransport: AcceptedInputTransport = {
 	start: startChat,
 	run: runChat,
 	fork: forkRunChat,
+	selfHandoff: selfHandoffRunChat,
 	enqueue: createQueuedInput,
-	active: sendActiveInput,
+	steer: steerChat,
+	steerQueuedEntry,
+	goalControl: submitGoalControl,
 };
 
 export class AcceptedInputSubmissionService {
@@ -58,18 +78,44 @@ export class AcceptedInputSubmissionService {
 		return this.#messageSubmission(input, (request) => this.transport.run(request));
 	}
 
-	fork(input: Omit<ForkRunCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
-		return this.#messageSubmission(input, (request) => this.transport.fork(request));
+	fork(
+		input: Omit<ForkRunCommandRequest, 'clientRequestId' | 'clientMessageId'>,
+	): PreparedForkInput {
+		const clientRequestId = this.createId();
+		const clientMessageId = this.createId();
+		const request = { ...input, clientRequestId, clientMessageId };
+		const handoffRequest = { ...request, allowHandoffFork: true };
+		return {
+			clientRequestId,
+			clientMessageId,
+			submit: () => submitIdempotentCommand(() => this.transport.fork(request)),
+			submitWithHandoffFork: () => submitIdempotentCommand(
+				() => this.transport.fork(handoffRequest),
+			),
+		};
 	}
 
-	enqueue(input: Omit<QueueEntryCreateCommandRequest, 'clientRequestId'>) {
-		const request = { ...input, clientRequestId: this.createId() };
-		return this.#prepared(request, () => this.transport.enqueue(request));
+	selfHandoff(input: Omit<SelfHandoffRunCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.selfHandoff(request));
 	}
 
-	active(input: Omit<ActiveInputCommandRequest, 'clientRequestId'>) {
+	enqueue(input: Omit<QueueEntryCreateCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.enqueue(request));
+	}
+
+	steer(input: Omit<SteerCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.steer(request));
+	}
+
+	steerQueuedEntry(
+		input: Omit<QueueEntrySteerCommandRequest, 'clientRequestId'>,
+	) {
 		const request = { ...input, clientRequestId: this.createId() };
-		return this.#prepared(request, () => this.transport.active(request));
+		return this.#prepared(request, () => this.transport.steerQueuedEntry(request));
+	}
+
+	goalControl(input: Omit<GoalControlCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.goalControl(request));
 	}
 
 	#messageSubmission<T extends object, R>(

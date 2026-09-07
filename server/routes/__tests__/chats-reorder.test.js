@@ -9,10 +9,6 @@ mock.module('../../lib/http-request.js', () => ({
   MalformedJsonError,
 }));
 
-mock.module('../../agents/claude/history-loader.js', () => ({
-  getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
   generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: '123', title: 'Generated Title' })),
@@ -20,11 +16,16 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import {
+  createRouteChatListProjector,
+  createRouteCommandLedger,
+  createRouteCommandService,
+} from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
-  getChat: mock(() => undefined),
+  getChat: mock(() => null),
+  hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
   updateChat: mock(() => undefined),
   removeChat: mock(() => undefined),
@@ -37,23 +38,33 @@ const settings = {
   getPinnedChatIds: mock(() => []),
   getNormalChatIds: mock(() => []),
   getArchivedChatIds: mock(() => []),
+  getUiSettings: mock(() => ({ pinnedInsertPosition: 'top' })),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-  reorderWindow: mock(() => Promise.resolve({ success: true })),
-  reorderRelative: mock(() => Promise.resolve({ success: true })),
+  reorderChat: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: 'chat-a', orderGroup: 'normal', changed: true },
+  })),
+  sortChatOrder: mock(() => Promise.resolve({ changed: true })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
 const chatViews = {
-  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+  page: mock(() => Promise.resolve({
+    transcriptViewId: 'view-1',
+    messages: [],
+    lastOrdinal: 0,
+    pageOldestOrdinal: 0,
+    pageNewestOrdinal: 0,
+    hasMore: false,
+  })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -61,19 +72,21 @@ const agents = {
 };
 
 const commandLedger = createRouteCommandLedger('chats-reorder');
-const pendingInputs = createRoutePendingInputs();
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
-
+const chatListProjector = createRouteChatListProjector({
+  registry,
+  settings,
+  metadata,
+  agents,
+});
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
-  pathCache,
+  processing: { phase: mock(() => null) },
   metadata,
   chatViews,
   agents,
-	pendingInputs,
-	chatListProjector,
+  chatListProjector,
   commandService: createRouteCommandService({
     registry,
     queue,
@@ -81,272 +94,315 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-		pendingInputs,
-		pathCache,
-		chatListProjector,
+    chatListProjector,
   }),
 });
 
-const allMocks = [
-  settings.reorderWindow, settings.reorderRelative,
-  parseJsonBody, registry.getChat,
-];
+const handler = chatsRoutes['/api/v1/chats/reorder'].POST;
+const sortHandler = chatsRoutes['/api/v1/chats/sort'].POST;
 
-describe('POST /api/chats/reorder (window-based)', () => {
-  const handler = chatsRoutes['/api/v1/chats/reorder'].POST;
+async function callReorder(body) {
+  parseJsonBody.mockResolvedValue(body);
+  const request = new Request('http://localhost/api/v1/chats/reorder', { method: 'POST' });
+  return handler(request);
+}
 
+async function callSort(body) {
+  parseJsonBody.mockResolvedValue(body);
+  const request = new Request('http://localhost/api/v1/chats/sort', { method: 'POST' });
+  return sortHandler(request);
+}
+
+describe('POST /api/v1/chats/reorder', () => {
   beforeEach(() => {
-    allMocks.forEach(m => m.mockClear());
-  });
-
-  it('rejects invalid list value', async () => {
-    parseJsonBody.mockResolvedValue({ list: 'invalid', oldOrder: [], newOrder: [] });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error).toBe('list must be "pinned", "normal", or "archived"');
-  });
-
-  it('rejects missing oldOrder or newOrder', async () => {
-    parseJsonBody.mockResolvedValue({ list: 'pinned' });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('oldOrder and newOrder must be arrays');
-  });
-
-  it('propagates store validation error for empty oldOrder', async () => {
-    parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: [], newOrder: [] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder must not be empty', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('oldOrder must not be empty');
-  });
-
-  it('propagates store validation error for length mismatch', async () => {
-    parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'b'], newOrder: ['a'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder and newOrder must have the same length', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('oldOrder and newOrder must have the same length');
-  });
-
-  it('propagates store validation error for set mismatch', async () => {
-    parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'b'], newOrder: ['a', 'c'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder and newOrder must contain the same IDs', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('oldOrder and newOrder must contain the same IDs');
-  });
-
-  it('propagates store validation error for IDs not in target list', async () => {
-    parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'x'], newOrder: ['x', 'a'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'ID "x" is not in the pinned list', errorCode: 'ORDER_ITEM_NOT_FOUND', status: 404 });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(404);
-    expect(body.error).toBe('ID "x" is not in the pinned list');
-    expect(body.errorCode).toBe('ORDER_ITEM_NOT_FOUND');
-  });
-
-  it('propagates store validation error for non-contiguous oldOrder', async () => {
-    parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'c'], newOrder: ['c', 'a'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder is not a contiguous subsequence of the current list', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('oldOrder is not a contiguous subsequence of the current list');
-  });
-
-  it('delegates pinned reorder to settings.reorderWindow', async () => {
-    settings.reorderWindow.mockResolvedValue({ success: true });
-    parseJsonBody.mockResolvedValue({
-      list: 'pinned',
-      oldOrder: ['a', 'b', 'c'],
-      newOrder: ['c', 'a', 'b'],
+    parseJsonBody.mockClear();
+    registry.getChat.mockClear();
+    settings.reorderChat.mockClear();
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
+    settings.reorderChat.mockResolvedValue({
+      success: true,
+      response: { success: true, chatId: 'chat-a', orderGroup: 'normal', changed: true },
     });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(settings.reorderWindow).toHaveBeenCalledWith('pinned', ['a', 'b', 'c'], ['c', 'a', 'b']);
   });
 
-  it('delegates normal reorder to settings.reorderWindow', async () => {
-    settings.reorderWindow.mockResolvedValue({ success: true });
-    parseJsonBody.mockResolvedValue({
-      list: 'normal',
-      oldOrder: ['x', 'y', 'z'],
-      newOrder: ['z', 'x', 'y'],
+  const invalidBodies = [
+    null,
+    {},
+    { chatId: 'chat-a' },
+    { chatId: 'chat-a', placement: { kind: 'boundary' } },
+    { chatId: 'chat-a', placement: { kind: 'boundary', boundary: 'middle' } },
+    { chatId: 'chat-a', placement: { kind: 'relative', referenceChatId: 'chat-a', position: 'before' } },
+    { chatId: 'chat-a', chatIdAbove: 'chat-b' },
+    { list: 'normal', oldOrder: ['chat-a'], newOrder: ['chat-a'] },
+  ];
+
+  for (const [index, body] of invalidBodies.entries()) {
+    it(`rejects invalid request shape ${index + 1}`, async () => {
+      const response = await callReorder(body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: 'Invalid chat reorder request',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      });
+      expect(settings.reorderChat).not.toHaveBeenCalled();
     });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(settings.reorderWindow).toHaveBeenCalledWith('normal', ['x', 'y', 'z'], ['z', 'x', 'y']);
-  });
-
-  it('delegates archived reorder to settings.reorderWindow', async () => {
-    settings.reorderWindow.mockResolvedValue({ success: true });
-    parseJsonBody.mockResolvedValue({
-      list: 'archived',
-      oldOrder: ['m', 'n', 'o'],
-      newOrder: ['o', 'n', 'm'],
-    });
-
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(settings.reorderWindow).toHaveBeenCalledWith('archived', ['m', 'n', 'o'], ['o', 'n', 'm']);
-  });
+  }
 
   it('handles malformed JSON', async () => {
     parseJsonBody.mockRejectedValue(new MalformedJsonError());
+    const request = new Request('http://localhost/api/v1/chats/reorder', { method: 'POST' });
 
-    const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
-    const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Malformed JSON');
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: 'Malformed JSON',
+      errorCode: 'VALIDATION_FAILED',
+      retryable: false,
+    });
+  });
+
+  it('rejects a missing source chat before entering the settings mutation', async () => {
+    registry.getChat.mockReturnValue(null);
+
+    const response = await callReorder({
+      chatId: 'chat-a',
+      placement: { kind: 'boundary', boundary: 'top' },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: 'Chat not found',
+      errorCode: 'SESSION_NOT_FOUND',
+      retryable: false,
+    });
+    expect(settings.reorderChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing relative reference before entering the settings mutation', async () => {
+    registry.getChat.mockImplementation((chatId) => chatId === 'chat-a' ? { agentId: 'claude' } : null);
+
+    const response = await callReorder({
+      chatId: 'chat-a',
+      placement: { kind: 'relative', referenceChatId: 'chat-b', position: 'after' },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: 'Reference chat not found',
+      errorCode: 'SESSION_NOT_FOUND',
+    });
+    expect(settings.reorderChat).not.toHaveBeenCalled();
+  });
+
+  it('delegates a boundary placement and returns the typed response', async () => {
+    const request = {
+      chatId: 'chat-a',
+      placement: { kind: 'boundary', boundary: 'bottom' },
+    };
+    settings.reorderChat.mockResolvedValue({
+      success: true,
+      response: { success: true, chatId: 'chat-a', orderGroup: 'pinned', changed: false },
+    });
+
+    const response = await callReorder(request);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      chatId: 'chat-a',
+      orderGroup: 'pinned',
+      changed: false,
+    });
+    expect(settings.reorderChat).toHaveBeenCalledTimes(1);
+    expect(settings.reorderChat.mock.calls[0][0]).toEqual(request);
+    expect(settings.reorderChat.mock.calls[0][1]('chat-a')).toBe(true);
+  });
+
+  it('delegates a relative placement', async () => {
+    const request = {
+      chatId: 'chat-a',
+      placement: { kind: 'relative', referenceChatId: 'chat-b', position: 'before' },
+    };
+
+    const response = await callReorder(request);
+
+    expect(response.status).toBe(200);
+    expect(settings.reorderChat.mock.calls[0][0]).toEqual(request);
+    expect(settings.reorderChat.mock.calls[0][1]('chat-b')).toBe(true);
+  });
+
+  it('lets the locked registry callback observe a deletion after route validation', async () => {
+    let registryChecks = 0;
+    registry.getChat.mockImplementation(() => {
+      registryChecks += 1;
+      return registryChecks === 1 ? { agentId: 'claude' } : null;
+    });
+    settings.reorderChat.mockImplementation(async (_request, isKnownChat) => {
+      expect(isKnownChat('chat-a')).toBe(false);
+      return {
+        success: false,
+        error: 'Chat not found',
+        errorCode: 'SESSION_NOT_FOUND',
+        status: 404,
+      };
+    });
+
+    const response = await callReorder({
+      chatId: 'chat-a',
+      placement: { kind: 'boundary', boundary: 'top' },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ errorCode: 'SESSION_NOT_FOUND' });
+  });
+
+  it('preserves a store cross-group failure', async () => {
+    settings.reorderChat.mockResolvedValue({
+      success: false,
+      error: 'Cross-group reorder is not allowed',
+      errorCode: 'ORDER_CROSS_GROUP',
+      status: 400,
+    });
+
+    const response = await callReorder({
+      chatId: 'chat-a',
+      placement: { kind: 'relative', referenceChatId: 'chat-b', position: 'after' },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Cross-group reorder is not allowed',
+      errorCode: 'ORDER_CROSS_GROUP',
+      retryable: false,
+    });
+  });
+
+  it('does not expose the retired quick route', () => {
+    expect(chatsRoutes['/api/v1/chats/reorder-quick']).toBeUndefined();
   });
 });
 
-describe('POST /api/chats/reorder-quick', () => {
-  const handler = chatsRoutes['/api/v1/chats/reorder-quick'].POST;
-
+describe('POST /api/v1/chats/sort', () => {
   beforeEach(() => {
-    allMocks.forEach(m => m.mockClear());
+    parseJsonBody.mockClear();
+    registry.getChat.mockClear();
+    settings.sortChatOrder.mockClear();
+    settings.sortChatOrder.mockResolvedValue({ changed: true });
+    settings.getUiSettings.mockClear();
+    settings.getUiSettings.mockReturnValue({ pinnedInsertPosition: 'top' });
+    metadata.listAllChatMetadata.mockClear();
+    metadata.listAllChatMetadata.mockReturnValue(new Map([
+      ['older-active', {
+        chatId: 'older-active',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        lastActivity: '2025-01-04T00:00:00.000Z',
+        lastMessage: '',
+        firstMessage: '',
+        source: 'live',
+      }],
+      ['newer-idle', {
+        chatId: 'newer-idle',
+        createdAt: '2025-01-03T00:00:00.000Z',
+        lastActivity: '2025-01-03T00:00:00.000Z',
+        lastMessage: '',
+        firstMessage: '',
+        source: 'live',
+      }],
+    ]));
   });
 
-  it('rejects missing chatId', async () => {
-    parseJsonBody.mockResolvedValue({ chatIdAbove: 'a' });
+  it.each(['created', 'activity'])('sorts by %s and returns the typed response', async (sortKey) => {
+    settings.sortChatOrder.mockResolvedValue({ changed: sortKey === 'created' });
 
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('chatId is required');
-  });
-
-  it('rejects when both chatIdAbove and chatIdBelow are provided', async () => {
-    parseJsonBody.mockResolvedValue({ chatId: 'a', chatIdAbove: 'b', chatIdBelow: 'c' });
-
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Exactly one of chatIdAbove or chatIdBelow must be provided');
-  });
-
-  it('rejects when neither chatIdAbove nor chatIdBelow are provided', async () => {
-    parseJsonBody.mockResolvedValue({ chatId: 'a' });
-
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Exactly one of chatIdAbove or chatIdBelow must be provided');
-  });
-
-  it('rejects when chat not found', async () => {
-    registry.getChat.mockImplementation(() => null);
-    parseJsonBody.mockResolvedValue({ chatId: 'a', chatIdAbove: 'b' });
-
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(404);
-    expect(body.error).toBe('Chat not found');
-  });
-
-  it('propagates store error for cross-group reorder', async () => {
-    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
-    settings.reorderRelative.mockResolvedValue({ success: false, error: 'Cross-group reorder is not allowed', errorCode: 'ORDER_CROSS_GROUP', status: 400 });
-    parseJsonBody.mockResolvedValue({ chatId: 'a', chatIdAbove: 'b' });
-
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Cross-group reorder is not allowed');
-  });
-
-  it('delegates chatIdAbove reorder to settings.reorderRelative', async () => {
-    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
-    settings.reorderRelative.mockResolvedValue({ success: true });
-    parseJsonBody.mockResolvedValue({ chatId: 'c', chatIdAbove: 'a' });
-
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
+    const response = await callSort({ sortKey });
 
     expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(settings.reorderRelative).toHaveBeenCalledWith('c', 'a', 'below');
+    expect(await response.json()).toEqual({
+      success: true,
+      sortKey,
+      changed: sortKey === 'created',
+    });
+    expect(settings.sortChatOrder).toHaveBeenCalledTimes(1);
+    expect(metadata.listAllChatMetadata).toHaveBeenCalledTimes(1);
+    expect(registry.getChat).not.toHaveBeenCalled();
   });
 
-  it('delegates chatIdBelow reorder to settings.reorderRelative', async () => {
-    registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
-    settings.reorderRelative.mockResolvedValue({ success: true });
-    parseJsonBody.mockResolvedValue({ chatId: 'z', chatIdBelow: 'x' });
+  it('builds the creation comparator from metadata', async () => {
+    settings.getUiSettings.mockReturnValue({ pinnedInsertPosition: 'bottom' });
+    await callSort({ sortKey: 'created' });
+    const [compare, comparatorOverrides] = settings.sortChatOrder.mock.calls[0];
 
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(settings.reorderRelative).toHaveBeenCalledWith('z', 'x', 'above');
+    expect(['older-active', 'newer-idle'].sort(compare))
+      .toEqual(['newer-idle', 'older-active']);
+    expect(comparatorOverrides).toEqual({});
   });
 
-  it('handles malformed JSON', async () => {
-    parseJsonBody.mockRejectedValue(new MalformedJsonError());
+  it('builds the activity comparator from metadata', async () => {
+    await callSort({ sortKey: 'activity' });
+    const [compare, comparatorOverrides] = settings.sortChatOrder.mock.calls[0];
 
-    const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });
-    const response = await handler(request);
-    const body = await response.json();
+    expect(['older-active', 'newer-idle'].sort(compare))
+      .toEqual(['older-active', 'newer-idle']);
+    expect(comparatorOverrides).toEqual({});
+  });
 
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Malformed JSON');
+  it('inverts only pinned activity ordering when pinned chats are added at the bottom', async () => {
+    settings.getUiSettings.mockReturnValue({ pinnedInsertPosition: 'bottom' });
+
+    await callSort({ sortKey: 'activity' });
+    const [compare, comparatorOverrides] = settings.sortChatOrder.mock.calls[0];
+
+    expect(typeof comparatorOverrides.pinned).toBe('function');
+    expect(['older-active', 'newer-idle'].sort(comparatorOverrides.pinned))
+      .toEqual(['newer-idle', 'older-active']);
+    expect(['older-active', 'newer-idle'].sort(compare))
+      .toEqual(['older-active', 'newer-idle']);
+  });
+
+  const invalidBodies = [
+    null,
+    {},
+    [],
+    { sortKey: 'oldest' },
+    { sortKey: 'created', direction: 'desc' },
+  ];
+
+  for (const [index, body] of invalidBodies.entries()) {
+    it(`rejects invalid sort request shape ${index + 1}`, async () => {
+      const response = await callSort(body);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: 'Invalid chat order sort request',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      });
+      expect(settings.sortChatOrder).not.toHaveBeenCalled();
+    });
+  }
+
+  it('maps settings failures to an opaque internal error', async () => {
+    settings.sortChatOrder.mockRejectedValue(new Error('save failed'));
+
+    const response = await callSort({ sortKey: 'activity' });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+  });
+
+  it('does not expose alternate quick or bulk sort routes', () => {
+    expect(chatsRoutes['/api/v1/chats/sort-quick']).toBeUndefined();
+    expect(chatsRoutes['/api/v1/chats/sort-bulk']).toBeUndefined();
   });
 });

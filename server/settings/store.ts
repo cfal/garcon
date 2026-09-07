@@ -6,7 +6,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
-import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.ts';
 import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import {
   ChatNameStore,
@@ -18,6 +18,7 @@ import {
   UiSettingsStore,
 } from './domain-stores.js';
 import {
+  AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   normalizeRemoteFeatureSettings,
 } from '../../common/settings.js';
@@ -37,12 +38,15 @@ import {
   sanitizeRecentAgentSettings,
 } from './startup-recents.js';
 import type { IChatRegistry } from '../chats/store.js';
-import { createLogger } from '../lib/log.js';
-import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import { isRecord } from '../../common/json.js';
+import type { ReorderChatRequest } from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 
-const logger = createLogger('settings:store');
 import type {
   ChatFolder,
+  ChatOrderComparatorOverrides,
+  ChatReorderResult,
+  ChatStartupPreferences,
   ProjectSettings,
   ReorderResult,
   SavedChatSearch,
@@ -71,8 +75,10 @@ type SessionNameChangedCallback = (chatId: string, title: string) => void;
 type ListChangedCallback = (reason: string, chatId: string) => void;
 type RemoteSettingsChangedCallback = () => void;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+interface SettingsStoreEvents {
+  'session-name-changed': Parameters<SessionNameChangedCallback>;
+  'list-changed': Parameters<ListChangedCallback>;
+  'remote-settings-changed': Parameters<RemoteSettingsChangedCallback>;
 }
 
 function stringRecord(raw: Record<string, unknown>): Record<string, string> {
@@ -158,6 +164,18 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
     ? rawFeatures.transcriptSearch
     : null;
   if (typeof rawTranscriptSearch?.enabled !== 'boolean') migrated = true;
+  const rawAgentCommands = isRecord(rawFeatures?.agentCommands)
+    ? rawFeatures.agentCommands
+    : null;
+  if (
+    !rawAgentCommands
+    || AGENT_COMMAND_SETTING_KEYS.some((key) => typeof rawAgentCommands[key] !== 'boolean')
+    || Object.keys(rawAgentCommands).some((key) =>
+      !AGENT_COMMAND_SETTING_KEYS.some((settingKey) => settingKey === key))
+    || Boolean(rawFeatures && 'chatIdDiscovery' in rawFeatures)
+  ) {
+    migrated = true;
+  }
   const features = normalizeRemoteFeatureSettings(raw.features);
   const chatFolders = Array.isArray(raw.chatFolders)
     ? raw.chatFolders.map(sanitizeFolder).filter((folder): folder is ChatFolder => Boolean(folder))
@@ -221,7 +239,7 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
   };
 }
 
-export class SettingsStore extends EventEmitter {
+export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   #cache: ProjectSettings | null = null;
   #mutationDraft: ProjectSettings | null = null;
   #workspaceDir: string;
@@ -282,21 +300,18 @@ export class SettingsStore extends EventEmitter {
   }
 
   async #writeToDisk(settings: ProjectSettings): Promise<void> {
-    await writeJsonFileAtomic(this.#settingsPath(), settings);
+    await writeJsonFileAtomic(this.#settingsPath(), settings, { mode: 0o600 });
   }
 
   async #readFromDiskWithMigration(): Promise<SanitizedSettingsResult> {
-    try {
-      const raw = await fs.readFile(this.#settingsPath(), 'utf8');
-      const parsed = JSON.parse(raw);
-      return sanitizeProjectSettings(parsed);
-    } catch (error) {
-      if (hasNodeErrorCode(error, 'ENOENT')) {
-        return { settings: createEmpty(), migrated: false };
-      }
-      logger.warn('settings: invalid project-settings.json, using empty settings:', errorMessage(error));
-      return { settings: createEmpty(), migrated: true };
-    }
+    return readJsonStateFile({
+      filePath: this.#settingsPath(),
+      empty: () => ({ settings: createEmpty(), migrated: false }),
+      normalize: (value) => {
+        if (!isRecord(value)) throw new TypeError('Project settings state must be a JSON object');
+        return sanitizeProjectSettings(value);
+      },
+    });
   }
 
   async init(): Promise<ProjectSettings> {
@@ -354,6 +369,10 @@ export class SettingsStore extends EventEmitter {
     return this.#chatNames.setSessionName(chatId, title);
   }
 
+  async setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean> {
+    return this.#chatNames.setSessionNameIfAbsent(chatId, title);
+  }
+
   async removeSessionName(chatId: string): Promise<void> {
     return this.#chatNames.removeSessionName(chatId);
   }
@@ -366,8 +385,10 @@ export class SettingsStore extends EventEmitter {
     return this.#featureSettings.getFeatureSettings();
   }
 
-  async setTranscriptSearchEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
-    return this.#featureSettings.setTranscriptSearchEnabled(enabled);
+  async setFeatureSettings(
+    patch: Partial<ProjectSettings['features']>,
+  ): Promise<ProjectSettings['features']> {
+    return this.#featureSettings.setFeatureSettings(patch);
   }
 
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
@@ -421,7 +442,7 @@ export class SettingsStore extends EventEmitter {
     return this.#startupDefaults.getExecutionDefaults();
   }
 
-  async recordChatStartup(defaults: Record<string, unknown> | null | undefined): Promise<void> {
+  async recordChatStartup(defaults: ChatStartupPreferences | null | undefined): Promise<void> {
     return this.#startupDefaults.recordChatStartup(defaults);
   }
 
@@ -456,8 +477,18 @@ export class SettingsStore extends EventEmitter {
     return this.#chatOrder.toggleArchive(chatId);
   }
 
-  async reorderWindow(list: string, rawOldOrder: unknown, rawNewOrder: unknown): Promise<ReorderResult> {
-    return this.#chatOrder.reorderWindow(list, rawOldOrder, rawNewOrder);
+  async reorderChat(
+    request: ReorderChatRequest,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatReorderResult> {
+    return this.#chatOrder.reorderChat(request, isKnownChat);
+  }
+
+  async sortChatOrder(
+    compareChatIds: ChatOrderIdComparator,
+    comparatorOverrides?: ChatOrderComparatorOverrides,
+  ): Promise<{ changed: boolean }> {
+    return this.#chatOrder.sortChatOrder(compareChatIds, comparatorOverrides);
   }
 
   getSavedSearches(): SavedChatSearch[] {
@@ -496,7 +527,4 @@ export class SettingsStore extends EventEmitter {
     return this.#folders.removeFolder(folderId);
   }
 
-  async reorderRelative(chatId: string, refId: string, mode: string): Promise<ReorderResult> {
-    return this.#chatOrder.reorderRelative(chatId, refId, mode);
-  }
 }

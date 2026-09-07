@@ -8,16 +8,18 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
+import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentCommandImage } from '@garcon/common/ws-requests';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import type { CarryOverSegmentRef } from '../chats/store.js';
+import type { TurnCommandType } from '../lib/turn-identity.js';
+import type { ChatPreambleSelection, PendingPreambleBoundary } from '@garcon/common/preambles';
 
 export type { AgentCommandImage, PermissionMode, ThinkingMode };
 export type AgentName = string;
-export type AgentExecutionCommandType =
-  | 'chat-start'
-  | 'agent-run'
-  | 'fork-run'
-  | 'agent-compact';
+export type AgentExecutionCommandType = TurnCommandType;
+
+export type { ChatPreambleSelection };
 
 export interface PersistedChatExecutionConfig {
   projectPath?: string;
@@ -29,7 +31,7 @@ export interface PersistedChatExecutionConfig {
 
 export interface AgentExecutionAdmission {
   readonly signal: AbortSignal;
-  markStarted(): void;
+  markStarted(): Promise<void>;
 }
 
 export function assertExecutionAdmissionOpen(
@@ -61,7 +63,15 @@ export class UnsupportedAgentSettingError extends Error {
 export interface StartedAgentSession {
   agentSessionId: string;
   nativeSession: AgentNativeSessionRef | null;
+  nativeSeedReceipt: NativeSeedReceipt | null;
 }
+
+// Deliberate mirror of AgentForkOutcome: server core types depend only on
+// common, never on the interface package; the runtime router is the sole
+// translation point between the two shapes.
+export type ForkedAgentSessionOutcome =
+  | { readonly kind: 'materialized'; readonly session: StartedAgentSession }
+  | { readonly kind: 'unmaterialized' };
 
 export interface PrepareProjectPathUpdateRequest {
   chatId: string;
@@ -84,6 +94,11 @@ export interface AgentChatEntry {
   agentSettingsById?: Record<string, AgentSettingsEnvelope>;
   nativeSession?: AgentNativeSessionRef | null;
   agentOwnershipEpoch?: string;
+  nativeSeedReceipt?: NativeSeedReceipt | null;
+  carryOverSegments?: readonly CarryOverSegmentRef[];
+  carryOverMigrationQuarantine?: { artifactId: string; errorCode: string } | null;
+  pendingPreambleBoundary?: PendingPreambleBoundary | null;
+  preambleSelection?: ChatPreambleSelection;
 }
 
 export interface RequiredChatExecutionConfig extends PersistedChatExecutionConfig {
@@ -138,8 +153,16 @@ export interface RunAgentTurnRequest {
 export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'> & {
   clientRequestId?: string;
   clientMessageId?: string;
+  transcriptViewId?: string;
+  excludedResendOrdinals?: readonly number[];
   turnId?: string;
   commandType?: AgentExecutionCommandType;
   executionAdmission?: AgentExecutionAdmission;
   integrationEndpoint?: AgentEndpointSelection | null;
 };
+
+export interface AgentSteerOptions {
+  readonly clientRequestId: string;
+  readonly clientMessageId: string;
+  readonly transcriptViewId: string;
+}

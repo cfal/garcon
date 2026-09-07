@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createLocalSettingsStore, HIDEABLE_TOOL_GROUPS } from '../local-settings.svelte';
+import {
+	createLocalSettingsStore,
+	HIDEABLE_TOOL_GROUPS,
+	SIDEBAR_INACTIVITY_DURATION_VALUES,
+} from '../local-settings.svelte';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 describe('LocalSettingsStore', () => {
@@ -10,19 +14,179 @@ describe('LocalSettingsStore', () => {
 	it('defaults max chat width and file opening preferences', () => {
 		const store = createLocalSettingsStore();
 
+		expect(store.chatListDock).toBe('left');
+		expect(store.chatListAutohide).toBe(false);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.overlayBackdropEffects).toBe(true);
-		expect(store.sidebarGroupByProject).toBe(true);
+		expect(store.alwaysExpandCliMessages).toBe(false);
+		expect(store.allowDirectChats).toBe(false);
+		expect(store.sidebarGrouping).toBe('project-and-activity');
+		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
-		expect(store.sidebarCompactChatItems).toBe(false);
+		expect(store.sidebarChatItemLayout).toBe('compact');
 		expect(store.sidebarSortMode).toBe('manual');
+		expect(store.sidebarSearchResultSort).toBe('relevance');
+		expect(store.reduceMotion).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
-		expect(store.textEditorOpenPlacement).toBe('source');
-		expect(store.imageViewerOpenPlacement).toBe('source');
-		expect(store.markdownViewerOpenPlacement).toBe('source');
+		expect(store.textEditorOpenPlacement).toBe('same-window');
+		expect(store.imageViewerOpenPlacement).toBe('same-window');
+		expect(store.markdownViewerOpenPlacement).toBe('same-window');
 		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
+		expect(store.steerWithCtrlEnter).toBe(true);
 
+		store.destroy();
+	});
+
+	it('persists the CLI message expansion preference', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('alwaysExpandCliMessages');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ alwaysExpandCliMessages: true });
+		const restored = createLocalSettingsStore();
+		expect(restored.alwaysExpandCliMessages).toBe(true);
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('persists every chat item layout and defaults malformed values to compact', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('sidebarChatItemLayout', 'single-line');
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ sidebarChatItemLayout: 'single-line' });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarChatItemLayout).toBe('single-line');
+		store.destroy();
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarChatItemLayout: 'condensed' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.sidebarChatItemLayout).toBe('compact');
+		malformed.destroy();
+	});
+
+	it('persists Ctrl+Enter steering and defaults malformed values to enabled', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('steerWithCtrlEnter');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ steerWithCtrlEnter: false });
+		const restored = createLocalSettingsStore();
+		expect(restored.steerWithCtrlEnter).toBe(false);
+		store.destroy();
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ steerWithCtrlEnter: 'enabled' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.steerWithCtrlEnter).toBe(true);
+		malformed.destroy();
+	});
+
+	it('persists and restores the chat list dock', () => {
+		const store = createLocalSettingsStore();
+		store.set('chatListDock', 'right');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({
+			chatListDock: 'right',
+		});
+
+		const restored = createLocalSettingsStore();
+		expect(restored.chatListDock).toBe('right');
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('persists and restores chat list autohide', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('chatListAutohide');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ chatListAutohide: true });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.chatListAutohide).toBe(true);
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('defaults malformed chat list autohide values to disabled', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ chatListAutohide: 'enabled' }),
+		);
+
+		const store = createLocalSettingsStore();
+		expect(store.chatListAutohide).toBe(false);
+		store.destroy();
+	});
+
+	it('persists and sanitizes global shortcut overrides', () => {
+		const store = createLocalSettingsStore();
+		store.set('globalShortcuts', {
+			'delete-chat': { key: 'X', ctrl: true },
+			'new-chat': null,
+		});
+
+		const restored = createLocalSettingsStore();
+		expect(restored.globalShortcuts).toEqual({
+			'delete-chat': { key: 'x', ctrl: true },
+			'new-chat': null,
+		});
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('drops malformed persisted global shortcuts', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				globalShortcuts: {
+					'delete-chat': { key: 'Control', ctrl: true },
+					unknown: { key: 'x', ctrl: true },
+				},
+			}),
+		);
+
+		const store = createLocalSettingsStore();
+		expect(store.globalShortcuts).toEqual({});
+		store.destroy();
+	});
+
+	it('copies chat-list dock values between stores and snapshots', () => {
+		const first = createLocalSettingsStore();
+		const second = createLocalSettingsStore();
+
+		expect(first.chatListDock).toBe(second.chatListDock);
+
+		first.destroy();
+		second.destroy();
+	});
+
+	it('normalizes malformed chat-list dock values passed to set', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('chatListDock', 'middle' as never);
+
+		expect(store.chatListDock).toBe('left');
 		store.destroy();
 	});
 
@@ -51,6 +215,28 @@ describe('LocalSettingsStore', () => {
 
 		expect(store.overlayBackdropEffects).toBe(true);
 		store.destroy();
+	});
+
+	it('persists direct chat opt-in and rejects malformed persisted values', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('allowDirectChats');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ allowDirectChats: true });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.allowDirectChats).toBe(true);
+		restored.destroy();
+		store.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ allowDirectChats: 'enabled' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.allowDirectChats).toBe(false);
+		malformed.destroy();
 	});
 
 	it('persists the terminal font size', () => {
@@ -82,56 +268,35 @@ describe('LocalSettingsStore', () => {
 
 	it('persists and restores independent file opening preferences', () => {
 		const store = createLocalSettingsStore();
-		store.set('textEditorOpenPlacement', 'source');
-		store.set('imageViewerOpenPlacement', 'sidebar');
-		store.set('markdownViewerOpenPlacement', 'dialog');
+		store.set('textEditorOpenPlacement', 'new-window');
+		store.set('imageViewerOpenPlacement', 'dialog');
+		store.set('markdownViewerOpenPlacement', 'same-window');
 
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
-			textEditorOpenPlacement: 'source',
-			imageViewerOpenPlacement: 'sidebar',
-			markdownViewerOpenPlacement: 'dialog',
+			textEditorOpenPlacement: 'new-window',
+			imageViewerOpenPlacement: 'dialog',
+			markdownViewerOpenPlacement: 'same-window',
 		});
 
 		const restored = createLocalSettingsStore();
-		expect(restored.textEditorOpenPlacement).toBe('source');
-		expect(restored.imageViewerOpenPlacement).toBe('sidebar');
-		expect(restored.markdownViewerOpenPlacement).toBe('dialog');
+		expect(restored.textEditorOpenPlacement).toBe('new-window');
+		expect(restored.imageViewerOpenPlacement).toBe('dialog');
+		expect(restored.markdownViewerOpenPlacement).toBe('same-window');
 
 		store.destroy();
 		restored.destroy();
 	});
 
-	it('preserves valid legacy fixed placement values', () => {
-		localStorage.setItem(
-			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({
-				textEditorOpenPlacement: 'main',
-				imageViewerOpenPlacement: 'sidebar',
-				markdownViewerOpenPlacement: 'dialog',
-			}),
-		);
+	it('defaults missing file opening preferences to the same window', () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({}));
 
 		const store = createLocalSettingsStore();
 
-		expect(store.textEditorOpenPlacement).toBe('main');
-		expect(store.imageViewerOpenPlacement).toBe('sidebar');
-		expect(store.markdownViewerOpenPlacement).toBe('dialog');
-		store.destroy();
-	});
-
-	it('defaults missing file opening preferences to source', () => {
-		localStorage.setItem(
-			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ imageViewerOpenPlacement: 'main' }),
-		);
-
-		const store = createLocalSettingsStore();
-
-		expect(store.textEditorOpenPlacement).toBe('source');
-		expect(store.imageViewerOpenPlacement).toBe('main');
-		expect(store.markdownViewerOpenPlacement).toBe('source');
+		expect(store.textEditorOpenPlacement).toBe('same-window');
+		expect(store.imageViewerOpenPlacement).toBe('same-window');
+		expect(store.markdownViewerOpenPlacement).toBe('same-window');
 		store.destroy();
 	});
 
@@ -140,33 +305,33 @@ describe('LocalSettingsStore', () => {
 			LOCAL_STORAGE_KEYS.localSettings,
 			JSON.stringify({
 				textEditorOpenPlacement: 'floating',
-				imageViewerOpenPlacement: 'sidebar',
+				imageViewerOpenPlacement: 'retired-value',
 				markdownViewerOpenPlacement: 42,
 			}),
 		);
 
 		const store = createLocalSettingsStore();
 
-		expect(store.textEditorOpenPlacement).toBe('source');
-		expect(store.imageViewerOpenPlacement).toBe('sidebar');
-		expect(store.markdownViewerOpenPlacement).toBe('source');
+		expect(store.textEditorOpenPlacement).toBe('same-window');
+		expect(store.imageViewerOpenPlacement).toBe('same-window');
+		expect(store.markdownViewerOpenPlacement).toBe('same-window');
 		store.destroy();
 	});
 
 	it('persists hidden tool groups', () => {
 		const store = createLocalSettingsStore();
-		const commands = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'commands');
-		if (!commands) throw new Error('expected command tool group');
-		store.setToolTypesHidden(commands.toolTypes, true);
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		if (!bash) throw new Error('expected Bash tool group');
+		store.setToolTypesHidden(bash.toolTypes, true);
 
-		expect(store.areToolTypesHidden(commands.toolTypes)).toBe(true);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
-		).toMatchObject({ hiddenToolTypes: commands.toolTypes });
+		).toMatchObject({ hiddenToolTypes: bash.toolTypes });
 
 		const restored = createLocalSettingsStore();
-		expect(restored.areToolTypesHidden(commands.toolTypes)).toBe(true);
-		restored.setToolTypesHidden(commands.toolTypes, false);
+		expect(restored.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		restored.setToolTypesHidden(bash.toolTypes, false);
 		expect(restored.hiddenToolTypes).toEqual([]);
 
 		store.destroy();
@@ -181,10 +346,54 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		const commands = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'commands');
-		if (!commands) throw new Error('expected command tool group');
-		expect(store.hiddenToolTypes).toEqual(commands.toolTypes);
-		expect(store.areToolTypesHidden(commands.toolTypes)).toBe(true);
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		if (!bash) throw new Error('expected Bash tool group');
+		expect(store.hiddenToolTypes).toEqual(bash.toolTypes);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		store.destroy();
+	});
+
+	it('keeps Bash and Exec visibility independent', () => {
+		const store = createLocalSettingsStore();
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		const exec = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'exec');
+		if (!bash || !exec) throw new Error('expected Bash and Exec tool groups');
+
+		store.setToolTypesHidden(bash.toolTypes, true);
+
+		expect(store.hiddenToolTypes).toEqual(bash.toolTypes);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		expect(store.areToolTypesHidden(exec.toolTypes)).toBe(false);
+
+		store.setToolTypesHidden(exec.toolTypes, true);
+		store.setToolTypesHidden(bash.toolTypes, false);
+
+		expect(store.hiddenToolTypes).toEqual(exec.toolTypes);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(false);
+		expect(store.areToolTypesHidden(exec.toolTypes)).toBe(true);
+		store.destroy();
+	});
+
+	it('preserves legacy combined command selections across the split', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				hiddenToolTypes: [
+					'bash-tool-use',
+					'exec-tool-use',
+					'wait-tool-use',
+					'write-stdin-tool-use',
+				],
+			}),
+		);
+
+		const store = createLocalSettingsStore();
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		const exec = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'exec');
+		if (!bash || !exec) throw new Error('expected Bash and Exec tool groups');
+
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		expect(store.areToolTypesHidden(exec.toolTypes)).toBe(true);
 		store.destroy();
 	});
 
@@ -240,24 +449,93 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
+	it('persists search result sorting and rejects invalid values', () => {
+		const store = createLocalSettingsStore();
+		for (const sort of ['activity', 'created', 'relevance'] as const) {
+			store.set('sidebarSearchResultSort', sort);
+			const restored = createLocalSettingsStore();
+			expect(restored.sidebarSearchResultSort).toBe(sort);
+			restored.destroy();
+		}
+		store.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarSearchResultSort: 'oldest' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.sidebarSearchResultSort).toBe('relevance');
+		malformed.destroy();
+	});
+
+	it('persists every sidebar inactivity duration and rejects malformed values', () => {
+		for (const duration of SIDEBAR_INACTIVITY_DURATION_VALUES) {
+			const store = createLocalSettingsStore();
+			store.set('sidebarInactivityDuration', duration);
+
+			expect(
+				JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+			).toMatchObject({ sidebarInactivityDuration: duration });
+
+			const restored = createLocalSettingsStore();
+			expect(restored.sidebarInactivityDuration).toBe(duration);
+			store.destroy();
+			restored.destroy();
+		}
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarInactivityDuration: '6-days' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.sidebarInactivityDuration).toBe('3-days');
+		malformed.destroy();
+	});
+
+	it('persists activity grouping and rejects the unused project-and-time token', () => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarGrouping', 'activity');
+
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarGrouping).toBe('activity');
+		store.destroy();
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarGrouping: 'project-and-time' }),
+		);
+		const oldToken = createLocalSettingsStore();
+		expect(oldToken.sidebarGrouping).toBe('project-and-activity');
+		oldToken.destroy();
+	});
+
 	it('persists max chat width', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
-		store.set('sidebarGroupByProject', false);
+		store.set('sidebarGrouping', 'project-and-activity');
+		store.set('sidebarInactivityDuration', '2-weeks');
 		store.set('sidebarGroupNestedProjectPaths', true);
-		store.set('sidebarCompactChatItems', true);
+		store.set('sidebarChatItemLayout', 'compact');
 		store.set('showQuickCommitTray', false);
+		store.toggle('reduceMotion');
 
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
 			chatMaxWidth: 'medium',
-			sidebarGroupByProject: false,
+			sidebarGrouping: 'project-and-activity',
+			sidebarInactivityDuration: '2-weeks',
 			sidebarGroupNestedProjectPaths: true,
-			sidebarCompactChatItems: true,
+			sidebarChatItemLayout: 'compact',
 			showQuickCommitTray: false,
+			reduceMotion: true,
 		});
+
+		const restored = createLocalSettingsStore();
+		expect(restored.reduceMotion).toBe(true);
+		restored.destroy();
 
 		store.destroy();
 	});
@@ -272,13 +550,18 @@ describe('LocalSettingsStore', () => {
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
 				overlayBackdropEffects: false,
-				sidebarGroupByProject: true,
+				sidebarGrouping: 'project',
+				sidebarInactivityDuration: '1-month',
 				sidebarGroupNestedProjectPaths: true,
-				sidebarCompactChatItems: true,
+				sidebarChatItemLayout: 'compact',
 				showQuickCommitTray: false,
-				textEditorOpenPlacement: 'source',
-				imageViewerOpenPlacement: 'sidebar',
-				markdownViewerOpenPlacement: 'main',
+				allowDirectChats: true,
+				steerWithCtrlEnter: false,
+				chatListAutohide: true,
+				chatListDock: 'right',
+				textEditorOpenPlacement: 'same-window',
+				imageViewerOpenPlacement: 'new-window',
+				markdownViewerOpenPlacement: 'same-window',
 			}),
 		);
 		window.dispatchEvent(
@@ -290,14 +573,18 @@ describe('LocalSettingsStore', () => {
 
 		expect(secondStore.chatMaxWidth).toBe('small');
 		expect(secondStore.overlayBackdropEffects).toBe(false);
-		expect(secondStore.sidebarGroupByProject).toBe(true);
+		expect(secondStore.sidebarGrouping).toBe('project');
+		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
-		expect(secondStore.sidebarCompactChatItems).toBe(true);
+		expect(secondStore.sidebarChatItemLayout).toBe('compact');
 		expect(secondStore.showQuickCommitTray).toBe(false);
-		expect(secondStore.textEditorOpenPlacement).toBe('source');
-		expect(secondStore.imageViewerOpenPlacement).toBe('sidebar');
-		expect(secondStore.markdownViewerOpenPlacement).toBe('main');
-
+		expect(secondStore.allowDirectChats).toBe(true);
+		expect(secondStore.steerWithCtrlEnter).toBe(false);
+		expect(secondStore.chatListAutohide).toBe(true);
+		expect(secondStore.chatListDock).toBe('right');
+		expect(secondStore.textEditorOpenPlacement).toBe('same-window');
+		expect(secondStore.imageViewerOpenPlacement).toBe('new-window');
+		expect(secondStore.markdownViewerOpenPlacement).toBe('same-window');
 		firstStore.destroy();
 		secondStore.destroy();
 	});
@@ -314,6 +601,83 @@ describe('LocalSettingsStore', () => {
 
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 
+		store.destroy();
+	});
+
+	it('defaults the snippet trigger and persists valid values', () => {
+		const store = createLocalSettingsStore();
+		expect(store.snippetTrigger).toBe(';;');
+
+		store.set('snippetTrigger', '!!');
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ snippetTrigger: '!!' });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.snippetTrigger).toBe('!!');
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('coerces invalid snippet triggers on set and on parse', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('snippetTrigger', ';');
+		expect(store.snippetTrigger).toBe(';;');
+		store.set('snippetTrigger', 'ab');
+		expect(store.snippetTrigger).toBe(';;');
+		store.set('snippetTrigger', ';@');
+		expect(store.snippetTrigger).toBe(';;');
+		store.set('snippetTrigger', ';;ok');
+		expect(store.snippetTrigger).toBe(';;ok');
+
+		store.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ snippetTrigger: 'way-too-long' }),
+		);
+		const restored = createLocalSettingsStore();
+		expect(restored.snippetTrigger).toBe(';;');
+		restored.destroy();
+	});
+
+	it('defaults, persists, and restores completion sound preferences', () => {
+		const store = createLocalSettingsStore();
+		expect(store.completionSoundMode).toBe('off');
+		expect(store.completionSoundVolume).toBe(0.7);
+		expect(store.completionSoundVisibility).toBe('unfocused');
+
+		store.set('completionSoundMode', 'custom');
+		store.set('completionSoundVolume', 0.45);
+		store.set('completionSoundVisibility', 'always');
+		store.set('customCompletionSoundName', 'done.ogg');
+
+		const restored = createLocalSettingsStore();
+		expect(restored.completionSoundMode).toBe('custom');
+		expect(restored.completionSoundVolume).toBe(0.45);
+		expect(restored.completionSoundVisibility).toBe('always');
+		expect(restored.customCompletionSoundName).toBe('done.ogg');
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('sanitizes malformed completion sound preferences', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				completionSoundMode: 'loud',
+				completionSoundVolume: 3,
+				completionSoundVisibility: 'sometimes',
+				customCompletionSoundName: 42,
+			}),
+		);
+		const store = createLocalSettingsStore();
+		expect(store.completionSoundMode).toBe('off');
+		expect(store.completionSoundVolume).toBe(1);
+		expect(store.completionSoundVisibility).toBe('unfocused');
+		expect(store.customCompletionSoundName).toBeNull();
 		store.destroy();
 	});
 });

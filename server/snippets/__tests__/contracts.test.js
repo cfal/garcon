@@ -3,10 +3,14 @@ import { runInNewContext } from 'node:vm';
 import {
   SNIPPET_ARGUMENTS_MAX_LENGTH,
   SNIPPET_EXPANDED_MAX_LENGTH,
+  compareSnippetShortNames,
   normalizeExpandSnippetRequest,
   normalizeExpandSnippetResponse,
+  normalizeSnippetArgumentsInput,
   normalizeSnippetDefinitionInput,
   normalizeSnippetsSnapshot,
+  hasSameSnippetTemplateTokenSignature,
+  snippetTemplateTokenSignature,
   snippetTemplateUsesArguments,
 } from '../../../common/snippets.ts';
 
@@ -15,6 +19,7 @@ function snippet(overrides = {}) {
     id: 'snippet-a',
     shortName: 'review_api',
     template: '\nReview {{arguments}}\n',
+    defaultArguments: '',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -22,42 +27,116 @@ function snippet(overrides = {}) {
 }
 
 describe('snippet contracts', () => {
-  it('preserves valid names and multiline template whitespace without normalization', () => {
+  it('compares names case-insensitively with numeric segments', () => {
+    const names = ['Zulu', 'alpha-10', 'Alpha-2', 'beta'];
+
+    expect(names.sort(compareSnippetShortNames)).toEqual(['Alpha-2', 'alpha-10', 'beta', 'Zulu']);
+  });
+
+  it('preserves template and default argument whitespace without normalization', () => {
     expect(
       normalizeSnippetDefinitionInput({
         shortName: 'review_api-2',
         template: '\nReview {{arguments}}\n',
+        defaultArguments: '\n staged changes \n',
       }),
     ).toEqual({
       shortName: 'review_api-2',
       template: '\nReview {{arguments}}\n',
+      defaultArguments: '\n staged changes \n',
     });
-    for (const shortName of [
-      'Review',
-      ' review',
-      'review me',
-      '_review',
-      'review.',
-      '',
-    ]) {
+    for (const shortName of ['Review', ' review', 'review me', '_review', 'review.', '']) {
       expect(
-        normalizeSnippetDefinitionInput({ shortName, template: 'text' }),
+        normalizeSnippetDefinitionInput({
+          shortName,
+          template: 'text',
+          defaultArguments: '',
+        }),
       ).toBeNull();
     }
 
     const inherited = Object.create({ shortName: 'review_api' });
     inherited.template = 'text';
+    inherited.defaultArguments = '';
     expect(normalizeSnippetDefinitionInput(inherited)).toBeNull();
   });
 
-  it('rejects duplicate IDs, duplicate names, and malformed revisions', () => {
+  it('requires a bounded default and an active arguments token for nonempty values', () => {
     expect(
-      normalizeSnippetsSnapshot({ revision: -1, snippets: [] }),
-    ).toBeNull();
+      normalizeSnippetDefinitionInput({
+        shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: '',
+      }),
+    ).not.toBeNull();
+    expect(
+      normalizeSnippetDefinitionInput({
+        shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH),
+      })?.defaultArguments,
+    ).toHaveLength(SNIPPET_ARGUMENTS_MAX_LENGTH);
+    for (const definition of [
+      { shortName: 'review', template: 'Review {{arguments}}' },
+      {
+        shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: null,
+      },
+      {
+        shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: 1,
+      },
+      {
+        shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: [],
+      },
+      {
+        shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: {},
+      },
+      { shortName: 'review', template: 'Review', defaultArguments: 'changes' },
+      {
+        shortName: 'review',
+        template: 'Review \\{{arguments}}',
+        defaultArguments: 'changes',
+      },
+      {
+        shortName: 'review',
+        template: 'Review {{ arguments }}',
+        defaultArguments: 'changes',
+      },
+      {
+        shortName: 'review',
+        template: 'Review {{Arguments}}',
+        defaultArguments: 'changes',
+      },
+      {
+        shortName: 'review',
+        template: 'Review {{arguments}}',
+        defaultArguments: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1),
+      },
+    ]) {
+      expect(normalizeSnippetDefinitionInput(definition)).toBeNull();
+    }
+  });
+
+  it('rejects duplicate IDs, duplicate names, and malformed revisions', () => {
+    expect(normalizeSnippetsSnapshot({ revision: -1, snippets: [] })).toBeNull();
     expect(
       normalizeSnippetsSnapshot({
         revision: 1,
         snippets: [snippet(), snippet({ id: 'snippet-b' })],
+      }),
+    ).toBeNull();
+    const { defaultArguments: _defaultArguments, ...preDefaultArgumentsSnippet } = snippet();
+    expect(
+      normalizeSnippetsSnapshot({
+        revision: 1,
+        snippets: [preDefaultArgumentsSnippet],
       }),
     ).toBeNull();
     expect(
@@ -68,6 +147,19 @@ describe('snippet contracts', () => {
     ).toBeNull();
   });
 
+  it('normalizes snapshots into canonical name order', () => {
+    expect(
+      normalizeSnippetsSnapshot({
+        revision: 1,
+        snippets: [
+          snippet({ id: 'snippet-10', shortName: 'item-10' }),
+          snippet({ id: 'snippet-2', shortName: 'item-2' }),
+          snippet({ id: 'snippet-a', shortName: 'alpha' }),
+        ],
+      })?.snippets.map(({ shortName }) => shortName),
+    ).toEqual(['alpha', 'item-2', 'item-10']);
+  });
+
   it('accepts plain records from another JavaScript realm', () => {
     const snapshot = runInNewContext(`({
       revision: 1,
@@ -75,6 +167,7 @@ describe('snippet contracts', () => {
         id: 'snippet-a',
         shortName: 'review_api',
         template: 'Review {{arguments}}',
+        defaultArguments: '',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z'
       }]
@@ -86,30 +179,108 @@ describe('snippet contracts', () => {
     });
   });
 
-  it('preserves raw arguments and accepts only explicit expansion contexts', () => {
+  it('normalizes default and explicit argument variants', () => {
+    expect(normalizeSnippetArgumentsInput({ type: 'default' })).toEqual({
+      type: 'default',
+    });
+    expect(normalizeSnippetArgumentsInput({ type: 'default', value: 'ignored' })).toEqual({
+      type: 'default',
+    });
+    expect(
+      normalizeSnippetArgumentsInput({
+        type: 'value',
+        value: ' first\nsecond ',
+      }),
+    ).toEqual({ type: 'value', value: ' first\nsecond ' });
+    for (const value of [
+      '',
+      null,
+      { type: 'value' },
+      { type: 'value', value: 1 },
+      { type: 'unknown', value: '' },
+      { type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
+    ]) {
+      expect(normalizeSnippetArgumentsInput(value)).toBeNull();
+    }
+  });
+
+  it('preserves raw explicit arguments and accepts only explicit expansion contexts', () => {
+    const registeredChatId = '1787471053739199';
+    const prospectiveChatId = '1787471053739200';
     expect(
       normalizeExpandSnippetRequest({
         shortName: 'review_api',
-        arguments: 'first  line\nsecond',
-        context: { type: 'chat', chatId: ' 123 ' },
+        arguments: { type: 'value', value: 'first  line\nsecond' },
+        context: {
+          type: 'chat',
+          chatId: registeredChatId,
+          projectPath: '/ignored',
+        },
       }),
     ).toEqual({
       shortName: 'review_api',
-      arguments: 'first  line\nsecond',
-      context: { type: 'chat', chatId: '123' },
+      arguments: { type: 'value', value: 'first  line\nsecond' },
+      context: { type: 'chat', chatId: registeredChatId },
     });
     expect(
       normalizeExpandSnippetRequest({
         shortName: 'review_api',
-        arguments: '',
-        context: { type: 'unknown', projectPath: '/repo' },
+        arguments: { type: 'default' },
+        context: {
+          type: 'new-chat',
+          chatId: prospectiveChatId,
+          projectPath: ' /repo ',
+        },
+      }),
+    ).toEqual({
+      shortName: 'review_api',
+      arguments: { type: 'default' },
+      context: {
+        type: 'new-chat',
+        chatId: prospectiveChatId,
+        projectPath: '/repo',
+      },
+    });
+    for (const context of [
+      { type: 'project', projectPath: '/repo' },
+      { type: 'unknown', chatId: prospectiveChatId, projectPath: '/repo' },
+      { type: 'chat', chatId: '123' },
+      { type: 'chat' },
+      { type: 'new-chat', chatId: '123', projectPath: '/repo' },
+      { type: 'new-chat', chatId: prospectiveChatId, projectPath: ' ' },
+      { type: 'new-chat', chatId: prospectiveChatId },
+    ]) {
+      expect(
+        normalizeExpandSnippetRequest({
+          shortName: 'review_api',
+          arguments: { type: 'value', value: '' },
+          context,
+        }),
+      ).toBeNull();
+    }
+    expect(
+      normalizeExpandSnippetRequest({
+        shortName: 'review_api',
+        arguments: {
+          type: 'value',
+          value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1),
+        },
+        context: {
+          type: 'new-chat',
+          chatId: prospectiveChatId,
+          projectPath: '/repo',
+        },
       }),
     ).toBeNull();
     expect(
       normalizeExpandSnippetRequest({
         shortName: 'review_api',
-        arguments: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1),
-        context: { type: 'project', projectPath: '/repo' },
+        arguments: '',
+        context: {
+          type: 'new-chat',
+          chatId: prospectiveChatId,
+          projectPath: '/repo',
+        },
       }),
     ).toBeNull();
   });
@@ -119,6 +290,28 @@ describe('snippet contracts', () => {
     expect(snippetTemplateUsesArguments('{{project_path}}/{{arguments}}')).toBe(true);
     expect(snippetTemplateUsesArguments('Review \\{{arguments}}')).toBe(false);
     expect(snippetTemplateUsesArguments('{{ arguments }} {{Arguments}}')).toBe(false);
+  });
+
+  it('captures ordered active and escaped template-token signatures', () => {
+    const template = '{{arguments}} \\{{project_path}} {{arguments}} {{chat_id}}';
+    expect(snippetTemplateTokenSignature(template)).toEqual([
+      'active:arguments',
+      'escaped:project_path',
+      'active:arguments',
+      'active:chat_id',
+    ]);
+    expect(hasSameSnippetTemplateTokenSignature(
+      template,
+      'Prefix {{arguments}} \\{{project_path}} {{arguments}} {{chat_id}} suffix',
+    )).toBe(true);
+    expect(hasSameSnippetTemplateTokenSignature(
+      template,
+      '{{arguments}} {{project_path}} {{arguments}} {{chat_id}}',
+    )).toBe(false);
+    expect(hasSameSnippetTemplateTokenSignature(
+      template,
+      '{{arguments}} \\{{project_path}} {{chat_id}} {{arguments}}',
+    )).toBe(false);
   });
 
   it('validates expansion response identity and output shape', () => {

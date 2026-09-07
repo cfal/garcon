@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
-	import { setFileSessions, setLocalSettings } from '$lib/context';
+	import {
+		setFileSessions,
+		setLocalSettings,
+		setNotifications,
+		setWorkspaceLayout,
+	} from '$lib/context';
 	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import {
 		FileSessionRegistry,
@@ -8,8 +13,10 @@
 	} from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
+	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 	import FileSurface from '../FileSurface.svelte';
 
 	let {
@@ -24,6 +31,8 @@
 		onRefresh = () => undefined,
 		onCheckFreshness = () => undefined,
 		onOpen = () => {},
+		onClose,
+		closeDisabled = false,
 	}: {
 		presentation: PresentationHostId;
 		rendererMode?: 'code' | 'markdown' | 'image';
@@ -36,6 +45,8 @@
 		onRefresh?: (sessionId: string) => void;
 		onCheckFreshness?: (sessionId: string) => void;
 		onOpen?: (request: FileOpenRequest) => void;
+		onClose?: () => void;
+		closeDisabled?: boolean;
 	} = $props();
 	const initial = untrack(() => ({
 		rendererMode,
@@ -48,10 +59,12 @@
 	}));
 	const frameBridge = new SurfaceFrameBridge();
 	const localSettings = createLocalSettingsStore();
+	const notifications = createNotificationsStore();
+	const workspaceLayout = createWorkspaceLayoutStore();
 
 	const fileSessions = new FileSessionRegistry({
 		getIsMobile: () => presentation === 'mobile',
-		getDefaultPlacement: () => 'dialog',
+		getDefaultPlacement: () => ({ type: 'dialog' }),
 		getEditorSettings: () => ({
 			wordWrap: false,
 			showLineNumbers: true,
@@ -131,7 +144,9 @@
 	setSurfaceFrameBridge(() => frameBridge);
 	setFileSessions(fileSessions);
 	setLocalSettings(localSettings);
+	setNotifications(notifications);
+	setWorkspaceLayout(workspaceLayout);
 	onDestroy(() => localSettings.destroy());
 </script>
 
-<FileSurface {session} {presentation} />
+<FileSurface {session} {presentation} {onClose} {closeDisabled} />

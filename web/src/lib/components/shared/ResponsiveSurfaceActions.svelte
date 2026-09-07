@@ -5,6 +5,7 @@
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
+		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import { cn } from '$lib/utils/cn';
@@ -12,6 +13,7 @@
 
 	export interface ResponsiveSurfaceAction {
 		id: string;
+		renderKey?: string;
 		label: string;
 		title?: string;
 		icon: Component<{ class?: string }>;
@@ -29,12 +31,18 @@
 		actions,
 		menuLabel,
 		menuContent,
+		menuLeadingContent,
+		menuIcon: MenuIcon = Ellipsis,
+		menuButtonClass,
 		fixed,
 		class: className,
 	}: {
 		actions: readonly ResponsiveSurfaceAction[];
 		menuLabel: string;
 		menuContent?: Snippet<[readonly ResponsiveSurfaceAction[]]>;
+		menuLeadingContent?: Snippet;
+		menuIcon?: Component<{ class?: string }>;
+		menuButtonClass?: string;
 		fixed?: Snippet;
 		class?: string;
 	} = $props();
@@ -43,6 +51,7 @@
 	let root = $state<HTMLDivElement | null>(null);
 	let fixedControl = $state<HTMLDivElement | null>(null);
 	let measurementRail = $state<HTMLDivElement | null>(null);
+	let menuTrigger = $state<HTMLElement | null>(null);
 	let visibleActionIds = $state.raw<ReadonlySet<string> | null>(null);
 	const visibleActions = $derived(
 		actions.filter((action) =>
@@ -54,7 +63,8 @@
 			(action) => !(visibleActionIds ?? new Set(actions.map(({ id }) => id))).has(action.id),
 		),
 	);
-	const showMenu = $derived(Boolean(menuContent) || overflowActions.length > 0);
+	const hasPersistentMenuContent = $derived(Boolean(menuContent) || Boolean(menuLeadingContent));
+	const showMenu = $derived(hasPersistentMenuContent || overflowActions.length > 0);
 
 	function actionClass(action: ResponsiveSurfaceAction): string {
 		return cn(
@@ -67,6 +77,13 @@
 			(!action.variant || action.variant === 'ghost') &&
 				'text-muted-foreground hover:bg-accent hover:text-foreground',
 			action.buttonClass,
+		);
+	}
+
+	function menuClass(): string {
+		return cn(
+			'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+			menuButtonClass,
 		);
 	}
 
@@ -84,13 +101,13 @@
 				.querySelector<HTMLElement>('[data-surface-action-overflow-measure]')
 				?.getBoundingClientRect().width ?? 0;
 		const fixedWidth = fixedControl?.getBoundingClientRect().width ?? 0;
-		const fixedGap = fixedWidth > 0 && (actions.length > 0 || Boolean(menuContent)) ? gap : 0;
+		const fixedGap = fixedWidth > 0 && (actions.length > 0 || hasPersistentMenuContent) ? gap : 0;
 		visibleActionIds = selectVisibleSurfaceActionIds({
 			actions: actions.map(({ id, priority = 100 }) => ({ id, priority })),
 			availableWidth: Math.max(0, actionRoot.clientWidth - fixedWidth - fixedGap),
 			widths,
 			menuButtonWidth,
-			menuVisibility: menuContent ? 'persistent' : 'overflow',
+			menuVisibility: hasPersistentMenuContent ? 'persistent' : 'overflow',
 			gap,
 		});
 	}
@@ -115,6 +132,7 @@
 			.map(
 				({
 					id,
+					renderKey,
 					label,
 					title,
 					disabled,
@@ -125,7 +143,7 @@
 					iconClass,
 					buttonClass,
 				}) =>
-					`${id}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}:${buttonClass}`,
+					`${id}:${renderKey}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}:${buttonClass}`,
 			)
 			.join('|');
 		untrack(() => queueMicrotask(recompute));
@@ -165,24 +183,35 @@
 			{@render fixed()}
 		</div>
 	{/if}
-	{#each visibleActions as action (action.id)}
+	{#each visibleActions as action (action.renderKey ?? action.id)}
 		{@render actionButton(action)}
 	{/each}
 	{#if showMenu}
 		<DropdownMenu>
 			<DropdownMenuTrigger
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				bind:ref={menuTrigger}
+				class={menuClass()}
 				aria-label={menuLabel}
 				title={menuLabel}
 				data-responsive-surface-menu-trigger
 			>
-				<Ellipsis class="h-4 w-4" />
+				<MenuIcon class="h-4 w-4" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" class={menuContent ? 'w-64' : 'w-56'}>
+			<DropdownMenuContent
+				align="end"
+				class={hasPersistentMenuContent ? 'w-64' : 'w-56'}
+				getFocusReturnTarget={() => menuTrigger}
+			>
+				{#if menuLeadingContent}
+					{@render menuLeadingContent()}
+					{#if overflowActions.length > 0 || menuContent}
+						<DropdownMenuSeparator />
+					{/if}
+				{/if}
 				{#if menuContent}
 					{@render menuContent(overflowActions)}
 				{:else}
-					{#each overflowActions as action (action.id)}
+					{#each overflowActions as action (action.renderKey ?? action.id)}
 						{@const Icon = action.icon}
 						<DropdownMenuItem
 							variant={action.variant === 'destructive' ? 'destructive' : undefined}
@@ -204,16 +233,11 @@
 		class="pointer-events-none invisible absolute -left-[10000px] top-0 flex items-center gap-1"
 		aria-hidden="true"
 	>
-		{#each actions as action (action.id)}
+		{#each actions as action (action.renderKey ?? action.id)}
 			{@render actionButton(action, true)}
 		{/each}
-		<button
-			type="button"
-			tabindex="-1"
-			class="inline-flex h-8 w-8 items-center justify-center rounded-md"
-			data-surface-action-overflow-measure
-		>
-			<Ellipsis class="h-4 w-4" />
+		<button type="button" tabindex="-1" class={menuClass()} data-surface-action-overflow-measure>
+			<MenuIcon class="h-4 w-4" />
 		</button>
 	</div>
 </div>

@@ -13,7 +13,7 @@ describe('AgentSwitchRow', () => {
 
 		expect(screen.getByText('Continued from Codex under Claude')).toBeTruthy();
 		expect(screen.getByText('(claude-sonnet-4-6)')).toBeTruthy();
-		expect(screen.getByText('prior tool state not carried over')).toBeTruthy();
+		expect(screen.getByText('new agent session; earlier context is carried as history')).toBeTruthy();
 	});
 
 	it('falls back to the raw agent id for unknown agents and omits an absent model', () => {

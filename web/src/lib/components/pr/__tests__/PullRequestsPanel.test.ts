@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequestSummary } from '$lib/api/pull-requests';
-import { PullRequestsStore } from '$lib/stores/pull-requests.svelte';
+import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
@@ -63,9 +63,11 @@ describe('PullRequestsPanel container presentation', () => {
 		const panel = container.querySelector('[data-pr-panel]');
 		const list = container.querySelector('[data-pr-list]');
 		const detail = container.querySelector('[data-pr-detail]');
+		const listViewport = list?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
 		expect(panel).toBeTruthy();
 		expect(list).toBeTruthy();
 		expect(detail).toBeTruthy();
+		expect(listViewport?.dataset.workspaceScrollRegion).toBe('contextual');
 		if (!panel || !list || !detail) return;
 
 		ResizeObserverHarness.emit(panel, 1_100);

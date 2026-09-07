@@ -1,22 +1,29 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
+import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import { CLAUDE_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
+  type AgentChatReference,
   type AgentHost,
   type AgentIntegration,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
+import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
-import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
-import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
+import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
+import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
+import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
+import {
+  createHistoryImport,
+  createNativeHistoryImport,
+} from '@garcon/server-agent-common/native-session/native-history-import';
 import { createClaudeConfig } from './config.js';
 import { getClaudeAuthStatus } from './agents/claude/claude-auth.js';
 import {
@@ -29,17 +36,18 @@ import {
   buildClaudeHostEnvironment,
 } from './agents/claude/endpoint-runtime.js';
 import { ClaudeExecution } from './agents/claude/execution.js';
-import { rewriteClaudeForkTranscriptEntry } from './agents/claude/fork-transcript.js';
 import {
-  getClaudePreviewFromNativePath,
-  loadClaudeChatMessagePage,
-  loadClaudeChatMessages,
-} from './agents/claude/history-loader.js';
+  claudeForkSemanticDigest,
+  projectClaudeForkEntry,
+  transformClaudeForkTranscript,
+} from './agents/claude/fork-transcript.js';
+import { loadClaudeChatMessages } from './agents/claude/history-loader.js';
 import {
   createClaudeNativePath,
   resolveClaudeNativePath,
 } from './agents/claude/native-path.js';
 import { ClaudeSlashCommandDiscovery } from './agents/claude/slash-command-discovery.js';
+import { createClaudeNativeActivityProbe } from './agents/claude/native-activity.js';
 
 const CLAUDE_DESCRIPTOR = {
   id: 'claude',
@@ -61,26 +69,28 @@ const CLAUDE_DESCRIPTOR = {
 
 export default class ClaudeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'claude';
-  static readonly apiVersion = 2 as const;
-  static readonly transcriptIndex = {
-    apiVersion: 1,
-    moduleUrl: resolveAgentStandaloneEntrypoint({
-      integrationId: 'claude',
-      name: 'transcript-index-source',
-      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
-    }),
-  } as const;
-
+  static readonly apiVersion = 5 as const;
   readonly descriptor = CLAUDE_DESCRIPTOR;
+  readonly attachments = {
+    fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
+  } as const;
   readonly execution;
-  readonly transcript;
+  readonly legacyHistoryImport;
+  readonly nativeHistoryImport;
+  readonly nativeActivity;
+  readonly nativeSessions;
+  readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
+  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands: NonNullable<AgentIntegration['commands']>;
+  readonly compaction = null;
   readonly forking;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
+  readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
@@ -88,7 +98,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     const config = createClaudeConfig(host.environment);
     const logger = createScopedAgentLogger(host.logger, 'claude');
     const nativeSessions = createPathNativeSessionCodec('claude');
-    const versionProbe = new ClaudeCliVersionProbe(logger);
+    const versionProbe = new ClaudeCliVersionProbe();
     const runtime = new ClaudeCliRuntime({
       binary: config.binary,
       logger,
@@ -100,7 +110,11 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       logger,
       environment: () => claudeLoginEnvironment(config),
     });
-    const commandDiscovery = new ClaudeSlashCommandDiscovery(config.binary, logger);
+    const commandDiscovery = new ClaudeSlashCommandDiscovery(
+      config.binary,
+      () => buildClaudeHostEnvironment(config),
+      logger,
+    );
 
     this.settings = createVersionedSettings({
       ownerId: 'claude',
@@ -112,24 +126,55 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         label: 'Thinking',
         labelKey: 'thinking',
         options: [
-          { value: 'auto', label: 'Auto', labelKey: 'automatic' },
-          { value: 'on', label: 'On', labelKey: 'enabled' },
-          { value: 'off', label: 'Off', labelKey: 'disabled' },
+          {
+            value: 'auto',
+            label: 'Auto',
+            labelKey: 'automatic',
+            description: 'Lets Claude decide when extended thinking is useful.',
+            descriptionKey: 'thinkingAutomatic',
+          },
+          {
+            value: 'on',
+            label: 'On',
+            labelKey: 'enabled',
+            description: 'Uses extended thinking for every response.',
+            descriptionKey: 'thinkingEnabled',
+          },
+          {
+            value: 'off',
+            label: 'Off',
+            labelKey: 'disabled',
+            description: 'Answers without extended thinking.',
+            descriptionKey: 'thinkingDisabled',
+          },
         ],
       }],
     });
-    this.execution = new ClaudeExecution(
+    const providerExecution = new ClaudeExecution(
       host,
       runtime,
       nativeSessions,
       logger,
       config,
     );
-    this.transcript = createClaudeTranscript({
+    this.sessionConfiguration = {
+      apply: (agentSessionId, configuration) => (
+        providerExecution.applySessionConfiguration(agentSessionId, configuration)
+      ),
+    };
+    this.projectPathUpdates = {
+      prepare: (request) => providerExecution.prepareProjectPathUpdate(request),
+    };
+    const nativeEvidence = createClaudeNativeEvidence({
       nativeSessions,
       configHomeDir: config.configHomeDir,
       logger,
     });
+    this.nativeSessions = nativeEvidence;
+    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
+    this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
+    this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CLAUDE_MODELS.DEFAULT,
@@ -159,13 +204,18 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         return commandDiscovery.discover(projectPath);
       },
     };
-    this.forking = createJsonlForking({
-      host,
-      supportsWhileRunning: true,
-      transcript: this.transcript,
+    this.forking = createJsonlNativeForking({
+      nativeEvidence,
       nativeSessions,
-      rewriteEntry: rewriteClaudeForkTranscriptEntry,
+      rewriteEntry: projectClaudeForkEntry,
+      transformEntries: transformClaudeForkTranscript,
+      semanticDigest: claudeForkSemanticDigest,
+      allowUnmaterializedWholeSession: true,
     });
+    this.steering = {
+      captureTarget: request => runtime.captureSteerTarget(request.agentSessionId),
+      steer: request => runtime.steer(request),
+    };
     this.endpoints = {
       async validate(selection) {
         if (selection.protocol !== 'anthropic-messages') {
@@ -192,7 +242,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
           return await runSingleQuery(request.prompt, {
             cwd: request.projectPath,
             model: request.model,
-            ...request.settings.values,
+            ...singleQueryRuntimeOptions(request),
             envOverrides: {
               ...buildClaudeHostEnvironment(config),
               ...endpointRuntime?.envOverrides,
@@ -206,7 +256,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
-        runtime.shutdown();
+        await runtime.shutdown();
         login.stop();
         commandDiscovery.clear();
       },
@@ -214,12 +264,14 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   }
 }
 
-function createClaudeTranscript(options: {
+function createClaudeNativeEvidence(options: {
   readonly nativeSessions: ReturnType<typeof createPathNativeSessionCodec>;
   readonly configHomeDir: () => string | null;
   readonly logger: AgentHost['logger'];
-}): AgentTranscript {
-  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+}): AgentNativeEvidenceSource & {
+  readonly loadLegacy: AgentNativeEvidenceSource['load'];
+} {
+  const reference = (chat: AgentChatReference) => {
     const native = options.nativeSessions.decode(chat.nativeSession);
     return {
       projectPath: chat.projectPath,
@@ -227,7 +279,7 @@ function createClaudeTranscript(options: {
       nativePath: native.path,
     };
   };
-  const derivedPath = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+  const derivedPath = async (chat: AgentChatReference) => {
     const value = reference(chat);
     return value.nativePath ?? (value.agentSessionId
       ? createClaudeNativePath(chat.projectPath, value.agentSessionId, {
@@ -235,19 +287,6 @@ function createClaudeTranscript(options: {
           logger: options.logger,
         })
       : null);
-  };
-  const loadMessages = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
-    loadClaudeChatMessages(await derivedPath(chat), options.logger)
-  );
-  const resolveIndexSource = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-  ) => {
-    const nativePath = await derivedPath(chat);
-    return nativePath ? {
-      ownerId: 'claude',
-      schemaVersion: 1,
-      value: { nativePath },
-    } as const : null;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -259,6 +298,7 @@ function createClaudeTranscript(options: {
         configHomeDir: options.configHomeDir() ?? undefined,
         logger: options.logger,
       });
+      if (!nativePath && chat.nativeSession) return chat.nativeSession;
       return options.nativeSessions.encode({
         path: nativePath,
         agentSessionId,
@@ -267,42 +307,40 @@ function createClaudeTranscript(options: {
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async loadPage({ chat, page, signal }) {
-      signal.throwIfAborted();
-      return loadClaudeChatMessagePage(
-        await derivedPath(chat),
-        page.limit,
-        page.offset,
-        options.logger,
-      );
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
       const nativePath = await derivedPath(chat);
-      if (!nativePath) return null;
-      const preview = await getClaudePreviewFromNativePath(nativePath, options.logger);
-      if (!preview) return null;
+      if (!nativePath) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Claude native transcript has no selected session',
+          false,
+        );
+      }
       return {
-        firstMessage: preview.firstMessage,
-        lastMessage: preview.lastMessage,
-        createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
-        lastActivity: preview.lastActivity,
+        messages: await loadClaudeChatMessages(
+          nativePath,
+          options.logger,
+          { throwOnError: true },
+        ),
       };
     },
-    async revision({ chat, signal }) {
+    async loadLegacy({ chat, signal }) {
       signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      const nativePath = await derivedPath(chat);
+      if (!nativePath) return { messages: [] };
+      try {
+        return {
+          messages: await loadClaudeChatMessages(
+            nativePath,
+            options.logger,
+            { throwOnError: true },
+          ),
+        };
+      } catch (error) {
+        if (hasNodeErrorCode(error, 'ENOENT')) {
+          return { messages: [] };
+        }
+        throw error;
+      }
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

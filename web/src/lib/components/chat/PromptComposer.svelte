@@ -3,12 +3,12 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
+	import PromptComposerEditor from './PromptComposerEditor.svelte';
+	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
-	import LoadingStatus from './LoadingStatus.svelte';
-	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
 	import {
 		getComposerState,
-		getConversationLifecycle,
 		getLocalSettings,
 		getChatSessions,
 		getAppShell,
@@ -18,17 +18,30 @@
 		getNotifications,
 		getSnippets,
 		getTransientLayers,
+		getWorkspaceShortcuts,
+		getProjectResolution,
 	} from '$lib/context';
 	import {
-		CHAT_ATTACHMENT_ACCEPT,
+		chatAttachmentAccept,
 		ImageAttachmentState,
 		isImageAttachment,
-		isSupportedChatAttachment,
+		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
-	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer/composer-shortcuts.js';
+	import {
+		resolveComposerKeydownAction,
+		canSubmitComposer,
+		type ComposerEnterAction,
+	} from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
+	import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
+	import {
+		COMPOSER_DEFAULT_HEIGHT,
+		COMPOSER_MAX_HEIGHT,
+		COMPOSER_MIN_HEIGHT,
+		PromptComposerHeightState,
+	} from './prompt-composer-height-state.svelte.js';
 	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
@@ -37,8 +50,8 @@
 		CHAT_DOCK_SHELL_BASE_CLASS,
 		CHAT_DOCK_SURFACE_CLASS,
 		CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS,
-		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
 		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
+		chatDockFrameClass,
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/composer/file-mentions.js';
 	import {
@@ -57,61 +70,44 @@
 		setLocalStorageItem,
 	} from '$lib/utils/local-persistence';
 	import FileText from '@lucide/svelte/icons/file-text';
+	import FileVideo from '@lucide/svelte/icons/file-video';
+	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import X from '@lucide/svelte/icons/x';
-	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-	import type { AgentSettingDescriptor } from '$shared/agent-integration';
-	import type { JsonValue } from '$shared/json';
-	import type { GitQuickSummaryReady } from '$lib/api/git.js';
-	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-	} from '$lib/components/model-selector/model-selector-types';
-	import type { Snippet, SnippetExpansionContext } from '$shared/snippets';
+	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
-
-	interface Props {
-		onsubmit: () => void;
-		onModelChange?: (selection: ModelSelectorChange) => void;
-		onPermissionModeChange?: (mode: PermissionMode) => void;
-		onThinkingModeChange?: (mode: ThinkingMode) => void;
-		onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
-		onAbort?: (() => void) | null;
-		quickCommitTrayVisible?: boolean;
-		quickCommitSummary?: GitQuickSummaryReady | null;
-		quickCommitRefreshing?: boolean;
-		quickCommitError?: string | null;
-		quickCommitBranchSelector?: GitQuickBranchSelectorControls | null;
-		onQuickCommit?: (() => void) | null;
-		// False when the composer is mounted but hidden (e.g. the Git tab is
-		// active). Focus requests must not be consumed while hidden, since
-		// focusing a display:none textarea is a silent no-op.
-		isVisible?: boolean;
-	}
+	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
+	import ResendCandidateChips from './ResendCandidateChips.svelte';
+	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
+	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
+	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
+	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
+	import type { PromptComposerProps } from './prompt-composer-props.js';
+	import ProjectAvailabilityNotice from '$lib/components/workspace/ProjectAvailabilityNotice.svelte';
 
 	let {
 		onsubmit,
+		onSteerPreferredSubmit,
 		onModelChange,
 		onPermissionModeChange,
 		onThinkingModeChange,
 		onAgentSettingChange,
-		onAbort = null,
-		quickCommitTrayVisible = false,
-		quickCommitSummary = null,
-		quickCommitRefreshing = false,
-		quickCommitError = null,
-		quickCommitBranchSelector = null,
-		onQuickCommit = null,
+		resendCandidates = [],
+		onExcludeResendCandidate,
+		directAdmissionPending = false,
+		requiresQueuedSubmission = false,
 		isVisible = true,
-	}: Props = $props();
-
+		isPresented: isPresentedOverride,
+		composerEditorOpenRequestId = 0,
+		onChooseProjectFolder,
+	}: PromptComposerProps = $props();
+	const isPresented = $derived(isPresentedOverride ?? isVisible);
 	const composerState = getComposerState();
-	const lifecycle = getConversationLifecycle();
 	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const sessions = getChatSessions();
@@ -121,6 +117,9 @@
 	const notifications = getNotifications();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
+	const workspaceShortcuts = getWorkspaceShortcuts();
+	const projectResolution = getProjectResolution();
+	const ui = new PromptComposerUiState();
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -131,27 +130,49 @@
 			snippetExpansion.cancel();
 			return true;
 		},
-		restoreFocus: () => void restoreComposerFocus(),
+		restoreFocus: returnComposerFocus,
 	});
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
-	let fileInput: HTMLInputElement | undefined = $state();
+	let expandedEditor: { open: () => boolean } | undefined = $state();
+	let destroyed = false;
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
-	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
-	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
+	let handledDraftAppendRequestId = 0;
+	const focusDelivery = new PromptComposerFocusDelivery();
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
-		return chat
-			? [chat.id, chat.status, chat.projectPath, chat.effectiveProjectKey].join('\u0000')
-			: '';
+		return chat ? [chat.id, chat.status, chat.projectPath].join('\u0000') : '';
 	});
+	const snippetContextHint = $derived(
+		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
+	);
+	const projectState = new PromptComposerProjectState({
+		get selectedChat() {
+			return sessions.selectedChat;
+		},
+		get completionDemand() {
+			return ui.showFileMenu || ui.showSlashMenu;
+		},
+		projectResolution,
+	});
+	const selectedProjectTarget = $derived(projectState.target);
+	const selectedProjectResolution = $derived(projectState.snapshot);
+	const completionProjectPath = $derived(projectState.completionProjectPath);
+	const canChooseProjectFolder = $derived(
+		Boolean(
+			onChooseProjectFolder &&
+			sessions.selectedChat &&
+			modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId),
+		),
+	);
 
 	function requestComposerFocusForChat(chatId: string | null): void {
-		if (!chatId) return;
-		nextFocusRequestId += 1;
-		pendingFocusRequest = { chatId, requestId: nextFocusRequestId };
+		focusDelivery.request(
+			chatId,
+			untrack(() => workspaceShortcuts.userInteractionGeneration),
+		);
 	}
 
 	// Auto-focus textarea when the composer mounts (new chat or chat switch).
@@ -159,36 +180,59 @@
 		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	onMount(() => {
-		const flushDraft = () => composerState.flushDraftSave();
-		const flushHiddenDraft = () => {
-			if (document.visibilityState === 'hidden') flushDraft();
-		};
-		window.addEventListener('pagehide', flushDraft);
-		document.addEventListener('visibilitychange', flushHiddenDraft);
-		return () => {
-			window.removeEventListener('pagehide', flushDraft);
-			document.removeEventListener('visibilitychange', flushHiddenDraft);
-		};
+	const promptRefinement = new PromptComposerRefinementController({
+		composer: composerState,
+		sessions,
+		notifications,
+		ui,
+		transientLayers,
+		get textarea() {
+			return textarea;
+		},
+		get visible() {
+			return isVisible;
+		},
+		get presented() {
+			return isPresented;
+		},
+		get startBlocked() {
+			return isDisabled || directAdmissionPending || snippetExpansion.pending;
+		},
+		resizeTextarea: autoResize,
 	});
-
-	// Ephemeral UI state extracted to companion class.
-	const ui = new PromptComposerUiState();
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const attachmentController = new PromptComposerAttachmentController({
+		composer: composerState,
+		get attachmentInputBlocked() {
+			return promptRefinement.pending || requiresQueuedSubmission;
+		},
+		get attachmentPickerBlocked() {
+			return promptTransformPending || requiresQueuedSubmission;
+		},
+		get attachmentSupport() {
+			return attachmentSupport;
+		},
+		onAttachmentInput: () => snippetExpansion.cancel(),
+		onBlockedAttachmentInput: () => {
+			if (requiresQueuedSubmission) {
+				notifications.error(m.chat_notice_queue_attachments_unavailable());
+			}
+		},
+	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
-
 	// Resets ephemeral UI state when switching chats without remounting the composer.
+	// Explicit navigation owns focus requests; pane focus must remain on the control the user chose.
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
 		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
 		snippetExpansion.cancel();
+		promptRefinement.abort();
 		composerState.isDragActive = false;
-		requestComposerFocusForChat(chatId);
 	});
 
-	// Cancels path-bound server expansion when the selected chat keeps its ID
-	// but moves to another project.
+	// Cancels path-bound expansion when a selected chat moves to another project.
 	$effect(() => {
 		const projectPath = sessions.selectedChat?.projectPath ?? null;
 		if (projectPath === previousSnippetProjectPath) return;
@@ -196,8 +240,7 @@
 		snippetExpansion.cancel();
 	});
 
-	// Shell focus requests can happen while navigation is changing ownership.
-	// The request ID makes them durable until this mounted composer can consume them.
+	// Keeps shell focus requests durable while navigation changes ownership.
 	$effect(() => {
 		const requestId = appShell.composerFocusRequestId;
 		if (requestId === 0 || requestId === handledAppShellFocusRequestId) return;
@@ -205,64 +248,105 @@
 		untrack(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	// Focuses after the textarea is enabled and visible; draft startup can
-	// briefly disable it, and the composer stays mounted-but-hidden while
-	// another tab (e.g. Git) is active. Requests stay pending until the
-	// composer is both enabled and visible, so returning to the chat tab
-	// re-runs this effect and focuses reliably instead of wasting the request
-	// on a display:none textarea.
-	$effect(() => {
-		const request = pendingFocusRequest;
-		const disabled = isDisabled;
-		const target = textarea;
-		if (!request || disabled || !isVisible || !target) return;
-		const frameId = requestAnimationFrame(() => {
-			if (pendingFocusRequest?.requestId !== request.requestId) return;
-			if (sessions.selectedChatId !== request.chatId || isDisabled || !isVisible || !textarea)
-				return;
-			autoResize();
-			textarea.focus();
-			if (pendingFocusRequest?.requestId === request.requestId) {
-				pendingFocusRequest = null;
-			}
-		});
-		return () => cancelAnimationFrame(frameId);
-	});
+	// Keeps focus pending through transient visibility during window moves.
+	$effect(() =>
+		focusDelivery.deliver({
+			selectedChatId: sessions.selectedChatId,
+			disabled: isDisabled,
+			visible: isVisible,
+			textarea,
+			userInteractionGeneration: () => workspaceShortcuts.userInteractionGeneration,
+			resize: autoResize,
+		}),
+	);
 
 	// Shared image URL lifecycle management. Syncs blob URLs with
 	// composerState.images and revokes stale URLs automatically.
 	const imageAttachments = new ImageAttachmentState();
 
 	$effect(() => {
-		imageAttachments.images = composerState.images;
-		imageAttachments.syncUrls();
+		const images = composerState.images;
+		untrack(() => {
+			const currentImages = imageAttachments.images;
+			const unchanged =
+				images.length === currentImages.length &&
+				images.every((file, index) => file === currentImages[index]);
+			if (unchanged) return;
+			imageAttachments.images = images;
+			imageAttachments.syncUrls();
+		});
 	});
 
 	onDestroy(() => {
+		destroyed = true;
+		projectState.destroy();
 		snippetExpansion.cancel();
-		composerState.flushDraftSave();
+		promptRefinement.destroy();
 		imageAttachments.revokeAll();
 	});
 
-	// Auto-resize textarea to content height. On mobile, caps lower to
-	// preserve message feed visibility; on desktop uses the stored height.
-	const MOBILE_AUTO_MAX = 150;
-	const DESKTOP_AUTO_MAX = 300;
+	const composerHeight = new PromptComposerHeightState();
 
-	function autoResize() {
-		if (!textarea) return;
-		const cap = appShell.isMobile ? MOBILE_AUTO_MAX : DESKTOP_AUTO_MAX;
-		textarea.style.height = 'auto';
-		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
+	function autoResize(): void {
+		if (!textarea || !isVisible) return;
+		composerHeight.fitToContent(textarea, appShell.isMobile);
 	}
 
-	// Updates the "@" file-mention and "/" slash-command triggers. The two are
-	// mutually exclusive; an active file mention suppresses the slash menu.
-	function updateTriggers(value: string, caret: number) {
-		const fileTrigger = findFileMentionTrigger(value, caret);
-		ui.setFileMentionTrigger(fileTrigger);
-		ui.setSlashCommandTrigger(fileTrigger ? null : findSlashCommandTrigger(value, caret));
+	// Programmatic draft changes do not emit input events. The effect measures
+	// the updated DOM value while Svelte remains the sole owner of its height.
+	$effect(() => {
+		const target = textarea;
+		const inputText = composerState.inputText;
+		const mobile = appShell.isMobile;
+		const visible = isVisible;
+		if (!target || !visible || target.value !== inputText) return;
+		untrack(() => composerHeight.fitToContent(target, mobile));
+	});
+
+	onMount(() => {
+		const stored = getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight);
+		if (stored === null || stored.trim() === '') return;
+		const parsed = Number(stored);
+		if (!Number.isFinite(parsed)) return;
+		composerHeight.restorePreferredHeight(parsed);
+		if (appShell.isMobile) autoResize();
+	});
+
+	function commitComposerHeight(height: number): void {
+		const committedHeight = composerHeight.commit(height);
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(committedHeight)));
 	}
+
+	// Reveals blocks appended from another surface without moving focus away from that surface.
+	$effect(() => {
+		const request = composerState.draftAppendRequest;
+		const selectedChatId = sessions.selectedChatId;
+		const target = textarea;
+		const visible = isVisible;
+		if (
+			!request ||
+			request.requestId === handledDraftAppendRequestId ||
+			request.chatId !== selectedChatId ||
+			!target ||
+			!visible
+		) {
+			return;
+		}
+		const frameId = requestAnimationFrame(() => {
+			if (
+				composerState.draftAppendRequest?.requestId !== request.requestId ||
+				sessions.selectedChatId !== request.chatId ||
+				!textarea ||
+				!isVisible
+			) {
+				return;
+			}
+			autoResize();
+			textarea.scrollTop = textarea.scrollHeight;
+			handledDraftAppendRequestId = request.requestId;
+		});
+		return () => cancelAnimationFrame(frameId);
+	});
 
 	function queueCurrentDraft(text: string): void {
 		const chatId = sessions.selectedChatId;
@@ -270,7 +354,7 @@
 	}
 
 	async function insertSlashCommand(name: string) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const trigger =
 			ui.slashCommandTrigger ??
 			findSlashCommandTrigger(
@@ -292,7 +376,7 @@
 	}
 
 	async function insertFileMention(path: string) {
-		if (snippetExpansion.pending) return;
+		if (promptTransformPending) return;
 		const trigger =
 			ui.fileMentionTrigger ??
 			findFileMentionTrigger(
@@ -313,87 +397,79 @@
 		autoResize();
 	}
 
-	function snippetContext(): SnippetExpansionContext | null {
-		const chat = sessions.selectedChat;
-		const projectPath = chat?.projectPath.trim();
-		if (!chat || !projectPath) return null;
-		return chat.status === 'draft'
-			? { type: 'project', projectPath }
-			: { type: 'chat', chatId: chat.id };
-	}
-
 	function snippetErrorDetail(error: unknown): string {
 		if (error instanceof ApiError) return error.details || error.message;
 		return error instanceof Error ? error.message : String(error);
 	}
 
-	async function restoreComposerFocus(caret?: number): Promise<void> {
-		await tick();
-		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
-		autoResize();
-		textarea?.focus();
+	function returnComposerFocus(): void {
+		if (destroyed || !isVisible) return;
+		textarea?.focus({ preventScroll: true });
 	}
 
-	async function focusPendingSnippetExpansion(): Promise<void> {
+	async function settleComposerAfterSnippet(caret?: number): Promise<void> {
 		await tick();
-		if (snippetExpansion.pending) textarea?.focus();
+		if (destroyed || !isVisible) return;
+		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
+		autoResize();
 	}
 
 	async function insertSnippet(
 		snippet: Snippet,
 		argumentsText: string,
+		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (snippetExpansion.pending || !textarea) return 'cancelled';
+		if (promptTransformPending || !textarea) return 'cancelled';
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
-		const context = snippetContext();
-		if (!context) {
-			notifications.error(m.chat_new_chat_errors_project_path_required());
-			await restoreComposerFocus();
-			return 'cancelled';
-		}
-		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
-		const start = textarea.selectionStart;
-		const end = textarea.selectionEnd;
+		const start = range?.start ?? textarea.selectionStart;
+		const end = range?.end ?? textarea.selectionEnd;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: snippet.shortName,
-					arguments: argumentsText,
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.runPrepared(snippet.shortName, async (signal) => {
+				const operation = await projectState.resolveSnippetContext(signal);
+				return {
+					request: {
+						shortName: snippet.shortName,
+						arguments: { type: 'value', value: argumentsText },
+						context: operation.context,
+					},
+					prepared: operation,
+				};
+			});
 			if (result.kind !== 'expanded') return 'cancelled';
+			const operation = result.prepared;
 			if (
 				result.response.snippetId !== snippet.id ||
 				result.response.snippetUpdatedAt !== snippet.updatedAt
 			) {
 				void snippets.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
-				await restoreComposerFocus();
+				await settleComposerAfterSnippet();
 				return 'cancelled';
 			}
 			if (
-				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath.trim() !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
+				sessions.selectedChatId !== operation.chatId ||
+				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
+				result.response.contextProjectPath !== operation.projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return 'cancelled';
-			const nextText =
-				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
-			composerState.inputText = nextText;
-			queueCurrentDraft(nextText);
-			await restoreComposerFocus(start + result.response.expandedText.length);
+			const replacement = range
+				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
+				: {
+						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
+						caret: start + result.response.expandedText.length,
+					};
+			composerState.inputText = replacement.text;
+			queueCurrentDraft(replacement.text);
+			await settleComposerAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreComposerFocus();
+			await settleComposerAfterSnippet();
 			return 'failed';
 		}
 	}
@@ -401,42 +477,39 @@
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
-		const context = snippetContext();
-		if (!context) {
-			notifications.error(m.chat_new_chat_errors_project_path_required());
-			return;
-		}
-		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: command.shortName,
-					arguments: command.arguments,
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.runPrepared(command.shortName, async (signal) => {
+				const operation = await projectState.resolveSnippetContext(signal);
+				return {
+					request: {
+						shortName: command.shortName,
+						arguments: command.arguments,
+						context: operation.context,
+					},
+					prepared: operation,
+				};
+			});
 			if (result.kind !== 'expanded') return;
+			const operation = result.prepared;
 			if (
-				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath.trim() !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
+				sessions.selectedChatId !== operation.chatId ||
+				sessions.selectedChat?.projectPath.trim() !== operation.projectPath ||
+				result.response.contextProjectPath !== operation.projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return;
 			composerState.inputText = result.response.expandedText;
 			queueCurrentDraft(result.response.expandedText);
 			ui.closeSlashMenu();
-			await restoreComposerFocus(result.response.expandedText.length);
+			await settleComposerAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreComposerFocus();
+			await settleComposerAfterSnippet();
 		}
 	}
 
@@ -444,43 +517,41 @@
 		appShell.openSnippets(() => appShell.requestComposerFocus());
 	}
 
-	// Handles Enter/Shift+Enter submission depending on preference.
-	// Defers to the file menu while it is open.
-	function handleKeyDown(event: KeyboardEvent) {
-		if (snippetExpansion.pending) return;
-		if (ui.showFileMenu) {
-			if (fileMentionMenu?.handleKeyDown(event)) return;
-			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
-				event.preventDefault();
-				return;
-			}
-		}
-		if (ui.showSlashMenu) {
-			if (slashCommandMenu?.handleKeyDown(event)) return;
-			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
-				event.preventDefault();
-				return;
-			}
-		}
-		if (event.key !== 'Enter') return;
-		if (
-			!shouldSubmitOnEnter({
-				sendByShiftEnter: localSettings.sendByShiftEnter,
-				shiftKey: event.shiftKey,
-				ctrlKey: event.ctrlKey,
-				metaKey: event.metaKey,
-				isComposing: event.isComposing,
-				isMobile: appShell.isMobile,
-			})
-		)
-			return;
-
+	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
+		if (!ui.showFileMenu && !ui.showSlashMenu) return false;
+		const menu = ui.showFileMenu ? fileMentionMenu : slashCommandMenu;
+		if (menu?.handleKeyDown(event)) return true;
+		if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) return false;
 		event.preventDefault();
-		handleFormSubmit();
+		return true;
 	}
 
-	function handleFormSubmit() {
-		if (!canSubmit || snippetExpansion.pending) return;
+	function resolveKeydownAction(event: KeyboardEvent): ComposerEnterAction {
+		return resolveComposerKeydownAction(event, {
+			sendByShiftEnter: localSettings.sendByShiftEnter,
+			steerWithCtrlEnter: localSettings.steerWithCtrlEnter,
+			isMobile: appShell.isMobile,
+		});
+	}
+
+	function handleKeyDown(event: KeyboardEvent) {
+		if (promptTransformPending) {
+			if (event.key === 'Enter' && resolveKeydownAction(event) !== 'newline') {
+				event.preventDefault();
+			}
+			return;
+		}
+		if (handleCompletionKeyDown(event)) return;
+		if (event.key !== 'Enter') return;
+		const action = resolveKeydownAction(event);
+		if (action === 'newline') return;
+
+		event.preventDefault();
+		handleFormSubmit(action);
+	}
+
+	function handleFormSubmit(action: Exclude<ComposerEnterAction, 'newline'> = 'submit') {
+		if (!canSubmit || promptTransformPending) return;
 		const command = parseSnippetCommand(composerState.inputText);
 		if (command.kind === 'invalid') {
 			notifications.error(
@@ -491,83 +562,52 @@
 			return;
 		}
 		if (command.kind === 'valid') {
+			returnComposerFocus();
 			void expandSnippetInvocation(command);
 			return;
 		}
-		onsubmit();
+		if (action === 'steer-preferred') onSteerPreferredSubmit();
+		else onsubmit();
 	}
 
 	function handleInput(event: Event) {
-		const value = (event.currentTarget as HTMLTextAreaElement).value;
-		autoResize();
+		const target = event.currentTarget as HTMLTextAreaElement;
+		if (isDisabled || promptRefinement.pending) {
+			target.value = composerState.inputText;
+			return;
+		}
+		if (snippetExpansion.pending) snippetExpansion.cancel();
+		const value = target.value;
+		composerState.inputText = value;
 		const caret = textarea?.selectionStart ?? value.length;
-		updateTriggers(value, caret);
+		ui.updateTriggers(
+			value,
+			caret,
+			localSettings.snippetTrigger,
+			(event as InputEvent).isComposing,
+		);
 		queueCurrentDraft(value);
 	}
 
-	function handleImagePick() {
-		if (snippetExpansion.pending) return;
-		fileInput?.click();
-	}
-
-	function handleFileChange(event: Event) {
-		const input = event.target as HTMLInputElement;
-		if (!input.files) return;
-		composerState.addImages(Array.from(input.files));
-		input.value = '';
-	}
-
-	// Drag-and-drop handlers for file attachment.
-	function handleDragOver(event: DragEvent) {
-		event.preventDefault();
-		if (snippetExpansion.pending) return;
-		composerState.isDragActive = true;
-	}
-
-	function handleDragLeave() {
-		composerState.isDragActive = false;
-	}
-
-	function handleDrop(event: DragEvent) {
-		event.preventDefault();
-		if (snippetExpansion.pending) return;
-		composerState.isDragActive = false;
-		const files = event.dataTransfer?.files;
-		if (!files) return;
-		const attachments = Array.from(files).filter(isSupportedChatAttachment);
-		composerState.addImages(attachments);
-	}
-
-	// Paste handler for images from clipboard.
-	function handlePaste(event: ClipboardEvent) {
-		if (snippetExpansion.pending) return;
-		const items = event.clipboardData?.items;
-		if (!items) return;
-		const imageFiles: File[] = [];
-		for (const item of items) {
-			if (item.type.startsWith('image/')) {
-				const file = item.getAsFile();
-				if (file) imageFiles.push(file);
-			}
-		}
-		if (imageFiles.length > 0) {
-			composerState.addImages(imageFiles);
-		}
-	}
-
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
-	const forkCapabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
+	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
+	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDraftStartupSubmitting = $derived(
 		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
 	);
-	const isQueueMode = $derived(selectedIsProcessing);
+	const isQueueMode = $derived(requiresQueuedSubmission);
+	const hasQueuedAttachmentConflict = $derived(isQueueMode && composerState.images.length > 0);
 	const isDisabled = $derived(isDraftStartupSubmitting);
+
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled || snippetExpansion.pending,
+			isDisabled || directAdmissionPending || promptTransformPending,
 			composerState.inputText,
 			composerState.images.length,
-		),
+		) && !hasQueuedAttachmentConflict,
+	);
+	const promptTransformStatus = $derived(
+		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
 	);
 	const permissionOptions = $derived(
 		buildPermissionOptions(modelCatalog.getPermissionModes(agentState.agentId)),
@@ -578,20 +618,32 @@
 	const canAttachImages = $derived(
 		modelCatalog.supportsImages(agentState.agentId, agentState.model),
 	);
-	const quickCommitRunningActionVisible = $derived(
-		selectedIsProcessing &&
-			localSettings.showQuickCommitTray &&
-			Boolean(onQuickCommit && quickCommitSummary && quickCommitSummary.changedFiles > 0),
+	const fileAttachmentMimeTypes = $derived(
+		modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
 	);
+	const attachmentSupport = $derived({
+		allowImages: canAttachImages,
+		fileMimeTypes: fileAttachmentMimeTypes,
+	});
+	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
+	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
 	// Existing (already-started) chats expose the full agent/source picker so a
 	// conversation can move between configured providers and models. Drafts keep
 	// the compact trigger; the new-chat form owns agent selection before start.
 	const isActiveModelSelection = $derived(
 		Boolean(sessions.selectedChat) && sessions.selectedChat?.status !== 'draft',
 	);
+	const modelSelectorAgentIds = $derived.by(() => {
+		const allAgentIds = modelCatalog.getSelectableAgents();
+		const selectedAgentId = sessions.selectedChat?.agentId;
+		if (localSettings.allowDirectChats || (selectedAgentId && isDirectAgentId(selectedAgentId))) {
+			return allAgentIds;
+		}
+		return nonDirectAgentIds(allAgentIds);
+	});
 	const modelSelectorMode: ModelSelectorMode = $derived(
 		isActiveModelSelection
-			? composerModelSelectorMode(modelCatalog, agentState.agentId)
+			? composerModelSelectorMode(modelCatalog, agentState.agentId, modelSelectorAgentIds)
 			: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 	);
 	const modelSelectorValue = $derived({
@@ -614,97 +666,72 @@
 			CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS[localSettings.chatMaxWidth],
 		),
 	);
-	const composerFrameWrapperClass = $derived(
-		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[localSettings.chatMaxWidth]),
-	);
-	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS);
+	const composerFrameWrapperClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
+	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS, 'shadow-none');
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
 		cn(
-			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200',
+			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-colors duration-200',
 			'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]',
 		),
 	);
-
-	// Composer resize via drag handle. Persists height to browser storage and
-	// mutates the DOM directly during drag to avoid render latency.
-	const COMPOSER_DEFAULT_HEIGHT = 140;
-	const COMPOSER_MIN_HEIGHT = 52;
-	const COMPOSER_MAX_HEIGHT = 500;
-
-	function clampHeight(h: number): number {
-		return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, h));
-	}
-
-	let composerHeight = $state(COMPOSER_DEFAULT_HEIGHT);
-	let dragCleanup: (() => void) | null = null;
-
-	// Initialise from persisted browser storage on mount.
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		const stored = Number(getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight));
-		if (Number.isFinite(stored)) composerHeight = clampHeight(stored);
-	});
-
-	function handleResizeStart(event: PointerEvent) {
-		event.preventDefault();
-		const startY = event.clientY;
-		const startHeight = composerHeight;
-		const ta = textarea;
-		if (!ta) return;
-
-		document.body.style.cursor = 'row-resize';
-		document.body.style.userSelect = 'none';
-		document.body.style.touchAction = 'none';
-
-		function onPointerMove(e: PointerEvent) {
-			if (ta) ta.style.minHeight = `${clampHeight(startHeight + startY - e.clientY)}px`;
-		}
-
-		function onPointerUp(e: PointerEvent) {
-			document.removeEventListener('pointermove', onPointerMove);
-			document.removeEventListener('pointerup', onPointerUp);
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			document.body.style.touchAction = '';
-			dragCleanup = null;
-			const finalHeight = clampHeight(startHeight + startY - e.clientY);
-			composerHeight = finalHeight;
-			setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(finalHeight)));
-		}
-
-		document.addEventListener('pointermove', onPointerMove);
-		document.addEventListener('pointerup', onPointerUp);
-
-		dragCleanup = () => {
-			document.removeEventListener('pointermove', onPointerMove);
-			document.removeEventListener('pointerup', onPointerUp);
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			document.body.style.touchAction = '';
-		};
-	}
-
-	onDestroy(() => {
-		dragCleanup?.();
-		dragCleanup = null;
-	});
 </script>
 
 {#snippet composerSurface()}
 	<div
 		data-composer
 		class={composerSurfaceClass}
-		aria-busy={snippetExpansion.pending}
+		aria-busy={promptTransformPending}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
+		{@attach promptRefinement.pending &&
+			!ui.composerEditorOpen &&
+			isPresented &&
+			promptRefinement.layerAttachment}
 	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
-			projectPath={sessions.selectedChat?.projectPath || ''}
+			projectPath={completionProjectPath}
 			isVisible={ui.showFileMenu}
+			projectPending={Boolean(
+				selectedProjectTarget &&
+				(selectedProjectResolution.kind === 'unchecked' ||
+					selectedProjectResolution.kind === 'resolving'),
+			)}
+			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
+				selectedProjectResolution.kind === 'request-failed'}
 			query={ui.fileQuery}
 			onSelect={insertFileMention}
 			onClose={() => ui.closeFileMenu()}
+		/>
+
+		<ComposerSnippetPalette
+			open={ui.snippetPalette.isOpen}
+			onOpenChange={(nextOpen) => {
+				// The hidden trigger remains available to the chained insertion.
+				if (!nextOpen) ui.snippetPalette.hide();
+			}}
+			initialQuery={ui.snippetPalette.initialQuery}
+			interactionKey={snippetInteractionKey}
+			contextHint={snippetContextHint}
+			onInsert={async (snippet, argumentsText) => {
+				const trigger = ui.snippetPalette.trigger;
+				const result = await insertSnippet(snippet, argumentsText, trigger);
+				if (result === 'inserted') ui.snippetPalette.complete();
+				else if (result !== 'failed' || !snippetTemplateUsesArguments(snippet.template)) {
+					ui.snippetPalette.dismiss();
+				}
+				return result;
+			}}
+			onCancelled={() => {
+				const caret = ui.snippetPalette.trigger?.end;
+				ui.snippetPalette.dismiss();
+				void settleComposerAfterSnippet(caret);
+			}}
+			onReturnFocus={returnComposerFocus}
+			onEditSnippets={() => {
+				ui.snippetPalette.dismiss();
+				editSnippets();
+			}}
 		/>
 
 		<form
@@ -714,6 +741,12 @@
 			}}
 			class="relative"
 		>
+			{#if !selectedIsProcessing}
+				<ResendCandidateChips
+					candidates={resendCandidates}
+					onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
+				/>
+			{/if}
 			{#if composerState.isDragActive}
 				<div
 					class="absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"
@@ -740,7 +773,11 @@
 										<div
 											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
 										>
-											<FileText class="h-5 w-5" aria-hidden="true" />
+											{#if isVideoChatAttachment(file)}
+												<FileVideo class="h-5 w-5" aria-hidden="true" />
+											{:else}
+												<FileText class="h-5 w-5" aria-hidden="true" />
+											{/if}
 											<span class="w-full truncate text-center text-[10px] leading-tight"
 												>{file.name}</span
 											>
@@ -752,8 +789,10 @@
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
 									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-									onclick={() => composerState.removeImage(idx)}
-									disabled={snippetExpansion.pending}
+									onclick={() => {
+										if (!promptTransformPending) composerState.removeImage(idx);
+									}}
+									disabled={promptTransformPending}
 								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
@@ -764,50 +803,53 @@
 			{/if}
 
 			<input
-				bind:this={fileInput}
+				bind:this={attachmentController.fileInput}
 				type="file"
-				accept={CHAT_ATTACHMENT_ACCEPT}
+				accept={attachmentAccept}
 				multiple
+				disabled={promptTransformPending || requiresQueuedSubmission}
 				class="hidden"
-				onchange={handleFileChange}
+				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
 
-			<!-- svelte-ignore a11y_no_static_element_interactions -- drag-and-drop region with role=region and aria-label -->
 			<div
-				class="relative bg-transparent focus-within:ring-0 transition-all duration-200 overflow-hidden"
-				ondragover={handleDragOver}
-				ondragleave={handleDragLeave}
-				ondrop={handleDrop}
+				class="relative overflow-hidden bg-transparent focus-within:ring-0"
+				ondragover={(event) => attachmentController.handleDragOver(event)}
+				ondragleave={() => attachmentController.handleDragLeave()}
+				ondrop={(event) => attachmentController.handleDrop(event)}
 				role="region"
 				aria-label={m.chat_composer_message_input_area()}
 			>
 				<div class="relative z-10">
 					<textarea
 						bind:this={textarea}
-						bind:value={composerState.inputText}
+						value={composerState.inputText}
 						onkeydown={handleKeyDown}
 						oninput={handleInput}
-						onpaste={handlePaste}
-						onfocus={() => appShell.requestSidebarRecenterToSelected()}
+						onpaste={(event) => attachmentController.handlePaste(event)}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
-						readonly={snippetExpansion.pending}
-						aria-busy={snippetExpansion.pending}
+						readonly={promptRefinement.pending}
+						aria-busy={promptTransformPending}
 						class={textareaClass}
-						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}></textarea>
+						style:height={`${composerHeight.renderedHeight}px`}></textarea>
 				</div>
 			</div>
 
 			<ComposerBottomBar
-				{canAttachImages}
-				{snippetInteractionKey}
-				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
-				onAddImage={handleImagePick}
-				onInsertSnippet={insertSnippet}
-				onEditSnippets={editSnippets}
-				onRequestComposerFocus={() => void restoreComposerFocus()}
+				canAttachImages={canAttachAttachments && !requiresQueuedSubmission}
+				attachImagesTooltip={requiresQueuedSubmission
+					? m.chat_notice_queue_attachments_unavailable()
+					: m.chat_composer_image_attachments_unavailable()}
+				onAddImage={() => attachmentController.pick()}
+				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
+				onOpenExpandedEditor={() => expandedEditor?.open()}
+				onRefinePrompt={() => promptRefinement.handleAction()}
+				canRefinePrompt={promptRefinement.canStart}
+				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
-				isPromptTransformPending={snippetExpansion.pending}
+				isPromptTransformPending={promptTransformPending}
+				{promptTransformStatus}
 				{permissionOptions}
 				selectedPermission={agentState.permissionMode}
 				onPermissionSelect={(mode) => {
@@ -821,8 +863,12 @@
 					onThinkingModeChange?.(mode);
 				}}
 				canSend={canSubmit}
-				onSend={handleFormSubmit}
-				sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
+				onSend={() => handleFormSubmit()}
+				sendTitle={hasQueuedAttachmentConflict
+					? m.chat_notice_queue_attachments_unavailable()
+					: isQueueMode
+						? m.chat_composer_queue_message()
+						: m.chat_composer_send_message()}
 				{sendButtonClass}
 			>
 				{#snippet agentSettings()}
@@ -840,6 +886,7 @@
 						onChange={(next) => onModelChange?.(next)}
 						recents={recentSelectorOptions}
 						{preferRecentsOnOpen}
+						selectableAgentIds={modelSelectorAgentIds}
 						align="end"
 						side="top"
 					/>
@@ -850,55 +897,89 @@
 {/snippet}
 
 {#snippet composerFrame()}
-	<div class="relative">
+	<!-- The detached composer and panel status dock apply the same processing treatment independently. -->
+	<div
+		class="relative"
+		class:composer-thinking-active={selectedIsProcessing}
+		class:composer-reduce-motion={thinkingReducedMotion}
+	>
 		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
 		     so the upward-opening menu is not cut off. -->
 		<SlashCommandMenu
 			bind:this={slashCommandMenu}
 			agent={agentState.agentId}
-			projectPath={sessions.selectedChat?.projectPath || ''}
+			projectPath={completionProjectPath}
 			chatId={sessions.selectedChatId}
 			isVisible={ui.showSlashMenu}
+			projectPending={Boolean(
+				selectedProjectTarget &&
+				(selectedProjectResolution.kind === 'unchecked' ||
+					selectedProjectResolution.kind === 'resolving'),
+			)}
+			projectUnavailable={selectedProjectResolution.kind === 'unavailable' ||
+				selectedProjectResolution.kind === 'request-failed'}
 			query={ui.slashQuery}
-			supportsFork={modelCatalog.supportsFork(forkCapabilityAgentId)}
+			supportsFork={modelCatalog.supportsFork(capabilityAgentId)}
+			supportsSteering={modelCatalog.supportsSteering(capabilityAgentId)}
+			supportsGoals={modelCatalog.supportsGoals(capabilityAgentId)}
 			canScheduleIn={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}
 		/>
 
-		<LoadingStatus
-			isVisible={selectedIsProcessing}
-			status={lifecycle.loadingStatus}
-			agentId={agentState.agentId}
-			spinnerSelectionKey={sessions.selectedChatId}
-			quickCommitVisible={quickCommitRunningActionVisible}
-			{quickCommitSummary}
-			onQuickCommit={() => onQuickCommit?.()}
-			{onAbort}
-		/>
-		<GitQuickStatusTray
-			isVisible={quickCommitTrayVisible}
-			summary={quickCommitSummary}
-			isRefreshing={quickCommitRefreshing}
-			isMobile={appShell.isMobile}
-			lastError={quickCommitError}
-			branchSelector={quickCommitBranchSelector}
-			onCommit={() => onQuickCommit?.()}
-		/>
 		{#if !appShell.isMobile}
-			<!-- Keeps the grab zone outside the clipped rounded surface. -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
-			<div
-				onpointerdown={handleResizeStart}
-				class="absolute left-0 right-0 -top-1 z-40 h-3 cursor-row-resize touch-none"
-			></div>
+			<ComposerResizeHandle
+				value={composerHeight.renderedHeight}
+				minimum={COMPOSER_MIN_HEIGHT}
+				maximum={COMPOSER_MAX_HEIGHT}
+				label={m.chat_composer_resize()}
+				onPreview={(height) => composerHeight.preview(height)}
+				onCommit={commitComposerHeight}
+				onCancel={() => composerHeight.cancelPreview()}
+				onReset={() => commitComposerHeight(COMPOSER_DEFAULT_HEIGHT)}
+			/>
 		{/if}
 		{@render composerSurface()}
 	</div>
 {/snippet}
 
-<div class={composerShellClass}>
+<div class={composerShellClass} data-composer-shell>
 	<div class={composerFrameWrapperClass}>
+		{#if selectedProjectTarget && (selectedProjectResolution.kind === 'unavailable' || selectedProjectResolution.kind === 'request-failed')}
+			<div
+				class="mb-2 rounded-lg border border-border bg-card px-4 py-3"
+				data-project-availability-notice
+			>
+				<ProjectAvailabilityNotice
+					projectPath={selectedProjectTarget.projectPath}
+					reason={selectedProjectResolution.kind === 'unavailable'
+						? selectedProjectResolution.reason
+						: undefined}
+					requestError={selectedProjectResolution.kind === 'request-failed'
+						? selectedProjectResolution.message
+						: undefined}
+					onRetry={() => projectState.retry()}
+					onChooseFolder={canChooseProjectFolder && sessions.selectedChat
+						? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
+						: undefined}
+				/>
+			</div>
+		{/if}
 		{@render composerFrame()}
 	</div>
 </div>
+
+<PromptComposerEditor
+	bind:this={expandedEditor}
+	{ui}
+	{textarea}
+	{isVisible}
+	{isPresented}
+	{isDisabled}
+	{promptTransformPending}
+	isPromptRefinementPending={promptRefinement.pending}
+	canRefinePrompt={promptRefinement.canStart}
+	onRefinePrompt={() => promptRefinement.handleAction()}
+	openRequestId={composerEditorOpenRequestId}
+	resizeTextarea={autoResize}
+/>

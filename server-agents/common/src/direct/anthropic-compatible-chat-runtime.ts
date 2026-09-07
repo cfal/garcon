@@ -1,13 +1,12 @@
 // Anthropic-compatible Messages protocol adapter for direct runtimes.
 
-import type { SharedModelOption } from '@garcon/common/models';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   DirectChatRuntimeBase,
+  type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
-  type DirectUserTurn,
+  type DirectTurnCompletion,
 } from "./direct-chat-runtime-base.js";
-import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '@garcon/server-agent-common/shared/attachments';
 import {
@@ -15,6 +14,8 @@ import {
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
+import { isJsonResponse } from './response-media-type.js';
+import { stripThinkBlocks } from './strip-think-blocks.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -41,15 +42,9 @@ interface AnthropicConversationMessage {
   content: AnthropicContent;
 }
 
-export interface AnthropicCompatibleChatRuntimeConfig {
-  runtimeId: string;
-  runtimeLabel: string;
-  defaultModel: string;
-  fallbackModels: SharedModelOption[];
+export interface AnthropicCompatibleChatRuntimeConfig extends DirectChatRuntimeBaseConfig {
   getApiKey: () => string;
   getBaseUrl: () => string;
-  getSessionDir: () => string;
-  getSessionFilePath: (sessionId: string) => string;
   maxTokens?: number;
 }
 
@@ -103,21 +98,6 @@ export function buildAnthropicCompatibleUserContent(
   return blocks;
 }
 
-export function extractAnthropicTextContent(content: AnthropicContent): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((part): part is AnthropicTextContentBlock => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n');
-}
-
-function persistedToAnthropicMessage(message: DirectConversationMessage): AnthropicConversationMessage {
-  return {
-    role: message.role,
-    content: message.content,
-  };
-}
-
 interface AnthropicStreamState {
   text: string;
   errorMessage: string | null;
@@ -153,6 +133,45 @@ function consumeAnthropicEvent(state: AnthropicStreamState, data: string): void 
   }
 }
 
+async function readAnthropicCompatibleResponse(
+  response: Response,
+  runtimeLabel: string,
+): Promise<string> {
+  let text: string;
+  if (isJsonResponse(response)) {
+    const data = await response.json() as {
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    text = (data.content ?? [])
+      .filter((part) => part.type === 'text' && typeof part.text === 'string')
+      .map((part) => part.text)
+      .join('');
+  } else {
+    if (!response.body) {
+      throw new Error(`${runtimeLabel} response did not include a stream body.`);
+    }
+
+    const state: AnthropicStreamState = {
+      text: '',
+      errorMessage: null,
+      sawMessageStop: false,
+    };
+    await readSseDataEvents(response.body, (data) => {
+      consumeAnthropicEvent(state, data);
+    });
+
+    if (state.errorMessage) {
+      throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
+    }
+    if (!state.sawMessageStop) {
+      throw new Error(`${runtimeLabel} stream ended before message_stop.`);
+    }
+    text = state.text;
+  }
+
+  return stripThinkBlocks(text);
+}
+
 export async function runAnthropicCompatibleSingleQuery(
   config: AnthropicCompatibleChatRuntimeConfig,
   prompt: string,
@@ -174,6 +193,7 @@ export async function runAnthropicCompatibleSingleQuery(
         model,
         max_tokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
         messages: [{ role: 'user', content: prompt }],
+        stream: true,
         ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
       }),
       signal: directSingleQuerySignal(options, controller.signal),
@@ -184,14 +204,7 @@ export async function runAnthropicCompatibleSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    const data = await response.json() as {
-      content?: Array<{ type?: string; text?: string }>;
-    };
-    return (data.content ?? [])
-      .filter((part) => part.type === 'text' && typeof part.text === 'string')
-      .map((part) => part.text)
-      .join('')
-      .trim();
+    return await readAnthropicCompatibleResponse(response, config.runtimeLabel);
   } finally {
     clearTimeout(timer);
   }
@@ -205,26 +218,21 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
     super(config);
   }
 
-  protected buildUserTurn(
+  protected buildUserMessage(
     command: string,
     images?: readonly AgentAttachment[],
-  ): DirectUserTurn<AnthropicConversationMessage> {
+  ): AnthropicConversationMessage {
     const content = buildAnthropicCompatibleUserContent(command, images);
-    return {
-      message: { role: 'user', content },
-      persistedContent: extractAnthropicTextContent(content),
-    };
+    return { role: 'user', content };
   }
 
   protected buildAssistantMessage(content: string): AnthropicConversationMessage {
     return { role: 'assistant', content };
   }
 
-  protected persistedToMessage(message: DirectConversationMessage): AnthropicConversationMessage {
-    return persistedToAnthropicMessage(message);
-  }
-
-  protected async streamSession(session: DirectRuntimeSession<AnthropicConversationMessage>): Promise<string> {
+  protected async streamSession(
+    session: DirectRuntimeSession<AnthropicConversationMessage>,
+  ): Promise<DirectTurnCompletion> {
     const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
     session.abortController = abortController;
@@ -248,28 +256,10 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
         const errorText = await response.text();
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      if (!response.body) {
-        throw new Error(`${this.config.runtimeLabel} response did not include a stream body.`);
-      }
-
-      const state: AnthropicStreamState = {
-        text: '',
-        errorMessage: null,
-        sawMessageStop: false,
+      return {
+        content: await readAnthropicCompatibleResponse(response, this.config.runtimeLabel),
+        checkpoint: null,
       };
-
-      await readSseDataEvents(response.body, (data) => {
-        consumeAnthropicEvent(state, data);
-      });
-
-      if (state.errorMessage) {
-        throw new Error(`${this.config.runtimeLabel} stream error: ${state.errorMessage}`);
-      }
-      if (!state.sawMessageStop) {
-        throw new Error(`${this.config.runtimeLabel} stream ended before message_stop.`);
-      }
-
-      return state.text;
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;

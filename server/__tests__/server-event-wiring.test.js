@@ -1,377 +1,586 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { UserMessage } from '../../common/chat-types.js';
-import { PendingUserInputService } from '../chats/pending-user-input-service.js';
+import { AssistantMessage } from '../../common/chat-types.js';
+import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
+import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
+import { ProjectUnavailableError } from '../lib/domain-error.ts';
 import { wireServerEvents } from '../server-event-wiring.js';
+import {
+  attachNativeMessageSource,
+  getNativeMessageRevisionSource,
+} from '../agents/shared/native-message-source.ts';
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
+const at = '2026-08-12T00:00:00.000Z';
 
-function createWiringFixture(overrides = {}) {
-  const agentListeners = {};
-  const queueListeners = {};
-  const noOpSubscription = mock(() => undefined);
-  const pendingInputs = overrides.pendingInputs ?? new PendingUserInputService({
-    loadNativeMessages: mock(async () => []),
-    getRetainedHistoryMessages: mock(() => []),
-  });
+function createFixture(overrides = {}) {
+  const agent = {};
+  const queue = {};
+  const settings = {};
+  const chats = {};
+  const scheduled = {};
+  const snippets = {};
+  const preambles = {};
+  const telegram = {};
+  const published = [];
+  let chatPresent = true;
+  const noOp = mock(() => undefined);
   const agentRegistry = {
-    onMessages: mock((callback) => { agentListeners.messages = callback; }),
-    onProcessing: noOpSubscription,
-    onSessionCreated: noOpSubscription,
-    onFinished: mock((callback) => { agentListeners.finished = callback; }),
-    onFailed: mock((callback) => { agentListeners.failed = callback; }),
-    discardTurn: mock(() => undefined),
+    onTranscriptCommitted: mock((callback) => { agent.transcript = callback; }),
+    onSessionCreated: mock((callback) => { agent.session = callback; }),
+    onFinished: mock((callback) => { agent.finished = callback; }),
+    onFailed: mock((callback) => { agent.failed = callback; }),
+    resendCandidates: mock(() => []),
     settleTurn: mock(() => undefined),
+    discardTurn: mock(() => undefined),
+    ...overrides.agentRegistry,
   };
-  const queue = {
-    onExecutionControlUpdated: noOpSubscription,
-    onSessionStopRequested: noOpSubscription,
-    onDispatching: noOpSubscription,
-    onChatMessages: noOpSubscription,
-    onSessionStopped: noOpSubscription,
-    onTurnFailed: mock((callback) => { queueListeners.failed = callback; }),
-    onTurnSettled: noOpSubscription,
+  const queueService = {
+    onExecutionControlUpdated: mock((callback) => { queue.control = callback; }),
+    onProcessingInvalidated: mock((callback) => { queue.processing = callback; }),
+    onSessionStopped: mock((callback) => { queue.stopped = callback; }),
+    onTurnFailed: mock((callback) => { queue.failed = callback; }),
+    onProjectUnavailable: mock((callback) => { queue.projectUnavailable = callback; }),
+    onTurnSettled: mock((callback) => { queue.settled = callback; }),
     getQueuedTurnFinalization: mock(() => null),
-    onAgentTurnTerminal: mock(() => undefined),
+    onAgentTurnTerminal: mock(async () => undefined),
     checkChatIdle: mock(async () => undefined),
+    ...overrides.queue,
+  };
+  const chatRegistry = {
+    getChat: mock(() => chatPresent ? { chatId: 'chat-1' } : null),
+    hasChat: mock(() => chatPresent),
+    onChatAdded: mock((callback) => { chats.added = callback; }),
+    onChatRemoved: mock((callback) => { chats.removed = callback; }),
+    onChatReadUpdated: mock((callback) => { chats.read = callback; }),
+    onChatProjectPathUpdated: mock((callback) => { chats.path = callback; }),
+    onChatTagsUpdated: mock((callback) => { chats.tags = callback; }),
+    ...overrides.chatRegistry,
+  };
+  const settingsStore = {
+    onSessionNameChanged: mock((callback) => { settings.name = callback; }),
+    onListChanged: mock((callback) => { settings.list = callback; }),
+    onRemoteSettingsChanged: mock((callback) => { settings.remote = callback; }),
+    ...overrides.settings,
   };
   const metadata = {
     updateFromAppendedMessages: mock(() => undefined),
-  };
-  const chatViews = {
-    captureFence: mock(() => 0),
-    appendAfterEnsuringGeneration: mock(async () => ({
-      generationId: 'generation-1',
-      messages: [],
-      lastSeq: 0,
-    })),
-    ...overrides.chatViews,
+    replaceFromTranscriptView: mock(() => undefined),
+    ...overrides.metadata,
   };
   const commandLedger = {
+    getTurnRecord: mock(async (_chatId, turnId) => (
+      turnId === 'turn-1' ? { payload: { clientMessageId: 'message-1' } } : null
+    )),
+    appendAssistantMessages: mock(async () => undefined),
     settleTerminal: mock(async () => undefined),
+    markPublicTerminal: mock(async () => undefined),
+    markChatInterrupted: mock(async () => undefined),
     ...overrides.commandLedger,
   };
   const searchIndex = {
-    sourceMayHaveChanged: mock(() => undefined),
     catalogMayHaveChanged: mock(() => undefined),
     deleteChat: mock(() => undefined),
+    ...overrides.searchIndex,
+  };
+  const shareStore = {
+    revokeShareByChatId: mock(async () => undefined),
+    ...overrides.shareStore,
+  };
+  const processing = {
+    phase: mock(() => null),
+    ...overrides.processing,
   };
   const wiring = wireServerEvents({
-    server: { publish: mock(() => undefined) },
+    server: {
+      publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      ...overrides.server,
+    },
     agentRegistry,
-    chatRegistry: {
-      getChat: mock(() => ({})),
-      onChatAdded: noOpSubscription,
-      onChatRemoved: noOpSubscription,
-      onChatReadUpdated: noOpSubscription,
-      onChatProjectPathUpdated: noOpSubscription,
-    },
-    settings: {
-      onSessionNameChanged: noOpSubscription,
-      onListChanged: noOpSubscription,
-      onRemoteSettingsChanged: noOpSubscription,
-    },
-    queue,
+    chatRegistry,
+    settings: settingsStore,
+    queue: queueService,
+    processing,
     metadata,
-    chatViews,
-    chatNativeReloader: {
-      reloadFromNative: mock(async () => ({
-        generationId: 'generation-2',
-        messages: [],
-        lastSeq: 0,
-      })),
-    },
-    pendingInputs,
-    pendingRecovery: { waitForSettlements: mock(async () => undefined) },
+    currentTranscriptMessages: overrides.currentTranscriptMessages ?? (() => []),
+    assistantMessagesForSubmission: overrides.assistantMessagesForSubmission ?? (() => []),
+    transientFeeds: new ChatTransientFeedStore('server-instance-test'),
     commandLedger,
-    shareStore: { revokeShareByChatId: mock(async () => undefined) },
-    telegramNotifier: {},
-    telegramSettings: { onChanged: noOpSubscription },
-    scheduledPrompts: { onInvalidated: noOpSubscription },
-    snippets: { onInvalidated: noOpSubscription },
-    loadNativeMessages: mock(async () => []),
+    shareStore,
+    telegramNotifier: { setBotToken: noOp, ...overrides.telegramNotifier },
+    telegramSettings: {
+      onChanged: mock((callback) => { telegram.changed = callback; }),
+      getBotToken: mock(() => null),
+      ...overrides.telegramSettings,
+    },
+    scheduledPrompts: {
+      onInvalidated: mock((callback) => { scheduled.invalidated = callback; }),
+      ...overrides.scheduledPrompts,
+    },
+    snippets: {
+      onInvalidated: mock((callback) => { snippets.invalidated = callback; }),
+      ...overrides.snippets,
+    },
+    preambles: {
+      onInvalidated: mock((callback) => { preambles.invalidated = callback; }),
+      ...overrides.preambles,
+    },
     searchIndex,
   });
   return {
-    agentListeners,
-    queueListeners,
-    wiring,
-    metadata,
-    chatViews,
+    agent,
+    agentRegistry,
+    chats,
+    chatRegistry,
     commandLedger,
+    metadata,
+    processing,
+    published,
+    queue,
+    queueService,
+    scheduled,
     searchIndex,
+    settings,
+    shareStore,
+    snippets,
+    preambles,
+    wiring,
+    removeChat() { chatPresent = false; },
   };
 }
 
+function providerCommit(content = 'answer') {
+  return {
+    type: 'rows',
+    chatId: 'chat-1',
+    viewId: 'view-1',
+    rows: [{
+      kind: 'provider-row',
+      ordinal: 2,
+      at,
+      providerMeta: null,
+      message: new AssistantMessage(at, content),
+    }],
+  };
+}
+
+function terminalCommit(outcome = 'finished') {
+  return {
+    type: 'run-ended',
+    chatId: 'chat-1',
+    viewId: 'view-1',
+    runId: 'turn-1',
+    row: {
+      kind: 'run-ended',
+      ordinal: 3,
+      at,
+      providerMeta: null,
+      outcome,
+      origin: outcome === 'interrupted' ? 'core' : 'provider',
+    },
+  };
+}
+
+const turn = {
+  commandType: 'agent-run',
+  clientRequestId: 'request-1',
+  turnId: 'turn-1',
+};
+
 describe('server event wiring', () => {
-  it('settles every direct execution command only at its exact terminal event', async () => {
-    const fixture = createWiringFixture();
+  it('broadcasts preamble catalog invalidations without catalog content', () => {
+    const fixture = createFixture();
 
-    fixture.agentListeners.finished('chat-1', 0, {
-      clientRequestId: 'req-run',
-      commandType: 'agent-run',
-      turnId: 'turn-run',
-    });
-    fixture.agentListeners.finished('chat-2', 0, {
-      clientRequestId: 'req-compact',
-      commandType: 'agent-compact',
-      turnId: 'turn-compact',
+    fixture.preambles.invalidated('updated');
+
+    expect(fixture.published).toEqual([{ type: 'preambles-invalidated', reason: 'updated' }]);
+  });
+
+  it('[TLV5-SEARCH.09-WS-03] broadcasts workspace transcript search status', () => {
+    const fixture = createFixture();
+    const status = {
+      version: 1,
+      phase: 'rebuilding',
+      chats: { total: 4, indexed: 3, pending: 1, failed: 0, unindexed: 0 },
+      queuedJobs: 1,
+      resync: { completedChats: 3, totalChats: 4 },
+      backlogRows: 12,
+      activeChat: { position: 4, total: 10 },
+      lastErrorCode: null,
+      updatedAt: '2026-08-19T00:00:00.000Z',
+    };
+
+    fixture.wiring.broadcastTranscriptSearchStatus(status);
+
+    expect(fixture.published).toEqual([{ type: 'transcript-search-status', status }]);
+  });
+
+  it('broadcasts the selection-change notice before its per-chat invalidation', async () => {
+    const fixture = createFixture();
+    const selectionChangeRow = {
+      kind: 'notice',
+      ordinal: 4,
+      at,
+      providerMeta: null,
+      message: 'Preambles updated',
+      detail: {
+        type: 'preamble-selection-change',
+        clientMessageId: 'selection-msg-1',
+        requestFingerprint: 'fingerprint-1',
+        selectionRevision: 2,
+        preambles: [{ id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Repository conventions' }],
+      },
+    };
+
+    fixture.agent.transcript({
+      type: 'rows',
+      chatId: 'chat-1',
+      viewId: 'view-1',
+      rows: [selectionChangeRow],
     });
     await fixture.wiring.waitForIdle();
 
-    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
-      'agent-run:chat-1:req-run',
-      'finished',
-      {},
-    );
-    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
-      'agent-compact:chat-2:req-compact',
-      'finished',
-      {},
-    );
+    const types = fixture.published.map((message) => message.type);
+    expect(types).toContain('chat-messages');
+    expect(types).toContain('chat-preambles-invalidated');
+    expect(types.indexOf('chat-messages')).toBeLessThan(types.indexOf('chat-preambles-invalidated'));
+    expect(fixture.published.at(-1)).toMatchObject({
+      type: 'chat-preambles-invalidated',
+      chatId: 'chat-1',
+      revision: 2,
+    });
   });
 
-  it('indexes only messages committed by transcript deduplication', async () => {
-    const fixture = createWiringFixture();
+  it('[TLV5-L03.02-CORE-UNIT-01] broadcasts committed rows before terminal-driven lifecycle state', async () => {
+    const fixture = createFixture();
 
-    fixture.agentListeners.messages('chat-1', [new UserMessage(
-      '2026-06-01T00:00:00.000Z',
-      'duplicate',
-      undefined,
-      { clientRequestId: 'req-duplicate' },
-    )]);
+    fixture.agent.transcript(providerCommit());
+    fixture.agent.transcript(terminalCommit());
+    fixture.agent.finished('chat-1', 0, turn, 'finished');
     await fixture.wiring.waitForIdle();
 
-    expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
-    expect(fixture.searchIndex.sourceMayHaveChanged).not.toHaveBeenCalled();
-  });
-
-  it('reports terminal settlement failures to the shutdown drain', async () => {
-    const settlementError = new Error('ledger unavailable');
-    const fixture = createWiringFixture({
-      commandLedger: {
-        settleTerminal: mock(async () => { throw settlementError; }),
-      },
-    });
-
-    fixture.agentListeners.finished('chat-1', 0, {
-      clientRequestId: 'req-run',
-      commandType: 'agent-run',
-      turnId: 'turn-run',
-    });
-
-    await expect(fixture.wiring.waitForIdle()).rejects.toBe(settlementError);
-  });
-
-  it('classifies an expected terminal before queue settlement can retire its identity', async () => {
-    const chatId = 'chat-1';
-    const turn = { clientRequestId: 'req-a', turnId: 'turn-a' };
-    const timestamp = '2026-06-01T00:00:00.000Z';
-    const nativeLoadStarted = deferred();
-    const releaseNativeLoad = deferred();
-    const loadNativeMessages = mock(async () => {
-      nativeLoadStarted.resolve();
-      return releaseNativeLoad.promise;
-    });
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages,
-      getRetainedHistoryMessages: mock(() => []),
-    });
-    await pendingInputs.register(chatId, 'interrupted', {
-      ...turn,
-      createdAt: timestamp,
-    });
-
-    const agentListeners = {};
-    const queueListeners = {};
-    const agentRegistry = {
-      onMessages: mock(() => undefined),
-      onProcessing: mock(() => undefined),
-      onSessionCreated: mock(() => undefined),
-      onFinished: mock((callback) => { agentListeners.finished = callback; }),
-      onFailed: mock(() => undefined),
-      discardTurn: mock(() => undefined),
-      settleTurn: mock(() => undefined),
-    };
-    const queue = {
-      onExecutionControlUpdated: mock(() => undefined),
-      onSessionStopRequested: mock((callback) => { queueListeners.stopRequested = callback; }),
-      onDispatching: mock(() => undefined),
-      onChatMessages: mock(() => undefined),
-      onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
-      onTurnFailed: mock(() => undefined),
-      onTurnSettled: mock((callback) => { queueListeners.turnSettled = callback; }),
-      getQueuedTurnFinalization: mock(() => null),
-      onAgentTurnTerminal: mock((terminalChatId, terminalTurn) => {
-        pendingInputs.store.upsert({
-          chatId: terminalChatId,
-          clientRequestId: 'req-b',
-          turnId: 'turn-b',
-          content: 'successor',
-          createdAt: timestamp,
-          deliveryStatus: 'accepted',
-        });
-        queueListeners.turnSettled(terminalChatId, terminalTurn);
-      }),
-      checkChatIdle: mock(async () => undefined),
-    };
-    const noOpSubscription = mock(() => undefined);
-
-    wireServerEvents({
-      server: { publish: mock(() => undefined) },
-      agentRegistry,
-      chatRegistry: {
-        getChat: mock(() => ({})),
-        onChatAdded: noOpSubscription,
-        onChatRemoved: noOpSubscription,
-        onChatReadUpdated: noOpSubscription,
-        onChatProjectPathUpdated: noOpSubscription,
-      },
-      settings: {
-        onSessionNameChanged: noOpSubscription,
-        onListChanged: noOpSubscription,
-        onRemoteSettingsChanged: noOpSubscription,
-      },
-      queue,
-      metadata: {},
-      chatViews: {},
-      chatNativeReloader: {},
-      pendingInputs,
-      pendingRecovery: { waitForSettlements: mock(async () => undefined) },
-      commandLedger: {},
-      shareStore: {},
-      telegramNotifier: {},
-      telegramSettings: { onChanged: noOpSubscription },
-      scheduledPrompts: { onInvalidated: noOpSubscription },
-      snippets: { onInvalidated: noOpSubscription },
-      loadNativeMessages: mock(async () => []),
-    });
-
-    queueListeners.stopRequested(chatId, 'stop-a', turn);
-    queueListeners.sessionStopped(chatId, true, 'interrupt-and-send', 'stop-a');
-    agentListeners.finished(chatId, 0, turn);
-    await nativeLoadStarted.promise;
-    releaseNativeLoad.resolve([new UserMessage(timestamp, 'successor')]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(loadNativeMessages).toHaveBeenCalledTimes(1);
-    expect(pendingInputs.listForChat(chatId)).toMatchObject([
-      { clientRequestId: 'req-a', deliveryStatus: 'unconfirmed' },
-      { clientRequestId: 'req-b', deliveryStatus: 'accepted' },
+    expect(fixture.published.map((message) => message.type)).toEqual([
+      'chat-messages',
+      'chat-messages',
+      'chat-processing-updated',
+      'agent-run-finished',
     ]);
-    expect(agentRegistry.settleTurn).toHaveBeenCalledWith(chatId, turn);
+    expect(fixture.published[0]).toMatchObject({
+      transcriptViewId: 'view-1',
+      firstOrdinal: 2,
+      lastOrdinal: 2,
+      messages: [{ ordinal: 2, message: { content: 'answer' } }],
+    });
+    expect(fixture.published[3]).toMatchObject({
+      type: 'agent-run-finished',
+      outcome: 'finished',
+    });
+    expect(fixture.queueService.onAgentTurnTerminal).toHaveBeenCalledWith('chat-1', turn, 'finished');
+    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
+      'agent-run:chat-1:request-1',
+      'finished',
+      {},
+    );
   });
 
-  it('releases a provider failure when the pending stop acknowledgement is rejected', async () => {
-    const chatId = 'chat-1';
-    const turn = { clientRequestId: 'req-a', turnId: 'turn-a' };
-    const pendingInputs = new PendingUserInputService({
-      loadNativeMessages: mock(async () => []),
-      getRetainedHistoryMessages: mock(() => []),
-    });
-    await pendingInputs.register(chatId, 'still running', {
-      ...turn,
-      createdAt: '2026-06-01T00:00:00.000Z',
-    });
+  it('preserves interrupted completion outcomes in the browser contract', async () => {
+    const fixture = createFixture();
 
-    const published = [];
-    const agentListeners = {};
-    const queueListeners = {};
-    const reloadFromNative = mock(async () => ({
-      mode: 'process-error',
-      generationId: 'generation-2',
-      messages: [],
-      lastSeq: 0,
-      pageOldestSeq: 1,
-      hasMore: false,
-    }));
-    const agentRegistry = {
-      onMessages: mock(() => undefined),
-      onProcessing: mock(() => undefined),
-      onSessionCreated: mock(() => undefined),
-      onFinished: mock(() => undefined),
-      onFailed: mock((callback) => { agentListeners.failed = callback; }),
-      discardTurn: mock(() => undefined),
-      settleTurn: mock(() => undefined),
-    };
-    const queue = {
-      onExecutionControlUpdated: mock(() => undefined),
-      onSessionStopRequested: mock((callback) => { queueListeners.stopRequested = callback; }),
-      onDispatching: mock(() => undefined),
-      onChatMessages: mock(() => undefined),
-      onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
-      onTurnFailed: mock(() => undefined),
-      onTurnSettled: mock((callback) => { queueListeners.turnSettled = callback; }),
-      getQueuedTurnFinalization: mock(() => null),
-      onAgentTurnTerminal: mock((terminalChatId, terminalTurn) => {
-        queueListeners.turnSettled(terminalChatId, terminalTurn);
+    fixture.agent.finished('chat-1', 0, turn, 'interrupted');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toContainEqual(
+      expect.objectContaining({
+        type: 'agent-run-finished',
+        chatId: 'chat-1',
+        exitCode: 0,
+        outcome: 'interrupted',
       }),
-      checkChatIdle: mock(async () => undefined),
-    };
-    const noOpSubscription = mock(() => undefined);
+    );
+  });
 
-    wireServerEvents({
-      server: {
-        publish: mock((_topic, payload) => {
-          published.push(JSON.parse(payload));
+  it('captures committed assistant output for the command receipt before terminal settlement', async () => {
+    const calls = [];
+    const fixture = createFixture({
+      assistantMessagesForSubmission: mock((chatId, viewId, clientMessageId, throughOrdinal) => {
+        calls.push(['read', chatId, viewId, clientMessageId, throughOrdinal]);
+        return ['answer'];
+      }),
+      commandLedger: {
+        appendAssistantMessages: mock(async (chatId, turnId, messages) => {
+          calls.push(['append', chatId, turnId, messages]);
+        }),
+        settleTerminal: mock(async () => {
+          calls.push(['settle']);
         }),
       },
-      agentRegistry,
-      chatRegistry: {
-        getChat: mock(() => ({})),
-        onChatAdded: noOpSubscription,
-        onChatRemoved: noOpSubscription,
-        onChatReadUpdated: noOpSubscription,
-        onChatProjectPathUpdated: noOpSubscription,
-      },
-      settings: {
-        onSessionNameChanged: noOpSubscription,
-        onListChanged: noOpSubscription,
-        onRemoteSettingsChanged: noOpSubscription,
-      },
-      queue,
-      metadata: {},
-      chatViews: { appendToCurrentOrProvisional: mock(async () => ({ messages: [] })) },
-      chatNativeReloader: { reloadFromNative },
-      pendingInputs,
-      pendingRecovery: { waitForSettlements: mock(async () => undefined) },
-      commandLedger: {},
-      shareStore: {},
-      telegramNotifier: {},
-      telegramSettings: { onChanged: noOpSubscription },
-      scheduledPrompts: { onInvalidated: noOpSubscription },
-      snippets: { onInvalidated: noOpSubscription },
-      loadNativeMessages: mock(async () => []),
     });
 
-    queueListeners.stopRequested(chatId, 'stop-a', turn);
-    agentListeners.failed(chatId, 'provider failed independently', turn);
-    await Promise.resolve();
+    await fixture.agent.transcript(terminalCommit());
+    fixture.agent.finished('chat-1', 0, turn, 'finished');
+    await fixture.wiring.waitForIdle();
 
-    expect(reloadFromNative).not.toHaveBeenCalled();
-    expect(published.some((message) => message.type === 'agent-run-failed')).toBe(false);
+    expect(calls).toEqual([
+      ['read', 'chat-1', 'view-1', 'message-1', 3],
+      ['append', 'chat-1', 'turn-1', ['answer']],
+      ['settle'],
+    ]);
+  });
 
-    queueListeners.sessionStopped(chatId, false, 'stop', 'stop-a');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  it('broadcasts committed output before a failed run transition', async () => {
+    const fixture = createFixture();
 
-    expect(reloadFromNative).toHaveBeenCalledWith(
-      chatId,
-      'process-error',
-      'provider failed independently',
+    fixture.agent.transcript(providerCommit('partial answer'));
+    fixture.agent.transcript(terminalCommit('failed'));
+    fixture.agent.failed('chat-1', 'provider failed', 'CARRYOVER_COMPACTION_FAILED', turn);
+    await fixture.wiring.waitForIdle();
+
+    const types = fixture.published.map((message) => message.type);
+    expect(types.indexOf('chat-messages')).toBeLessThan(types.indexOf('chat-processing-updated'));
+    expect(types.indexOf('chat-processing-updated')).toBeLessThan(types.indexOf('agent-run-failed'));
+    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
+      'agent-run:chat-1:request-1',
+      'failed',
+      { error: 'provider failed', errorCode: 'CARRYOVER_COMPACTION_FAILED' },
     );
-    expect(published).toContainEqual(expect.objectContaining({
-      type: 'agent-run-failed',
-      chatId,
-      error: 'provider failed independently',
-      turnId: 'turn-a',
-      clientRequestId: 'req-a',
-    }));
+  });
+
+  it('updates preview without scheduling a duplicate search rebuild for transcript commits', async () => {
+    const fixture = createFixture();
+
+    fixture.agent.transcript(providerCommit());
+    fixture.agent.transcript(terminalCommit());
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledTimes(1);
+    expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledWith('chat-1', [
+      expect.objectContaining({ content: 'answer' }),
+    ]);
+    expect(fixture.searchIndex.catalogMayHaveChanged).not.toHaveBeenCalled();
+  });
+
+  it('suppresses resend candidates in commit broadcasts while processing', async () => {
+    const fixture = createFixture({
+      agentRegistry: {
+        resendCandidates: mock(() => [{ ordinal: 1, content: 'prompt', attachmentNames: [] }]),
+      },
+      processing: { phase: mock(() => 'running') },
+    });
+
+    fixture.agent.transcript(providerCommit());
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published[0]).toMatchObject({
+      type: 'chat-messages',
+      resendCandidates: [],
+    });
+    expect(fixture.agentRegistry.resendCandidates).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds preview metadata from the complete replacement view', async () => {
+    const replacement = [new AssistantMessage(at, 'reloaded answer')];
+    const fixture = createFixture({ currentTranscriptMessages: () => replacement });
+
+    fixture.agent.transcript({
+      type: 'view-replaced',
+      chatId: 'chat-1',
+      previousViewId: 'view-1',
+      view: {
+        viewId: 'view-2',
+        status: 'current',
+        createdAt: at,
+        contentStartOrdinal: 1,
+      },
+    });
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.metadata.replaceFromTranscriptView)
+      .toHaveBeenCalledWith('chat-1', replacement);
+    expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
+    expect(fixture.published).toEqual([expect.objectContaining({
+      type: 'chat-transcript-replaced',
+      previousTranscriptViewId: 'view-1',
+      transcriptViewId: 'view-2',
+    })]);
+  });
+
+  it('broadcasts a view replacement before rows from the replacement producer', async () => {
+    const fixture = createFixture();
+
+    fixture.agent.transcript({
+      type: 'view-replaced',
+      chatId: 'chat-1',
+      previousViewId: 'view-1',
+      view: {
+        viewId: 'view-2',
+        status: 'current',
+        createdAt: at,
+        contentStartOrdinal: 1,
+      },
+    });
+    fixture.agent.transcript({
+      ...providerCommit('replacement live row'),
+      viewId: 'view-2',
+      rows: [{
+        kind: 'provider-row',
+        ordinal: 1,
+        at,
+        providerMeta: null,
+        message: new AssistantMessage(at, 'replacement live row'),
+      }],
+    });
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toEqual([
+      expect.objectContaining({
+        type: 'chat-transcript-replaced',
+        previousTranscriptViewId: 'view-1',
+        transcriptViewId: 'view-2',
+      }),
+      expect.objectContaining({
+        type: 'chat-messages',
+        transcriptViewId: 'view-2',
+        firstOrdinal: 1,
+        lastOrdinal: 1,
+        messages: [{
+          ordinal: 1,
+          message: expect.objectContaining({ content: 'replacement live row' }),
+        }],
+      }),
+    ]);
+  });
+
+  it('broadcasts session facts through the same per-chat task queue', async () => {
+    const fixture = createFixture();
+
+    fixture.agent.transcript(providerCommit());
+    fixture.agent.session('chat-1');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published.map((message) => message.type)).toEqual([
+      'chat-messages',
+      'chat-session-created',
+    ]);
+    expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('publishes a Stop outcome before the resulting processing phase', async () => {
+    const fixture = createFixture({ processing: { phase: mock(() => 'stopping') } });
+
+    fixture.queue.stopped('chat-1', 'interrupt-requested', 'stop');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toMatchObject([
+      {
+        type: 'chat-session-stopped',
+        chatId: 'chat-1',
+        outcome: 'interrupt-requested',
+        intent: 'stop',
+      },
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'stopping' },
+    ]);
+  });
+
+  it('repairs an idle processing phase before publishing an already-idle Stop', async () => {
+    const fixture = createFixture({ processing: { phase: mock(() => null) } });
+
+    fixture.queue.stopped('chat-1', 'already-idle', 'stop');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toMatchObject([
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: null },
+      {
+        type: 'chat-session-stopped',
+        chatId: 'chat-1',
+        outcome: 'already-idle',
+        intent: 'stop',
+      },
+    ]);
+  });
+
+  it('broadcasts view-qualified execution control updates', () => {
+    const fixture = createFixture();
+    const control = emptyStoredChatExecutionControl('server-instance-test');
+    control.version = 2;
+
+    fixture.queue.control('chat-1', control);
+
+    expect(fixture.published).toEqual([expect.objectContaining({
+      type: 'chat-execution-control-updated',
+      chatId: 'chat-1',
+      control: expect.objectContaining({ version: 2 }),
+    })]);
+  });
+
+  it('publishes handoff invalidation without rotating the transcript view', async () => {
+    const fixture = createFixture();
+
+    fixture.wiring.notifyAgentHandoff('chat-1');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toEqual([{
+      type: 'chat-list-refresh-requested',
+      reason: 'agent-handoff',
+      chatId: 'chat-1',
+    }]);
+    expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('deletes derived state and skips queued lifecycle broadcasts after removal', async () => {
+    const fixture = createFixture();
+    fixture.removeChat();
+
+    fixture.chats.removed('chat-1', 'user-deletion');
+    fixture.queue.processing('chat-1');
+    fixture.queue.stopped('chat-1', 'already-idle', 'stop');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.agentRegistry.discardTurn).toHaveBeenCalledWith('chat-1');
+    expect(fixture.searchIndex.deleteChat).toHaveBeenCalledWith('chat-1');
+    expect(fixture.shareStore.revokeShareByChatId).toHaveBeenCalledWith('chat-1');
+    expect(fixture.published).toEqual([{ type: 'chat-session-deleted', chatId: 'chat-1' }]);
+    expect(fixture.commandLedger.markChatInterrupted).toHaveBeenCalledWith(
+      'chat-1',
+      'chat-deleted',
+    );
+  });
+
+  it('broadcasts operational notices without entering transcript sequence space', () => {
+    const fixture = createFixture();
+
+    fixture.wiring.notifyOperationalNotice('chat-1', 'info', 'Carryover is being compacted.');
+
+    expect(fixture.published).toEqual([expect.objectContaining({
+      type: 'chat-operational-notice',
+      chatId: 'chat-1',
+      noticeType: 'info',
+      content: 'Carryover is being compacted.',
+    })]);
+    expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
+  });
+
+  it('publishes unavailable-project queue warnings as operational notices', async () => {
+    const fixture = createFixture();
+    const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+
+    fixture.queue.projectUnavailable('chat-1', unavailable);
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.published).toEqual([expect.objectContaining({
+      type: 'chat-operational-notice',
+      chatId: 'chat-1',
+      noticeType: 'warning',
+      content: unavailable.message,
+    })]);
+    expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
+  });
+
+  it('reports task failures through the shutdown drain', async () => {
+    const failure = new Error('command ledger unavailable');
+    const fixture = createFixture({
+      commandLedger: { settleTerminal: mock(async () => { throw failure; }) },
+    });
+
+    fixture.agent.finished('chat-1', 0, turn, 'finished');
+
+    await expect(fixture.wiring.waitForIdle()).rejects.toBe(failure);
   });
 });

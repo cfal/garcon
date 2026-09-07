@@ -3,7 +3,7 @@ import type { FileTableRow } from './file-tree-rows.js';
 export const FILE_TREE_PARENT_ROW_KEY = 'file-tree-parent-row';
 
 export type FileTreeRenderRow =
-	| { kind: 'parent'; key: string; level: 1; path: string }
+	| { kind: 'parent'; key: string; level: 1; path: string | null }
 	| FileTableRow
 	| {
 			kind: 'child-status';
@@ -38,9 +38,8 @@ export function buildFileTreeRenderModel(args: {
 		rows.push(row);
 	};
 
-	if (args.parentPath) {
-		append({ kind: 'parent', key: FILE_TREE_PARENT_ROW_KEY, level: 1, path: args.parentPath });
-	}
+	// The root keeps an inert parent row so repeated activation cannot land on its first entry.
+	append({ kind: 'parent', key: FILE_TREE_PARENT_ROW_KEY, level: 1, path: args.parentPath });
 
 	for (const row of args.rows) {
 		append(row);

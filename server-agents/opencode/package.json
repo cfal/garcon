@@ -5,15 +5,12 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "bunx tsc -p tsconfig.json" },
-  "dependencies": { "@garcon/common": "workspace:*", "@garcon/server-agent-common": "workspace:*", "@garcon/server-agent-interface": "workspace:*", "@opencode-ai/sdk": "1.17.11" },
-  "devDependencies": { "@types/bun": "^1.3.14", "typescript": "^6.0.3" },
+  "dependencies": { "@garcon/common": "workspace:*", "@garcon/server-agent-common": "workspace:*", "@garcon/server-agent-interface": "workspace:*", "@opencode-ai/sdk": "1.18.29", "jsonc-parser": "3.3.1" },
+  "devDependencies": { "@types/bun": "^1.4.1", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "opencode",
-    "standaloneEntrypoints": {
-      "transcript-index-source": "./src/transcript-index-source.ts"
-    },
-    "preMainModules": [],
+    "preMainModules": ["./src/build/prepare-compiled-runtime.ts"],
     "embeddedDependencyMetadata": []
   }
 }

@@ -1,24 +1,35 @@
-import { compactChat, forkChat } from '$lib/api/chats.js';
+import { compactChat, forkChat, type ForkChatParams } from '$lib/api/chats.js';
+import { ApiError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
+import { resolveConversationModelSelection } from './conversation-model-selection.js';
+import {
+	steerSubmissionRejection,
+	steerSubmissionRejectionNotice,
+} from './steer-submission-policy.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
+import { parseHandoffCommand } from '$lib/chat/composer/handoff-command.js';
 import {
 	parseCompactCommand,
-	isCodexGoalCommand,
+	isGoalCommand,
+	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
 	parseSteerCommand,
+	parseTagCommand,
 } from '$lib/chat/composer/slash-commands.js';
-import { createClientChatId } from '$lib/chat/sessions/client-chat-id.js';
+import { createClientChatId } from '$shared/client-chat-id';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import type {
 	ScheduleInCommandError,
 	ScheduleInCommandParseResult,
+	MoveChatBoundaryCommandParseResult,
+	TagCommandParseResult,
 } from '$lib/chat/composer/slash-commands.js';
 import { formatScheduledInstant } from '$lib/scheduling/local-schedule.js';
 import {
@@ -26,29 +37,64 @@ import {
 	prepareChatImages,
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
-import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
+import {
+	AcceptedInputSubmissionService,
+	type PreparedForkInput,
+} from '$lib/chat/conversation/accepted-input-submission-service.js';
+import {
+	remapForkAtMessage,
+	selectForkAtMessage,
+	type ForkAtMessageSelection,
+} from '$lib/chat/actions/fork-at-message-action.js';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
+import type { ReorderChatResponse } from '$shared/chat-order-contracts';
+import { normalizeTags } from '$shared/tags';
 
 interface SlashCommandSessions {
 	selectedChatId: string | null;
 	byId: Record<string, ChatSessionRecord>;
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
+	moveChatToBoundary(
+		chatId: string,
+		boundary: 'top' | 'bottom',
+	): Promise<ReorderChatResponse | null>;
+	setChatTags(chatId: string, tags: string[]): Promise<boolean>;
 	upsertServerChat(entry: ChatListEntry): void;
 	setSelectedChatId(chatId: string | null): void;
 }
 
 interface SlashCommandChatState {
 	activeChatId: string | null;
+	entries: readonly TranscriptMessage[];
 	isUserScrolledUp: boolean;
+	getCursor(): { transcriptViewId: string; lastOrdinal: number };
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
+	appendLocalNoticeForChat(
+		chatId: string,
+		noticeType: LocalNoticeType,
+		content: string,
+	): void;
+	noticeRevisionForChat(chatId: string): number;
+	clearLocalNoticesForChat(chatId: string, throughRevision?: number): void;
+}
+
+export interface ConversationForkSource {
+	readonly transcript: Pick<SlashCommandChatState, 'entries' | 'getCursor'>;
+	readonly refetchTranscript?: () => Promise<void>;
 }
 
 interface SlashCommandComposerState {
 	inputText: string;
 	images: File[];
-	clearAfterSubmit(chatId: string): void;
-	saveDraft(chatId: string): void;
+	clearAfterSubmit(chatId: string): number;
+	restoreDraftIfRevision(
+		chatId: string,
+		expectedRevision: number,
+		text: string,
+		images: readonly File[],
+	): boolean;
 }
 
 interface SlashCommandAgentState {
@@ -70,9 +116,11 @@ interface SlashCommandModelCatalog {
 		apiProviderId: string | null;
 		modelEndpointId: string | null;
 		modelProtocol: ApiProtocol | null;
-	};
+	} | null;
 	supportsFork(agentId: SessionAgentId): boolean;
 	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
+	supportsSteering(agentId: SessionAgentId): boolean;
+	supportsGoals(agentId: SessionAgentId): boolean;
 }
 
 export interface ConversationSlashCommandDeps {
@@ -83,15 +131,26 @@ export interface ConversationSlashCommandDeps {
 	lifecycle: SlashCommandLifecycle;
 	modelCatalog: SlashCommandModelCatalog;
 	navigation: { navigateToChat?(chatId: string): void };
+	refetchTranscript?: (chatId: string) => Promise<void>;
+	// Asks the user whether to continue when the provider cannot materialize a native fork.
+	// Without it the refusal reads as a plain failure.
+	confirmHandoffFork?: () => Promise<boolean>;
 	scrollToBottom(): void;
 }
 
 export type SlashCommandSubmissionResolution =
-	| { kind: 'handled'; outcome: ConversationSubmissionOutcome | Promise<ConversationSubmissionOutcome> }
-	| { kind: 'continue'; content: string; isActiveDeliveryInput: boolean };
+	| {
+			kind: 'handled';
+			outcome: ConversationSubmissionOutcome | Promise<ConversationSubmissionOutcome>;
+	  }
+	| { kind: 'steer'; content: string }
+	| { kind: 'goal-control'; content: string }
+	| { kind: 'continue'; content: string };
 
 export class ConversationSlashCommandService {
 	readonly #scheduleInFlight = new Set<string>();
+	// Serializes each chat's complete incremental tag read-modify-write operation.
+	readonly #tagMutationTails = new Map<string, Promise<void>>();
 
 	constructor(
 		private readonly deps: ConversationSlashCommandDeps,
@@ -104,13 +163,30 @@ export class ConversationSlashCommandService {
 		text: string;
 		images: File[];
 		ownsComposer: boolean;
+		handoffPending: boolean;
 	}): SlashCommandSubmissionResolution {
-		const { chatId, chat, text, images, ownsComposer } = input;
+		const { chatId, chat, text, images, ownsComposer, handoffPending } = input;
 		const rename = parseRenameCommand(text);
 		if (rename) {
 			return {
 				kind: 'handled',
 				outcome: this.submitRenameCommand(chatId, chat, rename.title, images, ownsComposer),
+			};
+		}
+
+		const move = parseMoveChatBoundaryCommand(text);
+		if (move.kind !== 'not-command') {
+			return {
+				kind: 'handled',
+				outcome: this.submitMoveChatBoundaryCommand(chatId, chat, move, images, ownsComposer),
+			};
+		}
+
+		const tag = parseTagCommand(text);
+		if (tag.kind !== 'not-command') {
+			return {
+				kind: 'handled',
+				outcome: this.submitTagCommand(chatId, chat, tag, images, ownsComposer),
 			};
 		}
 
@@ -124,38 +200,61 @@ export class ConversationSlashCommandService {
 
 		const agentId = chat.agentId as SessionAgentId;
 		const steer = parseSteerCommand(text);
-		if (steer.kind === 'invalid') {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_prompt_required());
-			return { kind: 'handled', outcome: 'rejected' };
+		if (steer.kind !== 'not-command') {
+			const prompt = steer.kind === 'valid' ? steer.prompt : '';
+			const rejection = steerSubmissionRejection({
+				prompt,
+				supportsSteering: this.deps.modelCatalog.supportsSteering(agentId),
+				attachmentCount: images.length,
+				handoffPending,
+			});
+			if (rejection) {
+				this.deps.chatState.appendLocalNotice('error', steerSubmissionRejectionNotice(rejection));
+				return { kind: 'handled', outcome: 'rejected' };
+			}
+			return { kind: 'steer', content: prompt };
 		}
-		if (steer.kind === 'valid' && agentId !== 'codex') {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_codex_only());
-			return { kind: 'handled', outcome: 'rejected' };
-		}
-		if (steer.kind === 'valid' && (chat.status !== 'running' || !chat.isProcessing)) {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_requires_active_turn());
-			return { kind: 'handled', outcome: 'rejected' };
+
+		if (
+			isGoalCommand(text) &&
+			chat.status === 'running' &&
+			chat.isProcessing &&
+			this.deps.modelCatalog.supportsGoals(agentId)
+		) {
+			if (images.length > 0) {
+				this.deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_queue_attachments_unavailable(),
+				);
+				return { kind: 'handled', outcome: 'rejected' };
+			}
+			return { kind: 'goal-control', content: text };
 		}
 
 		if (this.deps.modelCatalog.supportsFork(agentId)) {
 			const fork = parseForkCommand(text);
 			if (fork) {
-				if (chat.status === 'running' && chat.isProcessing
-					&& !this.deps.modelCatalog.supportsForkWhileRunning(agentId)) {
+				if (
+					chat.status === 'running' &&
+					chat.isProcessing &&
+					!this.deps.modelCatalog.supportsForkWhileRunning(agentId)
+				) {
 					this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return { kind: 'handled', outcome: 'rejected' };
 				}
 				return {
 					kind: 'handled',
-					outcome: this.submitForkCommand(
-						chatId,
-						chat,
-						fork.message,
-						images,
-						ownsComposer,
-					),
+					outcome: this.submitForkCommand(chatId, chat, fork.message, images, ownsComposer),
 				};
 			}
+		}
+
+		const handoff = parseHandoffCommand(text);
+		if (handoff) {
+			return {
+				kind: 'handled',
+				outcome: this.submitHandoffCommand(chatId, chat, handoff.message, images, ownsComposer),
+			};
 		}
 
 		const compact = parseCompactCommand(text);
@@ -168,9 +267,7 @@ export class ConversationSlashCommandService {
 
 		return {
 			kind: 'continue',
-			content: steer.kind === 'valid' ? steer.prompt : text,
-			isActiveDeliveryInput:
-				steer.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)),
+			content: text,
 		};
 	}
 
@@ -199,7 +296,7 @@ export class ConversationSlashCommandService {
 
 		this.#scheduleInFlight.add(chatId);
 		const previousText = deps.composerState.inputText;
-		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
+		const clearedRevision = ownsComposer ? deps.composerState.clearAfterSubmit(chatId) : null;
 		try {
 			const result = await scheduleChatPrompt({
 				chatId,
@@ -218,9 +315,8 @@ export class ConversationSlashCommandService {
 			}
 			return 'accepted';
 		} catch (error) {
-			if (ownsComposer && deps.sessions.selectedChatId === chatId) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.saveDraft(chatId);
+			if (clearedRevision !== null) {
+				deps.composerState.restoreDraftIfRevision(chatId, clearedRevision, previousText, []);
 			}
 			if (deps.chatState.activeChatId === chatId) {
 				deps.chatState.appendLocalNotice(
@@ -239,7 +335,7 @@ export class ConversationSlashCommandService {
 		chat: ChatSessionRecord,
 		title: string,
 		images: File[],
-		clearComposer: boolean,
+		ownsComposer: boolean,
 	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (!title) {
@@ -257,14 +353,164 @@ export class ConversationSlashCommandService {
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		if (clearComposer) deps.composerState.clearAfterSubmit(chatId);
+		const clearedContentRevision = ownsComposer
+			? deps.composerState.clearAfterSubmit(chatId)
+			: null;
 		const renamed = await deps.sessions.renameChat(chatId, title);
-		if (!renamed && clearComposer && deps.sessions.selectedChatId === chatId) {
-			deps.composerState.inputText = previousText;
-			deps.composerState.images = previousImages;
-			deps.composerState.saveDraft(chatId);
+		if (!renamed) {
+			this.#restoreComposerIfUntouched({
+				chatId,
+				ownsComposer,
+				text: previousText,
+				images: previousImages,
+				clearedContentRevision,
+			});
 		}
 		return renamed ? 'accepted' : 'rejected';
+	}
+
+	async submitMoveChatBoundaryCommand(
+		chatId: string,
+		chat: ChatSessionRecord,
+		command: MoveChatBoundaryCommandParseResult,
+		images: File[],
+		ownsComposer: boolean,
+	): Promise<ConversationSubmissionOutcome> {
+		const { deps } = this;
+		if (command.kind === 'invalid') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_move_arguments());
+			return 'rejected';
+		}
+		if (command.kind !== 'valid') return 'no-op';
+		if (chat.status === 'draft') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_move_draft());
+			return 'rejected';
+		}
+		if (images.length > 0) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_move_attachments());
+			return 'rejected';
+		}
+
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+		const clearedContentRevision = ownsComposer
+			? deps.composerState.clearAfterSubmit(chatId)
+			: null;
+		const result = await deps.sessions.moveChatToBoundary(chatId, command.boundary);
+		if (!result) {
+			this.#restoreComposerIfUntouched({
+				chatId,
+				ownsComposer,
+				text: previousText,
+				images: previousImages,
+				clearedContentRevision,
+			});
+			return 'rejected';
+		}
+
+		if (deps.chatState.activeChatId === chatId) {
+			deps.chatState.appendLocalNotice('info', moveChatNotice(command.boundary, result.changed));
+			deps.chatState.isUserScrolledUp = false;
+			deps.scrollToBottom();
+		}
+		return 'accepted';
+	}
+
+	async submitTagCommand(
+		chatId: string,
+		chat: ChatSessionRecord,
+		command: TagCommandParseResult,
+		images: File[],
+		ownsComposer: boolean,
+	): Promise<ConversationSubmissionOutcome> {
+		const { deps } = this;
+		if (command.kind === 'invalid') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_tag_arguments());
+			return 'rejected';
+		}
+		if (command.kind !== 'valid') return 'no-op';
+		if (images.length > 0) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_tag_attachments());
+			return 'rejected';
+		}
+
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+		const clearedContentRevision = ownsComposer
+			? deps.composerState.clearAfterSubmit(chatId)
+			: null;
+
+		return this.#enqueueTagMutation(chatId, async () => {
+			const currentTags = normalizeTags(deps.sessions.byId[chatId]?.tags ?? chat.tags);
+			const requested = new Set(command.tags);
+			const nextTags =
+				command.action === 'add'
+					? normalizeTags([...currentTags, ...command.tags])
+					: currentTags.filter((tag) => !requested.has(tag));
+			const changedTags =
+				command.action === 'add'
+					? nextTags.filter((tag) => !currentTags.includes(tag))
+					: currentTags.filter((tag) => !nextTags.includes(tag));
+			const updated =
+				changedTags.length === 0 ? true : await deps.sessions.setChatTags(chatId, nextTags);
+			if (!updated) {
+				this.#restoreComposerIfUntouched({
+					chatId,
+					ownsComposer,
+					text: previousText,
+					images: previousImages,
+					clearedContentRevision,
+				});
+				return 'rejected';
+			}
+
+			if (deps.chatState.activeChatId === chatId) {
+				const content =
+					changedTags.length === 0
+						? m.chat_notice_tags_unchanged()
+						: command.action === 'add'
+							? m.chat_notice_tags_added({ tags: changedTags.join(', ') })
+							: m.chat_notice_tags_removed({ tags: changedTags.join(', ') });
+				deps.chatState.appendLocalNotice('info', content);
+				deps.chatState.isUserScrolledUp = false;
+				deps.scrollToBottom();
+			}
+			return 'accepted';
+		});
+	}
+
+	#enqueueTagMutation(
+		chatId: string,
+		mutation: () => Promise<ConversationSubmissionOutcome>,
+	): Promise<ConversationSubmissionOutcome> {
+		const previous = this.#tagMutationTails.get(chatId) ?? Promise.resolve();
+		const result = previous.then(mutation, mutation);
+		const settled = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		this.#tagMutationTails.set(chatId, settled);
+		void settled.then(() => {
+			if (this.#tagMutationTails.get(chatId) === settled) this.#tagMutationTails.delete(chatId);
+		});
+		return result;
+	}
+
+	#restoreComposerIfUntouched(input: {
+		chatId: string;
+		ownsComposer: boolean;
+		text: string;
+		images: File[];
+		clearedContentRevision: number | null;
+	}): void {
+		const { deps } = this;
+		if (!input.ownsComposer || input.clearedContentRevision === null) return;
+		deps.composerState.restoreDraftIfRevision(
+			input.chatId,
+			input.clearedContentRevision,
+			input.text,
+			input.images,
+		);
 	}
 
 	async submitCompactCommand(
@@ -280,7 +526,8 @@ export class ConversationSlashCommandService {
 		}
 
 		const previousText = deps.composerState.inputText;
-		if (clearComposer) deps.composerState.clearAfterSubmit(chatId);
+		const previousImages = [...deps.composerState.images];
+		const clearedRevision = clearComposer ? deps.composerState.clearAfterSubmit(chatId) : null;
 
 		try {
 			await compactChat({
@@ -290,15 +537,112 @@ export class ConversationSlashCommandService {
 			});
 			return 'accepted';
 		} catch (error) {
-			if (clearComposer) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.saveDraft(chatId);
+			if (clearedRevision !== null) {
+				deps.composerState.restoreDraftIfRevision(
+					chatId,
+					clearedRevision,
+					previousText,
+					previousImages,
+				);
 			}
 			deps.chatState.appendLocalNotice(
 				'error',
 				m.chat_notice_failed_compact({ detail: errorDetail(error) }),
 			);
 			return 'rejected';
+		}
+	}
+
+	// Continues the chat under the same agent in a fresh chat, then navigates
+	// there so the user lands in the continuation rather than the chat they left.
+	async submitHandoffCommand(
+		sourceChatId: string,
+		sourceChat: ChatSessionRecord,
+		message: string,
+		images: File[],
+		clearComposer: boolean,
+	): Promise<ConversationSubmissionOutcome> {
+		const { deps } = this;
+		if (sourceChat.status !== 'running') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_handoff_draft());
+			return 'rejected';
+		}
+		if (!message.trim()) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_message());
+			return 'rejected';
+		}
+
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+		deps.chatState.appendLocalNotice('progress', m.chat_notice_handing_off_chat());
+		// Clearing through this revision on settle removes the progress notice while
+		// keeping any error notice the failure paths append after it.
+		const progressNoticeRevision = deps.chatState.noticeRevisionForChat(sourceChatId);
+		deps.chatState.isUserScrolledUp = false;
+		const clearedRevision = clearComposer
+			? deps.composerState.clearAfterSubmit(sourceChatId)
+			: null;
+
+		try {
+			let imagePayload: ChatImage[] = [];
+			if (images.length > 0) {
+				try {
+					imagePayload = await prepareChatImages(images);
+				} catch (error) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+					);
+					return 'rejected';
+				}
+			}
+
+			const submission = this.acceptedInputs.selfHandoff({
+				sourceChatId,
+				chatId: createClientChatId(),
+				command: message.trim(),
+				...(imagePayload.length > 0 ? { images: imagePayload } : {}),
+			});
+			try {
+				const response = await submission.submit();
+				deps.sessions.upsertServerChat(response.chat);
+				deps.sessions.setSelectedChatId(response.chat.id);
+				deps.navigation.navigateToChat?.(response.chat.id);
+				if (response.status === 'accepted') {
+					deps.lifecycle.beginTurn(response.chat.id);
+				}
+				return 'accepted';
+			} catch (error) {
+				// An ambiguous transport outcome may have already created the target and
+				// started its turn. Restoring the composer and calling it a failure
+				// invites a resubmission that would produce a second continuation.
+				const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+				if (!outcomeUnknown) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+				}
+				deps.chatState.appendLocalNotice(
+					'error',
+					outcomeUnknown
+						? m.chat_notice_handoff_outcome_unconfirmed()
+						: m.chat_notice_failed_handoff({ detail: errorDetail(error) }),
+				);
+				return outcomeUnknown ? 'unknown' : 'rejected';
+			}
+		} finally {
+			deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
+		}
+	}
+
+	async #submitForkRunWithConfirmation(
+		submission: PreparedForkInput,
+	): Promise<Awaited<ReturnType<PreparedForkInput['submit']>> | null> {
+		try {
+			return await submission.submit();
+		} catch (error) {
+			if (!isHandoffForkConfirmationError(error) || !this.deps.confirmHandoffFork) throw error;
+			if (!(await this.deps.confirmHandoffFork())) return null;
+			return submission.submitWithHandoffFork();
 		}
 	}
 
@@ -318,114 +662,204 @@ export class ConversationSlashCommandService {
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
 		deps.chatState.appendLocalNotice('progress', m.chat_notice_forking_chat());
+		// Clearing through this revision on settle removes the progress notice while
+		// keeping any error notice the failure paths append after it.
+		const progressNoticeRevision = deps.chatState.noticeRevisionForChat(sourceChatId);
 		deps.chatState.isUserScrolledUp = false;
-		if (clearComposer) deps.composerState.clearAfterSubmit(sourceChatId);
+		const clearedRevision = clearComposer
+			? deps.composerState.clearAfterSubmit(sourceChatId)
+			: null;
 
-		if (!message.trim()) {
-			return this.#submitForkOnlyCommand(sourceChatId, previousText, previousImages, clearComposer);
-		}
+		try {
+			if (!message.trim()) {
+				return await this.#submitForkOnlyCommand(
+					sourceChatId,
+					previousText,
+					previousImages,
+					clearedRevision,
+				);
+			}
 
-		let imagePayload: ChatImage[] = [];
-		if (images.length > 0) {
+			let imagePayload: ChatImage[] = [];
+			if (images.length > 0) {
+				try {
+					imagePayload = await prepareChatImages(images);
+				} catch (error) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+					);
+					return 'rejected';
+				}
+			}
+
+			const forkChatId = createClientChatId();
+			const model = sourceChat.model ?? deps.agentState.model;
+			const selection = resolveConversationModelSelection({
+				agentId: sourceChat.agentId,
+				model,
+				apiProviderId: sourceChat.apiProviderId ?? null,
+				modelEndpointId: sourceChat.modelEndpointId ?? null,
+				modelProtocol: sourceChat.modelProtocol ?? null,
+			}, deps.modelCatalog);
+			const submission = this.acceptedInputs.fork({
+				sourceChatId,
+				chatId: forkChatId,
+				command: message.trim(),
+				permissionMode: sourceChat.permissionMode,
+				thinkingMode: sourceChat.thinkingMode,
+				agentSettings: sourceChat.agentSettings,
+				images: imagePayload.length > 0 ? imagePayload : undefined,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
 			try {
-				imagePayload = await prepareChatImages(images);
+				const response = await this.#submitForkRunWithConfirmation(submission);
+				if (!response) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+					return 'rejected';
+				}
+				deps.sessions.upsertServerChat(response.chat);
+				deps.sessions.setSelectedChatId(response.chat.id);
+				deps.navigation.navigateToChat?.(response.chat.id);
+				if (response.status === 'accepted') {
+					deps.lifecycle.beginTurn(response.chat.id);
+				}
+				return 'accepted';
 			} catch (error) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+				const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+				if (!outcomeUnknown) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+					outcomeUnknown
+						? m.chat_notice_fork_outcome_unconfirmed()
+						: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 				);
-				return 'rejected';
+				return outcomeUnknown ? 'unknown' : 'rejected';
 			}
-		}
-
-		const forkChatId = createClientChatId();
-		const model = sourceChat.model ?? deps.agentState.model;
-		const selection = deps.modelCatalog.selectionFor(
-			sourceChat.agentId,
-			model,
-			sourceChat.modelEndpointId,
-		);
-		const submission = this.acceptedInputs.fork({
-			sourceChatId,
-			chatId: forkChatId,
-			command: message.trim(),
-			permissionMode: sourceChat.permissionMode,
-			thinkingMode: sourceChat.thinkingMode,
-			agentSettings: sourceChat.agentSettings,
-			images: imagePayload.length > 0 ? imagePayload : undefined,
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
-		try {
-			const response = await submission.submit();
-			deps.sessions.upsertServerChat(response.chat);
-			deps.sessions.setSelectedChatId(response.chat.id);
-			deps.navigation.navigateToChat?.(response.chat.id);
-			if (response.status === 'accepted') {
-				deps.lifecycle.beginTurn(response.chat.id);
-			}
-			return 'accepted';
-		} catch (error) {
-			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
-			if (!outcomeUnknown) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
-			}
-			deps.chatState.appendLocalNotice(
-				'error',
-				outcomeUnknown
-					? m.chat_notice_fork_outcome_unconfirmed()
-					: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
-			);
-			return outcomeUnknown ? 'unknown' : 'rejected';
+		} finally {
+			deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
 		}
 	}
 
-	async forkChat(sourceChatId: string, upToSeq?: number): Promise<void> {
+	async forkChat(
+		sourceChatId: string,
+		upToOrdinal?: number,
+		source?: ConversationForkSource,
+	): Promise<void> {
 		const sourceChat = this.deps.sessions.byId[sourceChatId];
 		if (!sourceChat || sourceChat.status === 'draft') {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
+			this.deps.chatState.appendLocalNoticeForChat(
+				sourceChatId,
+				'error',
+				m.chat_notice_cannot_fork_draft(),
+			);
 			return;
 		}
 		try {
-			await this.#performForkOnly(sourceChatId, upToSeq);
+			await this.#performForkOnly(sourceChatId, upToOrdinal, source);
 		} catch (error) {
-			this.deps.chatState.appendLocalNotice(
+			this.deps.chatState.appendLocalNoticeForChat(
+				sourceChatId,
 				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
+				forkFailureNotice(error),
 			);
 		}
 	}
 
-	async #performForkOnly(sourceChatId: string, upToSeq?: number): Promise<void> {
-		const result = await forkChat({
-			sourceChatId,
-			chatId: createClientChatId(),
-			...(upToSeq ? { upToSeq } : {}),
-		});
+	// Resolves null when the user declines a handoff fork, so callers stay silent instead of
+	// reporting a failure.
+	async #performForkOnly(
+		sourceChatId: string,
+		upToOrdinal?: number,
+		source?: ConversationForkSource,
+	): Promise<ChatListEntry | null> {
+		const sourceTranscript = source?.transcript ?? this.deps.chatState;
+		const chatId = createClientChatId();
+		const selection =
+			upToOrdinal === undefined
+				? null
+				: selectForkAtMessage(
+						sourceTranscript.entries,
+						sourceTranscript.getCursor().transcriptViewId,
+						upToOrdinal,
+					);
+		if (upToOrdinal !== undefined && !selection) {
+			throw new Error(m.chat_notice_fork_message_no_longer_available());
+		}
+		let result: Awaited<ReturnType<typeof forkChat>> | null;
+		try {
+			result = await this.#requestFork({
+				sourceChatId,
+				chatId,
+				...(selection ? forkPointParams(selection) : {}),
+			});
+		} catch (error) {
+			const defaultRefetch = this.deps.refetchTranscript;
+			const refetchTranscript =
+				source?.refetchTranscript ??
+				(defaultRefetch ? () => defaultRefetch(sourceChatId) : null);
+			if (!selection || !isStaleForkPointError(error) || !refetchTranscript) {
+				throw error;
+			}
+			try {
+				await refetchTranscript();
+			} catch {
+				throw error;
+			}
+			const remapped = remapForkAtMessage(
+				sourceTranscript.entries,
+				sourceTranscript.getCursor().transcriptViewId,
+				selection,
+			);
+			if (!remapped) throw error;
+			result = await this.#requestFork({
+				sourceChatId,
+				chatId,
+				...forkPointParams(remapped),
+			});
+		}
+		if (!result) return null;
 		this.deps.sessions.upsertServerChat(result.chat);
 		this.deps.lifecycle.setCurrentChatId(result.chat.id);
 		this.deps.sessions.setSelectedChatId(result.chat.id);
 		this.deps.navigation.navigateToChat?.(result.chat.id);
+		return result.chat;
+	}
+
+	// The server refuses a fork it cannot materialize natively rather than silently downgrading, so
+	// the refusal doubles as the probe: the user decides, and consent repeats the same request.
+	// Returns null when the user declines, which is an answer rather than a failure.
+	async #requestFork(params: ForkChatParams): Promise<Awaited<ReturnType<typeof forkChat>> | null> {
+		try {
+			return await forkChat(params);
+		} catch (error) {
+			if (!isHandoffForkConfirmationError(error) || !this.deps.confirmHandoffFork) throw error;
+			if (!(await this.deps.confirmHandoffFork())) return null;
+			return forkChat({ ...params, allowHandoffFork: true });
+		}
 	}
 
 	async #submitForkOnlyCommand(
 		sourceChatId: string,
 		previousText: string,
 		previousImages: File[],
-		restoreComposer: boolean,
+		clearedRevision: number | null,
 	): Promise<ConversationSubmissionOutcome> {
 		try {
-			await this.#performForkOnly(sourceChatId);
+			if (!(await this.#performForkOnly(sourceChatId))) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+				return 'rejected';
+			}
 			return 'accepted';
 		} catch (error) {
-			this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
-			this.deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
-			);
+			this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+			this.deps.chatState.appendLocalNotice('error', forkFailureNotice(error));
 			return 'rejected';
 		}
 	}
@@ -434,13 +868,45 @@ export class ConversationSlashCommandService {
 		chatId: string,
 		previousText: string,
 		previousImages: File[],
-		restore: boolean,
+		clearedRevision: number | null,
 	): void {
-		if (!restore) return;
-		this.deps.composerState.inputText = previousText;
-		this.deps.composerState.images = previousImages;
-		this.deps.composerState.saveDraft(chatId);
+		if (clearedRevision === null) return;
+		this.deps.composerState.restoreDraftIfRevision(
+			chatId,
+			clearedRevision,
+			previousText,
+			previousImages,
+		);
 	}
+}
+
+function forkPointParams(selection: ForkAtMessageSelection): {
+	upToOrdinal: number;
+	transcriptViewId: string;
+} {
+	return {
+		upToOrdinal: selection.ordinal,
+		transcriptViewId: selection.transcriptViewId,
+	};
+}
+
+function isStaleForkPointError(error: unknown): error is ApiError {
+	return error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW';
+}
+
+function isHandoffForkConfirmationError(error: unknown): error is ApiError {
+	return error instanceof ApiError && error.errorCode === 'TRANSCRIPT_NOT_YET_PERSISTED';
+}
+
+function forkFailureNotice(error: unknown): string {
+	return m.chat_notice_failed_fork_chat({ detail: errorDetail(error) });
+}
+
+function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {
+	if (boundary === 'top') {
+		return changed ? m.chat_notice_move_top_success() : m.chat_notice_move_top_unchanged();
+	}
+	return changed ? m.chat_notice_move_bottom_success() : m.chat_notice_move_bottom_unchanged();
 }
 
 function scheduleInErrorMessage(error: ScheduleInCommandError): string {

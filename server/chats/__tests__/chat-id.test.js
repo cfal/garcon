@@ -63,7 +63,7 @@ describe('chat ID contract', () => {
 describe('ChatIdAllocator', () => {
   it('allocates monotonically within the same millisecond and across clock rollback', () => {
     let now = 1_783_725_900_000;
-    const allocator = new ChatIdAllocator({ getChat: () => null }, () => now);
+    const allocator = new ChatIdAllocator({ hasChat: () => false }, () => now);
 
     expect(allocator.allocate()).toBe('1783725900000000');
     expect(allocator.allocate()).toBe('1783725900000001');
@@ -74,7 +74,7 @@ describe('ChatIdAllocator', () => {
   it('skips IDs that already exist in the registry', () => {
     const occupied = new Set(['1783725900000000', '1783725900000001']);
     const allocator = new ChatIdAllocator(
-      { getChat: (chatId) => occupied.has(chatId) ? {} : null },
+      { hasChat: (chatId) => occupied.has(chatId) },
       () => 1_783_725_900_000,
     );
 
@@ -82,8 +82,7 @@ describe('ChatIdAllocator', () => {
   });
 
   it('fails without mutating the registry when allocation is exhausted', () => {
-    const getChat = () => ({});
-    const allocator = new ChatIdAllocator({ getChat }, () => 1_783_725_900_000);
+    const allocator = new ChatIdAllocator({ hasChat: () => true }, () => 1_783_725_900_000);
 
     expect(() => allocator.allocate()).toThrow('Could not allocate a unique chat ID');
   });

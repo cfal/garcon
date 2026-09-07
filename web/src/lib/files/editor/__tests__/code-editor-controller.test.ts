@@ -4,6 +4,7 @@ import { history } from '@codemirror/commands';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
+import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
 const mounted: HTMLElement[] = [];
 
@@ -52,23 +53,36 @@ function createController() {
 }
 
 describe('CodeEditorController', () => {
-	it('moves one editor state between hosts and ignores stale cleanup', () => {
+	it('moves one editor state and its scroll position between hosts', async () => {
 		const { session, controller } = createController();
 		const firstParent = parent();
 		const secondParent = parent();
 
 		const firstLease = controller.attach(firstParent);
 		const firstScroller = firstParent.querySelector<HTMLElement>('.cm-scroller');
-		if (firstScroller) firstScroller.scrollTop = 24;
+		if (!firstScroller) throw new Error('Expected CodeMirror scroller');
+		expect(controller.scrollElement).toBe(firstScroller);
+		emulateDetachedScrollReset(firstScroller);
+		firstScroller.scrollLeft = 9;
+		firstScroller.scrollTop = 24;
+		firstScroller.dispatchEvent(new Event('scroll'));
+		firstParent.remove();
 		controller.prepareRendererTransfer();
 		const secondLease = controller.attach(secondParent);
 		controller.detach(firstLease);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const secondScroller = secondParent.querySelector<HTMLElement>('.cm-scroller');
 
 		expect(controller.isAttached).toBe(true);
+		expect(controller.scrollElement).toBe(secondScroller);
 		expect(firstParent.querySelector('.cm-editor')).toBeNull();
 		expect(secondParent.querySelector('.cm-editor')).not.toBeNull();
+		expect(session.editorScrollSnapshot).not.toBeNull();
+		expect(secondScroller?.scrollLeft).toBe(9);
+		expect(secondScroller?.scrollTop).toBe(24);
 		controller.detach(secondLease);
 		expect(controller.isAttached).toBe(false);
+		expect(controller.scrollElement).toBeNull();
 		expect(session.editorState?.doc.toString()).toBe('first\nsecond\nthird');
 		expect(session.editorState?.selection.main.anchor).toBe(8);
 	});
@@ -78,6 +92,35 @@ describe('CodeEditorController', () => {
 		controller.attach(parent());
 
 		expect(() => controller.attach(parent())).toThrow('already attached');
+		controller.dispose();
+	});
+
+	it('floors touch font size while preserving the configured fine-pointer size', () => {
+		const { session, controller } = createController();
+		session.editorState = null;
+		const host = parent();
+		controller.attach(host);
+		const editor = host.querySelector<HTMLElement>('.cm-editor');
+		if (!editor) throw new Error('Expected CodeMirror editor');
+
+		const styleRules = [...document.querySelectorAll('style')]
+			.map((style) => style.textContent ?? '')
+			.join('\n');
+		const matchingScope = [...editor.classList]
+			.filter((className) => className !== 'cm-editor')
+			.map((className) => {
+				const scope = `.${className}`;
+				return {
+					floorIndex: styleRules.indexOf(
+						`${scope} .cm-content, ${scope} .cm-gutters {font-size: 16px;`,
+					),
+					configuredIndex: styleRules.indexOf(
+						`@media (pointer: fine) {${scope} .cm-content, ${scope} .cm-gutters {font-size: 12px;`,
+					),
+				};
+			})
+			.find(({ floorIndex, configuredIndex }) => floorIndex >= 0 && configuredIndex > floorIndex);
+		expect(matchingScope).toBeDefined();
 		controller.dispose();
 	});
 
@@ -135,6 +178,23 @@ describe('CodeEditorController', () => {
 		controller.detach(editedLease);
 	});
 
+	it('preserves lone carriage-return line endings when serializing', () => {
+		const { session, controller } = createController();
+		controller.replaceContentFromDisk('first\rsecond');
+		const lease = controller.attach(parent());
+
+		expect(session.dirty).toBe(false);
+		expect(controller.currentContent()).toBe('first\rsecond');
+
+		controller.detach(lease);
+		session.editorState = EditorState.create({ doc: 'first\nsecond!' });
+		const editedLease = controller.attach(parent());
+
+		expect(session.dirty).toBe(true);
+		expect(controller.currentContent()).toBe('first\rsecond!');
+		controller.detach(editedLease);
+	});
+
 	it('replaces an attached disk document with fresh history and clamped selection', async () => {
 		const { session, controller } = createController();
 		const host = parent();
@@ -144,9 +204,9 @@ describe('CodeEditorController', () => {
 		scroller.scrollTop = 28;
 
 		controller.replaceContentFromDisk('new');
-		host.querySelector<HTMLElement>('.cm-content')?.dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }),
-		);
+		host
+			.querySelector<HTMLElement>('.cm-content')
+			?.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 
 		expect(controller.currentContent()).toBe('new');

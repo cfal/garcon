@@ -7,7 +7,6 @@
 	import Eye from '@lucide/svelte/icons/eye';
 	import {
 		getAppShell,
-		getFileSessions,
 		getGhCapability,
 		getLocalSettings,
 		getNotifications,
@@ -36,12 +35,13 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
-	const files = getFileSessions();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
 	const transientLayers = getTransientLayers();
+	const uid = $props.id();
+	const listId = `${uid}-list`;
 	let focusReturnTarget: HTMLElement | null = null;
 
 	let isOpen = $state(false);
@@ -54,6 +54,10 @@
 		void operation.catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
 		});
+	}
+
+	function reportOpenError(error: unknown): void {
+		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 	}
 
 	let commands = $derived.by<CommandItem[]>(() => {
@@ -97,28 +101,21 @@
 				label: m.command_switch_to_files(),
 				description: m.command_open_panel({ panel: m.workspace_surface_files() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('files')
-						: workspace.openSingleton('files', 'sidebar')),
+				action: () => void workspace.openSingleton('files').catch(reportOpenError),
 			},
-			...(!workspace.isMobile
-				? [
-						{
-							id: 'workspace-open-files',
-							label: m.file_session_open_files(),
-							description: m.file_session_open_files_description(),
-							category: categories.workspace,
-							action: () => files.showOpenFiles(),
-						},
-					]
-				: []),
+			{
+				id: 'workspace-chat-map',
+				label: m.workspace_open_chat_map(),
+				description: m.command_open_panel({ panel: m.workspace_surface_chat_map() }),
+				category: categories.workspace,
+				action: () => void workspace.openSingleton('chat-map').catch(reportOpenError),
+			},
 			{
 				id: 'workspace-terminal',
 				label: m.command_switch_to_terminal(),
 				description: m.command_open_panel({ panel: m.workspace_surface_terminal() }),
 				category: categories.workspace,
-				action: () => reportTerminalAction(workspace.focusMostRecentTerminalOrCreate('main')),
+				action: () => reportTerminalAction(workspace.focusMostRecentTerminalOrCreate()),
 			},
 			...(terminals.listStatus === 'ready' &&
 			terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
@@ -129,7 +126,9 @@
 							description: m.command_new_terminal_description(),
 							category: categories.workspace,
 							action: () =>
-								reportTerminalAction(workspace.createTerminal('main', 'command-menu:new-terminal')),
+								reportTerminalAction(
+									workspace.createTerminalInAvailableSpace('command-menu:new-terminal'),
+								),
 						},
 					]
 				: []),
@@ -138,10 +137,21 @@
 				label: m.command_switch_to_git(),
 				description: m.command_open_panel({ panel: m.workspace_surface_git_workbench() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('git')
-						: workspace.openSingleton('git', 'main')),
+				action: () => void workspace.openSingleton('git').catch(reportOpenError),
+			},
+			{
+				id: 'workspace-git-history',
+				label: m.workspace_surface_git_history(),
+				description: m.command_open_panel({ panel: m.workspace_surface_git_history() }),
+				category: categories.workspace,
+				action: () => void workspace.openSingleton('git-history').catch(reportOpenError),
+			},
+			{
+				id: 'workspace-git-compare',
+				label: m.workspace_surface_git_compare(),
+				description: m.command_open_panel({ panel: m.workspace_surface_git_compare() }),
+				category: categories.workspace,
+				action: () => void workspace.openSingleton('git-compare').catch(reportOpenError),
 			},
 			...(ghCapability.available || !ghCapability.hasChecked
 				? [
@@ -150,10 +160,7 @@
 							label: m.workspace_surface_pull_requests(),
 							description: m.command_open_panel({ panel: m.workspace_surface_pull_requests() }),
 							category: categories.workspace,
-							action: () =>
-								void (workspace.isMobile
-									? workspace.focusMobileSingleton('pull-requests')
-									: workspace.openSingleton('pull-requests', 'main')),
+							action: () => void workspace.openSingleton('pull-requests').catch(reportOpenError),
 						},
 					]
 				: []),
@@ -162,10 +169,7 @@
 				label: m.workspace_surface_commit(),
 				description: m.command_open_panel({ panel: m.workspace_surface_commit() }),
 				category: categories.workspace,
-				action: () =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('commit')
-						: workspace.openSingleton('commit', 'sidebar')),
+				action: () => void workspace.openSingleton('commit').catch(reportOpenError),
 			},
 		];
 	});
@@ -179,6 +183,11 @@
 	);
 
 	let filteredCommands = $derived(query.trim() ? fuse.search(query).map((r) => r.item) : commands);
+	let selectedCommand = $derived(filteredCommands[selectedIndex]);
+
+	function optionIdFor(commandId: string): string {
+		return `${uid}-command-${commandId}`;
+	}
 
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
@@ -229,7 +238,7 @@
 			focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
 		} else if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			selectedIndex = Math.min(selectedIndex + 1, filteredCommands.length - 1);
+			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			selectedIndex = Math.max(selectedIndex - 1, 0);
@@ -304,6 +313,11 @@
 					placeholder={m.command_placeholder()}
 					class="flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
 					type="text"
+					role="combobox"
+					aria-expanded="true"
+					aria-controls={listId}
+					aria-autocomplete="list"
+					aria-activedescendant={selectedCommand ? optionIdFor(selectedCommand.id) : undefined}
 				/>
 				<kbd
 					class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
@@ -312,15 +326,16 @@
 				</kbd>
 			</div>
 
-			<div class="max-h-[300px] overflow-y-auto p-2" role="listbox">
+			<div id={listId} class="max-h-[300px] overflow-y-auto p-2" role="listbox">
 				{#if filteredCommands.length === 0}
 					<div class="px-4 py-8 text-center text-sm text-muted-foreground">
 						{m.command_no_matching()}
 					</div>
 				{:else}
-					{#each filteredCommands as item, i}
+					{#each filteredCommands as item, i (item.id)}
 						{@const Icon = getCategoryIcon(item.category)}
 						<button
+							id={optionIdFor(item.id)}
 							data-cmd-index={i}
 							role="option"
 							aria-selected={i === selectedIndex}

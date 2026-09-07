@@ -74,6 +74,10 @@ function canonicalize(raw: string): string {
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
+export function isAmpHousekeepingToolUse(part: AmpToolUsePart): boolean {
+  return typeof part.name === 'string' && canonicalize(part.name) === 'shellcommandstatus';
+}
+
 function firstString(values: unknown[]): string | undefined {
   for (const value of values) {
     const next = asString(value);
@@ -105,7 +109,8 @@ export function convertAmpToolUse(ts: string, part: AmpToolUsePart): AmpToolUseR
   const key = canonicalize(rawName);
 
   switch (key) {
-    case 'bash': {
+    case 'bash':
+    case 'shellcommand': {
       const command = firstString([input.cmd, input.command]);
       if (command === undefined) break;
       return new BashToolUseMessage(ts, toolId, command, asString(input.description));

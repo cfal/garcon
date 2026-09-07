@@ -1,5 +1,6 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import Play from '@lucide/svelte/icons/play';
 	import SettingsModelSelector from '$lib/components/model-selector/SettingsModelSelector.svelte';
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
@@ -7,6 +8,14 @@
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import { getModelCatalog, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import {
+		DEFAULT_COMMIT_MESSAGE_PROMPT,
+		DEFAULT_PROMPT_REFINEMENT_PROMPT,
+	} from '$shared/generation-prompts';
+	import { parseAgentSwitchContextWindowTokens } from '$shared/handoff-sizing';
+	import GenerationPromptDialog, {
+		type GenerationPromptKind,
+	} from './GenerationPromptDialog.svelte';
 	import {
 		RemoteGenerationSettingsCardState,
 		type GenerationSettingsKey,
@@ -16,17 +25,20 @@
 		settingsKey: GenerationSettingsKey;
 		enabledLabel?: string;
 		modelLabel: string;
+		blurb?: string;
 		showDirectoryPrefix?: boolean;
-		showPrompt?: boolean;
+		promptKind?: GenerationPromptKind;
 	}
 
 	let {
 		settingsKey,
 		enabledLabel,
 		modelLabel,
+		blurb,
 		showDirectoryPrefix = false,
-		showPrompt = false,
+		promptKind,
 	}: Props = $props();
+	let promptDialogOpen = $state(false);
 
 	const remoteSettings = getRemoteSettings();
 	const modelCatalog = getModelCatalog();
@@ -45,14 +57,28 @@
 		get enabledLabel() {
 			return enabledLabel;
 		},
-		get showPrompt() {
-			return showPrompt;
-		},
 	});
 
-	$effect(() => {
-		cardState.syncPromptDraft();
-	});
+	let defaultPrompt = $derived(
+		promptKind === 'prompt-refinement'
+			? DEFAULT_PROMPT_REFINEMENT_PROMPT
+			: DEFAULT_COMMIT_MESSAGE_PROMPT,
+	);
+
+	async function savePrompt(customPrompt: string) {
+		const result = await cardState.persistPrompt(customPrompt);
+		if (result.ok) promptDialogOpen = false;
+		return result;
+	}
+
+	function saveContextWindow(event: Event): void {
+		const contextWindowTokens = parseAgentSwitchContextWindowTokens(
+			Number((event.currentTarget as HTMLSelectElement).value),
+		);
+		if (contextWindowTokens !== null) {
+			void cardState.persistContextWindowTokens(contextWindowTokens);
+		}
+	}
 </script>
 
 <div class="bg-muted/50 border border-border rounded-lg px-4">
@@ -70,7 +96,7 @@
 			<Switch
 				checked={cardState.enabled}
 				onCheckedChange={async (next) => {
-					await cardState.persistSettings({ enabled: Boolean(next) });
+					await cardState.persistEnabled(Boolean(next));
 				}}
 				aria-label={enabledLabel}
 			/>
@@ -78,6 +104,28 @@
 	{/if}
 
 	{#if cardState.enabled}
+		{#if settingsKey === 'agentSwitchCompaction'}
+			<div class="flex items-center justify-between gap-3 py-2">
+				<label
+					for="agent-switch-context-window"
+					class="text-sm font-medium text-foreground"
+				>
+					{m.settings_agent_switch_compaction_context_window()}
+				</label>
+				<select
+					id="agent-switch-context-window"
+					class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:text-sm"
+					value={cardState.contextWindowTokens}
+					disabled={cardState.isSaving}
+					onchange={saveContextWindow}
+				>
+					<option value={200000}>{m.settings_context_window_200000()}</option>
+					<option value={500000}>{m.settings_context_window_500000()}</option>
+					<option value={1000000}>{m.settings_context_window_1000000()}</option>
+				</select>
+			</div>
+		{/if}
+
 		<div class="flex items-start justify-between gap-3 pb-1 pt-2">
 			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
 			<div class="flex min-w-0 flex-col items-end">
@@ -124,50 +172,23 @@
 			</div>
 		</div>
 
-		{#if showPrompt}
-			<div class="space-y-1.5 py-2">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_commit_generation_prompt()}
-				</div>
-				<textarea
-					value={cardState.promptDraft}
-					oninput={(event) => {
-						cardState.promptDraft = event.currentTarget.value;
+		{#if blurb}
+			<div class="pb-2 text-xs leading-4 text-muted-foreground">{blurb}</div>
+		{/if}
+
+		{#if promptKind}
+			<div class="flex justify-end py-2">
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={cardState.isSaving}
+					onclick={() => {
+						promptDialogOpen = true;
 					}}
-					onblur={() => cardState.persistPromptDraft()}
-					aria-label={m.settings_commit_generation_prompt()}
-					placeholder={m.settings_commit_prompt_placeholder({
-						files: '{{files}}',
-						diff: '{{diff}}',
-					})}
-					class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent text-foreground placeholder:text-muted-foreground/60"
-					rows="8"></textarea>
-				<div class="rounded-md border border-border bg-muted/20 px-3 py-2">
-					<div class="text-xs font-medium text-foreground">
-						{m.settings_commit_prompt_legend_title()}
-					</div>
-					<div class="mt-1 space-y-1 text-xs text-muted-foreground">
-						<div>
-							<code class="font-mono text-foreground">{'{{files}}'}</code>
-							{m.settings_commit_prompt_legend_files()}
-						</div>
-						<div>
-							<code class="font-mono text-foreground">{'{{diff}}'}</code>
-							{m.settings_commit_prompt_legend_diff()}
-						</div>
-					</div>
-				</div>
-				{#if !cardState.isDefaultPrompt}
-					<div class="flex justify-end">
-						<Button
-							variant="outline"
-							size="sm"
-							onclick={() => cardState.restoreDefaultPrompt()}
-						>
-							{m.settings_commit_restore_default_prompt()}
-						</Button>
-					</div>
-				{/if}
+				>
+					<Pencil />
+					{m.settings_generation_prompt_edit()}
+				</Button>
 			</div>
 		{/if}
 
@@ -179,7 +200,7 @@
 				<Switch
 					checked={cardState.directoryPrefixEnabled}
 					onCheckedChange={async (next) => {
-						await cardState.persistSettings({ useCommonDirPrefix: Boolean(next) });
+						await cardState.persistDirectoryPrefixEnabled(Boolean(next));
 					}}
 					aria-label={m.settings_commit_add_common_directory_prefix_aria()}
 				/>
@@ -187,3 +208,15 @@
 		{/if}
 	{/if}
 </div>
+
+{#if promptDialogOpen && promptKind}
+	<GenerationPromptDialog
+		kind={promptKind}
+		initialPrompt={cardState.customPrompt}
+		{defaultPrompt}
+		onSave={savePrompt}
+		onCancel={() => {
+			promptDialogOpen = false;
+		}}
+	/>
+{/if}

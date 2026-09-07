@@ -16,7 +16,7 @@ describe('WorkspaceLayoutPersistence', () => {
 		const write = vi.fn();
 		const persistence = new WorkspaceLayoutPersistence({ write });
 		const first = canonicalWorkspaceSnapshot();
-		const second = { ...first, desiredSidebarWidth: 620 };
+		const second = { ...first, unplacedTerminalIds: ['terminal-620'] };
 
 		persistence.schedule(first);
 		persistence.schedule(second);
@@ -25,7 +25,7 @@ describe('WorkspaceLayoutPersistence', () => {
 		vi.advanceTimersByTime(1);
 
 		expect(write).toHaveBeenCalledOnce();
-		expect(JSON.parse(write.mock.calls[0][1]).desiredSidebarWidth).toBe(620);
+		expect(JSON.parse(write.mock.calls[0][1]).unplacedTerminalIds).toEqual(['terminal-620']);
 		persistence.destroy();
 	});
 
@@ -37,13 +37,13 @@ describe('WorkspaceLayoutPersistence', () => {
 		window.dispatchEvent(new PageTransitionEvent('pagehide'));
 		expect(write).toHaveBeenCalledOnce();
 
-		persistence.schedule({ ...canonicalWorkspaceSnapshot(), desiredSidebarWidth: 700 });
+		persistence.schedule({ ...canonicalWorkspaceSnapshot(), unplacedTerminalIds: ['terminal-700'] });
 		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
 		document.dispatchEvent(new Event('visibilitychange'));
 		expect(write).toHaveBeenCalledTimes(2);
 
 		persistence.destroy();
-		persistence.schedule({ ...canonicalWorkspaceSnapshot(), desiredSidebarWidth: 800 });
+		persistence.schedule({ ...canonicalWorkspaceSnapshot(), unplacedTerminalIds: ['terminal-800'] });
 		window.dispatchEvent(new PageTransitionEvent('pagehide'));
 		expect(write).toHaveBeenCalledTimes(2);
 	});
@@ -62,14 +62,14 @@ describe('WorkspaceLayoutPersistence', () => {
 		expect(persistence.hasError).toBe(true);
 		expect(onError).toHaveBeenCalledOnce();
 
-		persistence.schedule({ ...canonicalWorkspaceSnapshot(), desiredSidebarWidth: 640 });
+		persistence.schedule({ ...canonicalWorkspaceSnapshot(), unplacedTerminalIds: ['terminal-640'] });
 		vi.advanceTimersByTime(WORKSPACE_PERSISTENCE_DELAY_MS * 2);
 		expect(write).toHaveBeenCalledOnce();
 
 		shouldFail = false;
 		expect(persistence.retry()).toBe(true);
 		expect(persistence.hasError).toBe(false);
-		expect(JSON.parse(write.mock.calls.at(-1)?.[1] ?? '{}').desiredSidebarWidth).toBe(640);
+		expect(JSON.parse(write.mock.calls.at(-1)?.[1] ?? '{}').unplacedTerminalIds).toEqual(['terminal-640']);
 		persistence.destroy();
 	});
 });

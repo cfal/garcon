@@ -30,5 +30,8 @@ describe('ScheduledChatPickerDialog', () => {
 		expect(document.querySelectorAll('[role="presentation"] button[tabindex="-1"]')).toHaveLength(
 			1,
 		);
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.textContent)
+			.not.toContain('Load more');
+		expect(document.body.textContent).not.toContain('Best match');
 	});
 });

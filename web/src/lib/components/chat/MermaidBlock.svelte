@@ -4,6 +4,7 @@ Renders mermaid diagram from fenced code block source.
 Lazy-loads the mermaid library on first render via mermaid-loader.
 -->
 <script lang="ts">
+	import { onDestroy, tick } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
@@ -12,47 +13,89 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 
 	interface Props {
 		text?: string;
+		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
-	let { text = '' }: Props = $props();
+	let { text = '', acquireTransientActivity }: Props = $props();
 
 	let renderedSvg = $state('');
 	let renderError = $state('');
 	let loading = $state(true);
 	let copied = $state(false);
 	let viewerOpen = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
+	let releaseViewer: (() => void) | null = null;
 
 	async function handleCopy() {
 		const didCopy = await copyToClipboard(text);
 		if (!didCopy) return;
 		copied = true;
-		setTimeout(() => (copied = false), 2000);
+		if (copyTimer) clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => {
+			copied = false;
+			copyTimer = null;
+		}, 2000);
+	}
+
+	function openViewer(): void {
+		releaseViewer ??= acquireTransientActivity?.(() => void closeViewer()) ?? null;
+		viewerOpen = true;
+	}
+
+	async function closeViewer(): Promise<void> {
+		const release = releaseViewer;
+		releaseViewer = null;
+		viewerOpen = false;
+		await tick();
+		release?.();
+	}
+
+	function handleViewerOpenChange(open: boolean): void {
+		if (open) openViewer();
+		else void closeViewer();
 	}
 
 	$effect(() => {
-		if (!text) return;
+		if (!text) {
+			loading = false;
+			renderedSvg = '';
+			renderError = '';
+			return;
+		}
 
 		const currentText = text;
 		loading = true;
 		renderedSvg = '';
 		renderError = '';
 
+		let active = true;
 		renderMermaid(currentText).then(
 			(svg) => {
-				if (currentText !== text) return;
+				if (!active || currentText !== text) return;
 				renderedSvg = svg;
 				loading = false;
 			},
 			(err) => {
-				if (currentText !== text) return;
+				if (!active || currentText !== text) return;
 				renderError = err instanceof Error ? err.message : m.chat_mermaid_render_failed();
 				loading = false;
 			},
 		);
+		return () => {
+			active = false;
+		};
+	});
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+		releaseViewer?.();
 	});
 </script>
 
-<div class="group relative overflow-hidden rounded-md border border-border bg-muted/30">
+<div
+	class="group relative overflow-hidden rounded-md border border-border bg-muted/30"
+	data-chat-layout-pending={loading ? 'true' : undefined}
+>
 	<div
 		class="flex items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
 	>
@@ -92,7 +135,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 				{/if}
 			</button>
 			<button
-				onclick={() => (viewerOpen = true)}
+				onclick={openViewer}
 				class="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				title={m.chat_mermaid_expand()}
 				aria-label={m.chat_mermaid_expand()}
@@ -126,16 +169,13 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		{:else if renderError}
 			<div class="text-sm text-destructive">{renderError}</div>
 		{:else}
+			<!-- eslint-disable-next-line svelte/no-at-html-tags -- Mermaid generates this SVG in strict security mode. -->
 			{@html renderedSvg}
 		{/if}
 	</div>
 </div>
 
-<MermaidViewerDialog
-	open={viewerOpen}
-	svg={renderedSvg}
-	onOpenChange={(open) => (viewerOpen = open)}
-/>
+<MermaidViewerDialog open={viewerOpen} svg={renderedSvg} onOpenChange={handleViewerOpenChange} />
 
 <style>
 	.mermaid-container :global(svg) {
