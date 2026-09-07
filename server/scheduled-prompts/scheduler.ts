@@ -3,6 +3,9 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import {
   normalizeScheduledPromptDefinitionInput,
+  isMinuteAlignedIso,
+  isScheduledPromptIntervalMinutes,
+  type ScheduleForChatRequest,
   type CreateScheduledPromptRequest,
   type ReorderScheduledPromptsRequest,
   type RemoveScheduledPromptRequest,
@@ -13,7 +16,8 @@ import {
   type ScheduledPromptsSnapshot,
   type UpdateScheduledPromptRequest,
 } from '../../common/scheduled-prompts.js';
-import { parseScheduleDuration, scheduleInRunAt, type ScheduleDurationError } from '../../common/schedule-duration.js';
+import { parseScheduleDuration, scheduleInRunAt, SCHEDULE_IN_MAX_DELAY_MINUTES, type ScheduleDurationError } from '../../common/schedule-duration.js';
+import { AtomicJsonWriteError } from '../lib/json-file-store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { errorMessage } from '../lib/errors.js';
@@ -78,6 +82,30 @@ function scheduleDurationDomainError(error: ScheduleDurationError): ScheduledPro
 export interface ScheduleInResult {
   scheduledPrompt: ScheduledPrompt;
   snapshot: ScheduledPromptsSnapshot;
+}
+
+export class ScheduledPromptCreationOutcomeUnknownError extends Error {
+  constructor(readonly scheduleId: string, cause: unknown) {
+    super('Scheduled prompt creation outcome is unknown', { cause });
+  }
+}
+
+function assertValidScheduleForChatRequest(request: ScheduleForChatRequest): void {
+  const firstRun = request?.firstRun;
+  const interval = request?.intervalMinutes;
+  const validInterval = interval === null || isScheduledPromptIntervalMinutes(interval);
+  const validFirstRun = firstRun?.type === 'at'
+    ? isMinuteAlignedIso(firstRun.atUtc)
+    : firstRun?.type === 'after-interval'
+      ? isScheduledPromptIntervalMinutes(interval)
+      : firstRun?.type === 'after'
+        && Number.isSafeInteger(firstRun.minutes)
+        && firstRun.minutes >= 1 && firstRun.minutes <= SCHEDULE_IN_MAX_DELAY_MINUTES;
+  if (!validInterval || !validFirstRun
+    || (request.endAtUtc !== null && (interval === null || !isMinuteAlignedIso(request.endAtUtc)))
+    || (request.busyBehavior !== 'queue' && request.busyBehavior !== 'skip')) {
+    throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
+  }
 }
 
 interface ScheduledPromptSchedulerEvents {
@@ -185,6 +213,27 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     });
   }
 
+  async scheduleForChat(request: ScheduleForChatRequest, fixedNow?: Date): Promise<ScheduleInResult> {
+    return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
+      const now = fixedNow ?? new Date();
+      assertValidScheduleForChatRequest(request);
+      await this.#reconcileMissed(now, false);
+      const firstRunAtUtc = request.firstRun.type === 'at'
+        ? request.firstRun.atUtc
+        : scheduleInRunAt(now, request.firstRun.type === 'after'
+          ? request.firstRun.minutes : request.intervalMinutes!);
+      const definition = await this.#validateDefinition({
+        schedule: request.intervalMinutes === null
+          ? { type: 'once', runAtUtc: firstRunAtUtc }
+          : { type: 'recurring', firstRunAtUtc, intervalMinutes: request.intervalMinutes, endAtUtc: request.endAtUtc },
+        target: { type: 'existing-chat', chatId: request.chatId, busyBehavior: request.busyBehavior },
+        prompt: request.prompt,
+      }, now);
+      const scheduledPrompt = await this.#createDefinition(definition, now, this.deps.store.revision);
+      return { scheduledPrompt: structuredClone(scheduledPrompt), snapshot: this.#snapshot() };
+    });
+  }
+
   async update(request: UpdateScheduledPromptRequest): Promise<ScheduledPromptsSnapshot> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
@@ -278,11 +327,22 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     expectedRevision: number,
   ): Promise<ScheduledPrompt> {
     const scheduledPrompt = this.#promptFromDefinition(crypto.randomUUID(), definition, now);
-    await this.deps.store.create(scheduledPrompt, expectedRevision);
+    try {
+      await this.deps.store.create(scheduledPrompt, expectedRevision);
+    } catch (error) {
+      if (error instanceof AtomicJsonWriteError && error.renamed) {
+        throw new ScheduledPromptCreationOutcomeUnknownError(scheduledPrompt.id, error);
+      }
+      throw error;
+    }
     try {
       this.#register(scheduledPrompt);
     } catch (error) {
-      await this.deps.store.remove(scheduledPrompt.id, this.deps.store.revision).catch(() => {});
+      try {
+        await this.deps.store.remove(scheduledPrompt.id, this.deps.store.revision);
+      } catch (rollbackError) {
+        throw new ScheduledPromptCreationOutcomeUnknownError(scheduledPrompt.id, rollbackError);
+      }
       throw error;
     }
     this.#emitInvalidated('created');

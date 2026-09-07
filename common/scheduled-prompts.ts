@@ -20,6 +20,20 @@ export const SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX = 3650 * 24 * 60;
 export const SCHEDULED_PROMPT_MAX_LENGTH = 32_000;
 export const SCHEDULED_PROMPT_RUN_LOG_LIMIT = 200;
 export const SCHEDULED_PROMPT_MAX_COUNT = 500;
+
+export type ScheduleForChatFirstRun =
+  | { readonly type: 'after'; readonly minutes: number }
+  | { readonly type: 'after-interval' }
+  | { readonly type: 'at'; readonly atUtc: string };
+
+export interface ScheduleForChatRequest {
+  readonly chatId: string;
+  readonly firstRun: ScheduleForChatFirstRun;
+  readonly intervalMinutes: number | null;
+  readonly endAtUtc: string | null;
+  readonly busyBehavior: ScheduledPromptBusyBehavior;
+  readonly prompt: string;
+}
 export const SCHEDULED_PROMPT_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
 
 const SCHEDULED_PROMPT_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;

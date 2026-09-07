@@ -1,3 +1,5 @@
+import { SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX } from './scheduled-prompts.js';
+
 export const SCHEDULE_IN_MIN_DELAY_MINUTES = 1;
 export const SCHEDULE_IN_MAX_DELAY_MINUTES = 365 * 24 * 60;
 
@@ -15,6 +17,14 @@ export type ScheduleDurationResult =
 const DURATION_RE = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/i;
 
 export function parseScheduleDuration(token: string): ScheduleDurationResult {
+  return parseBoundedDuration(token, SCHEDULE_IN_MAX_DELAY_MINUTES);
+}
+
+export function parseScheduleInterval(token: string): ScheduleDurationResult {
+  return parseBoundedDuration(token, SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX);
+}
+
+function parseBoundedDuration(token: string, maximum: number): ScheduleDurationResult {
   const normalized = token.trim();
   if (!normalized) return { ok: false, error: 'missing' };
   if (/s/i.test(normalized)) return { ok: false, error: 'sub-minute-unsupported' };
@@ -30,7 +40,7 @@ export function parseScheduleDuration(token: string): ScheduleDurationResult {
   const total = days * 1_440 + hours * 60 + minutes;
   if (!Number.isSafeInteger(total)) return { ok: false, error: 'too-long' };
   if (total < SCHEDULE_IN_MIN_DELAY_MINUTES) return { ok: false, error: 'too-short' };
-  if (total > SCHEDULE_IN_MAX_DELAY_MINUTES) return { ok: false, error: 'too-long' };
+  if (total > maximum) return { ok: false, error: 'too-long' };
   return { ok: true, minutes: total };
 }
 
