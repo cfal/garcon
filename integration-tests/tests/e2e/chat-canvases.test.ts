@@ -21,9 +21,7 @@ describe('Lightpanda Chat Canvas', () => {
         (entry) => entry.preview.firstMessage === 'canvas-synthetic-chat',
       );
       if (!chat) throw new Error('Synthetic chat was not listed');
-      await app.selectWorkspaceWindowSurface('Open chat map');
-      await app.waitForText('Canvases');
-      await app.clickButton('Canvases');
+      await app.selectWorkspaceWindowSurface('Open canvas');
       await fixture.page.waitForSelector('[data-canvas-panel]');
       await app.waitForText('Create canvas');
       await app.clickButton('Create canvas');
@@ -90,9 +88,7 @@ describe('Lightpanda Chat Canvas', () => {
       await fixture.page.waitForSelector(
         '[data-workspace-window-current="true"]',
       );
-      await app.selectWorkspaceWindowSurface('Chat Map');
-      await app.waitForText('Canvases');
-      await app.clickButton('Canvases');
+      await app.selectWorkspaceWindowSurface('Canvas');
       await fixture.page.waitForSelector('[data-canvas-flow]');
       await app.clickButton('List');
       await fixture.page.waitForFunction(
