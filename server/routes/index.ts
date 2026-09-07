@@ -9,6 +9,8 @@ import createGitRoutes from './git.js';
 import createGhRoutes from './gh.js';
 import createChatRoutes from './chats.js';
 import createSnippetRoutes from './snippets.js';
+import { createCanvasRoutes } from './chat-canvases.js';
+import type { CanvasStore } from '../chat-canvas/store.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
@@ -76,6 +78,7 @@ export default function createAllRoutes({
   lastSelectedChat,
   scheduledPrompts,
   snippets,
+  canvases,
   preambles,
   chatPreambleSelection,
   terminals,
@@ -107,6 +110,7 @@ export default function createAllRoutes({
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
+  canvases: CanvasStore;
   preambles: PreambleService;
   chatPreambleSelection: ChatPreambleSelectionService;
   terminals: TerminalManager;
@@ -170,6 +174,7 @@ export default function createAllRoutes({
     ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),
+    ...createCanvasRoutes(canvases),
     ...createPreambleRoutes(preambles),
     ...createChatPreambleRoutes({
       selection: chatPreambleSelection,

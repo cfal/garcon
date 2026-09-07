@@ -101,6 +101,7 @@ import {
 } from './chats/chat-carryover-rollback.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { SnippetStore } from './snippets/store.js';
+import { CanvasStore } from './chat-canvas/store.js';
 import {
   SnippetProjectPathService,
   SnippetService,
@@ -705,6 +706,7 @@ export async function startServer(): Promise<void> {
 
     // Build route and WS handler tables
     const routes = createAllRoutes({
+      canvases: new CanvasStore(workspaceDir),
       registry: chatRegistry,
       settings,
       recentTitleIcons,
