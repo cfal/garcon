@@ -6,6 +6,26 @@ import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
+const DIFF_SYNTAX_CLASSES = [
+  "cm-code-keyword",
+  "cm-code-title",
+  "cm-code-meta",
+  "cm-code-invalid",
+  "cm-code-string",
+  "cm-code-symbol",
+  "cm-code-comment",
+  "cm-code-name",
+  "cm-code-section",
+  "cm-code-addition",
+  "cm-code-deletion",
+] as const;
+
+function diffSyntaxFixture(idPrefix: string): string {
+  return DIFF_SYNTAX_CLASSES.map(
+    (className) =>
+      `<span id="${idPrefix}-${className}" class="${className}">${className}</span>`,
+  ).join(" ");
+}
 
 function declaredProperties(source: string): string[] {
   return [...new Set(source.match(/--[a-z0-9-]+(?=\s*:)/g) ?? [])].sort();
@@ -28,20 +48,11 @@ async function readRenderedColors(
   selector: string,
   options: {
     pseudoElement?: string;
-    backgroundSelector?: string;
   } = {},
 ): Promise<{ foreground: string; background: string; surface: string }> {
   return page.locator(selector).evaluate((element, colorOptions) => {
     const surface = getComputedStyle(document.body).backgroundColor;
     const style = getComputedStyle(element, colorOptions.pseudoElement);
-    let backgroundStyle = style;
-    if (colorOptions.backgroundSelector) {
-      const backgroundElement = document.querySelector(
-        colorOptions.backgroundSelector,
-      );
-      if (!backgroundElement) throw new Error("Missing background fixture");
-      backgroundStyle = getComputedStyle(backgroundElement);
-    }
     const composite = (
       paint: string,
       backdrop: string,
@@ -62,11 +73,24 @@ async function readRenderedColors(
         .data.slice(0, 3);
       return `rgb(${red}, ${green}, ${blue})`;
     };
-    const background = composite(
-      backgroundStyle.backgroundColor,
-      surface,
-      backgroundStyle.filter,
-    );
+    const backgroundLayers: Element[] = [];
+    let current: Element | null = element;
+    while (current && current !== document.body) {
+      backgroundLayers.unshift(current);
+      current = current.parentElement;
+    }
+    let background = surface;
+    for (const layer of backgroundLayers) {
+      const layerStyle = getComputedStyle(layer);
+      background = composite(
+        layerStyle.backgroundColor,
+        background,
+        layerStyle.filter,
+      );
+    }
+    if (colorOptions.pseudoElement) {
+      background = composite(style.backgroundColor, background, style.filter);
+    }
     return {
       foreground: composite(style.color, background, style.filter),
       background,
@@ -109,9 +133,17 @@ describe("compiled theme CSS", () => {
       "utf8",
     );
     const profileProperties = declaredProperties(referenceProfile);
+    const styledDiffSyntaxClasses = [
+      ...new Set(
+        [...appCss.matchAll(/\.code-highlight \.(cm-code-[a-z-]+)/g)].map(
+          (match) => match[1],
+        ),
+      ),
+    ].sort();
 
     expect(appCss).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
     expect(compiledCss).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
+    expect(styledDiffSyntaxClasses).toEqual([...DIFF_SYNTAX_CLASSES].sort());
 
     const browser = await chromium.launch({
       headless: true,
@@ -144,16 +176,18 @@ describe("compiled theme CSS", () => {
           <button id="stage-action" class="bg-git-added/20 text-git-added hover:bg-git-added/30">Stage</button>
           <button id="unstage-action" class="bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30">Unstage</button>
           <pre id="inline-diff" class="bg-muted/50"><span id="inline-diff-addition" class="text-diff-addition">+added</span><span id="inline-diff-deletion" class="text-diff-deletion">-deleted</span><span id="inline-diff-hunk" class="text-diff-hunk">@@ hunk</span></pre>
-          <div id="virtual-add-normal" class="bg-diff-add"><span id="virtual-add-normal-content" class="text-diff-add-fg">+added</span><span id="virtual-add-normal-line" class="text-diff-add-line-num">1</span><button id="virtual-add-normal-action" class="text-muted-foreground">+</button></div>
-          <div id="virtual-add-composer" class="bg-interactive-accent/10"><span id="virtual-add-composer-content" class="text-diff-add-fg">+added</span><span id="virtual-add-composer-line" class="text-diff-add-line-num">1</span><button id="virtual-add-composer-action" class="text-muted-foreground">+</button></div>
-          <div id="virtual-add-selected" class="bg-interactive-accent/20"><span id="virtual-add-selected-content" class="text-diff-add-fg">+added</span><span id="virtual-add-selected-line" class="text-diff-add-line-num">1</span><button id="virtual-add-selected-action" class="text-muted-foreground">+</button></div>
-          <div id="virtual-del-normal" class="bg-diff-del"><span id="virtual-del-normal-content" class="text-diff-del-fg">-deleted</span><span id="virtual-del-normal-line" class="text-diff-del-line-num">1</span><button id="virtual-del-normal-action" class="text-muted-foreground">-</button></div>
-          <div id="virtual-del-composer" class="bg-interactive-accent/10"><span id="virtual-del-composer-content" class="text-diff-del-fg">-deleted</span><span id="virtual-del-composer-line" class="text-diff-del-line-num">1</span><button id="virtual-del-composer-action" class="text-muted-foreground">-</button></div>
-          <div id="virtual-del-selected" class="bg-interactive-accent/20"><span id="virtual-del-selected-content" class="text-diff-del-fg">-deleted</span><span id="virtual-del-selected-line" class="text-diff-del-line-num">1</span><button id="virtual-del-selected-action" class="text-muted-foreground">-</button></div>
-          <div id="virtual-context-normal"><span id="virtual-context-normal-line" class="text-foreground/70">1</span></div>
-          <div id="virtual-context-composer" class="bg-interactive-accent/10"><span id="virtual-context-composer-line" class="text-foreground/70">1</span></div>
-          <div id="virtual-context-selected" class="bg-interactive-accent/20"><span id="virtual-context-selected-line" class="text-foreground/70">1</span></div>
-          <div id="virtual-hunk-header" class="bg-diff-hunk-header"><span id="virtual-hunk-header-text" class="text-muted-foreground">@@ hunk</span></div>
+          <div class="bg-muted/15">
+            <div id="virtual-add-normal" class="bg-diff-add"><span id="virtual-add-normal-content" class="code-highlight text-diff-add-fg">+added ${diffSyntaxFixture("virtual-add-normal")}</span><span id="virtual-add-normal-line" class="text-diff-add-line-num">1</span><button id="virtual-add-normal-action" class="text-muted-foreground">+</button></div>
+            <div id="virtual-add-composer" class="bg-interactive-accent/10"><span id="virtual-add-composer-content" class="code-highlight text-diff-add-fg">+added ${diffSyntaxFixture("virtual-add-composer")}</span><span id="virtual-add-composer-line" class="text-diff-add-line-num">1</span><button id="virtual-add-composer-action" class="text-muted-foreground">+</button></div>
+            <div id="virtual-add-selected" class="bg-interactive-accent/20"><span id="virtual-add-selected-content" class="code-highlight text-diff-add-fg">+added ${diffSyntaxFixture("virtual-add-selected")}</span><span id="virtual-add-selected-line" class="text-diff-add-line-num">1</span><button id="virtual-add-selected-action" class="text-muted-foreground">+</button></div>
+            <div id="virtual-del-normal" class="bg-diff-del"><span id="virtual-del-normal-content" class="code-highlight text-diff-del-fg">-deleted ${diffSyntaxFixture("virtual-del-normal")}</span><span id="virtual-del-normal-line" class="text-diff-del-line-num">1</span><button id="virtual-del-normal-action" class="text-muted-foreground">-</button></div>
+            <div id="virtual-del-composer" class="bg-interactive-accent/10"><span id="virtual-del-composer-content" class="code-highlight text-diff-del-fg">-deleted ${diffSyntaxFixture("virtual-del-composer")}</span><span id="virtual-del-composer-line" class="text-diff-del-line-num">1</span><button id="virtual-del-composer-action" class="text-muted-foreground">-</button></div>
+            <div id="virtual-del-selected" class="bg-interactive-accent/20"><span id="virtual-del-selected-content" class="code-highlight text-diff-del-fg">-deleted ${diffSyntaxFixture("virtual-del-selected")}</span><span id="virtual-del-selected-line" class="text-diff-del-line-num">1</span><button id="virtual-del-selected-action" class="text-muted-foreground">-</button></div>
+            <div id="virtual-context-normal"><span id="virtual-context-normal-content" class="code-highlight">${diffSyntaxFixture("virtual-context-normal")}</span><span id="virtual-context-normal-line" class="text-foreground/70">1</span></div>
+            <div id="virtual-context-composer" class="bg-interactive-accent/10"><span class="code-highlight">${diffSyntaxFixture("virtual-context-composer")}</span><span id="virtual-context-composer-line" class="text-foreground/70">1</span></div>
+            <div id="virtual-context-selected" class="bg-interactive-accent/20"><span class="code-highlight">${diffSyntaxFixture("virtual-context-selected")}</span><span id="virtual-context-selected-line" class="text-foreground/70">1</span></div>
+            <div id="virtual-hunk-header" class="bg-diff-hunk-header"><span id="virtual-hunk-header-text" class="text-muted-foreground">@@ hunk</span></div>
+          </div>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
           <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
@@ -318,11 +352,7 @@ describe("compiled theme CSS", () => {
         }
 
         for (const kind of ["addition", "deletion", "hunk"] as const) {
-          const colors = await readRenderedColors(
-            page,
-            `#inline-diff-${kind}`,
-            { backgroundSelector: "#inline-diff" },
-          );
+          const colors = await readRenderedColors(page, `#inline-diff-${kind}`);
           expect(
             contrastRatio(colors.foreground, colors.background),
             `${profile.id} inline diff ${kind}`,
@@ -333,40 +363,55 @@ describe("compiled theme CSS", () => {
           for (const rowState of ["normal", "composer", "selected"] as const) {
             const row = `virtual-${kind}-${rowState}`;
             for (const role of ["content", "line"] as const) {
-              const colors = await readRenderedColors(page, `#${row}-${role}`, {
-                backgroundSelector: `#${row}`,
-              });
+              const colors = await readRenderedColors(page, `#${row}-${role}`);
               expect(
                 contrastRatio(colors.foreground, colors.background),
                 `${profile.id} ${kind} ${rowState} ${role}`,
               ).toBeGreaterThanOrEqual(4.5);
             }
 
-            const action = await readRenderedColors(page, `#${row}-action`, {
-              backgroundSelector: `#${row}`,
-            });
+            const action = await readRenderedColors(page, `#${row}-action`);
             expect(
               contrastRatio(action.foreground, action.background),
               `${profile.id} ${kind} ${rowState} line action`,
             ).toBeGreaterThanOrEqual(3);
+
+            for (const syntaxClass of DIFF_SYNTAX_CLASSES) {
+              const syntax = await readRenderedColors(
+                page,
+                `#${row}-${syntaxClass}`,
+              );
+              expect(
+                contrastRatio(syntax.foreground, syntax.background),
+                `${profile.id} ${kind} ${rowState} ${syntaxClass}`,
+              ).toBeGreaterThanOrEqual(4.5);
+            }
           }
         }
 
         for (const rowState of ["normal", "composer", "selected"] as const) {
           const row = `virtual-context-${rowState}`;
-          const colors = await readRenderedColors(page, `#${row}-line`, {
-            backgroundSelector: `#${row}`,
-          });
+          const colors = await readRenderedColors(page, `#${row}-line`);
           expect(
             contrastRatio(colors.foreground, colors.background),
             `${profile.id} context ${rowState} line number`,
           ).toBeGreaterThanOrEqual(4.5);
+
+          for (const syntaxClass of DIFF_SYNTAX_CLASSES) {
+            const syntax = await readRenderedColors(
+              page,
+              `#${row}-${syntaxClass}`,
+            );
+            expect(
+              contrastRatio(syntax.foreground, syntax.background),
+              `${profile.id} context ${rowState} ${syntaxClass}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
         }
 
         const hunkHeader = await readRenderedColors(
           page,
           "#virtual-hunk-header-text",
-          { backgroundSelector: "#virtual-hunk-header" },
         );
         expect(
           contrastRatio(hunkHeader.foreground, hunkHeader.background),
@@ -472,5 +517,5 @@ describe("compiled theme CSS", () => {
       await context.close();
       await browser.close();
     }
-  });
+  }, 20_000);
 });

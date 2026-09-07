@@ -159,12 +159,12 @@
 	--markdown-code-title: 266 48% 44%;
 	--markdown-code-meta: 211 100% 35%;
 	--markdown-code-string: 210 94% 20%;
-	--markdown-code-symbol: 26 92% 42%;
-	--markdown-code-comment: 215 10% 45%;
-	--markdown-code-name: 134 60% 34%;
+	--markdown-code-symbol: 26 92% 29%;
+	--markdown-code-comment: 215 10% 36%;
+	--markdown-code-name: 134 60% 25%;
 	--markdown-code-section: 211 100% 35%;
 	--markdown-code-addition-bg: 138 76% 97%;
-	--markdown-code-addition-fg: 134 60% 34%;
+	--markdown-code-addition-fg: 134 60% 31%;
 	--markdown-code-deletion-bg: 353 100% 97%;
 	--markdown-code-deletion-fg: 355 72% 41%;
 	--diff-modified: 48 88% 93%;

@@ -40,10 +40,6 @@ function propertyValues(source: string): Record<string, string> {
 	);
 }
 
-function relativeLuminance(hsl: string): number {
-	return relativeLuminanceFromChannels(hslToSrgbChannels(hsl));
-}
-
 type ColorChannels = readonly [red: number, green: number, blue: number];
 
 function hslToSrgbChannels(hsl: string): ColorChannels {
@@ -72,8 +68,12 @@ function relativeLuminanceFromChannels(channels: ColorChannels): number {
 }
 
 function contrastRatio(background: string, foreground: string): number {
-	const backgroundLuminance = relativeLuminance(background);
-	const foregroundLuminance = relativeLuminance(foreground);
+	return contrastRatioFromChannels(hslToSrgbChannels(background), hslToSrgbChannels(foreground));
+}
+
+function contrastRatioFromChannels(background: ColorChannels, foreground: ColorChannels): number {
+	const backgroundLuminance = relativeLuminanceFromChannels(background);
+	const foregroundLuminance = relativeLuminanceFromChannels(foreground);
 	return (
 		(Math.max(backgroundLuminance, foregroundLuminance) + 0.05) /
 		(Math.min(backgroundLuminance, foregroundLuminance) + 0.05)
@@ -108,12 +108,7 @@ function contrastRatioOnTint(
 		foregroundChannels,
 		foregroundOpacity,
 	);
-	const surfaceLuminance = relativeLuminanceFromChannels(tintedChannels);
-	const foregroundLuminance = relativeLuminanceFromChannels(renderedForegroundChannels);
-	return (
-		(Math.max(surfaceLuminance, foregroundLuminance) + 0.05) /
-		(Math.min(surfaceLuminance, foregroundLuminance) + 0.05)
-	);
+	return contrastRatioFromChannels(tintedChannels, renderedForegroundChannels);
 }
 
 describe('theme profile CSS sources', () => {
@@ -196,6 +191,8 @@ describe('theme profile CSS sources', () => {
 			['stop-button-bg', 'stop-button-foreground'],
 			['user-bubble', 'user-bubble-foreground'],
 			['markdown-code-background', 'markdown-code-foreground'],
+			['markdown-code-addition-bg', 'markdown-code-addition-fg'],
+			['markdown-code-deletion-bg', 'markdown-code-deletion-fg'],
 			['interactive-accent', 'interactive-accent-foreground'],
 			['git-action-commit', 'git-action-foreground'],
 			['git-action-commit-hover', 'git-action-foreground'],
@@ -231,10 +228,40 @@ describe('theme profile CSS sources', () => {
 			'diff-del-fg',
 			'diff-del-line-num',
 		] as const;
+		const syntaxForegrounds = [
+			'markdown-code-keyword',
+			'markdown-code-title',
+			'markdown-code-meta',
+			'markdown-code-string',
+			'markdown-code-symbol',
+			'markdown-code-comment',
+			'markdown-code-name',
+			'markdown-code-section',
+		] as const;
 		const surfaces = ['background', 'sidebar-background', 'muted'] as const;
 
 		for (const profile of THEME_PROFILES) {
 			const values = propertyValues(profileSource(profile.id));
+			const viewportSurface = blendChannels(
+				hslToSrgbChannels(values.background),
+				hslToSrgbChannels(values.muted),
+				0.15,
+			);
+			const composerSurface = blendChannels(
+				viewportSurface,
+				hslToSrgbChannels(values['interactive-accent']),
+				0.1,
+			);
+			const selectedSurface = blendChannels(
+				viewportSurface,
+				hslToSrgbChannels(values['interactive-accent']),
+				0.2,
+			);
+			const mutedToolSurface = blendChannels(
+				hslToSrgbChannels(values.background),
+				hslToSrgbChannels(values.muted),
+				0.4,
+			);
 			for (const [background, foreground] of pairs) {
 				expect(
 					contrastRatio(values[background], values[foreground]),
@@ -258,28 +285,49 @@ describe('theme profile CSS sources', () => {
 				}
 			}
 			for (const foreground of selectedDiffForegrounds) {
-				for (const opacity of [0.1, 0.2]) {
+				for (const [selection, diffSurface] of [
+					['composer', composerSurface],
+					['selected', selectedSurface],
+				] as const) {
 					expect(
-						contrastRatioOnTint(
-							values.background,
-							values['interactive-accent'],
-							values[foreground],
-							opacity,
-						),
-						`${profile.id}: ${foreground} on ${opacity * 100}% selected diff`,
+						contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values[foreground])),
+						`${profile.id}: ${foreground} on ${selection} diff`,
 					).toBeGreaterThanOrEqual(4.5);
 				}
 			}
-			for (const opacity of [0, 0.1, 0.2]) {
+			for (const [selection, diffSurface] of [
+				['normal', viewportSurface],
+				['composer', composerSurface],
+				['selected', selectedSurface],
+			] as const) {
 				expect(
-					contrastRatioOnTint(
-						values.background,
-						values['interactive-accent'],
-						values.foreground,
-						opacity,
-						0.7,
+					contrastRatioFromChannels(
+						diffSurface,
+						blendChannels(diffSurface, hslToSrgbChannels(values.foreground), 0.7),
 					),
-					`${profile.id}: context line number on ${opacity * 100}% selected diff`,
+					`${profile.id}: context line number on ${selection} diff`,
+				).toBeGreaterThanOrEqual(4.5);
+			}
+			for (const foreground of syntaxForegrounds) {
+				const syntaxColor = hslToSrgbChannels(values[foreground]);
+				for (const [surfaceName, syntaxSurface] of [
+					['addition', hslToSrgbChannels(values['diff-add-bg'])],
+					['deletion', hslToSrgbChannels(values['diff-del-bg'])],
+					['context', viewportSurface],
+					['composer', composerSurface],
+					['selected', selectedSurface],
+					['bash tool', hslToSrgbChannels(values['chat-bash-row-bg'])],
+					['inline tool', hslToSrgbChannels(values.card)],
+					['plain-text tool', mutedToolSurface],
+				] as const) {
+					expect(
+						contrastRatioFromChannels(syntaxSurface, syntaxColor),
+						`${profile.id}: ${foreground} on ${surfaceName} diff`,
+					).toBeGreaterThanOrEqual(4.5);
+				}
+				expect(
+					contrastRatio(values['markdown-code-background'], values[foreground]),
+					`${profile.id}: ${foreground} on markdown code`,
 				).toBeGreaterThanOrEqual(4.5);
 			}
 			for (const background of ['diff-add-bg', 'diff-del-bg'] as const) {
@@ -288,15 +336,13 @@ describe('theme profile CSS sources', () => {
 					`${profile.id}: line action on ${background}`,
 				).toBeGreaterThanOrEqual(3);
 			}
-			for (const opacity of [0.1, 0.2]) {
+			for (const [selection, diffSurface] of [
+				['composer', composerSurface],
+				['selected', selectedSurface],
+			] as const) {
 				expect(
-					contrastRatioOnTint(
-						values.background,
-						values['interactive-accent'],
-						values['muted-foreground'],
-						opacity,
-					),
-					`${profile.id}: line action on ${opacity * 100}% selected diff`,
+					contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values['muted-foreground'])),
+					`${profile.id}: line action on ${selection} diff`,
 				).toBeGreaterThanOrEqual(3);
 			}
 		}
