@@ -206,12 +206,27 @@ describe('Chromium Chat Canvas', () => {
           (await read()).content.nodes.filter((entry) => entry.type === 'chat'),
         ).toHaveLength(2);
 
+        markPhase('hiding canvas nodes behind an opened chat');
+        await page.locator(node('card')).click();
+        await page
+          .getByRole('button', { name: 'Open chat', exact: true })
+          .click();
+        await page.locator(node('card')).waitFor({ state: 'hidden' });
+        expect(await page.locator('.svelte-flow__node:visible').count()).toBe(0);
+        await page.getByRole('tab', { name: 'Chat Map', exact: true }).click();
+        await page.locator(node('card')).waitFor({ state: 'visible' });
+
         markPhase('opening chats alongside and preserving canvas navigation');
         await page.locator(node('card')).click();
         await page
           .getByRole('button', { name: 'Open alongside', exact: true })
           .click();
         await page.locator('[data-canvas-flow]').waitFor({ state: 'visible' });
+        expect(
+          await page
+            .getByRole('tab', { name: 'Chat Map', exact: true })
+            .getAttribute('aria-selected'),
+        ).toBe('true');
         expect(
           await page.locator('[data-workspace-window-id]').count(),
         ).toBeGreaterThan(1);

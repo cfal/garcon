@@ -137,8 +137,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			lastFocusedWindowId: () => this.#presentation.lastFocusedWindowId,
 			resolveWindowId: (snapshot, preferredWindowId) =>
 				this.#resolveWindowId(snapshot, preferredWindowId),
-			commitWithPresentationTarget: (mutations, resolveTarget) =>
-				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget),
+			commitWithPresentationTarget: (mutations, resolveTarget, options) =>
+				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget, options),
+			prepareChatSurfaceTransfer: (transfer) =>
+				this.#tabMovement.prepareChatSurfaceTransfer(transfer),
 			resolveSplitAdmission: deps.resolveSplitAdmission,
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
@@ -425,6 +427,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		edge: WorkspaceWindowEdge = 'right',
 	): Promise<WorkspaceWindowId> {
 		return this.#chatPlacement.openInNewWindow(chatId, targetWindowId, edge);
+	}
+
+	async openChatBeside(
+		chatId: string,
+		targetWindowId?: WorkspaceWindowId,
+		edge: WorkspaceWindowEdge = 'right',
+	): Promise<WorkspaceWindowId> {
+		return this.#chatPlacement.openBeside(chatId, targetWindowId, edge);
 	}
 
 	async clearDeletedChat(chatId: string): Promise<void> {

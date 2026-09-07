@@ -59,7 +59,7 @@
 	}
 	async function openBeside(id: string) {
 		try {
-			await workspace.openChatInNewWindow(
+			await workspace.openChatBeside(
 				id,
 				presentation === 'mobile' || presentation === 'dialog' ? undefined : presentation,
 			);

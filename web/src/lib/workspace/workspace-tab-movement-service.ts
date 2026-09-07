@@ -11,6 +11,7 @@ import { windowIdOfSurface, windowNodeById } from './window-tree.js';
 import type { WorkspaceCommitOptions, WorkspacePublication } from './workspace-commit.js';
 import {
 	deferredChatSurfaceTransferPublication,
+	type ChatSurfaceTransfer,
 	type ChatSurfaceTransferPort,
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
@@ -54,6 +55,10 @@ export class WorkspaceTabMovementService {
 		return () => {
 			if (this.#chatSurfaceTransferPort === port) this.#chatSurfaceTransferPort = null;
 		};
+	}
+
+	prepareChatSurfaceTransfer(transfer: ChatSurfaceTransfer): WorkspacePublication | null {
+		return this.#chatSurfaceTransferPort?.prepareChatSurfaceTransfer(transfer) ?? null;
 	}
 
 	async fitToHost(getHostSize: () => WorkspaceHostSize | null): Promise<boolean> {

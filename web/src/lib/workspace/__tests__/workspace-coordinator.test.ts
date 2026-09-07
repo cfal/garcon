@@ -444,7 +444,11 @@ describe('WorkspaceCoordinator', () => {
 		const { layout } = harness;
 		const mainSurfaceId = chatViewSurfaceId('window-main');
 		await coordinator.showChatInCurrentWindow('chat-a');
-		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		const otherWindowId = await coordinator.openChatInNewWindow(
+			'chat-b',
+			'window-main',
+			'right',
+		);
 		await coordinator.focusSurface('singleton:git');
 		await coordinator.focusSurface(chatViewSurfaceId(otherWindowId));
 		observeReuse = true;
@@ -536,6 +540,36 @@ describe('WorkspaceCoordinator', () => {
 		expect(publications[1].publish).toHaveBeenCalledOnce();
 		expect(publications[0].rollback).not.toHaveBeenCalled();
 		expect(publications[1].rollback).not.toHaveBeenCalled();
+	});
+
+	it('moves a loaded Chat beside its active Canvas tab', async () => {
+		const { coordinator, layout } = createHarness();
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		const prepareChatSurfaceTransfer = vi.fn(() => publication);
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonAsTab('chat-map', 'window-main');
+		const sourceSurfaceId = chatViewSurfaceId('window-main');
+
+		const destinationWindowId = await coordinator.openChatBeside('chat-a', 'window-main', 'right');
+		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+
+		expect(destinationWindowId).not.toBe('window-main');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:chat-map');
+		expect(layout.surface(sourceSurfaceId)).toBeNull();
+		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-a' });
+		expect(
+			Object.values(layout.snapshot.surfaces).filter(
+				(surface) => surface.type === 'chat' && surface.chatId === 'chat-a',
+			),
+		).toHaveLength(1);
+		expect(prepareChatSurfaceTransfer).toHaveBeenCalledWith({
+			sourceSurfaceId,
+			destinationSurfaceId,
+			chatId: 'chat-a',
+		});
+		expect(publication.publish).toHaveBeenCalledOnce();
+		expect(publication.rollback).not.toHaveBeenCalled();
 	});
 
 	it('rolls back a Chat surface transfer when layout publication fails', async () => {
@@ -830,11 +864,7 @@ describe('WorkspaceCoordinator', () => {
 	it('reuses the owning desktop Chat tab across mobile entry and return', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.showChatInCurrentWindow('chat-a');
-		const otherWindowId = await coordinator.openChatInNewWindow(
-			'chat-b',
-			'window-main',
-			'right',
-		);
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
 		await coordinator.enterWindowFullscreen(otherWindowId);
 		await coordinator.enterMobilePresentation();
 

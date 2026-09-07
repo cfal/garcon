@@ -9,6 +9,11 @@ import {
 	type WorkspaceWindowEdge,
 	type WorkspaceWindowId,
 } from './surface-types.js';
+import type { WorkspaceCommitOptions, WorkspacePublication } from './workspace-commit.js';
+import {
+	deferredChatSurfaceTransferPublication,
+	type ChatSurfaceTransfer,
+} from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
 import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
@@ -49,7 +54,9 @@ interface WorkspaceChatPlacementServiceDeps {
 	commitWithPresentationTarget(
 		mutations: WorkspaceMutationPlan,
 		resolveTarget: () => string | null,
+		options?: WorkspaceCommitOptions,
 	): Promise<boolean>;
+	prepareChatSurfaceTransfer(transfer: ChatSurfaceTransfer): WorkspacePublication | null;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 	present(surfaceId: string): void;
 }
@@ -89,52 +96,135 @@ export class WorkspaceChatPlacementService {
 		const destination = await this.#commitPlacement((latest) => {
 			const existing = this.#existingPlacementPlan(latest, chatId);
 			if (existing) return existing;
+			return this.#newWindowPlan(latest, chatId, targetWindowId, edge, newWindowId, partitionId);
+		});
+		return destination.windowId;
+	}
 
-			const anchorWindowId = this.deps.resolveWindowId(
-				latest,
-				targetWindowId ?? this.deps.lastFocusedWindowId(),
-			);
-			if (this.deps.windowReservations.has(anchorWindowId)) {
-				return { destination: null, mutations: [] };
-			}
-			if (this.deps.isMobile()) {
-				const surfaceId = chatViewSurfaceId(anchorWindowId);
-				if (this.deps.surfaceReservations.has(surfaceId)) {
-					return { destination: null, mutations: [] };
-				}
-				return {
-					destination: { surfaceId, windowId: anchorWindowId },
-					mutations: [
-						{ type: 'set-window-chat', windowId: anchorWindowId, chatId },
-						{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] },
-					],
-				};
-			}
-
-			if (
-				!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
-					targetWindowId: anchorWindowId,
-					edge,
-				})
-			) {
-				return { destination: null, mutations: [] };
-			}
-			const surfaceId = chatViewSurfaceId(newWindowId);
-			return {
-				destination: { surfaceId, windowId: newWindowId },
-				mutations: [
-					{
-						type: 'open-chat-in-new-window',
+	async openBeside(
+		chatId: string,
+		targetWindowId?: WorkspaceWindowId,
+		edge: WorkspaceWindowEdge = 'right',
+	): Promise<WorkspaceWindowId> {
+		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
+		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
+		let transferPublication: WorkspacePublication | null = null;
+		const destination = await this.#commitPlacement(
+			(latest) => {
+				transferPublication = null;
+				const placement = findWorkspaceChatPlacement(latest, chatId);
+				if (!placement) {
+					return this.#newWindowPlan(
+						latest,
 						chatId,
-						targetWindowId: anchorWindowId,
+						targetWindowId,
 						edge,
 						newWindowId,
 						partitionId,
-					},
+					);
+				}
+				if (this.deps.isMobile()) return this.#existingPlacementPlan(latest, chatId)!;
+				const anchorWindowId = this.deps.resolveWindowId(
+					latest,
+					targetWindowId ?? this.deps.lastFocusedWindowId(),
+				);
+				const sourceWindow = windowNodeById(latest.desktopRoot, placement.windowId);
+				if (
+					!sourceWindow ||
+					!this.#isAvailable(placement) ||
+					this.deps.windowReservations.has(anchorWindowId)
+				) {
+					return { destination: null, mutations: [] };
+				}
+				if (placement.windowId !== anchorWindowId || sourceWindow.tabs.order.length === 1) {
+					return this.#existingPlacementPlan(latest, chatId)!;
+				}
+				if (
+					!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
+						targetWindowId: anchorWindowId,
+						edge,
+						movingSurfaceId: placement.surfaceId,
+					})
+				) {
+					return { destination: null, mutations: [] };
+				}
+				const destinationSurfaceId = chatViewSurfaceId(newWindowId);
+				transferPublication = this.deps.prepareChatSurfaceTransfer({
+					sourceSurfaceId: placement.surfaceId,
+					destinationSurfaceId,
+					chatId,
+				});
+				return {
+					destination: { surfaceId: destinationSurfaceId, windowId: newWindowId },
+					mutations: [
+						{
+							type: 'move-tab-to-new-window',
+							surfaceId: placement.surfaceId,
+							targetWindowId: anchorWindowId,
+							edge,
+							newWindowId,
+							partitionId,
+						},
+					],
+				};
+			},
+			{
+				publication: deferredChatSurfaceTransferPublication(() => transferPublication),
+			},
+		);
+		return destination.windowId;
+	}
+
+	#newWindowPlan(
+		latest: WorkspaceLayoutSnapshot,
+		chatId: string,
+		targetWindowId: WorkspaceWindowId | undefined,
+		edge: WorkspaceWindowEdge,
+		newWindowId: WorkspaceWindowId,
+		partitionId: WorkspacePartitionId,
+	): WorkspaceChatPlacementPlan {
+		const anchorWindowId = this.deps.resolveWindowId(
+			latest,
+			targetWindowId ?? this.deps.lastFocusedWindowId(),
+		);
+		if (this.deps.windowReservations.has(anchorWindowId)) {
+			return { destination: null, mutations: [] };
+		}
+		if (this.deps.isMobile()) {
+			const surfaceId = chatViewSurfaceId(anchorWindowId);
+			if (this.deps.surfaceReservations.has(surfaceId)) {
+				return { destination: null, mutations: [] };
+			}
+			return {
+				destination: { surfaceId, windowId: anchorWindowId },
+				mutations: [
+					{ type: 'set-window-chat', windowId: anchorWindowId, chatId },
+					{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] },
 				],
 			};
-		});
-		return destination.windowId;
+		}
+		if (
+			!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
+				targetWindowId: anchorWindowId,
+				edge,
+			})
+		) {
+			return { destination: null, mutations: [] };
+		}
+		const surfaceId = chatViewSurfaceId(newWindowId);
+		return {
+			destination: { surfaceId, windowId: newWindowId },
+			mutations: [
+				{
+					type: 'open-chat-in-new-window',
+					chatId,
+					targetWindowId: anchorWindowId,
+					edge,
+					newWindowId,
+					partitionId,
+				},
+			],
+		};
 	}
 
 	async #show(
@@ -170,6 +260,7 @@ export class WorkspaceChatPlacementService {
 
 	async #commitPlacement(
 		resolvePlan: (snapshot: WorkspaceLayoutSnapshot) => WorkspaceChatPlacementPlan,
+		options?: WorkspaceCommitOptions,
 	): Promise<WorkspaceChatPlacement> {
 		let plan: WorkspaceChatPlacementPlan = { destination: null, mutations: [] };
 		const stillCurrent = await this.deps.commitWithPresentationTarget(
@@ -178,6 +269,7 @@ export class WorkspaceChatPlacementService {
 				return plan.mutations;
 			},
 			() => plan.destination?.surfaceId ?? null,
+			options,
 		);
 		const destination = plan.destination;
 		if (!destination) throw new Error(m.workspace_open_failed());

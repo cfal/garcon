@@ -26,7 +26,7 @@
 	} = $props();
 </script>
 
-<div class="flex h-full min-h-0 flex-col">
+<div class="flex h-full min-h-0 flex-col" style:display={visible ? undefined : 'none'}>
 	<nav
 		class="flex shrink-0 gap-1 border-b border-border bg-card p-2"
 		aria-label={m.canvas_navigation()}
