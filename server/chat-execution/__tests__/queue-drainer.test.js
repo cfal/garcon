@@ -452,6 +452,7 @@ describe('QueueDrainer', () => {
       turnRunner: { isChatRunning: () => false, runAgentTurn },
       getDrainOptions: () => ({}),
       projectAdmission: { assertAvailable },
+      runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
       callbacks,
     });
 
@@ -504,6 +505,7 @@ describe('QueueDrainer', () => {
             throw new ProjectUnavailableError('/workspace/missing', 'not-found');
           }),
         },
+        runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
         callbacks,
       });
 
