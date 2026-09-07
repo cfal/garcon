@@ -355,8 +355,8 @@ describe('sidebar search dialog flow', () => {
 		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
 		await fireEvent.click(menuTrigger);
 
-		const defaultLayout = await screen.findByRole('menuitemradio', { name: 'Default' });
-		expect(defaultLayout.getAttribute('aria-checked')).toBe('true');
+		const detailedLayout = await screen.findByRole('menuitemradio', { name: 'Detailed' });
+		expect(detailedLayout.getAttribute('aria-checked')).toBe('true');
 		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('false');
 
