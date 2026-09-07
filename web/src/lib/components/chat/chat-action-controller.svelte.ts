@@ -1,5 +1,6 @@
 import * as m from '$lib/paraglide/messages.js';
 import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
+import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatActionDialogsState } from './chat-action-dialogs-state.svelte';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -8,6 +9,9 @@ export interface ChatActionControllerDeps {
 	get chats(): ChatSessionRecord[];
 	get selectedChatId(): string | null;
 	onQuietRefresh: () => Promise<void> | void;
+	isArchiveMutationPending: (chatId: string) => boolean;
+	startArchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
+	startUnarchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
 	onSelectChat: (chatId: string) => void;
 	onNewChat: () => void;
 	onDeleteChat: (chatId: string) => Promise<void> | void;
@@ -31,10 +35,20 @@ export class ChatActionController {
 			get onQuietRefresh() {
 				return deps.onQuietRefresh;
 			},
+			get isArchiveMutationPending() {
+				return deps.isArchiveMutationPending;
+			},
+			get startArchivingChats() {
+				return deps.startArchivingChats;
+			},
+			get startUnarchivingChats() {
+				return deps.startUnarchivingChats;
+			},
 		});
 	}
 
 	async togglePinned(chatId: string): Promise<void> {
+		if (this.deps.isArchiveMutationPending(chatId)) return;
 		const chat = this.deps.chats.find((entry) => entry.id === chatId);
 		const wasPinned = chat?.isPinned === true;
 		await this.run('Failed to toggle pinned:', m.notifications_pin_chat_failed(), async () => {
@@ -46,27 +60,49 @@ export class ChatActionController {
 	}
 
 	async toggleArchive(chatId: string): Promise<void> {
-		const chat = this.deps.chats.find((entry) => entry.id === chatId);
-		const wasArchived = chat?.isArchived === true;
+		const chats = this.deps.chats;
+		const chatIndex = chats.findIndex((entry) => entry.id === chatId);
+		const chat = chats[chatIndex];
+		if (!chat || this.deps.isArchiveMutationPending(chatId)) return;
+		const wasArchived = chat.isArchived;
 		const isSelectedChat = this.deps.selectedChatId === chatId;
 		const isArchivingSelectedChat = !wasArchived && isSelectedChat;
-		const chatIndex = this.deps.chats.findIndex((entry) => entry.id === chatId);
-		const neighborId =
-			isArchivingSelectedChat && chatIndex >= 0
-				? (this.deps.chats[chatIndex + 1]?.id ?? this.deps.chats[chatIndex - 1]?.id ?? null)
-				: null;
+		let replacementChatId: string | null = null;
+		if (isArchivingSelectedChat) {
+			replacementChatId = this.#findArchiveReplacementChatId(chats, chatIndex);
+		}
+
+		const mutation = wasArchived
+			? this.deps.startUnarchivingChats([chatId])
+			: this.deps.startArchivingChats([chatId]);
+		if (!mutation.chatIds.includes(chatId)) return;
+
+		if (isArchivingSelectedChat) {
+			if (replacementChatId) this.deps.onSelectChat(replacementChatId);
+			else this.deps.onNewChat();
+		}
 
 		await this.run('Failed to toggle archive:', m.notifications_archive_chat_failed(), async () => {
-			await this.#sidebarController.toggleArchive(chatId);
-			if (isArchivingSelectedChat) {
-				if (neighborId) this.deps.onSelectChat(neighborId);
-				else this.deps.onNewChat();
-				return;
-			}
-			if (wasArchived && isSelectedChat) {
+			await mutation.completion;
+			if (wasArchived && this.deps.selectedChatId === chatId) {
 				this.deps.requestSidebarRecenter();
 			}
 		});
+	}
+
+	#findArchiveReplacementChatId(
+		chats: readonly ChatSessionRecord[],
+		chatIndex: number,
+	): string | null {
+		for (let index = chatIndex + 1; index < chats.length; index += 1) {
+			const chat = chats[index];
+			if (chat && !this.deps.isArchiveMutationPending(chat.id)) return chat.id;
+		}
+		for (let index = chatIndex - 1; index >= 0; index -= 1) {
+			const chat = chats[index];
+			if (chat && !this.deps.isArchiveMutationPending(chat.id)) return chat.id;
+		}
+		return null;
 	}
 
 	async confirmDelete(dialogs: ChatActionDialogsState): Promise<void> {

@@ -68,9 +68,24 @@ describe('SidebarController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		quietRefresh = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+		const startArchiveMutation = (chatIds: readonly string[]) => ({
+			chatIds: [...chatIds],
+			completion: Promise.all(chatIds.map((chatId) => mockToggleArchive(chatId))).then(async () => {
+				await quietRefresh();
+			}),
+		});
 		deps = {
 			get onQuietRefresh() {
 				return quietRefresh;
+			},
+			get isArchiveMutationPending() {
+				return () => false;
+			},
+			get startArchivingChats() {
+				return startArchiveMutation;
+			},
+			get startUnarchivingChats() {
+				return startArchiveMutation;
 			},
 		};
 		controller = new SidebarController(deps);
@@ -90,17 +105,6 @@ describe('SidebarController', () => {
 			mockTogglePinned.mockRejectedValue(new Error('fail'));
 
 			await expect(controller.togglePinned('c-1')).rejects.toThrow('fail');
-		});
-	});
-
-	describe('toggleArchive', () => {
-		it('calls API then refreshes', async () => {
-			mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
-
-			await controller.toggleArchive('c-1');
-
-			expect(mockToggleArchive).toHaveBeenCalledWith('c-1');
-			expect(quietRefresh).toHaveBeenCalledOnce();
 		});
 	});
 
@@ -229,11 +233,11 @@ describe('SidebarController', () => {
 		});
 	});
 
-	describe('runBulkOperation', () => {
+	describe('bulk operations', () => {
 		it('pins only unpinned selected chats', async () => {
 			mockTogglePinned.mockResolvedValue({ success: true, isPinned: true });
 
-			const result = await controller.runBulkOperation('pin', {
+			const operation = controller.startBulkOperation('pin', {
 				selectedChats: [
 					makeChat({ id: 'c-1', isPinned: false }),
 					makeChat({ id: 'c-2', isPinned: true }),
@@ -242,20 +246,22 @@ describe('SidebarController', () => {
 				selectedChatId: null,
 			});
 
-			expect(result).toEqual({
+			expect(operation).toMatchObject({
 				affectedIds: ['c-1'],
 				nextSelectedChatId: null,
 				shouldCreateNewChat: false,
 			});
+
+			await operation.completion;
+
 			expect(mockTogglePinned).toHaveBeenCalledWith('c-1');
 			expect(mockTogglePinned).toHaveBeenCalledTimes(1);
 			expect(quietRefresh).toHaveBeenCalledOnce();
 		});
 
-		it('returns the next visible chat when archiving the selected chat', async () => {
+		it('plans the next visible chat before archiving the selected chat', async () => {
 			mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
-
-			const result = await controller.runBulkOperation('archive', {
+			const operation = controller.startBulkOperation('archive', {
 				selectedChats: [makeChat({ id: 'c-1', isArchived: false })],
 				allChats: [
 					makeChat({ id: 'c-1', isArchived: false }),
@@ -264,24 +270,24 @@ describe('SidebarController', () => {
 				selectedChatId: 'c-1',
 			});
 
-			expect(result).toEqual({
+			expect(operation).toMatchObject({
 				affectedIds: ['c-1'],
 				nextSelectedChatId: 'c-2',
 				shouldCreateNewChat: false,
 			});
+			await operation.completion;
+
 			expect(mockToggleArchive).toHaveBeenCalledWith('c-1');
 		});
 
-		it('requests a new chat when bulk archive removes the last visible chat', async () => {
-			mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
-
-			const result = await controller.runBulkOperation('archive', {
+		it('plans a new chat when bulk archive removes the last visible chat', () => {
+			const operation = controller.startBulkOperation('archive', {
 				selectedChats: [makeChat({ id: 'c-1', isArchived: false })],
 				allChats: [makeChat({ id: 'c-1', isArchived: false })],
 				selectedChatId: 'c-1',
 			});
 
-			expect(result).toEqual({
+			expect(operation).toMatchObject({
 				affectedIds: ['c-1'],
 				nextSelectedChatId: null,
 				shouldCreateNewChat: true,

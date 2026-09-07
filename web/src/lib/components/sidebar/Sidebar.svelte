@@ -17,6 +17,7 @@
 		getSidebarSearch,
 		getRemoteSettings,
 	} from '$lib/context';
+	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
 		PersistedChatOrderGroup,
@@ -75,6 +76,10 @@
 		onRequestRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => Promise<void> | void;
 		onToggleArchive: (chatId: string) => Promise<void> | void;
+		isArchiveMutationPending?: (chatId: string) => boolean;
+		isChatOptimisticallyArchived?: (chatId: string) => boolean;
+		startArchivingChats?: (chatIds: readonly string[]) => ChatArchiveMutation;
+		startUnarchivingChats?: (chatIds: readonly string[]) => ChatArchiveMutation;
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => Promise<void> | void;
 		onShareChat: (chat: ChatSessionRecord) => void;
@@ -101,6 +106,10 @@
 		onRequestRenameChat,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = () => false,
+		isChatOptimisticallyArchived = () => false,
+		startArchivingChats = () => ({ chatIds: [], completion: Promise.resolve() }),
+		startUnarchivingChats = () => ({ chatIds: [], completion: Promise.resolve() }),
 		onShowDetails,
 		onForkChat,
 		onShareChat,
@@ -123,6 +132,15 @@
 	const controller = new SidebarController({
 		get onQuietRefresh() {
 			return onQuietRefresh;
+		},
+		get isArchiveMutationPending() {
+			return isArchiveMutationPending;
+		},
+		get startArchivingChats() {
+			return startArchivingChats;
+		},
+		get startUnarchivingChats() {
+			return startUnarchivingChats;
 		},
 	});
 
@@ -175,6 +193,8 @@
 			inactivityDuration: displayOptions.inactivityDuration,
 			sortMode: displayOptions.sortMode,
 			pinnedInsertPosition: displayOptions.pinnedInsertPosition,
+			isChatOptimisticallyArchived,
+			optimisticArchiveOrder: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
@@ -335,17 +355,18 @@
 		userMessage: string,
 	) {
 		isBulkOperating = true;
+		const operation = controller.startBulkOperation(action, {
+			selectedChats,
+			allChats: chats,
+			selectedChatId,
+		});
+		if (operation.nextSelectedChatId) {
+			onChatSelect(operation.nextSelectedChatId);
+		} else if (operation.shouldCreateNewChat) {
+			onNewChat();
+		}
 		try {
-			const result = await controller.runBulkOperation(action, {
-				selectedChats,
-				allChats: chats,
-				selectedChatId,
-			});
-			if (result.nextSelectedChatId) {
-				onChatSelect(result.nextSelectedChatId);
-			} else if (result.shouldCreateNewChat) {
-				onNewChat();
-			}
+			await operation.completion;
 		} catch (error) {
 			reportActionFailure(logMessage, userMessage, error);
 		} finally {
@@ -551,6 +572,8 @@
 			onToggleArchive={(id) => {
 				void onToggleArchive(id);
 			}}
+			{isArchiveMutationPending}
+			{isChatOptimisticallyArchived}
 			{onShowDetails}
 			onForkChat={(id) => {
 				void onForkChat(id);

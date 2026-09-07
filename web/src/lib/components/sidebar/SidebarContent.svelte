@@ -43,6 +43,8 @@
 		newWindowEdges: WorkspaceSplitAdmissions;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
+		isArchiveMutationPending?: (chatId: string) => boolean;
+		isChatOptimisticallyArchived?: (chatId: string) => boolean;
 		onQuickMove: (
 			list: PersistedChatOrderGroup,
 			chatId: string,
@@ -81,6 +83,8 @@
 		newWindowEdges,
 		onTogglePinned,
 		onToggleArchive,
+		isArchiveMutationPending = () => false,
+		isChatOptimisticallyArchived = () => false,
 		onQuickMove,
 		onSortChatOrder,
 	}: SidebarContentProps = $props();
@@ -128,6 +132,8 @@
 		{newWindowEdges}
 		{onTogglePinned}
 		{onToggleArchive}
+		{isArchiveMutationPending}
+		{isChatOptimisticallyArchived}
 		{onQuickMove}
 		{onSortChatOrder}
 	/>

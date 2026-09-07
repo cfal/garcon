@@ -525,6 +525,28 @@ describe('shared sidebar chat row', () => {
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
 	});
 
+	it('disables pin and archive toggles while an archive mutation is pending', async () => {
+		const onTogglePinned = vi.fn();
+		const onToggleArchive = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			isArchiveMutationPending: true,
+			onTogglePinned,
+			onToggleArchive,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		const pin = await screen.findByRole('menuitem', { name: 'Pin' });
+		const archive = screen.getByRole('menuitem', { name: 'Archive' });
+		expect(pin.hasAttribute('data-disabled')).toBe(true);
+		expect(archive.hasAttribute('data-disabled')).toBe(true);
+
+		await fireEvent.click(pin);
+		await fireEvent.click(archive);
+		expect(onTogglePinned).not.toHaveBeenCalled();
+		expect(onToggleArchive).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		['By creation time', 'created'],
 		['By recent activity', 'activity'],

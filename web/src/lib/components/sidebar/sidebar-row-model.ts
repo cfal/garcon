@@ -7,7 +7,7 @@ import type {
 } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { isSidebarChatInactive } from './chat-inactivity';
-import { sortSidebarChatsByRecency } from './chat-recency-sort';
+import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-recency-sort';
 import type { PinnedInsertPosition } from '$shared/settings';
 import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
 import {
@@ -509,13 +509,22 @@ export function buildSidebarDisplayChatIds(input: {
 	inactivityDuration: SidebarInactivityDuration;
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
+	isChatOptimisticallyArchived?: (chatId: string) => boolean;
+	optimisticArchiveOrder?: readonly ChatSessionRecord[];
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 }): string[] {
-	const displayedChats =
+	const sortedChats =
 		input.sortMode === 'recent'
 			? sortSidebarChatsByRecency(input.displayedChats, input.pinnedInsertPosition)
 			: input.displayedChats;
+	const displayedChats = input.isChatOptimisticallyArchived
+		? prioritizeOptimisticArchives(
+				sortedChats,
+				input.optimisticArchiveOrder ?? input.displayedChats,
+				input.isChatOptimisticallyArchived,
+			)
+		: sortedChats;
 	const orders = buildSidebarChatOrderMap(displayedChats);
 	return buildSidebarRowModel({
 		displayedChats,

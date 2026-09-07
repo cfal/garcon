@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
 	import {
 		setAppShell,
@@ -17,6 +18,7 @@
 		type SidebarSearchStore,
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import type {
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
@@ -30,6 +32,7 @@
 
 	interface SidebarHostProps {
 		chats?: ChatSessionRecord[];
+		chatSessions?: ChatSessionsStore;
 		isMobile?: boolean;
 		notifications?: unknown;
 		selectedChatId?: string | null;
@@ -48,10 +51,13 @@
 		sidebarSearchResultSort?: ChatSearchSort;
 		onQuietRefresh?: () => Promise<void> | void;
 		onRequestRecenter?: () => void;
+		onChatSelect?: (chatId: string) => void;
+		onNewChat?: () => void;
 	}
 
 	let {
 		chats = [],
+		chatSessions,
 		isMobile = false,
 		notifications,
 		selectedChatId = null,
@@ -70,7 +76,10 @@
 		sidebarSearchResultSort = 'relevance',
 		onQuietRefresh = () => Promise.resolve(),
 		onRequestRecenter = () => {},
+		onChatSelect = () => {},
+		onNewChat = () => {},
 	}: SidebarHostProps = $props();
+	let displayedChats = $derived(chatSessions?.orderedChats ?? chats);
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -206,7 +215,7 @@
 		return createSidebarSearchStore({
 			getTranscriptSearchEnabled: () => true,
 			getSearchResultSort: () => 'relevance',
-			getChats: () => chats,
+			getChats: () => displayedChats,
 			getSelectedChatId: () => selectedChatId,
 			notifyError: (message) => {
 				(getNotificationsContext() as { error?: (message: string) => void }).error?.(message);
@@ -231,11 +240,14 @@
 
 	setWorkspaceWindowDndTestContext();
 
-	setChatSessions({
-		get selectedChat() {
-			return null;
-		},
-	} as never);
+	setChatSessions(
+		untrack(() => chatSessions) ??
+			({
+				get selectedChat() {
+					return null;
+				},
+			} as never),
+	);
 
 	$effect(() => {
 		if (!autoLoadSavedSearches) return;
@@ -244,17 +256,30 @@
 </script>
 
 <Sidebar
-	{chats}
+	chats={displayedChats}
 	{selectedChatId}
 	isLoading={false}
 	{isMobile}
-	onChatSelect={() => {}}
-	onNewChat={() => {}}
+	{onChatSelect}
+	{onNewChat}
 	{onQuietRefresh}
 	onRequestDeleteChat={() => {}}
 	onRequestRenameChat={() => {}}
 	onTogglePinned={() => {}}
 	onToggleArchive={() => {}}
+	isArchiveMutationPending={(chatId) => chatSessions?.isArchiveMutationPending(chatId) ?? false}
+	isChatOptimisticallyArchived={(chatId) =>
+		chatSessions?.isChatOptimisticallyArchived(chatId) ?? false}
+	startArchivingChats={(chatIds) =>
+		chatSessions?.startArchivingChats(chatIds) ?? {
+			chatIds: [],
+			completion: Promise.resolve(),
+		}}
+	startUnarchivingChats={(chatIds) =>
+		chatSessions?.startUnarchivingChats(chatIds) ?? {
+			chatIds: [],
+			completion: Promise.resolve(),
+		}}
 	onShowDetails={() => {}}
 	onForkChat={() => {}}
 	onShareChat={() => {}}
