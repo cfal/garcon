@@ -1222,6 +1222,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'files',
 			'commit',
 			'chat-map',
+			'chat-board',
 		] as const;
 		runtime.surfaces = Object.fromEntries(
 			[chatSurface, ...kinds.map((kind) => portableSingletonDescriptor(kind))].map((surface) => [
@@ -1249,6 +1250,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_chat_map(),
+			m.workspace_open_chat_board(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const newTerminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });

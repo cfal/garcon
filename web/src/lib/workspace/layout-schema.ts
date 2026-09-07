@@ -49,6 +49,7 @@ const PORTABLE_SINGLETON_REF_KINDS = new Set<PortableSingletonKind>([
 	'files',
 	'commit',
 	'chat-map',
+	'chat-board',
 ]);
 
 function parseV2Ref(value: unknown): PersistedWorkspaceSurfaceRef | null {

@@ -30,6 +30,7 @@ import {
 	parseChatItemLayout as parseStoredChatItemLayout,
 	type ChatItemLayout,
 } from '$lib/chat/presentation/chat-item-layout.js';
+import { isChatBoardColumnId, isChatBoardId } from '$shared/chat-boards';
 
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
 export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
@@ -145,6 +146,9 @@ export interface LocalSettingsSnapshot {
 	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarChatItemLayout: ChatItemLayout;
+	selectedChatBoardId: string | null;
+	chatBoardItemLayout: ChatItemLayout | null;
+	chatBoardActiveColumnByBoardId: Record<string, string>;
 	sidebarSortMode: SidebarSortMode;
 	sidebarSearchResultSort: ChatSearchSort;
 	codeEditorWordWrap: boolean;
@@ -204,6 +208,9 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'compact',
+	selectedChatBoardId: null,
+	chatBoardItemLayout: null,
+	chatBoardActiveColumnByBoardId: {},
 	sidebarSortMode: 'manual',
 	sidebarSearchResultSort: 'relevance',
 	codeEditorWordWrap: false,
@@ -299,6 +306,16 @@ function parseSidebarChatItemLayout(value: unknown): ChatItemLayout {
 	return parseStoredChatItemLayout(value) ?? DEFAULTS.sidebarChatItemLayout;
 }
 
+function parseChatBoardActiveColumns(value: unknown): Record<string, string> {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+	const result: Record<string, string> = {};
+	for (const [boardId, columnId] of Object.entries(value)) {
+		if (isChatBoardId(boardId) && isChatBoardColumnId(columnId)) result[boardId] = columnId;
+		if (Object.keys(result).length === 50) break;
+	}
+	return result;
+}
+
 export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementPreference {
 	return (
 		typeof value === 'string' &&
@@ -354,6 +371,16 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.sidebarGroupNestedProjectPaths,
 		),
 		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
+		selectedChatBoardId: isChatBoardId(parsed.selectedChatBoardId)
+			? parsed.selectedChatBoardId
+			: null,
+		chatBoardItemLayout:
+			parsed.chatBoardItemLayout === null
+				? null
+				: parseStoredChatItemLayout(parsed.chatBoardItemLayout),
+		chatBoardActiveColumnByBoardId: parseChatBoardActiveColumns(
+			parsed.chatBoardActiveColumnByBoardId,
+		),
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
 		sidebarSearchResultSort: parseSidebarSearchResultSort(parsed.sidebarSearchResultSort),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
@@ -435,6 +462,9 @@ export class LocalSettingsStore {
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<ChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
+	selectedChatBoardId = $state<string | null>(DEFAULTS.selectedChatBoardId);
+	chatBoardItemLayout = $state<ChatItemLayout | null>(DEFAULTS.chatBoardItemLayout);
+	chatBoardActiveColumnByBoardId = $state<Record<string, string>>({});
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
 	sidebarSearchResultSort = $state<ChatSearchSort>(DEFAULTS.sidebarSearchResultSort);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
@@ -535,6 +565,9 @@ export class LocalSettingsStore {
 			sidebarInactivityDuration: this.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
+			selectedChatBoardId: this.selectedChatBoardId,
+			chatBoardItemLayout: this.chatBoardItemLayout,
+			chatBoardActiveColumnByBoardId: { ...this.chatBoardActiveColumnByBoardId },
 			sidebarSortMode: this.sidebarSortMode,
 			sidebarSearchResultSort: this.sidebarSearchResultSort,
 			codeEditorWordWrap: this.codeEditorWordWrap,
@@ -578,6 +611,9 @@ export class LocalSettingsStore {
 		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
+		this.selectedChatBoardId = snap.selectedChatBoardId;
+		this.chatBoardItemLayout = snap.chatBoardItemLayout;
+		this.chatBoardActiveColumnByBoardId = { ...snap.chatBoardActiveColumnByBoardId };
 		this.sidebarSortMode = snap.sidebarSortMode;
 		this.sidebarSearchResultSort = snap.sidebarSearchResultSort;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;

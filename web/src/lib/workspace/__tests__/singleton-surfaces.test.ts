@@ -4,6 +4,9 @@ import type { FileTreeResponse } from '$shared/file-contracts';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import type { ChatBoardApi } from '$lib/api/chat-boards.js';
+import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
+import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import SingletonSurfaceRegistryTemplateHost from './SingletonSurfaceRegistryTemplateHost.svelte';
 
@@ -53,6 +56,11 @@ function createRegistry() {
 		setPresentationVisible: ReturnType<typeof vi.fn>;
 		dispose: ReturnType<typeof vi.fn>;
 	}> = [];
+	const chatBoards: Array<{
+		setProjectState: ReturnType<typeof vi.fn>;
+		setPresentationVisible: ReturnType<typeof vi.fn>;
+		dispose: ReturnType<typeof vi.fn>;
+	}> = [];
 	const gitSurfaceDeps = createGitSurfaceTestDeps();
 	const registry = new SingletonSurfaceRegistry({
 		...gitSurfaceDeps,
@@ -77,12 +85,47 @@ function createRegistry() {
 			pullRequestsStores.push(tracked);
 			return controller;
 		},
+		createChatBoard: () => {
+			const api = {
+				load: vi.fn(async () => ({ revision: 0, boards: [] })),
+				create: vi.fn(),
+				update: vi.fn(),
+				remove: vi.fn(),
+				reorder: vi.fn(),
+			} satisfies ChatBoardApi;
+			const controller = new ChatBoardController({
+				api,
+				invalidations: new ChatBoardInvalidationHub(),
+				preferences: {
+					get selectedBoardId() {
+						return null;
+					},
+					setSelectedBoardId() {},
+					get itemLayout() {
+						return 'compact' as const;
+					},
+					setItemLayout() {},
+					getActiveColumnId() {
+						return null;
+					},
+					setActiveColumnId() {},
+				},
+				sidebarLayout: () => 'compact',
+			});
+			chatBoards.push({
+				setProjectState: vi.spyOn(controller, 'setProjectState'),
+				setPresentationVisible: vi.spyOn(controller, 'setPresentationVisible'),
+				dispose: vi.spyOn(controller, 'dispose'),
+			});
+			return controller;
+		},
 	});
 	registries.push(registry);
 	return {
 		registry,
 		commits,
 		pullRequestsStores,
+		chatBoards,
 		comparisonPreferences: gitSurfaceDeps.comparisonPreferences,
 	};
 }
@@ -126,19 +169,23 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.setPresentationVisible('git', true);
 		registry.setPresentationVisible('files', true);
 		registry.setPresentationVisible('chat-map', true);
+		registry.setPresentationVisible('chat-board', true);
 		const git = registry.gitWorkbench();
 		const files = registry.files();
 		const chatMap = registry.chatMap();
+		const chatBoard = registry.chatBoard();
 		chatMap.setQuery('retained query');
 		git.target.showTargetDialog = true;
 
 		registry.setPresentationVisible('git', false);
 		registry.setPresentationVisible('files', false);
 		registry.setPresentationVisible('chat-map', false);
+		registry.setPresentationVisible('chat-board', false);
 
 		expect(registry.gitWorkbench()).toBe(git);
 		expect(registry.files()).toBe(files);
 		expect(registry.chatMap()).toBe(chatMap);
+		expect(registry.chatBoard()).toBe(chatBoard);
 		expect(chatMap.query).toBe('retained query');
 		expect(git.presentationVisible).toBe(false);
 		expect(git.target.showTargetDialog).toBe(false);
@@ -184,20 +231,41 @@ describe('SingletonSurfaceRegistry', () => {
 		const firstPullRequests = registry.pullRequests();
 		const firstCommit = registry.commit();
 		const firstChatMap = registry.chatMap();
+		const firstChatBoard = registry.chatBoard();
 
 		registry.disposeSurface('git');
 		registry.disposeSurface('files');
 		registry.disposeSurface('pull-requests');
 		registry.disposeSurface('commit');
 		registry.disposeSurface('chat-map');
+		registry.disposeSurface('chat-board');
 
 		expect(registry.gitWorkbench()).not.toBe(firstGit);
 		expect(registry.files()).not.toBe(firstFiles);
 		expect(registry.pullRequests()).not.toBe(firstPullRequests);
 		expect(registry.commit()).not.toBe(firstCommit);
 		expect(registry.chatMap()).not.toBe(firstChatMap);
+		expect(registry.chatBoard()).not.toBe(firstChatBoard);
 		expect(firstPullRequests.dispose).toHaveBeenCalledOnce();
 		expect(firstCommit.dispose).toHaveBeenCalledOnce();
+	});
+
+	it('keeps Chat Board global and out of project-dependent visibility', () => {
+		const { registry, chatBoards } = createRegistry();
+		registry.setPresentationVisible('chat-board', true);
+		const board = registry.chatBoard();
+		expect(registry.hasVisibleProjectSurface).toBe(false);
+
+		registry.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat-a',
+				projectPath: '/project-a',
+				effectiveProjectKey: '/canonical/a',
+			},
+		});
+		expect(registry.chatBoard()).toBe(board);
+		expect(chatBoards[0]?.setProjectState).toHaveBeenCalled();
 	});
 
 	it('constructs independent Workbench, History, and Compare controllers', () => {

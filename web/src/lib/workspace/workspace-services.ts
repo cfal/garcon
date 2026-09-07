@@ -21,6 +21,9 @@ import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { createPullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
+import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
+import type { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
+import { chatBoardApi } from '$lib/api/chat-boards.js';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
@@ -91,6 +94,7 @@ export interface WorkspaceRootDependencies {
 	notifications: NotificationsStore;
 	terminalIdentity: { readonly clientId: string | null };
 	ws: PrimaryWsConnectionPort;
+	chatBoardInvalidations: ChatBoardInvalidationHub;
 	getRouteIdentity(): string;
 	onTerminalLauncherDismissed(): void;
 	isTerminalLauncherDismissed(): boolean;
@@ -154,12 +158,10 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}
 		});
 	});
-	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged(
-		(chatId, projectPath) => {
-			if (projectPath === null) projectResolution.removeChatTargets(chatId);
-			else projectResolution.markObsoleteChatTargets(chatId, projectPath);
-		},
-	);
+	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged((chatId, projectPath) => {
+		if (projectPath === null) projectResolution.removeChatTargets(chatId);
+		else projectResolution.markObsoleteChatTargets(chatId, projectPath);
+	});
 	for (const chat of deps.chatSessions.orderedChats) {
 		if (chat.status !== 'draft') {
 			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath);
@@ -271,6 +273,35 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
 	const comparisonPreferences = new LocalGitComparisonPreferences();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
+		createChatBoard: () =>
+			new ChatBoardController({
+				api: chatBoardApi,
+				invalidations: deps.chatBoardInvalidations,
+				preferences: {
+					get selectedBoardId() {
+						return deps.localSettings.selectedChatBoardId;
+					},
+					setSelectedBoardId(boardId) {
+						deps.localSettings.set('selectedChatBoardId', boardId);
+					},
+					get itemLayout() {
+						return deps.localSettings.chatBoardItemLayout;
+					},
+					setItemLayout(layout) {
+						deps.localSettings.set('chatBoardItemLayout', layout);
+					},
+					getActiveColumnId(boardId) {
+						return deps.localSettings.chatBoardActiveColumnByBoardId[boardId] ?? null;
+					},
+					setActiveColumnId(boardId, columnId) {
+						deps.localSettings.set('chatBoardActiveColumnByBoardId', {
+							...deps.localSettings.chatBoardActiveColumnByBoardId,
+							[boardId]: columnId,
+						});
+					},
+				},
+				sidebarLayout: () => deps.localSettings.sidebarChatItemLayout,
+			}),
 		createCommit: () =>
 			new CommitController({
 				createGitBranchSelector,

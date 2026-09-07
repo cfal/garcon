@@ -26,6 +26,9 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('compact');
+		expect(store.selectedChatBoardId).toBeNull();
+		expect(store.chatBoardItemLayout).toBeNull();
+		expect(store.chatBoardActiveColumnByBoardId).toEqual({});
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.sidebarSearchResultSort).toBe('relevance');
 		expect(store.reduceMotion).toBe(false);
@@ -134,6 +137,36 @@ describe('LocalSettingsStore', () => {
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({ sidebarChatItemLayout: 'detailed' });
 		store.destroy();
+	});
+
+	it('persists and validates browser-local Chat Board presentation', () => {
+		const boardId = '11111111-1111-4111-8111-111111111111';
+		const columnId = '22222222-2222-4222-8222-222222222222';
+		const store = createLocalSettingsStore();
+		store.set('selectedChatBoardId', boardId);
+		store.set('chatBoardItemLayout', 'detailed');
+		store.set('chatBoardActiveColumnByBoardId', { [boardId]: columnId });
+		store.destroy();
+
+		const restored = createLocalSettingsStore();
+		expect(restored.selectedChatBoardId).toBe(boardId);
+		expect(restored.chatBoardItemLayout).toBe('detailed');
+		expect(restored.chatBoardActiveColumnByBoardId).toEqual({ [boardId]: columnId });
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				selectedChatBoardId: 'invalid',
+				chatBoardItemLayout: 'wide',
+				chatBoardActiveColumnByBoardId: { invalid: columnId, [boardId]: 'invalid' },
+			}),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.selectedChatBoardId).toBeNull();
+		expect(malformed.chatBoardItemLayout).toBeNull();
+		expect(malformed.chatBoardActiveColumnByBoardId).toEqual({});
+		malformed.destroy();
 	});
 
 	it('persists Ctrl+Enter steering and defaults malformed values to enabled', () => {

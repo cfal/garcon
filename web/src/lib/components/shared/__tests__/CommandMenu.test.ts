@@ -93,6 +93,7 @@ describe('CommandMenu', () => {
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
 		['Open chat map', 'chat-map'],
+		['Open Chat Board', 'chat-board'],
 	] as const)('opens standalone %s through generic desktop placement', async (label, kind) => {
 		const { component } = render(CommandMenu);
 		component.toggle();
@@ -105,6 +106,7 @@ describe('CommandMenu', () => {
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
 		['Open chat map', 'chat-map'],
+		['Open Chat Board', 'chat-board'],
 	] as const)('focuses standalone %s on mobile', async (label, kind) => {
 		mocks.workspace.isMobile = true;
 		const { component } = render(CommandMenu);
