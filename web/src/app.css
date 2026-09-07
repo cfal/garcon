@@ -219,6 +219,28 @@
 	--input: 0 0% 90%;
 	--ring: 0 0% 40%;
 	--radius: 0.5rem;
+	--control-radius: calc(var(--radius) - 2px);
+	--menu-radius: calc(var(--radius) - 2px);
+	--menu-item-radius: calc(var(--radius) - 4px);
+	--dialog-radius: var(--radius);
+	--dialog-close-radius: calc(var(--radius) - 6px);
+	--menu-padding: 0.25rem;
+	--menu-shadow: var(--shadow-md);
+	--submenu-shadow: var(--shadow-lg);
+	--tooltip-shadow: none;
+	--dialog-shadow: var(--shadow-lg);
+	--primary-hover-shadow: var(--shadow-xs);
+	--dialog-surface: hsl(var(--background));
+	--scroll-area-thumb: hsl(var(--border));
+	--scroll-area-thumb-hover: hsl(var(--border));
+	--switch-thumb-checked: hsl(var(--background));
+	--switch-thumb-unchecked: hsl(var(--background));
+	--native-select-muted-background: hsl(var(--muted));
+	--native-select-surface-background: hsl(var(--background));
+	--native-select-border: hsl(var(--input));
+	--native-select-radius: calc(var(--radius) - 2px);
+	--native-select-compact-radius: calc(var(--radius) - 4px);
+	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235c6470' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 	--transient-backdrop-color: 0 0% 0%;
 	--transient-backdrop-opacity: 0.32;
 	--transient-backdrop-blur: 2px;
@@ -424,6 +446,7 @@
 }
 
 .dark {
+	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23848b98' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 	--background: 0 0% 10%;
 	--foreground: 0 0% 95%;
 	--card: 0 0% 8%;
@@ -709,6 +732,44 @@
 }
 
 @layer components {
+	.select-native {
+		appearance: none;
+		min-height: 2rem;
+		border: 1px solid var(--native-select-border);
+		border-radius: var(--native-select-radius);
+		background-color: var(--native-select-muted-background);
+		background-image: var(--select-chevron-icon);
+		background-repeat: no-repeat;
+		background-position: right 0.625rem center;
+		padding: 0.25rem 2rem 0.25rem 0.5rem;
+		color: hsl(var(--foreground));
+		font-size: 1rem;
+		line-height: 1.5;
+		transition:
+			border-color 140ms ease,
+			box-shadow 140ms ease;
+	}
+
+	.select-native-surface {
+		background-color: var(--native-select-surface-background);
+	}
+
+	.select-native-compact {
+		border-radius: var(--native-select-compact-radius);
+	}
+
+	.select-native:focus-visible {
+		outline: none;
+		border-color: hsl(var(--ring));
+		box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5);
+	}
+
+	@media (min-width: 640px) and (pointer: fine) {
+		.select-native {
+			font-size: 0.875rem;
+		}
+	}
+
 	.transient-backdrop {
 		background-color: hsl(var(--transient-backdrop-color) / var(--transient-backdrop-opacity));
 		-webkit-backdrop-filter: blur(var(--transient-backdrop-blur));

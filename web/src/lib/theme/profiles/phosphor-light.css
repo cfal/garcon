@@ -214,11 +214,14 @@
 	--primary-hover-shadow: var(--glow-primary);
 	--dialog-surface: hsl(var(--popover));
 	--scroll-area-thumb: hsl(var(--foreground) / 0.2);
+	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.3);
 	--switch-thumb-checked: hsl(var(--primary-foreground));
 	--switch-thumb-unchecked: hsl(var(--foreground));
-	--native-select-background: hsl(var(--muted));
+	--native-select-muted-background: hsl(var(--muted));
+	--native-select-surface-background: hsl(var(--muted));
 	--native-select-border: hsl(var(--border));
 	--native-select-radius: var(--radius);
+	--native-select-compact-radius: var(--radius);
 }
 
 :root:where([data-theme='phosphor-light']) {

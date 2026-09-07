@@ -16,11 +16,14 @@ const PROFILE_ROLE_PROPERTIES = [
 	'--primary-hover-shadow',
 	'--dialog-surface',
 	'--scroll-area-thumb',
+	'--scroll-area-thumb-hover',
 	'--switch-thumb-checked',
 	'--switch-thumb-unchecked',
-	'--native-select-background',
+	'--native-select-muted-background',
+	'--native-select-surface-background',
 	'--native-select-border',
 	'--native-select-radius',
+	'--native-select-compact-radius',
 ] as const;
 
 function profileSource(themeId: ThemeId): string {

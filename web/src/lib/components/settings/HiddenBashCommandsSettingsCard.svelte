@@ -203,7 +203,7 @@
 				oninput={() => (validationError = null)}
 			/>
 			<select
-				class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+				class="select-native"
 				aria-label={m.settings_hidden_bash_commands_mode_label()}
 				bind:value={mode}
 				disabled={isSaving}

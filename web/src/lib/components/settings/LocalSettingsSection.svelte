@@ -149,7 +149,7 @@
 		</label>
 		<select
 			id={`local-${key}`}
-			class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+			class="select-native w-36 max-w-[50%] shrink-0"
 			{value}
 			onchange={(event) =>
 				setFileOpenPlacement(key, (event.currentTarget as HTMLSelectElement).value)}
@@ -200,7 +200,7 @@
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
 				<select
-					class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+					class="select-native"
 					aria-label={m.settings_chat_max_width()}
 					value={ls.chatMaxWidth}
 					onchange={(event) => setChatMaxWidth((event.currentTarget as HTMLSelectElement).value)}
@@ -224,7 +224,7 @@
 				</div>
 				<select
 					id="local-sidebar-inactivity-duration"
-					class="w-28 shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+					class="select-native w-28 shrink-0"
 					value={ls.sidebarInactivityDuration}
 					onchange={(event) =>
 						setSidebarInactivityDuration((event.currentTarget as HTMLSelectElement).value)}
