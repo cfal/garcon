@@ -78,4 +78,54 @@ describe('ChatAgentTags', () => {
 		expect(root.textContent).not.toContain('long-tag-3');
 		expect(within(root).getByRole('button', { name: '+5' })).toBeTruthy();
 	});
+
+	it('retains fractional root width when measurement content resizes', async () => {
+		const tags = [
+			'customer-experience',
+			'release-management',
+			'frontend-platform',
+			'production-support',
+			'quality-assurance',
+			'security-review',
+			'urgent',
+		];
+		const { container } = render(ChatAgentTags, {
+			agentId: 'claude',
+			tags,
+			tagLimit: 6,
+			wrap: 'two-lines',
+			onManageTags: vi.fn(),
+		});
+		await Promise.resolve();
+		const root = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags"]');
+		const rail = container.querySelector<HTMLElement>(
+			'[data-slot="chat-agent-tags-measurement"]',
+		);
+		const agentMeasure = container.querySelector<HTMLElement>(
+			'[data-chat-agent-tags-agent-measure]',
+		);
+		if (!root || !rail || !agentMeasure) throw new Error('Expected tag measurement elements');
+
+		Object.defineProperty(root, 'clientWidth', { value: 231 });
+		agentMeasure.getBoundingClientRect = () => ({ width: 47.34375 }) as DOMRect;
+		const tagWidths = [114.609375, 113.5, 97.890625, 116, 108, 92];
+		for (const [index, element] of Array.from(
+			container.querySelectorAll<HTMLElement>('[data-chat-agent-tags-tag-measure]'),
+		).entries()) {
+			element.getBoundingClientRect = () => ({ width: tagWidths[index] ?? 0 }) as DOMRect;
+		}
+		for (const element of container.querySelectorAll<HTMLElement>(
+			'[data-chat-agent-tags-overflow-measure]',
+		)) {
+			element.getBoundingClientRect = () => ({ width: 11.40625 }) as DOMRect;
+		}
+
+		ResizeObserverHarness.emit(root, 230.5);
+		await Promise.resolve();
+		expect(within(root).getByRole('button', { name: '+5' })).toBeTruthy();
+
+		ResizeObserverHarness.emit(rail, 600);
+		await Promise.resolve();
+		expect(within(root).getByRole('button', { name: '+5' })).toBeTruthy();
+	});
 });

@@ -55,7 +55,7 @@
 		return undefined;
 	});
 
-	function recomputeVisibleTags(availableWidth = root?.clientWidth ?? 0): void {
+	function recomputeVisibleTags(availableWidth: number): void {
 		const rail = measurementRail;
 		if (!root || !rail || availableWidth <= 0) return;
 		const agentWidth =
@@ -97,13 +97,16 @@
 		}
 		if (!actionRoot || !rail) return;
 		let disposed = false;
+		let availableWidth = actionRoot.getBoundingClientRect().width;
+		const recompute = () => recomputeVisibleTags(availableWidth);
 		queueMicrotask(() => {
-			if (!disposed && inputKey === measurementKey) recomputeVisibleTags();
+			if (!disposed && inputKey === measurementKey) recompute();
 		});
 		const stopRootObservation = observeChatAgentTagsSize(actionRoot, (entry) => {
-			recomputeVisibleTags(entry.contentRect.width);
+			availableWidth = entry.contentRect.width;
+			recompute();
 		});
-		const stopRailObservation = observeChatAgentTagsSize(rail, () => recomputeVisibleTags());
+		const stopRailObservation = observeChatAgentTagsSize(rail, recompute);
 		return () => {
 			disposed = true;
 			stopRootObservation();
