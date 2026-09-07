@@ -28,6 +28,7 @@
 	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
+	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
@@ -65,6 +66,7 @@
 		allowDirectChats?: boolean;
 		reduceMotion?: boolean;
 		steerWithCtrlEnter?: boolean;
+		chatMaxWidth?: ChatMaxWidth;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
@@ -98,6 +100,7 @@
 		allowDirectChats = false,
 		reduceMotion = false,
 		steerWithCtrlEnter = true,
+		chatMaxWidth = 'medium',
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
@@ -284,6 +287,9 @@
 		get snippetTrigger() {
 			return snippetTrigger;
 		},
+		get chatMaxWidth() {
+			return chatMaxWidth;
+		},
 		get showQuickCommitTray() {
 			return true;
 		},
@@ -434,7 +440,7 @@
 
 <KeyboardShortcuts />
 <ConversationPanelStatusDock
-	chatMaxWidth="medium"
+	{chatMaxWidth}
 	isProcessing={selectedIsProcessing}
 	status={lifecycle.loadingStatus}
 	agentId={selectedAgentId}
