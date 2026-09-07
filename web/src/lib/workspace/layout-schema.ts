@@ -10,6 +10,7 @@ import {
 	portableSingletonDescriptor,
 	terminalSurfaceId,
 	type DesktopWorkspaceNode,
+	type ChatViewSurfaceDescriptor,
 	type PortableSingletonKind,
 	type SurfaceDescriptor,
 	type WorkspaceLayoutSnapshot,
@@ -229,6 +230,28 @@ function pruneUnplacedDescriptors(root: DesktopWorkspaceNode, state: TreeBuildSt
 	}
 }
 
+function repairDuplicateChatAssignments(root: DesktopWorkspaceNode, state: TreeBuildState): void {
+	const retained = new Map<string, { surface: ChatViewSurfaceDescriptor; isActive: boolean }>();
+	for (const workspaceWindow of collectWindowNodes(root)) {
+		for (const surfaceId of workspaceWindow.tabs.order) {
+			const surface = state.surfaces[surfaceId];
+			if (surface?.type !== 'chat' || surface.chatId === null) continue;
+			const isActive = workspaceWindow.tabs.activeId === surfaceId;
+			const existing = retained.get(surface.chatId);
+			if (!existing) {
+				retained.set(surface.chatId, { surface, isActive });
+				continue;
+			}
+			if (!existing.isActive && isActive) {
+				state.surfaces[existing.surface.id] = { ...existing.surface, chatId: null };
+				retained.set(surface.chatId, { surface, isActive });
+				continue;
+			}
+			state.surfaces[surface.id] = { ...surface, chatId: null };
+		}
+	}
+}
+
 function parseUnplacedTerminalIds(
 	value: unknown,
 	surfaces: Readonly<Record<string, SurfaceDescriptor>>,
@@ -258,6 +281,7 @@ function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
 	if (!restored) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
 	const root = enforceWindowResourceCeiling(restored);
 	pruneUnplacedDescriptors(root, state);
+	repairDuplicateChatAssignments(root, state);
 	const firstWindow = collectWindowNodes(root)[0];
 	if (!firstWindow) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
 	const snapshot: WorkspaceLayoutSnapshot = {

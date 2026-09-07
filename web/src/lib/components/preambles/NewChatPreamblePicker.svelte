@@ -1,42 +1,59 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getPreambles } from '$lib/context';
 	import type { NewChatPreambleChoice } from '$lib/chat/new-chat/new-chat-preamble-selection-state.svelte.js';
+	import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles.js';
 	import ChatPreambleSelectionPanel from './ChatPreambleSelectionPanel.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { PreambleId, PreambleSelectionProjection } from '$shared/preambles';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 
 	interface Props {
 		open: boolean;
 		choice: NewChatPreambleChoice;
 		defaultsIds: readonly PreambleId[];
 		previewLoading: boolean;
+		canLoadAutomaticPreview: boolean;
 		canonicalProjectPath: string;
 		projection: PreambleSelectionProjection | null;
 		onClose: () => void;
 		onApplyExplicit: (ids: readonly PreambleId[]) => void;
-		onResetToDefaults: () => void;
+		onApplyDefaults: () => void;
+		onLoadAutomaticPreview: () => Promise<PreambleSelectionPreviewResponse>;
 		onRefreshPreview: () => void | Promise<void>;
 	}
+
+	type AutomaticPreviewState =
+		| { readonly status: 'parent' }
+		| { readonly status: 'loading' }
+		| { readonly status: 'ready'; readonly preview: PreambleSelectionPreviewResponse }
+		| { readonly status: 'error' };
 
 	let {
 		open,
 		choice,
 		defaultsIds,
 		previewLoading,
+		canLoadAutomaticPreview,
 		canonicalProjectPath,
 		projection,
 		onClose,
 		onApplyExplicit,
-		onResetToDefaults,
+		onApplyDefaults,
+		onLoadAutomaticPreview,
 		onRefreshPreview,
 	}: Props = $props();
 
 	const appShell = getAppShell();
+	const preamblesCatalog = getPreambles();
 	let draftIds = $state<PreambleId[]>([]);
-	let touched = $state(false);
+	let draftMode = $state<NewChatPreambleChoice['mode']>('defaults');
+	let hasManualChanges = $state(false);
+	let automaticPreview = $state<AutomaticPreviewState>({ status: 'parent' });
+	let automaticPreviewVersion = 0;
+	let observedPreambleCatalogRevision: number | null = null;
+	let refreshedAutomaticDraftCatalogRevision: number | null = null;
 	let wasOpen = false;
 
 	function initialDraftIds(
@@ -47,50 +64,106 @@
 		return [...currentDefaults];
 	}
 
-	// Catalog updates follow automatic defaults until the user changes the draft.
-	// Explicit and touched drafts retain their exact membership and order.
+	// Automatic drafts follow catalog updates until the user changes them.
+	// Explicit drafts retain their exact membership and order.
 	$effect(() => {
 		if (!open) {
+			if (wasOpen) automaticPreviewVersion += 1;
 			wasOpen = false;
 			return;
 		}
 		if (!wasOpen) {
 			draftIds = initialDraftIds(choice, defaultsIds);
-			touched = false;
+			draftMode = choice.mode;
+			hasManualChanges = false;
+			automaticPreview = { status: 'parent' };
 			wasOpen = true;
 			return;
 		}
-		if (choice.mode === 'defaults' && !touched && projection !== null) {
+		if (
+			choice.mode === 'defaults' &&
+			draftMode === 'defaults' &&
+			!hasManualChanges &&
+			projection !== null
+		) {
 			draftIds = [...defaultsIds];
+			automaticPreview = { status: 'parent' };
 		}
 	});
 
+	$effect(() => {
+		const revision = preamblesCatalog.snapshot?.revision;
+		const automaticPreviewRevision =
+			automaticPreview.status === 'ready'
+				? automaticPreview.preview.projection.catalogRevision
+				: undefined;
+		if (revision === undefined) return;
+
+		const revisionChanged =
+			observedPreambleCatalogRevision !== null && revision !== observedPreambleCatalogRevision;
+		observedPreambleCatalogRevision = revision;
+		const previewIsStale =
+			automaticPreviewRevision !== undefined && automaticPreviewRevision < revision;
+		if (!revisionChanged && !previewIsStale) return;
+		if (!open || draftMode !== 'defaults' || choice.mode !== 'explicit') return;
+		if (refreshedAutomaticDraftCatalogRevision === revision) return;
+		refreshedAutomaticDraftCatalogRevision = revision;
+		untrack(() => void loadAutomaticDraft());
+	});
+
+	const displayedProjection = $derived.by(() => {
+		switch (automaticPreview.status) {
+			case 'parent':
+				return projection;
+			case 'ready':
+				return automaticPreview.preview.projection;
+			case 'loading':
+			case 'error':
+				return null;
+		}
+	});
+	const displayedCanonicalProjectPath = $derived.by(() => {
+		if (automaticPreview.status === 'ready') {
+			return automaticPreview.preview.canonicalProjectPath;
+		}
+		return canonicalProjectPath;
+	});
+	const automaticPreviewLoading = $derived(automaticPreview.status === 'loading');
 	const automaticDefaultsUnavailable = $derived(
-		choice.mode === 'defaults' && !touched && projection === null,
+		draftMode === 'defaults' && displayedProjection === null,
 	);
+	const applyDisabled = $derived(automaticPreviewLoading || automaticDefaultsUnavailable);
 
 	function move(id: PreambleId, direction: 'up' | 'down'): void {
-		touched = true;
 		const index = draftIds.indexOf(id);
 		const target = direction === 'up' ? index - 1 : index + 1;
 		if (index < 0 || target < 0 || target >= draftIds.length) return;
+		draftMode = 'explicit';
+		hasManualChanges = true;
 		const next = [...draftIds];
 		[next[index], next[target]] = [next[target], next[index]];
 		draftIds = next;
 	}
 
 	function remove(id: PreambleId): void {
-		touched = true;
+		draftMode = 'explicit';
+		hasManualChanges = true;
 		draftIds = draftIds.filter((entry) => entry !== id);
 	}
 
 	function add(id: PreambleId): void {
-		touched = true;
+		draftMode = 'explicit';
+		hasManualChanges = true;
 		if (!draftIds.includes(id)) draftIds = [...draftIds, id];
 	}
 
 	function handleApply(): void {
-		if (touched) onApplyExplicit(draftIds);
+		if (applyDisabled) return;
+		if (draftMode === 'defaults') {
+			if (choice.mode === 'explicit') onApplyDefaults();
+		} else if (hasManualChanges) {
+			onApplyExplicit(draftIds);
+		}
 		onClose();
 	}
 
@@ -111,18 +184,57 @@
 
 	function openCatalog(): void {
 		appShell.openPreambles(() => {
-			void tick().then(() => {
-				const opener = document.querySelector<HTMLElement>(
-					'[data-slot="new-chat-preamble-manage-catalog"]',
-				);
-				opener?.focus({ preventScroll: true });
-			});
+			void restorePickerAfterCatalog();
 		});
 	}
 
+	async function restorePickerAfterCatalog(): Promise<void> {
+		await tick();
+		const opener = document.querySelector<HTMLElement>(
+			'[data-slot="new-chat-preamble-manage-catalog"]',
+		);
+		opener?.focus({ preventScroll: true });
+	}
+
+	async function loadAutomaticDraft(): Promise<void> {
+		const version = ++automaticPreviewVersion;
+		draftMode = 'defaults';
+		hasManualChanges = false;
+		automaticPreview = { status: 'loading' };
+		try {
+			const nextPreview = await onLoadAutomaticPreview();
+			if (!isCurrentAutomaticPreview(version)) return;
+			automaticPreview = { status: 'ready', preview: nextPreview };
+			draftIds = [...nextPreview.orderedPreambleIds];
+		} catch {
+			if (!isCurrentAutomaticPreview(version)) return;
+			automaticPreview = { status: 'error' };
+		}
+	}
+
+	function isCurrentAutomaticPreview(version: number): boolean {
+		return version === automaticPreviewVersion && open && automaticPreview.status === 'loading';
+	}
+
 	function handleReset(): void {
-		onResetToDefaults();
-		onClose();
+		if (!canLoadAutomaticPreview) return;
+		if (choice.mode === 'defaults' && projection !== null) {
+			draftMode = 'defaults';
+			draftIds = [...defaultsIds];
+			hasManualChanges = false;
+			automaticPreview = { status: 'parent' };
+			return;
+		}
+		void loadAutomaticDraft();
+	}
+
+	function retryPreview(): void {
+		if (!canLoadAutomaticPreview) return;
+		if (draftMode === 'defaults' && choice.mode === 'explicit') {
+			void loadAutomaticDraft();
+			return;
+		}
+		void onRefreshPreview();
 	}
 </script>
 
@@ -137,30 +249,35 @@
 			<Dialog.Title class="text-lg font-semibold">
 				{m.preamble_selection_dialog_title()}
 			</Dialog.Title>
-			<Dialog.Description>{m.preamble_selection_next_message_hint()}</Dialog.Description>
+			<Dialog.Description class="sr-only">
+				{m.preamble_selection_next_message_hint()}
+			</Dialog.Description>
 		</Dialog.Header>
 
 		<div
 			data-slot="new-chat-preamble-scroll-body"
 			class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-base sm:px-6"
 		>
-			{#if automaticDefaultsUnavailable}
+			{#if automaticDefaultsUnavailable || automaticPreviewLoading}
 				<div
 					class="mb-3 flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
-					role={previewLoading ? 'status' : 'alert'}
+					role={previewLoading || automaticPreviewLoading ? 'status' : 'alert'}
 					data-slot="new-chat-preamble-preview-status"
 				>
 					<p class="min-w-0 flex-1 text-sm text-muted-foreground">
-						{previewLoading
-							? m.preamble_selection_loading()
-							: m.preamble_selection_preview_unavailable()}
+						{#if previewLoading || automaticPreviewLoading}
+							{m.preamble_selection_loading()}
+						{:else}
+							{m.preamble_selection_preview_unavailable()}
+						{/if}
 					</p>
-					{#if !previewLoading}
+					{#if !previewLoading && !automaticPreviewLoading}
 						<Button
 							variant="outline"
 							size="sm"
 							data-slot="new-chat-preamble-preview-retry"
-							onclick={() => void onRefreshPreview()}
+							disabled={!canLoadAutomaticPreview}
+							onclick={retryPreview}
 						>
 							{m.preamble_selection_refresh()}
 						</Button>
@@ -169,9 +286,9 @@
 			{/if}
 			<ChatPreambleSelectionPanel
 				{draftIds}
-				{projection}
-				{canonicalProjectPath}
-				disabled={automaticDefaultsUnavailable}
+				projection={displayedProjection}
+				canonicalProjectPath={displayedCanonicalProjectPath}
+				disabled={automaticDefaultsUnavailable || automaticPreviewLoading}
 				onMove={move}
 				onRemove={remove}
 				onAdd={add}
@@ -195,7 +312,7 @@
 					variant="ghost"
 					size="sm"
 					data-slot="new-chat-preamble-reset-defaults"
-					disabled={choice.mode === 'defaults' && !touched}
+					disabled={draftMode === 'defaults' || automaticPreviewLoading || !canLoadAutomaticPreview}
 					onclick={handleReset}
 				>
 					{m.preamble_selection_reset_defaults()}
@@ -203,7 +320,7 @@
 				<Button variant="outline" data-slot="new-chat-preamble-cancel" onclick={onClose}>
 					{m.preambles_cancel()}
 				</Button>
-				<Button type="submit" data-slot="new-chat-preamble-apply">
+				<Button type="submit" data-slot="new-chat-preamble-apply" disabled={applyDisabled}>
 					{m.preamble_selection_apply()}
 				</Button>
 			</div>

@@ -158,7 +158,7 @@ describe('web build cache', () => {
 
     await fs.writeFile(
       fixture.markerPath,
-      JSON.stringify({ ...recorded, version: recorded.version + 1 }),
+      JSON.stringify({ ...recorded, version: 1 }),
     );
     expect(await isWebBuildCurrent(options)).toBe(false);
   });
@@ -228,7 +228,7 @@ describe('web build cache', () => {
 
     await fs.writeFile(path.join(fixture.input, 'app.ts'), 'stale');
     await expect(assertWebBuildCurrent(options)).rejects.toThrow(
-      'Do not use `bun run --cwd web build`',
+      'The root and web workspace build commands both use the Garcon build coordinator',
     );
   });
 });

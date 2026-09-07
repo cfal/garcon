@@ -113,7 +113,7 @@ function capacityLayout(count: number, chatIds: string[]) {
     snapshot = reduceWorkspaceLayout(snapshot, [
       {
         type: 'open-chat-in-new-window',
-        chatId: chatIds[0]!,
+        chatId: `capacity-placeholder-${windowId}`,
         targetWindowId: columnIds[index - 1]!,
         edge: 'right',
         newWindowId: windowId,
@@ -131,7 +131,7 @@ function capacityLayout(count: number, chatIds: string[]) {
     snapshot = reduceWorkspaceLayout(snapshot, [
       {
         type: 'open-chat-in-new-window',
-        chatId: chatIds[0]!,
+        chatId: `capacity-placeholder-row-${index}`,
         targetWindowId: windowId,
         edge: 'bottom',
         newWindowId: `window-row-${index}`,

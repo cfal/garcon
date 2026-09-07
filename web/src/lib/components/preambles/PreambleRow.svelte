@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
+	import AgentPill from '$lib/components/shared/AgentPill.svelte';
+	import ColoredTag from '$lib/components/shared/ColoredTag.svelte';
 	import type { Preamble } from '$shared/preambles';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
@@ -38,6 +40,11 @@
 		if (count === 1) return m.preambles_project_path_badge_singular();
 		return m.preambles_project_path_badge_plural({ count });
 	}
+
+	function tagFilterTitle(): string {
+		if (preamble.tagFilter.mode === 'all') return m.preambles_tag_filter_all();
+		return m.preambles_tag_filter_any();
+	}
 </script>
 
 <article
@@ -74,6 +81,40 @@
 			<p class="line-clamp-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
 				{preamble.content}
 			</p>
+			{#if preamble.agentIds.length > 0 || preamble.tagFilter.tags.length > 0}
+				<div
+					class="flex flex-wrap items-center gap-1"
+					data-slot="preamble-row-filters"
+					title={preamble.tagFilter.tags.length > 0 ? tagFilterTitle() : undefined}
+				>
+					{#each preamble.agentIds as agentId (agentId)}
+						<svelte:boundary>
+							<span data-slot="preamble-row-agent-filter">
+								<AgentPill {agentId} />
+							</span>
+							{#snippet failed()}
+								<span class="text-xs text-muted-foreground">
+									{m.preamble_selection_row_unavailable()}
+								</span>
+							{/snippet}
+						</svelte:boundary>
+					{/each}
+					{#if preamble.tagFilter.tags.length > 0}
+						<span class="contents" data-slot="preamble-row-tag-filters">
+							{#each preamble.tagFilter.tags as tag (tag)}
+								<svelte:boundary>
+									<ColoredTag label={tag} autoColor />
+									{#snippet failed()}
+										<span class="text-xs text-muted-foreground">
+											{m.preamble_selection_row_unavailable()}
+										</span>
+									{/snippet}
+								</svelte:boundary>
+							{/each}
+						</span>
+					{/if}
+				</div>
+			{/if}
 			{#if preamble.scope.type === 'project-paths'}
 				<ul class="space-y-1">
 					{#each preamble.scope.rules as rule (rule.projectPath)}

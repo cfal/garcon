@@ -186,7 +186,7 @@ describe('Lightpanda workspace windows', () => {
     });
   });
 
-  test('copies sidebar Chats but moves Chat tabs into empty and occupied windows', async () => {
+  test('reuses hidden sidebar Chats and moves Chat tabs into empty and occupied windows', async () => {
     await withE2eFixture('workspace-window-chat-movement', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1_760, 900);
@@ -199,15 +199,6 @@ describe('Lightpanda workspace windows', () => {
       if (!chatA) throw new Error('Missing source Chat fixture.');
       const originalWindowId = await app.currentWorkspaceWindowId();
 
-      const secondChatWindowId = await app.openSidebarChatInNewWindow(
-        'workspace-chat-move-a',
-      );
-      expect(secondChatWindowId).not.toBe(originalWindowId);
-      await waitForPersistedChatWindows(fixture.page, {
-        [originalWindowId]: chatA.id,
-        [secondChatWindowId]: chatA.id,
-      });
-
       const chatBId = fixture.integration.newChatId();
       const startedChatB = await fixture.integration.client.startDirectChat({
         chatId: chatBId,
@@ -217,12 +208,38 @@ describe('Lightpanda workspace windows', () => {
       });
       await fixture.integration.client.waitForTurnTerminal(chatBId, startedChatB.turnId);
       await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatBId}"]`);
-      await app.clickSidebarChatById(chatBId);
+      const secondChatWindowId = await app.openSidebarChatInNewWindowById(chatBId);
       await app.waitForSelectedChat(chatBId);
+      expect(secondChatWindowId).not.toBe(originalWindowId);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,
         [secondChatWindowId]: chatBId,
       });
+
+      await app.selectWorkspaceWindowSurface('New Terminal', originalWindowId);
+      await waitForWindowActiveSurfacePrefix(fixture.page, originalWindowId, 'terminal:');
+      await app.focusWorkspaceWindow(secondChatWindowId);
+      await app.waitForSelectedChat(chatBId);
+
+      await app.clickSidebarChatById(chatA.id);
+      await app.waitForSelectedChat(chatA.id);
+      await waitForWindowActiveSurface(
+        fixture.page,
+        originalWindowId,
+        `chat-view:${originalWindowId}`,
+      );
+      await app.waitForWorkspaceWindowCount(3);
+      await waitForPersistedChatWindows(fixture.page, {
+        [originalWindowId]: chatA.id,
+        [secondChatWindowId]: chatBId,
+      });
+      expect(await app.currentWorkspaceWindowId()).toBe(originalWindowId);
+      expect(new URL(fixture.page.url()).pathname).toBe(`/chat/${chatA.id}`);
+      expect(
+        await fixture.page.$(
+          `[data-conversation-composer-host="chat-view:${originalWindowId}"] textarea[placeholder="Reply..."]`,
+        ),
+      ).not.toBeNull();
 
       const filesWindowId = await app.workspaceWindowIdForSurface('singleton:files');
       await app.waitForWorkspaceWindowCount(3);
@@ -404,8 +421,12 @@ async function waitForPersistedChatWindows(
         }
       };
       visit(parsed.root);
-      return Object.entries(expectedChats).every(
-        ([windowId, chatId]) => actual[windowId] === chatId,
+      const assignedChatIds = Object.values(actual).filter(
+        (chatId): chatId is string => chatId !== null,
+      );
+      return (
+        new Set(assignedChatIds).size === assignedChatIds.length &&
+        Object.entries(expectedChats).every(([windowId, chatId]) => actual[windowId] === chatId)
       );
     },
     { timeout: 20_000 },

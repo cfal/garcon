@@ -9,6 +9,7 @@ import {
 	type WorkspaceWindowId,
 } from './surface-types.js';
 import { windowIdOfSurface, windowNodeById } from './window-tree.js';
+import { findWorkspaceChatPlacement } from './workspace-chat-placement.js';
 import type {
 	WorkspaceSplitAdmissionResolver,
 	WorkspaceSplitBlockReason,
@@ -79,6 +80,10 @@ export class WorkspaceWindowDndController {
 		return this.payload !== null;
 	}
 
+	hasChatPlacement(chatId: string): boolean {
+		return findWorkspaceChatPlacement(this.layout.snapshot, chatId) !== null;
+	}
+
 	beginSurfaceTabDrag(
 		surfaceId: string,
 		sourceWindowId: WorkspaceWindowId,
@@ -138,22 +143,23 @@ export class WorkspaceWindowDndController {
 		const fallbackZone = rect
 			? resolveWorkspaceWindowDropZone(rect, event.clientX, event.clientY)
 			: null;
-		const target =
-			this.activeTarget?.kind === 'window' && this.activeTarget.windowId === windowId
-				? this.activeTarget
-				: fallbackZone
-					? this.#windowTarget(windowId, fallbackZone)
-					: null;
+		let target: Extract<WorkspaceWindowDropTarget, { kind: 'window' }> | null = null;
+		if (this.activeTarget?.kind === 'window' && this.activeTarget.windowId === windowId) {
+			target = this.activeTarget;
+		} else if (fallbackZone) {
+			target = this.#windowTarget(windowId, fallbackZone);
+		}
+		const currentTarget = target ? this.#windowTarget(windowId, target.zone) : null;
 		this.endDrag();
-		if (!target || target.blockedReason) return null;
+		if (!currentTarget || currentTarget.blockedReason) return null;
 		if (
 			payload.kind === 'surface-tab' &&
-			target.zone === 'center' &&
+			currentTarget.zone === 'center' &&
 			payload.sourceWindowId === windowId
 		) {
 			return null;
 		}
-		return { payload, target };
+		return { payload, target: currentTarget };
 	}
 
 	handleTabDragOver(
@@ -189,12 +195,14 @@ export class WorkspaceWindowDndController {
 		if (payload?.kind !== 'surface-tab') return null;
 		event.preventDefault();
 		event.stopPropagation();
-		const target =
-			this.activeTarget?.kind === 'tab' && this.activeTarget.windowId === windowId
-				? this.activeTarget
-				: referenceSurfaceId
-					? this.#tabTarget(windowId, referenceSurfaceId, event)
-					: this.#tabListEndTarget(windowId);
+		let target: Extract<WorkspaceWindowDropTarget, { kind: 'tab' }> | null;
+		if (this.activeTarget?.kind === 'tab' && this.activeTarget.windowId === windowId) {
+			target = this.activeTarget;
+		} else if (referenceSurfaceId) {
+			target = this.#tabTarget(windowId, referenceSurfaceId, event);
+		} else {
+			target = this.#tabListEndTarget(windowId);
+		}
 		this.endDrag();
 		if (!target || this.#isTabDropNoOp(payload.surfaceId, target)) return null;
 		return { payload, target };
@@ -215,6 +223,7 @@ export class WorkspaceWindowDndController {
 	): WorkspaceSplitBlockReason | 'same-window' | null | undefined {
 		const payload = this.payload;
 		if (!payload) return undefined;
+		if (payload.kind === 'chat' && this.hasChatPlacement(payload.chatId)) return undefined;
 		if (zone === 'center') return undefined;
 		if (payload.kind === 'surface-tab') {
 			const sourceWindow = windowNodeById(this.layout.snapshot.desktopRoot, payload.sourceWindowId);

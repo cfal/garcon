@@ -33,6 +33,7 @@
 		modelValueForSelection,
 		resolveModelSelection,
 	} from '../../../../test/model-catalog';
+	import { untrack } from 'svelte';
 
 	interface Props {
 		allowDirectChats?: boolean;
@@ -44,7 +45,9 @@
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
 		onStartChat?: (config: NewChatConfig, chatId: ChatId) => void;
-		preambleSnapshot?: PreamblesSnapshot;
+		preambleSnapshot?: PreamblesSnapshot | null;
+		loadPreambles?: () => Promise<PreamblesSnapshot>;
+		onPreambles?: (store: PreamblesStore) => void;
 	}
 
 	let {
@@ -58,6 +61,8 @@
 		snippetDefaultArguments = '',
 		onStartChat = () => {},
 		preambleSnapshot = { revision: 0, preambles: [] },
+		loadPreambles,
+		onPreambles,
 	}: Props = $props();
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
@@ -80,9 +85,11 @@
 	} as never);
 
 	setNotifications(notifications);
-	const preambles = new PreamblesStore();
-	const getInitialPreambleSnapshot = () => preambleSnapshot;
-	preambles.applySnapshot(getInitialPreambleSnapshot());
+	const preambleDeps = untrack(() => (loadPreambles ? { get: loadPreambles } : {}));
+	const preambles = new PreamblesStore(preambleDeps);
+	const initialPreambleSnapshot = untrack(() => preambleSnapshot);
+	if (initialPreambleSnapshot) preambles.applySnapshot(initialPreambleSnapshot);
+	untrack(() => onPreambles?.(preambles));
 	setPreambles(preambles);
 	setCanonicalWorkspaceLayout();
 
