@@ -201,11 +201,14 @@ const mockModelCatalog = {
 	),
 	getModels: vi.fn(modelsForAgent),
 	getModelForSelection: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
-		findModelForSelection(mockModelCatalog.getModels(agentId), model, endpointId)),
+		findModelForSelection(mockModelCatalog.getModels(agentId), model, endpointId),
+	),
 	selectionFor: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
-		resolveModelSelection(mockModelCatalog.getModels(agentId), model, endpointId)),
+		resolveModelSelection(mockModelCatalog.getModels(agentId), model, endpointId),
+	),
 	selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
-		modelValueForSelection(mockModelCatalog.getModels(agentId), model, endpointId)),
+		modelValueForSelection(mockModelCatalog.getModels(agentId), model, endpointId),
+	),
 	refreshIfStale: vi.fn().mockResolvedValue(undefined),
 };
 
@@ -1302,10 +1305,7 @@ describe('NewChatFormState preamble selection', () => {
 	const ID_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 	const ID_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
 
-	function previewResponse(
-		ids: readonly string[],
-		eligible: readonly string[] = ids,
-	) {
+	function previewResponse(ids: readonly string[], eligible: readonly string[] = ids) {
 		return {
 			success: true as const,
 			canonicalProjectPath: '/canonical/repo',
@@ -1318,14 +1318,18 @@ describe('NewChatFormState preamble selection', () => {
 		};
 	}
 
-	it('clears the preview immediately when the path becomes empty or invalid', async () => {
-		const formState = new NewChatFormState({
+	function createPreambleFormState(selectableAgentIds: readonly string[] = ['claude']) {
+		return new NewChatFormState({
 			modelCatalog: mockModelCatalog as any,
 			remoteSettings: makeMockRemoteSettings() as any,
 			get selectableAgentIds() {
-				return ['claude'];
+				return selectableAgentIds;
 			},
 		});
+	}
+
+	it('clears the preview immediately when the path becomes empty or invalid', async () => {
+		const formState = createPreambleFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 		formState.preambles.preview = previewResponse([ID_A]).projection;
@@ -1344,20 +1348,15 @@ describe('NewChatFormState preamble selection', () => {
 	});
 
 	it('adopts a preview only when path and choice still match, ignoring reordered responses', async () => {
-		const preview = vi.fn()
+		const preview = vi
+			.fn()
 			.mockImplementationOnce(async () => {
 				await new Promise((resolve) => setTimeout(resolve, 40));
 				return previewResponse([ID_A]);
 			})
 			.mockImplementationOnce(async () => previewResponse([ID_A, ID_B]));
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(preview);
-		const formState = new NewChatFormState({
-			modelCatalog: mockModelCatalog as any,
-			remoteSettings: makeMockRemoteSettings() as any,
-			get selectableAgentIds() {
-				return ['claude'];
-			},
-		});
+		const formState = createPreambleFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 
@@ -1371,8 +1370,10 @@ describe('NewChatFormState preamble selection', () => {
 		void second;
 
 		// Only the response for the current path was adopted.
-		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id))
-			.toEqual([ID_A, ID_B]);
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+			ID_A,
+			ID_B,
+		]);
 		expect(formState.preambles.canonicalProjectPath).toBe('/canonical/repo');
 		expect(formState.preambles.previewCount).toBe(2);
 	});
@@ -1383,13 +1384,7 @@ describe('NewChatFormState preamble selection', () => {
 			return previewResponse([ID_A]);
 		});
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(preview);
-		const formState = new NewChatFormState({
-			modelCatalog: mockModelCatalog as any,
-			remoteSettings: makeMockRemoteSettings() as any,
-			get selectableAgentIds() {
-				return ['claude'];
-			},
-		});
+		const formState = createPreambleFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 		formState.preambles.setExplicit([ID_A]);
@@ -1402,13 +1397,7 @@ describe('NewChatFormState preamble selection', () => {
 	});
 
 	it('omits orderedPreambleIds in defaults mode and sends explicit lists exactly', () => {
-		const formState = new NewChatFormState({
-			modelCatalog: mockModelCatalog as any,
-			remoteSettings: makeMockRemoteSettings() as any,
-			get selectableAgentIds() {
-				return ['claude'];
-			},
-		});
+		const formState = createPreambleFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 		formState.settingsLoaded = true;
@@ -1418,5 +1407,96 @@ describe('NewChatFormState preamble selection', () => {
 
 		formState.preambles.setExplicit([ID_B, ID_A]);
 		expect(formState.buildConfig()?.orderedPreambleIds).toEqual([ID_B, ID_A]);
+	});
+
+	it('refreshes untouched defaults for agent and tag changes without refetching explicit IDs', async () => {
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(async (request) => {
+			const ids =
+				request.orderedPreambleIds ??
+				(request.agentId === 'codex' || request.tags.includes('backend') ? [ID_B] : [ID_A]);
+			return previewResponse(ids);
+		});
+		const formState = createPreambleFormState(['claude', 'codex']);
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+
+		await formState.preambles.refreshPreview();
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([ID_A]);
+		formState.selectAgent('codex');
+		expect(formState.preambles.preview).toBeNull();
+		expect(formState.preambles.previewLoading).toBe(true);
+		await vi.waitFor(() => {
+			expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+				ID_B,
+			]);
+		});
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
+			projectPath: '/repo',
+			agentId: 'codex',
+			tags: [],
+		});
+
+		formState.preambles.setExplicit([ID_B, ID_A]);
+		await vi.waitFor(() => {
+			expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+				ID_B,
+				ID_A,
+			]);
+		});
+		const explicitPreviewCalls = vi.mocked(preamblesApi.preambleSelectionPreview).mock.calls.length;
+		formState.selectAgent('claude');
+		expect(formState.addTag('Backend')).toBe(true);
+		await Promise.resolve();
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(explicitPreviewCalls);
+		expect(formState.preambles.choice).toEqual({
+			mode: 'explicit',
+			orderedPreambleIds: [ID_B, ID_A],
+		});
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+			ID_B,
+			ID_A,
+		]);
+	});
+
+	it('ignores a preview response from an older agent and tag context', async () => {
+		const first = deferred<ReturnType<typeof previewResponse>>();
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce(previewResponse([ID_B]));
+		const formState = createPreambleFormState(['claude', 'codex']);
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+
+		const initial = formState.preambles.refreshPreview();
+		formState.selectAgent('codex');
+		await vi.waitFor(() => {
+			expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([
+				ID_B,
+			]);
+		});
+		first.resolve(previewResponse([ID_A]));
+		await initial;
+
+		expect(formState.preambles.preview?.eligiblePreambles.map((entry) => entry.id)).toEqual([ID_B]);
+	});
+
+	it('restores automatic defaults when the form reopens with the same valid path', async () => {
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue(previewResponse([ID_A]));
+		const formState = createPreambleFormState();
+		formState.projectPath = '/repo';
+		formState.validationStatus = 'valid';
+
+		await formState.preambles.refreshPreview();
+		expect(formState.preambles.previewCount).toBe(1);
+
+		formState.reseed('next message');
+		expect(formState.preambles.choice).toEqual({ mode: 'defaults' });
+		expect(formState.preambles.previewLoading).toBe(true);
+		await vi.waitFor(() => expect(formState.preambles.previewCount).toBe(1));
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith({
+			projectPath: '/repo',
+			agentId: 'claude',
+			tags: [],
+		});
 	});
 });

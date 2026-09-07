@@ -7,7 +7,7 @@
 	import { ChatPreambleSelectionController } from '$lib/preambles/chat-selection-controller.svelte.js';
 	import ChatPreambleSelectionPanel from './ChatPreambleSelectionPanel.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 
 	const appShell = getAppShell();
 	const hub = getChatPreambleSelectionInvalidationHub();
@@ -19,11 +19,7 @@
 		if (target) void controller.open(target);
 	});
 
-	// Destruction cleanup: subscriptions and outstanding responses never
-	// outlive conditional component destruction.
-	$effect(() => {
-		return () => controller.close();
-	});
+	onDestroy(() => controller.close());
 
 	function handleOpenChange(nextOpen: boolean): void {
 		if (!nextOpen && !appShell.showPreambles) appShell.closeChatPreambleSelection();
@@ -52,10 +48,7 @@
 	}
 </script>
 
-<Dialog.Root
-	open={target !== null && !appShell.showPreambles}
-	onOpenChange={handleOpenChange}
->
+<Dialog.Root open={target !== null && !appShell.showPreambles} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		data-slot="chat-preamble-selection-dialog"
 		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-screen sm:max-w-none sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(40rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[40rem] sm:pointer-fine:w-[calc(100vw-2rem)] sm:pointer-fine:max-w-2xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"
@@ -74,7 +67,11 @@
 			class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-base sm:px-6"
 		>
 			{#if controller.status === 'loading'}
-				<p class="text-sm text-muted-foreground" data-slot="chat-preamble-selection-status" role="status">
+				<p
+					class="text-sm text-muted-foreground"
+					data-slot="chat-preamble-selection-status"
+					role="status"
+				>
 					{m.preamble_selection_loading()}
 				</p>
 			{:else if controller.status === 'error'}
@@ -150,45 +147,47 @@
 					onRemove={(id) => controller.remove(id)}
 					onAdd={(id) => controller.add(id)}
 				/>
-				<div class="mt-3 flex flex-wrap items-center gap-2">
-					<Button
-						variant="ghost"
-						size="sm"
-						data-slot="chat-preamble-selection-manage-catalog"
-						onclick={openCatalog}
-					>
-						{m.preamble_selection_manage_catalog()}
-					</Button>
-				</div>
 			{/if}
 		</div>
 
 		<form
-			class="flex shrink-0 items-center justify-end gap-2 border-t border-border px-5 py-3 sm:px-6"
+			class="flex shrink-0 items-center justify-between gap-2 border-t border-border px-5 py-3 sm:px-6"
 			onsubmit={handleSaveSubmit}
 		>
 			<Button
 				type="button"
-				variant="outline"
-				data-slot="chat-preamble-selection-cancel"
-				onclick={() => handleOpenChange(false)}
+				variant="ghost"
+				size="sm"
+				data-slot="chat-preamble-selection-manage-catalog"
 				disabled={controller.saving}
+				onclick={openCatalog}
 			>
-				{m.preambles_cancel()}
+				{m.preamble_selection_manage_preambles()}
 			</Button>
-			<Button
-				type="submit"
-				data-slot="chat-preamble-selection-save"
-				disabled={!controller.canSave}
-				aria-busy={controller.saving}
-			>
-				{#if controller.saving}
-					<Loader2 class="h-4 w-4 animate-spin" aria-hidden="true" />
-					{m.preamble_selection_saving()}
-				{:else}
-					{m.preamble_selection_save()}
-				{/if}
-			</Button>
+			<div class="flex items-center gap-2">
+				<Button
+					type="button"
+					variant="outline"
+					data-slot="chat-preamble-selection-cancel"
+					onclick={() => handleOpenChange(false)}
+					disabled={controller.saving}
+				>
+					{m.preambles_cancel()}
+				</Button>
+				<Button
+					type="submit"
+					data-slot="chat-preamble-selection-save"
+					disabled={!controller.canSave}
+					aria-busy={controller.saving}
+				>
+					{#if controller.saving}
+						<Loader2 class="h-4 w-4 animate-spin" aria-hidden="true" />
+						{m.preamble_selection_saving()}
+					{:else}
+						{m.preamble_selection_save()}
+					{/if}
+				</Button>
+			</div>
 		</form>
 	</Dialog.Content>
 </Dialog.Root>

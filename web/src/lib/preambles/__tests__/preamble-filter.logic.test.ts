@@ -15,6 +15,8 @@ function preamble(overrides: Partial<Preamble> = {}): Preamble {
 			type: 'project-paths',
 			rules: [{ projectPath: '/workspace/project', includeNested: true }],
 		},
+		agentIds: [],
+		tagFilter: { mode: 'any', tags: [] },
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
 		...overrides,

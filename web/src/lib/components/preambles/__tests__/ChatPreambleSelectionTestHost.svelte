@@ -24,12 +24,14 @@
 		canonicalProjectPath = '/workspace/project',
 		choice = { mode: 'defaults' },
 		defaultsIds = draftIds,
+		previewLoading = false,
 		onMove = () => undefined,
 		onRemove = () => undefined,
 		onAdd = () => undefined,
 		onClose = () => undefined,
 		onApplyExplicit = () => undefined,
 		onResetToDefaults = () => undefined,
+		onRefreshPreview = () => undefined,
 		onAppShell,
 	}: {
 		mode?: 'panel' | 'new-chat';
@@ -41,12 +43,14 @@
 			| { mode: 'defaults' }
 			| { mode: 'explicit'; orderedPreambleIds: readonly PreambleId[] };
 		defaultsIds?: readonly PreambleId[];
+		previewLoading?: boolean;
 		onMove?: (id: PreambleId, direction: 'up' | 'down') => void;
 		onRemove?: (id: PreambleId) => void;
 		onAdd?: (id: PreambleId) => void;
 		onClose?: () => void;
 		onApplyExplicit?: (ids: readonly PreambleId[]) => void;
 		onResetToDefaults?: () => void;
+		onRefreshPreview?: () => void | Promise<void>;
 		onAppShell?: (store: AppShellStore) => void;
 	} = $props();
 
@@ -73,10 +77,12 @@
 		open={true}
 		{choice}
 		{defaultsIds}
+		{previewLoading}
 		{projection}
 		{canonicalProjectPath}
 		{onClose}
 		{onApplyExplicit}
 		{onResetToDefaults}
+		{onRefreshPreview}
 	/>
 {/if}

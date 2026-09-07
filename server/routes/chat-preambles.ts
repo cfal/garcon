@@ -123,7 +123,11 @@ export function createChatPreambleRoutes(deps: {
           const canonicalProjectPath = await projectPaths.resolve(parsed.projectPath);
           const catalog = deps.preambles.snapshot();
           const orderedPreambleIds = parsed.orderedPreambleIds === undefined
-            ? defaultOrderedPreambleIds(catalog, canonicalProjectPath)
+            ? defaultOrderedPreambleIds(catalog, {
+                canonicalProjectPath,
+                agentId: parsed.agentId,
+                tags: parsed.tags,
+              })
             : [...parsed.orderedPreambleIds];
           const response: PreambleSelectionPreviewResponse = {
             success: true,

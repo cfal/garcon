@@ -35,15 +35,10 @@
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
 	let formIsStale = $derived(
-		editingPreamble !== null
-			&& editingRevision !== null
-			&& (
-				editConflict
-				|| (
-					preambles.snapshot !== null
-					&& preambles.snapshot.revision !== editingRevision
-				)
-			),
+		editingPreamble !== null &&
+			editingRevision !== null &&
+			(editConflict ||
+				(preambles.snapshot !== null && preambles.snapshot.revision !== editingRevision)),
 	);
 
 	$effect(() => {
@@ -75,8 +70,7 @@
 			if (editingPreamble) {
 				if (editingRevision === null) throw new Error(m.preambles_edit_stale());
 				await preambles.update(editingPreamble.id, definition, editingRevision);
-			}
-			else await preambles.create(definition);
+			} else await preambles.create(definition);
 		} catch (error) {
 			if (editingPreamble && error instanceof ApiError && error.status === 409) {
 				editConflict = true;
@@ -123,12 +117,18 @@
 		catalogMutationBusy = true;
 		operationError = null;
 		try {
-			await preambles.update(preamble.id, {
-				enabled,
-				title: preamble.title,
-				content: preamble.content,
-				scope: preamble.scope,
-			}, revision);
+			await preambles.update(
+				preamble.id,
+				{
+					enabled,
+					title: preamble.title,
+					content: preamble.content,
+					scope: preamble.scope,
+					agentIds: preamble.agentIds,
+					tagFilter: preamble.tagFilter,
+				},
+				revision,
+			);
 		} catch (error) {
 			operationError = error instanceof Error ? error.message : m.preambles_toggle_error();
 		} finally {

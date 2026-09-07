@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell } from '$lib/context';
+	import type { NewChatPreambleChoice } from '$lib/chat/new-chat/new-chat-preamble-selection-state.svelte.js';
 	import ChatPreambleSelectionPanel from './ChatPreambleSelectionPanel.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { PreambleId, PreambleSelectionProjection } from '$shared/preambles';
@@ -9,42 +10,64 @@
 
 	interface Props {
 		open: boolean;
-		choice: { mode: 'defaults' } | { mode: 'explicit'; orderedPreambleIds: readonly PreambleId[] };
+		choice: NewChatPreambleChoice;
 		defaultsIds: readonly PreambleId[];
+		previewLoading: boolean;
 		canonicalProjectPath: string;
 		projection: PreambleSelectionProjection | null;
 		onClose: () => void;
 		onApplyExplicit: (ids: readonly PreambleId[]) => void;
 		onResetToDefaults: () => void;
+		onRefreshPreview: () => void | Promise<void>;
 	}
 
 	let {
 		open,
 		choice,
 		defaultsIds,
+		previewLoading,
 		canonicalProjectPath,
 		projection,
 		onClose,
 		onApplyExplicit,
 		onResetToDefaults,
+		onRefreshPreview,
 	}: Props = $props();
 
 	const appShell = getAppShell();
 	let draftIds = $state<PreambleId[]>([]);
 	let touched = $state(false);
-	let wasOpen = $state(false);
+	let wasOpen = false;
 
-	// Seed strictly on the closed-to-open transition; later choice, defaults,
-	// or catalog updates must not clobber an in-progress edit.
+	function initialDraftIds(
+		currentChoice: NewChatPreambleChoice,
+		currentDefaults: readonly PreambleId[],
+	): PreambleId[] {
+		if (currentChoice.mode === 'explicit') return [...currentChoice.orderedPreambleIds];
+		return [...currentDefaults];
+	}
+
+	// Catalog updates follow automatic defaults until the user changes the draft.
+	// Explicit and touched drafts retain their exact membership and order.
 	$effect(() => {
-		if (open && !wasOpen) {
-			draftIds = choice.mode === 'explicit'
-				? [...choice.orderedPreambleIds]
-				: [...defaultsIds];
-			touched = false;
+		if (!open) {
+			wasOpen = false;
+			return;
 		}
-		wasOpen = open;
+		if (!wasOpen) {
+			draftIds = initialDraftIds(choice, defaultsIds);
+			touched = false;
+			wasOpen = true;
+			return;
+		}
+		if (choice.mode === 'defaults' && !touched && projection !== null) {
+			draftIds = [...defaultsIds];
+		}
 	});
+
+	const automaticDefaultsUnavailable = $derived(
+		choice.mode === 'defaults' && !touched && projection === null,
+	);
 
 	function move(id: PreambleId, direction: 'up' | 'down'): void {
 		touched = true;
@@ -67,7 +90,7 @@
 	}
 
 	function handleApply(): void {
-		onApplyExplicit(draftIds);
+		if (touched) onApplyExplicit(draftIds);
 		onClose();
 	}
 
@@ -121,10 +144,34 @@
 			data-slot="new-chat-preamble-scroll-body"
 			class="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-base sm:px-6"
 		>
+			{#if automaticDefaultsUnavailable}
+				<div
+					class="mb-3 flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
+					role={previewLoading ? 'status' : 'alert'}
+					data-slot="new-chat-preamble-preview-status"
+				>
+					<p class="min-w-0 flex-1 text-sm text-muted-foreground">
+						{previewLoading
+							? m.preamble_selection_loading()
+							: m.preamble_selection_preview_unavailable()}
+					</p>
+					{#if !previewLoading}
+						<Button
+							variant="outline"
+							size="sm"
+							data-slot="new-chat-preamble-preview-retry"
+							onclick={() => void onRefreshPreview()}
+						>
+							{m.preamble_selection_refresh()}
+						</Button>
+					{/if}
+				</div>
+			{/if}
 			<ChatPreambleSelectionPanel
-				draftIds={draftIds}
+				{draftIds}
 				{projection}
 				{canonicalProjectPath}
+				disabled={automaticDefaultsUnavailable}
 				onMove={move}
 				onRemove={remove}
 				onAdd={add}
@@ -141,7 +188,7 @@
 				data-slot="new-chat-preamble-manage-catalog"
 				onclick={openCatalog}
 			>
-				{m.preamble_selection_manage_catalog()}
+				{m.preamble_selection_manage_preambles()}
 			</Button>
 			<div class="flex items-center gap-2">
 				<Button
@@ -156,10 +203,7 @@
 				<Button variant="outline" data-slot="new-chat-preamble-cancel" onclick={onClose}>
 					{m.preambles_cancel()}
 				</Button>
-				<Button
-					type="submit"
-					data-slot="new-chat-preamble-apply"
-				>
+				<Button type="submit" data-slot="new-chat-preamble-apply">
 					{m.preamble_selection_apply()}
 				</Button>
 			</div>

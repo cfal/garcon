@@ -6,6 +6,7 @@ import * as gitApi from '$lib/api/git';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
 import * as clientChatId from '$shared/client-chat-id';
+import * as preamblesApi from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 
@@ -184,6 +185,94 @@ describe('NewChatForm', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		vi.mocked(clientChatId.createClientChatId).mockReset();
 		vi.mocked(clientChatId.createClientChatId).mockReturnValue(PROSPECTIVE_CHAT_ID);
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockReset();
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(async (request) => ({
+			success: true,
+			canonicalProjectPath: request.projectPath,
+			orderedPreambleIds: request.orderedPreambleIds ?? [],
+			projection: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
+		}));
+	});
+
+	it('presents automatic preambles as pills in a composer-aligned editable surface', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const preambleId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue({
+			success: true,
+			canonicalProjectPath: '/workspace/project',
+			orderedPreambleIds: [preambleId],
+			projection: {
+				catalogRevision: 1,
+				eligiblePreambles: [{ id: preambleId, title: 'Repository conventions' }],
+				unavailable: [],
+			},
+		});
+
+		render(NewChatFormTestHost, {
+			props: {
+				preambleSnapshot: {
+					revision: 1,
+					preambles: [
+						{
+							id: preambleId,
+							enabled: true,
+							title: 'Repository conventions',
+							content: 'Synthetic body',
+							scope: { type: 'global' },
+							agentIds: [],
+							tagFilter: { mode: 'any', tags: [] },
+							createdAt: '2029-01-01T00:00:00.000Z',
+							updatedAt: '2029-01-01T00:00:00.000Z',
+						},
+					],
+				},
+			},
+		});
+
+		expect(await screen.findByText('Repository conventions')).toBeTruthy();
+		const surface = document.querySelector<HTMLElement>('[data-slot="new-chat-preambles-row"]');
+		expect(surface?.classList.contains('border')).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
+		expect(document.querySelector('[data-slot="new-chat-preamble-selection-dialog"]')).toBeTruthy();
+	});
+
+	it('retries a failed automatic preamble preview without opening the picker', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const preambleId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockRejectedValueOnce(new Error('preview unavailable'))
+			.mockResolvedValueOnce({
+				success: true,
+				canonicalProjectPath: '/workspace/project',
+				orderedPreambleIds: [preambleId],
+				projection: {
+					catalogRevision: 1,
+					eligiblePreambles: [{ id: preambleId, title: 'Recovered default' }],
+					unavailable: [],
+				},
+			});
+
+		render(NewChatFormTestHost);
+
+		const retry = await screen.findByRole('button', { name: 'Refresh' });
+		const edit = screen.getByRole('button', { name: 'Edit preambles' }) as HTMLButtonElement;
+		expect(edit.disabled).toBe(true);
+
+		await fireEvent.click(retry);
+
+		expect(await screen.findByText('Recovered default')).toBeTruthy();
+		expect(edit.disabled).toBe(false);
+		expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 	});
 
 	it('cancels pending reseed focus when unmounted', () => {
@@ -261,9 +350,9 @@ describe('NewChatForm', () => {
 		const messageInput = screen.getByPlaceholderText('How can I help you today?');
 		await fireEvent.input(messageInput, { target: { value: 'first line' } });
 		await waitFor(() => {
-			expect((screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled).toBe(
-				false,
-			);
+			expect(
+				(screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled,
+			).toBe(false);
 		});
 
 		await view.rerender({ catalogVersion: 1, modelsAvailable: false });

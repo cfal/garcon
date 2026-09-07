@@ -244,6 +244,7 @@ export class NewChatFormState {
 			);
 		}
 		this.#ensureAgentSettings(next);
+		if (changed) this.preambles.automaticFiltersChanged();
 	}
 
 	setPermissionMode(mode: PermissionMode): void {
@@ -301,11 +302,7 @@ export class NewChatFormState {
 		this.agentId = agentId;
 		this.#setModelSelection(
 			agentId,
-			this.#modelCatalog.selectionValueFor(
-				agentId,
-				selection.model,
-				selection.modelEndpointId,
-			),
+			this.#modelCatalog.selectionValueFor(agentId, selection.model, selection.modelEndpointId),
 			selection,
 		);
 	}
@@ -610,11 +607,15 @@ export class NewChatFormState {
 		if (!normalized) return false;
 		if (this.chatTags.some((t) => t.toLowerCase() === normalized)) return false;
 		this.chatTags = [...this.chatTags, normalized];
+		this.preambles.automaticFiltersChanged();
 		return true;
 	}
 
 	removeTag(tag: string): void {
-		this.chatTags = this.chatTags.filter((t) => t !== tag);
+		const nextTags = this.chatTags.filter((t) => t !== tag);
+		if (nextTags.length === this.chatTags.length) return;
+		this.chatTags = nextTags;
+		this.preambles.automaticFiltersChanged();
 	}
 
 	// Form submission
@@ -719,6 +720,7 @@ export class NewChatFormState {
 			await this.#modelCatalog.refreshIfStale();
 			this.#catalogRefreshCompleted = true;
 			this.#reconcileAgentSettingsWithCatalog();
+			const previousAgentId = this.agentId;
 			if (this.#startupSelectionAutomatic) {
 				const recent = this.#firstSelectableRecent(this.#startupRecents);
 				if (recent) {
@@ -732,6 +734,7 @@ export class NewChatFormState {
 				}
 				this.#applyExecutionDefaultsForAgent(this.agentId);
 			}
+			if (this.agentId !== previousAgentId) this.preambles.automaticFiltersChanged();
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to refresh models', err);

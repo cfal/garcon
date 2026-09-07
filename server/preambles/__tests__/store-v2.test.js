@@ -29,6 +29,8 @@ function preamble(id, overrides = {}) {
     title: `Preamble ${id}`,
     content: `Body ${id}`,
     scope: { type: 'global' },
+    agentIds: [],
+    tagFilter: { mode: 'any', tags: [] },
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -52,10 +54,11 @@ async function readCatalog(directory) {
 describe('PreambleStore version two', () => {
   it('migrates a valid version-one catalog at initialization', async () => {
     const directory = await temporaryDirectory();
+    const { agentIds: _agentIds, tagFilter: _tagFilter, ...legacyPreamble } = preamble(ID_A);
     await writeCatalog(directory, {
       version: 1,
       revision: 7,
-      preambles: [preamble(ID_A)],
+      preambles: [legacyPreamble],
     });
 
     const store = new PreambleStore(directory);
@@ -70,6 +73,32 @@ describe('PreambleStore version two', () => {
     const reopened = new PreambleStore(directory);
     await reopened.init();
     expect(reopened.snapshot()).toEqual(store.snapshot());
+  });
+
+  it('normalizes legacy version-two filters in memory and persists them on mutation', async () => {
+    const directory = await temporaryDirectory();
+    const { agentIds: _agentIds, tagFilter: _tagFilter, ...legacyPreamble } = preamble(ID_A);
+    const legacyFile = {
+      version: 2,
+      revision: 7,
+      preambles: [legacyPreamble],
+      retiredPreambleIds: [],
+    };
+    await writeCatalog(directory, legacyFile);
+
+    const store = new PreambleStore(directory);
+    await store.init();
+
+    expect(store.snapshot().preambles).toEqual([preamble(ID_A)]);
+    expect(await readCatalog(directory)).toEqual(legacyFile);
+
+    await store.reorder([ID_A], 7);
+    expect(await readCatalog(directory)).toEqual({
+      version: 2,
+      revision: 8,
+      preambles: [preamble(ID_A)],
+      retiredPreambleIds: [],
+    });
   });
 
   it('fails visibly on an invalid legacy ID instead of rewriting it', async () => {

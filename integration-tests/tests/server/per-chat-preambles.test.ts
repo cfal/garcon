@@ -27,8 +27,12 @@ async function createPreamble(
   })).snapshot;
 }
 
-function globalDefinition(title: string, content: string): PreambleDefinitionInput {
-  return { enabled: true, title, content, scope: { type: 'global' } };
+function globalDefinition(
+  title: string,
+  content: string,
+  filters: Pick<PreambleDefinitionInput, 'agentIds' | 'tagFilter'> = {},
+): PreambleDefinitionInput {
+  return { enabled: true, title, content, scope: { type: 'global' }, ...filters };
 }
 
 function selectionTarget(fixture: IntegrationFixture, chatId: string) {
@@ -365,38 +369,120 @@ describe('per-chat preambles', () => {
     });
   });
 
-  test('[PREAMBLE-SELECTION.02-SERVER-05] previews resolve defaults and explicit drafts without side effects', async () => {
+  test('[PREAMBLE-SELECTION.02-SERVER-05] previews and creation share automatic filters while explicit drafts bypass them', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
       const previewCatalog = await createPreamble(fixture, 0, globalDefinition('First', 'SYNTHETIC_FIRST_BODY'));
-      await createPreamble(fixture, previewCatalog.revision, globalDefinition('Second', 'SYNTHETIC_SECOND_BODY'));
+      const agentId = fixture.directAgents.openAi.agentId;
+      let catalog = await createPreamble(fixture, previewCatalog.revision, globalDefinition(
+        'Matching agent',
+        'SYNTHETIC_MATCHING_AGENT_BODY',
+        { agentIds: [agentId] },
+      ));
+      catalog = await createPreamble(fixture, catalog.revision, globalDefinition(
+        'Other agent',
+        'SYNTHETIC_OTHER_AGENT_BODY',
+        { agentIds: ['codex'] },
+      ));
+      catalog = await createPreamble(fixture, catalog.revision, globalDefinition(
+        'Any tag',
+        'SYNTHETIC_ANY_TAG_BODY',
+        { tagFilter: { mode: 'any', tags: ['backend', 'frontend'] } },
+      ));
+      await createPreamble(fixture, catalog.revision, globalDefinition(
+        'All tags',
+        'SYNTHETIC_ALL_TAGS_BODY',
+        { tagFilter: { mode: 'all', tags: ['backend', 'reviewed'] } },
+      ));
       const currentPreviewCatalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
-      const previewFirstId = currentPreviewCatalog.preambles[0]!.id;
-      const previewSecondId = currentPreviewCatalog.preambles[1]!.id;
+      const [firstId, matchingAgentId, otherAgentId, anyTagId, allTagsId] =
+        currentPreviewCatalog.preambles.map((preamble) => preamble.id);
+
+      const untagged = await fixture.client.post<PreambleSelectionPreviewResponse>(
+        '/api/v1/preambles/selection-preview',
+        { projectPath: fixture.dirs.project, agentId, tags: [] },
+      );
+      expect(untagged.orderedPreambleIds).toEqual([firstId, matchingAgentId]);
 
       const defaults = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        { projectPath: fixture.dirs.project },
+        { projectPath: fixture.dirs.project, agentId, tags: ['backend'] },
       );
-      expect(defaults.orderedPreambleIds).toEqual([previewFirstId, previewSecondId]);
-      expect(defaults.projection.eligiblePreambles).toHaveLength(2);
+      expect(defaults.orderedPreambleIds).toEqual([firstId, matchingAgentId, anyTagId]);
+      expect(defaults.projection.eligiblePreambles).toHaveLength(3);
       expect(JSON.stringify(defaults)).not.toContain('SYNTHETIC_FIRST_BODY');
+
+      const allTags = await fixture.client.post<PreambleSelectionPreviewResponse>(
+        '/api/v1/preambles/selection-preview',
+        { projectPath: fixture.dirs.project, agentId, tags: ['backend', 'reviewed'] },
+      );
+      expect(allTags.orderedPreambleIds).toEqual([
+        firstId,
+        matchingAgentId,
+        anyTagId,
+        allTagsId,
+      ]);
 
       const explicit = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        { projectPath: fixture.dirs.project, orderedPreambleIds: [previewSecondId, MISSING_ID] },
+        {
+          projectPath: fixture.dirs.project,
+          agentId,
+          tags: [],
+          orderedPreambleIds: [allTagsId!, otherAgentId!, MISSING_ID],
+        },
       );
-      expect(explicit.orderedPreambleIds).toEqual([previewSecondId, MISSING_ID]);
-      expect(explicit.projection.eligiblePreambles.map((entry) => entry.title)).toEqual(['Second']);
-      expect(explicit.projection.unavailable).toEqual([
-        { id: MISSING_ID, reason: 'missing' },
-      ]);
+      expect(explicit.orderedPreambleIds).toEqual([allTagsId, otherAgentId, MISSING_ID]);
+      expect(explicit.projection.eligiblePreambles.map((entry) => entry.title))
+        .toEqual(['All tags', 'Other agent']);
+      expect(explicit.projection.unavailable).toEqual([{ id: MISSING_ID, reason: 'missing' }]);
 
       const snapshotBefore = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        { projectPath: fixture.dirs.project },
+        { projectPath: fixture.dirs.project, agentId, tags: [] },
       );
       expect(await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles')).toEqual(snapshotBefore);
+
+      const automaticChatId = fixture.newChatId();
+      const automaticHeld = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const automaticStart = await fixture.client.startChat({
+        ...fixture.client.directStartRequest({
+          chatId: automaticChatId,
+          content: 'automatic filter prompt',
+          projectPath: fixture.dirs.project,
+          agent: fixture.directAgents.openAi,
+        }),
+        tags: ['backend'],
+      });
+      const automaticRequest = await automaticHeld.received;
+      expect(automaticRequest.lastUserText).toContain('SYNTHETIC_FIRST_BODY');
+      expect(automaticRequest.lastUserText).toContain('SYNTHETIC_MATCHING_AGENT_BODY');
+      expect(automaticRequest.lastUserText).toContain('SYNTHETIC_ANY_TAG_BODY');
+      expect(automaticRequest.lastUserText).not.toContain('SYNTHETIC_OTHER_AGENT_BODY');
+      expect(automaticRequest.lastUserText).not.toContain('SYNTHETIC_ALL_TAGS_BODY');
+      expect(automaticHeld.releaseText('automatic response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(automaticChatId, automaticStart.turnId);
+      expect((await selectionTarget(fixture, automaticChatId)).selection.orderedPreambleIds)
+        .toEqual(defaults.orderedPreambleIds);
+
+      const explicitChatId = fixture.newChatId();
+      const explicitHeld = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const explicitStart = await fixture.client.startDirectChat({
+        chatId: explicitChatId,
+        content: 'explicit filter bypass prompt',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+        orderedPreambleIds: [allTagsId!, otherAgentId!],
+      });
+      const explicitRequest = await explicitHeld.received;
+      expect(explicitRequest.lastUserText).toContain('SYNTHETIC_ALL_TAGS_BODY');
+      expect(explicitRequest.lastUserText).toContain('SYNTHETIC_OTHER_AGENT_BODY');
+      expect(explicitHeld.releaseText('explicit response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(explicitChatId, explicitStart.turnId);
     });
   });
 });

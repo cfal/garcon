@@ -83,20 +83,39 @@ describe('chat preamble selection contracts', () => {
     })).toThrow();
     expect(() => parsePreambleSelectionPreviewRequest({
       projectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
       unexpected: 1,
     })).toThrow('unexpected is not supported');
   });
 
   it('requires canonical UUID order in preview requests but allows omitted IDs', () => {
-    expect(parsePreambleSelectionPreviewRequest({ projectPath: '/repo' }))
-      .toEqual({ projectPath: '/repo' });
     expect(parsePreambleSelectionPreviewRequest({
       projectPath: '/repo',
+      agentId: 'claude',
+      tags: ['backend', 'review-needed'],
+    })).toEqual({ projectPath: '/repo', agentId: 'claude', tags: ['backend', 'review-needed'] });
+    expect(parsePreambleSelectionPreviewRequest({
+      projectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
       orderedPreambleIds: [],
-    })).toEqual({ projectPath: '/repo', orderedPreambleIds: [] });
+    })).toEqual({ projectPath: '/repo', agentId: 'claude', tags: [], orderedPreambleIds: [] });
     expect(() => parsePreambleSelectionPreviewRequest({
       projectPath: '/repo',
+      agentId: 'claude',
+      tags: [],
       orderedPreambleIds: [ID_A.toUpperCase()],
+    })).toThrow();
+    expect(() => parsePreambleSelectionPreviewRequest({
+      projectPath: '/repo',
+      agentId: 'Claude',
+      tags: [],
+    })).toThrow();
+    expect(() => parsePreambleSelectionPreviewRequest({
+      projectPath: '/repo',
+      agentId: 'claude',
+      tags: ['Review Needed'],
     })).toThrow();
     expect(() => parsePreambleSelectionPreviewRequest({})).toThrow();
   });

@@ -24,6 +24,11 @@ const preamble = {
 	createdAt: '2029-01-01T00:00:00.000Z',
 	updatedAt: '2029-01-01T00:00:00.000Z',
 };
+const normalizedPreamble = {
+	...preamble,
+	agentIds: [],
+	tagFilter: { mode: 'any' as const, tags: [] },
+};
 
 describe('preambles API contract', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
@@ -51,12 +56,17 @@ describe('preambles API contract', () => {
 				}),
 			});
 
-		await expect(getPreambles()).resolves.toEqual({ revision: 1, preambles: [preamble] });
+		await expect(getPreambles()).resolves.toEqual({
+			revision: 1,
+			preambles: [normalizedPreamble],
+		});
 		const definition = {
 			enabled: true,
 			title: 'Repository conventions',
 			content: 'Use the repository conventions.',
 			scope: { type: 'global' as const },
+			agentIds: ['codex'],
+			tagFilter: { mode: 'all' as const, tags: ['backend', 'review-needed'] },
 		};
 		await createPreamble({ expectedRevision: 1, preamble: definition });
 		await updatePreamble({ expectedRevision: 1, id: PREAMBLE_ID, preamble: definition });
@@ -77,7 +87,9 @@ describe('preambles API contract', () => {
 	});
 
 	it('rejects malformed catalog responses', async () => {
-		fetchMock.mockResolvedValueOnce(Response.json({ revision: 1, preambles: [{ ...preamble, id: '' }] }));
+		fetchMock.mockResolvedValueOnce(
+			Response.json({ revision: 1, preambles: [{ ...preamble, id: '' }] }),
+		);
 		await expect(getPreambles()).rejects.toThrow('Invalid preambles response');
 
 		fetchMock.mockResolvedValueOnce(Response.json({ success: true, snapshot: { revision: -1 } }));

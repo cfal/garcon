@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  PREAMBLE_AGENT_FILTER_MAX_COUNT,
   PREAMBLE_CHAT_ID_TOKEN,
   PREAMBLE_CONTENT_MAX_LENGTH,
   PREAMBLE_FILE_CONTEXT_SEPARATOR,
   PREAMBLE_MAX_COUNT,
   PREAMBLE_PATH_RULE_MAX_COUNT,
+  PREAMBLE_TAG_FILTER_MAX_COUNT,
+  PREAMBLE_TAG_MAX_CODE_POINTS,
   PREAMBLE_TITLE_MAX_CODE_POINTS,
   normalizePendingPreambleBoundary,
   normalizePreambleDefinitionInput,
@@ -36,6 +39,8 @@ function definition(overrides = {}) {
     title: 'Repository conventions',
     content: 'Follow the repository conventions.',
     scope: { type: 'global' },
+    agentIds: [],
+    tagFilter: { mode: 'any', tags: [] },
     ...overrides,
   };
 }
@@ -51,6 +56,47 @@ function preamble(id, overrides = {}) {
 }
 
 describe('preamble contracts', () => {
+  it('normalizes omitted and explicit automatic filters without broadening malformed values', () => {
+    const { agentIds: _agentIds, tagFilter: _tagFilter, ...legacy } = definition();
+    expect(normalizePreambleDefinitionInput(legacy)).toEqual(definition());
+    expect(normalizePreambleDefinitionInput(definition({
+      agentIds: ['claude', 'codex'],
+      tagFilter: { mode: 'all', tags: ['backend', 'review-needed'] },
+    }))).toEqual(definition({
+      agentIds: ['claude', 'codex'],
+      tagFilter: { mode: 'all', tags: ['backend', 'review-needed'] },
+    }));
+    expect(normalizePreambleDefinitionInput(definition({ agentIds: ['Claude'] }))).toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({ agentIds: ['claude', 'claude'] }))).toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({
+      agentIds: Array.from(
+        { length: PREAMBLE_AGENT_FILTER_MAX_COUNT + 1 },
+        (_, index) => `agent-${index}`,
+      ),
+    }))).toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({
+      tagFilter: { mode: 'some', tags: ['backend'] },
+    }))).toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({
+      tagFilter: { mode: 'any', tags: ['Backend'] },
+    }))).toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({
+      tagFilter: { mode: 'any', tags: ['backend', 'backend'] },
+    }))).toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({
+      tagFilter: { mode: 'any', tags: ['a'.repeat(PREAMBLE_TAG_MAX_CODE_POINTS + 1)] },
+    }))).toBeNull();
+    expect(normalizePreambleDefinitionInput(definition({
+      tagFilter: {
+        mode: 'any',
+        tags: Array.from(
+          { length: PREAMBLE_TAG_FILTER_MAX_COUNT + 1 },
+          (_, index) => `tag-${index}`,
+        ),
+      },
+    }))).toBeNull();
+  });
+
   it('normalizes global and independently nested project-path scopes', () => {
     expect(normalizePreambleDefinitionInput(definition())).toEqual(definition());
     expect(normalizePreambleDefinitionInput(definition({

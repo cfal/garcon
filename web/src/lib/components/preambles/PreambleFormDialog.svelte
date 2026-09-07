@@ -12,7 +12,7 @@
 		restorePromptEditorSelection,
 		type PromptEditorSelection,
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
-	import { getAppShell } from '$lib/context';
+	import { getAppShell, getModelCatalog, getSidebarSearch } from '$lib/context';
 	import {
 		PREAMBLE_CHAT_ID_TOKEN,
 		type Preamble,
@@ -23,6 +23,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import * as m from '$lib/paraglide/messages.js';
 	import { PreambleFormState } from './preamble-form-state.svelte.js';
+	import PreambleAutomaticFilters from './PreambleAutomaticFilters.svelte';
 
 	interface Props {
 		open: boolean;
@@ -34,7 +35,12 @@
 
 	let { open, preamble, isStale, onSave, onClose }: Props = $props();
 	const appShell = getAppShell();
+	const modelCatalog = getModelCatalog();
+	const sidebarSearch = getSidebarSearch();
 	const form = new PreambleFormState();
+	const agentOptions = $derived(
+		modelCatalog.getAgentMetadataList().map(({ id, label }) => ({ id, label })),
+	);
 	let pickerKey = $state<string | null>(null);
 	let pickerFocusReturnTarget: HTMLElement | null = null;
 	let contentTextarea = $state<HTMLTextAreaElement | null>(null);
@@ -269,6 +275,19 @@
 					</div>
 				{/if}
 			</fieldset>
+
+			<PreambleAutomaticFilters
+				agents={agentOptions}
+				selectedAgentIds={form.agentIds}
+				tags={form.tagFilterTags}
+				tagMatchMode={form.tagFilterMode}
+				knownTags={sidebarSearch.allKnownTags}
+				disabled={form.saving}
+				onToggleAgent={(agentId) => form.toggleAgent(agentId)}
+				onAddTag={(tag) => form.addTag(tag)}
+				onRemoveTag={(tag) => form.removeTag(tag)}
+				onTagMatchModeChange={(mode) => (form.tagFilterMode = mode)}
+			/>
 
 			<div class="space-y-1.5">
 				<label for="preamble-content" class="text-sm font-medium text-foreground">

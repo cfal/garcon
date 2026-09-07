@@ -73,9 +73,13 @@ describe('chat preamble selection API contract', () => {
 		await expect(getChatPreambleSelection(CHAT_ID, VIEW_ID)).rejects.toThrow(
 			'Invalid chat preamble selection response',
 		);
-		fetchMock.mockResolvedValueOnce(Response.json(targetResponse({
-			transcriptViewId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-		})));
+		fetchMock.mockResolvedValueOnce(
+			Response.json(
+				targetResponse({
+					transcriptViewId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				}),
+			),
+		);
 		await expect(getChatPreambleSelection(CHAT_ID, VIEW_ID)).rejects.toThrow(
 			'Invalid chat preamble selection response',
 		);
@@ -91,7 +95,9 @@ describe('chat preamble selection API contract', () => {
 			orderedPreambleIds: [PREAMBLE_ID],
 		};
 		fetchMock.mockResolvedValueOnce(Response.json(updateResponse()));
-		await expect(updateChatPreambleSelection(request)).resolves.toMatchObject({ kind: 'committed' });
+		await expect(updateChatPreambleSelection(request)).resolves.toMatchObject({
+			kind: 'committed',
+		});
 
 		for (const mismatch of [
 			{ chatId: '1783725900000299' },
@@ -107,15 +113,21 @@ describe('chat preamble selection API contract', () => {
 	});
 
 	it('requires an explicit preview to echo the exact requested order', async () => {
-		fetchMock.mockResolvedValueOnce(Response.json({
-			success: true,
-			canonicalProjectPath: '/repo',
-			orderedPreambleIds: [],
-			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
-		}));
-		await expect(preambleSelectionPreview({
-			projectPath: '/repo',
-			orderedPreambleIds: [PREAMBLE_ID],
-		})).rejects.toThrow('Invalid preamble selection preview response');
+		fetchMock.mockResolvedValueOnce(
+			Response.json({
+				success: true,
+				canonicalProjectPath: '/repo',
+				orderedPreambleIds: [],
+				projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
+			}),
+		);
+		await expect(
+			preambleSelectionPreview({
+				projectPath: '/repo',
+				agentId: 'claude',
+				tags: [],
+				orderedPreambleIds: [PREAMBLE_ID],
+			}),
+		).rejects.toThrow('Invalid preamble selection preview response');
 	});
 });

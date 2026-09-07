@@ -96,6 +96,8 @@ export class StartCommands {
     const preambleSelection = resolveNewChatPreambleSelection({
       catalog: this.deps.preambles.snapshot(),
       canonicalProjectPath: projectPath,
+      agentId: input.agentId,
+      tags: input.tags ?? [],
       chatId,
       ...(input.orderedPreambleIds === undefined
         ? {}
