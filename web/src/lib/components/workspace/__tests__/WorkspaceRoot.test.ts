@@ -1162,6 +1162,25 @@ describe('WorkspaceRoot', () => {
 		).not.toBeNull();
 	});
 
+	it('gives the transient mobile Chat Board explicit Back and Close controls', async () => {
+		const { layout, workspace } = installContext();
+		const board = portableSingletonDescriptor('chat-board');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'register-surface', surface: board },
+				{ type: 'set-mobile-presentation', activeId: board.id, returnStack: [] },
+			]),
+		);
+		renderRoot(true);
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_back() }));
+		expect(workspace.mobileBack).toHaveBeenCalledOnce();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_close_view() }));
+		expect(workspace.closeSurface).toHaveBeenCalledWith(board.id);
+	});
+
 	it('fullscreen hides other windows and restores their exact keyed layout on exit', async () => {
 		const { layout } = installContext();
 		layout.publish(
