@@ -29,13 +29,13 @@ const board: ChatBoard = {
 	columns: [column, reviewColumn],
 };
 
-function chat(): ChatSessionRecord {
+function chat(id = 'chat-1', title = 'Polish onboarding'): ChatSessionRecord {
 	return {
-		id: 'chat-1',
+		id,
 		parentChat: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
-		title: 'Polish onboarding',
+		title,
 		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
@@ -68,6 +68,10 @@ function emulateDetachedChromiumScrollReset(element: HTMLElement): void {
 			connectedScrollTop = value;
 		},
 	});
+}
+
+function nextAnimationFrame(): Promise<void> {
+	return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 function createController(initial: ChatBoardCatalog) {
@@ -314,6 +318,11 @@ describe('ChatBoardPanel', () => {
 		});
 		const readySelector = `[data-chat-board-lane-list="${column.id}"]`;
 		const reviewSelector = `[data-chat-board-lane-list="${reviewColumn.id}"]`;
+		const panel = container.querySelector<HTMLElement>('[data-chat-board-panel]')!;
+		let panelWidth = 700;
+		vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(
+			() => ({ width: panelWidth }) as DOMRect,
+		);
 		const ready = container.querySelector<HTMLElement>(readySelector)!;
 		const review = container.querySelector<HTMLElement>(reviewSelector)!;
 		emulateDetachedChromiumScrollReset(ready);
@@ -322,8 +331,12 @@ describe('ChatBoardPanel', () => {
 		review.scrollTop = 83;
 		await fireEvent.scroll(ready);
 		await fireEvent.scroll(review);
+		await nextAnimationFrame();
 
-		TestResizeObserver.emit(420);
+		panelWidth = 420;
+		ready.scrollTop = 0;
+		await fireEvent.scroll(ready);
+		TestResizeObserver.emit(panelWidth);
 		await waitFor(() =>
 			expect(container.querySelector<HTMLElement>(readySelector)?.scrollTop).toBe(37),
 		);
@@ -332,10 +345,78 @@ describe('ChatBoardPanel', () => {
 			expect(container.querySelector<HTMLElement>(reviewSelector)?.scrollTop).toBe(83),
 		);
 
-		TestResizeObserver.emit(700);
+		panelWidth = 700;
+		TestResizeObserver.emit(panelWidth);
 		await waitFor(() => {
 			expect(container.querySelector<HTMLElement>(readySelector)?.scrollTop).toBe(37);
 			expect(container.querySelector<HTMLElement>(reviewSelector)?.scrollTop).toBe(83);
 		});
+	});
+
+	it('restores lane scroll and focused controls across presentation host remounts', async () => {
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		const firstView = render(ChatBoardPanelTestHost, {
+			controller,
+			sessions,
+			onOpenChat: vi.fn(),
+			presentation: 'window-main',
+		});
+		const lane = firstView.container.querySelector<HTMLElement>(
+			`[data-chat-board-lane-list="${column.id}"]`,
+		)!;
+		lane.scrollTop = 63;
+		await fireEvent.scroll(lane);
+		await nextAnimationFrame();
+		const transition = screen.getByRole('button', { name: 'Transition…' });
+		transition.focus();
+		firstView.unmount();
+
+		const mobileView = render(ChatBoardPanelTestHost, {
+			controller,
+			sessions,
+			onOpenChat: vi.fn(),
+			presentation: 'mobile',
+		});
+		await waitFor(() =>
+			expect(
+				mobileView.container.querySelector<HTMLElement>(
+					`[data-chat-board-lane-list="${column.id}"]`,
+				)?.scrollTop,
+			).toBe(63),
+		);
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Transition…' })),
+		);
+	});
+
+	it('keeps a focused card mounted when live ordering moves it outside the virtual range', async () => {
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		const chats = Array.from({ length: 100 }, (_, index) => chat(`chat-${index}`, `Chat ${index}`));
+		sessions.byId = Object.fromEntries(chats.map((record) => [record.id, record]));
+		sessions.order = chats.map((record) => record.id);
+		sessions.chatListStatus = 'ready';
+		const { container } = render(ChatBoardPanelTestHost, {
+			controller,
+			sessions,
+			onOpenChat: vi.fn(),
+		});
+		const focused = await screen.findByRole('button', { name: 'Open Chat 5' });
+		const card = focused.closest<HTMLElement>('[data-chat-board-occurrence]')!;
+		focused.focus();
+
+		sessions.order = [...sessions.order.filter((chatId) => chatId !== 'chat-5'), 'chat-5'];
+		await tick();
+
+		await waitFor(() => expect(document.activeElement).toBe(focused));
+		expect(focused.isConnected).toBe(true);
+		expect(container.contains(card)).toBe(true);
+		expect(card.dataset.chatBoardOccurrenceIndex).toBe('99');
 	});
 });

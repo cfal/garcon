@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
 	import { tick, untrack } from 'svelte';
-	import { SvelteMap } from 'svelte/reactivity';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Button } from '$lib/components/ui/button';
@@ -15,6 +14,7 @@
 		type ChatSessionsPort,
 	} from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { getLocalSettings } from '$lib/context';
+	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import type { ChatBoard } from '$shared/chat-boards';
 	import * as m from '$lib/paraglide/messages.js';
@@ -29,6 +29,7 @@
 		type ChatBoardPresentationBand,
 	} from './chat-board-focus-controller.js';
 	import { isChatBoardCardDragData, resolveChatBoardColumnDropData } from './chat-board-dnd.js';
+	import { getChatBoardPanelMemory } from './chat-board-panel-memory.js';
 
 	let {
 		controller,
@@ -43,11 +44,19 @@
 	} = $props();
 
 	const localSettings = getLocalSettings();
+	const frameBridge = getSurfaceFrameBridge();
 	const instanceId = crypto.randomUUID();
 	const focusController = new ChatBoardFocusController();
+	const panelMemory = getChatBoardPanelMemory(untrack(() => controller));
 	const laneScrollers = new Map<string, (key: string) => void>();
-	const laneScrollOffsets = new SvelteMap<string, number>();
+	const laneScrollOffsets = panelMemory.laneScrollOffsets;
+	const pendingLaneScrollWrites = new Map<string, number>();
+	let pendingHostScrollRestore: ReadonlyMap<string, number> | null =
+		laneScrollOffsets.size > 0 ? new Map(laneScrollOffsets) : null;
+	let hostFocusTarget = panelMemory.focusTarget;
+	let laneScrollWriteFrame: number | null = null;
 	let laneRemountGeneration = 0;
+	let hostRestoreGeneration = 0;
 	let pendingLaneScrollRestore: {
 		readonly generation: number;
 		readonly targets: ReadonlyMap<string, number>;
@@ -88,26 +97,65 @@
 		focusController.setRoot(rootRef);
 	});
 
+	// Supplies bookmark-aware focus while the workspace replaces presentation hosts.
+	$effect(() =>
+		frameBridge.provideRenderer({
+			attach: () => {},
+			detach: () => {},
+			focusPrimary: restorePrimaryFocus,
+		}),
+	);
+
+	$effect(() => {
+		const root = rootRef;
+		if (!root) return;
+		const generation = ++hostRestoreGeneration;
+		const rememberFocus = (event: FocusEvent) => {
+			const target = event.target;
+			if (!(target instanceof HTMLElement)) return;
+			if (root.contains(target)) {
+				const focusTarget = focusController.captureFocusTarget(target);
+				if (focusTarget || !hostFocusTarget) panelMemory.focusTarget = focusTarget;
+				return;
+			}
+			if (!hostFocusTarget && !target.closest('[data-chat-board-panel]')) {
+				panelMemory.focusTarget = null;
+			}
+		};
+		const cancelFocusRestore = () => {
+			if (!hostFocusTarget) return;
+			hostFocusTarget = null;
+			panelMemory.focusTarget = null;
+		};
+		document.addEventListener('focusin', rememberFocus, true);
+		document.addEventListener('pointerdown', cancelFocusRestore, true);
+		document.addEventListener('keydown', cancelFocusRestore, true);
+		void restoreAfterHostMount(generation);
+		return () => {
+			hostRestoreGeneration += 1;
+			document.removeEventListener('focusin', rememberFocus, true);
+			document.removeEventListener('pointerdown', cancelFocusRestore, true);
+			document.removeEventListener('keydown', cancelFocusRestore, true);
+			discardPendingLaneScrollWrites();
+		};
+	});
+
 	$effect(() => {
 		const validKeys = new Set(
 			controller.catalog.boards.flatMap((board) =>
 				board.columns.map((column) => laneScrollKey(board.id, column.id)),
 			),
 		);
-		untrack(() => {
-			for (const key of laneScrollOffsets.keys()) {
-				if (!validKeys.has(key)) laneScrollOffsets.delete(key);
-			}
-		});
+		for (const key of laneScrollOffsets.keys()) {
+			if (!validKeys.has(key)) laneScrollOffsets.delete(key);
+		}
 	});
 
 	$effect(() => {
 		if (!rootRef || typeof ResizeObserver === 'undefined') return;
 		const observer = new ResizeObserver(([entry]) => {
 			const width = entry?.contentRect.width ?? rootRef?.clientWidth ?? 0;
-			let nextBand: ChatBoardPresentationBand = 'wide';
-			if (width < 560) nextBand = 'narrow';
-			else if (width < 900) nextBand = 'medium';
+			const nextBand = presentationBandForWidth(width);
 			if (nextBand === presentationBand) return;
 			const generation = beginLaneRemount();
 			focusController.preparePresentationChange(nextBand, activeColumnId);
@@ -179,6 +227,8 @@
 		const oldIndex = Number(occurrenceElement.dataset.chatBoardOccurrenceIndex ?? 0);
 		untrack(() => {
 			void tick().then(() => {
+				const currentActive = document.activeElement;
+				if (currentActive instanceof HTMLElement && currentActive !== document.body) return;
 				const candidates = nextLane?.occurrences ?? [];
 				const fallback = candidates[Math.min(oldIndex, Math.max(0, candidates.length - 1))];
 				if (fallback && focusController.focusOccurrence(columnId, fallback.chat.id)) return;
@@ -217,23 +267,47 @@
 		return laneScrollOffsets.get(laneScrollKey(boardId, columnId)) ?? 0;
 	}
 
-	function rememberLaneScroll(boardId: string, columnId: string, scrollTop: number): void {
-		const key = laneScrollKey(boardId, columnId);
-		if (pendingLaneScrollRestore?.targets.has(key)) return;
-		laneScrollOffsets.set(key, scrollTop);
+	function presentationBandForWidth(width: number): ChatBoardPresentationBand {
+		if (width < 560) return 'narrow';
+		if (width < 900) return 'medium';
+		return 'wide';
 	}
 
-	function rememberMountedLaneScrollPositions(): void {
-		const boardId = selectedBoard?.id;
-		if (!boardId || !rootRef) return;
-		for (const viewport of rootRef.querySelectorAll<HTMLElement>('[data-chat-board-lane-list]')) {
-			const columnId = viewport.dataset.chatBoardLaneList;
-			if (columnId) rememberLaneScroll(boardId, columnId, viewport.scrollTop);
+	function isPresentationChangePending(): boolean {
+		// Chromium can reset scrollTop before ResizeObserver commits the new band.
+		const width = rootRef?.getBoundingClientRect().width ?? 0;
+		return width > 0 && presentationBandForWidth(width) !== presentationBand;
+	}
+
+	function rememberLaneScroll(boardId: string, columnId: string, scrollTop: number): void {
+		if (isPresentationChangePending()) return;
+		const key = laneScrollKey(boardId, columnId);
+		if (pendingHostScrollRestore?.has(key)) return;
+		if (pendingLaneScrollRestore?.targets.has(key)) return;
+		pendingLaneScrollWrites.set(key, scrollTop);
+		if (laneScrollWriteFrame !== null) return;
+		laneScrollWriteFrame = requestAnimationFrame(() => flushPendingLaneScrollWrites());
+	}
+
+	function flushPendingLaneScrollWrites(): void {
+		if (laneScrollWriteFrame !== null) cancelAnimationFrame(laneScrollWriteFrame);
+		laneScrollWriteFrame = null;
+		for (const [key, scrollTop] of pendingLaneScrollWrites) {
+			if (pendingHostScrollRestore?.has(key)) continue;
+			if (pendingLaneScrollRestore?.targets.has(key)) continue;
+			laneScrollOffsets.set(key, scrollTop);
 		}
+		pendingLaneScrollWrites.clear();
+	}
+
+	function discardPendingLaneScrollWrites(): void {
+		if (laneScrollWriteFrame !== null) cancelAnimationFrame(laneScrollWriteFrame);
+		laneScrollWriteFrame = null;
+		pendingLaneScrollWrites.clear();
 	}
 
 	function beginLaneRemount(): number {
-		if (!pendingLaneScrollRestore) rememberMountedLaneScrollPositions();
+		discardPendingLaneScrollWrites();
 		const generation = ++laneRemountGeneration;
 		pendingLaneScrollRestore = {
 			generation,
@@ -248,6 +322,33 @@
 
 	function nextAnimationFrame(): Promise<void> {
 		return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+	}
+
+	async function restoreAfterHostMount(generation: number): Promise<void> {
+		await tick();
+		await nextAnimationFrame();
+		await nextAnimationFrame();
+		if (generation !== hostRestoreGeneration) return;
+		const scrollTargets = pendingHostScrollRestore;
+		if (scrollTargets) {
+			restoreMountedLaneScrollPositions(scrollTargets);
+			await nextAnimationFrame();
+			if (generation !== hostRestoreGeneration) return;
+			pendingHostScrollRestore = null;
+			for (const [key, scrollTop] of scrollTargets) laneScrollOffsets.set(key, scrollTop);
+		}
+		const target = hostFocusTarget ?? panelMemory.focusTarget;
+		if (!target) return;
+		focusController.restoreFocusTarget(target, presentationBand, activeColumnId);
+	}
+
+	function restorePrimaryFocus(): void {
+		const target = hostFocusTarget ?? panelMemory.focusTarget;
+		hostFocusTarget = null;
+		if (target && focusController.restoreFocusTarget(target, presentationBand, activeColumnId)) {
+			return;
+		}
+		focusController.focusToolbar();
 	}
 
 	function restoreMountedLaneScrollPositions(targets: ReadonlyMap<string, number>): void {
@@ -272,7 +373,7 @@
 		await nextAnimationFrame();
 		if (!isCurrentLaneRemount(generation)) return;
 		pendingLaneScrollRestore = null;
-		rememberMountedLaneScrollPositions();
+		for (const [key, scrollTop] of pending.targets) laneScrollOffsets.set(key, scrollTop);
 		focusController.completePresentationChange();
 	}
 
@@ -414,6 +515,7 @@
 			{#each [0, 1, 2] as item (item)}
 				<div
 					class="h-full w-[min(21rem,82%)] shrink-0 animate-pulse rounded-[10px] border border-chat-board-lane-border bg-chat-board-lane p-3"
+					data-chat-board-skeleton
 				>
 					<div class="h-4 w-28 rounded bg-muted-foreground/15"></div>
 					<div class="mt-5 space-y-2">
@@ -456,6 +558,7 @@
 			{#each selectedBoard.columns.slice(0, 3) as column (column.id)}
 				<div
 					class="h-full w-[min(21rem,82%)] shrink-0 animate-pulse rounded-[10px] border border-chat-board-lane-border bg-chat-board-lane p-3"
+					data-chat-board-skeleton
 				>
 					<div class="h-4 w-28 rounded bg-muted-foreground/15"></div>
 					<div class="mt-5 space-y-2">

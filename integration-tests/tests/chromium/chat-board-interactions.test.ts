@@ -262,6 +262,8 @@ describe('Chromium Chat Board interactions', () => {
         await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
         await expectLaneScroll(fixture, REVIEW_COLUMN_ID, settledReviewScrollTop, 1);
       }
+      await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
+      await expectLaneScroll(fixture, READY_COLUMN_ID, settledReadyScrollTop, 1);
 
       markPhase('restoring both lanes after leaving narrow presentation');
       await constrainBoardWidth(fixture, null);
@@ -279,6 +281,26 @@ describe('Chromium Chat Board interactions', () => {
         await expectTransitionFocus(fixture, READY_COLUMN_ID);
         expect(await invoker.evaluate((element) => document.activeElement === element)).toBe(true);
       }
+      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
+      await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
+
+      markPhase('retaining state across the mobile workspace host remount');
+      await invoker.focus();
+      await fixture.page.setViewportSize({ width: 390, height: 600 });
+      const mobilePanel = fixture.page.locator(
+        '[data-chat-board-panel][data-presentation="mobile"][data-presentation-band="narrow"]',
+      );
+      await mobilePanel.waitFor();
+      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
+      await expectTransitionFocus(fixture, READY_COLUMN_ID);
+
+      await fixture.page.setViewportSize({ width: 1_440, height: 600 });
+      await fixture.page
+        .locator('[data-chat-board-panel]:not([data-presentation="mobile"])')
+        .waitFor();
+      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
+      await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
+      await expectTransitionFocus(fixture, READY_COLUMN_ID);
 
       markPhase('keeping long direct-agent labels within detailed tag rows');
       await fixture.page.getByRole('button', { name: 'View', exact: true }).click();

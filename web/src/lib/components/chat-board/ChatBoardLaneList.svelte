@@ -61,6 +61,7 @@
 		},
 	});
 	let viewportRef = $state<HTMLDivElement | null>(null);
+	let focusedOccurrenceKey = $state<string | null>(null);
 
 	function estimatedRowHeight(itemLayout: ChatItemLayout): number {
 		switch (itemLayout) {
@@ -75,7 +76,16 @@
 
 	let estimate = $derived(estimatedRowHeight(layout));
 	let snapshot = $derived(virtual.snapshot);
-	let virtualItems = $derived(selectVirtualItems(snapshot, indexesInRange(snapshot.overscanRange)));
+	let renderedIndexes = $derived.by(() => {
+		const indexes = indexesInRange(snapshot.overscanRange);
+		if (!focusedOccurrenceKey) return indexes;
+		const focusedIndex = occurrences.findIndex(
+			(occurrence) => occurrence.key === focusedOccurrenceKey,
+		);
+		if (focusedIndex >= 0) indexes.push(focusedIndex);
+		return indexes;
+	});
+	let virtualItems = $derived(selectVirtualItems(snapshot, renderedIndexes));
 	let renderedItems = $derived.by(() => {
 		if (virtualItems.length > 0 || occurrences.length === 0) return virtualItems;
 		return occurrences.slice(0, 18).map((occurrence, index) => ({
@@ -152,11 +162,25 @@
 	function rememberScrollPosition(): void {
 		const viewport = viewportRef;
 		if (!viewport?.isConnected) return;
+		if (viewport.closest('[aria-hidden="true"], [inert]')) return;
 		onScrollTopChange(mountedBoardId, mountedColumnId, viewport.scrollTop);
 	}
 
+	function rememberFocusedOccurrence(event: FocusEvent): void {
+		const target = event.target;
+		if (!(target instanceof HTMLElement)) return;
+		focusedOccurrenceKey =
+			target.closest<HTMLElement>('[data-chat-board-occurrence]')?.dataset.chatBoardOccurrence ??
+			null;
+	}
+
+	function clearFocusedOccurrence(event: FocusEvent): void {
+		const next = event.relatedTarget;
+		if (next instanceof Node && viewportRef?.contains(next)) return;
+		focusedOccurrenceKey = null;
+	}
+
 	onDestroy(() => {
-		rememberScrollPosition();
 		virtual.destroy();
 	});
 </script>
@@ -169,6 +193,8 @@
 	style:overflow-anchor="none"
 	data-chat-board-lane-list={columnId}
 	onscroll={rememberScrollPosition}
+	onfocusin={rememberFocusedOccurrence}
+	onfocusout={clearFocusedOccurrence}
 >
 	{#if occurrences.length === 0}
 		<div class="grid min-h-40 place-items-center px-4 text-center">

@@ -1,6 +1,6 @@
 export type ChatBoardPresentationBand = 'narrow' | 'medium' | 'wide';
 
-type PendingFocusTarget =
+export type ChatBoardFocusTarget =
 	| { readonly kind: 'lane'; readonly columnId: string }
 	| {
 			readonly kind: 'occurrence';
@@ -10,7 +10,7 @@ type PendingFocusTarget =
 	  };
 
 interface PendingPresentationFocus {
-	readonly target: PendingFocusTarget;
+	readonly target: ChatBoardFocusTarget;
 	readonly band: ChatBoardPresentationBand;
 	readonly activeColumnId: string | null;
 }
@@ -52,7 +52,12 @@ export class ChatBoardFocusController {
 		if (target) this.#pending = { target, band: nextBand, activeColumnId };
 	}
 
-	#captureFocusTarget(active: HTMLElement): PendingFocusTarget | null {
+	captureFocusTarget(active: HTMLElement): ChatBoardFocusTarget | null {
+		if (!this.#root?.contains(active)) return null;
+		return this.#captureFocusTarget(active);
+	}
+
+	#captureFocusTarget(active: HTMLElement): ChatBoardFocusTarget | null {
 		const tab = active.closest<HTMLElement>('[data-chat-board-tab]');
 		if (tab?.dataset.chatBoardTab) {
 			return { kind: 'lane', columnId: tab.dataset.chatBoardTab };
@@ -75,19 +80,22 @@ export class ChatBoardFocusController {
 		const active = document.activeElement;
 		if (active instanceof HTMLElement && active !== document.body) return;
 		const { target, band, activeColumnId } = pending;
-		if (
-			band === 'narrow' &&
-			activeColumnId &&
-			target.columnId !== activeColumnId
-		) {
-			this.focusLane(activeColumnId);
-			return;
-		}
-		if (target.kind === 'occurrence' && this.#focusOccurrenceControl(target)) return;
-		this.focusLane(target.columnId);
+		this.restoreFocusTarget(target, band, activeColumnId);
 	}
 
-	#focusOccurrenceControl(target: Extract<PendingFocusTarget, { kind: 'occurrence' }>): boolean {
+	restoreFocusTarget(
+		target: ChatBoardFocusTarget,
+		band: ChatBoardPresentationBand,
+		activeColumnId: string | null,
+	): boolean {
+		if (band === 'narrow' && activeColumnId && target.columnId !== activeColumnId) {
+			return this.focusLane(activeColumnId);
+		}
+		if (target.kind === 'occurrence' && this.#focusOccurrenceControl(target)) return true;
+		return this.focusLane(target.columnId);
+	}
+
+	#focusOccurrenceControl(target: Extract<ChatBoardFocusTarget, { kind: 'occurrence' }>): boolean {
 		const control = this.#root?.querySelector<HTMLElement>(
 			`[data-chat-board-occurrence="${CSS.escape(target.occurrenceKey)}"] [data-chat-board-focus-target="${CSS.escape(target.control)}"]`,
 		);
