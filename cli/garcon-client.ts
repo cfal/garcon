@@ -20,6 +20,7 @@ import {
   type ChatRowTargetResponse,
 } from '@garcon/common/chat-row-contracts';
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
+import { normalizeCommandTagMutationOutcome } from '@garcon/common/chat-tag-mutations';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import { parseChatListResponse, type ChatListResponse } from '@garcon/common/chat-list';
 import { parseParentChatRef, type ParentChatRef } from '@garcon/common/chat-parentage';
@@ -162,6 +163,9 @@ async function responseBody(response: Response, phase: CliErrorPhase): Promise<u
 
 function parseCommandAcceptedResponse(value: unknown): CommandAcceptedResponse {
   const raw = record(value);
+  const tagMutation = raw?.tagMutation === undefined
+    ? undefined
+    : normalizeCommandTagMutationOutcome(raw.tagMutation);
   if (
     raw?.success !== true
     || typeof raw.commandType !== 'string'
@@ -169,6 +173,7 @@ function parseCommandAcceptedResponse(value: unknown): CommandAcceptedResponse {
     || typeof raw.chatId !== 'string'
     || (raw.status !== 'accepted' && raw.status !== 'duplicate')
     || typeof raw.acceptedAt !== 'string'
+    || tagMutation === null
   ) {
     throw new CliError('submission', 'server returned an invalid command acceptance response', 3);
   }
@@ -180,6 +185,7 @@ function parseCommandAcceptedResponse(value: unknown): CommandAcceptedResponse {
     ...(typeof raw.turnId === 'string' ? { turnId: raw.turnId } : {}),
     status: raw.status,
     acceptedAt: raw.acceptedAt,
+    ...(tagMutation === undefined ? {} : { tagMutation }),
   };
 }
 

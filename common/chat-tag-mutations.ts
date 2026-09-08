@@ -110,3 +110,30 @@ export type CommandTagMutationOutcome =
   | { readonly status: 'applied'; readonly addedTags: readonly string[] }
   | { readonly status: 'not-applied'; readonly errorCode: 'CHAT_TAG_SAVE_FAILED'; readonly retryable: true }
   | { readonly status: 'unknown'; readonly errorCode: 'CHAT_TAG_SAVE_UNKNOWN'; readonly recoveryRequired: true };
+
+export function normalizeCommandTagMutationOutcome(value: unknown): CommandTagMutationOutcome | null {
+  const raw = record(value);
+  if (!raw || typeof raw.status !== 'string') return null;
+  if (raw.status === 'applied') {
+    if (!hasOnlyKeys(raw, ['status', 'addedTags'])) return null;
+    const addedTags = stringArray(raw.addedTags);
+    return addedTags ? { status: 'applied', addedTags } : null;
+  }
+  if (raw.status === 'not-applied') {
+    if (
+      !hasOnlyKeys(raw, ['status', 'errorCode', 'retryable'])
+      || raw.errorCode !== 'CHAT_TAG_SAVE_FAILED'
+      || raw.retryable !== true
+    ) return null;
+    return { status: 'not-applied', errorCode: 'CHAT_TAG_SAVE_FAILED', retryable: true };
+  }
+  if (raw.status === 'unknown') {
+    if (
+      !hasOnlyKeys(raw, ['status', 'errorCode', 'recoveryRequired'])
+      || raw.errorCode !== 'CHAT_TAG_SAVE_UNKNOWN'
+      || raw.recoveryRequired !== true
+    ) return null;
+    return { status: 'unknown', errorCode: 'CHAT_TAG_SAVE_UNKNOWN', recoveryRequired: true };
+  }
+  return null;
+}

@@ -15,6 +15,7 @@ import type {
 } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
+import type { CommandTagMutationOutcome } from '@garcon/common/chat-tag-mutations';
 import { normalizeTags } from '@garcon/common/tags';
 import type { CliInvocation, StartAsyncCliInvocation } from './args.js';
 import {
@@ -67,6 +68,22 @@ function startTags(additionalTags: readonly string[] | undefined): string[] {
 function resumeTags(additionalTags: readonly string[] | undefined): string[] | undefined {
   const tags = normalizeTags(additionalTags ?? []).filter((tag) => tag !== 'cli');
   return tags.length === 0 ? undefined : tags;
+}
+
+function reportTagMutationOutcome(
+  outcome: CommandTagMutationOutcome | undefined,
+  output: CliOutput,
+): void {
+  if (!outcome || outcome.status === 'applied') return;
+  if (outcome.status === 'not-applied') {
+    output.diagnostic(
+      'The run was accepted, but its requested tags were not saved. Add the tags separately; do not resubmit the run.',
+    );
+    return;
+  }
+  output.diagnostic(
+    "The run was accepted, but its requested tags could not be confirmed. Check the chat's saved tags before adding them separately; do not resubmit the run.",
+  );
 }
 
 function requireResumeChat(sessions: readonly ChatListEntry[], chatId: string): ChatListEntry {
@@ -236,6 +253,7 @@ export async function runConsultation(
     ? await submitStart(invocation, prompt, client, signal, createId, createChatId)
     : await submitResume(invocation, prompt, client, signal, createId);
   output.accepted(accepted);
+  reportTagMutationOutcome(accepted.tagMutation, output);
   let titleError: unknown | undefined;
   try {
     await updateRequestedTitle(invocation, accepted.chatId, client, signal);

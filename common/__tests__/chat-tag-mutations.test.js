@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   normalizeChatTagsMutationResponse,
+  normalizeCommandTagMutationOutcome,
   normalizeRecoverChatTagsResponse,
 } from '../chat-tag-mutations.ts';
 
@@ -38,6 +39,49 @@ describe('chat tag mutation responses', () => {
       success: true,
       chatId: 'chat-1',
       tags: [],
+      extra: true,
+    })).toBeNull();
+  });
+
+  it('parses every accepted-command tag outcome', () => {
+    expect(normalizeCommandTagMutationOutcome({
+      status: 'applied',
+      addedTags: ['ready'],
+    })).toEqual({ status: 'applied', addedTags: ['ready'] });
+    expect(normalizeCommandTagMutationOutcome({
+      status: 'not-applied',
+      errorCode: 'CHAT_TAG_SAVE_FAILED',
+      retryable: true,
+    })).toEqual({
+      status: 'not-applied',
+      errorCode: 'CHAT_TAG_SAVE_FAILED',
+      retryable: true,
+    });
+    expect(normalizeCommandTagMutationOutcome({
+      status: 'unknown',
+      errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+      recoveryRequired: true,
+    })).toEqual({
+      status: 'unknown',
+      errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+      recoveryRequired: true,
+    });
+  });
+
+  it('rejects malformed accepted-command tag outcomes', () => {
+    expect(normalizeCommandTagMutationOutcome({
+      status: 'applied',
+      addedTags: ['Ready'],
+    })).toBeNull();
+    expect(normalizeCommandTagMutationOutcome({
+      status: 'not-applied',
+      errorCode: 'CHAT_TAG_SAVE_FAILED',
+      retryable: false,
+    })).toBeNull();
+    expect(normalizeCommandTagMutationOutcome({
+      status: 'unknown',
+      errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+      recoveryRequired: true,
       extra: true,
     })).toBeNull();
   });

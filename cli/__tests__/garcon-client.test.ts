@@ -829,6 +829,28 @@ describe('GarconClient', () => {
     expect(redirect).toBe('error');
   });
 
+  test.each([
+    { status: 'applied', addedTags: ['cli'] },
+    { status: 'not-applied', errorCode: 'CHAT_TAG_SAVE_FAILED', retryable: true },
+    { status: 'unknown', errorCode: 'CHAT_TAG_SAVE_UNKNOWN', recoveryRequired: true },
+  ] as const)('preserves the $status post-admission tag outcome', async (tagMutation) => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: true,
+        commandType: 'agent-run',
+        clientRequestId: runRequest.clientRequestId,
+        chatId: runRequest.chatId,
+        turnId: 'turn-1',
+        status: 'accepted',
+        acceptedAt: new Date().toISOString(),
+        tagMutation,
+      }),
+    });
+
+    await expect(client.runChat(runRequest)).resolves.toMatchObject({ tagMutation });
+  });
+
   test('updates a chat title through the existing workspace API', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
     const client = new GarconClient({
