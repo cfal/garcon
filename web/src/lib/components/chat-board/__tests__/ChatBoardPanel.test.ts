@@ -418,8 +418,12 @@ describe('ChatBoardPanel', () => {
 		render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
 		const reviewHeading = screen.getByRole('heading', { name: 'Review' });
 
-		await fireEvent.keyDown(reviewHeading, { key: 'Shift' });
 		reviewHeading.focus();
+		expect(getChatBoardPanelMemory(controller).focusTarget).toEqual({
+			kind: 'lane',
+			columnId: reviewColumn.id,
+		});
+		await fireEvent.keyDown(reviewHeading, { key: 'Shift' });
 		await nextAnimationFrame();
 		await nextAnimationFrame();
 

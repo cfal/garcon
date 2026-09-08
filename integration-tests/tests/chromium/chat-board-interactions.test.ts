@@ -294,6 +294,16 @@ describe('Chromium Chat Board interactions', () => {
         },
         { chatId: reorderedChatId, expectedIndex: CHAT_COUNT - 1, columnId: READY_COLUMN_ID },
       );
+
+      markPhase('releasing the virtual focus pin after focus leaves the board');
+      const reorderedCard = fixture.page.locator(
+        `[data-chat-board-column-id="${READY_COLUMN_ID}"] [data-chat-board-chat-id="${reorderedChatId}"]`,
+      );
+      await reorderedCard.waitFor();
+      await fixture.page.getByRole('button', { name: 'View', exact: true }).focus();
+      await setLaneScroll(fixture, READY_COLUMN_ID, 0);
+      await reorderedCard.waitFor({ state: 'detached' });
+
       markPhase('recording independent lane scroll positions');
       const readyScrollTop = await setLaneScroll(fixture, READY_COLUMN_ID, 0.4);
       const reviewScrollTop = await setLaneScroll(fixture, REVIEW_COLUMN_ID, 0.7);
@@ -347,14 +357,6 @@ describe('Chromium Chat Board interactions', () => {
       }
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
-
-      markPhase('releasing the virtual focus pin after focus leaves the board');
-      const reorderedCard = fixture.page.locator(
-        `[data-chat-board-column-id="${READY_COLUMN_ID}"] [data-chat-board-chat-id="${reorderedChatId}"]`,
-      );
-      await fixture.page.getByRole('button', { name: 'View', exact: true }).focus();
-      await setLaneScroll(fixture, READY_COLUMN_ID, 0);
-      await reorderedCard.waitFor({ state: 'detached' });
 
       markPhase('retaining an offscreen focus bookmark across the mobile host remount');
       await setLaneScroll(fixture, READY_COLUMN_ID, 1);
