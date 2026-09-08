@@ -19,6 +19,11 @@ const second: ChatBoard = {
 	name: 'Second',
 	columns: [],
 };
+const third: ChatBoard = {
+	id: '77777777-7777-4777-8777-777777777777',
+	name: 'Third',
+	columns: [],
+};
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -201,6 +206,30 @@ describe('ChatBoardController', () => {
 		await vi.waitFor(() => expect(test.controller.catalog.revision).toBe(2));
 		expect(test.activeColumns[first.id]).toBe(addedColumn.id);
 		expect(test.controller.activeColumnId).toBe(addedColumn.id);
+	});
+
+	it('repairs a deleted selection from the catalog before coalesced stale responses', async () => {
+		const staleResponse = deferred<ChatBoardCatalog>();
+		const currentResponse = deferred<ChatBoardCatalog>();
+		const test = harness(catalog(1, [first, second, third]));
+		await test.controller.refresh(true);
+		test.controller.selectBoard(second.id);
+		test.controller.setPresentationVisible(true);
+		test.api.load
+			.mockImplementationOnce(() => staleResponse.promise)
+			.mockImplementationOnce(() => currentResponse.promise);
+
+		const refreshing = test.controller.refresh(false);
+		test.invalidations.publish({ kind: 'catalog', revision: 3, reason: 'updated' });
+		staleResponse.resolve(catalog(2, [first, third]));
+		await vi.waitFor(() => expect(test.api.load).toHaveBeenCalledTimes(3));
+
+		expect(test.controller.catalog.revision).toBe(1);
+		expect(test.selectedBoardId).toBe(second.id);
+
+		currentResponse.resolve(catalog(3, [first, third]));
+		await refreshing;
+		expect(test.selectedBoardId).toBe(third.id);
 	});
 
 	it('stops responding after disposal', async () => {
