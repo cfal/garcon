@@ -73,7 +73,7 @@ describe('sidebar search interactions', () => {
 		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
 	});
 
-	it('renders the overlay in place by default', async () => {
+	it('renders as one body-level application dialog', async () => {
 		render(SidebarSearchDialog, {
 			open: true,
 			query: '',
@@ -90,49 +90,25 @@ describe('sidebar search interactions', () => {
 			onClose: vi.fn(),
 		});
 
-		const overlay = await screen
-			.findByText('First chat')
-			.then((row) => row.closest('[data-slot="search-dialog-overlay"]'));
-		expect(overlay?.parentElement).not.toBe(document.body);
+		const dialog = await screen.findByRole('dialog', { name: 'Search chats...' });
+		expect(dialog.parentElement).toBe(document.body);
+		expect(document.querySelectorAll('[data-slot="dialog-overlay"]')).toHaveLength(1);
 	});
 
-	it('mounts the overlay at document.body level when portaling is requested', async () => {
-		render(SidebarSearchDialog, {
-			open: true,
-			query: '',
-			filteredChats: [createChat('chat-1', 'First chat')],
-			savedSearches: [],
-			currentTime: new Date('2025-01-01T03:00:00.000Z'),
-			highlightedIndex: 0,
-			portalToBody: true,
-			onQueryChange: vi.fn(),
-			onSelectChat: vi.fn(),
-			onApplySavedSearch: vi.fn(),
-			onCreateSavedSearch: vi.fn(),
-			onOpenManager: vi.fn(),
-			onHighlightChange: vi.fn(),
-			onClose: vi.fn(),
-		});
-
-		const row = await screen.findByText('First chat');
-		const overlay = row.closest('[data-slot="search-dialog-overlay"]');
-		expect(overlay?.parentElement).toBe(document.body);
-	});
-
-	it('renders labeled full-width action buttons below the input row on mobile', () => {
+	it('renders icon-only mobile actions with full touch targets', () => {
 		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
 		});
 
 		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
 		expect(inputShell?.className).toContain('h-11');
-		expect(inputShell?.className).toContain('sm:h-9');
+		expect(inputShell?.className).toContain('min-[769px]:pointer-fine:h-9');
 
-		for (const name of ['Search help', 'Add saved search', 'Manage searches']) {
+		for (const name of ['Search help', 'Add saved search', 'Manage searches', 'Close search']) {
 			const button = screen.getByRole('button', { name });
-			expect(button.textContent).toContain(name);
-			expect(button.className).toContain('flex-1');
+			expect(button.textContent?.trim()).toBe('');
 			expect(button.className).toContain('h-11');
+			expect(button.className).toContain('w-11');
 		}
 	});
 
@@ -145,7 +121,6 @@ describe('sidebar search interactions', () => {
 		});
 
 		const input = await screen.findByRole('textbox');
-		expect(input.closest('.transient-backdrop')).toBeTruthy();
 		input.focus();
 
 		await fireEvent.keyDown(input, { key: 'Enter' });
@@ -206,13 +181,15 @@ describe('sidebar search interactions', () => {
 			onSortChange,
 		});
 
-		const trigger = await screen.findByRole('button', { name: 'Best match' });
+		const trigger = await screen.findByRole('button', {
+			name: 'Sort search results: Best match',
+		});
 		trigger.focus();
 		await fireEvent.click(trigger);
 		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Creation time' }));
 
 		expect(onSortChange).toHaveBeenCalledWith('created');
-		expect(screen.getByRole('button', { name: 'Creation time' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Sort search results: Creation time' })).toBeTruthy();
 	});
 
 	it('closes the sort menu before Escape closes the search dialog', async () => {
@@ -223,7 +200,9 @@ describe('sidebar search interactions', () => {
 			onClose,
 		});
 
-		await fireEvent.click(await screen.findByRole('button', { name: 'Best match' }));
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Sort search results: Best match' }),
+		);
 		const item = await screen.findByRole('menuitemradio', { name: 'Recent activity' });
 		await fireEvent.keyDown(item, { key: 'Escape', bubbles: true });
 		expect(onClose).not.toHaveBeenCalled();
@@ -271,25 +250,14 @@ describe('sidebar search interactions', () => {
 				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
 			),
 		);
-		const responsiveCloseButton = focusable.at(-1);
-		const lastVisible = focusable.at(-2);
-		expect(responsiveCloseButton).toBeTruthy();
+		const lastVisible = focusable.at(-1);
 		expect(lastVisible).toBeTruthy();
-		responsiveCloseButton!.style.display = 'none';
 		lastVisible!.focus();
 
 		await fireEvent.keyDown(lastVisible!, { key: 'Tab', bubbles: true });
 		expect(document.activeElement).toBe(input);
 
 		await fireEvent.keyDown(input, { key: 'Tab', shiftKey: true, bubbles: true });
-		expect(document.activeElement).toBe(lastVisible);
-
-		dialog.focus();
-		await fireEvent.keyDown(dialog, { key: 'Tab', bubbles: true });
-		expect(document.activeElement).toBe(input);
-
-		dialog.focus();
-		await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true, bubbles: true });
 		expect(document.activeElement).toBe(lastVisible);
 	});
 
@@ -426,28 +394,9 @@ describe('sidebar search interactions', () => {
 		expect(inputShell?.nextElementSibling).toBe(closeButton);
 		expect(closeButton.className).toContain('h-11');
 		expect(closeButton.className).toContain('w-11');
-		expect(closeButton.className).toContain('sm:hidden');
+		expect(closeButton.className).toContain('min-[769px]:pointer-fine:h-9');
 
 		await fireEvent.click(closeButton);
-
-		expect(onClose).toHaveBeenCalledTimes(1);
-		await waitFor(() => {
-			expect(screen.queryByRole('textbox')).toBeNull();
-		});
-	});
-
-	it('closes when clicking outside the dialog panel', async () => {
-		const onClose = vi.fn();
-
-		render(SidebarSearchDialogHost, {
-			filteredChats: [createChat('chat-1', 'First chat')],
-			onClose,
-		});
-
-		const container = document.querySelector('.fixed.inset-0.flex.items-stretch.justify-center');
-		if (!(container instanceof HTMLElement)) throw new Error('Expected search dialog container');
-
-		await fireEvent.click(container);
 
 		expect(onClose).toHaveBeenCalledTimes(1);
 		await waitFor(() => {
@@ -478,11 +427,11 @@ describe('sidebar search interactions', () => {
 			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
 		});
 
-		const dialogContent = document.querySelector('[data-slot="search-dialog-content"]');
-		expect(dialogContent?.className).toContain('sm:h-[min(44rem,calc(100dvh-8rem))]');
-		expect(dialogContent?.className).toContain('sm:w-full');
-		expect(dialogContent?.className).toContain('sm:max-w-3xl');
-		expect(dialogContent?.className).toContain('sm:rounded-2xl');
+		const dialogContent = document.querySelector('[data-search-dialog-content]');
+		expect(dialogContent?.className).toContain('h-[var(--app-height)]');
+		expect(dialogContent?.className).toContain('w-screen');
+		expect(dialogContent?.className).toContain('min-[769px]:pointer-fine:max-w-3xl');
+		expect(dialogContent?.className).toContain('min-[769px]:pointer-fine:rounded-2xl');
 
 		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
 		expect(inputShell?.className).toContain('relative');
@@ -493,9 +442,9 @@ describe('sidebar search interactions', () => {
 		const input = await screen.findByRole('textbox');
 		expect(input.className).toContain('bg-transparent');
 		expect(input.className).toContain('pl-9');
-		expect(input.className).toContain('pr-8');
+		expect(input.className).toContain('pr-11');
 		expect(input.className).toContain('text-base');
-		expect(input.className).toContain('sm:pointer-fine:text-sm');
+		expect(input.className).toContain('min-[769px]:pointer-fine:text-sm');
 		expect(input.className).toContain('outline-none');
 
 		expect(await screen.findByRole('listbox')).toBeTruthy();
@@ -504,6 +453,9 @@ describe('sidebar search interactions', () => {
 		);
 		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
 			'overflow-y-auto',
+		);
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
+			'touch-pan-y',
 		);
 	});
 

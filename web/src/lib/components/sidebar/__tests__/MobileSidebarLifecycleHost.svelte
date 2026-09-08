@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
+	import SidebarSearchDialogs from '../SidebarSearchDialogs.svelte';
 	import {
 		setAppShell,
 		setLocalSettings,
@@ -77,6 +78,7 @@
 	const sidebarSearchContext = createSidebarSearchContext();
 
 	let sidebarOpen = $state(initialSidebarOpen());
+	let sidebarSearchResultSort = $state<'relevance' | 'activity' | 'created'>('relevance');
 
 	// Mirrors the AppShell drawer-close effect that resets the search
 	// dialog cluster whenever the mobile drawer is closed.
@@ -130,15 +132,25 @@
 		get sidebarChatItemLayout() {
 			return sidebarChatItemLayout;
 		},
+		get sidebarSearchResultSort() {
+			return sidebarSearchResultSort;
+		},
 		toggle(_key: 'sidebarGroupNestedProjectPaths') {
 			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 		},
-		set(key: 'sidebarGrouping' | 'sidebarChatItemLayout', value: string) {
+		set(
+			key: 'sidebarGrouping' | 'sidebarChatItemLayout' | 'sidebarSearchResultSort',
+			value: string,
+		) {
 			if (key === 'sidebarGrouping') {
 				sidebarGrouping = value as SidebarChatGrouping;
 				return;
 			}
-			sidebarChatItemLayout = value as SidebarChatItemLayout;
+			if (key === 'sidebarChatItemLayout') {
+				sidebarChatItemLayout = value as SidebarChatItemLayout;
+				return;
+			}
+			sidebarSearchResultSort = value as typeof sidebarSearchResultSort;
 		},
 	} as never);
 	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
@@ -191,6 +203,8 @@
 
 <button type="button" onclick={() => (sidebarOpen = true)}>Open sidebar</button>
 <button type="button" onclick={() => (sidebarOpen = false)}>Close sidebar</button>
+
+<SidebarSearchDialogs {chats} onSelectChat={() => {}} />
 
 {#if sidebarOpen}
 	<Sidebar

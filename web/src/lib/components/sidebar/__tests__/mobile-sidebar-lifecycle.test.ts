@@ -138,16 +138,15 @@ describe('mobile sidebar lifecycle', () => {
 		render(MobileSidebarLifecycleHost, { chats, sidebarSearch });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Search chats...' }));
-		expect(screen.getByRole('dialog')).toBeTruthy();
-		// The mobile overlay must escape the drawer subtree and mount at
-		// body level so it fills the whole screen.
-		const overlay = document.querySelector('[data-slot="search-dialog-overlay"]');
-		expect(overlay?.parentElement).toBe(document.body);
+		const searchDialog = screen.getByRole('dialog', { name: 'Search chats...' });
+		expect(searchDialog.parentElement).toBe(document.body);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
 
-		expect(screen.queryByRole('dialog')).toBeNull();
+		await waitFor(() => {
+			expect(document.querySelector('[data-search-dialog-content][data-state="open"]')).toBeNull();
+		});
 		expect(screen.getByRole('button', { name: 'Search chats...' })).toBeTruthy();
 	});
 
@@ -172,6 +171,8 @@ describe('mobile sidebar lifecycle', () => {
 
 		expect(sidebarSearch.searchDialogOpen).toBe(false);
 		expect(sidebarSearch.managerOpen).toBe(false);
-		expect(screen.queryByRole('dialog')).toBeNull();
+		await waitFor(() => {
+			expect(document.querySelector('[role="dialog"][data-state="open"]')).toBeNull();
+		});
 	});
 });
