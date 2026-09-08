@@ -91,32 +91,33 @@ describe('assistant start and schedule commands', () => {
     });
   }, 60_000);
 
-  test('reports the retained child identity when current preambles block its initial slash command', async () => {
-    await withIntegrationFixture('agent-command-retained-preamble', async (fixture) => {
+  test('starts without preambles even when enabled defaults would block a slash command', async () => {
+    await withIntegrationFixture('agent-command-no-preambles', async (fixture) => {
       const agent = fixture.directAgents.openAi;
       const source = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'Request a child.' });
       const cursor = fixture.client.markEvents();
       await fixture.client.startDirectChat({ chatId: source, content: 'Request a child.', projectPath: fixture.dirs.project, agent });
       await held.received;
-      const preamble = await fixture.client.post<PreamblesMutationResponse>('/api/v1/preambles', {
+      await fixture.client.post<PreamblesMutationResponse>('/api/v1/preambles', {
         expectedRevision: 0,
         preamble: { enabled: true, title: 'Synthetic default', content: 'Synthetic boundary instructions.', scope: { type: 'global' } },
       });
       held.releaseText(`<garcon-start-agent agent="${agent.agentId}" provider="${agent.provider.providerId}" model="${agent.provider.model}">/synthetic-command</garcon-start-agent>`);
       const outcome = await waitForOutcome(fixture, source, 'agent-start-outcome', cursor);
-      expect(outcome).toMatchObject({ status: 'preamble-rejected', reason: 'slash-command-blocked' });
-      if (outcome.type !== 'agent-start-outcome' || outcome.status !== 'preamble-rejected') throw new Error('Missing retained child');
+      expect(outcome).toMatchObject({ status: 'created' });
+      if (outcome.type !== 'agent-start-outcome' || outcome.status !== 'created') throw new Error('Missing child');
+      const received = await fixture.fakeProviders.openAi.waitForRequest({ lastUserText: '/synthetic-command' });
+      expect(received.lastUserText).toBe('/synthetic-command');
       const chats = await fixture.client.listChats();
       expect(chats.sessions).toHaveLength(2);
       expect(chats.sessions.find((chat) => chat.id === outcome.chatId)?.parentChat).toEqual({ chatId: source, relation: 'delegation' });
       const child = await fixture.client.getMessages(outcome.chatId);
-      expect(userContents(child.messages)).toEqual([]);
-      expect(fixture.fakeProviders.openAi.requests().some((request) => request.lastUserText.includes('/synthetic-command'))).toBe(false);
+      expect(userContents(child.messages)).toEqual(['/synthetic-command']);
+      expect(messagesOfType(child.messages, 'transcript-notice').some((notice) => notice.detail?.type === 'preamble-application')).toBe(false);
       const persisted: ChatRegistrySnapshot = JSON.parse(await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'));
       const registry = persisted.sessions[outcome.chatId]!;
-      expect(registry.preambleSelection.orderedPreambleIds).toEqual([preamble.snapshot.preambles[0]!.id]);
-      expect(registry.pendingPreambleBoundary?.kind).toBe('new-chat');
+      expect(registry.preambleSelection).toEqual({ revision: 0, orderedPreambleIds: [] });
     });
   }, 60_000);
 });

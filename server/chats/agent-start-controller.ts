@@ -16,7 +16,7 @@ import { AgentCommandReplies, type AgentCommandContext } from './agent-command-r
 export interface AgentStartControllerOptions extends AgentCommandContext {
   readonly selection: Pick<AgentStartSelectionService, 'catalog' | 'resolve'>;
   readonly settings: Pick<SettingsStore, 'getExecutionDefaults'>;
-  readonly commands: Pick<ChatCommandService, 'submitAgentCommandStart'>;
+  readonly commands: Pick<ChatCommandService, 'submitAgentCommandStartLocked'>;
   readonly chatIds: Pick<ChatIdAllocator, 'allocate'>;
 }
 
@@ -31,7 +31,8 @@ export class AgentStartController {
       const catalog = await this.options.selection.catalog(command.agentId).then(
         (value) => ({ value }), (error: unknown) => ({ error }),
       );
-      return this.options.chatMutationLock.runExclusive(`chat:${source.chatId}`, async () => {
+      const allocated = this.options.chatIds.allocate();
+      return this.options.chatMutationLock.runExclusiveMany([`chat:${source.chatId}`, `chat:${allocated}`], async () => {
         if (!this.#replies.current(source, signal)) return null;
         let outcome: AgentStartOutcome;
         if (!this.options.isEnabled()) outcome = { status: 'failed', reason: 'disabled' };
@@ -45,18 +46,18 @@ export class AgentStartController {
             const selection = this.options.selection.resolve(
               catalog.value, command, this.options.settings.getExecutionDefaults(), parent.permissionMode,
             );
-            const allocated = this.options.chatIds.allocate();
             childChatId = allocated;
-            const result = await this.options.commands.submitAgentCommandStart({
+            const result = await this.options.commands.submitAgentCommandStartLocked({
               ...selection,
               chatId: allocated,
               parentChatId: source.chatId,
+              sourceViewId: source.viewId,
               clientRequestId: crypto.randomUUID(),
               clientMessageId: crypto.randomUUID(),
               command: command.prompt,
               agentId: command.agentId,
               projectPath: parent.projectPath,
-            });
+            }, signal);
             outcome = result.chat
               ? { status: 'created', chatId: allocated }
               : { status: 'outcome-unknown', chatId: allocated };

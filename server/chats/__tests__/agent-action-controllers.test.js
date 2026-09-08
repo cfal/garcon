@@ -51,7 +51,7 @@ function fixture() {
   };
   const agents = { getAgentCatalogEntry: mock(async () => entry) };
   const selection = new AgentStartSelectionService({ agents, apiProviders: { getCatalog: () => [] } });
-  const commands = { submitAgentCommandStart: mock(async (input) => {
+  const commands = { submitAgentCommandStartLocked: mock(async (input) => {
     events.push('start'); chats.set(input.chatId, {}); return { chat: { id: input.chatId } };
   }) };
   const scheduler = { scheduleForChat: mock(async () => {
@@ -75,11 +75,11 @@ describe('assistant action controllers', () => {
     gate.resolve();
     await drain();
     expect(f.agents.getAgentCatalogEntry).toHaveBeenCalledWith('test', { strict: true });
-    expect(f.commands.submitAgentCommandStart.mock.calls[0][0]).toMatchObject({
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).toMatchObject({
       parentChatId: SOURCE.chatId, chatId: CHILD, projectPath: '/synthetic/current', permissionMode: 'bypassPermissions',
       thinkingMode: 'high', apiProviderId: null, agentSettings: f.entry.defaultSettings, command: START.prompt,
     });
-    expect(f.commands.submitAgentCommandStart.mock.calls[0][0]).not.toHaveProperty('tags');
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).not.toHaveProperty('tags');
     expect(f.events).toEqual(['start', 'notice', 'reply']);
     expect(f.replies[0].input.receipt).toBeNull();
     expect(parseGarconCommandResult(f.replies[0].input.content)).toMatchObject({ status: 'created', chatId: CHILD, requestViewId: SOURCE.viewId, requestOrdinal: 2 });
@@ -94,14 +94,14 @@ describe('assistant action controllers', () => {
   ])('rejects %s before child allocation/admission', async (reason, configure, command) => {
     const f = fixture(); configure(f);
     f.start.request(SOURCE, command); await drain();
-    expect(f.commands.submitAgentCommandStart).not.toHaveBeenCalled();
+    expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
     expect(f.notices[0].detail).toMatchObject({ status: 'failed', reason });
   });
 
   for (const [code, reason] of [['PREAMBLE_SLASH_COMMAND_BLOCKED', 'slash-command-blocked'], ['PREAMBLE_SELECTION_COMPOSITION_INVALID', 'composition-invalid']]) {
     it(`identifies a child retained after ${code}`, async () => {
       const f = fixture();
-      f.commands.submitAgentCommandStart.mockImplementation(async () => {
+      f.commands.submitAgentCommandStartLocked.mockImplementation(async () => {
         f.chats.set(CHILD, {}); throw new DomainError(code, 'Synthetic preamble rejection');
       });
       f.start.request(SOURCE, START); await drain();
@@ -118,7 +118,7 @@ describe('assistant action controllers', () => {
       [new AggregateError([new Error('rollback flush failed')]), false, 'outcome-unknown'],
     ]) {
       const f = fixture();
-      f.commands.submitAgentCommandStart.mockImplementation(async () => { if (retained) f.chats.set(CHILD, {}); throw error; });
+      f.commands.submitAgentCommandStartLocked.mockImplementation(async () => { if (retained) f.chats.set(CHILD, {}); throw error; });
       f.start.request(SOURCE, START); await drain();
       expect(f.notices[0].detail.status).toBe(status);
     }
@@ -126,7 +126,7 @@ describe('assistant action controllers', () => {
 
   it.each(['not-found', 'not-a-directory', 'outside-base', 'permission-denied'])('reports an inherited project that is %s without creating a child', async (reason) => {
     const f = fixture();
-    f.commands.submitAgentCommandStart.mockImplementation((input) => resolveStartProjectPath(
+    f.commands.submitAgentCommandStartLocked.mockImplementation((input) => resolveStartProjectPath(
       input.projectPath, async () => ({ kind: 'unavailable', reason }),
     ));
     f.start.request(SOURCE, START);

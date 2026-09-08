@@ -13,6 +13,7 @@ import {
   type ChatCommandServiceDeps,
   type ChatStartInput,
   type AgentCommandStartInput,
+  type AgentCommandResumeInput,
   type CompactInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
@@ -74,8 +75,12 @@ export class ChatCommandService {
     return this.#start.submitScheduledStart(input);
   }
 
-  submitAgentCommandStart(input: AgentCommandStartInput) {
-    return this.#start.submitAgentCommandStart(input);
+  submitAgentCommandStartLocked(input: AgentCommandStartInput, signal: AbortSignal) {
+    return this.#start.submitAgentCommandStartLocked(input, signal);
+  }
+
+  submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal) {
+    return this.#session.submitAgentCommandResumeLocked(input, signal);
   }
 
   submitRun(input: SubmitRunInput) {

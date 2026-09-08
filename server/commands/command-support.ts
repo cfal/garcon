@@ -49,7 +49,7 @@ import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
-import type { LedgerRowDraft } from '../ledger/contracts.js';
+import type { LedgerRowDraft, TranscriptWatermark } from '../ledger/contracts.js';
 import type { PreambleHistoryEvidence } from '../ledger/preamble-history.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import {
@@ -198,11 +198,24 @@ export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   allowHandoffFork?: boolean;
 }
 
-export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & { origin: ChatStartOrigin };
+export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & {
+  origin: ChatStartOrigin;
+  title?: string;
+  transcriptSnapshot?: TranscriptWatermark;
+};
 
 export type AgentCommandStartInput = Omit<ChatStartInput,
   'origin' | 'images' | 'tags' | 'orderedPreambleIds' | 'userMessagePresentation' | 'parentChatId'
-> & { parentChatId: string };
+> & { parentChatId: string; sourceViewId: string };
+
+export interface AgentCommandResumeInput {
+  readonly sourceChatId: string;
+  readonly sourceViewId: string;
+  readonly chatId: string;
+  readonly command: string;
+  readonly clientRequestId: string;
+  readonly clientMessageId: string;
+}
 
 export interface ScheduledChatStartInput {
   chatId: ChatId;
@@ -222,6 +235,8 @@ export interface ScheduledChatStartInput {
 }
 
 export interface NormalizedChatStart {
+  title: string | null;
+  transcriptSnapshot: TranscriptWatermark | null;
   origin: ChatStartOrigin;
   chatId: ChatId;
   parentChatId: ChatId | null;
