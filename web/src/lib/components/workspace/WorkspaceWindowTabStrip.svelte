@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import { mergeProps } from 'bits-ui';
+	import { tabbable } from 'tabbable';
 	import { ContextMenu, ContextMenuTrigger } from '$lib/components/ui/context-menu';
 	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
 	import type {
@@ -22,6 +23,7 @@
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
+	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -36,6 +38,7 @@
 		isCurrent,
 		isChatProcessing = () => false,
 		onVisibleChange,
+		onMeasureChange,
 		surfaceMenuItems,
 	}: {
 		windowId: WorkspaceWindowId;
@@ -48,6 +51,7 @@
 		isCurrent: boolean;
 		isChatProcessing?: (surfaceId: string) => boolean;
 		onVisibleChange?: (ids: readonly string[]) => void;
+		onMeasureChange?: (measure: WorkspaceWindowTabMeasure | null) => void;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 	} = $props();
 
@@ -58,8 +62,24 @@
 	let measurementRail: HTMLDivElement | null = $state(null);
 	let tabPresentation = $state.raw<WindowTabPresentation | null>(null);
 	let closeFocusReturnTarget: HTMLElement | null = null;
+	let singleTabMenuOpen = $state(false);
+	let singleTabMenuShouldRestoreTabFocus = true;
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
+	const singleTabMenuSurfaceId = $derived.by(() => {
+		const [surfaceId] = tabs.order;
+		return tabs.order.length === 1 && surfaceId && hasContextMenu(surfaceId) ? surfaceId : null;
+	});
+
+	$effect.pre(() => {
+		const menuSurfaceId = singleTabMenuSurfaceId;
+		if (!menuSurfaceId) singleTabMenuOpen = false;
+		const viewport = untrack(() => tabViewport);
+		const focusedElement = document.activeElement;
+		if (focusedElement instanceof HTMLElement && viewport?.contains(focusedElement)) {
+			void restoreTabStripFocus(focusedElement);
+		}
+	});
 
 	$effect(() => {
 		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
@@ -126,8 +146,24 @@
 			const surfaceId = item.dataset.windowTabMeasureId;
 			if (surfaceId) widths.set(surfaceId, item.getBoundingClientRect().width);
 		}
+		const viewportWidth = tabViewport.clientWidth;
+		const measuredGap = Number.parseFloat(getComputedStyle(measurementRail).columnGap);
+		const tabGap = Number.isFinite(measuredGap) ? measuredGap : 2;
+		const hasCompleteMeasurements = tabs.order.every((surfaceId) => widths.has(surfaceId));
+		onMeasureChange?.(
+			hasCompleteMeasurements
+				? {
+							naturalWidth: tabs.order.reduce(
+							(sum, surfaceId, index) =>
+								sum + (widths.get(surfaceId) ?? 0) + (index > 0 ? tabGap : 0),
+							0,
+						),
+						viewportWidth,
+					}
+				: null,
+		);
 		const capacity = resolveWindowTabCapacity({
-			containerWidth: tabViewport.clientWidth,
+			containerWidth: viewportWidth,
 			actionsWidth: 0,
 			auxiliaryWidth: 0,
 			gap: 0,
@@ -139,7 +175,7 @@
 			pinnedIds: [],
 			availableWidth: capacity.contentWidth,
 			widths,
-			gap: 2,
+			gap: tabGap,
 			trailingReservedWidths: new Map(
 				tabs.order.flatMap((surfaceId) =>
 					supportsInlineClose(surfaceId)
@@ -247,10 +283,7 @@
 			return;
 		}
 		if (!isCurrent) return;
-		const activeTab = Array.from(
-			tabViewport?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
-		).find((button) => button.getAttribute('aria-selected') === 'true');
-		activeTab?.focus();
+		focusSelectedTab();
 	}
 
 	async function closeTab(surfaceId: string, trigger: HTMLButtonElement): Promise<void> {
@@ -263,6 +296,63 @@
 			await tick();
 			restoreFocusAfterClose(trigger, returnTarget);
 		}
+	}
+
+	function focusSelectedTab(): void {
+		tabViewport?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
+	}
+
+	async function restoreTabStripFocus(previouslyFocused: HTMLElement): Promise<void> {
+		await tick();
+		if (previouslyFocused.isConnected || document.activeElement !== document.body) return;
+		focusSelectedTab();
+	}
+
+	function handleSingleTabMenuInteractOutside(event: PointerEvent): void {
+		if (
+			event.target instanceof Element &&
+			event.target.closest('[data-slot="context-menu-sub-content"]')
+		) {
+			return;
+		}
+		singleTabMenuShouldRestoreTabFocus = false;
+	}
+
+	function handleSingleTabMenuOpenChange(open: boolean): void {
+		if (open) singleTabMenuShouldRestoreTabFocus = true;
+	}
+
+	function restoreSingleTabMenuFocus(event: Event): void {
+		event.preventDefault();
+		if (!singleTabMenuShouldRestoreTabFocus) return;
+		// Queues behind the transient layer's Escape restoration so the selected tab wins.
+		queueMicrotask(() => {
+			const activeElement = document.activeElement;
+			if (activeElement instanceof Element && activeElement.closest('[data-slot="dialog-content"]')) {
+				return;
+			}
+			focusSelectedTab();
+		});
+	}
+
+	async function handleSingleTabMenuKeydown(event: KeyboardEvent): Promise<void> {
+		if (event.key !== 'Tab') return;
+		const selectedTab = tabViewport?.querySelector<HTMLButtonElement>(
+			'[role="tab"][aria-selected="true"]',
+		);
+		if (!selectedTab) return;
+		const tabStops = tabbable(document.body);
+		const selectedTabIndex = tabStops.indexOf(selectedTab);
+		if (selectedTabIndex < 0) return;
+		const targetIndex = selectedTabIndex + (event.shiftKey ? -1 : 1);
+		const focusTarget = tabStops[targetIndex];
+		if (!focusTarget) return;
+
+		event.preventDefault();
+		singleTabMenuShouldRestoreTabFocus = false;
+		singleTabMenuOpen = false;
+		await tick();
+		focusTarget.focus();
 	}
 </script>
 
@@ -373,7 +463,7 @@
 		class={tabFrameClass(renderedLabelMode, showInlineClose)}
 		data-window-tab-measure-id={measurement ? surfaceId : undefined}
 	>
-		{#if measurement || !hasContextMenu(surfaceId)}
+		{#if measurement || singleTabMenuSurfaceId || !hasContextMenu(surfaceId)}
 			{@render tabButton(surfaceId, measurement, {})}
 		{:else}
 			<ContextMenu>
@@ -397,21 +487,49 @@
 	</div>
 {/snippet}
 
-<div
-	bind:this={tabViewport}
-	class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
-	role="tablist"
-	tabindex="-1"
-	aria-label={m.workspace_window_views()}
-	data-workspace-window-tabs={windowId}
-	data-workspace-tab-label-mode={labelMode}
-	ondragover={(event) => dnd.handleTabListDragOver(windowId, event)}
-	ondrop={(event) => void commitTabDrop(null, event)}
->
-	{#each displayedSurfaceIds as surfaceId (surfaceId)}
-		{@render tab(surfaceId)}
-	{/each}
-</div>
+{#snippet tabList(triggerProps: Record<string, unknown>)}
+	<div
+		{...triggerProps}
+		bind:this={tabViewport}
+		class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+		role="tablist"
+		tabindex="-1"
+		aria-label={m.workspace_window_views()}
+		data-workspace-window-tabs={windowId}
+		data-workspace-tab-label-mode={labelMode}
+		ondragover={(event) => dnd.handleTabListDragOver(windowId, event)}
+		ondrop={(event) => void commitTabDrop(null, event)}
+	>
+		{#each displayedSurfaceIds as surfaceId (surfaceId)}
+			{@render tab(surfaceId)}
+		{/each}
+	</div>
+{/snippet}
+
+{#if singleTabMenuSurfaceId}
+	<ContextMenu bind:open={singleTabMenuOpen} onOpenChange={handleSingleTabMenuOpenChange}>
+		<ContextMenuTrigger>
+			{#snippet child({ props })}
+				{@render tabList({ ...props, disabled: undefined })}
+			{/snippet}
+		</ContextMenuTrigger>
+		<WorkspaceWindowTabMenu
+			menu={contextMenuPrimitives}
+			{windowId}
+			{tabs}
+			surfaceId={singleTabMenuSurfaceId}
+			{hiddenSurfaceIds}
+			{labelFor}
+			{onSelect}
+			{surfaceMenuItems}
+			onContextMenuCloseAutoFocus={restoreSingleTabMenuFocus}
+			onContextMenuInteractOutside={handleSingleTabMenuInteractOutside}
+			onContextMenuKeydownCapture={handleSingleTabMenuKeydown}
+		/>
+	</ContextMenu>
+{:else}
+	{@render tabList({})}
+{/if}
 
 <div
 	bind:this={measurementRail}

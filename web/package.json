@@ -95,6 +95,7 @@
 		"katex": "^0.18.6",
 		"marked": "^18.0.11",
 		"mermaid": "^11.17.2",
+		"tabbable": "^6.5.0",
 		"tailwind-merge": "^3.6.0",
 		"tailwind-variants": "^3.3.1"
 	}

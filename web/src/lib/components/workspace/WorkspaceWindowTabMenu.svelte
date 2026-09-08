@@ -34,6 +34,9 @@
 		labelFor,
 		onSelect,
 		surfaceMenuItems,
+		onContextMenuCloseAutoFocus,
+		onContextMenuInteractOutside,
+		onContextMenuKeydownCapture,
 	}: {
 		menu: MenuPrimitives;
 		windowId: WorkspaceWindowId;
@@ -43,6 +46,9 @@
 		labelFor: (surfaceId: string) => string;
 		onSelect: (surfaceId: string) => void;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
+		onContextMenuCloseAutoFocus?: (event: Event) => void;
+		onContextMenuInteractOutside?: (event: PointerEvent) => void;
+		onContextMenuKeydownCapture?: (event: KeyboardEvent) => void;
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
@@ -249,6 +255,9 @@
 		class={contentClass}
 		data-workspace-window-tab-context-menu={surfaceId}
 		data-workspace-window-tab-menu="context"
+		onCloseAutoFocus={onContextMenuCloseAutoFocus}
+		onInteractOutside={onContextMenuInteractOutside}
+		onkeydowncapture={onContextMenuKeydownCapture}
 	>
 		{@render menuItems()}
 	</ContextMenuContent>

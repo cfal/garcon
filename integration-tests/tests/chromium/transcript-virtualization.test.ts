@@ -33,7 +33,10 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
-import { canonicalFilesWindowId } from '../../support/chromium-workspace.js';
+import {
+  canonicalFilesWindowId,
+  clickWorkspaceWindowAddAction,
+} from '../../support/chromium-workspace.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
@@ -1625,16 +1628,6 @@ async function openCurrentWorkspaceTabActionsMenu(page: Page): Promise<void> {
   });
 }
 
-async function openCurrentWorkspaceAddMenu(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const trigger = document.querySelector<HTMLButtonElement>(
-      '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
-    );
-    if (!trigger) throw new Error('Current workspace window add menu is missing.');
-    if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
-  });
-}
-
 async function clickMenuItem(page: Page, name: string): Promise<void> {
   await page.getByRole('menuitem', { name, exact: true }).click();
 }
@@ -1656,8 +1649,7 @@ async function openNewWorkspaceWindow(page: Page, name: string): Promise<string>
     'data-workspace-window-active-surface',
   );
   if (!sourceWindowId) throw new Error('Current workspace window has no ID.');
-  await openCurrentWorkspaceAddMenu(page);
-  await clickMenuItem(page, name);
+  await clickWorkspaceWindowAddAction(page, name);
   await page.waitForFunction(
     ({ expectedWindowId, previousSurfaceId }) => {
       const workspaceWindow = document.querySelector<HTMLElement>(
@@ -3457,8 +3449,7 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     userScrolledUp: true,
   });
   const chatIdentity = await currentWorkspaceIdentity(fixture.page);
-  await openCurrentWorkspaceAddMenu(fixture.page);
-  await clickMenuItem(fixture.page, 'New Terminal');
+  await clickWorkspaceWindowAddAction(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   await appendTurn(fixture.integration, chatId, 'chromium-hidden-append');
   await selectWorkspaceWindowSurface(fixture.page, chatIdentity.windowId, chatIdentity.surfaceId);
@@ -3482,8 +3473,7 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
   await waitForStablePinnedTranscriptLayout(fixture.page, 'pinned-append');
 
   const pinnedIdentity = await currentWorkspaceIdentity(fixture.page);
-  await openCurrentWorkspaceAddMenu(fixture.page);
-  await clickMenuItem(fixture.page, 'New Terminal');
+  await clickWorkspaceWindowAddAction(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   await appendTurn(fixture.integration, chatId, 'chromium-pinned-hidden-append');
   await selectWorkspaceWindowSurface(
@@ -4215,8 +4205,7 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
   await prepareTranscript(fixture, chatId);
   await scrollToPosition(fixture.page, 'middle');
   const chatIdentity = await currentWorkspaceIdentity(fixture.page);
-  await openCurrentWorkspaceAddMenu(fixture.page);
-  await clickMenuItem(fixture.page, 'New Terminal');
+  await clickWorkspaceWindowAddAction(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   const terminalIdentity = await currentWorkspaceIdentity(fixture.page);
   await selectWorkspaceWindowSurface(fixture.page, chatIdentity.windowId, chatIdentity.surfaceId);

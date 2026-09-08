@@ -5,6 +5,7 @@ import type { Locator, Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 import {
   canonicalFilesWindowId,
+  clickWorkspaceWindowAddAction,
   collapseCanonicalFilesWindow,
 } from '../../support/chromium-workspace.js';
 
@@ -89,8 +90,7 @@ async function openNewWindow(page: Page, label: string): Promise<string> {
     'data-workspace-window-active-surface',
   );
   if (!sourceWindowId) throw new Error('Current workspace window has no ID.');
-  await page.locator(`[data-workspace-window-add-trigger="${sourceWindowId}"]`).click();
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await clickWorkspaceWindowAddAction(page, label, sourceWindowId);
   await page.waitForFunction(
     ({ expectedWindowId, previousSurfaceId }) => {
       const workspaceWindow = document.querySelector<HTMLElement>(
@@ -137,8 +137,7 @@ async function openNewWindow(page: Page, label: string): Promise<string> {
 }
 
 async function openWindowTab(page: Page, windowId: string, label: string): Promise<void> {
-  await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await clickWorkspaceWindowAddAction(page, label, windowId);
 }
 
 interface ChatTranscriptPresentation {
@@ -807,6 +806,318 @@ async function resizeFirstPartition(page: Page): Promise<{ value: string; persis
 }
 
 describe('Chromium workspace windows', () => {
+  test('keeps full tab titles ahead of adaptive add actions', async () => {
+    await withChromiumFixture('workspace-window-adaptive-add-actions', async (fixture) => {
+      await fixture.page.setViewportSize({ width: 1440, height: 900 });
+      await fixture.page.evaluate(() => {
+        document.documentElement.style.fontSize = '20px';
+      });
+      const chatId = await createChat(fixture, 'workspace-window-adaptive-add-actions');
+      await openChat(fixture, chatId);
+      await collapseCanonicalFilesWindow(fixture.page);
+      const windowId = await fixture.page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!windowId) throw new Error('Missing adaptive-action workspace window.');
+
+      const titlebar = fixture.page.locator(`[data-workspace-window-titlebar="${windowId}"]`);
+      const addControls = titlebar.locator(`[data-workspace-window-add-controls="${windowId}"]`);
+      const tabViewport = fixture.page.locator(`[data-workspace-window-tabs="${windowId}"]`);
+      const selectedTab = tabViewport.getByRole('tab');
+      expect(await selectedTab.count()).toBe(1);
+      const tabViewportBounds = await tabViewport.boundingBox();
+      if (!tabViewportBounds) throw new Error('Missing adaptive-action tab viewport bounds.');
+      await tabViewport.click({
+        button: 'right',
+        position: { x: tabViewportBounds.width - 4, y: tabViewportBounds.height / 2 },
+      });
+      const tabContextMenu = fixture.page.locator('[data-workspace-window-tab-context-menu]');
+      await tabContextMenu.waitFor({ state: 'visible' });
+      const composer = fixture.page.locator('textarea[placeholder="Reply..."]');
+      await composer.click();
+      await tabContextMenu.waitFor({ state: 'detached' });
+      expect(await composer.evaluate((element) => element === document.activeElement)).toBe(true);
+
+      await tabViewport.click({
+        button: 'right',
+        position: { x: tabViewportBounds.width - 4, y: tabViewportBounds.height / 2 },
+      });
+      await tabContextMenu.waitFor({ state: 'visible' });
+      await fixture.page.keyboard.press('Escape');
+      await tabContextMenu.waitFor({ state: 'detached' });
+      expect(await selectedTab.evaluate((element) => element === document.activeElement)).toBe(true);
+
+      await selectedTab.focus();
+      await fixture.page.keyboard.press('Shift+F10');
+      await tabContextMenu.waitFor({ state: 'visible' });
+      await fixture.page.keyboard.press('Tab');
+      await tabContextMenu.waitFor({ state: 'detached' });
+      expect(
+        await addControls
+          .locator('button')
+          .first()
+          .evaluate((element) => element === document.activeElement),
+      ).toBe(true);
+
+      await selectedTab.focus();
+      await fixture.page.keyboard.press('Shift+F10');
+      await tabContextMenu.waitFor({ state: 'visible' });
+      await fixture.page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
+      const renameDialog = fixture.page.locator('[data-slot="dialog-content"]');
+      await renameDialog.waitFor({ state: 'visible' });
+      expect(
+        await renameDialog.evaluate((element) => element.contains(document.activeElement)),
+      ).toBe(true);
+      await fixture.page.keyboard.press('Escape');
+      await renameDialog.waitFor({ state: 'detached' });
+
+      await clickWorkspaceWindowAddAction(fixture.page, 'Open chat map', windowId);
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document.querySelectorAll(
+            `[data-workspace-window-tabs="${expectedWindowId}"] [role="tab"]`,
+          ).length === 2,
+        windowId,
+      );
+
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        return (
+          workspaceWindow
+            ?.querySelector('[data-workspace-window-tabs]')
+            ?.getAttribute('data-workspace-tab-label-mode') === 'full' &&
+          (workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length ?? 0) > 2
+        );
+      }, windowId);
+      const wideInlineCount = await addControls
+        .locator('[data-workspace-window-add-inline]')
+        .count();
+      expect(wideInlineCount).toBeGreaterThan(2);
+      expect(await addControls.locator('[data-workspace-window-add-trigger]').count()).toBe(0);
+      expect(
+        await addControls.evaluate((element) => {
+          const control = element.querySelector<HTMLElement>('button');
+          return {
+            controlWidth: control?.getBoundingClientRect().width,
+            gap: Number.parseFloat(getComputedStyle(element).columnGap),
+          };
+        }),
+      ).toEqual({ controlWidth: 28, gap: 2 });
+
+      await titlebar.evaluate((element) => {
+        const header = element as HTMLElement;
+        const tabViewport = header.querySelector<HTMLElement>('[data-workspace-window-tabs]');
+        const actionControls = header.querySelector<HTMLElement>(
+          '[data-workspace-window-add-controls]',
+        );
+        const measuredTabs = [
+          ...header.querySelectorAll<HTMLElement>('[data-window-tab-measure-id]'),
+        ];
+        if (!tabViewport || !actionControls || measuredTabs.length === 0) {
+          throw new Error('Adaptive title-bar measurements are incomplete.');
+        }
+        const naturalTabWidth = measuredTabs.reduce(
+          (width, tab, index) =>
+            width +
+            tab.getBoundingClientRect().width +
+            (index > 0 ? Number.parseFloat(getComputedStyle(tabViewport).columnGap) : 0),
+          0,
+        );
+        const fixedWidth =
+          header.getBoundingClientRect().width -
+          tabViewport.getBoundingClientRect().width -
+          actionControls.getBoundingClientRect().width;
+        const inlineButton = actionControls.querySelector<HTMLElement>(
+          '[data-workspace-window-add-inline]',
+        );
+        if (!inlineButton) throw new Error('Adaptive title bar has no inline action to measure.');
+        const controlWidth = inlineButton.getBoundingClientRect().width;
+        const controlGap = Number.parseFloat(getComputedStyle(actionControls).columnGap);
+        const twoInlineActionsAndMenuWidth = controlWidth * 3 + controlGap * 2;
+        header.style.width = `${Math.ceil(fixedWidth + naturalTabWidth + twoInlineActionsAndMenuWidth + 1)}px`;
+      });
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        return (
+          workspaceWindow
+            ?.querySelector('[data-workspace-window-tabs]')
+            ?.getAttribute('data-workspace-tab-label-mode') === 'full' &&
+          workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length === 2 &&
+          workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') !== null
+        );
+      }, windowId);
+
+      const inlineLabels = await addControls
+        .locator('[data-workspace-window-add-inline]')
+        .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
+      await addControls.locator('[data-workspace-window-add-trigger]').click();
+      const menu = fixture.page.locator(`[data-workspace-window-add-menu="${windowId}"]`);
+      const menuLabels = await menu
+        .getByRole('menuitem')
+        .evaluateAll((items) => items.map((item) => item.textContent?.trim() ?? ''));
+      expect(menuLabels).toHaveLength(wideInlineCount - 2);
+      expect(menuLabels.some((label) => inlineLabels.includes(label))).toBe(false);
+
+      const promotedMenuAction = menu.getByRole('menuitem').first();
+      const promotedActionId = await promotedMenuAction.getAttribute(
+        'data-workspace-window-add-action',
+      );
+      if (!promotedActionId) throw new Error('Overflow action has no stable identity.');
+      await promotedMenuAction.focus();
+      await titlebar.evaluate((element) => {
+        const header = element as HTMLElement;
+        header.style.width = `${header.getBoundingClientRect().width + 30}px`;
+      });
+      await fixture.page.waitForFunction(
+        ({ expectedActionId, expectedWindowId }) => {
+          const workspaceWindow = document.querySelector<HTMLElement>(
+            `[data-workspace-window-id="${expectedWindowId}"]`,
+          );
+          const promotedControl = workspaceWindow?.querySelector<HTMLElement>(
+            `[data-workspace-window-add-inline][data-workspace-window-add-action="${expectedActionId}"]`,
+          );
+          return (
+            promotedControl === document.activeElement &&
+            workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length === 3 &&
+            workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') !== null
+          );
+        },
+        { expectedActionId: promotedActionId, expectedWindowId: windowId },
+      );
+      await menu.waitFor({ state: 'detached' });
+      await fixture.page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
+      expect(
+        await addControls
+          .locator(`[data-workspace-window-add-action="${promotedActionId}"]`)
+          .evaluate((element) => element === document.activeElement),
+      ).toBe(true);
+
+      await titlebar.evaluate((element) => {
+        const header = element as HTMLElement;
+        header.style.width = `${header.getBoundingClientRect().width - 30}px`;
+      });
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        return (
+          workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length === 2 &&
+          workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') !== null
+        );
+      }, windowId);
+      await addControls.locator('[data-workspace-window-add-trigger]').click();
+      const retainedMenuAction = menu.getByRole('menuitem').nth(1);
+      const retainedActionId = await retainedMenuAction.getAttribute(
+        'data-workspace-window-add-action',
+      );
+      if (!retainedActionId) throw new Error('Retained overflow action has no stable identity.');
+      await retainedMenuAction.focus();
+      await titlebar.evaluate((element) => {
+        const header = element as HTMLElement;
+        header.style.width = `${header.getBoundingClientRect().width + 30}px`;
+      });
+      await fixture.page.waitForFunction(
+        ({ expectedActionId, expectedWindowId }) => {
+          const workspaceWindow = document.querySelector<HTMLElement>(
+            `[data-workspace-window-id="${expectedWindowId}"]`,
+          );
+          const openMenu = [
+            ...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]'),
+          ].find(
+            (element) =>
+              element.dataset.workspaceWindowAddMenu === expectedWindowId &&
+              element.dataset.state === 'open',
+          );
+          const retainedAction = openMenu?.querySelector<HTMLElement>(
+            `[data-workspace-window-add-action="${expectedActionId}"]`,
+          );
+          return (
+            retainedAction === document.activeElement &&
+            workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length === 3 &&
+            workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') !== null
+          );
+        },
+        { expectedActionId: retainedActionId, expectedWindowId: windowId },
+      );
+      await fixture.page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'detached' });
+
+      await titlebar.evaluate((element) => (element as HTMLElement).style.removeProperty('width'));
+      await fixture.page.waitForFunction(
+        ({ expectedCount, expectedWindowId }) => {
+          const workspaceWindow = document.querySelector<HTMLElement>(
+            `[data-workspace-window-id="${expectedWindowId}"]`,
+          );
+          return (
+            workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length ===
+              expectedCount &&
+            workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') === null
+          );
+        },
+        { expectedCount: wideInlineCount, expectedWindowId: windowId },
+      );
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('keeps sole-tab submenu traversal relative to the selected tab', async () => {
+    await withChromiumFixture('workspace-window-sole-tab-submenu-focus', async (fixture) => {
+      const chatId = await createChat(fixture, 'workspace-window-sole-tab-submenu-focus');
+      await openChat(fixture, chatId);
+      await collapseCanonicalFilesWindow(fixture.page);
+      const terminalWindowId = await openNewWindow(fixture.page, 'New Terminal');
+      const terminalWindow = fixture.page.locator(
+        `[data-workspace-window-id="${terminalWindowId}"]`,
+      );
+      const selectedTab = terminalWindow.getByRole('tab');
+      const firstAddControl = terminalWindow
+        .locator('[data-workspace-window-add-controls] button')
+        .first();
+      const contextMenu = fixture.page.locator('[data-workspace-window-tab-context-menu]');
+
+      expect(await selectedTab.count()).toBe(1);
+      await selectedTab.focus();
+      await fixture.page.keyboard.press('Shift+F10');
+      await contextMenu.waitFor({ state: 'visible' });
+      await fixture.page.getByRole('menuitem', { name: /Font size/ }).hover();
+      const fontSizeOption = fixture.page.getByRole('menuitemradio').first();
+      await fontSizeOption.waitFor({ state: 'visible' });
+      await fontSizeOption.focus();
+      await fixture.page.keyboard.press('Tab');
+      await contextMenu.waitFor({ state: 'detached' });
+      expect(await firstAddControl.evaluate((element) => element === document.activeElement)).toBe(
+        true,
+      );
+
+      await selectedTab.focus();
+      await fixture.page.keyboard.press('Shift+Tab');
+      const previousTabStop = fixture.page.locator(':focus');
+      await previousTabStop.evaluate((element) => {
+        element.setAttribute('data-sole-tab-previous-focus', '');
+      });
+      await selectedTab.focus();
+      await fixture.page.keyboard.press('Shift+F10');
+      await contextMenu.waitFor({ state: 'visible' });
+      await fixture.page.getByRole('menuitem', { name: /Font size/ }).hover();
+      await fontSizeOption.waitFor({ state: 'visible' });
+      await fontSizeOption.focus();
+      await fixture.page.keyboard.press('Shift+Tab');
+      await contextMenu.waitFor({ state: 'detached' });
+      expect(
+        await fixture.page
+          .locator('[data-sole-tab-previous-focus]')
+          .evaluate((element) => element === document.activeElement),
+      ).toBe(true);
+      fixture.assertNoBrowserErrors();
+    }, undefined, { serverEnvironment: { GARCON_TERMINAL_SHELL: '/usr/bin/cat' } });
+  });
+
   test('drags Chat onto any window, enforces split geometry, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
       await fixture.page.setViewportSize({ width: 1440, height: 900 });
@@ -844,7 +1155,9 @@ describe('Chromium workspace windows', () => {
       await verifyCanonicalSeparatorClearance(fixture.page, chatWindowId, filesWindowId);
       expect(await fixture.page.locator('[data-workspace-window-focus-ring]').count()).toBe(0);
       expect(
-        await fixture.page.locator(`[data-workspace-window-add-trigger="${chatWindowId}"]`).count(),
+        await fixture.page
+          .locator(`[data-workspace-window-add-controls="${chatWindowId}"]`)
+          .count(),
       ).toBe(1);
       expect(
         await fixture.page
@@ -1464,11 +1777,12 @@ describe('Chromium workspace windows', () => {
       await fileTab.focus();
       await waitForCloseOpacity('1');
       await fixture.page.keyboard.press('Tab');
-      expect(
-        await fixture.page
-          .locator(`[data-workspace-window-add-trigger="${windowId}"]`)
-          .evaluate((element) => document.activeElement === element),
-      ).toBe(true);
+      const firstAddControl = fixture.page
+        .locator(`[data-workspace-window-add-controls="${windowId}"] button`)
+        .first();
+      expect(await firstAddControl.evaluate((element) => document.activeElement === element)).toBe(
+        true,
+      );
       await fixture.page.keyboard.press('Shift+Tab');
       expect(await fileTab.evaluate((element) => document.activeElement === element)).toBe(true);
 
@@ -1647,7 +1961,9 @@ describe('Chromium workspace windows', () => {
       await terminalTab.hover();
       await closeButton.click();
       await closeButton.waitFor({ state: 'detached' });
-      await fixture.page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
+      await fixture.page
+        .locator(`[data-workspace-window-add-terminal-trigger="${windowId}"]`)
+        .click();
       await fixture.page
         .getByRole('menuitem', { name: terminalLabel, exact: true })
         .waitFor({ state: 'visible' });

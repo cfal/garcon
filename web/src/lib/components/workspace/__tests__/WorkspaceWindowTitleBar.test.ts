@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
+import WorkspaceWindowAddMenu from '../WorkspaceWindowAddMenu.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
-import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
+import { portableSingletonDescriptor, TERMINAL_LAUNCHER_ID } from '$lib/workspace/surface-types.js';
 import type {
 	DesktopWorkspaceNode,
 	SurfaceDescriptor,
@@ -12,6 +13,10 @@ import type {
 	WorkspaceWindowNode,
 } from '$lib/workspace/surface-types.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const {
@@ -26,6 +31,7 @@ const {
 	moveTabToWindow,
 	noteWindowChromeFocus,
 	openSingletonAsTab,
+	openTerminalSession,
 	moveTabToNewWindow,
 	copyToClipboard,
 	notificationError,
@@ -42,6 +48,7 @@ const {
 	moveTabToWindow: vi.fn(async () => undefined),
 	noteWindowChromeFocus: vi.fn(),
 	openSingletonAsTab: vi.fn(async () => undefined),
+	openTerminalSession: vi.fn(async () => undefined),
 	moveTabToNewWindow: vi.fn(async () => undefined),
 	copyToClipboard: vi.fn(async () => true),
 	notificationError: vi.fn(),
@@ -99,7 +106,7 @@ vi.mock('$lib/context', () => ({
 				: { allowed: true as const },
 		openSingletonAsTab,
 		createTerminal,
-		openTerminalSession: vi.fn(async () => undefined),
+		openTerminalSession,
 		closeSurface,
 		enterWindowFullscreen,
 		exitWindowFullscreen,
@@ -141,6 +148,10 @@ const terminalSurface = {
 	id: 'terminal:terminal-a',
 	type: 'terminal',
 	terminalId: 'terminal-a',
+} as const satisfies SurfaceDescriptor;
+const terminalLauncherSurface = {
+	id: TERMINAL_LAUNCHER_ID,
+	type: 'terminal-launcher',
 } as const satisfies SurfaceDescriptor;
 const otherChatSurface = {
 	id: 'chat-view:window-two',
@@ -590,6 +601,121 @@ describe('WorkspaceWindowTitleBar', () => {
 		).toBe(false);
 	});
 
+	it('opens the sole tab menu from the trailing title-bar space and the tab', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id]));
+		const tablist = screen.getByRole('tablist');
+		const tab = screen.getByRole('tab', { name: 'Chat A' });
+		expect(tablist.hasAttribute('disabled')).toBe(false);
+
+		await fireEvent.contextMenu(tablist, { clientX: 300, clientY: 12 });
+		const trailingSpaceMenu = await screen.findByRole('menu');
+		expect(
+			trailingSpaceMenu.getAttribute('data-workspace-window-tab-context-menu'),
+		).toBe(chatSurface.id);
+		expect(
+			Array.from(
+				trailingSpaceMenu.querySelectorAll<HTMLElement>('[data-workspace-window-tab-action]'),
+				(item) => item.dataset.workspaceWindowTabAction,
+			),
+		).toEqual(localTabActionOrder);
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(tab));
+
+		await fireEvent.contextMenu(tab);
+		await screen.findByRole('menuitem', { name: m.workspace_close_tab() });
+		expect(
+			document.querySelectorAll(
+				`[data-workspace-window-tab-context-menu="${chatSurface.id}"]`,
+			),
+		).toHaveLength(1);
+	});
+
+	it('restores selected-tab focus across sole and multi-tab layouts', async () => {
+		const dnd = new WorkspaceWindowDndController(
+			createWorkspaceLayoutStore(),
+			resolveUnmeasuredWorkspaceSplit,
+		);
+		const rendered = render(WorkspaceWindowTitleBar, {
+			workspaceWindow: workspaceWindow([chatSurface.id]),
+			labelFor,
+			dnd,
+			isCurrent: true,
+		});
+		const soleChatTab = screen.getByRole('tab', { name: 'Chat A' });
+		soleChatTab.focus();
+
+		await rendered.rerender({
+			workspaceWindow: workspaceWindow([chatSurface.id, gitSurface.id]),
+			labelFor,
+			dnd,
+			isCurrent: true,
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Chat A' })),
+		);
+		expect(document.activeElement).not.toBe(soleChatTab);
+
+		const gitTab = screen.getByRole('tab', { name: 'Git' });
+		gitTab.focus();
+		await rendered.rerender({
+			workspaceWindow: workspaceWindow([gitSurface.id]),
+			labelFor,
+			dnd,
+			isCurrent: true,
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Git' })),
+		);
+		expect(document.activeElement).not.toBe(gitTab);
+	});
+
+	it('keeps multi-tab trailing title-bar space outside tab context menus', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+
+		await fireEvent.contextMenu(screen.getByRole('tablist'));
+		expect(screen.queryByRole('menu')).toBeNull();
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		expect(await screen.findByRole('menu')).toBeTruthy();
+	});
+
+	it('keeps a sole terminal launcher outside tab context menus', async () => {
+		runtime.surfaces = { [terminalLauncherSurface.id]: terminalLauncherSurface };
+		renderTitleBar(workspaceWindow([terminalLauncherSurface.id]));
+
+		await fireEvent.contextMenu(screen.getByRole('tablist'));
+		await fireEvent.contextMenu(screen.getByRole('tab'));
+
+		expect(screen.queryByRole('menu')).toBeNull();
+	});
+
+	it('opens the sole tab menu from a touch long-press on trailing title-bar space', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id]));
+		const tablist = screen.getByRole('tablist');
+
+		await fireEvent.pointerDown(tablist, {
+			pointerType: 'touch',
+			pointerId: 1,
+			isPrimary: true,
+			clientX: 300,
+			clientY: 12,
+		});
+		const closeItem = await screen.findByRole(
+			'menuitem',
+			{ name: m.workspace_close_tab() },
+			{ timeout: 1_000 },
+		);
+		await fireEvent.pointerUp(tablist, {
+			pointerType: 'touch',
+			pointerId: 1,
+			isPrimary: true,
+		});
+
+		expect(closeItem).toBeTruthy();
+	});
+
 	it('activates the surface from inactive window chrome without hijacking controls', async () => {
 		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]), false);
 		const toolbar = rendered.getByRole('toolbar');
@@ -712,7 +838,382 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
 
-	it('keeps all available view commands in canonical order before open terminals', async () => {
+	it('keeps tab titles full while moving add actions in and out of the toolbar', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]));
+		const tabViewport = rendered.container.querySelector<HTMLElement>(
+			'[data-workspace-window-tabs="window-main"]',
+		)!;
+		const measurementTab = rendered.container.querySelector<HTMLElement>(
+			`[data-window-tab-measure-id="${chatSurface.id}"]`,
+		)!;
+		let viewportWidth = 190;
+		Object.defineProperty(tabViewport, 'clientWidth', {
+			configurable: true,
+			get: () => viewportWidth,
+		});
+		measurementTab.getBoundingClientRect = () => ({ width: 100 }) as DOMRect;
+
+		try {
+			ResizeObserverHarness.emit(tabViewport, viewportWidth);
+			await waitFor(() =>
+				expect(
+					rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+				).toHaveLength(3),
+			);
+			expect(tabViewport.dataset.workspaceTabLabelMode).toBe('full');
+
+			viewportWidth = 10;
+			ResizeObserverHarness.emit(tabViewport, viewportWidth);
+			await waitFor(() =>
+				expect(
+					rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+				).toHaveLength(0),
+			);
+			expect(tabViewport.dataset.workspaceTabLabelMode).not.toBe('full');
+
+			viewportWidth = 160;
+			ResizeObserverHarness.emit(tabViewport, viewportWidth);
+			await waitFor(() =>
+				expect(
+					rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+				).toHaveLength(2),
+			);
+			expect(tabViewport.dataset.workspaceTabLabelMode).toBe('full');
+		} finally {
+			rendered.unmount();
+			restoreResizeObserver();
+		}
+	});
+
+	it('keeps the terminal actions menu open while a tab label changes', async () => {
+		runtime.terminalSessions = [
+			{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+		];
+		const restoreResizeObserver = installResizeObserverHarness();
+		const node = workspaceWindow([chatSurface.id]);
+		const dnd = new WorkspaceWindowDndController(
+			createWorkspaceLayoutStore(),
+			resolveUnmeasuredWorkspaceSplit,
+		);
+		const rendered = render(WorkspaceWindowTitleBar, {
+			workspaceWindow: node,
+			labelFor,
+			dnd,
+			isCurrent: true,
+		});
+		const tabViewport = rendered.container.querySelector<HTMLElement>(
+			'[data-workspace-window-tabs="window-main"]',
+		)!;
+		const measurementTab = rendered.container.querySelector<HTMLElement>(
+			`[data-window-tab-measure-id="${chatSurface.id}"]`,
+		)!;
+		Object.defineProperty(tabViewport, 'clientWidth', {
+			configurable: true,
+			value: 1_000,
+		});
+		measurementTab.getBoundingClientRect = () => ({ width: 100 }) as DOMRect;
+
+		try {
+			ResizeObserverHarness.emit(tabViewport, 1_000);
+			const terminalTrigger = await screen.findByRole('button', {
+				name: m.workspace_terminal_actions(),
+			});
+			await fireEvent.click(terminalTrigger);
+			await screen.findByRole('menuitem', { name: m.workspace_new_terminal() });
+
+			await rendered.rerender({
+				workspaceWindow: node,
+				labelFor: () => 'Renamed Chat',
+				dnd,
+				isCurrent: true,
+			});
+
+			await screen.findByRole('tab', { name: 'Renamed Chat' });
+			expect(screen.getByRole('button', { name: m.workspace_terminal_actions() })).toBe(
+				terminalTrigger,
+			);
+			expect(terminalTrigger.getAttribute('aria-expanded')).toBe('true');
+			expect(screen.getByRole('menuitem', { name: m.workspace_new_terminal() })).toBeTruthy();
+		} finally {
+			rendered.unmount();
+			restoreResizeObserver();
+		}
+	});
+
+	it('moves an ordered action prefix inline without duplicating menu actions', async () => {
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 318 },
+		});
+		const expectedLabels = [
+			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
+			m.workspace_open_git_history(),
+			m.workspace_open_git_compare(),
+			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
+			m.workspace_open_chat_map(),
+			m.workspace_new_terminal(),
+		];
+
+		await waitFor(() =>
+			expect(
+				Array.from(
+					rendered.container.querySelectorAll<HTMLElement>('[data-workspace-window-add-inline]'),
+					(button) => button.getAttribute('aria-label'),
+				),
+			).toEqual(expectedLabels.slice(0, 3)),
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: expectedLabels[1] }));
+		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+		const menu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-add-menu="window-main"]',
+		)!;
+		expect(
+			within(menu)
+				.getAllByRole('menuitem')
+				.map((item) => item.textContent?.trim()),
+		).toEqual(expectedLabels.slice(3));
+		for (const label of expectedLabels.slice(0, 3)) {
+			expect(within(menu).queryByRole('menuitem', { name: label })).toBeNull();
+		}
+	});
+
+	it('hides the plus menu when every eligible action fits inline', async () => {
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+
+		await waitFor(() =>
+			expect(
+				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+			).toHaveLength(8),
+		);
+		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_new_terminal() }));
+		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
+	});
+
+	it('keeps a busy inline terminal action focused while creation is pending', async () => {
+		let resolveTerminalCreation!: (terminalId: string) => void;
+		createTerminal.mockImplementationOnce(
+			() =>
+				new Promise<string>((resolve) => {
+					resolveTerminalCreation = resolve;
+				}),
+		);
+		const node = workspaceWindow([chatSurface.id]);
+		render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		const terminalAction = await screen.findByRole('button', {
+			name: m.workspace_new_terminal(),
+		});
+		terminalAction.focus();
+
+		await fireEvent.click(terminalAction);
+
+		await waitFor(() => expect(terminalAction.getAttribute('aria-disabled')).toBe('true'));
+		expect(terminalAction.hasAttribute('disabled')).toBe(false);
+		expect(document.activeElement).toBe(terminalAction);
+		resolveTerminalCreation('terminal-created');
+		await waitFor(() => expect(terminalAction.hasAttribute('aria-disabled')).toBe(false));
+	});
+
+	it('restores focus when adaptive add controls move between the toolbar and menu', async () => {
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		const addLabel = m.workspace_add_to_window();
+		const firstActionLabel = m.workspace_open_surface({
+			surface: m.workspace_surface_git_workbench(),
+		});
+		const trigger = screen.getByRole('button', { name: addLabel });
+
+		trigger.focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: firstActionLabel })),
+		);
+
+		const inlineAction = screen.getByRole('button', { name: firstActionLabel });
+		inlineAction.focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: addLabel })),
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: addLabel }));
+		const secondActionLabel = m.workspace_open_git_history();
+		const menuAction = await screen.findByRole('menuitem', { name: secondActionLabel });
+		menuAction.focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 260 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: secondActionLabel }),
+			),
+		);
+		expect(screen.getByRole('button', { name: addLabel })).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: secondActionLabel })).toBeNull();
+	});
+
+	it('moves saved terminals into the inline terminal menu', async () => {
+		runtime.terminalSessions = [
+			{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+		];
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+
+		await waitFor(() =>
+			expect(
+				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+			).toHaveLength(7),
+		);
+		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
+		const trigger = screen.getByRole('button', { name: m.workspace_terminal_actions() });
+		expect(trigger.getAttribute('data-workspace-window-add-terminal-trigger')).toBe('window-main');
+
+		await fireEvent.click(trigger);
+		const menu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-add-terminal-menu="window-main"]',
+		)!;
+		const newTerminal = within(menu).getByRole('menuitem', { name: m.workspace_new_terminal() });
+		const separator = menu.querySelector<HTMLElement>('[data-slot="dropdown-menu-separator"]')!;
+		const openTerminals = within(menu).getByText(m.workspace_open_terminals());
+		const savedTerminal = within(menu).getByRole('menuitem', { name: 'Build logs' });
+
+		expect(within(menu).getAllByRole('menuitem')).toEqual([newTerminal, savedTerminal]);
+		expect(separator.previousElementSibling).toBe(newTerminal);
+		expect(separator.nextElementSibling).toBe(openTerminals);
+		expect(openTerminals.nextElementSibling).toBe(savedTerminal);
+
+		await fireEvent.click(newTerminal);
+		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
+		await fireEvent.click(trigger);
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Build logs' }));
+		expect(openTerminalSession).toHaveBeenCalledWith('terminal-seven', 'window-main');
+	});
+
+	it('restores focus from the inline terminal menu to plus when actions overflow', async () => {
+		runtime.terminalSessions = [
+			{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+		];
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		const terminalTrigger = await screen.findByRole('button', {
+			name: m.workspace_terminal_actions(),
+		});
+		terminalTrigger.focus();
+
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: m.workspace_add_to_window() }),
+			),
+		);
+	});
+
+	it('restores plus and menu-item focus to the sole inline terminal menu', async () => {
+		const kinds = [
+			'git',
+			'git-history',
+			'git-compare',
+			'pull-requests',
+			'files',
+			'commit',
+			'chat-map',
+		] as const;
+		const singletonSurfaces = kinds.map((kind) => portableSingletonDescriptor(kind));
+		runtime.surfaces = Object.fromEntries(
+			singletonSurfaces.map((surface) => [surface.id, surface]),
+		);
+		runtime.terminalSessions = [
+			{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+		];
+		const node = workspaceWindow(singletonSurfaces.map((surface) => surface.id));
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		const plusTrigger = screen.getByRole('button', { name: m.workspace_add_to_window() });
+		plusTrigger.focus();
+
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: m.workspace_terminal_actions() }),
+			),
+		);
+
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+		const newTerminalItem = await screen.findByRole('menuitem', {
+			name: m.workspace_new_terminal(),
+		});
+		newTerminalItem.focus();
+
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: m.workspace_terminal_actions() }),
+			),
+		);
+	});
+
+	it('keeps view commands canonical and terminal options at the bottom', async () => {
 		const kinds = [
 			'git',
 			'git-history',
@@ -735,7 +1236,10 @@ describe('WorkspaceWindowTitleBar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
 
-		expect(screen.getByText(m.workspace_open_views())).toBeTruthy();
+		expect(screen.queryByText('Open views')).toBeNull();
+		const menu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-add-menu="window-main"]',
+		)!;
 		const items = screen.getAllByRole('menuitem');
 		const viewLabels = [
 			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
@@ -747,10 +1251,15 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_chat_map(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
+		const newTerminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });
+		const separator = menu.querySelector<HTMLElement>('[data-slot="dropdown-menu-separator"]')!;
+		const openTerminals = screen.getByText(m.workspace_open_terminals());
 		const terminal = screen.getByRole('menuitem', { name: 'Build logs' });
 
-		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6, 7]);
-		expect(items.indexOf(viewItems.at(-1)!)).toBeLessThan(items.indexOf(terminal));
+		expect(items).toEqual([...viewItems, newTerminal, terminal]);
+		expect(separator.previousElementSibling).toBe(newTerminal);
+		expect(separator.nextElementSibling).toBe(openTerminals);
+		expect(openTerminals.nextElementSibling).toBe(terminal);
 	});
 
 	it('closes the plus menu when New Terminal enters its busy state', async () => {

@@ -3,7 +3,10 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import {
+  clickWorkspaceWindowAddAction,
+  collapseCanonicalFilesWindow,
+} from '../../support/chromium-workspace.js';
 
 const COMPARE_PANEL =
   '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' + '[aria-hidden="false"]';
@@ -52,10 +55,7 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
 }
 
 async function openCompare(page: Page): Promise<void> {
-  await page
-    .locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]')
-    .click();
-  await page.getByRole('menuitem', { name: 'Open Git Compare' }).click();
+  await clickWorkspaceWindowAddAction(page, 'Open Git Compare');
   await page.locator(`${COMPARE_PANEL} [data-git-comparison-header-row]`).waitFor();
 }
 
