@@ -425,6 +425,14 @@ describe('ChatRegistry', () => {
     expect(registry.getChat(SECOND_CHAT_ID)).toBeNull();
   });
 
+  it('returns null for desired tag updates targeting inherited session properties', async () => {
+    registry.addChat(newChat());
+
+    for (const chatId of ['__proto__', 'constructor', 'toString']) {
+      await expect(registry.setTags(chatId, ['review'])).resolves.toBeNull();
+    }
+  });
+
   it('ignores untyped parentage patches', () => {
     registry.addChat(newChat());
 
@@ -460,6 +468,121 @@ describe('ChatRegistry', () => {
     unchanged.preambleSelection.orderedPreambleIds.length = 0;
     expect(registry.getChat(CHAT_ID).preambleSelection.orderedPreambleIds).toEqual([PREAMBLE_ID]);
     expect(updated).toEqual([CHAT_ID]);
+  });
+
+  it('serializes desired tag retries behind durable persistence', async () => {
+    registry.addChat(newChat({ tags: ['existing'] }));
+    await registry.flush();
+    const firstRenameEntered = deferred();
+    const releaseFirstRename = deferred();
+    const originalRename = fs.rename.bind(fs);
+    let failFirstRename = true;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target === path.join(tempDir, 'chats.json') && failFirstRename) {
+        failFirstRename = false;
+        firstRenameEntered.resolve();
+        await releaseFirstRename.promise;
+        throw new Error('disk full');
+      }
+      return originalRename(source, target);
+    });
+
+    try {
+      const first = registry.setTags(CHAT_ID, ['replacement']);
+      await firstRenameEntered.promise;
+      const retry = registry.setTags(CHAT_ID, ['replacement']);
+      releaseFirstRename.resolve();
+
+      await expect(first).rejects.toThrow('disk full');
+      await expect(retry).resolves.toMatchObject({
+        entry: { tags: ['replacement'] },
+        durability: 'durable',
+        changed: true,
+      });
+    } finally {
+      releaseFirstRename.resolve();
+      rename.mockRestore();
+    }
+  });
+
+  it('does not confirm tag replacement until post-rename durability is reconciled', async () => {
+    registry.addChat(newChat({ tags: ['existing'] }));
+    await registry.flush();
+    const originalOpen = fs.open;
+    fs.open = async (target, flags, ...rest) => {
+      if (target === tempDir && flags === 'r') {
+        throw new Error('directory sync unavailable');
+      }
+      return originalOpen(target, flags, ...rest);
+    };
+
+    try {
+      await expect(registry.setTags(CHAT_ID, ['replacement']))
+        .rejects.toThrow('unconfirmed durability');
+      expect(registry.getChat(CHAT_ID).tags).toEqual(['replacement']);
+    } finally {
+      fs.open = originalOpen;
+    }
+
+    await expect(registry.setTags(CHAT_ID, ['replacement'])).resolves.toMatchObject({
+      entry: { tags: ['replacement'] },
+      durability: 'durable',
+      changed: false,
+    });
+  });
+
+  it('flushes a matching desired tag set when the registry is still dirty', async () => {
+    registry.addChat(newChat({ tags: ['existing'] }));
+    await registry.flush();
+    registry.addTags(CHAT_ID, ['replacement']);
+
+    await expect(registry.setTags(CHAT_ID, ['existing', 'replacement'])).resolves.toMatchObject({
+      entry: { tags: ['existing', 'replacement'] },
+      durability: 'durable',
+      changed: false,
+    });
+
+    const persisted = JSON.parse(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8'));
+    expect(persisted.sessions[CHAT_ID].tags).toEqual(['existing', 'replacement']);
+  });
+
+  it('returns the persisted desired tags when an ordinary update races the flush', async () => {
+    registry = new ChatRegistry(tempDir, { saveDelayMs: 60_000 });
+    await registry.init();
+    registry.addChat(newChat({ tags: ['original'] }));
+    await registry.flush();
+    registry.updateChat(CHAT_ID, { lastReadAt: '2026-09-08T00:00:00.000Z' });
+    const renameEntered = deferred();
+    const releaseRename = deferred();
+    const originalRename = fs.rename.bind(fs);
+    let intercepted = false;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (!intercepted && target === path.join(tempDir, 'chats.json')) {
+        intercepted = true;
+        renameEntered.resolve();
+        await releaseRename.promise;
+      }
+      return originalRename(source, target);
+    });
+
+    try {
+      const pending = registry.setTags(CHAT_ID, ['original']);
+      await renameEntered.promise;
+      registry.addTags(CHAT_ID, ['concurrent']);
+      releaseRename.resolve();
+
+      await expect(pending).resolves.toMatchObject({
+        entry: { tags: ['original'] },
+        durability: 'durable',
+        changed: false,
+      });
+      const persisted = JSON.parse(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8'));
+      expect(persisted.sessions[CHAT_ID].tags).toEqual(['original']);
+      expect(registry.getChat(CHAT_ID).tags).toEqual(['concurrent', 'original']);
+    } finally {
+      releaseRename.resolve();
+      rename.mockRestore();
+    }
   });
 
   it('validates owner-bound settings patches', () => {

@@ -1,11 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   claudeText,
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
-import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import {
+  type IntegrationFixture,
+  withIntegrationFixture,
+} from '../../support/integration-fixture.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
   waitForVisibleResponse,
@@ -17,6 +21,40 @@ import {
 } from '../../support/scripted-claude.js';
 
 const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const CLI_PERMISSION_WORKSPACE = 'cli-permission-integration';
+
+async function runCli(
+  fixture: IntegrationFixture,
+  arguments_: readonly string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const child = Bun.spawn({
+    cmd: [
+      process.execPath,
+      'cli/main.ts',
+      '--config-dir', fixture.dirs.config,
+      '--workspace', CLI_PERMISSION_WORKSPACE,
+      '--server', fixture.garcon.baseUrl,
+      ...arguments_,
+    ],
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      GARCON_CONFIG_DIR: '',
+      GARCON_WORKSPACE: '',
+      HOME: fixture.dirs.home,
+    },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  return { exitCode, stdout, stderr };
+}
 
 describe('scripted Claude permissions', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
@@ -98,7 +136,7 @@ describe('scripted Claude permissions', () => {
       })).rejects.toMatchObject({
         status: 409,
         body: {
-          errorCode: 'VALIDATION_FAILED',
+          errorCode: 'PERMISSION_NOT_ACTIONABLE',
           retryable: false,
         },
       });
@@ -276,6 +314,95 @@ describe('scripted Claude permissions', () => {
     });
   }, 60_000);
 
+  test('renders and decides one exact permission occurrence safely through the CLI', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = marker('CLI_PERMISSION_PROMPT');
+    const reply = marker('CLI_PERMISSION_REPLY');
+    const outputName = '.claude-scripted-cli-denied';
+    const command = `touch ${outputName}`;
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_cli_permission', 'Bash', { command }),
+    ]);
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-cli-permission', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'bash-tool-use'
+          && row.message.requestedTool.command === command,
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      const snapshot = await fixture.client.getChatSnapshot(chatId, 0);
+      const serverInstanceId = snapshot.transientFeed.serverInstanceId;
+
+      const status = await runCli(fixture, ['status', chatId, '--messages', '0']);
+      expect(status).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(status.stdout).toContain('pending permissions: 1');
+      expect(status.stdout).toContain(`permission occurrence: ${permission.permissionOccurrenceId}`);
+      expect(status.stdout).toContain(`permission run: ${permission.runId}`);
+      expect(status.stdout).toContain(`permission server instance: ${serverInstanceId}`);
+      expect(status.stdout).toContain(`deny command: garcon-cli`);
+
+      const stale = await runCli(fixture, [
+        'permission-decision', chatId, permission.permissionOccurrenceId, 'deny',
+        '--run', crypto.randomUUID(),
+        '--server-instance', serverInstanceId,
+        '--json',
+      ]);
+      expect(stale.exitCode).toBe(3);
+      expect(stale.stdout).toBe('');
+      expect(stale.stderr).toContain('PERMISSION_NOT_ACTIONABLE');
+
+      const decisionArgs = [
+        'permission-decision', chatId, permission.permissionOccurrenceId, 'deny',
+        '--run', permission.runId,
+        '--server-instance', serverInstanceId,
+        '--json',
+      ];
+      const accepted = await runCli(fixture, decisionArgs);
+      expect(accepted).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(accepted.stdout)).toMatchObject({
+        commandType: 'permission-decision',
+        chatId,
+        status: 'accepted',
+      });
+      const duplicate = await runCli(fixture, decisionArgs);
+      expect(duplicate).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(duplicate.stdout)).toMatchObject({ status: 'duplicate' });
+
+      const conflicting = await runCli(fixture, [
+        ...decisionArgs.slice(0, 3),
+        'allow',
+        ...decisionArgs.slice(4),
+      ]);
+      expect(conflicting.exitCode).toBe(3);
+      expect(conflicting.stdout).toBe('');
+      expect(conflicting.stderr).toContain('IDEMPOTENCY_CONFLICT');
+
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+      expect(await Bun.file(join(fixture.dirs.project, outputName)).exists()).toBe(false);
+      testEnvironment.model.assertSettled();
+    }, {
+      namedWorkspace: CLI_PERMISSION_WORKSPACE,
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
+
   test('[TLV5-PERM.07-CLAUDE-SCRIPTED-01] keeps permission history inert after a server restart', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
@@ -342,7 +469,7 @@ describe('scripted Claude permissions', () => {
       })).rejects.toMatchObject({
         status: 409,
         body: {
-          errorCode: 'VALIDATION_FAILED',
+          errorCode: 'PERMISSION_NOT_ACTIONABLE',
           retryable: false,
         },
       });

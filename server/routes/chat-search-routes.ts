@@ -31,11 +31,13 @@ import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { ValidationDomainError } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { createLogger } from '../lib/log.js';
 
 const MAX_SEARCH_QUERY_CHARS = 4_096;
 const MAX_SEARCH_TEXT_TOKEN_CHARS = 1_024;
 const MAX_SEARCH_TEXT_CHARS = 8_192;
 const MAX_SEARCH_CHAT_ID_CHARS = 512;
+const logger = createLogger('routes:chat-search');
 
 export interface ChatSearchDep {
   catalogMayHaveChanged(chatId: string): void;
@@ -58,6 +60,7 @@ export interface ChatSearchDep {
     results: ChatSearchResponse['results'];
     page: ChatSearchResponse['page'];
     index: ChatSearchResponse['index'];
+    removedStaleResultCount: number;
   }>;
 }
 
@@ -84,6 +87,12 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   const { registry, chatListProjector, searchIndex } = deps;
 
   async function postSearchChats(body: unknown, request?: Request): Promise<Response> {
+    const requestStarted = performance.now();
+    let candidateAdmissionMs = 0;
+    let controllerMs = 0;
+    let explicitChatIds = false;
+    let requestedChatCount = 0;
+    let admittedChatCount = 0;
     try {
       if (!searchIndex) {
         throw new TranscriptSearchUnavailableError(
@@ -93,7 +102,10 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         );
       }
       const search = parseSearchRequest(body);
+      explicitChatIds = search.chatIds !== undefined;
+      requestedChatCount = search.chatIds?.length ?? 0;
       request?.signal.throwIfAborted();
+      const candidateAdmissionStarted = performance.now();
       const allowedChatIds = await searchableChatIds(
         registry,
         chatListProjector,
@@ -101,7 +113,10 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         search.sort,
         request?.signal,
       );
+      candidateAdmissionMs = performance.now() - candidateAdmissionStarted;
+      admittedChatCount = allowedChatIds.length;
       request?.signal.throwIfAborted();
+      const controllerStarted = performance.now();
       const result = await searchIndex.search({
         query: search.query,
         textTokens: search.textTokens,
@@ -113,6 +128,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         snippetLimit: search.snippetLimit,
         signal: request?.signal,
       });
+      controllerMs = performance.now() - controllerStarted;
       return Response.json({
         query: search.query,
         mode: result.mode,
@@ -120,8 +136,22 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         results: result.results,
         page: result.page,
         index: result.index,
+        removedStaleResultCount: result.removedStaleResultCount,
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
+      if (error instanceof TranscriptSearchUnavailableError && error.code === 'SEARCH_TIMEOUT') {
+        logger.warn('Transcript search route timed out', {
+          code: error.code,
+          explicitChatIds,
+          requestedChatCount,
+          admittedChatCount,
+          candidateAdmissionMs: Math.round(candidateAdmissionMs),
+          controllerMs: Math.round(
+            controllerMs || performance.now() - requestStarted - candidateAdmissionMs,
+          ),
+          totalMs: Math.round(performance.now() - requestStarted),
+        });
+      }
       if (request?.signal.aborted && isAbortError(error)) {
         return new Response(null, { status: CLIENT_CLOSED_REQUEST_STATUS });
       }

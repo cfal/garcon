@@ -1,11 +1,14 @@
 import {
+  classifyChatSearchFailureRecovery,
   compileChatSearchQuery,
   CHAT_SEARCH_DEFAULT_PAGE_SIZE,
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_PREFIX_SIZE,
   CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
+  CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   type ChatSearchIndexStatus,
+  type ChatSearchFailedChat,
   type ChatSearchPage,
   type ChatSearchResult,
   type ChatSearchResultMode,
@@ -72,9 +75,9 @@ export class TranscriptSearchController {
     string,
     { viewId: TranscriptViewId; through: number }
   >();
-  readonly #adoptionFailedChatIds = new Set<string>();
+  readonly #adoptionFailedChatIds = new Map<string, string>();
   readonly #adoptingChatIds = new Set<string>();
-  readonly #fencedChatIds = new Set<string>();
+  readonly #fencedChatIds = new Map<string, string>();
   readonly #unsubscribe: () => void;
   #resyncTail: Promise<void> = Promise.resolve();
   #enabled = false;
@@ -164,6 +167,7 @@ export class TranscriptSearchController {
     results: ChatSearchResult[];
     page: ChatSearchPage;
     index: ChatSearchIndexStatus;
+    removedStaleResultCount: number;
   }> {
     if (!this.#enabled || this.#closed) {
       const unavailable = this.#admissionFailed || this.#closed;
@@ -183,19 +187,32 @@ export class TranscriptSearchController {
       this.#deps.searchTimeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS,
     );
     timeout.unref?.();
+    const controllerStarted = performance.now();
+    let snapshotMs = 0;
+    let compileMs = 0;
+    let uniqueCandidateCount = 0;
+    let admittedChatCount = 0;
+    let controllerFailureCount = 0;
+    let unindexedChatCount = 0;
+    let clauseCount = 0;
     try {
       options.signal?.throwIfAborted();
       executionAbort.signal.throwIfAborted();
+      const snapshotStarted = performance.now();
       const allowedViews = new Map<string, TranscriptViewId>();
       const allowedChats: TranscriptSearchAllowedChat[] = [];
-      const fencedChatIds = new Set<string>();
-      const adoptionFailedChatIds = new Set<string>();
-      let unindexedChatCount = 0;
-      for (const chatId of new Set(options.allowedChatIds)) {
+      const controllerFailures: ChatSearchFailedChat[] = [];
+      const uniqueChatIds = new Set(options.allowedChatIds);
+      uniqueCandidateCount = uniqueChatIds.size;
+      for (const chatId of uniqueChatIds) {
         const snapshot = this.#ledgerSnapshots.get(chatId) ?? null;
         if (!snapshot) {
-          if (this.#fencedChatIds.has(chatId)) fencedChatIds.add(chatId);
-          else if (this.#adoptionFailedChatIds.has(chatId)) adoptionFailedChatIds.add(chatId);
+          const fencedCode = this.#fencedChatIds.get(chatId);
+          const adoptionCode = this.#adoptionFailedChatIds.get(chatId);
+          if (fencedCode) controllerFailures.push(searchFailureDetail(chatId, 'ledger', fencedCode));
+          else if (adoptionCode) {
+            controllerFailures.push(searchFailureDetail(chatId, 'adoption', adoptionCode));
+          }
           else unindexedChatCount += 1;
           continue;
         }
@@ -206,14 +223,21 @@ export class TranscriptSearchController {
           throughOrdinal: snapshot.through,
         });
       }
+      snapshotMs = performance.now() - snapshotStarted;
+      admittedChatCount = allowedChats.length;
+      controllerFailureCount = controllerFailures.length;
       const mode = options.mode ?? 'page';
       const snippetLimit = clampSnippetLimit(options.snippetLimit);
       const offset = clampOffset(options.offset);
       if (mode === 'prefix' && (offset !== 0 || snippetLimit !== 1)) {
         throw new RangeError('Invalid transcript search prefix projection');
       }
+      const compileStarted = performance.now();
+      const query = compileChatSearchQuery(options.query, options.textTokens);
+      compileMs = performance.now() - compileStarted;
+      clauseCount = query.clauses.length;
       const response = await this.#deps.service.search({
-        query: compileChatSearchQuery(options.query, options.textTokens),
+        query,
         allowedChats,
         order: (options.sort ?? 'relevance') === 'relevance' ? 'relevance' : 'allowlist',
         mode,
@@ -223,24 +247,34 @@ export class TranscriptSearchController {
         admissionSignal: options.signal,
         executionSignal: executionAbort.signal,
       });
+      const results = response.results.filter((result) => (
+        allowedViews.get(result.chatId) === result.transcriptViewId
+        && this.validateResultView(result.chatId, result.transcriptViewId)
+      ));
       return {
         mode: response.mode,
         snippetLimit: response.snippetLimit,
-        results: response.results.filter((result) => (
-          allowedViews.get(result.chatId) === result.transcriptViewId
-          && this.validateResultView(result.chatId, result.transcriptViewId)
-        )),
+        results,
         page: response.page,
-        index: {
-          ...response.index,
-          failedChatCount: response.index.failedChatCount
-            + fencedChatIds.size
-            + adoptionFailedChatIds.size,
-          unindexedChatCount,
-        },
+        index: mergeSearchFailures(response.index, controllerFailures, unindexedChatCount),
+        removedStaleResultCount: response.results.length - results.length,
       };
     } catch (error) {
       if (isAbortError(error) && options.signal?.aborted) throw error;
+      if ((error instanceof Error && error.message === 'SEARCH_TIMEOUT') || isAbortError(error)) {
+        this.#deps.logger.warn('Transcript search controller timed out', {
+          code: 'SEARCH_TIMEOUT',
+          requestedCandidateCount: options.allowedChatIds.length,
+          uniqueCandidateCount,
+          admittedChatCount,
+          controllerFailureCount,
+          unindexedChatCount,
+          clauseCount,
+          snapshotMs: Math.round(snapshotMs),
+          compileMs: Math.round(compileMs),
+          totalMs: Math.round(performance.now() - controllerStarted),
+        });
+      }
       throw translateSearchError(error, this.#deps.logger);
     } finally {
       clearTimeout(timeout);
@@ -344,11 +378,11 @@ export class TranscriptSearchController {
       }
       const fenced = error instanceof LedgerFencedError;
       if (fenced) {
-        this.#fencedChatIds.add(chatId);
+        this.#fencedChatIds.set(chatId, searchFailureCode(error));
         this.#adoptionFailedChatIds.delete(chatId);
       } else {
         this.#fencedChatIds.delete(chatId);
-        this.#adoptionFailedChatIds.add(chatId);
+        this.#adoptionFailedChatIds.set(chatId, searchFailureCode(error));
       }
       const code = searchFailureCode(error);
       const viewId = fenced
@@ -458,7 +492,7 @@ export class TranscriptSearchController {
       if (!(error instanceof LedgerFencedError)) throw error;
       this.#indexedViews.delete(chatId);
       this.#ledgerSnapshots.delete(chatId);
-      this.#fencedChatIds.add(chatId);
+      this.#fencedChatIds.set(chatId, fenceErrorCode(error));
       await this.#deps.service.markChatUnavailable(
         chatId,
         LEDGER_FENCED_VIEW_SENTINEL,
@@ -724,6 +758,47 @@ function searchFailureCode(error: unknown): string {
     return error.message;
   }
   return 'SEARCH_INDEX_UNAVAILABLE';
+}
+
+function searchFailureDetail(
+  chatId: string,
+  stage: 'adoption' | 'ledger',
+  errorCode: string,
+): ChatSearchFailedChat {
+  return {
+    chatId,
+    transcriptViewId: null,
+    stage,
+    errorCode,
+    indexedThroughOrdinal: null,
+    targetThroughOrdinal: null,
+    recovery: classifyChatSearchFailureRecovery(stage, errorCode),
+  };
+}
+
+function mergeSearchFailures(
+  index: ChatSearchIndexStatus,
+  controllerFailures: readonly ChatSearchFailedChat[],
+  unindexedChatCount: number,
+): ChatSearchIndexStatus {
+  const failedChatCount = index.failedChatCount + controllerFailures.length;
+  const failedChats: ChatSearchFailedChat[] = [];
+  const seen = new Set<string>();
+  for (const failure of [
+    ...[...controllerFailures].sort((left, right) => left.chatId.localeCompare(right.chatId)),
+    ...index.failedChats,
+  ]) {
+    if (seen.has(failure.chatId)) continue;
+    seen.add(failure.chatId);
+    if (failedChats.length < CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS) failedChats.push(failure);
+  }
+  return {
+    ...index,
+    failedChatCount,
+    unindexedChatCount,
+    failedChats,
+    failedChatsOmittedCount: Math.max(0, failedChatCount - failedChats.length),
+  };
 }
 
 function rowsForCommit(

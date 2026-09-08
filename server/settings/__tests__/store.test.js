@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { CorruptStateFileError, QUARANTINE_INFIX } from '../../lib/json-file-store.ts';
+import {
+  CorruptStateFileError,
+  QUARANTINE_INFIX,
+} from '../../lib/json-file-store.ts';
 import { SettingsStore } from '../store.js';
 
 let tmpDir;
@@ -16,6 +19,27 @@ async function writeRaw(data) {
   await fs.mkdir(tmpDir, { recursive: true });
   await fs.writeFile(settingsFile(), JSON.stringify(data, null, 2), 'utf8');
   await store.loadSettings();
+}
+
+async function withFailingDirectorySync(action) {
+  const originalOpen = fs.open;
+  fs.open = async (target, flags, ...rest) => {
+    if (target === tmpDir && flags === 'r') {
+      throw new Error('directory sync unavailable');
+    }
+    return originalOpen(target, flags, ...rest);
+  };
+  try {
+    return await action();
+  } finally {
+    fs.open = originalOpen;
+  }
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((next) => { resolve = next; });
+  return { promise, resolve };
 }
 
 function defaultExecutionDefaults() {
@@ -91,6 +115,83 @@ describe('settings store', () => {
       expect(settings.projects).toBeUndefined();
       expect(settings.ui.theme).toBe('dark');
     });
+
+    it('retains the durability fence when a migrated reload fails after rename', async () => {
+      await fs.writeFile(settingsFile(), JSON.stringify({
+        ui: {},
+        paths: {},
+        chatNames: { abc: 'Desired' },
+        pinnedChatIds: ['abc'],
+      }), 'utf8');
+
+      await expect(withFailingDirectorySync(() => store.loadSettings()))
+        .rejects.toMatchObject({ name: 'AtomicJsonWriteError', renamed: true });
+      await expect(withFailingDirectorySync(() => store.setSessionName('abc', 'Desired')))
+        .rejects.toMatchObject({ name: 'AtomicJsonWriteError', renamed: true });
+      await expect(store.setSessionName('abc', 'Desired')).resolves.toEqual({
+        title: 'Desired',
+        changed: false,
+      });
+    });
+
+    it('discards pending notifications when explicit reload adopts different state', async () => {
+      const events = [];
+      store.onSessionNameChanged((chatId, title) => events.push({ chatId, title }));
+      await expect(withFailingDirectorySync(() => store.setSessionName('abc', 'A')))
+        .rejects.toMatchObject({ renamed: true });
+      const external = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      external.chatNames.abc = 'B';
+      await fs.writeFile(settingsFile(), JSON.stringify(external), 'utf8');
+
+      await store.loadSettings();
+      await store.confirmDurability();
+
+      expect(store.getChatName('abc')).toBe('B');
+      expect(events).toEqual([]);
+      expect(JSON.parse(await fs.readFile(settingsFile(), 'utf8')).chatNames.abc).toBe('B');
+    });
+
+    it('serializes explicit reload behind durability confirmation', async () => {
+      const events = [];
+      store.onSessionNameChanged((chatId, title) => events.push({ chatId, title }));
+      await expect(withFailingDirectorySync(() => store.setSessionName('abc', 'A')))
+        .rejects.toMatchObject({ renamed: true });
+      const renameEntered = deferred();
+      const releaseRename = deferred();
+      const originalRename = fs.rename.bind(fs);
+      let intercepted = false;
+      const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+        if (!intercepted && target === settingsFile()) {
+          intercepted = true;
+          renameEntered.resolve();
+          await releaseRename.promise;
+        }
+        return originalRename(source, target);
+      });
+
+      try {
+        const confirmation = store.confirmDurability();
+        await renameEntered.promise;
+        const external = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+        external.chatNames.abc = 'B';
+        await fs.writeFile(settingsFile(), JSON.stringify(external), 'utf8');
+        const reload = store.loadSettings();
+        releaseRename.resolve();
+        await confirmation;
+        await reload;
+
+        expect(store.getChatName('abc')).toBe('A');
+        expect(events).toEqual([{ chatId: 'abc', title: 'A' }]);
+        await expect(store.setSessionName('abc', 'B')).resolves.toEqual({
+          title: 'B',
+          changed: true,
+        });
+        expect(JSON.parse(await fs.readFile(settingsFile(), 'utf8')).chatNames.abc).toBe('B');
+      } finally {
+        releaseRename.resolve();
+        rename.mockRestore();
+      }
+    });
   });
 
   describe('session name CRUD', () => {
@@ -165,6 +266,62 @@ describe('settings store', () => {
       store.onSessionNameChanged((chatId, title) => events.push({ chatId, title }));
       await store.setSessionName('abc', '');
       expect(events).toEqual([{ chatId: 'abc', title: '' }]);
+    });
+
+    it('does not persist or emit when the normalized title is unchanged', async () => {
+      await store.setSessionName('abc', 'My Title');
+      const events = [];
+      store.onSessionNameChanged((chatId, title) => events.push({ chatId, title }));
+      const rename = spyOn(fs, 'rename');
+
+      try {
+        await expect(store.setSessionName('abc', '  My Title  ')).resolves.toEqual({
+          title: 'My Title',
+          changed: false,
+        });
+        expect(rename).not.toHaveBeenCalled();
+        expect(events).toEqual([]);
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
+    it('reconciles a post-rename title failure before evaluating a later setter', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: { abc: 'Original' } });
+      const events = [];
+      store.onSessionNameChanged((chatId, title) => events.push({ chatId, title }));
+
+      await expect(withFailingDirectorySync(() => store.setSessionName('abc', 'Replacement')))
+        .rejects.toMatchObject({
+          name: 'AtomicJsonWriteError',
+          renamed: true,
+        });
+      expect(events).toEqual([]);
+      await expect(store.setSessionName('abc', 'Original')).resolves.toEqual({
+        title: 'Original',
+        changed: true,
+      });
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.chatNames.abc).toBe('Original');
+      expect(events).toEqual([
+        { chatId: 'abc', title: 'Replacement' },
+        { chatId: 'abc', title: 'Original' },
+      ]);
+    });
+
+    it('publishes a recovered title change before a same-value retry returns', async () => {
+      const events = [];
+      store.onSessionNameChanged((chatId, title) => events.push({ chatId, title }));
+
+      await expect(withFailingDirectorySync(() => store.setSessionName('abc', 'Desired')))
+        .rejects.toMatchObject({ renamed: true });
+      await expect(store.setSessionName('abc', 'Desired')).resolves.toEqual({
+        title: 'Desired',
+        changed: false,
+      });
+
+      expect(events).toEqual([{ chatId: 'abc', title: 'Desired' }]);
     });
   });
 
@@ -873,6 +1030,148 @@ describe('settings store', () => {
       expect(settings.archivedChatIds).toEqual(['a']);
       expect(settings.remoteSettingsVersion).toBe(1);
       expect(remoteEvents).toEqual(['changed']);
+    });
+  });
+
+  describe('desired chat order state', () => {
+    const isKnownChat = (chatId) => ['a', 'b', 'c'].includes(chatId);
+
+    it('pins once and preserves order, persistence, version, and events on retry', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b'], archivedChatIds: [] });
+      const events = [];
+      store.onListChanged((reason, chatId) => events.push({ reason, chatId }));
+
+      await expect(store.setPinned('a', true, isKnownChat)).resolves.toEqual({
+        success: true,
+        response: {
+          success: true,
+          chatId: 'a',
+          orderGroup: 'pinned',
+          isPinned: true,
+          isArchived: false,
+          changed: true,
+        },
+      });
+      const afterFirst = await store.loadSettings();
+      await expect(store.setPinned('a', true, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'pinned', changed: false },
+      });
+      const afterRetry = await store.loadSettings();
+
+      expect(afterRetry.pinnedChatIds).toEqual(['a']);
+      expect(afterRetry.remoteSettingsVersion).toBe(afterFirst.remoteSettingsVersion);
+      expect(events).toEqual([{ reason: 'pinned-toggled', chatId: 'a' }]);
+    });
+
+    it('archives once, leaves pinned state, and unarchives only archived chats', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a'], normalChatIds: ['b'], archivedChatIds: ['c'] });
+
+      await expect(store.setArchived('a', true, isKnownChat)).resolves.toMatchObject({
+        response: {
+          orderGroup: 'archived',
+          isPinned: false,
+          isArchived: true,
+          changed: true,
+        },
+      });
+      await expect(store.setArchived('a', true, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'archived', changed: false },
+      });
+      await expect(store.setArchived('b', false, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'normal', changed: false },
+      });
+      await expect(store.setArchived('c', false, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'normal', changed: true },
+      });
+    });
+
+    it('rechecks chat existence inside the serialized desired-state mutation', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a'], archivedChatIds: [] });
+
+      await expect(store.setPinned('missing', true, isKnownChat)).resolves.toEqual({
+        success: false,
+        error: 'Chat not found',
+        errorCode: 'SESSION_NOT_FOUND',
+        status: 404,
+      });
+      expect((await store.loadSettings()).pinnedChatIds).toEqual([]);
+    });
+
+    it('reconciles a post-rename pin failure before evaluating a later setter', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a'], archivedChatIds: [] });
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('remote'));
+      store.onListChanged((reason, chatId) => events.push(`${reason}:${chatId}`));
+
+      await expect(withFailingDirectorySync(() => store.setPinned('a', true, isKnownChat)))
+        .rejects.toMatchObject({
+          name: 'AtomicJsonWriteError',
+          renamed: true,
+        });
+      expect(events).toEqual([]);
+      await expect(store.setPinned('a', false, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'normal', changed: true },
+      });
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.pinnedChatIds).toEqual([]);
+      expect(persisted.normalChatIds).toContain('a');
+      expect(events).toEqual([
+        'remote',
+        'pinned-toggled:a',
+        'remote',
+        'pinned-toggled:a',
+      ]);
+    });
+
+    it('reconciles a post-rename archive failure before evaluating a later setter', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a'], archivedChatIds: [] });
+      const events = [];
+      store.onListChanged((reason, chatId) => events.push(`${reason}:${chatId}`));
+
+      await expect(withFailingDirectorySync(() => store.setArchived('a', true, isKnownChat)))
+        .rejects.toMatchObject({
+          name: 'AtomicJsonWriteError',
+          renamed: true,
+        });
+      expect(events).toEqual([]);
+      await expect(store.setArchived('a', false, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'normal', changed: true },
+      });
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.archivedChatIds).toEqual([]);
+      expect(persisted.normalChatIds).toContain('a');
+      expect(events).toEqual(['archive-toggled:a', 'archive-toggled:a']);
+    });
+
+    it('publishes a recovered legacy pin mutation before a desired-state no-op', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a'], archivedChatIds: [] });
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('remote'));
+      store.onListChanged((reason, chatId) => events.push(`${reason}:${chatId}`));
+
+      await expect(withFailingDirectorySync(() => store.togglePin('a')))
+        .rejects.toMatchObject({ renamed: true });
+      await expect(store.setPinned('a', true, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'pinned', changed: false },
+      });
+
+      expect(events).toEqual(['remote', 'pinned-toggled:a']);
+    });
+
+    it('publishes a recovered legacy archive mutation before a desired-state no-op', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a'], archivedChatIds: [] });
+      const events = [];
+      store.onListChanged((reason, chatId) => events.push(`${reason}:${chatId}`));
+
+      await expect(withFailingDirectorySync(() => store.toggleArchive('a')))
+        .rejects.toMatchObject({ renamed: true });
+      await expect(store.setArchived('a', true, isKnownChat)).resolves.toMatchObject({
+        response: { orderGroup: 'archived', changed: false },
+      });
+
+      expect(events).toEqual(['archive-toggled:a']);
     });
   });
 

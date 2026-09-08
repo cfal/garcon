@@ -10,6 +10,7 @@ export const CHAT_SEARCH_MAX_OFFSET = 9_999;
 export const CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT = 3;
 export const CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS = 520;
 export const CHAT_SEARCH_MAX_CHAT_IDS = 10_000;
+export const CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS = 20;
 export const CHAT_SEARCH_SORT_VALUES = ['relevance', 'activity', 'created'] as const;
 export const CHAT_SEARCH_RESULT_MODES = ['page', 'prefix'] as const;
 
@@ -81,6 +82,43 @@ export interface ChatSearchIndexStatus {
   unindexedChatCount: number;
   unsupportedChatCount: number;
   resultsTruncated: boolean;
+  failedChats: ChatSearchFailedChat[];
+  failedChatsOmittedCount: number;
+}
+
+export type ChatSearchFailureStage = 'adoption' | 'ledger' | 'indexing';
+export type ChatSearchFailureRecovery = 'source-required' | 'index-retry' | 'unknown';
+
+export interface ChatSearchFailedChat {
+  readonly chatId: string;
+  readonly transcriptViewId: string | null;
+  readonly stage: ChatSearchFailureStage;
+  readonly errorCode: string;
+  readonly indexedThroughOrdinal: number | null;
+  readonly targetThroughOrdinal: number | null;
+  readonly recovery: ChatSearchFailureRecovery;
+}
+
+const SOURCE_REQUIRED_SEARCH_FAILURES: ReadonlySet<string> = new Set([
+  'CARRYOVER_HISTORY_UNAVAILABLE',
+  'HISTORY_LOAD_FAILED',
+  'LEDGER_FENCED',
+  'SOURCE_TRANSCRIPT_UNAVAILABLE',
+  'TRANSCRIPT_UNAVAILABLE',
+]);
+
+export function classifyChatSearchFailureRecovery(
+  stage: ChatSearchFailureStage,
+  errorCode: string,
+): ChatSearchFailureRecovery {
+  if (
+    stage === 'adoption'
+    || stage === 'ledger'
+    || SOURCE_REQUIRED_SEARCH_FAILURES.has(errorCode)
+    || errorCode.startsWith('SQLITE_')
+  ) return 'source-required';
+  if (stage === 'indexing' && errorCode.startsWith('SEARCH_')) return 'index-retry';
+  return 'unknown';
 }
 
 export interface ChatSearchPage {
@@ -98,6 +136,7 @@ export interface ChatSearchResponse {
   results: ChatSearchResult[];
   page: ChatSearchPage;
   index: ChatSearchIndexStatus;
+  removedStaleResultCount: number;
 }
 
 export function parseChatSearchResponse(
@@ -159,6 +198,11 @@ export function parseChatSearchResponse(
     || results.length > Math.max(0, page.total - page.offset)
   ) invalidChatSearchResponse('result window');
   const index = parseChatSearchIndexStatus(response.index);
+  if (
+    !isNonNegativeSafeInteger(response.removedStaleResultCount)
+    || results.length + response.removedStaleResultCount > page.limit
+    || results.length + response.removedStaleResultCount > Math.max(0, page.total - page.offset)
+  ) invalidChatSearchResponse('removed stale result count');
   return {
     query: response.query,
     mode: expectedMode,
@@ -172,6 +216,7 @@ export function parseChatSearchResponse(
       nextOffset: page.nextOffset,
     },
     index,
+    removedStaleResultCount: response.removedStaleResultCount,
   };
 }
 
@@ -259,7 +304,15 @@ function parseChatSearchIndexStatus(value: unknown): ChatSearchIndexStatus {
     || !isNonNegativeSafeInteger(index.unindexedChatCount)
     || !isNonNegativeSafeInteger(index.unsupportedChatCount)
     || typeof index.resultsTruncated !== 'boolean'
+    || !Array.isArray(index.failedChats)
+    || index.failedChats.length > CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS
+    || !isNonNegativeSafeInteger(index.failedChatsOmittedCount)
   ) invalidChatSearchResponse('index');
+  const failedChats = index.failedChats.map(parseFailedChat);
+  if (
+    new Set(failedChats.map((failure) => failure.chatId)).size !== failedChats.length
+    || failedChats.length + index.failedChatsOmittedCount !== index.failedChatCount
+  ) invalidChatSearchResponse('failed chat details');
   return {
     indexedChatCount: index.indexedChatCount,
     pendingChatCount: index.pendingChatCount,
@@ -267,6 +320,40 @@ function parseChatSearchIndexStatus(value: unknown): ChatSearchIndexStatus {
     unindexedChatCount: index.unindexedChatCount,
     unsupportedChatCount: index.unsupportedChatCount,
     resultsTruncated: index.resultsTruncated,
+    failedChats,
+    failedChatsOmittedCount: index.failedChatsOmittedCount,
+  };
+}
+
+function parseFailedChat(value: unknown): ChatSearchFailedChat {
+  const failure = chatSearchRecord(value);
+  if (
+    !failure
+    || typeof failure.chatId !== 'string'
+    || !/^\d{16}$/u.test(failure.chatId)
+    || (failure.transcriptViewId !== null && (
+      typeof failure.transcriptViewId !== 'string'
+      || failure.transcriptViewId.length === 0
+      || failure.transcriptViewId.length > 512
+    ))
+    || !['adoption', 'ledger', 'indexing'].includes(String(failure.stage))
+    || typeof failure.errorCode !== 'string'
+    || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(failure.errorCode)
+    || !nullableNonNegativeSafeInteger(failure.indexedThroughOrdinal)
+    || !nullableNonNegativeSafeInteger(failure.targetThroughOrdinal)
+    || (failure.indexedThroughOrdinal !== null
+      && failure.targetThroughOrdinal !== null
+      && failure.indexedThroughOrdinal > failure.targetThroughOrdinal)
+    || !['source-required', 'index-retry', 'unknown'].includes(String(failure.recovery))
+  ) invalidChatSearchResponse('failed chat detail');
+  return {
+    chatId: failure.chatId,
+    transcriptViewId: failure.transcriptViewId as string | null,
+    stage: failure.stage as ChatSearchFailureStage,
+    errorCode: failure.errorCode,
+    indexedThroughOrdinal: failure.indexedThroughOrdinal as number | null,
+    targetThroughOrdinal: failure.targetThroughOrdinal as number | null,
+    recovery: failure.recovery as ChatSearchFailureRecovery,
   };
 }
 
@@ -282,6 +369,10 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function nullableNonNegativeSafeInteger(value: unknown): value is number | null {
+  return value === null || isNonNegativeSafeInteger(value);
 }
 
 function invalidChatSearchResponse(reason: string): never {

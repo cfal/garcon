@@ -30,6 +30,7 @@ export class TranscriptSearchSettingsCoordinator {
     additionalPatch: Partial<FeatureSettings> = {},
   ): Promise<void> {
     await this.#lock.runExclusive(SETTINGS_LOCK_KEY, async () => {
+      await this.#settings.confirmDurability();
       const current = this.#settings.getFeatureSettings().transcriptSearch.enabled;
       const featurePatch = {
         ...additionalPatch,

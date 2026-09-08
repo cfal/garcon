@@ -611,6 +611,8 @@ export class SidebarSearchStore {
 				unindexedChatCount: 0,
 				unsupportedChatCount: 0,
 				resultsTruncated: false,
+				failedChats: [],
+				failedChatsOmittedCount: 0,
 			};
 			this.transcriptSearchPage = {
 				offset: 0,

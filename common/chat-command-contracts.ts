@@ -14,6 +14,7 @@ import type { ChatExecutionControlState } from './chat-execution-control.js';
 import { parseChatTransientControlAction, type ChatTransientControlAction } from './chat-transient-feed.js';
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
+import type { ParentChatRef } from './chat-parentage.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
@@ -76,6 +77,8 @@ export type CommandErrorCode = Extract<
   | 'QUEUE_STEER_RECOVERY_FAILED'
   | 'GOAL_CONTROL_NOT_DELIVERED'
   | 'GOAL_CONTROL_OUTCOME_UNKNOWN'
+  | 'PERMISSION_NOT_ACTIONABLE'
+  | 'PERMISSION_DECISION_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
   | 'EXPECTED_AGENT_MISMATCH'
   | 'EXPLICIT_BYPASS_REQUIRED'
@@ -127,6 +130,7 @@ export interface CommandAcceptedResponse {
 export interface AgentTurnCommandResponse extends CommandAcceptedResponse {
   chatId: string;
   turnId: string;
+  parentChat?: ParentChatRef | null;
   chat?: ChatListEntry | null;
 }
 
@@ -313,6 +317,7 @@ export interface SteerCommandResponse extends CommandAcceptedResponse {
   commandType: 'steer';
   chatId: string;
   turnId: string;
+  parentChat?: ParentChatRef | null;
 }
 
 export interface QueueEntrySteerCommandRequest {
@@ -414,6 +419,7 @@ export interface AgentStopCommandRequest {
 export interface AgentStopResponse extends CommandAcceptedResponse {
   outcome: ChatStopOutcome;
   control: ChatExecutionControlState;
+  parentChat?: ParentChatRef | null;
 }
 
 export interface AgentInterruptAndSendCommandRequest {

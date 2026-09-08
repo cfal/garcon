@@ -2,6 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   parseReorderChatRequest,
   parseReorderChatResponse,
+  parseSetChatArchivedRequest,
+  parseSetChatOrderStateResponse,
+  parseSetChatPinnedRequest,
   parseSortChatOrderRequest,
   parseSortChatOrderResponse,
 } from '../chat-order-contracts.ts';
@@ -142,4 +145,44 @@ describe('chat order contracts', () => {
       expect(parseSortChatOrderResponse(value)).toBeNull();
     });
   }
+
+  it('parses strict desired-state requests and authoritative responses', () => {
+    expect(parseSetChatPinnedRequest({ chatId: ' chat-a ', isPinned: true })).toEqual({
+      chatId: 'chat-a',
+      isPinned: true,
+    });
+    expect(parseSetChatArchivedRequest({ chatId: 'chat-a', isArchived: false })).toEqual({
+      chatId: 'chat-a',
+      isArchived: false,
+    });
+    expect(parseSetChatOrderStateResponse({
+      success: true,
+      chatId: 'chat-a',
+      orderGroup: 'pinned',
+      isPinned: true,
+      isArchived: false,
+      changed: false,
+    })).toEqual({
+      success: true,
+      chatId: 'chat-a',
+      orderGroup: 'pinned',
+      isPinned: true,
+      isArchived: false,
+      changed: false,
+    });
+  });
+
+  it('rejects malformed desired-state contracts', () => {
+    expect(parseSetChatPinnedRequest({ chatId: 'chat-a', isPinned: 'yes' })).toBeNull();
+    expect(parseSetChatPinnedRequest({ chatId: 'chat-a', isPinned: true, extra: true })).toBeNull();
+    expect(parseSetChatArchivedRequest({ chatId: '', isArchived: true })).toBeNull();
+    expect(parseSetChatOrderStateResponse({
+      success: true,
+      chatId: 'chat-a',
+      orderGroup: 'normal',
+      isPinned: true,
+      isArchived: false,
+      changed: false,
+    })).toBeNull();
+  });
 });
