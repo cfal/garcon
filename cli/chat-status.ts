@@ -3,7 +3,12 @@ import type { StatusCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
-import { formatTranscriptMessage } from './transcript-message-format.js';
+import { PermissionRequestMessage } from '@garcon/common/chat-types';
+import { shellQuote } from './shell-quote.js';
+import {
+  formatPermissionRequestedTool,
+  formatTranscriptMessage,
+} from './transcript-message-format.js';
 
 export interface ChatStatusClient {
   getChatSnapshot(
@@ -36,10 +41,13 @@ export async function runChatStatus(
   }
   output.result(command.json
     ? JSON.stringify(snapshot, null, 2)
-    : formatChatStatus(snapshot));
+    : formatChatStatus(snapshot, command));
 }
 
-export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
+export function formatChatStatus(
+  snapshot: ChatSnapshotResponse,
+  connection?: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+): string {
   const lines = [
     `chat id: ${snapshot.chat.id}`,
     `status: ${snapshot.processingPhase ?? 'idle'}`,
@@ -70,6 +78,46 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
   if (snapshot.control.queue.pause !== null) {
     lines.push(`queue paused: ${snapshot.control.queue.pause.kind}`);
   }
+  if (snapshot.transientFeed.rows.length > 0) {
+    lines.push(`pending permissions: ${snapshot.transientFeed.rows.length}`);
+    for (const row of snapshot.transientFeed.rows) {
+      const message = row.message;
+      if (!(message instanceof PermissionRequestMessage)) continue;
+      const structured = message.requestedTool.type === 'ask-user-question-tool-use'
+        || message.requestedTool.type === 'cursor-ask-question-tool-use';
+      lines.push(
+        '',
+        `permission occurrence: ${row.permissionOccurrenceId}`,
+        `permission run: ${row.runId}`,
+        `permission server instance: ${snapshot.transientFeed.serverInstanceId}`,
+        `requested tool: ${message.requestedTool.type}`,
+        `requested tool details:\n${formatPermissionRequestedTool(message.requestedTool)}`,
+      );
+      if (structured) {
+        lines.push(
+          'action: answer this structured question in Garcon; allow does not supply question answers',
+        );
+      }
+      if (connection) {
+        if (!structured) {
+          lines.push(`allow command: ${permissionDecisionCommand(
+            connection,
+            snapshot,
+            row.permissionOccurrenceId,
+            row.runId,
+            'allow',
+          )}`);
+        }
+        lines.push(`deny command: ${permissionDecisionCommand(
+          connection,
+          snapshot,
+          row.permissionOccurrenceId,
+          row.runId,
+          'deny',
+        )}`);
+      }
+    }
+  }
   if (snapshot.transcript.availability === 'unavailable') {
     lines.push(
       `transcript: unavailable (${snapshot.transcript.errorCode}, retryable: `
@@ -88,4 +136,31 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
     }
   }
   return lines.join('\n');
+}
+
+function permissionDecisionCommand(
+  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+  snapshot: ChatSnapshotResponse,
+  permissionOccurrenceId: string,
+  runId: string,
+  decision: 'allow' | 'deny',
+): string {
+  return [
+    'garcon-cli',
+    '--workspace',
+    shellQuote(connection.workspace),
+    '--config-dir',
+    shellQuote(connection.configDir),
+    ...(connection.serverUrl === undefined
+      ? []
+      : ['--server', shellQuote(connection.serverUrl)]),
+    'permission-decision',
+    shellQuote(snapshot.chat.id),
+    shellQuote(permissionOccurrenceId),
+    decision,
+    '--run',
+    shellQuote(runId),
+    '--server-instance',
+    shellQuote(snapshot.transientFeed.serverInstanceId),
+  ].join(' ');
 }

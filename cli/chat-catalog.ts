@@ -66,6 +66,8 @@ export function filterAndSortChats(
   return chats
     .filter((chat) => matchesChatFilter({
       ...chat,
+      createdAt: chat.activity.createdAt,
+      lastActivityAt: chat.activity.lastActivityAt,
       firstMessage: chat.preview.firstMessage,
       lastMessage: chat.preview.lastMessage,
     }, filter))

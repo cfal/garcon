@@ -65,6 +65,34 @@ describe('chat catalog', () => {
       .toThrow('invalid chat filter token: is:deleted');
   });
 
+  test('applies shared direct-parent, identity, and transcript-activity date semantics', () => {
+    const directChild = chat({
+      id: CHAT_ID,
+      parentChat: { chatId: OTHER_CHAT_ID, relation: 'delegation' },
+      activity: {
+        createdAt: '2026-09-01T00:00:00.000Z',
+        lastActivityAt: '2026-09-03T12:00:00.000Z',
+        lastReadAt: null,
+      },
+    });
+    const unrelated = chat({
+      id: '1785337200123458',
+      activity: {
+        createdAt: '2026-09-02T00:00:00.000Z',
+        lastActivityAt: '2026-09-04T00:00:00.000Z',
+        lastReadAt: null,
+      },
+    });
+
+    const result = buildChatCatalogResult({
+      filter: `id:${CHAT_ID} parent:${OTHER_CHAT_ID} created-before:2026-09-02 updated-after:2026-09-03`,
+      limit: 20,
+      offset: 0,
+    }, chatList([unrelated, directChild]));
+
+    expect(result.chats.map((value) => value.chatId)).toEqual([CHAT_ID]);
+  });
+
   test('formats stable JSON and an unambiguous empty page', () => {
     const result = buildChatCatalogResult(
       { ...command, filter: '', offset: 10 },

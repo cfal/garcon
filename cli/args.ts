@@ -25,6 +25,7 @@ import {
   type CliRowFormat,
 } from '@garcon/common/cli-presentation';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
+import { isPreambleId, type PreambleId } from '@garcon/common/preambles';
 import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import {
   CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
@@ -73,12 +74,16 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
-  garcon-cli [options] start [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
-  garcon-cli [options] start-async [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] start-async [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
-  garcon-cli [options] resume-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
+  garcon-cli [options] resume-async <chat-id> [--allow-steer] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
   garcon-cli [options] list <resource>
-  garcon-cli [options] stop <chat-id>
+  garcon-cli [options] stop <chat-id> [--json]
+  garcon-cli [connection options] permission-decision <chat-id> <occurrence-id> <allow|deny> --run <run-id> --server-instance <instance-id> [--json]
+  garcon-cli [connection options] archive|unarchive|pin|unpin <chat-id> [--json]
+  garcon-cli [connection options] rename <chat-id> <title> [--json]
+  garcon-cli [connection options] set-tags <chat-id> (--tag <tag>... | --clear) [--json]
   garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] chats [--filter <expression>] [--limit <count>] [--offset <count>] [--json]
@@ -124,6 +129,10 @@ Chat research:
   conversation spine; use --include tools for tool calls and results.
   Search coverage warnings are diagnostics. A truncated or partially indexed
   result cannot establish that no other matching chat exists.
+  Metadata filters include exact id:<chat-id> and direct parent:<chat-id>, plus
+  created-before/after and updated-before/after. Date-only values use midnight
+  UTC; timestamps require an RFC3339 timezone. updated means transcript/list
+  activity, not title, tag, pin, or archive modification time.
 
 Options:
   --workspace <name>           Named Garcon data workspace (default: default)
@@ -131,6 +140,8 @@ Options:
   --server <url>               Assert the workspace descriptor's exact URL
   --cwd <path>                 Project directory for a new chat (default: current directory)
   --parent <chat-id>           Record an existing parent for a new delegated chat
+  --no-preamble               Disable all preambles for this new chat
+  --preamble <id>             Select a preamble by UUID in order; repeatable
   --agent <id>                 Agent ID; required for a new chat and scoped lists, optional for native-session lookup
   --provider <id>              Configured API provider ID
   --endpoint <id>              Endpoint ID within --provider
@@ -143,6 +154,9 @@ Options:
   --color <light[,dark]>       Custom six-digit hex accent; one value applies to both themes
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --allow-steer                With resume-async, steer the active turn when busy; never queues
+  --run <run-id>               Exact permission request run fence
+  --server-instance <id>       Exact permission request server-instance fence
+  --clear                      Replace the complete tag set with no tags
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
   --type <style>               Add-row style: info, notice, error, or custom
@@ -168,7 +182,7 @@ Options:
                                an estimate; token usage varies by model.
   --output <path>              Write export or handoff artifact atomically to a file
   --force                      Replace an existing export or handoff output file
-  --json                       Print supported read-only results as JSON
+  --json                       Print supported command results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
@@ -211,10 +225,12 @@ export interface StartCliInvocation extends CliInvocationBase {
   model: string;
   cwd: string;
   parentChatId?: ChatId;
+  orderedPreambleIds?: readonly PreambleId[];
 }
 
 export interface StartAsyncCliInvocation extends Omit<StartCliInvocation, 'kind'> {
   kind: 'start-async';
+  json: boolean;
 }
 
 export interface ResumeCliInvocation extends CliInvocationBase {
@@ -250,12 +266,48 @@ export interface ResumeAsyncCliCommand extends CliConnectionOptions {
   allowSteer: boolean;
   message: string | null;
   readsMessageFromStdin: boolean;
+  json: boolean;
   userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface StopCliCommand extends CliConnectionOptions {
   kind: 'stop';
   chatId: ChatId;
+  json: boolean;
+}
+
+export interface PermissionDecisionCliCommand extends CliConnectionOptions {
+  readonly kind: 'permission-decision';
+  readonly chatId: ChatId;
+  readonly permissionOccurrenceId: string;
+  readonly runId: string;
+  readonly serverInstanceId: string;
+  readonly allow: boolean;
+  readonly json: boolean;
+}
+
+export type ChatOrderMutationKind = 'archive' | 'unarchive' | 'pin' | 'unpin';
+
+export type ChatOrderMutationCliCommand = {
+  [Kind in ChatOrderMutationKind]: CliConnectionOptions & {
+    readonly kind: Kind;
+    readonly chatId: ChatId;
+    readonly json: boolean;
+  };
+}[ChatOrderMutationKind];
+
+export interface RenameCliCommand extends CliConnectionOptions {
+  readonly kind: 'rename';
+  readonly chatId: ChatId;
+  readonly title: string;
+  readonly json: boolean;
+}
+
+export interface SetTagsCliCommand extends CliConnectionOptions {
+  readonly kind: 'set-tags';
+  readonly chatId: ChatId;
+  readonly tags: readonly string[];
+  readonly json: boolean;
 }
 
 export interface AddRowCliCommand extends CliConnectionOptions {
@@ -342,6 +394,10 @@ export type ParsedCliCommand =
   | ListCliCommand
   | ResumeAsyncCliCommand
   | StopCliCommand
+  | PermissionDecisionCliCommand
+  | ChatOrderMutationCliCommand
+  | RenameCliCommand
+  | SetTagsCliCommand
   | AddRowCliCommand
   | StatusCliCommand
   | WaitCliCommand
@@ -384,6 +440,8 @@ const SINGLE_STRING_OPTIONS = [
   'before-context',
   'after-context',
   'transcript-view-id',
+  'run',
+  'server-instance',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -432,13 +490,16 @@ function parseModeOptions(values: Record<string, ParsedOptionValue>): {
   };
 }
 
-function parseAdditionalTags(value: ParsedOptionValue): string[] | undefined {
-  if (value === undefined) return undefined;
-  const rawTags = value as string[];
+function parseTagOptions(value: ParsedOptionValue): string[] {
+  const rawTags = value === undefined ? [] : value as string[];
   for (const tag of rawTags) {
     if (!normalizeTagSlug(tag)) throw argumentError('--tag must contain letters or numbers');
   }
-  const tags = normalizeTags(rawTags).filter((tag) => tag !== 'cli');
+  return normalizeTags(rawTags);
+}
+
+function parseAdditionalTags(value: ParsedOptionValue): string[] | undefined {
+  const tags = parseTagOptions(value).filter((tag) => tag !== 'cli');
   return tags.length > 0 ? tags : undefined;
 }
 
@@ -501,7 +562,15 @@ function isListResource(value: string): value is ListResource {
   return (LIST_RESOURCE_VALUES as readonly string[]).includes(value);
 }
 
-type ControlCommandKind = 'resume-async' | 'stop' | 'add-row' | 'read';
+type ControlCommandKind =
+  | 'resume-async'
+  | 'stop'
+  | 'add-row'
+  | 'read'
+  | 'permission-decision'
+  | ChatOrderMutationKind
+  | 'rename'
+  | 'set-tags';
 
 const CONNECTION_OPTION_KEYS = ['workspace', 'config-dir', 'server'] as const;
 
@@ -527,8 +596,13 @@ const RESUME_ASYNC_OPTIONS = optionSet(
   'message-style',
   'color',
   'collapsible',
+  'json',
 );
-const STOP_OPTIONS = optionSet();
+const STOP_OPTIONS = optionSet('json');
+const PERMISSION_DECISION_OPTIONS = optionSet('run', 'server-instance', 'json');
+const CHAT_ORDER_MUTATION_OPTIONS = optionSet('json');
+const RENAME_OPTIONS = optionSet('json');
+const SET_TAGS_OPTIONS = optionSet('tag', 'clear', 'json');
 const ADD_ROW_OPTIONS = optionSet('title', 'type', 'color', 'markdown', 'collapsible');
 const WAIT_OPTIONS = optionSet('turn', 'json');
 const STATUS_OPTIONS = optionSet('messages', 'json');
@@ -560,7 +634,10 @@ const START_OPTIONS = optionSet(
   'color',
   'tag',
   'collapsible',
+  'no-preamble',
+  'preamble',
 );
+const START_ASYNC_OPTIONS = new Set([...START_OPTIONS, 'json']);
 const RESUME_OPTIONS = optionSet(
   'agent',
   'provider',
@@ -608,6 +685,7 @@ function parseResumeAsync(
     allowSteer: values['allow-steer'] === true,
     message,
     readsMessageFromStdin,
+    json: values.json === true,
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
   };
 }
@@ -625,7 +703,132 @@ function parseStop(
     kind: 'stop',
     ...connection,
     chatId: parseControlChatId(parsed.positionals[1]!, 'stop'),
+    json: values.json === true,
   };
+}
+
+function parseOpaqueControlId(value: ParsedOptionValue, flag: string): string {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.trim() !== value
+    || !isCommandCorrelationIdWithinLimit(value)
+  ) {
+    throw argumentError(`${flag} requires one valid exact ID`);
+  }
+  return value;
+}
+
+function parsePermissionDecision(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): PermissionDecisionCliCommand {
+  rejectOptionsExcept(values, PERMISSION_DECISION_OPTIONS, 'permission-decision');
+  if (parsed.positionals.length !== 4) {
+    throw argumentError(
+      'permission-decision requires a chat ID, permission occurrence ID, and allow or deny',
+    );
+  }
+  const decision = parsed.positionals[3];
+  if (decision !== 'allow' && decision !== 'deny') {
+    throw argumentError('permission-decision decision must be allow or deny');
+  }
+  return {
+    kind: 'permission-decision',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'permission-decision'),
+    permissionOccurrenceId: parseOpaqueControlId(
+      parsed.positionals[2],
+      'permission occurrence ID',
+    ),
+    runId: parseOpaqueControlId(values.run, '--run'),
+    serverInstanceId: parseOpaqueControlId(values['server-instance'], '--server-instance'),
+    allow: decision === 'allow',
+    json: values.json === true,
+  };
+}
+
+function parseChatOrderMutation(
+  kind: ChatOrderMutationKind,
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): ChatOrderMutationCliCommand {
+  rejectOptionsExcept(values, CHAT_ORDER_MUTATION_OPTIONS, kind);
+  if (parsed.positionals.length !== 2) {
+    throw argumentError(`${kind} requires exactly one chat ID`);
+  }
+  return {
+    kind,
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, kind),
+    json: values.json === true,
+  };
+}
+
+function parseRename(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): RenameCliCommand {
+  rejectOptionsExcept(values, RENAME_OPTIONS, 'rename');
+  if (parsed.positionals.length < 3) {
+    throw argumentError('rename requires a chat ID and title');
+  }
+  const title = parsed.positionals.slice(2).join(' ').trim();
+  if (!title) throw argumentError('rename title must not be empty');
+  return {
+    kind: 'rename',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'rename'),
+    title,
+    json: values.json === true,
+  };
+}
+
+function parseSetTags(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): SetTagsCliCommand {
+  rejectOptionsExcept(values, SET_TAGS_OPTIONS, 'set-tags');
+  if (parsed.positionals.length !== 2) {
+    throw argumentError('set-tags requires exactly one chat ID');
+  }
+  const clear = values.clear === true;
+  const hasTags = values.tag !== undefined;
+  if (clear === hasTags) {
+    throw argumentError('set-tags requires either repeatable --tag or --clear');
+  }
+  return {
+    kind: 'set-tags',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'set-tags'),
+    tags: clear ? [] : parseTagOptions(values.tag),
+    json: values.json === true,
+  };
+}
+
+function parsePreambleSelection(
+  values: Record<string, ParsedOptionValue>,
+): readonly PreambleId[] | undefined {
+  const noPreamble = values['no-preamble'] === true;
+  const rawIds = values.preamble as string[] | undefined;
+  if (noPreamble && rawIds !== undefined) {
+    throw argumentError('--no-preamble cannot be combined with --preamble');
+  }
+  if (noPreamble) return [];
+  if (rawIds === undefined) return undefined;
+  const ids: PreambleId[] = [];
+  const seen = new Set<string>();
+  for (const rawId of rawIds) {
+    if (!isPreambleId(rawId)) throw argumentError('--preamble must be a canonical UUID v4');
+    if (seen.has(rawId)) throw argumentError('--preamble cannot contain duplicate IDs');
+    seen.add(rawId);
+    ids.push(rawId);
+  }
+  return ids;
 }
 
 function parseAddRow(
@@ -1071,6 +1274,7 @@ export function parseCliArgs(
         server: { type: 'string' },
         cwd: { type: 'string' },
         parent: { type: 'string' },
+        preamble: { type: 'string', multiple: true },
         agent: { type: 'string' },
         provider: { type: 'string' },
         endpoint: { type: 'string' },
@@ -1098,8 +1302,12 @@ export function parseCliArgs(
         'after-context': { type: 'string', short: 'A' },
         include: { type: 'string', multiple: true },
         'transcript-view-id': { type: 'string' },
+        run: { type: 'string' },
+        'server-instance': { type: 'string' },
         force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
+        'no-preamble': { type: 'boolean' },
+        clear: { type: 'boolean' },
         markdown: { type: 'boolean' },
         collapsible: { type: 'boolean' },
         json: { type: 'boolean' },
@@ -1162,6 +1370,19 @@ export function parseCliArgs(
   if (commandName === undefined) throw argumentError('a command is required');
   if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
   if (commandName === 'stop') return parseStop(parsed, values, connection);
+  if (commandName === 'permission-decision') {
+    return parsePermissionDecision(parsed, values, connection);
+  }
+  if (
+    commandName === 'archive'
+    || commandName === 'unarchive'
+    || commandName === 'pin'
+    || commandName === 'unpin'
+  ) {
+    return parseChatOrderMutation(commandName, parsed, values, connection);
+  }
+  if (commandName === 'rename') return parseRename(parsed, values, connection);
+  if (commandName === 'set-tags') return parseSetTags(parsed, values, connection);
   if (commandName === 'add-row') return parseAddRow(parsed, values, connection);
   if (commandName === 'wait') return parseWait(parsed, values, connection);
   if (commandName === 'status') return parseStatus(parsed, values, connection);
@@ -1224,14 +1445,16 @@ export function parseCliArgs(
   if (commandName !== 'start' && commandName !== 'start-async' && commandName !== 'resume') {
     throw argumentError(`unknown command: ${commandName}`);
   }
-  rejectOptionsExcept(
-    values,
-    commandName === 'resume' ? RESUME_OPTIONS : START_OPTIONS,
-    commandName,
-  );
+  let lifecycleOptions = START_OPTIONS;
+  if (commandName === 'resume') lifecycleOptions = RESUME_OPTIONS;
+  if (commandName === 'start-async') lifecycleOptions = START_ASYNC_OPTIONS;
+  rejectOptionsExcept(values, lifecycleOptions, commandName);
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   const modes = parseModeOptions(values);
+  const orderedPreambleIds = commandName === 'resume'
+    ? undefined
+    : parsePreambleSelection(values);
 
   if (endpointId !== undefined && providerId === undefined) {
     throw argumentError('--endpoint requires --provider');
@@ -1271,12 +1494,15 @@ export function parseCliArgs(
   if (agentId === undefined) throw argumentError('--agent is required for a new chat');
   if (model === undefined) throw argumentError('--model is required for a new chat');
   const parentChatId = parent === undefined ? undefined : parseChatIdOption(parent, '--parent');
-  return {
-    kind: commandName,
+  const start = {
     ...shared,
     agentId,
     model,
     cwd: path.resolve(currentDirectory, cwd ?? '.'),
     ...(parentChatId === undefined ? {} : { parentChatId }),
+    ...(orderedPreambleIds === undefined ? {} : { orderedPreambleIds }),
   };
+  return commandName === 'start-async'
+    ? { kind: 'start-async', ...start, json: values.json === true }
+    : { kind: 'start', ...start };
 }

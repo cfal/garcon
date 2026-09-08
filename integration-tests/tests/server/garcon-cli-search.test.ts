@@ -51,16 +51,31 @@ describe('garcon-cli chat research', () => {
     await withIntegrationFixture('garcon-cli-search-read', async (fixture) => {
       const projectPath = path.join(fixture.dirs.project, 'removed-project');
       await fs.mkdir(projectPath);
+      const parentChatId = fixture.newChatId();
       const chatId = fixture.newChatId();
       const firstTerm = marker('firstclause');
       const secondTerm = marker('secondclause');
       const agent = fixture.directAgents.openAi;
-      const first = await fixture.client.startDirectChat({
-        chatId,
-        content: firstTerm,
-        projectPath,
+      const parent = await fixture.client.startDirectChat({
+        chatId: parentChatId,
+        content: marker('parentclause'),
+        projectPath: fixture.dirs.project,
         agent,
       });
+      expect((await fixture.client.waitForTurnTerminal(parentChatId, parent.turnId)).type)
+        .toBe('agent-run-finished');
+      const first = await fixture.client.startChat({
+        ...fixture.client.directStartRequest({
+          chatId,
+          content: firstTerm,
+          projectPath,
+          agent,
+        }),
+        parentChatId,
+      });
+      expect(first.parentChat).toEqual({ chatId: parentChatId, relation: 'delegation' });
+      expect(first.turnId).toBeString();
+      expect(first.chatId).toBe(chatId);
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type)
         .toBe('agent-run-finished');
       const second = await fixture.client.runDirectChat({
@@ -76,6 +91,30 @@ describe('garcon-cli chat research', () => {
         features: { transcriptSearch: { enabled: true } },
       });
       await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 60_000 });
+
+      const child = (await fixture.client.listChats()).sessions.find((entry) => entry.id === chatId);
+      if (!child?.activity.createdAt || !child.activity.lastActivityAt) {
+        throw new Error('Child chat is missing activity timestamps.');
+      }
+      const createdMs = Date.parse(child.activity.createdAt);
+      const updatedMs = Date.parse(child.activity.lastActivityAt);
+      const identityAndDates = [
+        `id:${chatId}`,
+        `parent:${parentChatId}`,
+        `created-after:${new Date(createdMs - 1).toISOString()}`,
+        `created-before:${new Date(createdMs + 1).toISOString()}`,
+        `updated-after:${new Date(updatedMs - 1).toISOString()}`,
+        `updated-before:${new Date(updatedMs + 1).toISOString()}`,
+      ].join(' ');
+
+      const lineageCatalog = await runCli(fixture, [
+        'chats', '--filter', identityAndDates, '--json',
+      ]);
+      expect(lineageCatalog).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(lineageCatalog.stdout)).toMatchObject({
+        page: { total: 1 },
+        chats: [{ chatId, parentChatId, parentRelation: 'delegation' }],
+      });
 
       const catalog = await runCli(fixture, [
         'chats', '--filter', `project:${projectPath}`, '--json',
@@ -103,10 +142,23 @@ describe('garcon-cli chat research', () => {
           failedChatCount: 0,
           unindexedChatCount: 0,
           resultsTruncated: false,
+          failedChats: [],
+          failedChatsOmittedCount: 0,
         },
+        removedStaleResultCount: 0,
         results: [{ chatId, chat: { projectPath } }],
       });
       expect(searchResult.results[0]?.transcriptViewId).toBeString();
+
+      const lineageSearch = await runCli(fixture, [
+        'search', firstTerm, '--filter', identityAndDates, '--json',
+      ]);
+      expect(lineageSearch).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(lineageSearch.stdout)).toMatchObject({
+        candidateChatCount: 1,
+        page: { total: 1 },
+        results: [{ chatId }],
+      });
 
       const quoted = await runCli(fixture, [
         'search', `"${firstTerm} ${secondTerm}"`,

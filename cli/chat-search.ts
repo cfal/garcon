@@ -22,6 +22,7 @@ import {
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
+import { shellQuote } from './shell-quote.js';
 
 export interface CliChatSearchHit extends ChatSearchResult {
   readonly chat: CliChatSummary | null;
@@ -35,6 +36,7 @@ export interface CliChatSearchResult {
   readonly candidateChatCount: number;
   readonly page: ChatSearchPage;
   readonly index: ChatSearchIndexStatus;
+  readonly removedStaleResultCount: number;
   readonly results: readonly CliChatSearchHit[];
 }
 
@@ -88,6 +90,7 @@ export function buildChatSearchResult(
     candidateChatCount,
     page: response.page,
     index: response.index,
+    removedStaleResultCount: response.removedStaleResultCount,
     results: response.results.map((result) => {
       const chat = chatsById.get(result.chatId);
       return { ...result, chat: chat ? projectCliChat(chat) : null };
@@ -142,6 +145,19 @@ export function searchDiagnostics(result: CliChatSearchResult): string[] {
       `search coverage: ${result.index.failedChatCount} candidate chats failed indexing`,
     );
   }
+  for (const failure of result.index.failedChats) {
+    const frontier = failure.indexedThroughOrdinal === null
+      ? ''
+      : `; indexed through ${failure.indexedThroughOrdinal} of ${failure.targetThroughOrdinal}`;
+    diagnostics.push(
+      `search failure: chat ${failure.chatId}; ${failure.stage}; ${failure.errorCode}; recovery ${failure.recovery}${frontier}`,
+    );
+  }
+  if (result.index.failedChatsOmittedCount > 0) {
+    diagnostics.push(
+      `search failure: ${result.index.failedChatsOmittedCount} additional failed chats omitted from bounded details`,
+    );
+  }
   if (result.index.unindexedChatCount > 0) {
     diagnostics.push(
       `search coverage: ${result.index.unindexedChatCount} candidate chats are not indexed`,
@@ -160,12 +176,17 @@ export function searchDiagnostics(result: CliChatSearchResult): string[] {
   if (result.page.hasMore) {
     diagnostics.push(`search page: more matches are available at --offset ${result.page.nextOffset}`);
   }
+  if (result.removedStaleResultCount > 0) {
+    diagnostics.push(
+      `search page: ${result.removedStaleResultCount} stale result${result.removedStaleResultCount === 1 ? '' : 's'} removed after paging; rerun the search because transcript views changed`,
+    );
+  }
   if (result.results.length === 0 && result.page.total > 0) {
     if (result.page.offset >= result.page.total) {
       diagnostics.push(
         `search page: --offset ${result.page.offset} is beyond ${result.page.total} matching chats; retry with a lower offset`,
       );
-    } else {
+    } else if (result.removedStaleResultCount === 0) {
       diagnostics.push(
         `search page: no current results were returned despite ${result.page.total} matching chats; rerun search because transcript views may have changed`,
       );
@@ -193,6 +214,14 @@ export async function runChatSearch(
         'chat search',
         'transcript search is disabled; enable features.transcriptSearch.enabled in Garcon settings',
         2,
+        { cause: error },
+      );
+    }
+    if (error instanceof GarconHttpError && error.errorCode === 'SEARCH_TIMEOUT') {
+      throw new CliError(
+        'chat search',
+        'transcript search timed out before coverage could be reported; rerun the search, try a quoted phrase, or change the metadata filter',
+        3,
         { cause: error },
       );
     }
@@ -266,9 +295,6 @@ function readIncludesForSearchRole(role: ChatSearchSnippet['role']): string | nu
   }
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
 
 function formatInterpretedQuery(query: ChatSearchQueryV1): string {
   return query.clauses.map((clause) => {

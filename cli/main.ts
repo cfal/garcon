@@ -12,6 +12,14 @@ import { runConsultation, startConsultationAsync } from './consultation.js';
 import { runChatCatalog } from './chat-catalog.js';
 import { runChatSearch } from './chat-search.js';
 import { runChatRead } from './chat-read.js';
+import { runPermissionDecision } from './chat-permission.js';
+import { runChatOrderMutation, runRename, runSetTags } from './chat-metadata.js';
+import {
+  resumeAsyncJsonEnvelope,
+  startAsyncJsonEnvelope,
+  stopJsonEnvelope,
+  titleUpdateFailure,
+} from './automation-output.js';
 import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
 import { GarconClient } from './garcon-client.js';
@@ -141,10 +149,26 @@ function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
     && ['list', 'chats', 'search', 'read', 'status', 'wait', 'lookup-native-session']
       .includes(command.kind)
   ) return 'terminal interrupted; the read-only operation was canceled';
+  if (
+    command !== undefined
+    && [
+      'start-async',
+      'resume-async',
+      'stop',
+      'permission-decision',
+      'archive',
+      'unarchive',
+      'pin',
+      'unpin',
+      'rename',
+      'set-tags',
+    ].includes(command.kind)
+  ) {
+    return 'terminal interrupted; the command may have reached Garcon; inspect the chat before retrying';
+  }
   return command !== undefined
-    && (command.kind === 'resume-async' || command.kind === 'stop' || command.kind === 'start-async')
-    ? 'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying'
-    : 'terminal interrupted; no Garcon agent was stopped';
+    ? 'terminal interrupted; no Garcon agent was stopped'
+    : 'terminal interrupted; no Garcon command was run';
 }
 
 export async function main(
@@ -212,9 +236,42 @@ export async function main(
       output.result(chatId);
       return 0;
     }
+    if (command.kind === 'permission-decision') {
+      const client = await connectedClient(command, options);
+      await runPermissionDecision(command, client, output, options.signal);
+      return 0;
+    }
+    if (
+      command.kind === 'archive'
+      || command.kind === 'unarchive'
+      || command.kind === 'pin'
+      || command.kind === 'unpin'
+    ) {
+      const client = await connectedClient(command, options);
+      await runChatOrderMutation(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'rename') {
+      const client = await connectedClient(command, options);
+      await runRename(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'set-tags') {
+      const client = await connectedClient(command, options);
+      await runSetTags(command, client, output, options.signal);
+      return 0;
+    }
     if (command.kind === 'stop') {
       const client = await connectedClient(command, options);
-      await stopChat(command.chatId, client, output, options.signal);
+      const result = await stopChat(command.chatId, client, options.signal);
+      if (command.json) {
+        output.result(JSON.stringify(stopJsonEnvelope({
+          workspace: command.workspace,
+          serverInstanceId: client.serverInstanceId,
+        }, result), null, 2));
+      } else {
+        output.stopped(result.response.chatId!, result.response.outcome);
+      }
       return 0;
     }
     if (command.kind === 'resume-async') {
@@ -225,14 +282,22 @@ export async function main(
         throw new CliError('arguments', 'the message read from stdin must not be empty', 2);
       }
       const client = await connectedClient(command, options);
-      await resumeChatAsync({
+      const result = await resumeChatAsync({
         chatId: command.chatId,
         content: message,
         allowSteer: command.allowSteer,
         ...(command.userMessagePresentation === undefined
           ? {}
           : { userMessagePresentation: command.userMessagePresentation }),
-      }, client, output, options.signal);
+      }, client, options.signal);
+      if (command.json) {
+        output.result(JSON.stringify(resumeAsyncJsonEnvelope({
+          workspace: command.workspace,
+          serverInstanceId: client.serverInstanceId,
+        }, result), null, 2));
+      } else {
+        output.sent(result.response.chatId, result.delivery, result.response.turnId);
+      }
       return 0;
     }
     if (command.kind === 'add-row') {
@@ -255,7 +320,17 @@ export async function main(
       : command;
     const client = await connectedClient(invocation, options);
     if (invocation.kind === 'start-async') {
-      await startConsultationAsync(invocation, prompt, client, output, options.signal);
+      const result = await startConsultationAsync(invocation, prompt, client, options.signal);
+      if (invocation.json) {
+        output.result(JSON.stringify(startAsyncJsonEnvelope({
+          workspace: invocation.workspace,
+          serverInstanceId: client.serverInstanceId,
+        }, result), null, 2));
+      } else {
+        output.accepted(result.accepted);
+      }
+      const titleError = titleUpdateFailure(result);
+      if (titleError !== undefined) throw titleError;
     } else {
       await runConsultation(invocation, prompt, client, output, options.signal);
     }

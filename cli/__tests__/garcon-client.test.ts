@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
+  PermissionDecisionCommandRequest,
   SteerCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import { runtimeProofPayload } from '@garcon/common/server-runtime';
@@ -32,6 +33,8 @@ function accepted(request: AgentRunCommandRequest): Response {
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: new Date().toISOString(),
+    parentChat: null,
+    chat: null,
   });
 }
 
@@ -180,7 +183,10 @@ function validSearch(): Record<string, unknown> {
       unindexedChatCount: 0,
       unsupportedChatCount: 0,
       resultsTruncated: false,
+      failedChats: [],
+      failedChatsOmittedCount: 0,
     },
+    removedStaleResultCount: 0,
   };
 }
 
@@ -596,17 +602,165 @@ describe('GarconClient', () => {
           method: init?.method,
           body: String(init?.body),
         };
-        return Response.json({ success: true });
+        return Response.json({
+          success: true,
+          chatId: runRequest.chatId,
+          title: 'Delegated review',
+          changed: true,
+        });
       },
     });
 
-    await client.updateChatTitle({ chatId: runRequest.chatId, title: 'Delegated review' });
+    await expect(client.updateChatTitle({
+      chatId: runRequest.chatId,
+      title: 'Delegated review',
+    })).resolves.toMatchObject({ title: 'Delegated review', changed: true });
 
     expect(request).toEqual({
       url: `${connection.baseUrl}/api/v1/app/session-name`,
       method: 'PUT',
       body: JSON.stringify({ chatId: runRequest.chatId, title: 'Delegated review' }),
     });
+  });
+
+  test('uses desired-state metadata routes and strictly correlates their responses', async () => {
+    const requests: Array<{ url: string; method: string | undefined; body: string }> = [];
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({ url, method: init?.method, body: String(init?.body) });
+        if (url.endsWith('/api/v1/chats/pin')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            orderGroup: 'pinned',
+            isPinned: true,
+            isArchived: false,
+            changed: true,
+          });
+        }
+        if (url.endsWith('/api/v1/chats/archive')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            orderGroup: 'archived',
+            isPinned: false,
+            isArchived: true,
+            changed: true,
+          });
+        }
+        return Response.json({
+          success: true,
+          chatId: runRequest.chatId,
+          tags: ['automation', 'review'],
+          changed: true,
+        });
+      },
+    });
+
+    await expect(client.setChatPinned({ chatId: runRequest.chatId, isPinned: true }))
+      .resolves.toMatchObject({ orderGroup: 'pinned', changed: true });
+    await expect(client.setChatArchived({ chatId: runRequest.chatId, isArchived: true }))
+      .resolves.toMatchObject({ orderGroup: 'archived', changed: true });
+    await expect(client.setChatTags({
+      chatId: runRequest.chatId,
+      tags: ['automation', 'review'],
+    })).resolves.toMatchObject({ tags: ['automation', 'review'], changed: true });
+
+    expect(requests).toEqual([
+      {
+        url: `${connection.baseUrl}/api/v1/chats/pin`,
+        method: 'PUT',
+        body: JSON.stringify({ chatId: runRequest.chatId, isPinned: true }),
+      },
+      {
+        url: `${connection.baseUrl}/api/v1/chats/archive`,
+        method: 'PUT',
+        body: JSON.stringify({ chatId: runRequest.chatId, isArchived: true }),
+      },
+      {
+        url: `${connection.baseUrl}/api/v1/chats/tags`,
+        method: 'PATCH',
+        body: JSON.stringify({ chatId: runRequest.chatId, tags: ['automation', 'review'] }),
+      },
+    ]);
+  });
+
+  test('retries an ambiguous permission decision byte-for-byte and accepts its duplicate receipt', async () => {
+    const request: PermissionDecisionCommandRequest = {
+      clientRequestId: 'permission-v1:request',
+      chatId: runRequest.chatId,
+      permissionOccurrenceId: 'occurrence-1',
+      allow: false,
+      alwaysAllow: false,
+      control: {
+        serverInstanceId: connection.instanceId,
+        chatId: runRequest.chatId,
+        runId: 'run-1',
+        permissionOccurrenceId: 'occurrence-1',
+      },
+    };
+    const bodies: string[] = [];
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        bodies.push(String(init?.body));
+        if (attempts === 1) throw new TypeError('connection reset');
+        return Response.json({
+          success: true,
+          commandType: 'permission-decision',
+          clientRequestId: request.clientRequestId,
+          chatId: request.chatId,
+          status: 'duplicate',
+          acceptedAt: '2026-09-08T00:00:00.000Z',
+        });
+      },
+    });
+
+    await expect(client.decidePermission(request)).resolves.toMatchObject({ status: 'duplicate' });
+    expect(attempts).toBe(2);
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  test('does not retry a definitive stale permission decision', async () => {
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async () => {
+        attempts += 1;
+        return Response.json({
+          success: false,
+          error: 'Permission request is no longer actionable',
+          errorCode: 'PERMISSION_NOT_ACTIONABLE',
+          retryable: false,
+        }, { status: 409 });
+      },
+    });
+
+    await expect(client.decidePermission({
+      clientRequestId: 'permission-v1:stale',
+      chatId: runRequest.chatId,
+      permissionOccurrenceId: 'occurrence-stale',
+      allow: false,
+      alwaysAllow: false,
+      control: {
+        serverInstanceId: connection.instanceId,
+        chatId: runRequest.chatId,
+        runId: 'run-stale',
+        permissionOccurrenceId: 'occurrence-stale',
+      },
+    })).rejects.toMatchObject({
+      status: 409,
+      errorCode: 'PERMISSION_NOT_ACTIONABLE',
+      retryable: false,
+    });
+    expect(attempts).toBe(1);
   });
 
   test('retries an ambiguous submission with the identical request body', async () => {
@@ -844,6 +998,7 @@ describe('GarconClient', () => {
       clientRequestId: request.clientRequestId,
       chatId: request.chatId,
       turnId: 'turn-active',
+      parentChat: null,
       status: 'accepted',
       acceptedAt: new Date().toISOString(),
     });
@@ -966,6 +1121,7 @@ describe('GarconClient', () => {
       commandType: 'agent-stop',
       clientRequestId: stopRequest.clientRequestId,
       chatId: stopRequest.chatId,
+      parentChat: null,
       status: 'accepted',
       acceptedAt: new Date().toISOString(),
       outcome: 'interrupt-requested',
