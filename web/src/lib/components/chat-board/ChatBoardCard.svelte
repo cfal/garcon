@@ -7,7 +7,10 @@
 	import ChatSummary from '$lib/components/chat/ChatSummary.svelte';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
-	import type { ChatTagConfirmationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
+	import {
+		isChatTagRefreshRequired,
+		type ChatTagReconciliationKind,
+	} from '$lib/chat/sessions/chat-sessions-contract.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getChatBoardCardDragData } from './chat-board-dnd.js';
 
@@ -18,12 +21,12 @@
 		boardId,
 		canDrag,
 		pending,
-		confirmationKind,
+		reconciliationKind,
 		canTransition,
 		occurrenceIndex,
 		onOpen,
 		onTransition,
-		onConfirmTags,
+		onReconcileTags,
 	}: {
 		occurrence: ChatBoardOccurrence;
 		layout: ChatItemLayout;
@@ -31,12 +34,12 @@
 		boardId: string;
 		canDrag: boolean;
 		pending: boolean;
-		confirmationKind: ChatTagConfirmationKind;
+		reconciliationKind: ChatTagReconciliationKind;
 		canTransition: boolean;
 		occurrenceIndex: number;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
-		onConfirmTags: (chatId: string) => void;
+		onReconcileTags: (chatId: string) => void;
 	} = $props();
 
 	const minuteClock = getMinuteClock();
@@ -52,8 +55,8 @@
 		if (occurrence.chat.isProcessing) descriptions.push(m.chat_window_processing());
 		return descriptions.join('. ');
 	});
-	let confirmationLabel = $derived(
-		confirmationKind === 'reconciliation'
+	let reconciliationLabel = $derived(
+		isChatTagRefreshRequired(reconciliationKind)
 			? m.chat_board_refreshing_tags()
 			: m.chat_board_confirming_tags(),
 	);
@@ -95,7 +98,7 @@
 		'hover:-translate-y-px hover:border-foreground/20 hover:bg-chat-board-card-hover hover:shadow-sm focus-within:border-foreground/25',
 		dragging && 'scale-[0.99] opacity-70',
 		pending && 'border-status-info-border',
-		confirmationKind && 'border-status-warning-border',
+		reconciliationKind && 'border-status-warning-border',
 	)}
 	data-chat-board-occurrence={occurrence.key}
 	data-chat-board-chat-id={occurrence.chat.id}
@@ -134,7 +137,7 @@
 				class="grid min-h-9 flex-1 place-items-center text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-35"
 				aria-label={m.chat_board_transition()}
 				title={m.chat_board_transition()}
-				disabled={!canTransition || pending || confirmationKind !== null}
+				disabled={!canTransition || pending || reconciliationKind !== null}
 				onclick={(event) => onTransition(occurrence, event.currentTarget)}
 				data-chat-board-focus-target="transition"
 			>
@@ -154,15 +157,15 @@
 		</div>
 	</div>
 
-	{#if confirmationKind}
+	{#if reconciliationKind}
 		<button
 			type="button"
 			class="flex w-full items-center gap-1.5 border-t border-status-warning-border bg-status-warning/10 px-3 py-1 text-left text-[11px] font-medium text-status-warning-muted-foreground outline-none hover:bg-status-warning/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-			onclick={() => onConfirmTags(occurrence.chat.id)}
+			onclick={() => onReconcileTags(occurrence.chat.id)}
 			data-chat-board-focus-target="recovery"
 		>
 			<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
-			<span class="flex-1">{confirmationLabel}</span>
+			<span class="flex-1">{reconciliationLabel}</span>
 			<span class="underline decoration-current/50 underline-offset-2">
 				{m.chat_board_try_again()}
 			</span>

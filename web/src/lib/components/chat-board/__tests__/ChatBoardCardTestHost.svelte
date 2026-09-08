@@ -3,17 +3,17 @@
 	import { setMinuteClock } from '$lib/context';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import { MinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
-	import type { ChatTagConfirmationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
+	import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import ChatBoardCard from '../ChatBoardCard.svelte';
 
 	let {
 		occurrence,
 		currentTime,
-		confirmationKind = null,
+		reconciliationKind = null,
 	}: {
 		occurrence: ChatBoardOccurrence;
 		currentTime: Date;
-		confirmationKind?: ChatTagConfirmationKind;
+		reconciliationKind?: ChatTagReconciliationKind;
 	} = $props();
 
 	const minuteClock = new MinuteClockStore();
@@ -31,10 +31,10 @@
 	boardId="board"
 	canDrag={false}
 	pending={false}
-	{confirmationKind}
+	{reconciliationKind}
 	canTransition
 	occurrenceIndex={0}
 	onOpen={() => {}}
 	onTransition={() => {}}
-	onConfirmTags={() => {}}
+	onReconcileTags={() => {}}
 />

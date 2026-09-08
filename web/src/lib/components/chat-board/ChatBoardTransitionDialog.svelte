@@ -11,7 +11,10 @@
 		initialTargetTags,
 		projectChatBoardTransition,
 	} from '$lib/chat-board/transition/chat-board-transition.js';
-	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
+	import {
+		isChatTagRefreshRequired,
+		type ChatSessionsPort,
+	} from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { chatMatchesBoardColumn, type ChatBoard } from '$shared/chat-boards';
 	import { ApiError } from '$lib/api/client.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -78,7 +81,7 @@
 		initialDestination ? [...initialTargetTags(initial.tags, initialDestination)] : [],
 	);
 	let submitting = $state(false);
-	let confirming = $state(false);
+	let reconciling = $state(false);
 	let submitError = $state<string | null>(null);
 	let forcedOutdated = $state(false);
 	let currentChat = $derived(sessions.byId[occurrence.chat.id] ?? null);
@@ -100,14 +103,15 @@
 			: null,
 	);
 	let sourceMatches = $derived(Boolean(source && chatMatchesBoardColumn(baseTags, source)));
-	let confirmationKind = $derived(sessions.tagConfirmationKind(occurrence.chat.id));
-	let confirmationProgressLabel = $derived(
-		confirmationKind === 'reconciliation'
+	let reconciliationKind = $derived(sessions.tagReconciliationKind(occurrence.chat.id));
+	let refreshRequired = $derived(isChatTagRefreshRequired(reconciliationKind));
+	let reconciliationProgressLabel = $derived(
+		refreshRequired
 			? m.chat_board_refreshing_tags()
 			: m.chat_board_confirming_tags(),
 	);
-	let confirmationRetryLabel = $derived(
-		confirmationKind === 'reconciliation'
+	let reconciliationRetryLabel = $derived(
+		refreshRequired
 			? m.chat_tags_retry_refresh()
 			: m.chat_tags_retry_confirmation(),
 	);
@@ -122,7 +126,7 @@
 			!outdated &&
 			!preview.isNoop &&
 			(target.match === 'all' || preview.appliedTargetTags.length > 0) &&
-				confirmationKind === null,
+			reconciliationKind === null,
 		),
 	);
 	let title = $derived(occurrence.chat.title || m.sidebar_chats_unnamed());
@@ -189,9 +193,10 @@
 			});
 			onApplied(occurrence.chat.id, target.id);
 		} catch (value) {
+			const currentReconciliation = sessions.tagReconciliationKind(occurrence.chat.id);
 			if (
 				(value instanceof ApiError && value.errorCode === 'CHAT_TAG_SAVE_UNKNOWN') ||
-				confirmationKind !== null
+				currentReconciliation === 'durability'
 			) {
 				forcedOutdated = true;
 				submitError = m.chat_tags_confirmation_unknown();
@@ -200,6 +205,11 @@
 				submitError = m.chat_board_transition_outdated();
 				await controller.refresh(false);
 				await sessions.quietRefreshChats();
+			} else if (isChatTagRefreshRequired(currentReconciliation)) {
+				forcedOutdated = true;
+				submitError = currentReconciliation === 'committed-refresh'
+					? m.chat_tags_refresh_required()
+					: m.chat_tags_conflict_refresh_required();
 			} else {
 				submitError =
 					value instanceof Error && value.message
@@ -211,22 +221,22 @@
 		}
 	}
 
-	async function retryConfirmation(): Promise<void> {
-		if (!confirmationKind || confirming) return;
-		const requestedKind = confirmationKind;
-		confirming = true;
+	async function retryReconciliation(): Promise<void> {
+		if (!reconciliationKind || reconciling) return;
+		const requestedKind = reconciliationKind;
+		reconciling = true;
 		submitError = null;
 		try {
-			await sessions.retryTagConfirmation(occurrence.chat.id);
-			submitError = requestedKind === 'reconciliation'
+			await sessions.retryTagReconciliation(occurrence.chat.id);
+			submitError = isChatTagRefreshRequired(requestedKind)
 				? m.chat_board_transition_outdated()
 				: m.chat_board_transition_unknown();
 		} catch {
-			submitError = requestedKind === 'reconciliation'
+			submitError = isChatTagRefreshRequired(requestedKind)
 				? m.chat_tags_refresh_failed()
 				: m.chat_tags_confirmation_failed();
 		} finally {
-			confirming = false;
+			reconciling = false;
 		}
 	}
 
@@ -390,16 +400,16 @@
 							{submitError ?? transitionErrorMessage()}
 						</p>
 					{/if}
-					{#if confirmationKind}
+					{#if reconciliationKind}
 						<Button
 							variant="outline"
-							disabled={submitting || confirming}
-							onclick={() => void retryConfirmation()}
+							disabled={submitting || reconciling}
+							onclick={() => void retryReconciliation()}
 						>
-							{confirming ? confirmationProgressLabel : confirmationRetryLabel}
+							{reconciling ? reconciliationProgressLabel : reconciliationRetryLabel}
 						</Button>
 					{:else if outdated}
-						<Button variant="outline" disabled={submitting || confirming} onclick={reviewLatest}>
+						<Button variant="outline" disabled={submitting || reconciling} onclick={reviewLatest}>
 							{m.chat_board_review_latest()}
 						</Button>
 					{/if}

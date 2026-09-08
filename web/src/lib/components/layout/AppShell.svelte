@@ -817,12 +817,12 @@
 	currentTags={chatActionDialogs.tagDialog
 		? sessions.byId[chatActionDialogs.tagDialog.chatId]?.tags
 		: undefined}
-	confirmationKind={chatActionDialogs.tagDialog
-		? sessions.tagConfirmationKind(chatActionDialogs.tagDialog.chatId)
+	reconciliationKind={chatActionDialogs.tagDialog
+		? sessions.tagReconciliationKind(chatActionDialogs.tagDialog.chatId)
 		: null}
 	onClose={() => chatActionDialogs.closeTagDialog()}
 	onSave={confirmChatTags}
-	onRetryConfirmation={(chatId) => sessions.retryTagConfirmation(chatId)}
+	onRetryReconciliation={(chatId) => sessions.retryTagReconciliation(chatId)}
 />
 
 <ShareChatDialog

@@ -10,7 +10,10 @@
 		projectChatBoard,
 		type ChatBoardOccurrence,
 	} from '$lib/chat-board/projection/chat-board-projection.js';
-	import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
+	import {
+		isChatTagRefreshRequired,
+		type ChatSessionsPort,
+	} from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { getLocalSettings } from '$lib/context';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import type { ChatBoard } from '$shared/chat-boards';
@@ -314,18 +317,19 @@
 		focusController.focusToolbar();
 	}
 
-	async function retryTagConfirmation(chatId: string): Promise<void> {
-		const confirmationKind = sessions.tagConfirmationKind(chatId);
-		announcement = confirmationKind === 'reconciliation'
+	async function retryTagReconciliation(chatId: string): Promise<void> {
+		const reconciliationKind = sessions.tagReconciliationKind(chatId);
+		const refreshRequired = isChatTagRefreshRequired(reconciliationKind);
+		announcement = refreshRequired
 			? m.chat_board_refreshing_tags()
 			: m.chat_board_confirming_tags();
 		try {
-			await sessions.retryTagConfirmation(chatId);
-			announcement = confirmationKind === 'reconciliation'
+			await sessions.retryTagReconciliation(chatId);
+			announcement = refreshRequired
 				? m.chat_tags_refresh_complete()
 				: m.chat_tags_confirmation_complete();
 		} catch {
-			announcement = confirmationKind === 'reconciliation'
+			announcement = refreshRequired
 				? m.chat_tags_refresh_failed()
 				: m.chat_tags_confirmation_failed();
 		}
@@ -519,11 +523,11 @@
 							narrow
 							isDropTarget={false}
 							pendingChatIds={sessions.pendingTagMutationChatIds}
-							tagConfirmationKind={(chatId) => sessions.tagConfirmationKind(chatId)}
+							tagReconciliationKind={(chatId) => sessions.tagReconciliationKind(chatId)}
 							canTransition={selectedBoard.columns.length > 1}
 							onOpen={onOpenChat}
 							onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
-							onConfirmTags={(chatId) => void retryTagConfirmation(chatId)}
+							onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
 							onRegisterScroller={registerScroller}
 							initialScrollTop={laneScrollTop(selectedBoard.id, narrowLane.column.id)}
 							onScrollTopChange={rememberLaneScroll}
@@ -549,11 +553,11 @@
 						narrow={false}
 						isDropTarget={dropTargetColumnId === lane.column.id}
 						pendingChatIds={sessions.pendingTagMutationChatIds}
-						tagConfirmationKind={(chatId) => sessions.tagConfirmationKind(chatId)}
+						tagReconciliationKind={(chatId) => sessions.tagReconciliationKind(chatId)}
 						canTransition={selectedBoard.columns.length > 1}
 						onOpen={onOpenChat}
 						onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
-						onConfirmTags={(chatId) => void retryTagConfirmation(chatId)}
+						onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
 						onRegisterScroller={registerScroller}
 						initialScrollTop={laneScrollTop(selectedBoard.id, lane.column.id)}
 						onScrollTopChange={rememberLaneScroll}

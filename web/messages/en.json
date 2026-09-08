@@ -1038,6 +1038,7 @@
 	"chat_tags_confirmation_complete": "Saved tags confirmed.",
 	"chat_tags_retry_confirmation": "Try confirmation again",
 	"chat_tags_refresh_required": "The tag change was saved, but the latest tags could not be loaded. Refresh them before editing again.",
+	"chat_tags_conflict_refresh_required": "The tag change was rejected because tags changed elsewhere, but the latest tags could not be loaded. Refresh them before editing again.",
 	"chat_tags_refresh_failed": "Saved tags still could not be refreshed. Check your connection and try again.",
 	"chat_tags_refresh_complete": "Saved tags refreshed.",
 	"chat_tags_retry_refresh": "Refresh saved tags",

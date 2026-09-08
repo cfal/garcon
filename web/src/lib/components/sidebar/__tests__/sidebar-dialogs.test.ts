@@ -472,7 +472,7 @@ describe('Sidebar dialogs', () => {
 	});
 
 	it('retries tag confirmation without discarding the staged edit', async () => {
-		const onRetryConfirmation = vi.fn()
+		const onRetryReconciliation = vi.fn()
 			.mockRejectedValueOnce(new TypeError('Offline'))
 			.mockResolvedValueOnce(undefined);
 		const onSave = vi.fn().mockResolvedValue(undefined);
@@ -485,10 +485,10 @@ describe('Sidebar dialogs', () => {
 			},
 			allKnownTags: [],
 			currentTags: ['existing'],
-			confirmationKind: 'durability' as const,
+			reconciliationKind: 'durability' as const,
 			onClose: vi.fn(),
 			onSave,
-			onRetryConfirmation,
+			onRetryReconciliation,
 		};
 		const rendered = render(SidebarTagDialog, props);
 
@@ -499,11 +499,11 @@ describe('Sidebar dialogs', () => {
 			expect(await screen.findByText('Saved tags still could not be confirmed. Check your connection and try again.')).toBeTruthy();
 
 			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
-			await waitFor(() => expect(onRetryConfirmation).toHaveBeenCalledTimes(2));
+			await waitFor(() => expect(onRetryReconciliation).toHaveBeenCalledTimes(2));
 			await rendered.rerender({
 				...props,
 				currentTags: ['saved'],
-				confirmationKind: null,
+				reconciliationKind: null,
 			});
 			expect(screen.getByRole('button', { name: 'Remove tag staged' })).toBeTruthy();
 			expect(screen.getByText('Tags changed since this editor opened. Review the latest saved tags before saving.')).toBeTruthy();
@@ -521,7 +521,7 @@ describe('Sidebar dialogs', () => {
 	});
 
 	it('distinguishes a required canonical tag refresh from durability confirmation', async () => {
-		const onRetryConfirmation = vi.fn().mockRejectedValue(new TypeError('Offline'));
+		const onRetryReconciliation = vi.fn().mockRejectedValue(new TypeError('Offline'));
 		const rendered = render(SidebarTagDialog, {
 			tagDialog: {
 				chatId: 'chat-1',
@@ -531,10 +531,10 @@ describe('Sidebar dialogs', () => {
 			},
 			allKnownTags: [],
 			currentTags: ['existing'],
-			confirmationKind: 'reconciliation',
+			reconciliationKind: 'committed-refresh',
 			onClose: vi.fn(),
 			onSave: vi.fn(),
-			onRetryConfirmation,
+			onRetryReconciliation,
 		});
 
 		try {
@@ -549,7 +549,35 @@ describe('Sidebar dialogs', () => {
 					'Saved tags still could not be refreshed. Check your connection and try again.',
 				),
 			).toBeTruthy();
-			expect(onRetryConfirmation).toHaveBeenCalledWith('chat-1');
+			expect(onRetryReconciliation).toHaveBeenCalledWith('chat-1');
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('does not present a rejected tag replacement as saved', async () => {
+		const rendered = render(SidebarTagDialog, {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['existing'],
+				editingTags: ['existing', 'staged'],
+			},
+			allKnownTags: [],
+			currentTags: ['existing'],
+			reconciliationKind: 'conflict-refresh',
+			onClose: vi.fn(),
+			onSave: vi.fn(),
+			onRetryReconciliation: vi.fn(),
+		});
+
+		try {
+			expect(
+				screen.getByText(
+					'The tag change was rejected because tags changed elsewhere, but the latest tags could not be loaded. Refresh them before editing again.',
+				),
+			).toBeTruthy();
+			expect(screen.queryByText(/tag change was saved/)).toBeNull();
 		} finally {
 			await unmountDialog(rendered);
 		}

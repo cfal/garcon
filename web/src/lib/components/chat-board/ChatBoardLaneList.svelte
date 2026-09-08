@@ -2,7 +2,7 @@
 	import { onDestroy, untrack } from 'svelte';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
-	import type { ChatTagConfirmationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
+	import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 	import {
 		virtualItems as selectVirtualItems,
@@ -22,11 +22,11 @@
 		layout,
 		canDrag,
 		pendingChatIds,
-		tagConfirmationKind,
+		tagReconciliationKind,
 		canTransition,
 		onOpen,
 		onTransition,
-		onConfirmTags,
+		onReconcileTags,
 		onRegisterScroller,
 		initialScrollTop,
 		onScrollTopChange,
@@ -38,11 +38,11 @@
 		layout: ChatItemLayout;
 		canDrag: boolean;
 		pendingChatIds: ReadonlySet<string>;
-		tagConfirmationKind: (chatId: string) => ChatTagConfirmationKind;
+		tagReconciliationKind: (chatId: string) => ChatTagReconciliationKind;
 		canTransition: boolean;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
-		onConfirmTags: (chatId: string) => void;
+		onReconcileTags: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 		initialScrollTop: number;
 		onScrollTopChange: (boardId: string, columnId: string, scrollTop: number) => void;
@@ -197,12 +197,12 @@
 								{boardId}
 								{canDrag}
 								pending={pendingChatIds.has(occurrence.chat.id)}
-								confirmationKind={tagConfirmationKind(occurrence.chat.id)}
+								reconciliationKind={tagReconciliationKind(occurrence.chat.id)}
 								{canTransition}
 								occurrenceIndex={virtualItem.index}
 								{onOpen}
 								{onTransition}
-								{onConfirmTags}
+								{onReconcileTags}
 							/>
 							{#snippet failed()}
 								<button

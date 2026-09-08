@@ -78,7 +78,7 @@ describe('ChatBoardCard', () => {
 		render(ChatBoardCardTestHost, {
 			occurrence: occurrence(),
 			currentTime: new Date('2026-09-07T10:00:30.000Z'),
-			confirmationKind: 'reconciliation',
+			reconciliationKind: 'committed-refresh',
 		});
 
 		expect(screen.getByRole('button', { name: /Refreshing saved tags.*Try again/ })).toBeTruthy();
