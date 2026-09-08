@@ -132,6 +132,8 @@ describe('composed assistant schedule pipeline', () => {
       test(`nested closers cannot publish schedules inside an unclosed ${prefix ? 'trailing' : 'leading'} ${family}`, async () => {
         await withPipeline(async ({ ledger, publisher, schedules, lock, cron }) => {
           const contents = [
+            `${prefix}<garcon-${family}>\n~~~xml\n</garcon-${family}>\n<garcon-schedule in="1m" />`,
+            `${prefix}<garcon-${family}>\n\`\`\`xml\n</garcon-${family}>\n<garcon-schedule in="5m" />`,
             `${prefix}<garcon-${family}>\n<garcon-${family}>nested</garcon-${family}>\n<garcon-schedule in="1m" />`,
             `${prefix}<garcon-${family} broken="</garcon-${family}>\n<garcon-schedule in="5m" />`,
             `${prefix}<garcon-${family}>\n<example broken="</garcon-${family}>\n<garcon-schedule in="10m" />`,

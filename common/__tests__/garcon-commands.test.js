@@ -323,6 +323,45 @@ describe('Garcon edge commands', () => {
     expect(extractGarconCommands(new UserMessage(AT, '<garcon-schedule in="1m" />'))).toBeNull();
   });
 
+  for (const family of ['start-agent', 'schedule', 'send-message']) {
+    for (const prefix of ['', 'Answer\n']) {
+      it(`preserves Markdown fences in a retained ${prefix ? 'trailing' : 'leading'} ${family}`, () => {
+        for (const fence of ['~~~', '```', '   ~~~~']) {
+          const malformed = `${prefix}<garcon-${family}>\n${fence}xml\n</garcon-${family}>`;
+          for (const suffix of [GARCON_GET_CHAT_ID, '<garcon-schedule in="1m" />',
+            '<garcon-start-agent agent="codex" model="example">Inspect.</garcon-start-agent>', send(FIRST, false)]) {
+            const content = `${malformed}\n${suffix}`;
+            const result = extractGarconCommands(new AssistantMessage(AT, content));
+            expect(result?.commands ?? []).toEqual([]);
+            expect(result?.message.content ?? content).toBe(content);
+          }
+          const result = extractGarconCommands(new AssistantMessage(AT,
+            `${malformed}\n${fence}\n<garcon-schedule in="1m" />`));
+          expect(result.commands).toMatchObject([{ type: 'schedule', firstRun: { minutes: 1 } }]);
+          expect(result.commands).toHaveLength(1);
+        }
+      });
+    }
+  }
+
+  it('keeps fences opaque only inside envelopes that are removed', () => {
+    for (const envelope of [
+      '<garcon-start-agent agent="codex" model="example">\n~~~xml\n</garcon-start-agent>',
+      '<garcon-schedule in="1m">\n~~~xml\n</garcon-schedule>',
+      send(FIRST, false, '~~~xml'),
+    ]) {
+      const removed = extractGarconCommands(new AssistantMessage(AT, `Answer\n${envelope}\n<garcon-schedule in="5m" />`));
+      expect(removed.commands).toHaveLength(2);
+      expect(removed.message.content).toBe('Answer');
+      for (const following of ['Retained prose', '<garcon-start-agent />']) {
+        const content = `Answer\n${envelope}\n${following}\n<garcon-schedule in="5m" />`;
+        const retained = extractGarconCommands(new AssistantMessage(AT, content));
+        expect(retained?.commands ?? []).toEqual([]);
+        expect(retained?.message.content ?? content).toBe(content);
+      }
+    }
+  });
+
   it('never uses a nested self-closing command to close a malformed outer opener', () => {
     for (const family of ['start-agent', 'schedule', 'send-message']) {
       for (const attributes of ['', ' broken="']) {

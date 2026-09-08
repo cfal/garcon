@@ -68,12 +68,16 @@ export function garconEnvelopeSpanAt(content: string, start: number, end: number
   return { command, start, end: null };
 }
 
-export function scanGarconEnvelopeSpans(content: string, start: number, end: number): {
+export function scanGarconEnvelopeSpans(
+  content: string, start: number, end: number,
+  isRemovedEnvelope: (span: GarconEnvelopeSpan) => boolean,
+): {
   readonly spans: readonly GarconEnvelopeSpan[];
   readonly openFence: boolean;
 } {
   const spans: GarconEnvelopeSpan[] = [];
   let cursor = start;
+  let opaqueThrough = start;
   let fence: { character: string; length: number } | null = null;
   while (cursor < end) {
     const nextLine = content.indexOf('\n', cursor);
@@ -83,11 +87,17 @@ export function scanGarconEnvelopeSpans(content: string, start: number, end: num
     if (delimiter) {
       if (!fence) fence = { character: delimiter[1][0], length: delimiter[1].length };
       else if (delimiter[1][0] === fence.character && delimiter[1].length >= fence.length && !delimiter[2].trim()) fence = null;
-    } else if (!fence) {
+    } else if (!fence && cursor >= opaqueThrough) {
       const span = garconEnvelopeSpanAt(content, cursor, end);
       if (span) {
         spans.push(span);
         if (span.end === null) return { spans, openFence: false };
+        if (!isRemovedEnvelope(span)) {
+          // Retained text contributes Markdown fences, but nested commands stay opaque.
+          opaqueThrough = span.end;
+          cursor = lineEnd + 1;
+          continue;
+        }
         cursor = span.end;
         if (cursor === end) break;
         if (content[cursor] === '\n') cursor += 1;

@@ -182,7 +182,9 @@ function parseEnvelopeSpan(content: string, span: GarconEnvelopeSpan): ParsedEdg
 }
 
 function parseTrailingCommand(content: string, start: number, end: number): ParsedEdge {
-  const { spans, openFence } = scanGarconEnvelopeSpans(content, start, end);
+  const trailingChains = new Map<number, boolean>();
+  const { spans, openFence } = scanGarconEnvelopeSpans(content, start, end,
+    (span) => isTrailingCommandChain(content, span.start, end, trailingChains));
   const unclosed = spans.find((span) => span.end === null);
   if (unclosed) return { kind: 'malformed', command: unclosed.command, candidateStart: unclosed.start };
   if (openFence) return { kind: 'none' };
@@ -204,6 +206,23 @@ function parseTrailingCommand(content: string, start: number, end: number): Pars
     }
   }
   return { kind: 'none' };
+}
+
+function isTrailingCommandChain(content: string, start: number, end: number, cache: Map<number, boolean>): boolean {
+  const visited: number[] = [];
+  let cursor = start;
+  let removable = true;
+  while (cursor < end) {
+    const cached = cache.get(cursor);
+    if (cached !== undefined) { removable = cached; break; }
+    visited.push(cursor);
+    const parsed = parseLeadingCommand(content, cursor, end);
+    if (parsed.kind !== 'valid') { removable = false; break; }
+    cursor = trimStartIndex(content, parsed.end, end);
+    if (cursor < end && content[cursor - 1] !== '\n') { removable = false; break; }
+  }
+  for (const position of visited) cache.set(position, removable);
+  return removable;
 }
 
 function parseSendMessage(opener: string, rawBody: string): GarconEdgeCommand | null {
