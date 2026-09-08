@@ -151,4 +151,43 @@ describe('ManageBoardsDialog', () => {
 		currentResponse.resolve({ revision: 3, boards: [first, second, created] });
 		await waitFor(() => expect(onEditBoard).toHaveBeenCalledWith(created));
 	});
+
+	it('clears pending creation when a newer catalog has removed the board', async () => {
+		const created: ChatBoard = {
+			id: '33333333-3333-4333-8333-333333333333',
+			name: 'Short lived',
+			columns: [],
+		};
+		const currentResponse = deferred<ChatBoardCatalog>();
+		const { api, controller, invalidations } = await setup();
+		controller.setPresentationVisible(true);
+		api.load.mockImplementationOnce(() => currentResponse.promise);
+		api.create.mockResolvedValueOnce({
+			success: true,
+			boardId: created.id,
+			catalog: { revision: 2, boards: [first, second, created] },
+		});
+		invalidations.publish({ kind: 'catalog', revision: 3, reason: 'removed' });
+		const onEditBoard = vi.fn();
+		render(ManageBoardsDialog, {
+			open: true,
+			controller,
+			onClose: vi.fn(),
+			onEditBoard,
+		});
+
+		const nameInput = screen.getByLabelText('Board name');
+		await fireEvent.input(nameInput, { target: { value: created.name } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+		await waitFor(() => expect(api.create).toHaveBeenCalledWith(1, created.name));
+
+		currentResponse.resolve({ revision: 3, boards: [first, second] });
+		await waitFor(() =>
+			expect(screen.getByRole('alert').textContent).toBe(
+				'The new board was removed before it could be opened.',
+			),
+		);
+		expect(onEditBoard).not.toHaveBeenCalled();
+		expect((nameInput as HTMLInputElement).disabled).toBe(false);
+	});
 });

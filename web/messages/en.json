@@ -1009,6 +1009,7 @@
 	"chat_board_column_tags_invalid": "Use up to 32 valid tags, separated by commas.",
 	"chat_board_column_rule_duplicate": "This column has the same rule as “{column}”.",
 	"chat_board_save_failed": "Changes could not be saved. Try again.",
+	"chat_board_created_board_removed": "The new board was removed before it could be opened.",
 	"chat_board_outdated": "This board changed elsewhere. Review the latest version before saving.",
 	"chat_board_start_latest": "Start again from latest",
 	"chat_board_transition_title": "Transition Chat",

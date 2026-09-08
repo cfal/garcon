@@ -149,12 +149,12 @@ export class ChatBoardController implements PortableSingletonController {
 		}
 	}
 
-	async createBoard(name: string): Promise<string> {
+	async createBoard(name: string): Promise<{ boardId: string; catalogRevision: number }> {
 		try {
 			const result = await this.deps.api.create(this.#catalog.revision, name);
 			this.#applyCatalog(result.catalog);
 			this.deps.preferences.setSelectedBoardId(result.boardId);
-			return result.boardId;
+			return { boardId: result.boardId, catalogRevision: result.catalog.revision };
 		} catch (error) {
 			this.#applyConflictCatalog(error);
 			throw error;

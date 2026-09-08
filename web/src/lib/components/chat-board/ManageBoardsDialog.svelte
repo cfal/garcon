@@ -31,16 +31,20 @@
 	let error = $state<string | null>(null);
 	let draggedId = $state<string | null>(null);
 	let dragOverId = $state<string | null>(null);
-	let pendingCreatedBoardId = $state<string | null>(null);
+	let pendingBoardEditor = $state<{ boardId: string; catalogRevision: number } | null>(null);
 
 	$effect(() => {
-		if (!pendingCreatedBoardId) return;
-		const board = controller.catalog.boards.find(
-			(candidate) => candidate.id === pendingCreatedBoardId,
-		);
-		if (!board) return;
-		pendingCreatedBoardId = null;
-		onEditBoard(board);
+		const pending = pendingBoardEditor;
+		if (!pending) return;
+		const board = controller.catalog.boards.find((candidate) => candidate.id === pending.boardId);
+		if (board) {
+			pendingBoardEditor = null;
+			onEditBoard(board);
+			return;
+		}
+		if (controller.catalog.revision < pending.catalogRevision) return;
+		pendingBoardEditor = null;
+		error = m.chat_board_created_board_removed();
 	});
 
 	function presentError(value: unknown): string {
@@ -49,16 +53,16 @@
 
 	async function createBoard(): Promise<void> {
 		const name = newName.trim();
-		if (!name || busy || pendingCreatedBoardId) {
+		if (!name || busy || pendingBoardEditor) {
 			if (!name) error = m.chat_board_name_required();
 			return;
 		}
 		busy = true;
 		error = null;
 		try {
-			const id = await controller.createBoard(name);
+			const result = await controller.createBoard(name);
 			newName = '';
-			pendingCreatedBoardId = id;
+			pendingBoardEditor = result;
 		} catch (value) {
 			error = presentError(value);
 		} finally {
@@ -190,11 +194,11 @@
 					<Input
 						bind:value={newName}
 						maxlength={80}
-						disabled={busy || Boolean(pendingCreatedBoardId)}
+						disabled={busy || pendingBoardEditor !== null}
 						autocomplete="off"
 					/>
 				</label>
-				<Button type="submit" disabled={busy || Boolean(pendingCreatedBoardId) || !newName.trim()}
+				<Button type="submit" disabled={busy || pendingBoardEditor !== null || !newName.trim()}
 					>{m.chat_board_add()}</Button
 				>
 			</form>
