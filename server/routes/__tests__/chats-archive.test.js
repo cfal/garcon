@@ -59,6 +59,14 @@ const settings = {
   ensureInNormal: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
+  setPinned: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: '500', orderGroup: 'pinned', isPinned: true, isArchived: false, changed: true },
+  })),
+  setArchived: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: '500', orderGroup: 'archived', isPinned: false, isArchived: true, changed: true },
+  })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
 const metadata = {
@@ -108,6 +116,7 @@ const allMocks = [
   registry.getChat,
   settings.getPinnedChatIds, settings.getNormalChatIds, settings.getArchivedChatIds,
   settings.togglePin, settings.toggleArchive,
+  settings.setPinned, settings.setArchived,
 ];
 
 describe('POST /api/chats/archive', () => {
@@ -209,6 +218,56 @@ describe('POST /api/chats/pin', () => {
     expect(body.success).toBe(true);
     expect(body.isPinned).toBe(false);
     expect(settings.togglePin).toHaveBeenCalledWith('500');
+  });
+});
+
+describe('PUT desired chat order state', () => {
+  beforeEach(() => {
+    allMocks.forEach(m => m.mockClear());
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
+  });
+
+  it('sets pinned state through the atomic desired-state owner', async () => {
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500', isPinned: true }));
+    const response = await chatsRoutes['/api/v1/chats/pin'].PUT(new Request(
+      'http://localhost/api/v1/chats/pin',
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}' },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      chatId: '500',
+      orderGroup: 'pinned',
+      changed: true,
+    });
+    expect(settings.setPinned).toHaveBeenCalledWith('500', true, expect.any(Function));
+  });
+
+  it('sets archived state through the atomic desired-state owner', async () => {
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500', isArchived: true }));
+    const response = await chatsRoutes['/api/v1/chats/archive'].PUT(new Request(
+      'http://localhost/api/v1/chats/archive',
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}' },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      chatId: '500',
+      orderGroup: 'archived',
+      changed: true,
+    });
+    expect(settings.setArchived).toHaveBeenCalledWith('500', true, expect.any(Function));
+  });
+
+  it('rejects retry-unsafe or malformed desired-state requests', async () => {
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
+    const response = await chatsRoutes['/api/v1/chats/pin'].PUT(new Request(
+      'http://localhost/api/v1/chats/pin',
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}' },
+    ));
+
+    expect(response.status).toBe(400);
+    expect(settings.setPinned).not.toHaveBeenCalled();
   });
 });
 

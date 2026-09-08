@@ -12,7 +12,7 @@ import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
-import type { CliOutput } from './output.js';
+import type { AsyncDelivery } from './output.js';
 
 const MAX_CONTROL_DISPATCH_ATTEMPTS = 3;
 const CONTROL_STATE_RETRY_DELAY_MS = 50;
@@ -71,10 +71,9 @@ export async function resumeChatAsync(
     userMessagePresentation?: UserMessagePresentation;
   },
   client: ChatControlClient,
-  output: CliOutput,
   signal?: AbortSignal,
   dependencies: ChatControlDependencies = {},
-): Promise<void> {
+): Promise<ResumeChatAsyncResult> {
   const createId = dependencies.createId ?? crypto.randomUUID;
   const delay = dependencies.delay ?? abortableDelay;
   const transcriptViewId = await currentTranscriptViewId(client, input.chatId, signal);
@@ -95,8 +94,7 @@ export async function resumeChatAsync(
     try {
       if (operation === 'run') {
         const response = await client.runChat(runRequest, signal);
-        output.sent(response.chatId, 'new-turn', response.turnId);
-        return;
+        return { delivery: 'new-turn', response };
       }
 
       // A steer attempt gets a fresh identity; a later logical steer must never
@@ -112,8 +110,7 @@ export async function resumeChatAsync(
           : { userMessagePresentation: input.userMessagePresentation }),
       };
       const response = await client.steerChat(request, signal);
-      output.sent(response.chatId, 'steer', response.turnId);
-      return;
+      return { delivery: 'steer', response };
     } catch (error) {
       if (operation === 'run') {
         if (!hasDefinitiveConflictCode(error, 'SESSION_BUSY')) throw error;
@@ -169,10 +166,9 @@ async function currentTranscriptViewId(
 export async function stopChat(
   chatId: string,
   client: ChatControlClient,
-  output: CliOutput,
   signal?: AbortSignal,
   dependencies: Pick<ChatControlDependencies, 'createId'> = {},
-): Promise<void> {
+): Promise<StopChatResult> {
   const response = await client.stopChat({
     clientRequestId: (dependencies.createId ?? crypto.randomUUID)(),
     chatId,
@@ -180,5 +176,16 @@ export async function stopChat(
   if (response.outcome === 'failed') {
     throw new CliError('submission', `Garcon could not stop chat ${chatId}`, 3);
   }
-  output.stopped(chatId, response.outcome);
+  return { response: { ...response, outcome: response.outcome } };
+}
+
+export interface ResumeChatAsyncResult {
+  readonly delivery: AsyncDelivery;
+  readonly response: AgentTurnCommandResponse | SteerCommandResponse;
+}
+
+export interface StopChatResult {
+  readonly response: AgentStopResponse & {
+    readonly outcome: Exclude<AgentStopResponse['outcome'], 'failed'>;
+  };
 }

@@ -2,12 +2,15 @@ import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import { parseAgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
   AgentRunCommandRequest,
+  CommandAcceptedResponse,
   AgentStopCommandRequest,
   AgentStopResponse,
   AgentTurnCommandResponse,
+  StartChatCommandResponse,
   StartChatCommandRequest,
   SteerCommandRequest,
   SteerCommandResponse,
+  PermissionDecisionCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import {
   parseAddChatRowResponse,
@@ -19,6 +22,7 @@ import {
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import { parseChatListResponse, type ChatListResponse } from '@garcon/common/chat-list';
+import { parseParentChatRef, type ParentChatRef } from '@garcon/common/chat-parentage';
 import {
   parseChatHistoryResponse,
   type ChatHistoryResponse,
@@ -38,6 +42,18 @@ import type {
   UpdateChatTitleRequest,
   UpdateChatTitleResponse,
 } from '@garcon/common/chat-title-contracts';
+import { parseUpdateChatTitleResponse } from '@garcon/common/chat-title-contracts';
+import {
+  parseSetChatOrderStateResponse,
+  type SetChatArchivedRequest,
+  type SetChatOrderStateResponse,
+  type SetChatPinnedRequest,
+} from '@garcon/common/chat-order-contracts';
+import {
+  parseSetChatTagsResponse,
+  type SetChatTagsRequest,
+  type SetChatTagsResponse,
+} from '@garcon/common/chat-tags-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import {
@@ -136,14 +152,13 @@ async function responseBody(response: Response, phase: CliErrorPhase): Promise<u
   }
 }
 
-function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
+function parseCommandAcceptedResponse(value: unknown): CommandAcceptedResponse {
   const raw = record(value);
   if (
     raw?.success !== true
     || typeof raw.commandType !== 'string'
     || typeof raw.clientRequestId !== 'string'
     || typeof raw.chatId !== 'string'
-    || typeof raw.turnId !== 'string'
     || (raw.status !== 'accepted' && raw.status !== 'duplicate')
     || typeof raw.acceptedAt !== 'string'
   ) {
@@ -154,10 +169,59 @@ function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
     commandType: raw.commandType,
     clientRequestId: raw.clientRequestId,
     chatId: raw.chatId,
-    turnId: raw.turnId,
+    ...(typeof raw.turnId === 'string' ? { turnId: raw.turnId } : {}),
     status: raw.status,
     acceptedAt: raw.acceptedAt,
   };
+}
+
+function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
+  const raw = record(value);
+  const accepted = parseCommandAcceptedResponse(value);
+  if (typeof accepted.chatId !== 'string' || typeof accepted.turnId !== 'string') {
+    throw new CliError('submission', 'server returned an invalid command acceptance response', 3);
+  }
+  return {
+    ...accepted,
+    chatId: accepted.chatId,
+    turnId: accepted.turnId,
+    parentChat: parseRequiredParentChat(raw),
+  };
+}
+
+function parseRequiredParentChat(raw: Record<string, unknown> | null): ParentChatRef | null {
+  if (!raw || !Object.hasOwn(raw, 'parentChat')) {
+    throw new CliError('submission', 'server returned an invalid command parent relation', 3);
+  }
+  if (raw.parentChat === null) return null;
+  const parsed = parseParentChatRef(raw.parentChat);
+  if (!parsed) {
+    throw new CliError('submission', 'server returned an invalid command parent relation', 3);
+  }
+  return parsed;
+}
+
+function parseStartResponse(value: unknown): StartChatCommandResponse {
+  const accepted = parseAcceptedResponse(value);
+  const raw = record(value);
+  if (!raw || !Object.hasOwn(raw, 'chat')) {
+    throw new CliError('submission', 'server returned an invalid started chat', 3);
+  }
+  let chat: ChatListResponse['sessions'][number] | null;
+  if (raw.chat === null) {
+    chat = null;
+  } else {
+    try {
+      chat = parseChatListResponse({
+        sessions: [raw.chat],
+        total: 1,
+        lastSelectedChatId: null,
+      }).sessions[0]!;
+    } catch (error) {
+      throw new CliError('submission', 'server returned an invalid started chat', 3, { cause: error });
+    }
+  }
+  return { ...accepted, chat };
 }
 
 function parseStopResponse(value: unknown): AgentStopResponse {
@@ -186,6 +250,7 @@ function parseStopResponse(value: unknown): AgentStopResponse {
     acceptedAt: raw.acceptedAt,
     outcome: raw.outcome as ChatStopOutcome,
     control,
+    parentChat: parseRequiredParentChat(raw),
   };
 }
 
@@ -242,6 +307,10 @@ export class GarconClient {
     this.#capability = options.localCapability;
     this.#fetch = options.fetch ?? fetch;
     this.#submissionDelay = options.submissionDelay ?? abortableDelay;
+  }
+
+  get serverInstanceId(): string {
+    return this.#instanceId;
   }
 
   async getModelCatalog(
@@ -467,8 +536,16 @@ export class GarconClient {
     }
   }
 
-  startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
-    return this.#submitTurn('/api/v1/chats/start', 'chat-start', request, signal, isAmbiguousSubmissionError);
+  startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<StartChatCommandResponse> {
+    return this.#submitTurn(
+      '/api/v1/chats/start',
+      'chat-start',
+      request,
+      signal,
+      isAmbiguousSubmissionError,
+      REQUEST_TIMEOUT_MS,
+      parseStartResponse,
+    );
   }
 
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
@@ -479,11 +556,20 @@ export class GarconClient {
       signal,
       isAmbiguousSubmissionError,
       request.handoff ? HANDOFF_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      parseAcceptedResponse,
     );
   }
 
   steerChat(request: SteerCommandRequest, signal?: AbortSignal): Promise<SteerCommandResponse> {
-    return this.#submitTurn('/api/v1/chats/steer', 'steer', request, signal, isAmbiguousSteerSubmissionError)
+    return this.#submitTurn(
+      '/api/v1/chats/steer',
+      'steer',
+      request,
+      signal,
+      isAmbiguousSteerSubmissionError,
+      REQUEST_TIMEOUT_MS,
+      parseAcceptedResponse,
+    )
       .then((response) => {
         // #submitTurn rejects mismatched commandType values, so a correlated
         // success is guaranteed to carry the steer literal.
@@ -502,6 +588,28 @@ export class GarconClient {
         && response.chatId === submitted.chatId
       ),
       ambiguityDescription: `the stop command for chat ${request.chatId}`,
+    }, signal);
+  }
+
+  decidePermission(
+    request: PermissionDecisionCommandRequest,
+    signal?: AbortSignal,
+  ): Promise<CommandAcceptedResponse> {
+    return this.#submitCorrelated({
+      route: '/api/v1/chats/permissions/decision',
+      request,
+      parse: parseCommandAcceptedResponse,
+      correlates: (response, submitted) => (
+        response.commandType === 'permission-decision'
+        && response.clientRequestId === submitted.clientRequestId
+        && response.chatId === submitted.chatId
+      ),
+      ambiguityDescription: `the permission decision for chat ${request.chatId}`,
+      ambiguous: (error) => (
+        isAmbiguousSubmissionError(error)
+        && !(error instanceof GarconHttpError
+          && error.errorCode === 'PERMISSION_DECISION_OUTCOME_UNKNOWN')
+      ),
     }, signal);
   }
 
@@ -552,7 +660,10 @@ export class GarconClient {
     }, signal);
   }
 
-  async updateChatTitle(request: UpdateChatTitleRequest, signal?: AbortSignal): Promise<void> {
+  async updateChatTitle(
+    request: UpdateChatTitleRequest,
+    signal?: AbortSignal,
+  ): Promise<UpdateChatTitleResponse> {
     const value = await this.#request(
       'title update',
       'PUT',
@@ -560,10 +671,69 @@ export class GarconClient {
       request,
       signal,
     );
-    const response = record(value) as Partial<UpdateChatTitleResponse> | null;
-    if (response?.success !== true) {
+    const response = parseUpdateChatTitleResponse(value);
+    if (!response || response.chatId !== request.chatId || response.title !== request.title.trim()) {
       throw new CliError('title update', 'server returned an invalid title update response', 3);
     }
+    return response;
+  }
+
+  async setChatPinned(
+    request: SetChatPinnedRequest,
+    signal?: AbortSignal,
+  ): Promise<SetChatOrderStateResponse> {
+    const value = await this.#request(
+      'submission',
+      'PUT',
+      '/api/v1/chats/pin',
+      request,
+      signal,
+    );
+    const response = parseSetChatOrderStateResponse(value);
+    if (!response || response.chatId !== request.chatId || response.isPinned !== request.isPinned) {
+      throw new CliError('submission', 'server returned an invalid pinned-state response', 3);
+    }
+    return response;
+  }
+
+  async setChatArchived(
+    request: SetChatArchivedRequest,
+    signal?: AbortSignal,
+  ): Promise<SetChatOrderStateResponse> {
+    const value = await this.#request(
+      'submission',
+      'PUT',
+      '/api/v1/chats/archive',
+      request,
+      signal,
+    );
+    const response = parseSetChatOrderStateResponse(value);
+    if (!response || response.chatId !== request.chatId || response.isArchived !== request.isArchived) {
+      throw new CliError('submission', 'server returned an invalid archived-state response', 3);
+    }
+    return response;
+  }
+
+  async setChatTags(
+    request: SetChatTagsRequest,
+    signal?: AbortSignal,
+  ): Promise<SetChatTagsResponse> {
+    const value = await this.#request(
+      'submission',
+      'PATCH',
+      '/api/v1/chats/tags',
+      request,
+      signal,
+    );
+    const response = parseSetChatTagsResponse(value);
+    if (
+      !response
+      || response.chatId !== request.chatId
+      || stableJsonStringify(response.tags) !== stableJsonStringify(request.tags)
+    ) {
+      throw new CliError('submission', 'server returned an invalid tag-state response', 3);
+    }
+    return response;
   }
 
   async getTurnReceipt(chatId: string, turnId: string, signal?: AbortSignal): Promise<AgentTurnReceipt> {
@@ -594,18 +764,19 @@ export class GarconClient {
     );
   }
 
-  async #submitTurn(
+  async #submitTurn<TResponse extends AgentTurnCommandResponse>(
     route: string,
     commandType: 'chat-start' | 'agent-run' | 'steer',
     request: StartChatCommandRequest | AgentRunCommandRequest | SteerCommandRequest,
     signal: AbortSignal | undefined,
     ambiguous: (error: unknown) => boolean,
     timeoutMs = REQUEST_TIMEOUT_MS,
-  ): Promise<AgentTurnCommandResponse> {
+    parse: (value: unknown) => TResponse,
+  ): Promise<TResponse> {
     return this.#submitCorrelated({
       route,
       request,
-      parse: parseAcceptedResponse,
+      parse,
       correlates: (response, submitted) => (
         response.commandType === commandType
         && response.clientRequestId === submitted.clientRequestId
@@ -688,7 +859,7 @@ export class GarconClient {
 
   async #request(
     phase: CliErrorPhase,
-    method: 'GET' | 'POST' | 'PUT',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
     route: string,
     body: unknown,
     signal?: AbortSignal,

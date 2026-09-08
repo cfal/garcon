@@ -76,6 +76,16 @@ describe('transcript corruption isolation', () => {
         unindexedChatCount: 0,
         unsupportedChatCount: 0,
         resultsTruncated: false,
+        failedChats: [{
+          chatId: corruptChatId,
+          transcriptViewId: null,
+          stage: 'ledger',
+          errorCode: expect.stringMatching(/^(?:SQLITE_[A-Z0-9_]+|LEDGER_FENCED)$/u),
+          indexedThroughOrdinal: null,
+          targetThroughOrdinal: null,
+          recovery: 'source-required',
+        }],
+        failedChatsOmittedCount: 0,
       });
       const healthyTurn = await fixture.client.runDirectChat({
         chatId: healthyChatId,
@@ -89,4 +99,54 @@ describe('transcript corruption isolation', () => {
       ]);
     });
   });
+
+  test('bounds failed-chat search details while preserving the complete failure count', async () => {
+    await withIntegrationFixture('transcript-search-bounded-failures', async (fixture) => {
+      const chatIds = Array.from({ length: 22 }, () => fixture.newChatId()).sort();
+      for (const [index, chatId] of chatIds.entries()) {
+        const turn = await fixture.client.startDirectChat({
+          chatId,
+          content: `synthetic-search-failure-${index}`,
+          projectPath: fixture.dirs.project,
+          agent: fixture.directAgents.openAi,
+        });
+        await fixture.client.waitForTurnTerminal(chatId, turn.turnId);
+      }
+      await fixture.client.updateSettings({
+        features: { transcriptSearch: { enabled: true } },
+      });
+      await fixture.client.waitForChatSearch(
+        { query: 'synthetic-search-failure', chatIds },
+        (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length,
+      );
+
+      await fixture.restartGarcon({
+        beforeStart: () => Promise.all(chatIds.map((chatId) => writeFile(
+          join(fixture.dirs.workspace, 'transcript-ledgers', chatId, 'ledger.sqlite'),
+          'not a sqlite database',
+        ))).then(() => undefined),
+      });
+
+      const search = await fixture.client.waitForChatSearch(
+        { query: 'synthetic-search-failure', chatIds },
+        (response) => response.index.pendingChatCount === 0
+          && response.index.failedChatCount === chatIds.length,
+      );
+      expect(search.index.failedChatCount).toBe(22);
+      expect(search.index.failedChats).toHaveLength(20);
+      expect(search.index.failedChatsOmittedCount).toBe(2);
+      expect(search.index.failedChats.map((failure) => failure.chatId))
+        .toEqual(chatIds.slice(0, 20));
+      expect(search.index.failedChats).toEqual(chatIds.slice(0, 20).map((chatId) => ({
+        chatId,
+        transcriptViewId: null,
+        stage: 'ledger',
+        errorCode: expect.stringMatching(/^(?:SQLITE_[A-Z0-9_]+|LEDGER_FENCED)$/u),
+        indexedThroughOrdinal: null,
+        targetThroughOrdinal: null,
+        recovery: 'source-required',
+      })));
+    });
+  }, 120_000);
 });

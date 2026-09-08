@@ -163,7 +163,10 @@ function createRoutesFixture({
         unindexedChatCount: 0,
         unsupportedChatCount: 0,
         resultsTruncated: false,
+        failedChats: [],
+        failedChatsOmittedCount: 0,
       },
+      removedStaleResultCount: 0,
     })),
   };
   const chatListProjector = {
@@ -412,7 +415,10 @@ describe('POST /api/v1/chats/search', () => {
         unindexedChatCount: 0,
         unsupportedChatCount: 0,
         resultsTruncated: false,
+        failedChats: [],
+        failedChatsOmittedCount: 0,
       },
+      removedStaleResultCount: 0,
     });
     const response = await postSearch(routes, {
       query: 'needle', chatIds: ['c1', 'missing', 'c2'], sort: 'created', offset: 50, limit: 50,
@@ -542,7 +548,10 @@ describe('POST /api/v1/chats/search', () => {
         unindexedChatCount: 0,
         unsupportedChatCount: 0,
         resultsTruncated: false,
+        failedChats: [],
+        failedChatsOmittedCount: 0,
       },
+      removedStaleResultCount: 0,
     };
     searchIndex.search.mockResolvedValueOnce(result);
 

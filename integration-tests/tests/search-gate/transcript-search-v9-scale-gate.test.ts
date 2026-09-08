@@ -574,6 +574,7 @@ test('[TLV5-SEARCH.10-GATE-05] compact prefix retains near-cap client headroom',
           query: request.query,
           ...result,
           results: [...result.results],
+          removedStaleResultCount: 0,
         };
       } finally {
         clearTimeout(executionTimeout);

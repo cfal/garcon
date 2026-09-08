@@ -600,7 +600,12 @@ describe('ChatSessionsStore IO', () => {
 
 	it('reports a successful remote rename', async () => {
 		const store = new ChatSessionsStore();
-		mockUpdateSessionName.mockResolvedValue({ success: true });
+		mockUpdateSessionName.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			title: 'Updated title',
+			changed: true,
+		});
 
 		const renamed = await store.renameChat('chat-1', 'New Title');
 

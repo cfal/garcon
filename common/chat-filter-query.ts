@@ -2,6 +2,7 @@ import {
   PERSISTED_CHAT_ORDER_GROUPS,
   type PersistedChatOrderGroup,
 } from './chat-order-contracts.js';
+import { parseChatId } from './chat-id.js';
 
 export type ChatFilterOrGroup = string[];
 
@@ -19,6 +20,12 @@ export interface ChatFilterSpec {
   status?: 'active' | 'unread';
   orderGroup?: ChatOrderGroupFilter;
   project: string[];
+  ids?: ChatFilterOrGroup[];
+  parents?: ChatFilterOrGroup[];
+  createdBefore?: string[];
+  createdAfter?: string[];
+  updatedBefore?: string[];
+  updatedAfter?: string[];
 }
 
 export interface ChatFilterParseResult {
@@ -27,6 +34,8 @@ export interface ChatFilterParseResult {
 }
 
 export interface ChatFilterTarget {
+  readonly id: string;
+  readonly parentChat: { readonly chatId: string } | null;
   readonly title: string;
   readonly projectPath: string;
   readonly agentId: string;
@@ -36,6 +45,8 @@ export interface ChatFilterTarget {
   readonly isUnread: boolean;
   readonly isPinned: boolean;
   readonly isArchived: boolean;
+  readonly createdAt: string | null;
+  readonly lastActivityAt: string | null;
   readonly firstMessage?: string;
   readonly lastMessage?: string;
 }
@@ -52,7 +63,13 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
     && spec.models.length === 0
     && spec.status === undefined
     && spec.orderGroup === undefined
-    && spec.project.length === 0;
+    && spec.project.length === 0
+    && (spec.ids?.length ?? 0) === 0
+    && (spec.parents?.length ?? 0) === 0
+    && (spec.createdBefore?.length ?? 0) === 0
+    && (spec.createdAfter?.length ?? 0) === 0
+    && (spec.updatedBefore?.length ?? 0) === 0
+    && (spec.updatedAfter?.length ?? 0) === 0;
 }
 
 export function parseChatFilterQuery(query: string): ChatFilterParseResult {
@@ -108,6 +125,24 @@ export function parseChatFilterQuery(query: string): ChatFilterParseResult {
       else invalidTokens.push(token);
       continue;
     }
+    if (lower.startsWith('id:')) {
+      const parts = parseChatIdGroup(token.slice(3));
+      if (parts) (spec.ids ??= []).push(parts);
+      else invalidTokens.push(token);
+      continue;
+    }
+    if (lower.startsWith('parent:')) {
+      const parts = parseChatIdGroup(token.slice(7));
+      if (parts) (spec.parents ??= []).push(parts);
+      else invalidTokens.push(token);
+      continue;
+    }
+    const timestampOperator = parseTimestampOperator(token, lower);
+    if (timestampOperator) {
+      if (timestampOperator.timestamp === null) invalidTokens.push(token);
+      else (spec[timestampOperator.field] ??= []).push(timestampOperator.timestamp);
+      continue;
+    }
     spec.textTokens.push(lower);
   }
 
@@ -124,6 +159,21 @@ export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec):
   if (spec.orderGroup) {
     const group = chatOrderGroupFor(chat);
     if ((group === spec.orderGroup.group) === spec.orderGroup.negated) return false;
+  }
+  if (spec.ids) {
+    for (const group of spec.ids) {
+      if (!group.includes(chat.id)) return false;
+    }
+  }
+  if (spec.parents) {
+    const parentChatId = chat.parentChat?.chatId ?? null;
+    for (const group of spec.parents) {
+      if (parentChatId === null || !group.includes(parentChatId)) return false;
+    }
+  }
+  if (!matchesTimeConstraints(chat.createdAt, spec.createdBefore, spec.createdAfter)) return false;
+  if (!matchesTimeConstraints(chat.lastActivityAt, spec.updatedBefore, spec.updatedAfter)) {
+    return false;
   }
   if (spec.titles.length > 0) {
     const title = chat.title.toLowerCase();
@@ -182,6 +232,16 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
   if (spec.project.length > 0) {
     parts.push(`project:${serializeOperatorValue(spec.project.join('|'))}`);
   }
+  for (const group of spec.ids ?? []) {
+    parts.push(`id:${group.join('|')}`);
+  }
+  for (const group of spec.parents ?? []) {
+    parts.push(`parent:${group.join('|')}`);
+  }
+  for (const value of spec.createdBefore ?? []) parts.push(`created-before:${value}`);
+  for (const value of spec.createdAfter ?? []) parts.push(`created-after:${value}`);
+  for (const value of spec.updatedBefore ?? []) parts.push(`updated-before:${value}`);
+  for (const value of spec.updatedAfter ?? []) parts.push(`updated-after:${value}`);
   for (const text of spec.textTokens) {
     parts.push(text.includes(' ') ? `"${text}"` : text);
   }
@@ -211,6 +271,97 @@ function parsePipeValue(raw: string): string[] | null {
     .map((value) => value.trim().toLowerCase())
     .filter((value) => value.length > 0);
   return parts.length > 0 ? parts : null;
+}
+
+function parseChatIdGroup(raw: string): string[] | null {
+  const parts = parsePipeValue(raw);
+  if (!parts) return null;
+  try {
+    return parts.map((part) => parseChatId(part));
+  } catch {
+    return null;
+  }
+}
+
+type TimestampFilterField =
+  | 'createdBefore'
+  | 'createdAfter'
+  | 'updatedBefore'
+  | 'updatedAfter';
+
+const TIMESTAMP_OPERATORS: readonly [string, TimestampFilterField][] = [
+  ['created-before:', 'createdBefore'],
+  ['created-after:', 'createdAfter'],
+  ['updated-before:', 'updatedBefore'],
+  ['updated-after:', 'updatedAfter'],
+];
+
+function parseTimestampOperator(
+  token: string,
+  lower: string,
+): { field: TimestampFilterField; timestamp: string | null } | null {
+  const match = TIMESTAMP_OPERATORS.find(([prefix]) => lower.startsWith(prefix));
+  if (!match) return null;
+  return { field: match[1], timestamp: parseFilterTimestamp(token.slice(match[0].length)) };
+}
+
+function parseFilterTimestamp(value: string): string | null {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (dateOnly) {
+    const year = Number(dateOnly[1]);
+    const month = Number(dateOnly[2]);
+    const day = Number(dateOnly[3]);
+    if (!validCalendarDate(year, month, day)) return null;
+    return `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}T00:00:00.000Z`;
+  }
+
+  const timestamp = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/u.exec(value);
+  if (!timestamp) return null;
+  const year = Number(timestamp[1]);
+  const month = Number(timestamp[2]);
+  const day = Number(timestamp[3]);
+  const hour = Number(timestamp[4]);
+  const minute = Number(timestamp[5]);
+  const second = Number(timestamp[6]);
+  if (
+    !validCalendarDate(year, month, day)
+    || hour > 23
+    || minute > 59
+    || second > 59
+    || !validTimezoneOffset(timestamp[8]!)
+  ) {
+    return null;
+  }
+  const epochMs = Date.parse(value);
+  return Number.isFinite(epochMs) ? new Date(epochMs).toISOString() : null;
+}
+
+function validCalendarDate(year: number, month: number, day: number): boolean {
+  return year >= 1
+    && year <= 9999
+    && month >= 1
+    && month <= 12
+    && day >= 1
+    && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function validTimezoneOffset(value: string): boolean {
+  if (value === 'Z') return true;
+  const match = /^[+-](\d{2}):(\d{2})$/u.exec(value);
+  return match !== null && Number(match[1]) <= 23 && Number(match[2]) <= 59;
+}
+
+function matchesTimeConstraints(
+  value: string | null,
+  before: readonly string[] | undefined,
+  after: readonly string[] | undefined,
+): boolean {
+  if ((before?.length ?? 0) === 0 && (after?.length ?? 0) === 0) return true;
+  if (value === null) return false;
+  const epochMs = Date.parse(value);
+  if (!Number.isFinite(epochMs)) return false;
+  return (before ?? []).every((limit) => epochMs < Date.parse(limit))
+    && (after ?? []).every((limit) => epochMs > Date.parse(limit));
 }
 
 function tokenizeChatFilter(input: string): string[] {

@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type {
   ChatSearchIndexStatus,
+  ChatSearchFailedChat,
   ChatSearchPage,
   ChatSearchClauseV1,
   ChatSearchQueryV1,
@@ -11,8 +12,10 @@ import type {
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
+  classifyChatSearchFailureRecovery,
   CHAT_SEARCH_DEFAULT_PAGE_SIZE,
   CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_PREFIX_SIZE,
   CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS,
@@ -316,33 +319,70 @@ function searchIndexStatusForPreparedAllowed(
       unindexedChatCount: 0,
       unsupportedChatCount: 0,
       resultsTruncated: false,
+      failedChats: [],
+      failedChatsOmittedCount: 0,
     };
   }
-  const counts = db.query<{
-    indexed: number;
-    failed: number;
-  }, []>(`
-    SELECT
-      COALESCE(SUM(CASE WHEN state.status = 'indexed'
-        AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS indexed,
-      COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
-    FROM temp.search_allowed_chats allowed
-    LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
-      AND state.transcript_view_id = allowed.transcript_view_id
-  `).get() ?? { indexed: 0, failed: 0 };
-  const indexedChatCount = Number(counts.indexed);
-  const failedChatCount = Number(counts.failed);
-  return {
-    indexedChatCount,
-    failedChatCount,
-    unindexedChatCount: 0,
-    unsupportedChatCount: 0,
-    resultsTruncated: false,
-    pendingChatCount: Math.max(
-      0,
-      allowed.length - indexedChatCount - failedChatCount,
-    ),
-  };
+  return db.transaction((): ChatSearchIndexStatus => {
+    const counts = db.query<{
+      indexed: number;
+      failed: number;
+    }, []>(`
+      SELECT
+        COALESCE(SUM(CASE WHEN state.status = 'indexed'
+          AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS indexed,
+        COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
+      FROM temp.search_allowed_chats allowed
+      LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
+        AND state.transcript_view_id = allowed.transcript_view_id
+    `).get() ?? { indexed: 0, failed: 0 };
+    const indexedChatCount = Number(counts.indexed);
+    const failedChatCount = Number(counts.failed);
+    const failedChats = db.query<{
+      chatId: string;
+      transcriptViewId: string;
+      indexedThroughOrdinal: number;
+      targetThroughOrdinal: number;
+      errorCode: string | null;
+    }, [number]>(`
+      SELECT
+        state.chat_id AS chatId,
+        state.transcript_view_id AS transcriptViewId,
+        state.indexed_through AS indexedThroughOrdinal,
+        state.target_through AS targetThroughOrdinal,
+        state.last_error_code AS errorCode
+      FROM temp.search_allowed_chats allowed
+      JOIN search_chat_state state ON state.chat_id = allowed.chat_id
+        AND state.transcript_view_id = allowed.transcript_view_id
+      WHERE state.status = 'failed'
+      ORDER BY state.chat_id ASC
+      LIMIT ?
+    `).all(CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS).map((failure): ChatSearchFailedChat => ({
+      chatId: failure.chatId,
+      transcriptViewId: failure.transcriptViewId,
+      stage: 'indexing',
+      errorCode: failure.errorCode ?? 'SEARCH_INDEX_FAILED',
+      indexedThroughOrdinal: Number(failure.indexedThroughOrdinal),
+      targetThroughOrdinal: Number(failure.targetThroughOrdinal),
+      recovery: classifyChatSearchFailureRecovery(
+        'indexing',
+        failure.errorCode ?? 'SEARCH_INDEX_FAILED',
+      ),
+    }));
+    return {
+      indexedChatCount,
+      failedChatCount,
+      unindexedChatCount: 0,
+      unsupportedChatCount: 0,
+      resultsTruncated: false,
+      failedChats,
+      failedChatsOmittedCount: Math.max(0, failedChatCount - failedChats.length),
+      pendingChatCount: Math.max(
+        0,
+        allowed.length - indexedChatCount - failedChatCount,
+      ),
+    };
+  })();
 }
 
 interface TermMatch extends ResultRow {

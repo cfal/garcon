@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	parseChatSearch,
+	parseChatFilterQuery,
 	serializeChatFilter,
 	addTagToQuery,
 	removeTagFromQuery,
@@ -166,6 +167,35 @@ describe('parseChatSearch', () => {
 	] as const)('preserves word quoting in %s', (query, expected) => {
 		expect(parseChatSearch(query).textTokens).toEqual(expected);
 	});
+
+	it('parses exact chat and direct-parent identity groups', () => {
+		const spec = parseChatSearch(
+			'id:1785337200123456|1785337200123457 parent:1785337200123458 parent:1785337200123459',
+		);
+		expect(spec.ids).toEqual([['1785337200123456', '1785337200123457']]);
+		expect(spec.parents).toEqual([['1785337200123458'], ['1785337200123459']]);
+	});
+
+	it('normalizes supported temporal values to UTC', () => {
+		const spec = parseChatSearch(
+			'created-after:2026-01-02 updated-before:2026-01-03T04:05:06.12+02:30',
+		);
+		expect(spec.createdAfter).toEqual(['2026-01-02T00:00:00.000Z']);
+		expect(spec.updatedBefore).toEqual(['2026-01-03T01:35:06.120Z']);
+	});
+
+	it.each([
+		'id:123',
+		'parent:',
+		'created-before:2026-02-30',
+		'created-after:2026-01-01T00:00:00',
+		'updated-before:2026-01-01T00:00:00.0001Z',
+		'updated-after:yesterday',
+	])('reports malformed recognized filter %s instead of treating it as text', (query) => {
+		const parsed = parseChatFilterQuery(query);
+		expect(parsed.invalidTokens).toEqual([query]);
+		expect(parsed.spec.textTokens).toEqual([]);
+	});
 });
 
 describe('serializeChatFilter', () => {
@@ -248,6 +278,14 @@ describe('serializeChatFilter', () => {
 		const serialized = serializeChatFilter(spec);
 		const reparsed = parseChatSearch(serialized);
 		expect(reparsed).toEqual(spec);
+	});
+
+	it('round-trips identity and temporal constraints', () => {
+		const spec = parseChatSearch(
+			'id:1785337200123456|1785337200123457 parent:1785337200123458 '
+			+ 'created-after:2026-01-02 updated-before:2026-01-03T04:05:06Z',
+		);
+		expect(parseChatSearch(serializeChatFilter(spec))).toEqual(spec);
 	});
 });
 
@@ -358,6 +396,8 @@ describe('serializeChatFilter project', () => {
 
 describe('matchesChatFilter project', () => {
 	const chat = {
+		id: '1785337200123456',
+		parentChat: null,
 		title: 'Test',
 		projectPath: '/workspace/garcon-monorepo',
 		agentId: 'claude',
@@ -367,6 +407,8 @@ describe('matchesChatFilter project', () => {
 		isUnread: false,
 		isPinned: false,
 		isArchived: false,
+		createdAt: '2026-01-01T00:00:00.000Z',
+		lastActivityAt: '2026-01-02T00:00:00.000Z',
 	};
 
 	it('matches when projectPath contains the value', () => {
@@ -413,6 +455,8 @@ describe('matchesChatFilter project', () => {
 describe('matchesChatFilter is: filters', () => {
 	const chats = {
 		pinned: {
+			id: '1785337200123456',
+			parentChat: null,
 			title: 'Pinned',
 			projectPath: '/workspace/test',
 			agentId: 'claude',
@@ -422,8 +466,12 @@ describe('matchesChatFilter is: filters', () => {
 			isUnread: false,
 			isPinned: true,
 			isArchived: false,
+			createdAt: '2026-01-01T00:00:00.000Z',
+			lastActivityAt: '2026-01-02T00:00:00.000Z',
 		},
 		normal: {
+			id: '1785337200123457',
+			parentChat: null,
 			title: 'Normal',
 			projectPath: '/workspace/test',
 			agentId: 'claude',
@@ -433,8 +481,12 @@ describe('matchesChatFilter is: filters', () => {
 			isUnread: false,
 			isPinned: false,
 			isArchived: false,
+			createdAt: '2026-01-01T00:00:00.000Z',
+			lastActivityAt: '2026-01-02T00:00:00.000Z',
 		},
 		archived: {
+			id: '1785337200123458',
+			parentChat: null,
 			title: 'Archived',
 			projectPath: '/workspace/test',
 			agentId: 'claude',
@@ -444,6 +496,8 @@ describe('matchesChatFilter is: filters', () => {
 			isUnread: false,
 			isPinned: false,
 			isArchived: true,
+			createdAt: '2026-01-01T00:00:00.000Z',
+			lastActivityAt: '2026-01-02T00:00:00.000Z',
 		},
 	};
 
@@ -471,6 +525,8 @@ describe('matchesChatFilter is: filters', () => {
 
 describe('matchesChatFilter OR groups', () => {
 	const chat = {
+		id: '1785337200123456',
+		parentChat: null,
 		title: 'Test',
 		projectPath: '/workspace/test',
 		agentId: 'claude',
@@ -480,6 +536,8 @@ describe('matchesChatFilter OR groups', () => {
 		isUnread: false,
 		isPinned: false,
 		isArchived: false,
+		createdAt: '2026-01-01T00:00:00.000Z',
+		lastActivityAt: '2026-01-02T00:00:00.000Z',
 	};
 
 	it('matches title groups only against the title', () => {
@@ -508,5 +566,68 @@ describe('matchesChatFilter OR groups', () => {
 	it('fails AND when one OR group does not match', () => {
 		const spec = { ...emptyFilterSpec(), tags: [['ops'], ['bugs']] };
 		expect(matchesChatFilter(chat, spec)).toBe(false);
+	});
+});
+
+describe('matchesChatFilter identity and time filters', () => {
+	const chat = {
+		id: '1785337200123456',
+		parentChat: { chatId: '1785337200123457' },
+		title: 'Test',
+		projectPath: '/workspace/test',
+		agentId: 'claude',
+		model: 'sonnet',
+		tags: [],
+		isProcessing: false,
+		isUnread: false,
+		isPinned: false,
+		isArchived: false,
+		createdAt: '2026-01-02T00:00:00.000Z',
+		lastActivityAt: '2026-01-03T12:00:00.000Z',
+	};
+
+	it('matches exact IDs and direct parents with OR within and AND across groups', () => {
+		expect(matchesChatFilter(
+			chat,
+			parseChatSearch(
+				'id:1785337200123455|1785337200123456 id:1785337200123456 '
+				+ 'parent:1785337200123457|1785337200123458',
+			),
+		)).toBe(true);
+		expect(matchesChatFilter(chat, parseChatSearch('id:1785337200123455'))).toBe(false);
+		expect(matchesChatFilter(chat, parseChatSearch('parent:1785337200123458'))).toBe(false);
+		expect(matchesChatFilter(
+			{ ...chat, parentChat: null },
+			parseChatSearch('parent:1785337200123457'),
+		)).toBe(false);
+	});
+
+	it('uses strict created and transcript-activity boundaries', () => {
+		expect(matchesChatFilter(
+			chat,
+			parseChatSearch(
+				'created-after:2026-01-01 created-before:2026-01-03 '
+				+ 'updated-after:2026-01-03T11:59:59.999Z updated-before:2026-01-03T12:00:00.001Z',
+			),
+		)).toBe(true);
+		expect(matchesChatFilter(
+			chat,
+			parseChatSearch('created-after:2026-01-02T00:00:00Z'),
+		)).toBe(false);
+		expect(matchesChatFilter(
+			chat,
+			parseChatSearch('updated-before:2026-01-03T12:00:00Z'),
+		)).toBe(false);
+	});
+
+	it('does not match a temporal constraint without a usable timestamp', () => {
+		expect(matchesChatFilter(
+			{ ...chat, createdAt: null },
+			parseChatSearch('created-after:2026-01-01'),
+		)).toBe(false);
+		expect(matchesChatFilter(
+			{ ...chat, lastActivityAt: 'invalid' },
+			parseChatSearch('updated-before:2026-01-04'),
+		)).toBe(false);
 	});
 });

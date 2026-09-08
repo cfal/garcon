@@ -65,6 +65,7 @@ function acceptedControlResponse(_input: string | URL | Request, init?: RequestI
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: new Date().toISOString(),
+    parentChat: null,
   });
 }
 
@@ -145,6 +146,65 @@ function addChatRowResponse(init?: RequestInit): Response {
     disclosure: body.disclosure,
     status: 'appended',
     timestamp: '2026-08-18T12:00:00.000Z',
+  });
+}
+
+function startModelCatalogResponse(): Response {
+  return Response.json({
+    catalog: {
+      agents: [{
+        id: 'codex',
+        label: 'Codex',
+        kind: 'agent',
+        supportsFork: true,
+        supportsForkAtMessage: true,
+        supportsForkWhileRunning: false,
+        supportsUpdateProjectPath: true,
+        supportsImages: true,
+        acceptsApiProviderEndpoints: false,
+        supportedProtocols: [],
+        authLoginSupported: true,
+        supportedPermissionModes: ['default'],
+        supportedThinkingModes: ['none'],
+        settings: [],
+        defaultSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+        requiresStrictModelDiscovery: true,
+        generation: null,
+        defaultModel: 'gpt-5.4',
+        models: [{ value: 'gpt-5.4', label: 'GPT 5.4' }],
+      }],
+      apiProviders: [],
+    },
+  });
+}
+
+function remoteSettingsResponse(): Response {
+  return Response.json({
+    version: 1,
+    features: {
+      transcriptSearch: { enabled: false },
+      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+    },
+    ui: {},
+    uiEffective: {},
+    paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
+    pinnedChatIds: [],
+    recentAgentSettings: [],
+    executionDefaults: {
+      global: { permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {} },
+      byAgent: {},
+    },
+    projectBasePath: '/project',
+    telegram: {
+      botTokenAvailable: false,
+      botUsername: null,
+      botFirstName: null,
+      recipientUsername: null,
+      recipientDisplayName: null,
+      recipientLinked: false,
+      pendingLink: false,
+      linkUrl: null,
+    },
   });
 }
 
@@ -403,7 +463,10 @@ describe('main', () => {
             unindexedChatCount: 0,
             unsupportedChatCount: 0,
             resultsTruncated: false,
+            failedChats: [],
+            failedChatsOmittedCount: 0,
           },
+          removedStaleResultCount: 0,
         });
       },
     });
@@ -527,6 +590,69 @@ describe('main', () => {
     }
   });
 
+  test('prints one complete start-async JSON acceptance envelope', async () => {
+    const capture = capturedStreams();
+    let startRequest: Record<string, unknown> | undefined;
+    const exitCode = await main([
+      'start-async', '--agent', 'codex', '--model', 'gpt-5.4',
+      '--parent', '1785337200123455', '--title', 'Async review', '--json', 'Review it',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async (input, init) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/v1/models') return startModelCatalogResponse();
+        if (pathname === '/api/v1/app/settings') return remoteSettingsResponse();
+        if (pathname === '/api/v1/chats/start') {
+          startRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return Response.json({
+            success: true,
+            commandType: 'chat-start',
+            clientRequestId: startRequest.clientRequestId,
+            chatId: startRequest.chatId,
+            turnId: 'turn-start',
+            status: 'accepted',
+            acceptedAt: TS,
+            parentChat: { chatId: '1785337200123455', relation: 'delegation' },
+            chat: null,
+          });
+        }
+        if (pathname === '/api/v1/app/session-name') {
+          return Response.json({
+            success: true,
+            chatId: startRequest?.chatId,
+            title: 'Async review',
+            changed: true,
+          });
+        }
+        throw new Error(`Unexpected request: ${pathname}`);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.stderr.join('')).toBe('');
+    expect(startRequest).toMatchObject({
+      command: 'Review it',
+      parentChatId: '1785337200123455',
+    });
+    expect(capture.stdout.join('')).toBe(`${JSON.stringify({
+      schemaVersion: 1,
+      command: 'start-async',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'chat-start',
+        clientRequestId: startRequest?.clientRequestId,
+        chatId: startRequest?.chatId,
+        turnId: 'turn-start',
+        status: 'accepted',
+        acceptedAt: TS,
+      },
+      parentChat: { chatId: '1785337200123455', relation: 'delegation' },
+      titleUpdate: { status: 'succeeded', title: 'Async review', changed: true },
+    }, null, 2)}\n`);
+  });
+
   test('resume-async delivers to an idle chat and exits after acceptance', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
@@ -540,6 +666,50 @@ describe('main', () => {
     });
     expect(exitCode).toBe(0);
     expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('prints one complete resume-async JSON delivery envelope', async () => {
+    const capture = capturedStreams();
+    let runRequest: Record<string, unknown> | undefined;
+    const exitCode = await main([
+      'resume-async', CHAT_ID, '--json', 'Implement the review',
+    ], {
+      fetch: async (input, init) => {
+        if (String(input).includes('/snapshot?')) return controlSnapshotResponse();
+        runRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({
+          success: true,
+          commandType: 'agent-run',
+          clientRequestId: runRequest.clientRequestId,
+          chatId: CHAT_ID,
+          turnId: 'turn-async',
+          status: 'accepted',
+          acceptedAt: TS,
+          parentChat: null,
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.stderr.join('')).toBe('');
+    expect(capture.stdout.join('')).toBe(`${JSON.stringify({
+      schemaVersion: 1,
+      command: 'resume-async',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'agent-run',
+        clientRequestId: runRequest?.clientRequestId,
+        chatId: CHAT_ID,
+        turnId: 'turn-async',
+        status: 'accepted',
+        acceptedAt: TS,
+      },
+      parentChat: null,
+      delivery: 'new-turn',
+    }, null, 2)}\n`);
   });
 
   test('resume-async without --allow-steer reports busy and exits 3', async () => {
@@ -589,6 +759,7 @@ describe('main', () => {
           turnId: 'turn-active',
           status: 'accepted',
           acceptedAt: new Date().toISOString(),
+          parentChat: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -807,6 +978,7 @@ describe('main', () => {
             version: 0,
             updatedAt: null,
           },
+          parentChat: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -814,6 +986,60 @@ describe('main', () => {
     });
     expect(exitCode).toBe(0);
     expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('prints one complete stop JSON outcome envelope', async () => {
+    const capture = capturedStreams();
+    let stopRequest: Record<string, unknown> | undefined;
+    const control = {
+      serverInstanceId: 'instance',
+      queue: {
+        entries: [],
+        steeringEntryId: null,
+        recentlyDispatched: [],
+        pause: null,
+        reorderRevision: 0,
+      },
+      version: 0,
+      updatedAt: null,
+    };
+    const exitCode = await main(['stop', CHAT_ID, '--json'], {
+      fetch: async (_input, init) => {
+        stopRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({
+          success: true,
+          commandType: 'agent-stop',
+          clientRequestId: stopRequest.clientRequestId,
+          chatId: CHAT_ID,
+          status: 'accepted',
+          acceptedAt: TS,
+          outcome: 'already-idle',
+          control,
+          parentChat: null,
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.stderr.join('')).toBe('');
+    expect(capture.stdout.join('')).toBe(`${JSON.stringify({
+      schemaVersion: 1,
+      command: 'stop',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'agent-stop',
+        clientRequestId: stopRequest?.clientRequestId,
+        chatId: CHAT_ID,
+        status: 'accepted',
+        acceptedAt: TS,
+      },
+      parentChat: null,
+      outcome: 'already-idle',
+      control,
+    }, null, 2)}\n`);
   });
 
   test('stop exits 3 when the server reports failure', async () => {
@@ -841,6 +1067,7 @@ describe('main', () => {
             version: 0,
             updatedAt: null,
           },
+          parentChat: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -865,7 +1092,7 @@ describe('main', () => {
 
     await expect(result).resolves.toBe(130);
     expect(capture.diagnostics).toEqual([
-      'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying',
+      'terminal interrupted; the command may have reached Garcon; inspect the chat before retrying',
     ]);
   });
 
@@ -887,7 +1114,7 @@ describe('main', () => {
 
     await expect(result).resolves.toBe(130);
     expect(capture.diagnostics).toEqual([
-      'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying',
+      'terminal interrupted; the command may have reached Garcon; inspect the chat before retrying',
     ]);
   });
 

@@ -249,6 +249,8 @@ describe('worker protocol v9', () => {
           unindexedChatCount: 0,
           unsupportedChatCount: 0,
           resultsTruncated: false,
+          failedChats: [],
+          failedChatsOmittedCount: 0,
         },
       },
       { ...envelope, type: 'error', code: 'READER_INTERNAL', retryable: true },
