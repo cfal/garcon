@@ -76,5 +76,8 @@
   "overrides": {
     "@codemirror/view": "6.43.11",
     "cookie": "0.7.2"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }
