@@ -15,7 +15,7 @@
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import { browserTimeZoneLabel, localDateValue } from '$lib/scheduling/local-schedule';
 	import {
-		SCHEDULED_PROMPT_INTERVAL_HOURS_MIN,
+		SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN,
 		type ScheduledPrompt,
 		type ScheduledPromptDefinitionInput,
 	} from '$shared/scheduled-prompts';
@@ -216,7 +216,7 @@
 								<input
 									id="scheduled-prompt-interval"
 									type="number"
-									min={SCHEDULED_PROMPT_INTERVAL_HOURS_MIN}
+									min={SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN}
 									max={form.intervalAmountMax}
 									step="1"
 									bind:value={form.intervalAmount}
@@ -227,6 +227,7 @@
 									bind:value={form.intervalUnit}
 									class="select-native select-native-surface h-10 pl-3 text-base sm:pointer-fine:text-sm"
 								>
+									<option value="minutes">{m.scheduled_prompts_minutes()}</option>
 									<option value="hours">{m.scheduled_prompts_hours()}</option>
 									<option value="days">{m.scheduled_prompts_days()}</option>
 								</select>

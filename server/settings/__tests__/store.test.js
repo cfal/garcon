@@ -662,6 +662,9 @@ describe('settings store', () => {
             enabled: true,
             chatIdDiscovery: true,
             sendMessage: true,
+            startAgent: true,
+            resumeAgent: true,
+            schedule: true,
           },
         },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
@@ -1129,6 +1132,9 @@ describe('settings store', () => {
             enabled: true,
             chatIdDiscovery: true,
             sendMessage: true,
+            startAgent: true,
+            resumeAgent: true,
+            schedule: true,
             removedCommand: true,
           },
         },
@@ -1138,6 +1144,9 @@ describe('settings store', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: true,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features.agentCommands).toEqual(
@@ -1158,6 +1167,9 @@ describe('settings store', () => {
           enabled: false,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
@@ -1167,6 +1179,9 @@ describe('settings store', () => {
           enabled: false,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       });
     });
@@ -1183,12 +1198,18 @@ describe('settings store', () => {
         enabled: true,
         chatIdDiscovery: false,
         sendMessage: true,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features.agentCommands).toEqual({
         enabled: true,
         chatIdDiscovery: false,
         sendMessage: true,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       });
       expect(persisted.features.chatIdDiscovery).toBeUndefined();
     });
@@ -1203,6 +1224,9 @@ describe('settings store', () => {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
@@ -1216,6 +1240,9 @@ describe('settings store', () => {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       });
     });
@@ -1228,6 +1255,9 @@ describe('settings store', () => {
           enabled: true,
           chatIdDiscovery: false,
           sendMessage: false,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       });
 
@@ -1237,6 +1267,9 @@ describe('settings store', () => {
           enabled: true,
           chatIdDiscovery: false,
           sendMessage: false,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
@@ -1248,6 +1281,9 @@ describe('settings store', () => {
         enabled: true,
         chatIdDiscovery: false,
         sendMessage: false,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       });
     });
   });

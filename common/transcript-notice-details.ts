@@ -1,4 +1,6 @@
 import { parseChatId } from './chat-id.js';
+import { parseAgentCommandOutcome, type AgentStartOutcomeNoticeDetail, type AgentResumeOutcomeNoticeDetail, type AgentScheduleOutcomeNoticeDetail } from './garcon-command-results.js';
+export type { AgentStartOutcomeNoticeDetail, AgentResumeOutcomeNoticeDetail, AgentScheduleOutcomeNoticeDetail } from './garcon-command-results.js';
 import {
   isPreambleId,
   PREAMBLE_MAX_COUNT,
@@ -82,6 +84,9 @@ export interface InterAgentMessageReceivedNoticeDetail {
 export type ServerControlReceiptDetail = InterAgentMessageReceivedNoticeDetail;
 
 export type TranscriptNoticeDetail =
+  | AgentStartOutcomeNoticeDetail
+  | AgentResumeOutcomeNoticeDetail
+  | AgentScheduleOutcomeNoticeDetail
   | PreambleApplicationNoticeDetail
   | PreambleSelectionChangedNoticeDetail
   | CarryoverMigrationQuarantineNoticeDetail
@@ -214,6 +219,8 @@ function hasType(value: unknown, type: string): boolean {
 }
 
 export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  const outcome = parseAgentCommandOutcome(value);
+  if (outcome) return outcome;
   if (isPreambleApplicationNoticeDetail(value)) {
     return {
       type: value.type,

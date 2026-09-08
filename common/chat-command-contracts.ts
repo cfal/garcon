@@ -97,6 +97,7 @@ export type CommandErrorCode = Extract<
   | 'TRANSCRIPT_UNAVAILABLE'
   | 'TRANSCRIPT_NOT_YET_PERSISTED'
   | 'STALE_TRANSCRIPT_VIEW'
+  | 'AGENT_RESUME_NOT_DELEGATED'
   | 'PROJECT_PATH_UPDATE_UNSUPPORTED'
   | 'PROJECT_PATH_DESTINATION_REJECTED'
   | 'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN'
@@ -134,6 +135,7 @@ export interface StartChatCommandResponse extends AgentTurnCommandResponse {
 }
 
 export const CHAT_START_ORIGINS = [
+  'agent-command',
   'interactive',
   'cli',
   'scheduled',

@@ -120,7 +120,7 @@ describe('chat command request parsers', () => {
     };
 
     expect(parseStartChatCommandRequest(input).origin).toBe('cli');
-    for (const origin of [undefined, 'scheduled', 'other']) {
+    for (const origin of [undefined, 'scheduled', 'agent-command', 'other']) {
       expect(() => parseStartChatCommandRequest({ ...input, origin })).toThrow(
         'origin must be interactive or cli',
       );

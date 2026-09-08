@@ -59,6 +59,9 @@ function createMockCtx() {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       })),
       getFeatureSettings: mock(() => ({
@@ -67,6 +70,9 @@ function createMockCtx() {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       })),
       getPathSettings: mock(() => ({})),
@@ -109,6 +115,9 @@ beforeEach(() => {
       enabled: true,
       chatIdDiscovery: true,
       sendMessage: true,
+      startAgent: true,
+      resumeAgent: true,
+      schedule: true,
     },
   }));
 });
@@ -831,6 +840,9 @@ describe('PUT /api/app/settings', () => {
           enabled: true,
           chatIdDiscovery: false,
           sendMessage: false,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       },
     }));
@@ -840,6 +852,9 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     }));
 
@@ -853,6 +868,9 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: false,
         sendMessage: false,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     });
   });
@@ -875,6 +893,9 @@ describe('PUT /api/app/settings', () => {
         enabled: false,
         chatIdDiscovery: true,
         sendMessage: true,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     });
   });
@@ -906,6 +927,9 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     });
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();

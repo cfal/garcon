@@ -2,10 +2,12 @@ import crypto from 'crypto';
 import type {
   AgentInterruptAndSendResponse,
   AgentStopResponse,
+  AgentTurnCommandResponse,
   CommandAcceptedResponse,
   ProjectPathPatchResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
+import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
 import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
@@ -22,6 +24,7 @@ import {
   CommandValidationError,
   commandResultFromRecord,
   type CompactInput,
+  type AgentCommandResumeInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
   type StopInput,
@@ -31,6 +34,7 @@ import {
 import type { CommandLedgerRecord } from './command-ledger.js';
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
+import { AgentResumePreparationError } from './agent-resume-preparation-error.js';
 
 const logger = createLogger('commands:session');
 
@@ -41,13 +45,34 @@ export class SessionCommands {
     return this.support.deps;
   }
 
-  async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+  async submitRun(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {
     return this.support.withChatMutationLock(input.chatId, () =>
       this.submitRunLocked(input),
     );
   }
 
-  private async submitRunLocked(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+  async submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal): Promise<AgentTurnCommandResponse> {
+    signal.throwIfAborted();
+    const child = this.deps.chats.getChat(input.chatId);
+    if (!this.deps.chats.getChat(input.sourceChatId)
+      || !isDirectDelegatedChild(input.sourceChatId, input.chatId, child)) {
+      throw new CommandValidationError('AGENT_RESUME_NOT_DELEGATED', 'Only a directly delegated child can be resumed', 403);
+    }
+    if (this.deps.transcripts.existingCurrentView(input.sourceChatId)?.viewId !== input.sourceViewId) {
+      throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
+    }
+    const transcriptViewId = await this.deps.agents.currentTranscriptViewId(input.chatId, signal).catch((error: unknown) => {
+      if (signal.aborted) throw error;
+      throw new AgentResumePreparationError(error);
+    });
+    signal.throwIfAborted();
+    return this.submitRunLocked({
+      chatId: input.chatId, transcriptViewId, command: input.command, images: [],
+      clientRequestId: input.clientRequestId, clientMessageId: input.clientMessageId,
+    });
+  }
+
+  private async submitRunLocked(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {
     await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
     const normalizedInput = {
       chatId: input.chatId,
