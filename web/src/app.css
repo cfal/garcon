@@ -230,7 +230,7 @@
 }
 
 .chat-board-reduce-motion [data-chat-board-occurrence]:hover {
-	transform: none;
+	translate: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -241,8 +241,8 @@
 		transition: none;
 	}
 
-	[data-chat-board-occurrence]:hover {
-		transform: none;
+	[data-chat-board-panel] [data-chat-board-occurrence]:hover {
+		translate: none;
 	}
 }
 

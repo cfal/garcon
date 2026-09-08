@@ -23,6 +23,10 @@ export class ChatBoardFocusController {
 		this.#root = root;
 	}
 
+	get pendingTarget(): ChatBoardFocusTarget | null {
+		return this.#pending?.target ?? null;
+	}
+
 	preparePresentationChange(
 		nextBand: ChatBoardPresentationBand,
 		activeColumnId: string | null,

@@ -26,6 +26,7 @@
 	import ManageBoardsDialog from './ManageBoardsDialog.svelte';
 	import {
 		ChatBoardFocusController,
+		type ChatBoardFocusTarget,
 		type ChatBoardPresentationBand,
 	} from './chat-board-focus-controller.js';
 	import { isChatBoardCardDragData, resolveChatBoardColumnDropData } from './chat-board-dnd.js';
@@ -53,7 +54,10 @@
 	const pendingLaneScrollWrites = new Map<string, number>();
 	let pendingHostScrollRestore: ReadonlyMap<string, number> | null =
 		laneScrollOffsets.size > 0 ? new Map(laneScrollOffsets) : null;
-	let hostFocusTarget = panelMemory.focusTarget;
+	let hostFocusTarget = $state<ChatBoardFocusTarget | null>(panelMemory.focusTarget);
+	let remountFocusTarget = $state<ChatBoardFocusTarget | null>(null);
+	let hostFocusRestorePending = panelMemory.focusTarget !== null;
+	let hostFocusRestoreCanceled = false;
 	let laneScrollWriteFrame: number | null = null;
 	let laneRemountGeneration = 0;
 	let hostRestoreGeneration = 0;
@@ -92,6 +96,13 @@
 			? focusedTabId
 			: activeColumnId,
 	);
+	let validLaneScrollKeys = $derived(
+		new Set(
+			controller.catalog.boards.flatMap((board) =>
+				board.columns.map((column) => laneScrollKey(board.id, column.id)),
+			),
+		),
+	);
 
 	$effect(() => {
 		focusController.setRoot(rootRef);
@@ -123,9 +134,9 @@
 			}
 		};
 		const cancelFocusRestore = () => {
-			if (!hostFocusTarget) return;
+			if (!hostFocusRestorePending) return;
+			hostFocusRestoreCanceled = true;
 			hostFocusTarget = null;
-			panelMemory.focusTarget = null;
 		};
 		document.addEventListener('focusin', rememberFocus, true);
 		document.addEventListener('pointerdown', cancelFocusRestore, true);
@@ -141,11 +152,7 @@
 	});
 
 	$effect(() => {
-		const validKeys = new Set(
-			controller.catalog.boards.flatMap((board) =>
-				board.columns.map((column) => laneScrollKey(board.id, column.id)),
-			),
-		);
+		const validKeys = validLaneScrollKeys;
 		for (const key of laneScrollOffsets.keys()) {
 			if (!validKeys.has(key)) laneScrollOffsets.delete(key);
 		}
@@ -159,6 +166,7 @@
 			if (nextBand === presentationBand) return;
 			const generation = beginLaneRemount();
 			focusController.preparePresentationChange(nextBand, activeColumnId);
+			remountFocusTarget = focusController.pendingTarget;
 			presentationBand = nextBand;
 			void restoreAfterLaneRemount(generation);
 		});
@@ -267,6 +275,13 @@
 		return laneScrollOffsets.get(laneScrollKey(boardId, columnId)) ?? 0;
 	}
 
+	function pinnedOccurrenceKey(columnId: string): string | null {
+		const target = hostFocusTarget ?? remountFocusTarget;
+		return target?.kind === 'occurrence' && target.columnId === columnId
+			? target.occurrenceKey
+			: null;
+	}
+
 	function presentationBandForWidth(width: number): ChatBoardPresentationBand {
 		if (width < 560) return 'narrow';
 		if (width < 900) return 'medium';
@@ -284,6 +299,7 @@
 		const key = laneScrollKey(boardId, columnId);
 		if (pendingHostScrollRestore?.has(key)) return;
 		if (pendingLaneScrollRestore?.targets.has(key)) return;
+		if (!validLaneScrollKeys.has(key)) return;
 		pendingLaneScrollWrites.set(key, scrollTop);
 		if (laneScrollWriteFrame !== null) return;
 		laneScrollWriteFrame = requestAnimationFrame(() => flushPendingLaneScrollWrites());
@@ -295,7 +311,7 @@
 		for (const [key, scrollTop] of pendingLaneScrollWrites) {
 			if (pendingHostScrollRestore?.has(key)) continue;
 			if (pendingLaneScrollRestore?.targets.has(key)) continue;
-			laneScrollOffsets.set(key, scrollTop);
+			if (validLaneScrollKeys.has(key)) laneScrollOffsets.set(key, scrollTop);
 		}
 		pendingLaneScrollWrites.clear();
 	}
@@ -335,16 +351,33 @@
 			await nextAnimationFrame();
 			if (generation !== hostRestoreGeneration) return;
 			pendingHostScrollRestore = null;
-			for (const [key, scrollTop] of scrollTargets) laneScrollOffsets.set(key, scrollTop);
+			commitLaneScrollOffsets(scrollTargets);
 		}
-		const target = hostFocusTarget ?? panelMemory.focusTarget;
-		if (!target) return;
+		if (!hostFocusRestorePending) return;
+		hostFocusRestorePending = false;
+		const canceled = hostFocusRestoreCanceled;
+		hostFocusRestoreCanceled = false;
+		const target = hostFocusTarget;
+		hostFocusTarget = null;
+		if (canceled || !target) return;
+		const active = document.activeElement;
+		if (active instanceof HTMLElement && active !== document.body) return;
 		focusController.restoreFocusTarget(target, presentationBand, activeColumnId);
 	}
 
 	function restorePrimaryFocus(): void {
-		const target = hostFocusTarget ?? panelMemory.focusTarget;
+		let target: ChatBoardFocusTarget | null;
+		let canceled = false;
+		if (hostFocusRestorePending) {
+			hostFocusRestorePending = false;
+			canceled = hostFocusRestoreCanceled;
+			hostFocusRestoreCanceled = false;
+			target = hostFocusTarget;
+		} else {
+			target = panelMemory.focusTarget;
+		}
 		hostFocusTarget = null;
+		if (canceled) return;
 		if (target && focusController.restoreFocusTarget(target, presentationBand, activeColumnId)) {
 			return;
 		}
@@ -361,6 +394,12 @@
 		}
 	}
 
+	function commitLaneScrollOffsets(targets: ReadonlyMap<string, number>): void {
+		for (const [key, scrollTop] of targets) {
+			if (validLaneScrollKeys.has(key)) laneScrollOffsets.set(key, scrollTop);
+		}
+	}
+
 	async function restoreAfterLaneRemount(generation: number): Promise<void> {
 		await tick();
 		if (!isCurrentLaneRemount(generation)) return;
@@ -373,8 +412,9 @@
 		await nextAnimationFrame();
 		if (!isCurrentLaneRemount(generation)) return;
 		pendingLaneScrollRestore = null;
-		for (const [key, scrollTop] of pending.targets) laneScrollOffsets.set(key, scrollTop);
 		focusController.completePresentationChange();
+		remountFocusTarget = null;
+		commitLaneScrollOffsets(pending.targets);
 	}
 
 	function openTransition(
@@ -633,6 +673,7 @@
 							onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
 							onRegisterScroller={registerScroller}
 							initialScrollTop={laneScrollTop(selectedBoard.id, narrowLane.column.id)}
+							pinnedOccurrenceKey={pinnedOccurrenceKey(narrowLane.column.id)}
 							onScrollTopChange={rememberLaneScroll}
 						/>
 					</div>
@@ -663,6 +704,7 @@
 						onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
 						onRegisterScroller={registerScroller}
 						initialScrollTop={laneScrollTop(selectedBoard.id, lane.column.id)}
+						pinnedOccurrenceKey={pinnedOccurrenceKey(lane.column.id)}
 						onScrollTopChange={rememberLaneScroll}
 					/>
 				{/each}

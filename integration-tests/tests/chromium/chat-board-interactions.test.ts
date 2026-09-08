@@ -13,6 +13,7 @@ import {
 
 const READY_COLUMN_ID = '22222222-2222-4222-8222-222222222222';
 const REVIEW_COLUMN_ID = '33333333-3333-4333-8333-333333333333';
+const CHAT_COUNT = 24;
 const LONG_CARD_TAGS = [
   'customer-experience',
   'release-management',
@@ -189,19 +190,22 @@ async function resizeBoardDuringRemount(
 async function expectTransitionFocus(
   fixture: ChromiumFixture,
   columnId: string,
+  chatId?: string,
 ): Promise<void> {
   try {
     await fixture.page.waitForFunction(
-      ({ expectedColumnId }) => {
+      ({ expectedColumnId, expectedChatId }) => {
         const active = document.activeElement;
         return (
           active instanceof HTMLElement &&
+          (!expectedChatId ||
+            active.closest<HTMLElement>('[data-chat-board-chat-id]')?.dataset.chatBoardChatId === expectedChatId) &&
           active.matches(
             `[data-chat-board-column-id="${expectedColumnId}"] [data-chat-board-occurrence] [data-chat-board-focus-target="transition"]`,
           )
         );
       },
-      { expectedColumnId: columnId },
+      { expectedColumnId: columnId, expectedChatId: chatId },
     );
   } catch (error) {
     const actual = await fixture.page.evaluate(() => ({
@@ -216,13 +220,43 @@ async function expectTransitionFocus(
   }
 }
 
+async function focusReviewDuringNextDesktopMount(fixture: ChromiumFixture): Promise<void> {
+  await fixture.page.evaluate(
+    (reviewColumnId) =>
+      new Promise<void>((resolve) => {
+        const focusReview = () => {
+          const panel = document.querySelector<HTMLElement>(
+            '[data-chat-board-panel]:not([data-presentation="mobile"])',
+          );
+          const heading = panel?.querySelector<HTMLElement>(
+            `[data-chat-board-lane-heading="${reviewColumnId}"]`,
+          );
+          if (!heading) return false;
+          queueMicrotask(() => {
+            heading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
+            heading.focus();
+            resolve();
+          });
+          return true;
+        };
+        if (focusReview()) return;
+        const observer = new MutationObserver(() => {
+          if (!focusReview()) return;
+          observer.disconnect();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      }),
+    REVIEW_COLUMN_ID,
+  );
+}
+
 describe('Chromium Chat Board interactions', () => {
   test('preserves responsive interaction state and detailed tag geometry', async () => {
     await withChromiumFixture('chat-board-responsive-interactions', async (fixture, markPhase) => {
       await fixture.page.setViewportSize({ width: 1_440, height: 600 });
       markPhase('seeding the board and overlapping cards');
       await seedBoard(fixture);
-      const firstChatId = await seedChats(fixture, 8);
+      const firstChatId = await seedChats(fixture, CHAT_COUNT);
 
       markPhase('opening the board and cancelling a transition');
       await openBoard(fixture, firstChatId);
@@ -236,6 +270,30 @@ describe('Chromium Chat Board interactions', () => {
       await fixture.page.getByRole('button', { name: 'Cancel', exact: true }).click();
       expect(await invoker.evaluate((element) => document.activeElement === element)).toBe(true);
 
+      markPhase('preserving focus through live virtual reordering');
+      const reorderedChatId = await invoker.evaluate((element) => {
+        const card = element.closest<HTMLElement>('[data-chat-board-chat-id]');
+        if (!card?.dataset.chatBoardChatId) throw new Error('Expected a focused Chat Board card.');
+        return card.dataset.chatBoardChatId;
+      });
+      await invoker.focus();
+      await fixture.integration.client.reorderChat({
+        chatId: reorderedChatId,
+        placement: { kind: 'boundary', boundary: 'bottom' },
+      });
+      await fixture.page.waitForFunction(
+        ({ chatId, expectedIndex, columnId }) => {
+          const card = document.querySelector<HTMLElement>(
+            `[data-chat-board-column-id="${columnId}"] [data-chat-board-chat-id="${chatId}"]`,
+          );
+          return (
+            card?.dataset.chatBoardOccurrenceIndex === String(expectedIndex) &&
+            document.activeElement ===
+              card.querySelector('[data-chat-board-focus-target="transition"]')
+          );
+        },
+        { chatId: reorderedChatId, expectedIndex: CHAT_COUNT - 1, columnId: READY_COLUMN_ID },
+      );
       markPhase('recording independent lane scroll positions');
       const readyScrollTop = await setLaneScroll(fixture, READY_COLUMN_ID, 0.4);
       const reviewScrollTop = await setLaneScroll(fixture, REVIEW_COLUMN_ID, 0.7);
@@ -246,23 +304,23 @@ describe('Chromium Chat Board interactions', () => {
       await constrainBoardWidth(fixture, 480);
       await fixture.page.locator('[data-chat-board-panel][data-presentation-band="narrow"]').waitFor();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
-      await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
+      await fixture.page.getByRole('tab', { name: `Review ${CHAT_COUNT}`, exact: true }).click();
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
-      await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
+      await fixture.page.getByRole('tab', { name: `Ready ${CHAT_COUNT}`, exact: true }).click();
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
       const settledReadyScrollTop = await settledLaneScrollTop(fixture, READY_COLUMN_ID);
-      await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
+      await fixture.page.getByRole('tab', { name: `Review ${CHAT_COUNT}`, exact: true }).click();
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
       const settledReviewScrollTop = await settledLaneScrollTop(fixture, REVIEW_COLUMN_ID);
 
       markPhase('repeating narrow lane switches without scroll drift');
       for (let index = 0; index < 8; index += 1) {
-        await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
+        await fixture.page.getByRole('tab', { name: `Ready ${CHAT_COUNT}`, exact: true }).click();
         await expectLaneScroll(fixture, READY_COLUMN_ID, settledReadyScrollTop, 1);
-        await fixture.page.getByRole('tab', { name: /Review 8/ }).click();
+        await fixture.page.getByRole('tab', { name: `Review ${CHAT_COUNT}`, exact: true }).click();
         await expectLaneScroll(fixture, REVIEW_COLUMN_ID, settledReviewScrollTop, 1);
       }
-      await fixture.page.getByRole('tab', { name: /Ready 8/ }).click();
+      await fixture.page.getByRole('tab', { name: `Ready ${CHAT_COUNT}`, exact: true }).click();
       await expectLaneScroll(fixture, READY_COLUMN_ID, settledReadyScrollTop, 1);
 
       markPhase('restoring both lanes after leaving narrow presentation');
@@ -275,32 +333,59 @@ describe('Chromium Chat Board interactions', () => {
 
       markPhase('coalescing consecutive presentation changes');
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        await invoker.focus();
+        const focusedChatId = await invoker.evaluate((element) => {
+          const chatId = element.closest<HTMLElement>(
+            '[data-chat-board-chat-id]',
+          )?.dataset.chatBoardChatId;
+          (element as HTMLElement).focus({ preventScroll: true });
+          return chatId;
+        });
+        if (!focusedChatId) throw new Error('Expected a focused Chat Board card.');
         await resizeBoardDuringRemount(fixture, 480, 1_000);
         await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
-        await expectTransitionFocus(fixture, READY_COLUMN_ID);
-        expect(await invoker.evaluate((element) => document.activeElement === element)).toBe(true);
+        await expectTransitionFocus(fixture, READY_COLUMN_ID, focusedChatId);
       }
       await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
 
-      markPhase('retaining state across the mobile workspace host remount');
-      await invoker.focus();
+      markPhase('releasing the virtual focus pin after focus leaves the board');
+      const reorderedCard = fixture.page.locator(
+        `[data-chat-board-column-id="${READY_COLUMN_ID}"] [data-chat-board-chat-id="${reorderedChatId}"]`,
+      );
+      await fixture.page.getByRole('button', { name: 'View', exact: true }).focus();
+      await setLaneScroll(fixture, READY_COLUMN_ID, 0);
+      await reorderedCard.waitFor({ state: 'detached' });
+
+      markPhase('retaining an offscreen focus bookmark across the mobile host remount');
+      await setLaneScroll(fixture, READY_COLUMN_ID, 1);
+      const offscreenTransition = fixture.page.locator(
+        `[data-chat-board-column-id="${READY_COLUMN_ID}"] [data-chat-board-chat-id="${reorderedChatId}"] [data-chat-board-focus-target="transition"]`,
+      );
+      await offscreenTransition.waitFor();
+      await offscreenTransition.focus();
+      const remountedReadyScrollTop = await setLaneScroll(fixture, READY_COLUMN_ID, 0);
       await fixture.page.setViewportSize({ width: 390, height: 600 });
       const mobilePanel = fixture.page.locator(
         '[data-chat-board-panel][data-presentation="mobile"][data-presentation-band="narrow"]',
       );
       await mobilePanel.waitFor();
-      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
-      await expectTransitionFocus(fixture, READY_COLUMN_ID);
+      await expectLaneScroll(fixture, READY_COLUMN_ID, remountedReadyScrollTop);
+      await expectTransitionFocus(fixture, READY_COLUMN_ID, reorderedChatId);
 
+      markPhase('respecting new keyboard focus while desktop host restoration is pending');
+      const focusReview = focusReviewDuringNextDesktopMount(fixture);
       await fixture.page.setViewportSize({ width: 1_440, height: 600 });
+      await focusReview;
       await fixture.page
         .locator('[data-chat-board-panel]:not([data-presentation="mobile"])')
         .waitFor();
-      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
+      await expectLaneScroll(fixture, READY_COLUMN_ID, remountedReadyScrollTop);
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
-      await expectTransitionFocus(fixture, READY_COLUMN_ID);
+      await fixture.page.waitForFunction(
+        (reviewColumnId) =>
+          document.activeElement?.matches(`[data-chat-board-lane-heading="${reviewColumnId}"]`) === true,
+        REVIEW_COLUMN_ID,
+      );
 
       markPhase('keeping long direct-agent labels within detailed tag rows');
       await fixture.page.getByRole('button', { name: 'View', exact: true }).click();
@@ -331,6 +416,16 @@ describe('Chromium Chat Board interactions', () => {
       });
       expect(tagGeometry.agentWhiteSpace).toBe('nowrap');
       expect(tagGeometry.overflowBottom).toBeLessThanOrEqual(tagGeometry.rowBottom + 0.1);
+
+      markPhase('disabling decorative card movement under both reduced-motion controls');
+      const card = fixture.page.locator('[data-chat-board-occurrence]').first();
+      const panel = fixture.page.locator('[data-chat-board-panel]');
+      await card.hover();
+      await panel.evaluate((element) => element.classList.add('chat-board-reduce-motion'));
+      expect(await card.evaluate((element) => getComputedStyle(element).translate)).toBe('none');
+      await panel.evaluate((element) => element.classList.remove('chat-board-reduce-motion'));
+      await fixture.page.emulateMedia({ reducedMotion: 'reduce' });
+      expect(await card.evaluate((element) => getComputedStyle(element).translate)).toBe('none');
       fixture.assertNoBrowserErrors();
     });
   });

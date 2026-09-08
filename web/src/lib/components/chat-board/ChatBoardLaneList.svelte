@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
@@ -29,6 +29,7 @@
 		onReconcileTags,
 		onRegisterScroller,
 		initialScrollTop,
+		pinnedOccurrenceKey,
 		onScrollTopChange,
 	}: {
 		columnId: string;
@@ -45,8 +46,14 @@
 		onReconcileTags: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 		initialScrollTop: number;
+		pinnedOccurrenceKey: string | null;
 		onScrollTopChange: (boardId: string, columnId: string, scrollTop: number) => void;
 	} = $props();
+
+	interface OccurrenceFocusTarget {
+		readonly occurrenceKey: string;
+		readonly control: string;
+	}
 
 	const mountedBoardId = untrack(() => boardId);
 	const mountedColumnId = untrack(() => columnId);
@@ -62,6 +69,7 @@
 	});
 	let viewportRef = $state<HTMLDivElement | null>(null);
 	let focusedOccurrenceKey = $state<string | null>(null);
+	let pendingFocusRestore: OccurrenceFocusTarget | null = null;
 
 	function estimatedRowHeight(itemLayout: ChatItemLayout): number {
 		switch (itemLayout) {
@@ -78,11 +86,13 @@
 	let snapshot = $derived(virtual.snapshot);
 	let renderedIndexes = $derived.by(() => {
 		const indexes = indexesInRange(snapshot.overscanRange);
-		if (!focusedOccurrenceKey) return indexes;
-		const focusedIndex = occurrences.findIndex(
-			(occurrence) => occurrence.key === focusedOccurrenceKey,
-		);
-		if (focusedIndex >= 0) indexes.push(focusedIndex);
+		const pinnedKeys = new Set([focusedOccurrenceKey, pinnedOccurrenceKey]);
+		for (const key of pinnedKeys) {
+			if (!key) continue;
+			const index = occurrences.findIndex((occurrence) => occurrence.key === key);
+			if (index >= 0 && !indexes.includes(index)) indexes.push(index);
+		}
+		indexes.sort((left, right) => left - right);
 		return indexes;
 	});
 	let virtualItems = $derived(selectVirtualItems(snapshot, renderedIndexes));
@@ -100,6 +110,7 @@
 	$effect.pre(() => {
 		const keys = occurrences.map((occurrence) => occurrence.key);
 		const nextEstimate = estimate;
+		const focusTarget = captureOccurrenceFocusTarget();
 		untrack(() => {
 			virtual.apply({
 				kind: 'update',
@@ -108,6 +119,10 @@
 				anchor: currentAnchor(),
 			});
 		});
+		if (focusTarget && keys.includes(focusTarget.occurrenceKey)) {
+			pendingFocusRestore = focusTarget;
+			void restoreFocusAfterReorder(focusTarget);
+		}
 	});
 
 	$effect(() => {
@@ -174,13 +189,44 @@
 			null;
 	}
 
+	function captureOccurrenceFocusTarget(): OccurrenceFocusTarget | null {
+		const active = typeof document === 'undefined' ? null : document.activeElement;
+		if (!(active instanceof HTMLElement) || !viewportRef?.contains(active)) return null;
+		const occurrence = active.closest<HTMLElement>('[data-chat-board-occurrence]');
+		const control = active.closest<HTMLElement>('[data-chat-board-focus-target]');
+		const occurrenceKey = occurrence?.dataset.chatBoardOccurrence;
+		const controlName = control?.dataset.chatBoardFocusTarget;
+		return occurrenceKey && controlName ? { occurrenceKey, control: controlName } : null;
+	}
+
+	async function restoreFocusAfterReorder(target: OccurrenceFocusTarget): Promise<void> {
+		await tick();
+		if (pendingFocusRestore !== target) return;
+		pendingFocusRestore = null;
+		const active = document.activeElement;
+		if (active instanceof HTMLElement && active !== document.body) {
+			if (!viewportRef?.contains(active)) focusedOccurrenceKey = null;
+			return;
+		}
+		const control = viewportRef?.querySelector<HTMLElement>(
+			`[data-chat-board-occurrence="${CSS.escape(target.occurrenceKey)}"] [data-chat-board-focus-target="${CSS.escape(target.control)}"]`,
+		);
+		if (!control || control.matches(':disabled')) {
+			focusedOccurrenceKey = null;
+			return;
+		}
+		control.focus({ preventScroll: true });
+	}
+
 	function clearFocusedOccurrence(event: FocusEvent): void {
 		const next = event.relatedTarget;
 		if (next instanceof Node && viewportRef?.contains(next)) return;
+		if (pendingFocusRestore && (next === null || next === document.body)) return;
 		focusedOccurrenceKey = null;
 	}
 
 	onDestroy(() => {
+		pendingFocusRestore = null;
 		virtual.destroy();
 	});
 </script>

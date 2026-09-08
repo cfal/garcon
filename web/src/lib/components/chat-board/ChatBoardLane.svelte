@@ -28,6 +28,7 @@
 		onReconcileTags,
 		onRegisterScroller,
 		initialScrollTop,
+		pinnedOccurrenceKey,
 		onScrollTopChange,
 	}: {
 		lane: ChatBoardLaneProjection;
@@ -45,6 +46,7 @@
 		onReconcileTags: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 		initialScrollTop: number;
+		pinnedOccurrenceKey: string | null;
 		onScrollTopChange: (boardId: string, columnId: string, scrollTop: number) => void;
 	} = $props();
 
@@ -54,6 +56,17 @@
 			? m.chat_board_rule_all({ tags: lane.column.tags.join(', ') })
 			: m.chat_board_rule_any({ tags: lane.column.tags.join(', ') }),
 	);
+	let widthClass = $derived.by(() => {
+		if (narrow) return 'w-full';
+		switch (layout) {
+			case 'single-line':
+				return 'w-[clamp(280px,30vw,340px)]';
+			case 'compact':
+				return 'w-[clamp(304px,32vw,368px)]';
+			case 'detailed':
+				return 'w-[clamp(336px,36vw,416px)]';
+		}
+	});
 
 	$effect(() => {
 		if (!canDrag || !laneRef) return;
@@ -82,13 +95,7 @@
 	bind:this={laneRef}
 	class={cn(
 		'flex h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-[10px] border border-chat-board-lane-border bg-chat-board-lane transition-[border-color,background-color,box-shadow] duration-150',
-		narrow
-			? 'w-full'
-			: layout === 'single-line'
-				? 'w-[clamp(280px,30vw,340px)]'
-				: layout === 'compact'
-					? 'w-[clamp(304px,32vw,368px)]'
-					: 'w-[clamp(336px,36vw,416px)]',
+		widthClass,
 		isDropTarget && 'border-ring bg-chat-board-drop shadow-[0_0_0_2px_hsl(var(--ring))]',
 	)}
 	aria-labelledby={`chat-board-column-${lane.column.id}`}
@@ -145,6 +152,7 @@
 		{onReconcileTags}
 		{onRegisterScroller}
 		{initialScrollTop}
+		{pinnedOccurrenceKey}
 		{onScrollTopChange}
 	/>
 </section>

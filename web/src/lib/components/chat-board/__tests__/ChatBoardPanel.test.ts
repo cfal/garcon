@@ -9,6 +9,7 @@ import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-inv
 import { ApiError } from '$lib/api/client';
 import { tick } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
+import { getChatBoardPanelMemory } from '../chat-board-panel-memory.js';
 import ChatBoardPanelTestHost from './ChatBoardPanelTestHost.svelte';
 
 const column = {
@@ -74,12 +75,33 @@ function nextAnimationFrame(): Promise<void> {
 	return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+function stubPanelWidth(width: number): void {
+	vi.stubGlobal(
+		'ResizeObserver',
+		class {
+			constructor(
+				private readonly callback: (entries: readonly { contentRect: { width: number } }[]) => void,
+			) {}
+
+			observe(element: Element): void {
+				if (element.matches('[data-chat-board-panel]')) {
+					this.callback([{ contentRect: { width } }]);
+				}
+			}
+
+			unobserve(): void {}
+			disconnect(): void {}
+		},
+	);
+}
+
 function createController(initial: ChatBoardCatalog) {
+	let current = initial;
 	let selectedBoardId: string | null = null;
 	let itemLayout = null as 'compact' | 'detailed' | 'single-line' | null;
 	const activeColumnIds = new SvelteMap<string, string>();
 	const api = {
-		load: vi.fn(async () => initial),
+		load: vi.fn(async () => current),
 		create: vi.fn(async (_revision: number, name: string) => ({
 			success: true as const,
 			boardId: board.id,
@@ -116,7 +138,13 @@ function createController(initial: ChatBoardCatalog) {
 		},
 		sidebarLayout: () => 'compact',
 	});
-	return { controller, api };
+	return {
+		controller,
+		api,
+		setCatalog(catalog: ChatBoardCatalog) {
+			current = catalog;
+		},
+	};
 }
 
 afterEach(() => {
@@ -190,23 +218,7 @@ describe('ChatBoardPanel', () => {
 	});
 
 	it('implements narrow lane tabs without changing selection during arrow-key focus', async () => {
-		vi.stubGlobal(
-			'ResizeObserver',
-			class {
-				constructor(
-					private readonly callback: (
-						entries: readonly { contentRect: { width: number } }[],
-					) => void,
-				) {}
-				observe(element: Element) {
-					if (element.matches('[data-chat-board-panel]')) {
-						this.callback([{ contentRect: { width: 420 } }]);
-					}
-				}
-				unobserve() {}
-				disconnect() {}
-			},
-		);
+		stubPanelWidth(420);
 		const { controller } = createController({ revision: 1, boards: [board] });
 		await controller.refresh(true);
 		const selectColumn = vi.spyOn(controller, 'selectColumn');
@@ -241,8 +253,11 @@ describe('ChatBoardPanel', () => {
 		const card = container.querySelector<HTMLElement>('[data-chat-board-occurrence]')!;
 		const open = screen.getByRole('button', { name: 'Open Polish onboarding' });
 		const lane = container.querySelector<HTMLElement>('[data-chat-board-lane-list]')!;
+		await tick();
 		open.focus();
 		lane.scrollTop = 24;
+		await fireEvent.scroll(lane);
+		await nextAnimationFrame();
 		sessions.applyProcessingEvent('chat-1', null);
 
 		await waitFor(() => expect(sessions.byId['chat-1']?.isProcessing).toBe(false));
@@ -394,7 +409,80 @@ describe('ChatBoardPanel', () => {
 		);
 	});
 
+	it('does not restore an old host bookmark after new keyboard focus', async () => {
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		getChatBoardPanelMemory(controller).focusTarget = { kind: 'lane', columnId: column.id };
+		const sessions = new ChatSessionsStore();
+		sessions.chatListStatus = 'ready';
+		render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
+		const reviewHeading = screen.getByRole('heading', { name: 'Review' });
+
+		await fireEvent.keyDown(reviewHeading, { key: 'Shift' });
+		reviewHeading.focus();
+		await nextAnimationFrame();
+		await nextAnimationFrame();
+
+		expect(document.activeElement).toBe(reviewHeading);
+		expect(getChatBoardPanelMemory(controller).focusTarget).toEqual({
+			kind: 'lane',
+			columnId: reviewColumn.id,
+		});
+	});
+
+	it('retains an offscreen occurrence bookmark until host focus restoration', async () => {
+		stubPanelWidth(420);
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		const chats = Array.from({ length: 100 }, (_, index) => chat(`chat-${index}`, `Chat ${index}`));
+		sessions.byId = Object.fromEntries(chats.map((record) => [record.id, record]));
+		sessions.order = chats.map((record) => record.id);
+		sessions.chatListStatus = 'ready';
+		getChatBoardPanelMemory(controller).focusTarget = {
+			kind: 'occurrence',
+			columnId: column.id,
+			occurrenceKey: `${column.id}:chat-99`,
+			control: 'transition',
+		};
+		const { container } = render(ChatBoardPanelTestHost, {
+			controller,
+			sessions,
+			onOpenChat: vi.fn(),
+			presentation: 'mobile',
+		});
+
+		const restored = container.querySelector<HTMLElement>(
+			`[data-chat-board-chat-id="chat-99"] [data-chat-board-focus-target="transition"]`,
+		);
+		expect(restored).toBeTruthy();
+		await waitFor(() => expect(document.activeElement).toBe(restored));
+	});
+
+	it('does not restore scroll memory for a column deleted during host mounting', async () => {
+		const { controller, setCatalog } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const memory = getChatBoardPanelMemory(controller);
+		const readyKey = `${board.id}:${column.id}`;
+		const reviewKey = `${board.id}:${reviewColumn.id}`;
+		memory.laneScrollOffsets.set(readyKey, 37);
+		memory.laneScrollOffsets.set(reviewKey, 83);
+		const sessions = new ChatSessionsStore();
+		sessions.chatListStatus = 'ready';
+		render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
+
+		setCatalog({ revision: 2, boards: [{ ...board, columns: [column] }] });
+		await controller.refresh(false);
+		await nextAnimationFrame();
+		await nextAnimationFrame();
+		await nextAnimationFrame();
+
+		expect(memory.laneScrollOffsets.get(readyKey)).toBe(37);
+		expect(memory.laneScrollOffsets.has(reviewKey)).toBe(false);
+	});
+
 	it('keeps a focused card mounted when live ordering moves it outside the virtual range', async () => {
+		stubPanelWidth(420);
 		const { controller } = createController({ revision: 1, boards: [board] });
 		await controller.refresh(true);
 		const sessions = new ChatSessionsStore();
@@ -418,5 +506,8 @@ describe('ChatBoardPanel', () => {
 		expect(focused.isConnected).toBe(true);
 		expect(container.contains(card)).toBe(true);
 		expect(card.dataset.chatBoardOccurrenceIndex).toBe('99');
+
+		screen.getByRole('button', { name: 'View' }).focus();
+		await waitFor(() => expect(container.contains(card)).toBe(false));
 	});
 });

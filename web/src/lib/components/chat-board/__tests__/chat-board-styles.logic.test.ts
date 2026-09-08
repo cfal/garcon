@@ -30,10 +30,10 @@ describe('Chat Board styles', () => {
 			/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\[data-chat-board-skeleton\],[\s\S]*?\[data-chat-board-column-id\] \{\s*animation: none;\s*transition: none;\s*\}/,
 		);
 		expect(appCss).toMatch(
-			/\.chat-board-reduce-motion \[data-chat-board-occurrence\]:hover \{\s*transform: none;\s*\}/,
+			/\.chat-board-reduce-motion \[data-chat-board-occurrence\]:hover \{\s*translate: none;\s*\}/,
 		);
 		expect(appCss).toMatch(
-			/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\[data-chat-board-occurrence\]:hover \{\s*transform: none;\s*\}/,
+			/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\[data-chat-board-panel\] \[data-chat-board-occurrence\]:hover \{\s*translate: none;\s*\}/,
 		);
 	});
 });
