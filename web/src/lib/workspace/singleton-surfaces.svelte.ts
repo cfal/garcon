@@ -15,12 +15,14 @@ import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
 import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
 import { CanvasExitGuard } from '$lib/chat-canvas/canvas-exit-guard.js';
 import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
+import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
 	createPullRequests(): PullRequestsStore;
 	comparisonPreferences: GitComparisonPreferences;
+	createChatBoard?(): ChatBoardController;
 }
 
 export class FilesSurfaceController implements PortableSingletonController {
@@ -53,6 +55,7 @@ export interface SingletonControllerByKind {
 	commit: CommitController;
 	'chat-map': ChatMapController;
 	'chat-canvas': CanvasController;
+	'chat-board': ChatBoardController;
 }
 
 type SingletonControllerFactories = {
@@ -81,6 +84,7 @@ export class SingletonSurfaceRegistry {
 		commit: false,
 		'chat-map': false,
 		'chat-canvas': false,
+		'chat-board': false,
 	};
 	#hasVisibleProjectSurface = $state(false);
 	readonly #canvasExitGuard = new CanvasExitGuard(
@@ -98,6 +102,10 @@ export class SingletonSurfaceRegistry {
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
 			'chat-canvas': () => new CanvasController(),
+			'chat-board': () => {
+				if (!this.deps.createChatBoard) throw new Error('Chat Board factory is unavailable');
+				return this.deps.createChatBoard();
+			},
 			'pull-requests': () => {
 				const controller = this.deps.createPullRequests();
 				controller.setCapability(
@@ -137,6 +145,10 @@ export class SingletonSurfaceRegistry {
 		return (
 			(this.#controllers.get('chat-canvas')?.controller as CanvasController | undefined) ?? null
 		);
+	}
+
+	chatBoard(): ChatBoardController {
+		return this.#controller('chat-board');
 	}
 
 	commit(): CommitController {
@@ -193,7 +205,10 @@ export class SingletonSurfaceRegistry {
 	#updateVisibleProjectSurface(): void {
 		this.#hasVisibleProjectSurface = PORTABLE_SINGLETON_KINDS.some(
 			(candidate) =>
-				candidate !== 'chat-map' && candidate !== 'chat-canvas' && this.#visible[candidate],
+				candidate !== 'chat-map' &&
+				candidate !== 'chat-canvas' &&
+				candidate !== 'chat-board' &&
+				this.#visible[candidate],
 		);
 	}
 

@@ -203,7 +203,7 @@
 									event.stopPropagation();
 									startLineAction(row.actionTarget!, row.view.row.diffLineIndex);
 								}}
-								class="rounded p-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+								class="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 								title={lineActionTitle()}
 								aria-label={lineActionTitle()}
 							>
@@ -446,7 +446,7 @@
 									<button
 										type="button"
 										disabled={workbenchControls.operationPending}
-										class="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+										class="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 										title={lineActionTitle()}
 										aria-label={lineActionTitle()}
 										onclick={() => startLineAction(row.actionTarget!, cellView.cell.diffLineIndex)}

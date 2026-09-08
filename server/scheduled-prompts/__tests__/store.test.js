@@ -137,10 +137,10 @@ describe('scheduled prompt persistence', () => {
     expect(store.revision).toBe(50);
     const prompts = store.list();
     expect(prompts).toHaveLength(5);
-    expect(prompts.map((entry) => entry.schedule.intervalHours)).toEqual([14 * 24, 14 * 24, 21 * 24, 7 * 24, 24]);
+    expect(prompts.map((entry) => entry.schedule.intervalMinutes)).toEqual([14 * 1440, 14 * 1440, 21 * 1440, 7 * 1440, 1440]);
     expect(prompts[0].schedule.endAt).toBe('2030-12-31T09:00:00.000Z');
     const migrated = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    expect(migrated.version).toBe(2);
+    expect(migrated.version).toBe(3);
     expect(migrated.revision).toBe(50);
     expect(migrated.prompts).toHaveLength(5);
     expect(migrated.prompts[0].schedule.endAt).toBe('2030-12-31T09:00:00.000Z');
@@ -197,19 +197,19 @@ describe('scheduled prompt persistence', () => {
     expect(store.list().map((entry) => entry.schedule)).toEqual([
       {
         type: 'recurring',
-        intervalHours: 7 * 24,
+        intervalMinutes: 7 * 1440,
         nextRunAt: '2030-01-01T09:00:00.000Z',
         endAt: null,
       },
       {
         type: 'recurring',
-        intervalHours: 6,
+        intervalMinutes: 360,
         nextRunAt: '2030-01-02T09:00:00.000Z',
         endAt: null,
       },
       {
         type: 'recurring',
-        intervalHours: 2 * 24,
+        intervalMinutes: 2 * 1440,
         nextRunAt: '2030-01-03T09:00:00.000Z',
         endAt: null,
       },
@@ -426,7 +426,7 @@ describe('scheduled prompt persistence', () => {
         '[scheduled-prompts]',
         `Ignored 1 invalid or duplicate scheduled prompt record while loading scheduled-prompts.json. Original file backed up to ${backupPaths[0]}.`,
       );
-      expect(await fs.readFile(filePath, 'utf8')).toBe(persisted);
+      expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({ version: 3, revision: 9, prompts: [] });
 
       await fs.chmod(backupPaths[0], 0o400);
       await new ScheduledPromptStore(dir).init();
@@ -454,7 +454,7 @@ describe('scheduled prompt persistence', () => {
       {
         value: [scheduledPrompt('array-record', { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' })],
         expectedRevision: 0,
-        sourceVersion: 2,
+        sourceVersion: 3,
       },
       {
         value: {
@@ -476,7 +476,7 @@ describe('scheduled prompt persistence', () => {
         value: { version: 1, revision: '5', prompts: [] },
         expectedRevision: 0,
         sourceVersion: 1,
-        expectedVersionAfterInit: 2,
+        expectedVersionAfterInit: 3,
       },
     ];
     const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -516,11 +516,94 @@ describe('scheduled prompt persistence', () => {
     }
   });
 
+  it('migrates version-two hours without changing canonical records or accepting fractional legacy values', async () => {
+    const dir = await tempDir();
+    const historical = [1, 6, 3650 * 24].map((intervalHours, index) => scheduledPrompt(`hour-${index}`, {
+      type: 'recurring', intervalHours, nextRunAt: '2030-01-01T23:30:00.000Z', endAt: null,
+    }));
+    const once = scheduledPrompt('once', { type: 'once', nextRunAt: '2030-01-01T23:30:00.000Z' });
+    const source = {
+      version: 2, revision: 27,
+      prompts: [once, ...historical, ...[0, 1.5, 87601].map((intervalHours, index) =>
+        scheduledPrompt(`invalid-${index}`, { ...historical[0].schedule, intervalHours })),
+        scheduledPrompt('minutes-only', { type: 'recurring', intervalMinutes: 5, nextRunAt: '2030-01-01T23:30:00.000Z', endAt: null }),
+      ],
+    };
+    const filePath = await seedScheduledPrompts(dir, source);
+    const original = await fs.readFile(filePath);
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    expect(store.revision).toBe(27);
+    expect(store.list()).toEqual([once, ...historical.map((prompt) => ({
+      ...prompt, schedule: {
+        type: 'recurring', intervalMinutes: prompt.schedule.intervalHours * 60,
+        nextRunAt: prompt.schedule.nextRunAt, endAt: null,
+      },
+    }))]);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8')).version).toBe(3);
+    const backups = await scheduledPromptBackupPaths(dir, 2);
+    expect(backups).toHaveLength(1);
+    expect(await fs.readFile(backups[0])).toEqual(original);
+    expect((await fs.stat(backups[0])).mode & 0o777).toBe(0o600);
+    const reopened = new ScheduledPromptStore(dir);
+    await reopened.init();
+    expect(reopened.list()).toEqual(store.list());
+    expect(await scheduledPromptBackupPaths(dir, 2)).toEqual(backups);
+    expect(await scheduledPromptBackupPaths(dir, 3)).toEqual([]);
+  });
+
+  it('backs up invalid v3 interval aliases before normalizing and reuses the backup', async () => {
+    const dir = await tempDir();
+    const source = { version: 3, revision: 1, prompts: [scheduledPrompt('invalid', {
+      type: 'recurring', intervalMinutes: 5, intervalHours: 1,
+      nextRunAt: '2030-01-01T09:00:00.000Z', endAt: null,
+    })] };
+    const filePath = await seedScheduledPrompts(dir, source);
+    const original = await fs.readFile(filePath);
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    expect(store.list()).toEqual([]);
+    const backups = await scheduledPromptBackupPaths(dir, 3);
+    expect(backups).toHaveLength(1);
+    expect(await fs.readFile(backups[0])).toEqual(original);
+    expect(await fs.readFile(filePath)).toEqual(original);
+    await fs.chmod(backups[0], 0o400);
+    await new ScheduledPromptStore(dir).init();
+    expect(await scheduledPromptBackupPaths(dir, 3)).toEqual(backups);
+  });
+
+  it.each([1, 5, 90])('advances %i-minute intervals across midnight through an inclusive end', async (intervalMinutes) => {
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    const first = '2030-01-01T23:59:00.000Z';
+    const second = new Date(Date.parse(first) + intervalMinutes * 60_000).toISOString();
+    await store.create(scheduledPrompt('minute', {
+      type: 'recurring', intervalMinutes, nextRunAt: first, endAt: second,
+    }), 0);
+    expect((await store.claimOccurrence('minute', first)).nextScheduledPrompt.schedule.nextRunAt).toBe(second);
+    expect((await store.claimOccurrence('minute', second)).nextScheduledPrompt).toBeNull();
+    expect(store.list()).toEqual([]);
+  });
+
+  it('skips years of missed minutes in one anchored advance without catch-up', async () => {
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    await store.create(scheduledPrompt('minute', {
+      type: 'recurring', intervalMinutes: 1, nextRunAt: '2030-01-01T00:00:00.000Z', endAt: null,
+    }), 0);
+    const result = await store.reconcileMissed(new Date('2035-01-01T12:00:30.000Z'), { includeCurrentMinute: true });
+    expect(result.events).toHaveLength(1);
+    expect(store.revision).toBe(2);
+    expect(store.get('minute').schedule.nextRunAt).toBe('2035-01-01T12:01:00.000Z');
+  });
+
   it('rejects future scheduled prompt file versions', async () => {
     const dir = await tempDir();
-    await seedScheduledPrompts(dir, { version: 3, revision: 0, prompts: [] });
+    await seedScheduledPrompts(dir, { version: 4, revision: 0, prompts: [] });
 
-    await expect(new ScheduledPromptStore(dir).init()).rejects.toThrow('Unsupported scheduled-prompts.json version: 3');
+    await expect(new ScheduledPromptStore(dir).init()).rejects.toThrow('Unsupported scheduled-prompts.json version: 4');
   });
 
   it('claims once and recurring occurrences before dispatch', async () => {
@@ -537,7 +620,7 @@ describe('scheduled prompt persistence', () => {
     await store.create(
       scheduledPrompt('repeat', {
         type: 'recurring',
-        intervalHours: 1,
+        intervalMinutes: 60,
         nextRunAt: '2030-01-02T09:00:00.000Z',
         endAt: '2030-01-02T11:00:00.000Z',
       }),
@@ -571,7 +654,7 @@ describe('scheduled prompt persistence', () => {
     await store.create(
       scheduledPrompt('repeat', {
         type: 'recurring',
-        intervalHours: 2,
+        intervalMinutes: 120,
         nextRunAt: '2030-01-01T09:00:00.000Z',
         endAt: null,
       }),
@@ -593,7 +676,7 @@ describe('scheduled prompt persistence', () => {
     await store.create(
       scheduledPrompt('repeat', {
         type: 'recurring',
-        intervalHours: 1,
+        intervalMinutes: 60,
         nextRunAt: '2030-01-01T09:00:00.000Z',
         endAt: null,
       }),

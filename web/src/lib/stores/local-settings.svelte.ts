@@ -20,12 +20,23 @@ import {
 	DEFAULT_SNIPPET_TRIGGER,
 	normalizeSnippetTrigger,
 } from '$lib/chat/composer/snippet-trigger.js';
+import { CHAT_SEARCH_SORT_VALUES, type ChatSearchSort } from '$shared/chat-search';
 import {
-	CHAT_SEARCH_SORT_VALUES,
-	type ChatSearchSort,
-} from '$shared/chat-search';
+	DEFAULT_THEME_PREFERENCE,
+	parseThemePreference,
+	type ThemePreference,
+} from '$lib/theme/themes.js';
+import {
+	parseChatItemLayout as parseStoredChatItemLayout,
+	type ChatItemLayout,
+} from '$lib/layout/chat-item-layout.js';
+import {
+	CHAT_BOARD_MAX_COUNT,
+	isChatBoardColumnId,
+	isChatBoardId,
+	type ChatBoard,
+} from '$shared/chat-boards';
 
-export type ThemeMode = 'dark' | 'light' | 'system';
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
 export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
 export const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as const;
@@ -56,8 +67,6 @@ export const SIDEBAR_INACTIVITY_DURATION_VALUES = [
 ] as const;
 export type SidebarInactivityDuration = (typeof SIDEBAR_INACTIVITY_DURATION_VALUES)[number];
 
-export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
-export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
 export type FileOpenPlacementPreference = 'same-window' | 'new-window' | 'dialog';
 export const FILE_OPEN_PLACEMENT_VALUES = [
 	'same-window',
@@ -121,8 +130,7 @@ export const HIDEABLE_TOOL_TYPE_VALUES: readonly HideableToolType[] = HIDEABLE_T
 );
 
 export interface LocalSettingsSnapshot {
-	theme: ThemeMode;
-	colorblindMode: boolean;
+	themePreference: ThemePreference;
 	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
 	alwaysExpandCliMessages: boolean;
@@ -142,7 +150,10 @@ export interface LocalSettingsSnapshot {
 	sidebarGrouping: SidebarChatGrouping;
 	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
-	sidebarChatItemLayout: SidebarChatItemLayout;
+	sidebarChatItemLayout: ChatItemLayout;
+	selectedChatBoardId: string | null;
+	chatBoardItemLayout: ChatItemLayout | null;
+	chatBoardActiveColumnByBoardId: Record<string, string>;
 	sidebarSortMode: SidebarSortMode;
 	sidebarSearchResultSort: ChatSearchSort;
 	codeEditorWordWrap: boolean;
@@ -164,7 +175,6 @@ export interface LocalSettingsSnapshot {
 }
 
 type BooleanLocalSettingKey =
-	| 'colorblindMode'
 	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
 	| 'alwaysExpandCliMessages'
@@ -182,8 +192,7 @@ type BooleanLocalSettingKey =
 	| 'codeEditorLineNumbers';
 
 const DEFAULTS: LocalSettingsSnapshot = {
-	theme: 'system',
-	colorblindMode: false,
+	themePreference: DEFAULT_THEME_PREFERENCE,
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
 	alwaysExpandCliMessages: false,
@@ -204,6 +213,9 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'compact',
+	selectedChatBoardId: null,
+	chatBoardItemLayout: null,
+	chatBoardActiveColumnByBoardId: {},
 	sidebarSortMode: 'manual',
 	sidebarSearchResultSort: 'relevance',
 	codeEditorWordWrap: false,
@@ -252,13 +264,6 @@ function parseCompletionSoundVisibility(value: unknown): CompletionSoundVisibili
 		: DEFAULTS.completionSoundVisibility;
 }
 
-function parseTheme(value: unknown): ThemeMode {
-	if (typeof value === 'string' && (value === 'dark' || value === 'light' || value === 'system')) {
-		return value;
-	}
-	return DEFAULTS.theme;
-}
-
 export function isChatMaxWidth(value: unknown): value is ChatMaxWidth {
 	return typeof value === 'string' && CHAT_MAX_WIDTH_VALUES.includes(value as ChatMaxWidth);
 }
@@ -302,11 +307,20 @@ function parseSidebarInactivityDuration(value: unknown): SidebarInactivityDurati
 	return isSidebarInactivityDuration(value) ? value : DEFAULTS.sidebarInactivityDuration;
 }
 
-function parseSidebarChatItemLayout(value: unknown): SidebarChatItemLayout {
-	return typeof value === 'string' &&
-		SIDEBAR_CHAT_ITEM_LAYOUT_VALUES.includes(value as SidebarChatItemLayout)
-		? (value as SidebarChatItemLayout)
-		: DEFAULTS.sidebarChatItemLayout;
+function parseSidebarChatItemLayout(value: unknown): ChatItemLayout {
+	return parseStoredChatItemLayout(value) ?? DEFAULTS.sidebarChatItemLayout;
+}
+
+function parseChatBoardActiveColumns(value: unknown): Record<string, string> {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+	return Object.fromEntries(
+		Object.entries(value)
+			.filter(
+				(entry): entry is [string, string] =>
+					isChatBoardId(entry[0]) && isChatBoardColumnId(entry[1]),
+			)
+			.slice(-CHAT_BOARD_MAX_COUNT),
+	);
 }
 
 export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementPreference {
@@ -334,8 +348,7 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
-		theme: parseTheme(parsed.theme),
-		colorblindMode: parseBoolean(parsed.colorblindMode, DEFAULTS.colorblindMode),
+		themePreference: parseThemePreference(parsed.themePreference),
 		overlayBackdropEffects: parseBoolean(
 			parsed.overlayBackdropEffects,
 			DEFAULTS.overlayBackdropEffects,
@@ -359,14 +372,22 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		sidebarGrouping: parseSidebarChatGrouping(parsed.sidebarGrouping),
-		sidebarInactivityDuration: parseSidebarInactivityDuration(
-			parsed.sidebarInactivityDuration,
-		),
+		sidebarInactivityDuration: parseSidebarInactivityDuration(parsed.sidebarInactivityDuration),
 		sidebarGroupNestedProjectPaths: parseBoolean(
 			parsed.sidebarGroupNestedProjectPaths,
 			DEFAULTS.sidebarGroupNestedProjectPaths,
 		),
 		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
+		selectedChatBoardId: isChatBoardId(parsed.selectedChatBoardId)
+			? parsed.selectedChatBoardId
+			: null,
+		chatBoardItemLayout:
+			parsed.chatBoardItemLayout === null
+				? null
+				: parseStoredChatItemLayout(parsed.chatBoardItemLayout),
+		chatBoardActiveColumnByBoardId: parseChatBoardActiveColumns(
+			parsed.chatBoardActiveColumnByBoardId,
+		),
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
 		sidebarSearchResultSort: parseSidebarSearchResultSort(parsed.sidebarSearchResultSort),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
@@ -427,8 +448,7 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 }
 
 export class LocalSettingsStore {
-	theme = $state<ThemeMode>(DEFAULTS.theme);
-	colorblindMode = $state(DEFAULTS.colorblindMode);
+	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	alwaysExpandCliMessages = $state(DEFAULTS.alwaysExpandCliMessages);
@@ -446,11 +466,12 @@ export class LocalSettingsStore {
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGrouping = $state<SidebarChatGrouping>(DEFAULTS.sidebarGrouping);
-	sidebarInactivityDuration = $state<SidebarInactivityDuration>(
-		DEFAULTS.sidebarInactivityDuration,
-	);
+	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
-	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
+	sidebarChatItemLayout = $state<ChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
+	selectedChatBoardId = $state<string | null>(DEFAULTS.selectedChatBoardId);
+	chatBoardItemLayout = $state<ChatItemLayout | null>(DEFAULTS.chatBoardItemLayout);
+	chatBoardActiveColumnByBoardId = $state<Record<string, string>>({});
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
 	sidebarSearchResultSort = $state<ChatSearchSort>(DEFAULTS.sidebarSearchResultSort);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
@@ -469,13 +490,12 @@ export class LocalSettingsStore {
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
 	completionSoundVolume = $state(DEFAULTS.completionSoundVolume);
-	completionSoundVisibility = $state<CompletionSoundVisibility>(
-		DEFAULTS.completionSoundVisibility,
-	);
+	completionSoundVisibility = $state<CompletionSoundVisibility>(DEFAULTS.completionSoundVisibility);
 	customCompletionSoundName = $state<string | null>(DEFAULTS.customCompletionSoundName);
 
 	#storageListener = (event: StorageEvent) => {
-		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
+		if (event.storageArea !== window.localStorage) return;
+		if (event.key !== null && event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
 		this.#apply(readPersistedLocalSettings());
 	};
 
@@ -506,6 +526,9 @@ export class LocalSettingsStore {
 		if (key === 'completionSoundVolume') {
 			next.completionSoundVolume = parseCompletionSoundVolume(value);
 		}
+		if (key === 'themePreference') {
+			next.themePreference = parseThemePreference(value);
+		}
 		this.#apply(next);
 		persistLocalSettings(next);
 	}
@@ -526,10 +549,24 @@ export class LocalSettingsStore {
 		this.set('hiddenToolTypes', hiddenToolTypes);
 	}
 
+	pruneChatBoardActiveColumns(boards: readonly ChatBoard[]): void {
+		const columnsByBoardId = new Map(
+			boards.map((board) => [board.id, new Set(board.columns.map((column) => column.id))]),
+		);
+		const retained = Object.fromEntries(
+			Object.entries(this.chatBoardActiveColumnByBoardId).filter(([boardId, columnId]) =>
+				columnsByBoardId.get(boardId)?.has(columnId),
+			),
+		);
+		if (Object.keys(retained).length === Object.keys(this.chatBoardActiveColumnByBoardId).length) {
+			return;
+		}
+		this.set('chatBoardActiveColumnByBoardId', retained);
+	}
+
 	snapshot(): LocalSettingsSnapshot {
 		return {
-			theme: this.theme,
-			colorblindMode: this.colorblindMode,
+			themePreference: this.themePreference,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
 			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
@@ -550,6 +587,9 @@ export class LocalSettingsStore {
 			sidebarInactivityDuration: this.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
+			selectedChatBoardId: this.selectedChatBoardId,
+			chatBoardItemLayout: this.chatBoardItemLayout,
+			chatBoardActiveColumnByBoardId: { ...this.chatBoardActiveColumnByBoardId },
 			sidebarSortMode: this.sidebarSortMode,
 			sidebarSearchResultSort: this.sidebarSearchResultSort,
 			codeEditorWordWrap: this.codeEditorWordWrap,
@@ -572,8 +612,7 @@ export class LocalSettingsStore {
 	}
 
 	#apply(snap: LocalSettingsSnapshot): void {
-		this.theme = snap.theme;
-		this.colorblindMode = snap.colorblindMode;
+		this.themePreference = snap.themePreference;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;
@@ -594,6 +633,9 @@ export class LocalSettingsStore {
 		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
+		this.selectedChatBoardId = snap.selectedChatBoardId;
+		this.chatBoardItemLayout = snap.chatBoardItemLayout;
+		this.chatBoardActiveColumnByBoardId = { ...snap.chatBoardActiveColumnByBoardId };
 		this.sidebarSortMode = snap.sidebarSortMode;
 		this.sidebarSearchResultSort = snap.sidebarSearchResultSort;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;

@@ -15,6 +15,7 @@ import { isLedgerPrivateGarconCommandRow } from './garcon-command-request.js';
 import {
   isLedgerCliRowNoticeDetail,
   isLedgerPreambleSelectionChangedNoticeDetail,
+  projectLedgerAgentCommandOutcome,
   type LedgerRow,
 } from './contracts.js';
 
@@ -77,7 +78,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       return new TranscriptNoticeMessage(
         row.at,
         row.message,
-        parseTranscriptNoticeDetail(row.detail) ?? undefined,
+        projectLedgerAgentCommandOutcome(row.detail) ?? parseTranscriptNoticeDetail(row.detail) ?? undefined,
         typeof row.detail.title === 'string' && row.detail.title ? row.detail.title : undefined,
       );
     }

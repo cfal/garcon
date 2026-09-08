@@ -31,7 +31,7 @@ export interface StoredControlInputEntry {
     readonly title: string;
     readonly content: string;
     readonly detail: ServerControlReceiptDetail;
-  };
+  } | null;
 }
 
 export type StoredQueueCommandOperation = 'create' | 'replace' | 'delete' | 'move';
@@ -92,7 +92,7 @@ export function cloneStoredChatExecutionControl(
     })),
     controlEntries: control.controlEntries.map((entry) => ({
       ...entry,
-      receipt: {
+      receipt: entry.receipt === null ? null : {
         ...entry.receipt,
         detail: { ...entry.receipt.detail },
       },

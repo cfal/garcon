@@ -2,17 +2,22 @@ import crypto from 'node:crypto';
 import type {
   AgentRunCommandRequest,
   AgentTurnCommandResponse,
+  StartChatCommandResponse,
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import { createClientChatId } from '@garcon/common/client-chat-id';
 import type { ChatListEntry } from '@garcon/common/chat-list';
 import type { ChatListResponse } from '@garcon/common/chat-list';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
-import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts';
+import type {
+  UpdateChatTitleRequest,
+  UpdateChatTitleResponse,
+} from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
+import type { CommandTagMutationOutcome } from '@garcon/common/chat-tag-mutations';
 import { normalizeTags } from '@garcon/common/tags';
-import type { CliInvocation } from './args.js';
+import type { CliInvocation, StartAsyncCliInvocation } from './args.js';
 import {
   resolveModelSelection,
   resolveHandoffSelection,
@@ -38,9 +43,12 @@ export interface ConsultationClient extends ReceiptClient {
   getModelCatalog(agentId: string, signal?: AbortSignal): Promise<ModelCatalogResponse>;
   getSettings(signal?: AbortSignal): Promise<RemoteSettingsSnapshot>;
   listChats(signal?: AbortSignal): Promise<ChatListResponse>;
-  startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse>;
+  startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<StartChatCommandResponse>;
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse>;
-  updateChatTitle(request: UpdateChatTitleRequest, signal?: AbortSignal): Promise<void>;
+  updateChatTitle(
+    request: UpdateChatTitleRequest,
+    signal?: AbortSignal,
+  ): Promise<UpdateChatTitleResponse>;
 }
 
 export interface ConsultationDependencies {
@@ -52,7 +60,7 @@ export interface ConsultationDependencies {
 const START_CHAT_ID_ATTEMPTS = 3;
 
 // The cli tag records creation provenance only. Every started chat receives it;
-// resumes, send-async, steer, and stop never add it.
+// resumes, resume-async, steer, and stop never add it.
 function startTags(additionalTags: readonly string[] | undefined): string[] {
   return normalizeTags(['cli', ...(additionalTags ?? [])]);
 }
@@ -60,6 +68,22 @@ function startTags(additionalTags: readonly string[] | undefined): string[] {
 function resumeTags(additionalTags: readonly string[] | undefined): string[] | undefined {
   const tags = normalizeTags(additionalTags ?? []).filter((tag) => tag !== 'cli');
   return tags.length === 0 ? undefined : tags;
+}
+
+function reportTagMutationOutcome(
+  outcome: CommandTagMutationOutcome | undefined,
+  output: CliOutput,
+): void {
+  if (!outcome || outcome.status === 'applied') return;
+  if (outcome.status === 'not-applied') {
+    output.diagnostic(
+      'The run was accepted, but its requested tags were not saved. Add the tags separately; do not resubmit the run.',
+    );
+    return;
+  }
+  output.diagnostic(
+    "The run was accepted, but its requested tags could not be confirmed. Check the chat's saved tags before adding them separately; do not resubmit the run.",
+  );
 }
 
 function requireResumeChat(sessions: readonly ChatListEntry[], chatId: string): ChatListEntry {
@@ -74,13 +98,13 @@ function requireResumeChat(sessions: readonly ChatListEntry[], chatId: string): 
 }
 
 async function submitStart(
-  invocation: Extract<CliInvocation, { kind: 'start' }>,
+  invocation: Extract<CliInvocation, { kind: 'start' }> | StartAsyncCliInvocation,
   prompt: string,
   client: ConsultationClient,
   signal: AbortSignal | undefined,
   createId: () => string,
   createChatId: () => string,
-): Promise<AgentTurnCommandResponse> {
+): Promise<StartChatCommandResponse> {
   const [catalog, settings] = await Promise.all([
     client.getModelCatalog(invocation.agentId, signal),
     client.getSettings(signal),
@@ -108,6 +132,9 @@ async function submitStart(
       ...selection,
       command: prompt,
       tags: startTags(invocation.additionalTags),
+      ...(invocation.orderedPreambleIds === undefined
+        ? {}
+        : { orderedPreambleIds: invocation.orderedPreambleIds }),
       ...(invocation.userMessagePresentation === undefined
         ? {}
         : { userMessagePresentation: invocation.userMessagePresentation }),
@@ -127,6 +154,18 @@ async function submitStart(
     3,
     { cause: lastCollision },
   );
+}
+
+async function updateRequestedTitle(
+  invocation: Pick<CliInvocation | StartAsyncCliInvocation, 'title'>,
+  chatId: string,
+  client: ConsultationClient,
+  signal?: AbortSignal,
+): Promise<UpdateChatTitleResponse | null> {
+  if (invocation.title !== undefined) {
+    return client.updateChatTitle({ chatId, title: invocation.title }, signal);
+  }
+  return null;
 }
 
 async function submitResume(
@@ -214,13 +253,12 @@ export async function runConsultation(
     ? await submitStart(invocation, prompt, client, signal, createId, createChatId)
     : await submitResume(invocation, prompt, client, signal, createId);
   output.accepted(accepted);
+  reportTagMutationOutcome(accepted.tagMutation, output);
   let titleError: unknown | undefined;
-  if (invocation.title !== undefined) {
-    try {
-      await client.updateChatTitle({ chatId: accepted.chatId, title: invocation.title }, signal);
-    } catch (error) {
-      titleError = error;
-    }
+  try {
+    await updateRequestedTitle(invocation, accepted.chatId, client, signal);
+  } catch (error) {
+    titleError = error;
   }
   const receipt = await pollTurnReceipt(
     client,
@@ -232,4 +270,39 @@ export async function runConsultation(
   );
   writeTerminalResult(receipt, output);
   if (titleError !== undefined) throw titleError;
+}
+
+export async function startConsultationAsync(
+  invocation: StartAsyncCliInvocation,
+  prompt: string,
+  client: ConsultationClient,
+  signal?: AbortSignal,
+  dependencies: ConsultationDependencies = {},
+): Promise<StartConsultationAsyncResult> {
+  const accepted = await submitStart(
+    invocation,
+    prompt,
+    client,
+    signal,
+    dependencies.createId ?? crypto.randomUUID,
+    dependencies.createChatId ?? createClientChatId,
+  );
+  if (invocation.title === undefined) {
+    return { accepted, titleUpdate: { status: 'not-requested' } };
+  }
+  try {
+    const response = await updateRequestedTitle(invocation, accepted.chatId, client, signal);
+    if (!response) throw new Error('Requested title update returned no result');
+    return { accepted, titleUpdate: { status: 'succeeded', response } };
+  } catch (error) {
+    return { accepted, titleUpdate: { status: 'failed', error } };
+  }
+}
+
+export interface StartConsultationAsyncResult {
+  readonly accepted: StartChatCommandResponse;
+  readonly titleUpdate:
+    | { readonly status: 'not-requested' }
+    | { readonly status: 'succeeded'; readonly response: UpdateChatTitleResponse }
+    | { readonly status: 'failed'; readonly error: unknown };
 }

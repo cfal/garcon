@@ -16,7 +16,7 @@ vi.mock('$lib/context', () => ({
 const ScheduledChatPickerDialog = (await import('../ScheduledChatPickerDialog.svelte')).default;
 
 describe('ScheduledChatPickerDialog', () => {
-	it('uses one visual backdrop while retaining the nested interaction layer', async () => {
+	it('renders the shared search panel inside one primary dialog', async () => {
 		render(ScheduledChatPickerDialog, {
 			open: true,
 			onSelect: vi.fn(),
@@ -24,14 +24,14 @@ describe('ScheduledChatPickerDialog', () => {
 		});
 
 		await waitFor(() => {
-			expect(document.querySelector('[data-slot="search-dialog-content"]')).toBeTruthy();
+			expect(document.querySelector('[data-slot="search-dialog-panel"]')).toBeTruthy();
 		});
 		expect(document.querySelectorAll('.transient-backdrop')).toHaveLength(1);
-		expect(document.querySelectorAll('[role="presentation"] button[tabindex="-1"]')).toHaveLength(
-			1,
-		);
-		expect(document.querySelector('[data-slot="search-dialog-results"]')?.textContent)
-			.not.toContain('Load more');
+		expect(document.querySelectorAll('[data-slot="dialog-overlay"]')).toHaveLength(1);
+		expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+		expect(
+			document.querySelector('[data-slot="search-dialog-results"]')?.textContent,
+		).not.toContain('Load more');
 		expect(document.body.textContent).not.toContain('Best match');
 	});
 });

@@ -139,6 +139,7 @@ describe('TerminalRuntime', () => {
 		expect(fakes.terminals[0].options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
 		expect(fakes.terminals[0].options.fontWeight).toBe(400);
 		expect(fakes.terminals[0].options.fontWeightBold).toBe(700);
+		expect(fakes.terminals[0].options.minimumContrastRatio).toBe(4.5);
 		expect(onResize).toHaveBeenCalledOnce();
 		expect(onResize).toHaveBeenCalledWith({ cols: 100, rows: 30 });
 

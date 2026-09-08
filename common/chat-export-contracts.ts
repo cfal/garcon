@@ -1,21 +1,19 @@
 import { parseChatId } from './chat-id.js';
+import {
+  TRANSCRIPT_ENTRY_CATEGORY_ALIASES,
+  TRANSCRIPT_ENTRY_OPTIONAL_CATEGORIES,
+  canonicalTranscriptEntryOptionalCategories,
+  isTranscriptEntryOptionalCategory,
+  type TranscriptEntryOptionalCategory,
+} from './transcript-entry-categories.js';
 
 export const TRANSCRIPT_EXPORT_FORMATS = ['markdown', 'xml'] as const;
 export type TranscriptExportFormat = (typeof TRANSCRIPT_EXPORT_FORMATS)[number];
 
-export const TRANSCRIPT_EXPORT_CATEGORIES = [
-  'tool-calls',
-  'tool-results',
-  'reasoning',
-  'permissions',
-  'diagnostics',
-  'handoffs',
-] as const;
-export type TranscriptExportCategory = (typeof TRANSCRIPT_EXPORT_CATEGORIES)[number];
+export const TRANSCRIPT_EXPORT_CATEGORIES = TRANSCRIPT_ENTRY_OPTIONAL_CATEGORIES;
+export type TranscriptExportCategory = TranscriptEntryOptionalCategory;
 
-export const TRANSCRIPT_EXPORT_CATEGORY_ALIASES = {
-  tools: ['tool-calls', 'tool-results'],
-} as const satisfies Record<string, readonly TranscriptExportCategory[]>;
+export const TRANSCRIPT_EXPORT_CATEGORY_ALIASES = TRANSCRIPT_ENTRY_CATEGORY_ALIASES;
 
 export interface TranscriptExportOmittedCount {
   readonly category: TranscriptExportCategory;
@@ -44,21 +42,19 @@ export class TranscriptExportContractError extends Error {
 }
 
 const formatSet = new Set<string>(TRANSCRIPT_EXPORT_FORMATS);
-const categorySet = new Set<string>(TRANSCRIPT_EXPORT_CATEGORIES);
 
 export function isTranscriptExportFormat(value: unknown): value is TranscriptExportFormat {
   return typeof value === 'string' && formatSet.has(value);
 }
 
 export function isTranscriptExportCategory(value: unknown): value is TranscriptExportCategory {
-  return typeof value === 'string' && categorySet.has(value);
+  return isTranscriptEntryOptionalCategory(value);
 }
 
 export function canonicalTranscriptExportCategories(
   categories: Iterable<TranscriptExportCategory>,
 ): TranscriptExportCategory[] {
-  const selected = new Set(categories);
-  return TRANSCRIPT_EXPORT_CATEGORIES.filter((category) => selected.has(category));
+  return canonicalTranscriptEntryOptionalCategories(categories);
 }
 
 export function parseTranscriptExportResponse(value: unknown): TranscriptExportResponse {

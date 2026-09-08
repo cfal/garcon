@@ -10,8 +10,9 @@ function createHarness(enabled = false) {
   const settings = {
     getFeatureSettings: () => ({
       transcriptSearch: { enabled: current },
-      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true },
     }),
+    confirmDurability: mock(async () => undefined),
     setFeatureSettings: mock(async (patch) => {
       events.push(`persist:${patch.transcriptSearch.enabled}`);
       current = patch.transcriptSearch.enabled;
@@ -85,18 +86,64 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     expect(harness.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
+  for (const [enabled, lifecycle] of [[true, 'start'], [false, 'delete']]) {
+    it(`confirms settings durability before the ${lifecycle} same-value lifecycle action`, async () => {
+      const harness = createHarness(enabled);
+      harness.settings.confirmDurability.mockImplementationOnce(async () => {
+        harness.events.push('confirm');
+      });
+
+      await harness.coordinator.setEnabled(enabled);
+
+      expect(harness.events).toEqual(['confirm', lifecycle]);
+    });
+  }
+
   it('persists a combined feature patch once', async () => {
     const harness = createHarness(false);
 
     await harness.coordinator.setEnabled(true, {
-      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true },
     });
 
     expect(harness.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
     expect(harness.settings.setFeatureSettings).toHaveBeenCalledWith({
       transcriptSearch: { enabled: true },
-      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true },
     });
+  });
+
+  it('rebuilds an enabled derived index without changing its durable setting', async () => {
+    const harness = createHarness(true);
+
+    await harness.coordinator.rebuild();
+
+    expect(harness.events).toEqual(['delete', 'start']);
+    expect(harness.settings.setFeatureSettings).not.toHaveBeenCalled();
+  });
+
+  it('rejects rebuild while disabled before changing index lifecycle', async () => {
+    const harness = createHarness(false);
+
+    await expect(harness.coordinator.rebuild()).rejects.toMatchObject({
+      code: 'TRANSCRIPT_SEARCH_DISABLED',
+    });
+
+    expect(harness.controller.disableAndDelete).not.toHaveBeenCalled();
+    expect(harness.controller.start).not.toHaveBeenCalled();
+  });
+
+  it('reports rebuild admission failures through the existing typed error', async () => {
+    const harness = createHarness(true);
+    harness.controller.start.mockImplementationOnce(async () => {
+      harness.events.push('start');
+      throw new Error('reader unavailable');
+    });
+
+    await expect(harness.coordinator.rebuild()).rejects.toMatchObject({
+      code: 'TRANSCRIPT_SEARCH_ENABLE_FAILED',
+    });
+    expect(harness.events).toEqual(['delete', 'start']);
   });
 
   it('keeps an additional feature patch when disabled cleanup fails', async () => {
@@ -107,13 +154,13 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     });
 
     await expect(harness.coordinator.setEnabled(false, {
-      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true },
     })).rejects.toMatchObject({ code: 'TRANSCRIPT_SEARCH_CLEANUP_FAILED' });
 
     expect(harness.events).toEqual(['persist:false', 'delete']);
     expect(harness.settings.setFeatureSettings).toHaveBeenCalledWith({
       transcriptSearch: { enabled: false },
-      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true },
     });
   });
 });

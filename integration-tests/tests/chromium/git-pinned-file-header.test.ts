@@ -3,7 +3,10 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import {
+  clickWorkspaceWindowAddAction,
+  collapseCanonicalFilesWindow,
+} from '../../support/chromium-workspace.js';
 
 const WORKBENCH_PANEL =
   '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
@@ -81,10 +84,7 @@ async function switchToGitWorkbench(page: Page): Promise<void> {
 }
 
 async function openWorkspaceAddMenuItem(page: Page, label: string): Promise<void> {
-  await page
-    .locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]')
-    .click();
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await clickWorkspaceWindowAddAction(page, label);
 }
 
 async function waitForDiff(page: Page, panelSelector: string): Promise<void> {

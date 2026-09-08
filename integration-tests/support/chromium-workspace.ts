@@ -1,4 +1,8 @@
 import type { Page } from 'playwright';
+import {
+  interactWithWorkspaceWindowAddAction,
+  type WorkspaceWindowAddActionRequest,
+} from './workspace-window-add-action.js';
 
 // The canonical desktop layout always includes a dedicated Files window.
 export async function canonicalFilesWindowId(page: Page): Promise<string> {
@@ -19,5 +23,21 @@ export async function collapseCanonicalFilesWindow(page: Page): Promise<void> {
     (expectedCount) =>
       document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
     windowCount - 1,
+  );
+}
+
+export async function clickWorkspaceWindowAddAction(
+  page: Page,
+  label: string,
+  windowId?: string,
+): Promise<void> {
+  await page.waitForFunction<boolean, WorkspaceWindowAddActionRequest>(
+    interactWithWorkspaceWindowAddAction,
+    {
+      expectedLabel: label,
+      expectedWindowId: windowId,
+      expectedIntent: 'activate',
+    },
+    { timeout: 20_000 },
   );
 }

@@ -11,7 +11,7 @@
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
-import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
+	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
@@ -67,6 +67,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		setGitReviewDisplay,
 		setGitViewLauncher,
 		setSingletonSurfaces,
+		setThemeRuntime,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
 	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.svelte.js';
@@ -92,6 +93,9 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		serializeTerminalLauncherDismissal,
 	} from '$lib/workspace/terminal-launcher-dismissal.js';
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
+	import { ThemeController } from '$lib/theme/theme-controller.svelte.js';
+	import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
+	import { ChatBoardsRouter } from '$lib/events/chat-boards-router.svelte.js';
 
 	let { children } = $props();
 
@@ -102,6 +106,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	const scheduledPrompts = createScheduledPromptsStore();
 	const preambles = createPreamblesStore();
 	const chatPreambleSelectionInvalidationHub = createChatPreambleSelectionInvalidationHub();
+	const chatBoardInvalidations = createChatBoardInvalidationHub();
 	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
@@ -125,6 +130,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		notifications,
 		terminalIdentity,
 		ws,
+		chatBoardInvalidations,
 		getRouteIdentity: () => page.url.pathname,
 		onTerminalLauncherDismissed: () => {
 			if (!terminalIdentity.clientId) return;
@@ -156,6 +162,12 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	const workspaceShortcuts = workspaceServices.shortcuts;
 	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const minuteClock = createMinuteClockStore();
+	const themeController = new ThemeController({
+		getPreference: () => localSettings.themePreference,
+		setTerminalPresentation: (presentation) => terminals.setThemePresentation(presentation),
+		setEditorPresentation: (presentation) => fileSessions.setThemePresentation(presentation),
+		reportError: (message) => console.error(message),
+	});
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
@@ -205,6 +217,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	setSidebarSearch(sidebarSearch);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
 	setMinuteClock(minuteClock);
+	setThemeRuntime(themeController);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
@@ -212,47 +225,6 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	);
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
-	const DARK_THEME_COLOR = '#0c1117';
-	const LIGHT_THEME_COLOR = '#ffffff';
-
-	function applyThemeDom(isDark: boolean): void {
-		terminals.setDarkTheme(isDark);
-		document.documentElement.classList.toggle('dark', isDark);
-		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-		fileSessions.setDarkTheme(isDark);
-
-		const statusBarMeta = document.querySelector(
-			'meta[name="apple-mobile-web-app-status-bar-style"]',
-		);
-		statusBarMeta?.setAttribute('content', isDark ? 'black-translucent' : 'default');
-
-		const themeColor = isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
-		const themeColorMetas = document.querySelectorAll('meta[name="theme-color"]');
-		themeColorMetas.forEach((meta) => meta.setAttribute('content', themeColor));
-	}
-
-	// Applies theme class to document element. When 'system', listens for
-	// OS-level preference changes (e.g. Dark Reader or system toggle).
-	$effect(() => {
-		const theme = localSettings.theme;
-		if (theme !== 'system') {
-			applyThemeDom(theme === 'dark');
-			return;
-		}
-		const mql = window.matchMedia('(prefers-color-scheme: dark)');
-		applyThemeDom(mql.matches);
-		function onChange(e: MediaQueryListEvent) {
-			applyThemeDom(e.matches);
-		}
-		mql.addEventListener('change', onChange);
-		return () => mql.removeEventListener('change', onChange);
-	});
-
-	// Toggles colorblind-friendly color overrides on the root element.
-	$effect(() => {
-		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
-	});
-
 	// Projects the browser-local backdrop preference to portal-rendered overlays.
 	$effect(() => {
 		return projectOverlayBackdropEffects(
@@ -299,11 +271,13 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
 	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
+	const chatBoardsRouter = new ChatBoardsRouter(ws, chatBoardInvalidations);
 	settingsRouter.start();
 	transcriptSearchStatusRouter.start();
 	scheduledPromptsRouter.start();
 	preamblesRouter.start();
 	snippetsRouter.start();
+	chatBoardsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
@@ -311,6 +285,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		scheduledPromptsRouter.tick();
 		preamblesRouter.tick();
 		snippetsRouter.tick();
+		chatBoardsRouter.tick();
 	});
 
 	$effect(() => {
@@ -327,6 +302,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		// A reconnect also refreshes an already-open chat selection editor;
 		// its dirty draft is preserved by the controller's refresh path.
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
+		untrack(() => chatBoardInvalidations.publishReconnect());
 	});
 
 	onMount(() => {
@@ -417,6 +393,7 @@ import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-
 		scheduledPromptsRouter.destroy();
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
+		chatBoardsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		minuteClock.destroy();

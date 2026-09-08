@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { main } from '../main.js';
 import { createCliOutput, type CliOutput } from '../output.js';
+import { AssistantMessage } from '@garcon/common/chat-types';
+import { chat, chatList, TS } from './chat-research-fixtures.js';
 
 const CHAT_ID = '1785337200123456';
 
@@ -63,6 +65,7 @@ function acceptedControlResponse(_input: string | URL | Request, init?: RequestI
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: new Date().toISOString(),
+    parentChat: null,
   });
 }
 
@@ -146,7 +149,160 @@ function addChatRowResponse(init?: RequestInit): Response {
   });
 }
 
+function startModelCatalogResponse(): Response {
+  return Response.json({
+    catalog: {
+      agents: [{
+        id: 'codex',
+        label: 'Codex',
+        kind: 'agent',
+        supportsFork: true,
+        supportsForkAtMessage: true,
+        supportsForkWhileRunning: false,
+        supportsUpdateProjectPath: true,
+        supportsImages: true,
+        acceptsApiProviderEndpoints: false,
+        supportedProtocols: [],
+        authLoginSupported: true,
+        supportedPermissionModes: ['default'],
+        supportedThinkingModes: ['none'],
+        settings: [],
+        defaultSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+        requiresStrictModelDiscovery: true,
+        generation: null,
+        defaultModel: 'gpt-5.4',
+        models: [{ value: 'gpt-5.4', label: 'GPT 5.4' }],
+      }],
+      apiProviders: [],
+    },
+  });
+}
+
+function remoteSettingsSnapshot(transcriptSearchEnabled = false): Record<string, unknown> {
+  return {
+    version: 1,
+    features: {
+      transcriptSearch: { enabled: transcriptSearchEnabled },
+      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+    },
+    ui: {},
+    uiEffective: {},
+    paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
+    pinnedChatIds: [],
+    recentAgentSettings: [],
+    executionDefaults: {
+      global: { permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {} },
+      byAgent: {},
+    },
+    projectBasePath: '/project',
+    telegram: {
+      botTokenAvailable: false,
+      botUsername: null,
+      botFirstName: null,
+      recipientUsername: null,
+      recipientDisplayName: null,
+      recipientLinked: false,
+      pendingLink: false,
+      linkUrl: null,
+    },
+  };
+}
+
+function remoteSettingsResponse(): Response {
+  return Response.json(remoteSettingsSnapshot());
+}
+
+function transcriptSearchStatusResponse(): Record<string, unknown> {
+  return {
+    version: 1,
+    phase: 'ready',
+    chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
+    queuedJobs: 0,
+    resync: null,
+    backlogRows: 0,
+    activeChat: null,
+    lastErrorCode: null,
+    updatedAt: '2026-09-08T00:00:00.000Z',
+    queryStats: {
+      served: 2,
+      timedOut: 0,
+      rejectedBusy: 0,
+      p50Ms: 10,
+      p95Ms: 20,
+      maxMs: 20,
+      admissionP50Ms: 1,
+      admissionP95Ms: 2,
+      admissionMaxMs: 2,
+      totalP50Ms: 11,
+      totalP95Ms: 22,
+      totalMaxMs: 22,
+    },
+  };
+}
+
 describe('main', () => {
+  test('routes transcript search administration through typed settings and search endpoints', async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const enableCapture = capturedOutput();
+    const enableExit = await main(['transcript-search', 'enable', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: enableCapture.output,
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        });
+        return Response.json({ success: true, settings: remoteSettingsSnapshot(true) });
+      },
+    });
+    expect(enableExit).toBe(0);
+    expect(requests[0]).toEqual({
+      url: 'http://127.0.0.1:8080/api/v1/app/settings',
+      method: 'PUT',
+      body: { features: { transcriptSearch: { enabled: true } } },
+    });
+    expect(JSON.parse(enableCapture.results[0]!)).toEqual({ enabled: true, settingsVersion: 1 });
+
+    const statusCapture = capturedOutput();
+    const statusExit = await main(['transcript-search', 'status', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: statusCapture.output,
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), method: init?.method ?? 'GET', body: undefined });
+        return Response.json(transcriptSearchStatusResponse());
+      },
+    });
+    expect(statusExit).toBe(0);
+    expect(requests[1]).toEqual({
+      url: 'http://127.0.0.1:8080/api/v1/chats/search/status',
+      method: 'GET',
+      body: undefined,
+    });
+    expect(JSON.parse(statusCapture.results[0]!)).toEqual(transcriptSearchStatusResponse());
+
+    const rebuildCapture = capturedOutput();
+    const rebuildResponse = {
+      success: true,
+      status: transcriptSearchStatusResponse(),
+    };
+    const rebuildExit = await main(['transcript-search', 'rebuild', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: rebuildCapture.output,
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), method: init?.method ?? 'GET', body: undefined });
+        return Response.json(rebuildResponse);
+      },
+    });
+    expect(rebuildExit).toBe(0);
+    expect(requests[2]).toEqual({
+      url: 'http://127.0.0.1:8080/api/v1/chats/search/rebuild',
+      method: 'POST',
+      body: undefined,
+    });
+    expect(JSON.parse(rebuildCapture.results[0]!)).toEqual(rebuildResponse);
+  });
+
   test('prints only the native session lookup chat ID', async () => {
     const capture = capturedStreams();
     let submitted: unknown;
@@ -357,10 +513,100 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
+  test('routes chats, search, and read through their read-only endpoints', async () => {
+    const catalogCapture = capturedOutput();
+    const catalogExit = await main(['chats', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: catalogCapture.output,
+      fetch: async () => Response.json(chatList([chat()])),
+    });
+    expect(catalogExit).toBe(0);
+    expect(JSON.parse(catalogCapture.results[0]!)).toMatchObject({
+      page: { total: 1 },
+      chats: [{ chatId: CHAT_ID }],
+    });
+
+    const searchCapture = capturedOutput();
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const searchExit = await main(['search', 'needle', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: searchCapture.output,
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({
+          url,
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        });
+        if (url.endsWith('/api/v1/chats')) return Response.json(chatList([chat()]));
+        return Response.json({
+          query: 'needle',
+          mode: 'page',
+          snippetLimit: 3,
+          results: [{
+            chatId: CHAT_ID,
+            transcriptViewId: 'view-1',
+            score: 1,
+            matchedMessageCount: 1,
+            snippets: [{ ordinal: 1, role: 'assistant', timestamp: TS, text: 'needle' }],
+          }],
+          page: { offset: 0, limit: 20, total: 1, hasMore: false, nextOffset: null },
+          index: {
+            indexedChatCount: 1,
+            pendingChatCount: 0,
+            failedChatCount: 0,
+            unindexedChatCount: 0,
+            unsupportedChatCount: 0,
+            resultsTruncated: false,
+            failedChats: [],
+            failedChatsOmittedCount: 0,
+          },
+          removedStaleResultCount: 0,
+        });
+      },
+    });
+    expect(searchExit).toBe(0);
+    expect(requests[1]).toMatchObject({
+      url: expect.stringContaining('/api/v1/chats/search'),
+      body: { query: 'needle', mode: 'page', offset: 0, limit: 20, snippetLimit: 3 },
+    });
+    expect(JSON.parse(searchCapture.results[0]!)).toMatchObject({
+      results: [{ chatId: CHAT_ID, chat: { chatId: CHAT_ID } }],
+    });
+
+    const readCapture = capturedOutput();
+    const readExit = await main(['read', CHAT_ID, '1', '-B', '0', '-A', '0', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: readCapture.output,
+      fetch: async (input) => {
+        const query = new URL(String(input)).searchParams;
+        const limit = Number(query.get('limit'));
+        return Response.json({
+          historyState: { kind: 'complete' },
+          chatId: CHAT_ID,
+          transcriptViewId: 'view-1',
+          messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'answer') }],
+          resendCandidates: [],
+          lastOrdinal: 1,
+          pageOldestOrdinal: 1,
+          pageNewestOrdinal: 1,
+          nextBeforeOrdinal: null,
+          hasMore: false,
+          limit,
+        });
+      },
+    });
+    expect(readExit).toBe(0);
+    expect(JSON.parse(readCapture.results[0]!)).toMatchObject({
+      anchorOrdinal: 1,
+      messages: [{ ordinal: 1, message: { content: 'answer' } }],
+    });
+  });
+
   test('interrupts a pending stdin read before runtime discovery', async () => {
     const controller = new AbortController();
     const capture = capturedOutput();
     const result = main([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt-5.4',
       '-',
@@ -385,6 +631,7 @@ describe('main', () => {
     const capture = capturedOutput();
     try {
       const exitCode = await main([
+        'start',
         '--cwd', file,
         '--agent', 'codex',
         '--model', 'gpt-5.4',
@@ -407,6 +654,7 @@ describe('main', () => {
       const child = Bun.spawn([
         process.execPath,
         cliEntry,
+        'start',
         '--agent', 'codex',
         '--model', 'gpt-5.4',
         '-',
@@ -436,10 +684,73 @@ describe('main', () => {
     }
   });
 
-  test('send-async delivers to an idle chat and exits after acceptance', async () => {
+  test('prints one complete start-async JSON acceptance envelope', async () => {
+    const capture = capturedStreams();
+    let startRequest: Record<string, unknown> | undefined;
+    const exitCode = await main([
+      'start-async', '--agent', 'codex', '--model', 'gpt-5.4',
+      '--parent', '1785337200123455', '--title', 'Async review', '--json', 'Review it',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async (input, init) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/v1/models') return startModelCatalogResponse();
+        if (pathname === '/api/v1/app/settings') return remoteSettingsResponse();
+        if (pathname === '/api/v1/chats/start') {
+          startRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return Response.json({
+            success: true,
+            commandType: 'chat-start',
+            clientRequestId: startRequest.clientRequestId,
+            chatId: startRequest.chatId,
+            turnId: 'turn-start',
+            status: 'accepted',
+            acceptedAt: TS,
+            parentChat: { chatId: '1785337200123455', relation: 'delegation' },
+            chat: null,
+          });
+        }
+        if (pathname === '/api/v1/app/session-name') {
+          return Response.json({
+            success: true,
+            chatId: startRequest?.chatId,
+            title: 'Async review',
+            changed: true,
+          });
+        }
+        throw new Error(`Unexpected request: ${pathname}`);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.stderr.join('')).toBe('');
+    expect(startRequest).toMatchObject({
+      command: 'Review it',
+      parentChatId: '1785337200123455',
+    });
+    expect(capture.stdout.join('')).toBe(`${JSON.stringify({
+      schemaVersion: 1,
+      command: 'start-async',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'chat-start',
+        clientRequestId: startRequest?.clientRequestId,
+        chatId: startRequest?.chatId,
+        turnId: 'turn-start',
+        status: 'accepted',
+        acceptedAt: TS,
+      },
+      parentChat: { chatId: '1785337200123455', relation: 'delegation' },
+      titleUpdate: { status: 'succeeded', title: 'Async review', changed: true },
+    }, null, 2)}\n`);
+  });
+
+  test('resume-async delivers to an idle chat and exits after acceptance', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, 'Implement the review',
+      'resume-async', CHAT_ID, 'Implement the review',
     ], {
       fetch: (input, init) => String(input).includes('/snapshot?')
         ? controlSnapshotResponse()
@@ -451,10 +762,54 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
-  test('send-async without --allow-steer reports busy and exits 3', async () => {
+  test('prints one complete resume-async JSON delivery envelope', async () => {
+    const capture = capturedStreams();
+    let runRequest: Record<string, unknown> | undefined;
+    const exitCode = await main([
+      'resume-async', CHAT_ID, '--json', 'Implement the review',
+    ], {
+      fetch: async (input, init) => {
+        if (String(input).includes('/snapshot?')) return controlSnapshotResponse();
+        runRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({
+          success: true,
+          commandType: 'agent-run',
+          clientRequestId: runRequest.clientRequestId,
+          chatId: CHAT_ID,
+          turnId: 'turn-async',
+          status: 'accepted',
+          acceptedAt: TS,
+          parentChat: null,
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.stderr.join('')).toBe('');
+    expect(capture.stdout.join('')).toBe(`${JSON.stringify({
+      schemaVersion: 1,
+      command: 'resume-async',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'agent-run',
+        clientRequestId: runRequest?.clientRequestId,
+        chatId: CHAT_ID,
+        turnId: 'turn-async',
+        status: 'accepted',
+        acceptedAt: TS,
+      },
+      parentChat: null,
+      delivery: 'new-turn',
+    }, null, 2)}\n`);
+  });
+
+  test('resume-async without --allow-steer reports busy and exits 3', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, 'Implement the review',
+      'resume-async', CHAT_ID, 'Implement the review',
     ], {
       fetch: async (input) => String(input).includes('/snapshot?')
         ? controlSnapshotResponse()
@@ -471,11 +826,11 @@ describe('main', () => {
     expect(capture.diagnostics[0]).toContain('--allow-steer');
   });
 
-  test('send-async with --allow-steer steers the active turn', async () => {
+  test('resume-async with --allow-steer steers the active turn', async () => {
     const capture = capturedOutput();
     let runCalls = 0;
     const exitCode = await main([
-      'send-async', CHAT_ID, '--allow-steer', 'Also update the migration test.',
+      'resume-async', CHAT_ID, '--allow-steer', 'Also update the migration test.',
     ], {
       fetch: async (input, init) => {
         const url = String(input);
@@ -498,6 +853,7 @@ describe('main', () => {
           turnId: 'turn-active',
           status: 'accepted',
           acceptedAt: new Date().toISOString(),
+          parentChat: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -508,10 +864,10 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
-  test('send-async rejects empty stdin content before any network submission', async () => {
+  test('resume-async rejects empty stdin content before any network submission', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, '-',
+      'resume-async', CHAT_ID, '-',
     ], {
       fetch: async () => { throw new Error('network must not be reached'); },
       discoverRuntime: stubDiscovery,
@@ -716,6 +1072,7 @@ describe('main', () => {
             version: 0,
             updatedAt: null,
           },
+          parentChat: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -723,6 +1080,60 @@ describe('main', () => {
     });
     expect(exitCode).toBe(0);
     expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('prints one complete stop JSON outcome envelope', async () => {
+    const capture = capturedStreams();
+    let stopRequest: Record<string, unknown> | undefined;
+    const control = {
+      serverInstanceId: 'instance',
+      queue: {
+        entries: [],
+        steeringEntryId: null,
+        recentlyDispatched: [],
+        pause: null,
+        reorderRevision: 0,
+      },
+      version: 0,
+      updatedAt: null,
+    };
+    const exitCode = await main(['stop', CHAT_ID, '--json'], {
+      fetch: async (_input, init) => {
+        stopRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({
+          success: true,
+          commandType: 'agent-stop',
+          clientRequestId: stopRequest.clientRequestId,
+          chatId: CHAT_ID,
+          status: 'accepted',
+          acceptedAt: TS,
+          outcome: 'already-idle',
+          control,
+          parentChat: null,
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.stderr.join('')).toBe('');
+    expect(capture.stdout.join('')).toBe(`${JSON.stringify({
+      schemaVersion: 1,
+      command: 'stop',
+      workspace: 'default',
+      serverInstanceId: 'instance',
+      receipt: {
+        commandType: 'agent-stop',
+        clientRequestId: stopRequest?.clientRequestId,
+        chatId: CHAT_ID,
+        status: 'accepted',
+        acceptedAt: TS,
+      },
+      parentChat: null,
+      outcome: 'already-idle',
+      control,
+    }, null, 2)}\n`);
   });
 
   test('stop exits 3 when the server reports failure', async () => {
@@ -750,6 +1161,7 @@ describe('main', () => {
             version: 0,
             updatedAt: null,
           },
+          parentChat: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -759,11 +1171,11 @@ describe('main', () => {
     expect(capture.diagnostics[0]).toContain('could not stop');
   });
 
-  test('interrupts a send-async stdin read with the control-aware diagnostic', async () => {
+  test('interrupts a resume-async stdin read with the control-aware diagnostic', async () => {
     const controller = new AbortController();
     const capture = capturedOutput();
     const result = main([
-      'send-async', CHAT_ID, '-',
+      'resume-async', CHAT_ID, '-',
     ], {
       signal: controller.signal,
       readStdin: () => new Promise(() => undefined),
@@ -774,7 +1186,7 @@ describe('main', () => {
 
     await expect(result).resolves.toBe(130);
     expect(capture.diagnostics).toEqual([
-      'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying',
+      'terminal interrupted; the command may have reached Garcon; inspect the chat before retrying',
     ]);
   });
 
@@ -796,7 +1208,7 @@ describe('main', () => {
 
     await expect(result).resolves.toBe(130);
     expect(capture.diagnostics).toEqual([
-      'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying',
+      'terminal interrupted; the command may have reached Garcon; inspect the chat before retrying',
     ]);
   });
 

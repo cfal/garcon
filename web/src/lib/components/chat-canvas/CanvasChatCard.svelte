@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ChatSummary from '../shared/ChatSummary.svelte';
+	import ChatSummary from '../chat/ChatSummary.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import * as m from '$lib/paraglide/messages.js';
 	let { chat, currentTime }: { chat: ChatSessionRecord | undefined; currentTime: Date } = $props();
@@ -13,7 +13,8 @@
 			suppressUnread={false}
 			{currentTime}
 			showTimestamp
-			chatItemLayout="default"
+			chatItemLayout="detailed"
+			variant="sidebar"
 		/>
 		{#if chat.isArchived}<span class="text-xs text-muted-foreground"
 				>{m.chat_map_status_archived()}</span

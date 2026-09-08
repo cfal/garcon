@@ -6,10 +6,9 @@ import type {
   SteerCommandRequest,
   SteerCommandResponse,
 } from '@garcon/common/chat-command-contracts';
-import { sendChatAsync, stopChat, type ChatControlClient, type ChatControlDependencies } from '../chat-control.js';
+import { resumeChatAsync, stopChat, type ChatControlClient, type ChatControlDependencies } from '../chat-control.js';
 import { CliError } from '../errors.js';
 import { GarconHttpError, GarconTransportError } from '../garcon-client.js';
-import type { CliOutput } from '../output.js';
 
 const CHAT_ID = '1785337200123456';
 
@@ -37,23 +36,6 @@ function steerError(code: string): GarconHttpError {
 // Deterministic policy tests never wait on the real 50 ms transition delay.
 function noDelayDependencies(createId: () => string = () => 'id'): ChatControlDependencies {
   return { createId, delay: async () => undefined };
-}
-
-function output(): CliOutput & {
-  sentRecords: Array<[string, string, string]>;
-  stoppedRecords: string[];
-} {
-  const sentRecords: Array<[string, string, string]> = [];
-  const stoppedRecords: string[] = [];
-  return {
-    sentRecords, stoppedRecords,
-    accepted() {},
-    completed() {},
-    result() {},
-    sent(chatId, delivery, turnId) { sentRecords.push([chatId, delivery, turnId]); },
-    stopped(chatId, outcome) { stoppedRecords.push(`${chatId}:${outcome}`); },
-    diagnostic() {},
-  };
 }
 
 function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient & {
@@ -140,37 +122,41 @@ function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient &
   };
 }
 
-describe('sendChatAsync', () => {
+describe('resumeChatAsync', () => {
   test('accepts a run on the first attempt and never calls steer', async () => {
     const testClient = client();
-    const testOutput = output();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Implement it', allowSteer: false }, testClient, testOutput, undefined, noDelayDependencies());
-    expect(testClient.runs).toHaveLength(1);
-    expect(testClient.steers).toHaveLength(0);
-    expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
-  });
-
-  test('uses a new turn for an idle chat even when steering is allowed', async () => {
-    const testClient = client();
-    const testOutput = output();
-    await sendChatAsync(
-      { chatId: CHAT_ID, content: 'Implement it', allowSteer: true },
+    const result = await resumeChatAsync(
+      { chatId: CHAT_ID, content: 'Implement it', allowSteer: false },
       testClient,
-      testOutput,
       undefined,
       noDelayDependencies(),
     );
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(0);
-    expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
+    expect(result).toMatchObject({
+      delivery: 'new-turn',
+      response: { chatId: CHAT_ID, turnId: 'turn-1' },
+    });
+  });
+
+  test('uses a new turn for an idle chat even when steering is allowed', async () => {
+    const testClient = client();
+    const result = await resumeChatAsync(
+      { chatId: CHAT_ID, content: 'Implement it', allowSteer: true },
+      testClient,
+      undefined,
+      noDelayDependencies(),
+    );
+    expect(testClient.runs).toHaveLength(1);
+    expect(testClient.steers).toHaveLength(0);
+    expect(result.delivery).toBe('new-turn');
   });
 
   test('fails without steering when the chat is busy and --allow-steer is absent', async () => {
     const testClient = client({ async runChat() { throw busyError(); } });
-    const testOutput = output();
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: false },
-      testClient, testOutput, undefined, noDelayDependencies(),
+      testClient, undefined, noDelayDependencies(),
     )).rejects.toMatchObject({
       phase: 'submission',
       message: expect.stringMatching(/chat is busy.*paused or queued work in Garcon/),
@@ -178,19 +164,25 @@ describe('sendChatAsync', () => {
     });
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(0);
-    expect(testOutput.sentRecords).toEqual([]);
   });
 
   test('steers after a definitive busy rejection and prints delivery: steer', async () => {
     const testClient = client({
       async runChat() { throw busyError(); },
     });
-    const testOutput = output();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, testOutput, undefined, noDelayDependencies());
+    const result = await resumeChatAsync(
+      { chatId: CHAT_ID, content: 'Message', allowSteer: true },
+      testClient,
+      undefined,
+      noDelayDependencies(),
+    );
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(1);
     expect(testClient.steers[0]).toMatchObject({ chatId: CHAT_ID, content: 'Message' });
-    expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'steer', 'turn-active']]);
+    expect(result).toMatchObject({
+      delivery: 'steer',
+      response: { chatId: CHAT_ID, turnId: 'turn-active' },
+    });
   });
 
   test('alternates run-steer-run when the steer target is unavailable', async () => {
@@ -203,11 +195,15 @@ describe('sendChatAsync', () => {
       },
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
     });
-    const testOutput = output();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, testOutput, undefined, noDelayDependencies());
+    const result = await resumeChatAsync(
+      { chatId: CHAT_ID, content: 'Message', allowSteer: true },
+      testClient,
+      undefined,
+      noDelayDependencies(),
+    );
     expect(testClient.runs).toHaveLength(2);
     expect(testClient.steers).toHaveLength(1);
-    expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
+    expect(result.delivery).toBe('new-turn');
   });
 
   test('preserves presentation across run and steer route switches', async () => {
@@ -221,12 +217,12 @@ describe('sendChatAsync', () => {
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
     });
     const presentation = { origin: 'cli', style: 'info', title: 'Context' } as const;
-    await sendChatAsync({
+    await resumeChatAsync({
       chatId: CHAT_ID,
       content: 'Message',
       allowSteer: true,
       userMessagePresentation: presentation,
-    }, testClient, output(), undefined, noDelayDependencies());
+    }, testClient, undefined, noDelayDependencies());
 
     expect(testClient.runs).toHaveLength(2);
     expect(testClient.runs[0]).toEqual(testClient.runs[1]);
@@ -239,17 +235,15 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
       async steerChat() { throw steerError('STEER_TURN_CHANGED'); },
     });
-    const testOutput = output();
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
-      testClient, testOutput, undefined, noDelayDependencies(),
+      testClient, undefined, noDelayDependencies(),
     )).rejects.toMatchObject({
       message: expect.stringMatching(/not sent after 3 attempts.*last result: chat is busy/),
       exitCode: 3,
     });
     expect(testClient.runs).toHaveLength(2);
     expect(testClient.steers).toHaveLength(1);
-    expect(testOutput.sentRecords).toEqual([]);
   });
 
   test('reuses the exact run request identity when returning to /run', async () => {
@@ -262,7 +256,12 @@ describe('sendChatAsync', () => {
       },
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
     });
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, output(), undefined, noDelayDependencies(() => 'fixed-id'));
+    await resumeChatAsync(
+      { chatId: CHAT_ID, content: 'Message', allowSteer: true },
+      testClient,
+      undefined,
+      noDelayDependencies(() => 'fixed-id'),
+    );
     expect(testClient.runs).toHaveLength(2);
     expect(testClient.runs[0]).toEqual(testClient.runs[1]);
     expect(testClient.runs[0]).toEqual({
@@ -277,7 +276,12 @@ describe('sendChatAsync', () => {
   test('gives the steer attempt an identity distinct from the run request', async () => {
     const ids = ['run-request', 'run-message', 'steer-request', 'steer-message'];
     const testClient = client({ async runChat() { throw busyError(); } });
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, output(), undefined, noDelayDependencies(() => ids.shift()!));
+    await resumeChatAsync(
+      { chatId: CHAT_ID, content: 'Message', allowSteer: true },
+      testClient,
+      undefined,
+      noDelayDependencies(() => ids.shift()!),
+    );
     expect(testClient.steers[0]).toMatchObject({
       clientRequestId: 'steer-request',
       clientMessageId: 'steer-message',
@@ -300,9 +304,9 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
       async steerChat() { throw steerFailure; },
     });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
-      testClient, output(), undefined, noDelayDependencies(),
+      testClient, undefined, noDelayDependencies(),
     )).rejects.toBeInstanceOf(CliError);
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(1);
@@ -311,9 +315,9 @@ describe('sendChatAsync', () => {
   test('does not steer when a busy code arrives on a non-409 status', async () => {
     const nonConflict = new GarconHttpError('submission', 'busy', 500, 'SESSION_BUSY', true);
     const testClient = client({ async runChat() { throw nonConflict; } });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
-      testClient, output(), undefined, noDelayDependencies(),
+      testClient, undefined, noDelayDependencies(),
     )).rejects.toBe(nonConflict);
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(0);
@@ -328,9 +332,9 @@ describe('sendChatAsync', () => {
       false,
     );
     const testClient = client({ async runChat() { throw rejection; } });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
-      testClient, output(), undefined, noDelayDependencies(),
+      testClient, undefined, noDelayDependencies(),
     )).rejects.toBe(rejection);
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(0);
@@ -348,9 +352,9 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
       async steerChat() { throw nonConflict; },
     });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
-      testClient, output(), undefined, noDelayDependencies(),
+      testClient, undefined, noDelayDependencies(),
     )).rejects.toBe(nonConflict);
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(1);
@@ -363,9 +367,9 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
       async steerChat() { throw steerError('STEER_TURN_CHANGED'); },
     });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
-      testClient, output(), controller.signal, {
+      testClient, controller.signal, {
         createId: () => 'id',
         delay: async (milliseconds, signal) => { delays.push([milliseconds, signal]); },
       },
@@ -375,7 +379,12 @@ describe('sendChatAsync', () => {
 
   test('omits tags, overrides, and permission fallback from the run payload', async () => {
     const testClient = client();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: false }, testClient, output(), undefined, noDelayDependencies());
+    await resumeChatAsync(
+      { chatId: CHAT_ID, content: 'Message', allowSteer: false },
+      testClient,
+      undefined,
+      noDelayDependencies(),
+    );
     expect(testClient.runs[0]).toEqual({
       clientRequestId: 'id',
       clientMessageId: 'id',
@@ -389,7 +398,6 @@ describe('sendChatAsync', () => {
 describe('stopChat', () => {
   test('accepts interrupt-requested and already-idle outcomes', async () => {
     for (const outcome of ['interrupt-requested', 'already-idle']) {
-      const testOutput = output();
       let captured: AgentStopCommandRequest | undefined;
       const stopClient: ChatControlClient = {
         async runChat() { throw new Error('unused'); },
@@ -401,14 +409,15 @@ describe('stopChat', () => {
           };
         },
       };
-      await stopChat(CHAT_ID, stopClient, testOutput, undefined, { createId: () => 'stop-id' });
+      const result = await stopChat(CHAT_ID, stopClient, undefined, {
+        createId: () => 'stop-id',
+      });
       expect(captured).toEqual({ clientRequestId: 'stop-id', chatId: CHAT_ID });
-      expect(testOutput.stoppedRecords).toEqual([`${CHAT_ID}:${outcome}`]);
+      expect(result.response.outcome).toBe(outcome);
     }
   });
 
   test('rejects a failed stop without printing success', async () => {
-    const testOutput = output();
     const stopClient: ChatControlClient = {
       async runChat() { throw new Error('unused'); },
       async steerChat() { throw new Error('unused'); },
@@ -418,8 +427,7 @@ describe('stopChat', () => {
         };
       },
     };
-    await expect(stopChat(CHAT_ID, stopClient, testOutput, undefined, { createId: () => 'id' }))
+    await expect(stopChat(CHAT_ID, stopClient, undefined, { createId: () => 'id' }))
       .rejects.toMatchObject({ exitCode: 3 });
-    expect(testOutput.stoppedRecords).toEqual([]);
   });
 });

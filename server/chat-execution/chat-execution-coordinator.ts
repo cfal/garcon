@@ -93,6 +93,7 @@ const logger = createLogger('queue');
 
 interface ChatExecutionCoordinatorOptions {
   projectAdmission: ProjectAdmissionPort;
+  isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
   appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
   selectionAdmissionLock?: KeyedPromiseLock;
@@ -232,6 +233,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
           this.#acceptedInputTranscript.registerQueued(chatId, content, options)
         ),
         appendControlReceipt,
+        isControlInputViewCurrent: options.isControlInputViewCurrent,
         discardPreparedInput: (chatId, clientMessageId) => {
           this.#acceptedInputTranscript.discard(chatId, clientMessageId);
         },
@@ -450,7 +452,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     );
   }
 
-  async deliverInterAgentControlInput(
+  async deliverServerControlInput(
     chatId: string,
     input: ServerControlInput,
     signal: AbortSignal,

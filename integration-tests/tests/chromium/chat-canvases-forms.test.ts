@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ChatCanvas, CanvasContent } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 
 const endpoint = '/api/v1/chat-canvases';
 
@@ -23,8 +24,7 @@ test('revalidates connection endpoints and chat destinations after remote edits'
     };
     await integration.client.post(endpoint, { id: 'diagram', content });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, { waitUntil: 'domcontentloaded' });
-    await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-    await page.getByRole('menuitem', { name: 'Open canvas', exact: true }).click();
+    await clickWorkspaceWindowAddAction(page, 'Open canvas');
     await page.getByRole('button', { name: 'Connect', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel(/^From/).selectOption('source');

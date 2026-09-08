@@ -1,7 +1,6 @@
 import {
   PermissionRequestMessage,
   parseChatMessage,
-  type ChatMessage,
 } from './chat-types';
 
 export interface TransientFeedRow {
@@ -12,7 +11,7 @@ export interface TransientFeedRow {
     readonly afterOrdinal: number;
   };
   readonly displayOrder: number;
-  readonly message: ChatMessage;
+  readonly message: PermissionRequestMessage;
 }
 
 export type ChatTransientFeedMutationBody =
@@ -57,8 +56,8 @@ export function parseTransientFeedRow(value: unknown): TransientFeedRow | null {
   if (!permissionOccurrenceId || !runId || !transcriptViewId
       || afterOrdinal === null || displayOrder === null || !parsedMessage) return null;
   if (
-    parsedMessage instanceof PermissionRequestMessage
-    && parsedMessage.permissionOccurrenceId !== permissionOccurrenceId
+    !(parsedMessage instanceof PermissionRequestMessage)
+    || parsedMessage.permissionOccurrenceId !== permissionOccurrenceId
   ) return null;
   return {
     permissionOccurrenceId,

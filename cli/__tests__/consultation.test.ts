@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
   AgentRunCommandRequest,
-  AgentTurnCommandResponse,
+  StartChatCommandResponse,
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import type { ChatListResponse } from '@garcon/common/chat-list';
@@ -10,14 +10,18 @@ import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
-import type { CliInvocation } from '../args.js';
-import { runConsultation, type ConsultationClient } from '../consultation.js';
+import type { CliInvocation, StartAsyncCliInvocation } from '../args.js';
+import {
+  runConsultation,
+  startConsultationAsync,
+  type ConsultationClient,
+} from '../consultation.js';
 import { CliError } from '../errors.js';
 import { GarconHttpError } from '../garcon-client.js';
 import type { CliOutput } from '../output.js';
 
 const CHAT_ID = '1785337200123456';
-const accepted: AgentTurnCommandResponse = {
+const accepted: StartChatCommandResponse = {
   success: true,
   commandType: 'chat-start',
   clientRequestId: 'request',
@@ -25,6 +29,8 @@ const accepted: AgentTurnCommandResponse = {
   turnId: 'turn-1',
   status: 'accepted',
   acceptedAt: new Date().toISOString(),
+  parentChat: null,
+  chat: null,
 };
 const receipt: AgentTurnReceipt = {
   state: 'completed',
@@ -118,15 +124,16 @@ const settings = {
 function output(): CliOutput & {
   acceptedHandles: Array<{ chatId: string; turnId: string }>;
   messages: string[][];
+  diagnostics: string[];
 } {
   return {
-    acceptedHandles: [], messages: [],
+    acceptedHandles: [], messages: [], diagnostics: [],
     accepted({ chatId, turnId }) { this.acceptedHandles.push({ chatId, turnId }); },
     completed(messages) { this.messages.push([...messages]); },
     result() {},
     sent() {},
     stopped() {},
-    diagnostic() {},
+    diagnostic(message) { this.diagnostics.push(message); },
   };
 }
 
@@ -143,7 +150,15 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
     async listChats() { throw new Error('chat list should not be loaded'); },
     async startChat(request) { this.starts.push(request); return accepted; },
     async runChat(request) { this.runs.push(request); return { ...accepted, commandType: 'agent-run' }; },
-    async updateChatTitle(request) { this.titles.push(request); },
+    async updateChatTitle(request) {
+      this.titles.push(request);
+      return {
+        success: true,
+        chatId: request.chatId,
+        title: request.title,
+        changed: true,
+      };
+    },
     async getTurnReceipt() { return receipt; },
     async verifyRuntime() { return true; },
     ...overrides,
@@ -151,12 +166,60 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
 }
 
 describe('runConsultation', () => {
+  test('starts asynchronously and returns after acceptance without reading a receipt', async () => {
+    const invocation: StartAsyncCliInvocation = {
+      kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
+      agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
+      title: 'Async review', json: false,
+    };
+    let receiptRead = false;
+    const testClient = client({
+      async getTurnReceipt() {
+        receiptRead = true;
+        return receipt;
+      },
+    });
+    const result = await startConsultationAsync(invocation, 'Implement it', testClient, undefined, {
+      createId: () => 'request', createChatId: () => CHAT_ID,
+    });
+
+    expect(receiptRead).toBe(false);
+    expect(result).toMatchObject({
+      accepted: { chatId: CHAT_ID, turnId: 'turn-1' },
+      titleUpdate: {
+        status: 'succeeded',
+        response: { title: 'Async review', changed: true },
+      },
+    });
+    expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Async review' }]);
+    expect(testClient.starts[0]).not.toHaveProperty('orderedPreambleIds');
+  });
+
+  test('preserves the accepted async handle when title update fails', async () => {
+    const result = await startConsultationAsync({
+      kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
+      agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
+      title: 'Async review', json: false,
+    }, 'Implement it', client({
+      async updateChatTitle() { throw new CliError('title update', 'rename failed', 3); },
+    }), undefined, {
+      createId: () => 'request', createChatId: () => CHAT_ID,
+    });
+
+    expect(result.accepted).toMatchObject({ chatId: CHAT_ID, turnId: 'turn-1' });
+    expect(result.titleUpdate).toMatchObject({
+      status: 'failed',
+      error: expect.objectContaining({ message: 'rename failed' }),
+    });
+  });
+
   test('starts a tagged write-capable chat and prints its result', async () => {
     const invocation: CliInvocation = {
       kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       title: 'Implementation review',
       parentChatId: '1785337200123455',
+      orderedPreambleIds: [],
       userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
       additionalTags: ['review-needed'],
     };
@@ -175,6 +238,7 @@ describe('runConsultation', () => {
       permissionMode: 'acceptEdits',
       thinkingMode: 'high',
       tags: ['cli', 'review-needed'],
+      orderedPreambleIds: [],
       userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
     });
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
@@ -268,6 +332,68 @@ describe('runConsultation', () => {
       userMessagePresentation: { origin: 'cli', style: 'error' },
     });
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Follow-up review' }]);
+  });
+
+  test.each([
+    {
+      name: 'applied',
+      outcome: { status: 'applied', addedTags: ['follow-up'] } as const,
+      diagnostic: null,
+    },
+    {
+      name: 'not applied',
+      outcome: {
+        status: 'not-applied',
+        errorCode: 'CHAT_TAG_SAVE_FAILED',
+        retryable: true,
+      } as const,
+      diagnostic: 'The run was accepted, but its requested tags were not saved.',
+    },
+    {
+      name: 'unknown',
+      outcome: {
+        status: 'unknown',
+        errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+        recoveryRequired: true,
+      } as const,
+      diagnostic: 'The run was accepted, but its requested tags could not be confirmed.',
+    },
+  ])('preserves accepted execution when post-admission tags are $name', async ({ outcome, diagnostic }) => {
+    const testOutput = output();
+    let submissions = 0;
+    const testClient = client({
+      async runChat(request) {
+        submissions += 1;
+        return {
+          ...accepted,
+          commandType: 'agent-run',
+          clientRequestId: request.clientRequestId,
+          tagMutation: outcome,
+        };
+      },
+    });
+
+    await expect(runConsultation({
+      kind: 'resume',
+      workspace: 'default',
+      configDir: '/config',
+      chatId: CHAT_ID,
+      prompt: 'Continue',
+      readsPromptFromStdin: false,
+      additionalTags: ['follow-up'],
+    }, 'Continue', testClient, testOutput, undefined, {
+      createId: () => 'request',
+    })).resolves.toBeUndefined();
+
+    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
+    expect(testOutput.messages).toEqual([['Done']]);
+    expect(submissions).toBe(1);
+    if (diagnostic) {
+      expect(testOutput.diagnostics).toHaveLength(1);
+      expect(testOutput.diagnostics[0]?.startsWith(diagnostic)).toBe(true);
+    } else {
+      expect(testOutput.diagnostics).toEqual([]);
+    }
   });
 
   test('returns the agent result before surfacing a title update failure', async () => {

@@ -425,6 +425,14 @@ describe('ChatRegistry', () => {
     expect(registry.getChat(SECOND_CHAT_ID)).toBeNull();
   });
 
+  it('reports inherited session properties as unavailable mutation targets', () => {
+    registry.addChat(newChat());
+
+    for (const chatId of ['__proto__', 'constructor', 'toString']) {
+      expect(registry.chatMutationDurability(chatId)).toBe('unavailable');
+    }
+  });
+
   it('ignores untyped parentage patches', () => {
     registry.addChat(newChat());
 
@@ -438,28 +446,6 @@ describe('ChatRegistry', () => {
     });
 
     expect(registry.getChat(CHAT_ID)?.parentChat).toBeNull();
-  });
-
-  it('adds normalized tags without removing existing tags', () => {
-    registry.addChat(newChat({
-      tags: ['existing'],
-      preambleSelection: { revision: 1, orderedPreambleIds: [PREAMBLE_ID] },
-    }));
-    const updated = [];
-    registry.onChatTagsUpdated((chatId) => updated.push(chatId));
-
-    const changed = registry.addTags(CHAT_ID, ['CLI', 'existing', 'Review Needed']);
-    expect(changed).toMatchObject({
-      tags: ['cli', 'existing', 'review-needed'],
-    });
-    changed.preambleSelection.orderedPreambleIds.length = 0;
-    const unchanged = registry.addTags(CHAT_ID, ['cli']);
-    expect(unchanged).toMatchObject({
-      tags: ['cli', 'existing', 'review-needed'],
-    });
-    unchanged.preambleSelection.orderedPreambleIds.length = 0;
-    expect(registry.getChat(CHAT_ID).preambleSelection.orderedPreambleIds).toEqual([PREAMBLE_ID]);
-    expect(updated).toEqual([CHAT_ID]);
   });
 
   it('validates owner-bound settings patches', () => {

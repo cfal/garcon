@@ -71,18 +71,6 @@
 			.filter((entry): entry is SharedMessageEntry => entry !== null);
 	}
 
-	onMount(() => {
-		const mql = window.matchMedia('(prefers-color-scheme: dark)');
-		document.documentElement.classList.toggle('dark', mql.matches);
-		document.documentElement.style.colorScheme = mql.matches ? 'dark' : 'light';
-		function onChange(e: MediaQueryListEvent) {
-			document.documentElement.classList.toggle('dark', e.matches);
-			document.documentElement.style.colorScheme = e.matches ? 'dark' : 'light';
-		}
-		mql.addEventListener('change', onChange);
-		return () => mql.removeEventListener('change', onChange);
-	});
-
 	async function loadSharedSnapshot(): Promise<void> {
 		if (!token) {
 			loadError = 'not-found';
@@ -273,8 +261,10 @@
 				{/if}
 				{#each messages as entry (entry.index)}
 					{@const message = entry.message}
-					{@const userPresentation = message instanceof UserMessage ? message.presentation : undefined}
-					{@const customUserStyle = userPresentation?.style === 'custom' ? userPresentation.customStyle : null}
+					{@const userPresentation =
+						message instanceof UserMessage ? message.presentation : undefined}
+					{@const customUserStyle =
+						userPresentation?.style === 'custom' ? userPresentation.customStyle : null}
 					<svelte:boundary>
 						{#snippet failed(error)}
 							<MessageRenderFallback {error} />

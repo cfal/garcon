@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ChatCanvas } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 for (const interruption of ['blur', 'pointercancel', 'hide'] as const) {
   test(`cancels an armed click connection on ${interruption}`, async () => {
@@ -27,14 +27,7 @@ for (const interruption of ['blur', 'pointercancel', 'hide'] as const) {
           waitUntil: 'domcontentloaded',
         });
         await collapseCanonicalFilesWindow(page);
-        await page
-          .locator(
-            '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
-          )
-          .click();
-        await page
-          .getByRole('menuitem', { name: 'Open canvas', exact: true })
-          .click();
+        await clickWorkspaceWindowAddAction(page, 'Open canvas');
         const handle = (id: string) =>
           page.locator(
             `.svelte-flow__node[data-id="${id}"] [data-handleid="right"]`,
@@ -124,8 +117,7 @@ for (const removal of ['delete', 'reload'] as const) {
       }
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await collapseCanonicalFilesWindow(page);
-      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-      await page.getByRole('menuitem', { name: 'Open canvas', exact: true }).click();
+      await clickWorkspaceWindowAddAction(page, 'Open canvas');
       const node = (id: string) => page.locator(`.svelte-flow__node[data-id="${id}"]`);
       const handle = (id: string) => node(id).locator('[data-handleid="right"]');
       await node('a').click();

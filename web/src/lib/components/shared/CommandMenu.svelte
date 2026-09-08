@@ -4,11 +4,9 @@
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Settings from '@lucide/svelte/icons/settings';
 	import FileCode from '@lucide/svelte/icons/file-code';
-	import Eye from '@lucide/svelte/icons/eye';
 	import {
 		getAppShell,
 		getGhCapability,
-		getLocalSettings,
 		getNotifications,
 		getTerminalRegistry,
 		getTransientLayers,
@@ -29,14 +27,12 @@
 	const categories = {
 		chat: m.command_category_chat(),
 		navigation: m.command_category_navigation(),
-		accessibility: m.command_category_accessibility(),
 		workspace: m.command_category_workspace(),
 	} as const;
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
 	const appShell = getAppShell();
-	const localSettings = getLocalSettings();
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
 	const transientLayers = getTransientLayers();
@@ -79,17 +75,6 @@
 				action: () => appShell.openSettings(),
 			},
 			{
-				id: 'toggle-colorblind',
-				label: localSettings.colorblindMode
-					? m.command_colorblind_disable()
-					: m.command_colorblind_enable(),
-				description: localSettings.colorblindMode
-					? m.command_colorblind_disable_desc()
-					: m.command_colorblind_enable_desc(),
-				category: categories.accessibility,
-				action: () => localSettings.toggle('colorblindMode'),
-			},
-			{
 				id: 'workspace-chat',
 				label: m.command_switch_to_chat(),
 				description: m.command_open_panel({ panel: m.workspace_surface_chat() }),
@@ -116,6 +101,13 @@
 				description: m.command_open_panel({ panel: m.workspace_surface_chat_canvas() }),
 				category: categories.workspace,
 				action: () => void workspace.openSingleton('chat-canvas').catch(reportOpenError),
+			},
+			{
+				id: 'workspace-chat-board',
+				label: m.workspace_open_chat_board(),
+				description: m.command_open_panel({ panel: m.workspace_surface_chat_board() }),
+				category: categories.workspace,
+				action: () => void workspace.openSingleton('chat-board').catch(reportOpenError),
 			},
 			{
 				id: 'workspace-terminal',
@@ -266,8 +258,6 @@
 				return MessageSquarePlus;
 			case categories.navigation:
 				return Settings;
-			case categories.accessibility:
-				return Eye;
 			case 'Tabs':
 				return FileCode;
 			default:

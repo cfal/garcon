@@ -1,5 +1,6 @@
 import { normalizeAgentSettings } from '@garcon/common/agent-settings';
 import type { AgentCatalogEntry, AgentModelOption } from '@garcon/common/agents';
+import type { ApiProviderCatalogEntry } from '@garcon/common/api-providers';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentHandoffTarget } from '@garcon/common/chat-command-contracts';
 import {
@@ -12,6 +13,7 @@ import {
   StartSelectionError,
   requireCatalogAgent as requireSharedCatalogAgent,
   requireCatalogModels as requireSharedCatalogModels,
+  requireCatalogProvider as requireSharedCatalogProvider,
   resolveCatalogModelSelection as resolveSharedCatalogModelSelection,
   resolveModelSelection as resolveSharedModelSelection,
   resolveStartSelection as resolveSharedStartSelection,
@@ -55,6 +57,13 @@ export function requireCatalogAgent(
 
 export function requireCatalogModels(agent: AgentCatalogEntry): AgentModelOption[] {
   return withCliCatalogErrors(() => requireSharedCatalogModels(agent));
+}
+
+export function requireCatalogProvider(
+  providers: readonly ApiProviderCatalogEntry[],
+  selector: string,
+): ApiProviderCatalogEntry {
+  return withCliCatalogErrors(() => requireSharedCatalogProvider(providers, selector));
 }
 
 export function resolveCatalogModelSelection(

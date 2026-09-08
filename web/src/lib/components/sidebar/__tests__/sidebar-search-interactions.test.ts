@@ -73,6 +73,45 @@ describe('sidebar search interactions', () => {
 		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
 	});
 
+	it('renders as one body-level application dialog', async () => {
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [createChat('chat-1', 'First chat')],
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const dialog = await screen.findByRole('dialog', { name: 'Search chats...' });
+		expect(dialog.parentElement).toBe(document.body);
+		expect(document.querySelectorAll('[data-slot="dialog-overlay"]')).toHaveLength(1);
+	});
+
+	it('renders icon-only mobile actions with full touch targets', () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+		});
+
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
+		expect(inputShell?.className).toContain('h-11');
+		expect(inputShell?.className).toContain('min-[769px]:pointer-fine:h-9');
+
+		for (const name of ['Search help', 'Add saved search', 'Manage searches', 'Close search']) {
+			const button = screen.getByRole('button', { name });
+			expect(button.textContent?.trim()).toBe('');
+			expect(button.className).toContain('h-11');
+			expect(button.className).toContain('w-11');
+		}
+	});
+
 	it('opens the highlighted chat from the query input and respects arrow selection', async () => {
 		const onSelectChat = vi.fn();
 
@@ -82,7 +121,6 @@ describe('sidebar search interactions', () => {
 		});
 
 		const input = await screen.findByRole('textbox');
-		expect(input.closest('.transient-backdrop')).toBeTruthy();
 		input.focus();
 
 		await fireEvent.keyDown(input, { key: 'Enter' });
@@ -96,9 +134,9 @@ describe('sidebar search interactions', () => {
 	it('prefetches once keyboard navigation reaches the final eight loaded rows', async () => {
 		const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
 		render(SidebarSearchDialogHost, {
-			filteredChats: Array.from({ length: 10 }, (_, index) => (
-				createChat(`chat-${index}`, `Chat ${index}`)
-			)),
+			filteredChats: Array.from({ length: 10 }, (_, index) =>
+				createChat(`chat-${index}`, `Chat ${index}`),
+			),
 			hasMoreTranscriptResults: true,
 			onLoadMoreTranscriptResults,
 		});
@@ -114,27 +152,27 @@ describe('sidebar search interactions', () => {
 	it.each([
 		['page', { transcriptSearchPageError: 'Loading more results failed.' }],
 		['revalidation', { transcriptSearchRevalidationError: 'Updating results failed.' }],
-	])('does not prefetch from the keyboard while a %s error requires explicit retry', async (
-		_errorKind,
-		errorProps,
-	) => {
-		const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
-		render(SidebarSearchDialogHost, {
-			filteredChats: Array.from({ length: 10 }, (_, index) => (
-				createChat(`chat-${index}`, `Chat ${index}`)
-			)),
-			hasMoreTranscriptResults: true,
-			onLoadMoreTranscriptResults,
-			...errorProps,
-		});
+	])(
+		'does not prefetch from the keyboard while a %s error requires explicit retry',
+		async (_errorKind, errorProps) => {
+			const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
+			render(SidebarSearchDialogHost, {
+				filteredChats: Array.from({ length: 10 }, (_, index) =>
+					createChat(`chat-${index}`, `Chat ${index}`),
+				),
+				hasMoreTranscriptResults: true,
+				onLoadMoreTranscriptResults,
+				...errorProps,
+			});
 
-		const input = await screen.findByRole('textbox');
-		input.focus();
-		await fireEvent.keyDown(input, { key: 'ArrowDown' });
-		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+			const input = await screen.findByRole('textbox');
+			input.focus();
+			await fireEvent.keyDown(input, { key: 'ArrowDown' });
+			await fireEvent.keyDown(input, { key: 'ArrowDown' });
 
-		expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
-	});
+			expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
+		},
+	);
 
 	it('changes the search-result sort from the keyboard-reachable menu', async () => {
 		const onSortChange = vi.fn();
@@ -143,13 +181,15 @@ describe('sidebar search interactions', () => {
 			onSortChange,
 		});
 
-		const trigger = await screen.findByRole('button', { name: 'Best match' });
+		const trigger = await screen.findByRole('button', {
+			name: 'Sort search results: Best match',
+		});
 		trigger.focus();
 		await fireEvent.click(trigger);
 		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Creation time' }));
 
 		expect(onSortChange).toHaveBeenCalledWith('created');
-		expect(screen.getByRole('button', { name: 'Creation time' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Sort search results: Creation time' })).toBeTruthy();
 	});
 
 	it('closes the sort menu before Escape closes the search dialog', async () => {
@@ -160,7 +200,9 @@ describe('sidebar search interactions', () => {
 			onClose,
 		});
 
-		await fireEvent.click(await screen.findByRole('button', { name: 'Best match' }));
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Sort search results: Best match' }),
+		);
 		const item = await screen.findByRole('menuitemradio', { name: 'Recent activity' });
 		await fireEvent.keyDown(item, { key: 'Escape', bubbles: true });
 		expect(onClose).not.toHaveBeenCalled();
@@ -208,25 +250,14 @@ describe('sidebar search interactions', () => {
 				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
 			),
 		);
-		const responsiveCloseButton = focusable.at(-1);
-		const lastVisible = focusable.at(-2);
-		expect(responsiveCloseButton).toBeTruthy();
+		const lastVisible = focusable.at(-1);
 		expect(lastVisible).toBeTruthy();
-		responsiveCloseButton!.style.display = 'none';
 		lastVisible!.focus();
 
 		await fireEvent.keyDown(lastVisible!, { key: 'Tab', bubbles: true });
 		expect(document.activeElement).toBe(input);
 
 		await fireEvent.keyDown(input, { key: 'Tab', shiftKey: true, bubbles: true });
-		expect(document.activeElement).toBe(lastVisible);
-
-		dialog.focus();
-		await fireEvent.keyDown(dialog, { key: 'Tab', bubbles: true });
-		expect(document.activeElement).toBe(input);
-
-		dialog.focus();
-		await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true, bubbles: true });
 		expect(document.activeElement).toBe(lastVisible);
 	});
 
@@ -348,7 +379,7 @@ describe('sidebar search interactions', () => {
 		expect(onApplySavedSearch).not.toHaveBeenCalled();
 	});
 
-	it('closes from the compact header close button beside search settings', async () => {
+	it('closes from the header close button beside the query input', async () => {
 		const onClose = vi.fn();
 
 		render(SidebarSearchDialogHost, {
@@ -357,34 +388,15 @@ describe('sidebar search interactions', () => {
 		});
 
 		await screen.findByRole('textbox');
-		const settingsButton = screen.getByRole('button', { name: 'Manage searches' });
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
 		const closeButton = screen.getByRole('button', { name: 'Close search' });
 
-		expect(settingsButton.nextElementSibling).toBe(closeButton);
-		expect(closeButton.className).toContain('h-9');
-		expect(closeButton.className).toContain('w-9');
-		expect(closeButton.className).toContain('sm:hidden');
+		expect(inputShell?.nextElementSibling).toBe(closeButton);
+		expect(closeButton.className).toContain('h-11');
+		expect(closeButton.className).toContain('w-11');
+		expect(closeButton.className).toContain('min-[769px]:pointer-fine:h-9');
 
 		await fireEvent.click(closeButton);
-
-		expect(onClose).toHaveBeenCalledTimes(1);
-		await waitFor(() => {
-			expect(screen.queryByRole('textbox')).toBeNull();
-		});
-	});
-
-	it('closes when clicking outside the dialog panel', async () => {
-		const onClose = vi.fn();
-
-		render(SidebarSearchDialogHost, {
-			filteredChats: [createChat('chat-1', 'First chat')],
-			onClose,
-		});
-
-		const container = document.querySelector('.fixed.inset-0.flex.items-stretch.justify-center');
-		if (!(container instanceof HTMLElement)) throw new Error('Expected search dialog container');
-
-		await fireEvent.click(container);
 
 		expect(onClose).toHaveBeenCalledTimes(1);
 		await waitFor(() => {
@@ -415,11 +427,11 @@ describe('sidebar search interactions', () => {
 			filteredChats: [createChat('chat-1', 'First chat'), createChat('chat-2', 'Second chat')],
 		});
 
-		const dialogContent = document.querySelector('[data-slot="search-dialog-content"]');
-		expect(dialogContent?.className).toContain('sm:h-[min(44rem,calc(100dvh-8rem))]');
-		expect(dialogContent?.className).toContain('sm:w-full');
-		expect(dialogContent?.className).toContain('sm:max-w-3xl');
-		expect(dialogContent?.className).toContain('sm:rounded-2xl');
+		const dialogContent = document.querySelector('[data-search-dialog-content]');
+		expect(dialogContent?.className).toContain('h-[var(--app-height)]');
+		expect(dialogContent?.className).toContain('w-screen');
+		expect(dialogContent?.className).toContain('min-[769px]:pointer-fine:max-w-3xl');
+		expect(dialogContent?.className).toContain('min-[769px]:pointer-fine:rounded-2xl');
 
 		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
 		expect(inputShell?.className).toContain('relative');
@@ -430,9 +442,9 @@ describe('sidebar search interactions', () => {
 		const input = await screen.findByRole('textbox');
 		expect(input.className).toContain('bg-transparent');
 		expect(input.className).toContain('pl-9');
-		expect(input.className).toContain('pr-8');
+		expect(input.className).toContain('pr-11');
 		expect(input.className).toContain('text-base');
-		expect(input.className).toContain('sm:pointer-fine:text-sm');
+		expect(input.className).toContain('min-[769px]:pointer-fine:text-sm');
 		expect(input.className).toContain('outline-none');
 
 		expect(await screen.findByRole('listbox')).toBeTruthy();
@@ -441,6 +453,9 @@ describe('sidebar search interactions', () => {
 		);
 		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
 			'overflow-y-auto',
+		);
+		expect(document.querySelector('[data-slot="search-dialog-results"]')?.className).toContain(
+			'touch-pan-y',
 		);
 	});
 
@@ -578,22 +593,18 @@ describe('sidebar search interactions', () => {
 		expect(items[5]?.textContent).toContain('No grouping');
 		expect(screen.getByRole('menuitemradio', { name: 'Project' })).toBeTruthy();
 		expect(items[6]?.textContent).toContain('Project');
-		expect(
-			screen.getByRole('menuitemradio', { name: 'Project and activity' }),
-		).toBeTruthy();
+		expect(screen.getByRole('menuitemradio', { name: 'Project and activity' })).toBeTruthy();
 		expect(items[7]?.textContent).toContain('Project and activity');
 		expect(screen.getByRole('menuitemradio', { name: 'Activity' })).toBeTruthy();
 		expect(items[8]?.textContent).toContain('Activity');
-		expect(
-			screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' }),
-		).toBeTruthy();
+		expect(screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' })).toBeTruthy();
 		expect(items[9]?.textContent).toContain('Combine nested paths');
-		expect(screen.getByRole('menuitemradio', { name: 'Default' })).toBeTruthy();
-		expect(items[10]?.textContent).toContain('Default');
-		expect(screen.getByRole('menuitemradio', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[11]?.textContent).toContain('Compact chat items');
-		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
-		expect(items[12]?.textContent).toContain('Single-line chat items');
+		expect(screen.getByRole('menuitemradio', { name: 'Detailed' })).toBeTruthy();
+		expect(items[10]?.textContent).toContain('Detailed');
+		expect(screen.getByRole('menuitemradio', { name: 'Compact' })).toBeTruthy();
+		expect(items[11]?.textContent).toContain('Compact');
+		expect(screen.getByRole('menuitemradio', { name: 'Single-line' })).toBeTruthy();
+		expect(items[12]?.textContent).toContain('Single-line');
 		expect(items[13]?.textContent).toContain('Autohide sidebar');
 		expect(items[14]?.textContent).toContain('Dock sidebar on the right');
 		expect(items[15]?.textContent).toContain('Scheduled prompts');
@@ -673,17 +684,17 @@ describe('sidebar search interactions', () => {
 		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
 		expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe(null);
 		expect(items[7]?.textContent).toContain('Combine nested paths');
-		const defaultLayout = screen.getByRole('menuitemradio', { name: 'Default' });
-		expect(defaultLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[8]?.textContent).toContain('Default');
-		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
+		const detailedLayout = screen.getByRole('menuitemradio', { name: 'Detailed' });
+		expect(detailedLayout.getAttribute('aria-checked')).toBe('false');
+		expect(items[8]?.textContent).toContain('Detailed');
+		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
-		expect(items[9]?.textContent).toContain('Compact chat items');
+		expect(items[9]?.textContent).toContain('Compact');
 		const singleLineLayout = screen.getByRole('menuitemradio', {
-			name: 'Single-line chat items',
+			name: 'Single-line',
 		});
 		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[10]?.textContent).toContain('Single-line chat items');
+		expect(items[10]?.textContent).toContain('Single-line');
 		const chatListAutohide = screen.getByRole('menuitemcheckbox', {
 			name: 'Autohide sidebar',
 		});

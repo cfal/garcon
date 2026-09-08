@@ -414,15 +414,12 @@ export class TranscriptSearchService {
     const executionStarted = performance.now();
     const admissionMs = executionStarted - totalStarted;
     const session = slot.supervisor.beginRequestSession();
+    const framingStarted = performance.now();
     const frames = searchFrames(
-      request.query,
-      request.allowedChats,
-      request.order,
-      request.mode,
-      request.offset,
-      request.limit,
-      request.snippetLimit,
+      request.query, request.allowedChats, request.order, request.mode,
+      request.offset, request.limit, request.snippetLimit,
     );
+    const framingMs = performance.now() - framingStarted;
     const pending = session.request(frames, undefined, this.#readerRequestTimeoutMs, {
       isComplete: (candidate) => candidate.type === 'search-result',
     });
@@ -441,7 +438,11 @@ export class TranscriptSearchService {
         this.#rateLimitedWarn('Transcript search query timeout', {
           code: 'SEARCH_TIMEOUT',
           admissionMs: Math.round(admissionMs),
+          framingMs: Math.round(framingMs),
           executeMs: Math.round(performance.now() - executionStarted),
+          allowedChatCount: request.allowedChats.length,
+          clauseCount: request.query.clauses.length,
+          phraseClauseCount: request.query.clauses.filter((clause) => clause.kind === 'phrase').length,
           order: request.order,
           offset: request.offset,
           limit: request.limit,

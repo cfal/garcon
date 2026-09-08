@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import type { Page } from 'playwright';
 import type { ChatCanvas, CanvasListResponse, UpdateCanvasRequest } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { Deferred } from '../../support/deferred.js';
 
 const endpoint = '/api/v1/chat-canvases';
@@ -18,8 +18,7 @@ for (const nextAction of ['edit', 'delete', 'edit-before-failure'] as const) {
       await integration.client.post(endpoint, { id: 'board', content: { title: 'Original', nodes: [], connections: [] } });
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await collapseCanonicalFilesWindow(page);
-      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-      await page.getByRole('menuitem', { name: 'Open canvas', exact: true }).click();
+      await clickWorkspaceWindowAddAction(page, 'Open canvas');
       await page.getByLabel('Choose canvas').waitFor();
       const clockStart = Date.now();
       await page.clock.install({ time: clockStart });

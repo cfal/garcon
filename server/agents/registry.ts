@@ -84,7 +84,7 @@ export interface AgentRegistryServiceContract {
   supportsFileAttachmentMimeType(agentId: string, mimeType: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
-  currentTranscriptViewId(chatId: string): Promise<string>;
+  currentTranscriptViewId(chatId: string, signal?: AbortSignal): Promise<string>;
   hasMatchingInput(
     chatId: string,
     message: UserMessage,
@@ -511,8 +511,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#transcriptListeners.add(listener);
   }
 
-  async currentTranscriptViewId(chatId: string): Promise<string> {
-    return (await this.#adoption.ensure(chatId)).viewId;
+  async currentTranscriptViewId(chatId: string, signal?: AbortSignal): Promise<string> {
+    return (await this.#adoption.ensure(chatId, signal)).viewId;
   }
 
   publishSessionFact(chatId: string, session: StartedAgentSession): void {

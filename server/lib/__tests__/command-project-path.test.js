@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   resolveStartProjectPath,
   resolveUpdatedProjectPath,
+  StartProjectUnavailableError,
 } from '../command-project-path.ts';
 
 const PROJECT_PATH = '/workspace/project';
@@ -76,6 +77,7 @@ describe('command project path resolution', () => {
     for (const entry of cases) {
       const inspect = async () => ({ kind: 'unavailable', reason: entry.reason });
       await expect(resolveStartProjectPath(PROJECT_PATH, inspect)).rejects.toMatchObject(entry.start);
+      await expect(resolveStartProjectPath(PROJECT_PATH, inspect)).rejects.toBeInstanceOf(StartProjectUnavailableError);
       await expect(resolveUpdatedProjectPath(PROJECT_PATH, inspect)).rejects.toMatchObject(
         entry.update,
       );

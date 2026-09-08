@@ -54,7 +54,7 @@ function createFixture(overrides = {}) {
     ...overrides.adoption,
   };
   const execution = {
-    deliverInterAgentControlInput: mock(async () => 'delivered'),
+    deliverServerControlInput: mock(async () => 'delivered'),
     ...overrides.execution,
   };
   const notices = {
@@ -88,7 +88,7 @@ describe('InterAgentMessageController', () => {
     await waitFor(() => sourceNotices(fixture).length === 1);
 
     expect(fixture.adoption.ensure).not.toHaveBeenCalled();
-    expect(fixture.execution.deliverInterAgentControlInput).not.toHaveBeenCalled();
+    expect(fixture.execution.deliverServerControlInput).not.toHaveBeenCalled();
     expect(sourceNotices(fixture)[0][2]).toMatchObject({
       content: 'message body',
       detail: {
@@ -106,7 +106,7 @@ describe('InterAgentMessageController', () => {
     fixture.controller.request(request());
     await waitFor(() => sourceNotices(fixture).length === 1);
 
-    expect(fixture.execution.deliverInterAgentControlInput).toHaveBeenCalledWith(
+    expect(fixture.execution.deliverServerControlInput).toHaveBeenCalledWith(
       TARGET_CHAT_ID,
       {
         content: `<garcon-message from="${SOURCE_CHAT_ID}">\nmessage body\n</garcon-message>`,
@@ -149,13 +149,13 @@ describe('InterAgentMessageController', () => {
 
   it('hides sender identity and reports process-ephemeral queue admission honestly', async () => {
     const fixture = createFixture({
-      execution: { deliverInterAgentControlInput: mock(async () => 'queued') },
+      execution: { deliverServerControlInput: mock(async () => 'queued') },
     });
 
     fixture.controller.request(request({ hideSender: true }));
     await waitFor(() => sourceNotices(fixture).length === 1);
 
-    expect(fixture.execution.deliverInterAgentControlInput.mock.calls[0][1]).toEqual({
+    expect(fixture.execution.deliverServerControlInput.mock.calls[0][1]).toEqual({
       content: '<garcon-message>\nmessage body\n</garcon-message>',
       transcriptViewId: `view-${TARGET_CHAT_ID}`,
       createdAt: '2026-08-29T00:00:00.000Z',
@@ -177,7 +177,7 @@ describe('InterAgentMessageController', () => {
   it('fans out independently and preserves recipient order in one partial outcome', async () => {
     const fixture = createFixture({
       execution: {
-        deliverInterAgentControlInput: mock(async (chatId) => {
+        deliverServerControlInput: mock(async (chatId) => {
           if (chatId === TARGET_CHAT_ID) return 'delivered';
           if (chatId === SECOND_TARGET_CHAT_ID) {
             throw new DomainError('CONTROL_INPUT_QUEUE_FULL', 'full');
@@ -204,7 +204,7 @@ describe('InterAgentMessageController', () => {
       { chatId: MISSING_TARGET_CHAT_ID, status: 'failed', reason: 'target-not-found' },
       { chatId: THIRD_TARGET_CHAT_ID, status: 'failed', reason: 'delivery-unknown' },
     ]);
-    expect(fixture.execution.deliverInterAgentControlInput).toHaveBeenCalledTimes(3);
+    expect(fixture.execution.deliverServerControlInput).toHaveBeenCalledTimes(3);
   });
 
   it('records every recipient when one target lock fails unexpectedly', async () => {
@@ -244,7 +244,7 @@ describe('InterAgentMessageController', () => {
         }),
       },
       execution: {
-        deliverInterAgentControlInput: mock(async () => {
+        deliverServerControlInput: mock(async () => {
           throw new DomainError('STEER_PROVIDER_REJECTED', 'rejected');
         }),
       },
@@ -268,7 +268,7 @@ describe('InterAgentMessageController', () => {
   it('classifies project admission failure as target unavailable', async () => {
     const fixture = createFixture({
       execution: {
-        deliverInterAgentControlInput: mock(async () => {
+        deliverServerControlInput: mock(async () => {
           throw new ProjectUnavailableError('/workspace/project', 'not-found');
         }),
       },
@@ -313,7 +313,7 @@ describe('InterAgentMessageController', () => {
     let calls = 0;
     const fixture = createFixture({
       execution: {
-        deliverInterAgentControlInput: mock(() => {
+        deliverServerControlInput: mock(() => {
           calls += 1;
           return calls === 1 ? first.promise : Promise.resolve('queued');
         }),
@@ -322,14 +322,14 @@ describe('InterAgentMessageController', () => {
 
     fixture.controller.request(request({ body: 'first' }));
     fixture.controller.request(request({ body: 'second' }));
-    await waitFor(() => fixture.execution.deliverInterAgentControlInput.mock.calls.length === 1);
+    await waitFor(() => fixture.execution.deliverServerControlInput.mock.calls.length === 1);
     expect(sourceNotices(fixture)).toHaveLength(0);
 
     first.resolve('queued');
-    await waitFor(() => fixture.execution.deliverInterAgentControlInput.mock.calls.length === 2);
+    await waitFor(() => fixture.execution.deliverServerControlInput.mock.calls.length === 2);
     await waitFor(() => sourceNotices(fixture).length === 2);
 
-    expect(fixture.execution.deliverInterAgentControlInput.mock.calls.map((call) => call[1].receipt.content))
+    expect(fixture.execution.deliverServerControlInput.mock.calls.map((call) => call[1].receipt.content))
       .toEqual(['first', 'second']);
   });
 
@@ -338,7 +338,7 @@ describe('InterAgentMessageController', () => {
     let controller;
     const fixture = createFixture({
       execution: {
-        deliverInterAgentControlInput: mock(async () => {
+        deliverServerControlInput: mock(async () => {
           targetAccepted = true;
           controller.discardSource(SOURCE_CHAT_ID);
           return 'queued';

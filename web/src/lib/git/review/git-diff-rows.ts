@@ -479,7 +479,7 @@ function lineNumClass(kind: GitDiffRowKind): string {
 		case 'del':
 			return 'text-diff-del-line-num';
 		default:
-			return 'text-muted-foreground/50';
+			return 'text-foreground/70';
 	}
 }
 
@@ -490,7 +490,7 @@ function splitLineNumClass(kind: SplitDiffCell['kind']): string {
 		case 'del':
 			return 'text-diff-del-line-num';
 		default:
-			return 'text-muted-foreground/50';
+			return 'text-foreground/70';
 	}
 }
 

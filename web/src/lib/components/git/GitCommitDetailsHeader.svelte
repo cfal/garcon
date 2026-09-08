@@ -141,7 +141,7 @@
 				<label class="inline-flex items-center gap-1">
 					<span>Diff against</span>
 					<select
-						class="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						class="select-native select-native-surface select-native-compact text-base md:pointer-fine:text-xs"
 						value={snapshot.selectedParent ?? ''}
 						onchange={(event) => onSelectParent(event.currentTarget.value || null)}
 					>

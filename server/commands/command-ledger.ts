@@ -195,6 +195,7 @@ export class CommandLedger {
   readonly #steerIdentityLimit: number;
   #steerIdentityCount = 0;
   readonly #turnOwnerIndex = new Map<string, string>();
+  readonly #terminalWaiters = new Map<string, Set<(record: CommandLedgerRecord | null) => void>>();
   readonly #pendingChatDeletions = new Set<string>();
   readonly #recordLimit: number;
   readonly #turnResultByteLimit: number;
@@ -231,6 +232,37 @@ export class CommandLedger {
     if (!key) return null;
     const record = this.#records.get(key);
     return record ? cloneRecord(record) : null;
+  }
+
+  async waitForTurnTerminal(
+    chatId: string,
+    turnId: string,
+    signal: AbortSignal,
+  ): Promise<CommandLedgerRecord | null> {
+    signal.throwIfAborted();
+    const record = this.#recordForTurn(chatId, turnId);
+    if (!record || record.retainedPrivateTerminal) return null;
+    if (record.publicTerminalAt) return cloneRecord(record);
+    const indexKey = turnIndexKey(chatId, turnId);
+    return new Promise((resolve, reject) => {
+      const waiters = this.#terminalWaiters.get(indexKey) ?? new Set();
+      const cleanup = () => {
+        signal.removeEventListener('abort', abort);
+        waiters.delete(complete);
+        if (waiters.size === 0) this.#terminalWaiters.delete(indexKey);
+      };
+      const complete = (terminal: CommandLedgerRecord | null) => {
+        cleanup();
+        resolve(terminal ? cloneRecord(terminal) : null);
+      };
+      const abort = () => {
+        cleanup();
+        reject(signal.reason);
+      };
+      waiters.add(complete);
+      this.#terminalWaiters.set(indexKey, waiters);
+      signal.addEventListener('abort', abort, { once: true });
+    });
   }
 
   async appendAssistantMessages(
@@ -296,6 +328,7 @@ export class CommandLedger {
     record.updatedAt = now;
     record.payload = {};
     this.#assignTerminalRetentionOrdinal(record);
+    this.#notifyTerminalWaiters(record);
     this.#expireTerminalResults();
     this.#trimRecords();
     return cloneRecord(record);
@@ -479,6 +512,7 @@ export class CommandLedger {
     const next = { ...existing, ...patch, updatedAt: new Date().toISOString() };
     this.#assignTerminalRetentionOrdinal(next);
     this.#records.set(key, next);
+    this.#notifyTerminalWaiters(next);
     this.#trimRecords();
     return cloneRecord(next);
   }
@@ -525,6 +559,7 @@ export class CommandLedger {
     };
     this.#assignTerminalRetentionOrdinal(record);
     this.#records.set(key, record);
+    this.#notifyTerminalWaiters(record);
     this.#trimRecords();
     return { kind: 'applied', record: cloneRecord(record) };
   }
@@ -588,7 +623,18 @@ export class CommandLedger {
   #removeTurnIndex(record: CommandLedgerRecord): void {
     if (!record.turnId) return;
     const indexKey = turnIndexKey(record.chatId, record.turnId);
-    if (this.#turnOwnerIndex.get(indexKey) === record.key) this.#turnOwnerIndex.delete(indexKey);
+    if (this.#turnOwnerIndex.get(indexKey) !== record.key) return;
+    this.#turnOwnerIndex.delete(indexKey);
+    for (const complete of this.#terminalWaiters.get(indexKey) ?? []) complete(null);
+  }
+
+  #notifyTerminalWaiters(record: CommandLedgerRecord): void {
+    if (!record.turnId || (!record.publicTerminalAt && !record.retainedPrivateTerminal)) return;
+    const indexKey = turnIndexKey(record.chatId, record.turnId);
+    if (this.#turnOwnerIndex.get(indexKey) !== record.key) return;
+    for (const complete of this.#terminalWaiters.get(indexKey) ?? []) {
+      complete(record.retainedPrivateTerminal ? null : record);
+    }
   }
 
   #discardResult(record: CommandLedgerRecord): void {

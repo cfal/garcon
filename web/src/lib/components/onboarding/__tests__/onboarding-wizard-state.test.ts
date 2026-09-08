@@ -46,11 +46,14 @@ describe('OnboardingWizardState', () => {
 	it('writes each selection to its local setting', () => {
 		const { wizard, localSettings } = createWizard();
 
-		wizard.selectTheme('dark');
+		wizard.selectTheme({ mode: 'fixed', themeId: 'classic-dark' });
 		wizard.selectChatItemLayout('single-line');
 		wizard.selectChatMaxWidth('medium');
 
-		expect(localSettings.theme).toBe('dark');
+		expect(localSettings.themePreference).toEqual({
+			mode: 'fixed',
+			themeId: 'classic-dark',
+		});
 		expect(localSettings.sidebarChatItemLayout).toBe('single-line');
 		expect(localSettings.chatMaxWidth).toBe('medium');
 	});

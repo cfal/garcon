@@ -3,6 +3,10 @@ import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 import { assertLightpandaWorkspaceGeometry } from './lightpanda-workspace-geometry.js';
+import {
+  interactWithWorkspaceWindowAddAction,
+  type WorkspaceWindowAddActionIntent,
+} from './workspace-window-add-action.js';
 
 interface ClickOptions {
   contains?: boolean;
@@ -572,9 +576,7 @@ export class SpaDriver {
       `[data-workspace-window-id="${sourceWindowId}"]`,
       (element) => (element as HTMLElement).dataset.workspaceWindowActiveSurface ?? null,
     );
-    await this.openWorkspaceWindowAddMenu(sourceWindowId);
-    await this.waitForMenuItemEnabled(name);
-    await this.clickMenuItem(name);
+    await this.clickWorkspaceWindowAddAction(name, sourceWindowId);
     await this.#page.waitForFunction(
       ({ expectedWindowId, previousSurfaceId }) => {
         const workspaceWindow = [
@@ -710,9 +712,7 @@ export class SpaDriver {
       await this.selectWorkspaceWindowSurfaceById(surfaceId, targetWindowId);
       return;
     }
-    await this.openWorkspaceWindowAddMenu(targetWindowId);
-    await this.waitForMenuItemEnabled(name);
-    await this.clickMenuItem(name);
+    await this.clickWorkspaceWindowAddAction(name, targetWindowId);
   }
 
   async selectWorkspaceWindowSurfaceById(surfaceId: string, windowId?: string): Promise<void> {
@@ -835,15 +835,41 @@ export class SpaDriver {
     }, targetWindowId);
   }
 
-  async openWorkspaceWindowAddMenu(windowId?: string): Promise<void> {
+  async clickWorkspaceWindowAddAction(name: string, windowId?: string): Promise<void> {
     const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
-    await this.#page.evaluate((expectedWindowId) => {
-      const trigger = [
-        ...document.querySelectorAll<HTMLButtonElement>('[data-workspace-window-add-trigger]'),
-      ].find((element) => element.dataset.workspaceWindowAddTrigger === expectedWindowId);
-      if (!trigger) throw new Error(`Missing workspace window add menu: ${expectedWindowId}`);
-      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
-    }, targetWindowId);
+    await this.#waitForWorkspaceWindowAddAction(name, targetWindowId, 'activate');
+  }
+
+  async waitForWorkspaceWindowAddActionEnabled(name: string, windowId?: string): Promise<void> {
+    const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
+    await this.#waitForWorkspaceWindowAddAction(name, targetWindowId, 'observe');
+  }
+
+  async #waitForWorkspaceWindowAddAction(
+    name: string,
+    windowId: string,
+    intent: WorkspaceWindowAddActionIntent,
+  ): Promise<void> {
+    try {
+      await this.#page.waitForFunction(
+        interactWithWorkspaceWindowAddAction,
+        { timeout: 20_000 },
+        {
+          expectedLabel: name,
+          expectedWindowId: windowId,
+          expectedIntent: intent,
+        },
+      );
+    } catch (error) {
+      // Lightpanda can collect the CDP promise when activation unmounts the menu.
+      if (
+        intent !== 'activate' ||
+        !(error instanceof Error) ||
+        !error.message.includes('Promise was collected')
+      ) {
+        throw error;
+      }
+    }
   }
 
   async clickResponsiveAction(

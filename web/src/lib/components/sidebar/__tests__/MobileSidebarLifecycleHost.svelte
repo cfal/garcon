@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
+	import SidebarSearchDialogs from '../SidebarSearchDialogs.svelte';
 	import {
 		setAppShell,
 		setLocalSettings,
@@ -20,9 +21,9 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
 		SidebarChatGrouping,
-		SidebarChatItemLayout,
 		SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 
@@ -35,7 +36,7 @@
 		sidebarGrouping?: SidebarChatGrouping;
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
-		sidebarChatItemLayout?: SidebarChatItemLayout;
+		sidebarChatItemLayout?: ChatItemLayout;
 		collapsedProjectKeys?: Set<string>;
 	}
 
@@ -48,7 +49,7 @@
 		sidebarGrouping = 'project',
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
-		sidebarChatItemLayout = 'default',
+		sidebarChatItemLayout = 'detailed',
 		collapsedProjectKeys = new Set<string>(),
 	}: MobileSidebarLifecycleHostProps = $props();
 
@@ -77,6 +78,13 @@
 	const sidebarSearchContext = createSidebarSearchContext();
 
 	let sidebarOpen = $state(initialSidebarOpen());
+	let sidebarSearchResultSort = $state<'relevance' | 'activity' | 'created'>('relevance');
+
+	// Mirrors the AppShell drawer-close effect that resets the search
+	// dialog cluster whenever the mobile drawer is closed.
+	$effect(() => {
+		if (!sidebarOpen) sidebarSearchContext.resetDialogs();
+	});
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -124,15 +132,25 @@
 		get sidebarChatItemLayout() {
 			return sidebarChatItemLayout;
 		},
+		get sidebarSearchResultSort() {
+			return sidebarSearchResultSort;
+		},
 		toggle(_key: 'sidebarGroupNestedProjectPaths') {
 			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 		},
-		set(key: 'sidebarGrouping' | 'sidebarChatItemLayout', value: string) {
+		set(
+			key: 'sidebarGrouping' | 'sidebarChatItemLayout' | 'sidebarSearchResultSort',
+			value: string,
+		) {
 			if (key === 'sidebarGrouping') {
 				sidebarGrouping = value as SidebarChatGrouping;
 				return;
 			}
-			sidebarChatItemLayout = value as SidebarChatItemLayout;
+			if (key === 'sidebarChatItemLayout') {
+				sidebarChatItemLayout = value as ChatItemLayout;
+				return;
+			}
+			sidebarSearchResultSort = value as typeof sidebarSearchResultSort;
 		},
 	} as never);
 	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
@@ -185,6 +203,8 @@
 
 <button type="button" onclick={() => (sidebarOpen = true)}>Open sidebar</button>
 <button type="button" onclick={() => (sidebarOpen = false)}>Close sidebar</button>
+
+<SidebarSearchDialogs {chats} onSelectChat={() => {}} />
 
 {#if sidebarOpen}
 	<Sidebar

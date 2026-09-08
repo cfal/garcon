@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ChatCanvas } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 test('commits a grouped selection drag as one ordered, undoable edit', async () => {
   await withChromiumFixture('canvas-selection-drag', async (fixture) => {
@@ -35,14 +35,7 @@ test('commits a grouped selection drag as one ordered, undoable edit', async () 
       waitUntil: 'domcontentloaded',
     });
     await collapseCanonicalFilesWindow(page);
-    await page
-      .locator(
-        '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
-      )
-      .click();
-    await page
-      .getByRole('menuitem', { name: 'Open canvas', exact: true })
-      .click();
+    await clickWorkspaceWindowAddAction(page, 'Open canvas');
     await page
       .locator('.svelte-flow__node[data-id="b"]')
       .waitFor({ state: 'visible' });

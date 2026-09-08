@@ -5,7 +5,7 @@ function projectSettings(overrides = {}) {
   return {
     features: {
       transcriptSearch: { enabled: false },
-      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
+      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true },
     },
     ui: {},
     paths: {},
@@ -46,6 +46,12 @@ function createHarness(overrides = {}, options = {}) {
       saveCalls.push(remoteSettingsChanged);
       if (options.failSave) throw new Error('save failed');
     }),
+    saveAndEmitList: mock(async (_settings, remoteSettingsChanged, reason, chatId) => {
+      saveCalls.push(remoteSettingsChanged);
+      if (options.failSave) throw new Error('save failed');
+      listChanges.push({ reason, chatId });
+    }),
+    saveAndEmitSessionName: mock(async () => undefined),
     emitSessionNameChanged: mock(() => undefined),
     emitListChanged: mock((reason, chatId) => listChanges.push({ reason, chatId })),
   };

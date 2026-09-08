@@ -159,6 +159,8 @@ function harness(options = {}) {
         unindexedChatCount: 0,
         unsupportedChatCount: 0,
         resultsTruncated: false,
+        failedChats: [],
+        failedChatsOmittedCount: 0,
       },
     })),
     status: mock(() => ({
@@ -290,11 +292,15 @@ describe('TranscriptSearchController v9', () => {
       results: [{
         chatId: 'chat-0001', transcriptViewId: 'stale-view', score: 1,
         matchedMessageCount: 1, snippets: [],
+      }, {
+        chatId: 'chat-0001', transcriptViewId: 'view-0001', score: 2,
+        matchedMessageCount: 1, snippets: [],
       }],
       page: { offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75 },
       index: {
         indexedChatCount: 1, pendingChatCount: 0, failedChatCount: 0,
         unindexedChatCount: 0, unsupportedChatCount: 0, resultsTruncated: false,
+        failedChats: [], failedChatsOmittedCount: 0,
       },
     });
     const callerAbort = new AbortController();
@@ -317,7 +323,8 @@ describe('TranscriptSearchController v9', () => {
       admissionSignal: callerAbort.signal,
       executionSignal: expect.any(AbortSignal),
     });
-    expect(result.results).toEqual([]);
+    expect(result.results).toEqual([expect.objectContaining({ transcriptViewId: 'view-0001' })]);
+    expect(result.removedStaleResultCount).toBe(1);
     expect(result.page).toEqual({
       offset: 50, limit: 50, total: 80, hasMore: true, nextOffset: 75,
     });
@@ -439,7 +446,18 @@ describe('TranscriptSearchController v9', () => {
         query: 'alpha',
         allowedChatIds: ['chat-0001'],
       });
-      expect(result.index).toMatchObject({ failedChatCount: 1, unindexedChatCount: 0 });
+      expect(result.index).toMatchObject({
+        failedChatCount: 1,
+        unindexedChatCount: 0,
+        failedChats: [{
+          chatId: 'chat-0001',
+          transcriptViewId: null,
+          stage: 'adoption',
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          recovery: 'source-required',
+        }],
+        failedChatsOmittedCount: 0,
+      });
     }
     expect(fixture.ledger.existingCurrentView).toHaveBeenCalledTimes(probeCount);
 
@@ -1053,6 +1071,7 @@ describe('TranscriptSearchController v9', () => {
     }] });
     await fixture.controller.start();
     await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.logger.warn.mockClear();
     for (const [source, expected] of [
       ['SEARCH_TIMEOUT', 'SEARCH_TIMEOUT'],
       ['SEARCH_INDEX_BUSY', 'SEARCH_INDEX_BUSY'],
@@ -1063,6 +1082,19 @@ describe('TranscriptSearchController v9', () => {
         query: 'alpha', allowedChatIds: ['chat-0001'],
       })).rejects.toMatchObject({ code: expected, retryable: true });
     }
+    expect(fixture.logger.warn).toHaveBeenCalledWith(
+      'Transcript search controller timed out',
+      expect.objectContaining({
+        code: 'SEARCH_TIMEOUT',
+        requestedCandidateCount: 1,
+        uniqueCandidateCount: 1,
+        admittedChatCount: 1,
+        clauseCount: 1,
+        snapshotMs: expect.any(Number),
+        compileMs: expect.any(Number),
+        totalMs: expect.any(Number),
+      }),
+    );
     await fixture.controller.close();
   });
 

@@ -46,6 +46,9 @@ import {
   DISABLED_INTER_AGENT_MESSAGE_SINK,
   dispatchGarconCommands,
   type ChatIdRequestSink,
+  type AgentStartRequestSink,
+  type AgentScheduleRequestSink,
+  type AgentResumeRequestSink,
   type InterAgentMessageRequestSink,
 } from './garcon-command-publication.js';
 import { PermissionNotActionableError } from './errors.js';
@@ -108,6 +111,9 @@ export interface TranscriptLedgerServiceOptions {
   readonly onListenerError?: (error: unknown) => void;
   readonly chatIdRequests?: ChatIdRequestSink;
   readonly interAgentMessages?: InterAgentMessageRequestSink;
+  readonly agentStarts?: AgentStartRequestSink;
+  readonly agentResumes?: AgentResumeRequestSink;
+  readonly agentSchedules?: AgentScheduleRequestSink;
 }
 
 export interface PermissionResolutionClaim {
@@ -147,6 +153,9 @@ export class TranscriptLedgerService {
   readonly #onListenerError: (error: unknown) => void;
   readonly #chatIdRequests: ChatIdRequestSink;
   readonly #interAgentMessages: InterAgentMessageRequestSink;
+  readonly #agentStarts: AgentStartRequestSink;
+  readonly #agentResumes: AgentResumeRequestSink;
+  readonly #agentSchedules: AgentScheduleRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
@@ -163,6 +172,9 @@ export class TranscriptLedgerService {
     this.#onListenerError = options.onListenerError ?? (() => undefined);
     this.#chatIdRequests = options.chatIdRequests ?? DISABLED_CHAT_ID_REQUEST_SINK;
     this.#interAgentMessages = options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK;
+    this.#agentStarts = options.agentStarts ?? { request: () => undefined };
+    this.#agentResumes = options.agentResumes ?? { request: () => undefined };
+    this.#agentSchedules = options.agentSchedules ?? { request: () => undefined };
   }
 
   subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
@@ -732,6 +744,10 @@ export class TranscriptLedgerService {
           runId: this.#activeRuns.get(chatId) ?? null,
           chatIdRequests: this.#chatIdRequests,
           interAgentMessages: this.#interAgentMessages,
+          agentStarts: this.#agentStarts,
+          agentResumes: this.#agentResumes,
+          agentSchedules: this.#agentSchedules,
+          committedRows: committed,
         });
         if (committed.length > 0) {
           this.#notify({ type: 'rows', chatId, viewId, rows: committed });

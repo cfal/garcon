@@ -28,6 +28,9 @@
 	const chatCanvasRenderer = lazyRenderer(
 		() => import('$lib/components/chat-canvas/ChatCanvasSurface.svelte'),
 	);
+	const chatBoardRenderer = lazyRenderer(
+		() => import('$lib/components/chat-board/ChatBoardPanel.svelte'),
+	);
 </script>
 
 <script lang="ts">
@@ -217,6 +220,19 @@
 		{@const controller = singletonSurfaces.chatCanvas()}
 		{#await chatCanvasRenderer() then ChatCanvasSurface}
 			<ChatCanvasSurface {controller} chats={sessions.orderedChats} {visible} {presentation} />
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'chat-board'}
+		{@const controller = singletonSurfaces.chatBoard()}
+		{#await chatBoardRenderer() then ChatBoardPanel}
+			<ChatBoardPanel
+				{controller}
+				{sessions}
+				{presentation}
+				onOpenChat={(chatId) => {
+					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
+					else void workspace.showChatInWindow(chatId, presentation);
+				}}
+			/>
 		{/await}
 	{/if}
 

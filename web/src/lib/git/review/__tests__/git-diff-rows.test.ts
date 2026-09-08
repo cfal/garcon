@@ -185,6 +185,7 @@ describe('git diff rows', () => {
 		expect(views[3].bgClass).toBe('bg-interactive-accent/20');
 		expect(views[4].showComposer).toBe(true);
 		expect(views[4].bgClass).toBe('bg-interactive-accent/10');
+		expect(views[1].lineNumClass).toBe('text-foreground/70');
 	});
 
 	it('decorates split cells with side-specific selection targets', () => {
@@ -207,6 +208,7 @@ describe('git diff rows', () => {
 		expect(views[2].right?.selectionKey).toBe(
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'after', 2),
 		);
+		expect(views[1].left?.lineNumClass).toBe('text-foreground/70');
 	});
 
 	it('projects before and after syntax segments onto unified rows', () => {

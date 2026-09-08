@@ -1,22 +1,156 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import MermaidBlock from '../MermaidBlock.svelte';
+import MermaidBlock from './MermaidBlockTestHost.svelte';
 import { renderMermaid } from '../mermaid-loader';
 
 vi.mock('../mermaid-loader', () => ({
 	renderMermaid: vi.fn(),
+	resolveMermaidThemeId: ({
+		colorScheme,
+		rendererPalette,
+	}: {
+		colorScheme: 'light' | 'dark';
+		rendererPalette: 'standard' | 'colorblind';
+	}) => `${rendererPalette === 'colorblind' ? 'colorblind' : 'standard'}-${colorScheme}`,
 }));
 
 const mockedRenderMermaid = vi.mocked(renderMermaid);
 
 describe('MermaidBlock', () => {
 	beforeEach(() => {
+		mockedRenderMermaid.mockReset();
 		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
 		vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
 		mockedRenderMermaid.mockResolvedValue(
 			'<svg viewBox="0 0 200 100" aria-label="Rendered diagram"><rect width="200" height="100" /></svg>',
 		);
+	});
+
+	it('deduplicates same-renderer profile changes and rerenders for Colorblind', async () => {
+		const source = 'flowchart LR\nA --> B';
+		const rendered = render(MermaidBlock, { text: source, themeId: 'classic-light' });
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledOnce());
+		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'standard-light');
+
+		rendered.component.setThemeId('phosphor-light');
+		await tick();
+		expect(mockedRenderMermaid).toHaveBeenCalledOnce();
+
+		rendered.component.setThemeId('colorblind-light');
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
+		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'colorblind-light');
+	});
+
+	it('keeps the inline diagram visible while a theme render is pending', async () => {
+		let resolveThemeRender!: (svg: string) => void;
+		mockedRenderMermaid
+			.mockResolvedValueOnce('<svg aria-label="Initial inline diagram"></svg>')
+			.mockReturnValueOnce(
+				new Promise<string>((resolve) => {
+					resolveThemeRender = resolve;
+				}),
+			);
+		const rendered = render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			themeId: 'classic-light',
+		});
+		await screen.findByLabelText('Initial inline diagram');
+
+		rendered.component.setThemeId('colorblind-light');
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
+		expect(screen.getByLabelText('Initial inline diagram')).toBeTruthy();
+		expect(screen.queryByText('Rendering diagram...')).toBeNull();
+
+		resolveThemeRender('<svg aria-label="Rethemed inline diagram"></svg>');
+		await screen.findByLabelText('Rethemed inline diagram');
+	});
+
+	it('ignores stale success and failure completions after a theme change', async () => {
+		const pending: Array<{
+			resolve: (svg: string) => void;
+			reject: (error: Error) => void;
+		}> = [];
+		mockedRenderMermaid.mockImplementation(
+			() =>
+				new Promise<string>((resolve, reject) => {
+					pending.push({ resolve, reject });
+				}),
+		);
+		const source = 'flowchart LR\nA --> B';
+		const rendered = render(MermaidBlock, { text: source, themeId: 'classic-light' });
+		await waitFor(() => expect(pending).toHaveLength(1));
+
+		rendered.component.setThemeId('colorblind-light');
+		await waitFor(() => expect(pending).toHaveLength(2));
+		pending[0]?.reject(new Error('stale failure'));
+		await tick();
+		expect(screen.queryByText('stale failure')).toBeNull();
+
+		rendered.component.setThemeId('colorblind-dark');
+		await waitFor(() => expect(pending).toHaveLength(3));
+		pending[1]?.resolve('<svg aria-label="stale success"></svg>');
+		await tick();
+		expect(screen.queryByLabelText('stale success')).toBeNull();
+
+		pending[2]?.resolve('<svg aria-label="current diagram"></svg>');
+		await waitFor(() => expect(screen.getByLabelText('current diagram')).toBeTruthy());
+	});
+
+	it('preserves manual viewer zoom and position across a theme render', async () => {
+		let resolveThemeRender!: (svg: string) => void;
+		mockedRenderMermaid
+			.mockResolvedValueOnce('<svg viewBox="0 0 200 100" aria-label="Initial diagram"></svg>')
+			.mockReturnValueOnce(
+				new Promise<string>((resolve) => {
+					resolveThemeRender = resolve;
+				}),
+			);
+		const rendered = render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			themeId: 'classic-light',
+		});
+		const expandButton = await screen.findByRole('button', { name: 'Expand diagram' });
+		await waitFor(() => expect((expandButton as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(expandButton);
+
+		const viewport = screen.getByRole('region', {
+			name: 'Mermaid diagram viewport; drag to pan, pinch or Control- or Command-wheel to zoom',
+		});
+		const stage = viewport.querySelector<HTMLElement>('.mermaid-zoom-stage');
+		expect(stage).toBeTruthy();
+		Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 100 });
+		Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 80 });
+		viewport.getBoundingClientRect = () => new DOMRect(0, 0, 100, 80);
+		stage!.getBoundingClientRect = () =>
+			new DOMRect(
+				Number.parseFloat(stage!.style.left) - viewport.scrollLeft,
+				Number.parseFloat(stage!.style.top) - viewport.scrollTop,
+				Number.parseFloat(stage!.style.width),
+				Number.parseFloat(stage!.style.height),
+			);
+		await fireEvent.click(screen.getByRole('button', { name: 'Fit to window (0)' }));
+		for (let zoomStep = 0; zoomStep < 4; zoomStep += 1) {
+			await fireEvent.click(screen.getByRole('button', { name: 'Zoom in (+)' }));
+		}
+		viewport.scrollLeft = 80;
+		viewport.scrollTop = 40;
+		const zoomLabel = screen.getByText('126%');
+
+		rendered.component.setThemeId('colorblind-light');
+		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledTimes(2));
+		expect(zoomLabel).toBeTruthy();
+		expect(screen.getAllByLabelText('Initial diagram')).toHaveLength(2);
+
+		resolveThemeRender('<svg viewBox="0 0 200 100" aria-label="Rethemed diagram"></svg>');
+		await waitFor(() => expect(screen.getAllByLabelText('Rethemed diagram')).toHaveLength(2));
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+		);
+
+		expect(screen.getByText('126%')).toBeTruthy();
+		expect(viewport.scrollLeft).toBeCloseTo(80, 3);
+		expect(viewport.scrollTop).toBeCloseTo(40, 3);
 	});
 
 	afterEach(() => {

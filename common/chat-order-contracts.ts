@@ -59,11 +59,40 @@ export interface SortChatOrderResponse {
   changed: boolean;
 }
 
+export interface SetChatPinnedRequest {
+  chatId: string;
+  isPinned: boolean;
+}
+
+export interface SetChatArchivedRequest {
+  chatId: string;
+  isArchived: boolean;
+}
+
+export interface SetChatOrderStateResponse {
+  success: true;
+  chatId: string;
+  orderGroup: PersistedChatOrderGroup;
+  isPinned: boolean;
+  isArchived: boolean;
+  changed: boolean;
+}
+
 const REQUEST_KEYS = new Set(['chatId', 'placement']);
 const RELATIVE_KEYS = new Set(['kind', 'referenceChatId', 'position']);
 const BOUNDARY_KEYS = new Set(['kind', 'boundary']);
 const SORT_REQUEST_KEYS = new Set(['sortKey']);
 const SORT_RESPONSE_KEYS = new Set(['success', 'sortKey', 'changed']);
+const SET_PINNED_REQUEST_KEYS = new Set(['chatId', 'isPinned']);
+const SET_ARCHIVED_REQUEST_KEYS = new Set(['chatId', 'isArchived']);
+const SET_ORDER_STATE_RESPONSE_KEYS = new Set([
+  'success',
+  'chatId',
+  'orderGroup',
+  'isPinned',
+  'isArchived',
+  'changed',
+]);
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlySet<string>): boolean {
   return Object.keys(value).every((key) => keys.has(key));
@@ -139,6 +168,51 @@ export function parseSortChatOrderResponse(value: unknown): SortChatOrderRespons
   return {
     success: true,
     sortKey: value.sortKey,
+    changed: value.changed,
+  };
+}
+
+export function parseSetChatPinnedRequest(value: unknown): SetChatPinnedRequest | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, SET_PINNED_REQUEST_KEYS)) return null;
+  const chatId = nonemptyString(value.chatId);
+  if (!chatId || typeof value.isPinned !== 'boolean') return null;
+  return { chatId, isPinned: value.isPinned };
+}
+
+export function parseSetChatArchivedRequest(value: unknown): SetChatArchivedRequest | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, SET_ARCHIVED_REQUEST_KEYS)) return null;
+  const chatId = nonemptyString(value.chatId);
+  if (!chatId || typeof value.isArchived !== 'boolean') return null;
+  return { chatId, isArchived: value.isArchived };
+}
+
+export function parseSetChatOrderStateResponse(
+  value: unknown,
+): SetChatOrderStateResponse | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, SET_ORDER_STATE_RESPONSE_KEYS)) return null;
+  if (
+    value.success !== true
+    || typeof value.isPinned !== 'boolean'
+    || typeof value.isArchived !== 'boolean'
+    || typeof value.changed !== 'boolean'
+  ) {
+    return null;
+  }
+  const chatId = nonemptyString(value.chatId);
+  if (
+    !chatId
+    || !PERSISTED_CHAT_ORDER_GROUPS.includes(value.orderGroup as PersistedChatOrderGroup)
+    || value.isPinned !== (value.orderGroup === 'pinned')
+    || value.isArchived !== (value.orderGroup === 'archived')
+  ) {
+    return null;
+  }
+  return {
+    success: true,
+    chatId,
+    orderGroup: value.orderGroup as PersistedChatOrderGroup,
+    isPinned: value.isPinned,
+    isArchived: value.isArchived,
     changed: value.changed,
   };
 }

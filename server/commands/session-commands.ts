@@ -2,10 +2,17 @@ import crypto from 'crypto';
 import type {
   AgentInterruptAndSendResponse,
   AgentStopResponse,
+  AgentTurnCommandResponse,
   CommandAcceptedResponse,
   ProjectPathPatchResponse,
 } from '../../common/chat-command-contracts.js';
+import {
+  askUserQuestionDecisionValidationError,
+  normalizeAskUserQuestionDecisionResponse,
+} from '../../common/ask-user-question-response.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
+import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
+import { applyPostAdmissionChatTags } from '../chats/post-admission-chat-tags.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
 import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
@@ -17,11 +24,13 @@ import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import { withCurrentExecutionControl } from '../lib/command-execution-control-error.js';
 import { resolveUpdatedProjectPath } from '../lib/command-project-path.js';
+import { permissionDecisionError } from '../lib/permission-decision-error.js';
 import {
   CommandSupport,
   CommandValidationError,
   commandResultFromRecord,
   type CompactInput,
+  type AgentCommandResumeInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
   type StopInput,
@@ -31,6 +40,7 @@ import {
 import type { CommandLedgerRecord } from './command-ledger.js';
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
+import { AgentResumePreparationError } from './agent-resume-preparation-error.js';
 
 const logger = createLogger('commands:session');
 
@@ -41,13 +51,34 @@ export class SessionCommands {
     return this.support.deps;
   }
 
-  async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+  async submitRun(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {
     return this.support.withChatMutationLock(input.chatId, () =>
       this.submitRunLocked(input),
     );
   }
 
-  private async submitRunLocked(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+  async submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal): Promise<AgentTurnCommandResponse> {
+    signal.throwIfAborted();
+    const child = this.deps.chats.getChat(input.chatId);
+    if (!this.deps.chats.getChat(input.sourceChatId)
+      || !isDirectDelegatedChild(input.sourceChatId, input.chatId, child)) {
+      throw new CommandValidationError('AGENT_RESUME_NOT_DELEGATED', 'Only a directly delegated child can be resumed', 403);
+    }
+    if (this.deps.transcripts.existingCurrentView(input.sourceChatId)?.viewId !== input.sourceViewId) {
+      throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
+    }
+    const transcriptViewId = await this.deps.agents.currentTranscriptViewId(input.chatId, signal).catch((error: unknown) => {
+      if (signal.aborted) throw error;
+      throw new AgentResumePreparationError(error);
+    });
+    signal.throwIfAborted();
+    return this.submitRunLocked({
+      chatId: input.chatId, transcriptViewId, command: input.command, images: [],
+      clientRequestId: input.clientRequestId, clientMessageId: input.clientMessageId,
+    });
+  }
+
+  private async submitRunLocked(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {
     await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
     const normalizedInput = {
       chatId: input.chatId,
@@ -70,8 +101,7 @@ export class SessionCommands {
     };
     const replay = await this.support.replayHttpRun(normalizedInput);
     if (replay) {
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return replay;
+      return applyPostAdmissionChatTags(replay, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
@@ -109,8 +139,7 @@ export class SessionCommands {
         normalizedInput,
         handoffCommand.preparation,
       );
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return result;
+      return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
@@ -161,8 +190,7 @@ export class SessionCommands {
     }
 
     const result = await this.support.submitHttpRun(normalizedInput);
-    if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-    return result;
+    return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
@@ -181,7 +209,7 @@ export class SessionCommands {
     input: PermissionDecisionInput,
   ): Promise<CommandAcceptedResponse> {
     this.support.requireChat(input.chatId);
-    const ledger = await this.deps.ledger.accept({
+    const ledgerInput = {
       commandType: 'permission-decision',
       chatId: input.chatId,
       clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
@@ -193,36 +221,78 @@ export class SessionCommands {
         control: input.control,
         ...(input.response ? { response: input.response } : {}),
       },
-    });
-    this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
-    if (ledger.kind !== 'duplicate') {
-      try {
-        this.deps.transientFeeds.validateAction(input.control);
-        await this.deps.agents.resolvePermission(input.chatId, input.permissionOccurrenceId, {
-          allow: input.allow,
-          alwaysAllow: input.alwaysAllow,
-          response: input.response,
-        }, input.control);
-        await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
-      } catch (error) {
-        await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        if (
-          error instanceof TransientControlActionError
-          || error instanceof PermissionNotActionableError
-        ) {
-          throw new CommandValidationError(
-            'VALIDATION_FAILED',
-            'This permission request is no longer actionable',
-            409,
-            false,
-          );
-        }
-        throw error;
+    };
+
+    if (input.response?.type === 'ask-user-question-response') {
+      const existing = await this.deps.ledger.observe(ledgerInput);
+      if (existing?.kind === 'duplicate') {
+        return this.replayPermissionDecision(existing.record);
       }
+      if (existing) this.support.throwOnConflict(existing, 'Conflicting permission decision retry');
+      this.validateStructuredPermissionDecision(input);
     }
-    return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
+
+    const ledger = await this.deps.ledger.accept(ledgerInput);
+    this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
+    if (ledger.kind === 'duplicate') {
+      return this.replayPermissionDecision(ledger.record);
+    }
+    try {
+      this.deps.transientFeeds.validateAction(input.control);
+      await this.deps.agents.resolvePermission(input.chatId, input.permissionOccurrenceId, {
+        allow: input.allow,
+        alwaysAllow: input.alwaysAllow,
+        response: input.response,
+      }, input.control);
+      await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
+    } catch (error) {
+      const failureCode = error instanceof TransientControlActionError || error instanceof PermissionNotActionableError
+        ? 'PERMISSION_NOT_ACTIONABLE'
+        : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+      const failure = permissionDecisionError(failureCode);
+      await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
+        error: failure.message, errorCode: failure.code,
+      });
+      throw failure;
+    }
+    return commandResultFromRecord(ledger.record);
+  }
+
+  private validateStructuredPermissionDecision(input: PermissionDecisionInput): void {
+    const response = normalizeAskUserQuestionDecisionResponse(input.response);
+    if (!response) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        'Permission response contains an invalid structured answer',
+      );
+    }
+
+    let pending;
+    try {
+      pending = this.deps.transientFeeds.validateAction(input.control);
+    } catch (error) {
+      if (error instanceof TransientControlActionError) {
+        throw permissionDecisionError('PERMISSION_NOT_ACTIONABLE');
+      }
+      throw error;
+    }
+    const validationError = askUserQuestionDecisionValidationError(
+      pending.message.requestedTool,
+      input.allow,
+      response,
+    );
+    if (validationError) {
+      throw new CommandValidationError('VALIDATION_FAILED', validationError);
+    }
+  }
+
+  private replayPermissionDecision(record: CommandLedgerRecord): CommandAcceptedResponse {
+    if (record.status === 'finished') return commandResultFromRecord(record, 'duplicate');
+    const failureCode = record.status === 'failed'
+      && record.errorCode === 'PERMISSION_NOT_ACTIONABLE'
+      ? 'PERMISSION_NOT_ACTIONABLE'
+      : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+    throw permissionDecisionError(failureCode);
   }
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {

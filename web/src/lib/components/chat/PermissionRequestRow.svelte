@@ -41,6 +41,8 @@
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
+	type StructuredQuestionOutcome = 'answered' | 'skipped';
+	type StructuredQuestionPrompt = AskUserQuestionPrompt | CursorAskQuestionPrompt;
 
 	interface Props {
 		request: PermissionRequestMessage;
@@ -241,8 +243,8 @@
 		return selectedOptionsFor(questionId).includes(optionId);
 	}
 
-	function updateAskUserQuestionOption(
-		question: AskUserQuestionPrompt,
+	function updateQuestionOption(
+		question: StructuredQuestionPrompt,
 		optionId: string,
 		checked: boolean,
 	): void {
@@ -262,8 +264,9 @@
 		return option?.preview;
 	}
 
-	function askUserQuestionResponse(
-		outcome: 'answered' | 'skipped',
+	function structuredQuestionResponse(
+		questions: readonly StructuredQuestionPrompt[],
+		outcome: StructuredQuestionOutcome,
 	): AskUserQuestionDecisionResponse {
 		if (outcome === 'skipped') {
 			return {
@@ -275,54 +278,30 @@
 		return {
 			type: 'ask-user-question-response',
 			outcome: 'answered',
-			answers: (askUserQuestionRequest?.questions ?? []).map((question) => ({
+			answers: questions.map((question) => ({
 				questionId: question.id,
 				selectedOptionIds: selectedOptionsFor(question.id),
 			})),
 		};
 	}
 
-	function respondToAskUserQuestion(outcome: 'answered' | 'skipped'): void {
+	function respondToAskUserQuestion(outcome: StructuredQuestionOutcome): void {
 		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
-			response: askUserQuestionResponse(outcome),
+			response: structuredQuestionResponse(
+				askUserQuestionRequest?.questions ?? [],
+				outcome,
+			),
 		});
 	}
 
-	function updateQuestionOption(
-		question: CursorAskQuestionPrompt,
-		optionId: string,
-		checked: boolean,
-	): void {
-		if (question.allowMultiple) {
-			const current = new Set(selectedOptionsFor(question.id));
-			if (checked) current.add(optionId);
-			else current.delete(optionId);
-			setSelectedOptions(question.id, Array.from(current));
-			return;
-		}
-		setSelectedOptions(question.id, checked ? [optionId] : []);
-	}
-
-	function cursorQuestionResponse(outcome: 'answered' | 'skipped'): Record<string, unknown> {
-		if (outcome === 'skipped') {
-			return { outcome: { outcome: 'skipped', reason: 'User skipped question' } };
-		}
-		return {
-			outcome: {
-				outcome: 'answered',
-				answers: (cursorAskQuestionRequest?.questions ?? []).map((question) => ({
-					questionId: question.id,
-					selectedOptionIds: selectedOptionsFor(question.id),
-				})),
-			},
-		};
-	}
-
-	function respondToCursorQuestion(outcome: 'answered' | 'skipped'): void {
+	function respondToCursorQuestion(outcome: StructuredQuestionOutcome): void {
 		onDecision(request.permissionOccurrenceId, {
 			allow: outcome === 'answered',
-			response: cursorQuestionResponse(outcome),
+			response: structuredQuestionResponse(
+				cursorAskQuestionRequest?.questions ?? [],
+				outcome,
+			),
 		});
 	}
 
@@ -509,7 +488,7 @@
 											checked={isOptionSelected(question.id, option.id)}
 											disabled={!isPending}
 											onchange={(event) =>
-												updateAskUserQuestionOption(
+												updateQuestionOption(
 													question,
 													option.id,
 													(event.currentTarget as HTMLInputElement).checked,

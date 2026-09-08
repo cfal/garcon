@@ -799,6 +799,8 @@ async function initializeSearchFold(ledger, rows) {
           unindexedChatCount: 0,
           unsupportedChatCount: 0,
           resultsTruncated: false,
+          failedChats: [],
+          failedChatsOmittedCount: 0,
         },
       }),
       status: () => ({

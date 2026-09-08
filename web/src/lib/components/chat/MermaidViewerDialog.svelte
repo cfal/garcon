@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import {
@@ -20,11 +21,12 @@
 
 	interface Props {
 		open: boolean;
+		source: string;
 		svg: string;
 		onOpenChange: (open: boolean) => void;
 	}
 
-	let { open, svg, onOpenChange }: Props = $props();
+	let { open, source, svg, onOpenChange }: Props = $props();
 
 	const ZOOM_STEP = 0.25;
 	const ZOOM_MIN = 0.05;
@@ -48,6 +50,7 @@
 	let panPointerId: number | null = null;
 	let zoomFrame: number | null = null;
 	let pendingZoomAnchor: ZoomAnchor | null = null;
+	let displayedSource: string | null = null;
 	const pointers = new Map<number, ZoomPoint>();
 	let pinchGesture: {
 		pointerIds: [number, number];
@@ -317,6 +320,12 @@
 	$effect(() => {
 		if (!open || !viewportElement || !stageElement) return;
 		void svg;
+		const nextSource = source;
+		const shouldFit =
+			displayedSource === null ||
+			displayedSource !== nextSource ||
+			untrack(() => viewMode === 'fit');
+		displayedSource = nextSource;
 		const viewport = viewportElement;
 		let resizeFrame: number | null = null;
 		const observer = new ResizeObserver(() => {
@@ -328,7 +337,15 @@
 			});
 		});
 		observer.observe(viewport);
-		const frame = requestAnimationFrame(fitToWindow);
+		const frame = requestAnimationFrame(() => {
+			if (shouldFit) {
+				fitToWindow();
+				return;
+			}
+			const anchor = captureCurrentAnchor();
+			updateGeometry();
+			scheduleAnchorRestore(anchor);
+		});
 		return () => {
 			observer.disconnect();
 			cancelAnimationFrame(frame);

@@ -15,11 +15,25 @@ import {
   expandTemplate,
 } from './template-tokens.js';
 
-export const SCHEDULED_PROMPT_INTERVAL_HOURS_MIN = 1;
-export const SCHEDULED_PROMPT_INTERVAL_HOURS_MAX = 3650 * 24;
+export const SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN = 1;
+export const SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX = 3650 * 24 * 60;
 export const SCHEDULED_PROMPT_MAX_LENGTH = 32_000;
 export const SCHEDULED_PROMPT_RUN_LOG_LIMIT = 200;
 export const SCHEDULED_PROMPT_MAX_COUNT = 500;
+
+export type ScheduleForChatFirstRun =
+  | { readonly type: 'after'; readonly minutes: number }
+  | { readonly type: 'after-interval' }
+  | { readonly type: 'at'; readonly atUtc: string };
+
+export interface ScheduleForChatRequest {
+  readonly chatId: string;
+  readonly firstRun: ScheduleForChatFirstRun;
+  readonly intervalMinutes: number | null;
+  readonly endAtUtc: string | null;
+  readonly busyBehavior: ScheduledPromptBusyBehavior;
+  readonly prompt: string;
+}
 export const SCHEDULED_PROMPT_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
 
 const SCHEDULED_PROMPT_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;
@@ -34,7 +48,7 @@ export interface OneOffScheduledPromptSchedule {
 
 export interface RecurringScheduledPromptSchedule {
   type: 'recurring';
-  intervalHours: number;
+  intervalMinutes: number;
   nextRunAt: string;
   endAt: string | null;
 }
@@ -86,7 +100,7 @@ export interface OneOffScheduleInput {
 export interface RecurringScheduleInput {
   type: 'recurring';
   firstRunAtUtc: string;
-  intervalHours: number;
+  intervalMinutes: number;
   endAtUtc: string | null;
 }
 
@@ -253,12 +267,12 @@ function isAgentSettingsById(value: unknown): value is Record<string, AgentSetti
   return parseAgentSettingsById(value) !== null;
 }
 
-function isScheduledPromptIntervalHours(value: unknown): value is number {
+export function isScheduledPromptIntervalMinutes(value: unknown): value is number {
   return (
     typeof value === 'number' &&
     Number.isSafeInteger(value) &&
-    value >= SCHEDULED_PROMPT_INTERVAL_HOURS_MIN &&
-    value <= SCHEDULED_PROMPT_INTERVAL_HOURS_MAX
+    value >= SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN &&
+    value <= SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX
   );
 }
 
@@ -275,13 +289,14 @@ export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptT
 export function normalizeScheduledPromptSchedule(value: unknown): ScheduledPromptSchedule | null {
   const raw = asRecord(value);
   if (!raw || !isMinuteAlignedIso(raw.nextRunAt)) return null;
+  if ('intervalHours' in raw || 'intervalDays' in raw) return null;
   if (raw.type === 'once') return { type: 'once', nextRunAt: raw.nextRunAt };
-  if (raw.type !== 'recurring' || !isScheduledPromptIntervalHours(raw.intervalHours)) return null;
+  if (raw.type !== 'recurring' || !isScheduledPromptIntervalMinutes(raw.intervalMinutes)) return null;
   if (raw.endAt !== null && !isMinuteAlignedIso(raw.endAt)) return null;
   if (typeof raw.endAt === 'string' && raw.endAt < raw.nextRunAt) return null;
   return {
     type: 'recurring',
-    intervalHours: raw.intervalHours,
+    intervalMinutes: raw.intervalMinutes,
     nextRunAt: raw.nextRunAt,
     endAt: raw.endAt as string | null,
   };
@@ -325,6 +340,8 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
   if (
     !raw ||
     !schedule ||
+    'intervalHours' in schedule ||
+    'intervalDays' in schedule ||
     !target ||
     !prompt ||
     prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
@@ -339,14 +356,14 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
   } else if (
     schedule.type === 'recurring' &&
     isMinuteAlignedIso(schedule.firstRunAtUtc) &&
-    isScheduledPromptIntervalHours(schedule.intervalHours) &&
+    isScheduledPromptIntervalMinutes(schedule.intervalMinutes) &&
     (schedule.endAtUtc === null || isMinuteAlignedIso(schedule.endAtUtc)) &&
     (schedule.endAtUtc === null || schedule.endAtUtc >= schedule.firstRunAtUtc)
   ) {
     normalizedSchedule = {
       type: 'recurring',
       firstRunAtUtc: schedule.firstRunAtUtc,
-      intervalHours: schedule.intervalHours,
+      intervalMinutes: schedule.intervalMinutes,
       endAtUtc: schedule.endAtUtc as string | null,
     };
   }

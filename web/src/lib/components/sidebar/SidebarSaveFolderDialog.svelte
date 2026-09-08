@@ -5,7 +5,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatFolderFilter } from '$lib/api/settings';
-	import { emptyFilterSpec, isEmptyFilter } from '$lib/sidebar/search/sidebar-search.js';
+	import { emptyFilterSpec, isEmptyFilter } from '$shared/chat-filter-query';
 
 	export interface FolderDialogState {
 		mode: 'create' | 'edit';

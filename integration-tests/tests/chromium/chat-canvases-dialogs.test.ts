@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ChatCanvas, CanvasContent } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 
 const endpoint = '/api/v1/chat-canvases';
 
@@ -41,14 +42,7 @@ test('suspends every Canvas modal when Chat activates and retains unfinished inp
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, {
         waitUntil: 'domcontentloaded',
       });
-      await page
-        .locator(
-          '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
-        )
-        .click();
-      await page
-        .getByRole('menuitem', { name: 'Open canvas', exact: true })
-        .click();
+      await clickWorkspaceWindowAddAction(page, 'Open canvas');
       const dialog = page.getByRole('dialog');
       for (const action of [
         'Rename canvas',
@@ -143,14 +137,7 @@ test('keeps stale rename, selected-chat, and full-connection drafts reviewable',
       await page.goto(integration.garcon.baseUrl, {
         waitUntil: 'domcontentloaded',
       });
-      await page
-        .locator(
-          '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
-        )
-        .click();
-      await page
-        .getByRole('menuitem', { name: 'Open canvas', exact: true })
-        .click();
+      await clickWorkspaceWindowAddAction(page, 'Open canvas');
       const dialog = page.getByRole('dialog');
       markPhase('renaming a box removed remotely');
       await page.locator('.svelte-flow__node[data-id="source"]').click();

@@ -114,9 +114,10 @@ export class PromptEditorController {
 					'.cm-cursor, .cm-dropCursor': {
 						borderLeftColor: 'hsl(var(--foreground))',
 					},
-					'.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
-						backgroundColor: 'hsl(var(--accent))',
-					},
+					'& > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground':
+						{
+							backgroundColor: 'hsl(var(--accent))',
+						},
 					'@media (pointer: fine)': {
 						'.cm-scroller': { fontSize: '14px' },
 					},

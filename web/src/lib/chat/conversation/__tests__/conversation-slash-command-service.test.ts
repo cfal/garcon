@@ -6,6 +6,8 @@ import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage } from '$shared/chat-types';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
+import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
+import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 import {
 	ConversationSlashCommandService,
 	type ConversationSlashCommandDeps,
@@ -162,11 +164,29 @@ function createDeps(chat = createChat()) {
 			orderGroup: 'normal',
 			changed: true,
 		}),
-		setChatTags: vi.fn(async (chatId: string, tags: string[]) => {
-			const current = sessions.byId[chatId];
-			if (!current) return false;
-			sessions.byId[chatId] = { ...current, tags };
-			return true;
+		tagReconciliationKind: vi.fn((_chatId: string): ChatTagReconciliationKind => null),
+		applyChatTagDelta: vi.fn(async (request: {
+			chatId: string;
+			addTags?: readonly string[];
+			removeTags?: readonly string[];
+		}) => {
+			const current = sessions.byId[request.chatId];
+			if (!current) throw new Error('Chat not found');
+			const removed = new Set(request.removeTags ?? []);
+			const tags = [...new Set([
+				...current.tags.filter((tag) => !removed.has(tag)),
+				...(request.addTags ?? []),
+			])].sort();
+			const before = new Set(current.tags);
+			const after = new Set(tags);
+			sessions.byId[request.chatId] = { ...current, tags };
+			return {
+				success: true as const,
+				chatId: request.chatId,
+				tags,
+				addedTags: tags.filter((tag) => !before.has(tag)),
+				removedTags: current.tags.filter((tag) => !after.has(tag)),
+			};
 		}),
 		upsertServerChat: vi.fn(),
 		setSelectedChatId: vi.fn(),
@@ -613,16 +633,15 @@ describe('ConversationSlashCommandService', () => {
 		expect(dispatch.kind).toBe('handled');
 		if (dispatch.kind !== 'handled') throw new Error('tag command was not handled');
 		await expect(dispatch.outcome).resolves.toBe('accepted');
-		expect(deps.sessions.setChatTags).toHaveBeenCalledWith(chat.id, [
-			'existing',
-			'review',
-			'urgent',
-		]);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({
+			chatId: chat.id,
+			addTags: ['existing', 'urgent'],
+		});
 		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: urgent.');
 		expect(composerState.inputText).toBe('');
 	});
 
-	it('accepts adding only existing tags without issuing a mutation', async () => {
+	it('lets the server confirm adding only existing tags', async () => {
 		const chat = createChat({ tags: ['existing'] });
 		const { deps, appendLocalNotice } = createDeps(chat);
 
@@ -635,23 +654,26 @@ describe('ConversationSlashCommandService', () => {
 		);
 
 		expect(result).toBe('accepted');
-		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({
+			chatId: chat.id,
+			addTags: ['existing'],
+		});
 		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Tags are already up to date.');
 	});
 
 	it('serializes overlapping tag additions and rebases the second mutation', async () => {
 		const chat = createChat();
 		const { deps, composerState, appendLocalNotice } = createDeps(chat);
-		const first = deferred<boolean>();
-		deps.sessions.setChatTags
-			.mockImplementationOnce(async (chatId, tags) => {
-				const updated = await first.promise;
-				if (updated) deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
-				return updated;
+		const first = deferred<void>();
+		deps.sessions.applyChatTagDelta
+			.mockImplementationOnce(async (request) => {
+				await first.promise;
+				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['alpha'] };
+				return { success: true, chatId: request.chatId, tags: ['alpha'], addedTags: ['alpha'], removedTags: [] };
 			})
-			.mockImplementationOnce(async (chatId, tags) => {
-				deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
-				return true;
+			.mockImplementationOnce(async (request) => {
+				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['alpha', 'beta'] };
+				return { success: true, chatId: request.chatId, tags: ['alpha', 'beta'], addedTags: ['beta'], removedTags: [] };
 			});
 		const service = new ConversationSlashCommandService(deps);
 
@@ -673,10 +695,13 @@ describe('ConversationSlashCommandService', () => {
 		);
 
 		await Promise.resolve();
-		expect(deps.sessions.setChatTags).toHaveBeenCalledTimes(1);
-		first.resolve(true);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledTimes(1);
+		first.resolve();
 		await expect(Promise.all([addAlpha, addBeta])).resolves.toEqual(['accepted', 'accepted']);
-		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['alpha', 'beta']);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenNthCalledWith(2, {
+			chatId: chat.id,
+			addTags: ['beta'],
+		});
 		expect(deps.sessions.byId[chat.id].tags).toEqual(['alpha', 'beta']);
 		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: alpha.');
 		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: beta.');
@@ -685,16 +710,16 @@ describe('ConversationSlashCommandService', () => {
 	it('rebases a queued tag removal after an overlapping addition', async () => {
 		const chat = createChat({ tags: ['existing'] });
 		const { deps } = createDeps(chat);
-		const first = deferred<boolean>();
-		deps.sessions.setChatTags
-			.mockImplementationOnce(async (chatId, tags) => {
-				const updated = await first.promise;
-				if (updated) deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
-				return updated;
+		const first = deferred<void>();
+		deps.sessions.applyChatTagDelta
+			.mockImplementationOnce(async (request) => {
+				await first.promise;
+				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['existing', 'urgent'] };
+				return { success: true, chatId: request.chatId, tags: ['existing', 'urgent'], addedTags: ['urgent'], removedTags: [] };
 			})
-			.mockImplementationOnce(async (chatId, tags) => {
-				deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
-				return true;
+			.mockImplementationOnce(async (request) => {
+				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['urgent'] };
+				return { success: true, chatId: request.chatId, tags: ['urgent'], addedTags: [], removedTags: ['existing'] };
 			});
 		const service = new ConversationSlashCommandService(deps);
 
@@ -713,17 +738,23 @@ describe('ConversationSlashCommandService', () => {
 			true,
 		);
 
-		first.resolve(true);
+		first.resolve();
 		await expect(Promise.all([addition, removal])).resolves.toEqual(['accepted', 'accepted']);
-		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['urgent']);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenNthCalledWith(2, {
+			chatId: chat.id,
+			removeTags: ['existing'],
+		});
 		expect(deps.sessions.byId[chat.id].tags).toEqual(['urgent']);
 	});
 
 	it('continues a queued tag mutation after the preceding mutation fails', async () => {
 		const chat = createChat();
-		const { deps, composerState } = createDeps(chat);
-		const first = deferred<boolean>();
-		deps.sessions.setChatTags.mockImplementationOnce(() => first.promise);
+		const { deps, composerState, appendLocalNoticeForChat } = createDeps(chat);
+		const first = deferred<void>();
+		deps.sessions.applyChatTagDelta.mockImplementationOnce(async () => {
+			await first.promise;
+			throw new Error('save failed');
+		});
 		const service = new ConversationSlashCommandService(deps);
 
 		composerState.inputText = '/tag add alpha';
@@ -743,12 +774,68 @@ describe('ConversationSlashCommandService', () => {
 			true,
 		);
 
-		first.resolve(false);
+		first.resolve();
 		await expect(Promise.all([addAlpha, addBeta])).resolves.toEqual(['rejected', 'accepted']);
-		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['beta']);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenNthCalledWith(2, {
+			chatId: chat.id,
+			addTags: ['beta'],
+		});
 		expect(deps.sessions.byId[chat.id].tags).toEqual(['beta']);
 		expect(composerState.inputText).toBe('');
 		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			'Failed to update chat tags.',
+		);
+	});
+
+	it('reports an ambiguous tag outcome as requiring durability confirmation', async () => {
+		const chat = createChat();
+		const { deps, appendLocalNoticeForChat } = createDeps(chat);
+		deps.sessions.applyChatTagDelta.mockRejectedValue(
+			new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN'),
+		);
+		deps.sessions.tagReconciliationKind.mockReturnValue('durability');
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			'Garcon could not confirm whether the tag change was saved. Confirm the saved tags before editing again.',
+		);
+	});
+
+	it('reports when an earlier reconciliation blocks the tag command before dispatch', async () => {
+		const chat = createChat();
+		const { deps, appendLocalNoticeForChat } = createDeps(chat);
+		deps.sessions.applyChatTagDelta.mockRejectedValue(
+			new ChatTagMutationBlockedError('committed-refresh'),
+		);
+		deps.sessions.tagReconciliationKind.mockReturnValue('committed-refresh');
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			'This tag change was not submitted because an earlier tag change still needs attention. Refresh or confirm the saved tags before trying again.',
+		);
 	});
 
 	it('removes existing tags and ignores requested tags that are absent', async () => {
@@ -764,11 +851,14 @@ describe('ConversationSlashCommandService', () => {
 		);
 
 		expect(result).toBe('accepted');
-		expect(deps.sessions.setChatTags).toHaveBeenCalledWith(chat.id, ['urgent']);
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({
+			chatId: chat.id,
+			removeTags: ['existing', 'missing'],
+		});
 		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Removed tags: existing.');
 	});
 
-	it('accepts removing only absent tags without issuing a mutation', async () => {
+	it('lets the server confirm removing only absent tags', async () => {
 		const chat = createChat({ tags: ['existing'] });
 		const { deps, appendLocalNotice } = createDeps(chat);
 
@@ -781,7 +871,10 @@ describe('ConversationSlashCommandService', () => {
 		);
 
 		expect(result).toBe('accepted');
-		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({
+			chatId: chat.id,
+			removeTags: ['missing'],
+		});
 		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Tags are already up to date.');
 	});
 
@@ -807,7 +900,7 @@ describe('ConversationSlashCommandService', () => {
 			if (dispatch.kind !== 'handled') throw new Error('tag command was not handled');
 			await expect(dispatch.outcome).resolves.toBe('rejected');
 			expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
-			expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+			expect(deps.sessions.applyChatTagDelta).not.toHaveBeenCalled();
 		}
 	});
 
@@ -815,7 +908,7 @@ describe('ConversationSlashCommandService', () => {
 		const chat = createChat({ tags: ['existing'] });
 		const { deps, composerState } = createDeps(chat);
 		composerState.inputText = '/tag add urgent';
-		deps.sessions.setChatTags.mockResolvedValueOnce(false);
+		deps.sessions.applyChatTagDelta.mockRejectedValueOnce(new Error('save failed'));
 
 		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
 			chat.id,

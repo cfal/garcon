@@ -2,6 +2,7 @@ import { ErrorMessage, parseChatMessage } from './chat-types';
 import type { ChatMessage } from './chat-types';
 
 export const CHAT_MESSAGES_MAX_LIMIT = 200;
+export const CHAT_MESSAGES_DEFAULT_LIMIT = 50;
 
 export type TranscriptReadPurpose = 'activation';
 
@@ -133,6 +134,134 @@ export interface UnavailableChatHistoryResponse {
 export type ChatHistoryResponse =
   | CompleteChatHistoryResponse
   | UnavailableChatHistoryResponse;
+
+export type ChatMessagesRequest = {
+  readonly chatId: string;
+  readonly limit?: number;
+} & (
+  | {
+      readonly beforeOrdinal?: undefined;
+      readonly transcriptViewId?: string;
+      readonly purpose?: TranscriptReadPurpose;
+    }
+  | {
+      readonly beforeOrdinal: number;
+      readonly transcriptViewId: string;
+      readonly purpose?: never;
+    }
+);
+
+export function parseChatHistoryResponse(
+  request: ChatMessagesRequest,
+  value: unknown,
+): ChatHistoryResponse {
+  const response = asRecord(value);
+  const historyState = parseChatHistoryState(response.historyState);
+  if (historyState === null) invalidHistoryPage('historyState');
+  const chatId = requiredString(response.chatId, 'chatId');
+  if (chatId !== request.chatId) invalidHistoryPage('chatId does not match request');
+  if (historyState.kind !== 'complete') {
+    if (!Array.isArray(response.messages) || response.messages.length !== 0) {
+      invalidHistoryPage('unavailable messages');
+    }
+    for (const field of [
+      'transcriptViewId',
+      'lastOrdinal',
+      'pageOldestOrdinal',
+      'pageNewestOrdinal',
+      'nextBeforeOrdinal',
+      'hasMore',
+      'limit',
+    ] as const) {
+      if (response[field] !== undefined) invalidHistoryPage(`unavailable ${field}`);
+    }
+    return { historyState, chatId, messages: [] };
+  }
+
+  const messages = parseTranscriptMessages(response.messages);
+  if (messages === null) invalidHistoryPage('messages');
+  const resendCandidates = parseResendCandidates(response.resendCandidates);
+  if (resendCandidates === null) invalidHistoryPage('resendCandidates');
+  if (typeof response.hasMore !== 'boolean') invalidHistoryPage('hasMore');
+  const page: CompleteChatHistoryResponse = {
+    historyState,
+    chatId,
+    messages,
+    resendCandidates,
+    transcriptViewId: requiredString(response.transcriptViewId, 'transcriptViewId'),
+    lastOrdinal: requiredNonNegativeInteger(response.lastOrdinal, 'lastOrdinal'),
+    pageOldestOrdinal: requiredNonNegativeInteger(
+      response.pageOldestOrdinal,
+      'pageOldestOrdinal',
+    ),
+    pageNewestOrdinal: requiredNonNegativeInteger(
+      response.pageNewestOrdinal,
+      'pageNewestOrdinal',
+    ),
+    nextBeforeOrdinal: requiredNullablePositiveInteger(
+      response.nextBeforeOrdinal,
+      'nextBeforeOrdinal',
+    ),
+    hasMore: response.hasMore,
+    limit: requiredPositiveInteger(response.limit, 'limit'),
+  };
+  validateChatHistoryPage(request, page);
+  return page;
+}
+
+function validateChatHistoryPage(
+  request: ChatMessagesRequest,
+  page: CompleteChatHistoryResponse,
+): void {
+  const expectedLimit = Math.min(
+    request.limit ?? CHAT_MESSAGES_DEFAULT_LIMIT,
+    CHAT_MESSAGES_MAX_LIMIT,
+  );
+  if (page.limit !== expectedLimit) invalidHistoryPage('limit does not match request');
+  if (
+    request.transcriptViewId !== undefined
+    && page.transcriptViewId !== request.transcriptViewId
+  ) invalidHistoryPage('transcriptViewId does not match request');
+  const effectiveBefore = Math.min(
+    request.beforeOrdinal ?? page.lastOrdinal + 1,
+    page.lastOrdinal + 1,
+  );
+  if (page.pageNewestOrdinal !== effectiveBefore - 1) {
+    invalidHistoryPage('pageNewestOrdinal does not match the effective request boundary');
+  }
+  if (page.messages.length > page.limit) invalidHistoryPage('messages exceed limit');
+  if (!isRelationallyValidTranscriptPage(page)) invalidHistoryPage('ordinal relations');
+  if (!isRelationallyValidBoundedTranscriptPage(page, page.limit)) {
+    invalidHistoryPage('raw continuation');
+  }
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) invalidHistoryPage(field);
+  return value;
+}
+
+function requiredNonNegativeInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    invalidHistoryPage(field);
+  }
+  return value;
+}
+
+function requiredPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    invalidHistoryPage(field);
+  }
+  return value;
+}
+
+function requiredNullablePositiveInteger(value: unknown, field: string): number | null {
+  return value === null ? null : requiredPositiveInteger(value, field);
+}
+
+function invalidHistoryPage(reason: string): never {
+  throw new Error(`Invalid chat messages page: ${reason}`);
+}
 
 export function isUnavailableChatHistoryResponse(
   response: ChatHistoryResponse,

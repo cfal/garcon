@@ -1,11 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import crypto from 'node:crypto';
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
+  PermissionDecisionCommandRequest,
   SteerCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import { runtimeProofPayload } from '@garcon/common/server-runtime';
+import { DEFAULT_REMOTE_FEATURE_SETTINGS } from '@garcon/common/settings';
 import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-client.js';
 
 const connection = {
@@ -32,6 +34,8 @@ function accepted(request: AgentRunCommandRequest): Response {
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: new Date().toISOString(),
+    parentChat: null,
+    chat: null,
   });
 }
 
@@ -99,7 +103,434 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
+function validChatList(): Record<string, unknown> {
+  return {
+    sessions: [{
+      id: runRequest.chatId,
+      parentChat: null,
+      agentId: 'codex',
+      agentOwnershipEpoch: 'epoch-1',
+      model: 'gpt-5.4',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      title: 'Review',
+      projectPath: '/project',
+      orderGroup: 'normal',
+      tags: ['cli'],
+      activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+      preview: { firstMessage: 'Review', lastMessage: 'Done' },
+      isPinned: false,
+      isArchived: false,
+      isActive: false,
+      isProcessing: false,
+      processingPhase: null,
+      canReloadFromNativeHistory: false,
+      isUnread: false,
+    }],
+    total: 1,
+    lastSelectedChatId: runRequest.chatId,
+  };
+}
+
+function validHistory(): Record<string, unknown> {
+  return {
+    historyState: { kind: 'complete' },
+    chatId: runRequest.chatId,
+    transcriptViewId: 'view-1',
+    messages: [{
+      ordinal: 84,
+      message: {
+        type: 'assistant-message',
+        timestamp: '2026-09-07T00:00:00.000Z',
+        content: 'answer',
+      },
+    }],
+    resendCandidates: [],
+    lastOrdinal: 100,
+    pageOldestOrdinal: 84,
+    pageNewestOrdinal: 100,
+    nextBeforeOrdinal: 51,
+    hasMore: true,
+    limit: 50,
+  };
+}
+
+function validSearch(): Record<string, unknown> {
+  return {
+    query: 'needle',
+    mode: 'page',
+    snippetLimit: 1,
+    results: [{
+      chatId: runRequest.chatId,
+      transcriptViewId: 'view-1',
+      score: 1,
+      matchedMessageCount: 1,
+      snippets: [{
+        ordinal: 84,
+        role: 'assistant',
+        timestamp: '2026-09-07T00:00:00.000Z',
+        text: 'needle',
+      }],
+    }],
+    page: { offset: 0, limit: 20, total: 1, hasMore: false, nextOffset: null },
+    index: {
+      indexedChatCount: 1,
+      pendingChatCount: 0,
+      failedChatCount: 0,
+      unindexedChatCount: 0,
+      unsupportedChatCount: 0,
+      resultsTruncated: false,
+      failedChats: [],
+      failedChatsOmittedCount: 0,
+    },
+    removedStaleResultCount: 0,
+  };
+}
+
+function validSearchStatus(): Record<string, unknown> {
+  return {
+    version: 1,
+    phase: 'ready',
+    chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
+    queuedJobs: 0,
+    resync: null,
+    backlogRows: 0,
+    activeChat: null,
+    lastErrorCode: null,
+    updatedAt: '2026-09-08T00:00:00.000Z',
+    queryStats: {
+      served: 2,
+      timedOut: 0,
+      rejectedBusy: 0,
+      p50Ms: 10,
+      p95Ms: 20,
+      maxMs: 20,
+      admissionP50Ms: 1,
+      admissionP95Ms: 2,
+      admissionMaxMs: 2,
+      totalP50Ms: 11,
+      totalP95Ms: 22,
+      totalMaxMs: 22,
+    },
+  };
+}
+
+function validRemoteSettings(enabled: boolean): Record<string, unknown> {
+  return {
+    version: 2,
+    features: {
+      ...DEFAULT_REMOTE_FEATURE_SETTINGS,
+      transcriptSearch: { enabled },
+    },
+    ui: {},
+    uiEffective: {},
+    paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
+    pinnedChatIds: [],
+    recentAgentSettings: [],
+    executionDefaults: {
+      global: { permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {} },
+      byAgent: {},
+    },
+    projectBasePath: '/project',
+    telegram: {
+      botTokenAvailable: false,
+      botUsername: null,
+      botFirstName: null,
+      recipientUsername: null,
+      recipientDisplayName: null,
+      recipientLinked: false,
+      pendingLink: false,
+      linkUrl: null,
+    },
+  };
+}
+
 describe('GarconClient', () => {
+  test('fetches and validates the preamble catalog', async () => {
+    const snapshot = {
+      revision: 1,
+      preambles: [{
+        id: '3502b645-222b-49d2-ac39-1c91f9fb1174',
+        enabled: true,
+        title: 'Repository guidance',
+        content: 'Follow the repository guidance.',
+        scope: { type: 'global' },
+        agentIds: [],
+        tagFilter: { mode: 'all', tags: [] },
+        createdAt: '2026-09-08T00:00:00.000Z',
+        updatedAt: '2026-09-08T00:00:00.000Z',
+      }],
+    };
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(snapshot);
+      },
+    });
+
+    await expect(client.getPreambles()).resolves.toEqual(snapshot);
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/preambles`);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ ...snapshot, revision: -1 }),
+    });
+    await expect(malformed.getPreambles()).rejects.toMatchObject({
+      phase: 'catalog resolution',
+      exitCode: 3,
+    });
+  });
+
+  test('fetches and strictly validates the complete chat catalog', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validChatList());
+      },
+    });
+    await expect(client.listChats()).resolves.toMatchObject({ total: 1 });
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats`);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ ...validChatList(), total: 2 }),
+    });
+    await expect(malformed.listChats()).rejects.toMatchObject({
+      phase: 'chat discovery',
+      exitCode: 3,
+    });
+  });
+
+  test('fetches and validates a view-qualified transcript page', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validHistory());
+      },
+    });
+    await expect(client.getChatMessages({
+      chatId: runRequest.chatId,
+      transcriptViewId: 'view-1',
+      beforeOrdinal: 101,
+      limit: 50,
+    })).resolves.toMatchObject({ transcriptViewId: 'view-1', lastOrdinal: 100 });
+    expect(requestedUrl).toBe(
+      `${connection.baseUrl}/api/v1/chats/messages?chatId=${runRequest.chatId}&limit=50&beforeOrdinal=101&transcriptViewId=view-1`,
+    );
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ ...validHistory(), transcriptViewId: 'view-2' }),
+    });
+    await expect(malformed.getChatMessages({
+      chatId: runRequest.chatId,
+      transcriptViewId: 'view-1',
+      beforeOrdinal: 101,
+      limit: 50,
+    })).rejects.toMatchObject({ phase: 'chat read', exitCode: 3 });
+  });
+
+  test('posts and validates a request-correlated transcript search', async () => {
+    let submitted: unknown;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (_input, init) => {
+        submitted = JSON.parse(String(init?.body));
+        return Response.json(validSearch());
+      },
+    });
+    const request = {
+      query: 'needle',
+      mode: 'page' as const,
+      offset: 0,
+      limit: 20,
+      snippetLimit: 1,
+    };
+    await expect(client.searchChats(request)).resolves.toMatchObject({
+      query: 'needle',
+      results: [{ chatId: runRequest.chatId }],
+    });
+    expect(submitted).toEqual(request);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        ...validSearch(),
+        page: { ...validSearch().page as object, offset: 1 },
+      }),
+    });
+    await expect(malformed.searchChats(request)).rejects.toMatchObject({
+      phase: 'chat search',
+      exitCode: 3,
+    });
+
+    const invalid = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: false,
+        error: 'Search query has too many terms',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      }, { status: 400 }),
+    });
+    await expect(invalid.searchChats(request)).rejects.toMatchObject({
+      phase: 'chat search',
+      exitCode: 2,
+      errorCode: 'VALIDATION_FAILED',
+    });
+  });
+
+  test('fetches and strictly validates transcript search status', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validSearchStatus());
+      },
+    });
+
+    await expect(client.getTranscriptSearchStatus()).resolves.toEqual(validSearchStatus());
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats/search/status`);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        ...validSearchStatus(),
+        queryStats: { ...(validSearchStatus().queryStats as object), served: '2' },
+      }),
+    });
+    await expect(malformed.getTranscriptSearchStatus()).rejects.toMatchObject({
+      phase: 'chat search',
+      exitCode: 3,
+    });
+  });
+
+  test('rebuilds transcript search and strictly validates the returned status', async () => {
+    let requestedUrl = '';
+    let method = '';
+    const response = { success: true, status: validSearchStatus() };
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        requestedUrl = String(input);
+        method = init?.method ?? '';
+        return Response.json(response);
+      },
+    });
+
+    await expect(client.rebuildTranscriptSearch()).resolves.toEqual(response);
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats/search/rebuild`);
+    expect(method).toBe('POST');
+
+    for (const value of [
+      { ...response, success: false },
+      { ...response, status: { ...validSearchStatus(), phase: 'unknown' } },
+    ]) {
+      const malformed = new GarconClient({
+        ...connection,
+        fetch: async () => Response.json(value),
+      });
+      await expect(malformed.rebuildTranscriptSearch()).rejects.toMatchObject({
+        phase: 'chat search',
+        exitCode: 3,
+      });
+    }
+  });
+
+  test('updates transcript search through the settings contract and verifies desired state', async () => {
+    let requestedUrl = '';
+    let submitted: unknown;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        requestedUrl = String(input);
+        submitted = JSON.parse(String(init?.body));
+        return Response.json({ success: true, settings: validRemoteSettings(true) });
+      },
+    });
+
+    await expect(client.setTranscriptSearchEnabled(true)).resolves.toMatchObject({
+      version: 2,
+      features: { transcriptSearch: { enabled: true } },
+    });
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/app/settings`);
+    expect(submitted).toEqual({ features: { transcriptSearch: { enabled: true } } });
+
+    for (const value of [
+      { success: true, settings: validRemoteSettings(false) },
+      { success: false, settings: validRemoteSettings(true) },
+      { success: true, settings: { ...validRemoteSettings(true), features: {} } },
+    ]) {
+      const malformed = new GarconClient({
+        ...connection,
+        fetch: async () => Response.json(value),
+      });
+      await expect(malformed.setTranscriptSearchEnabled(true)).rejects.toMatchObject({
+        phase: 'chat search',
+        exitCode: 3,
+      });
+    }
+  });
+
+  test('leaves transcript search maintenance unbounded', async () => {
+    const timeout = spyOn(AbortSignal, 'timeout');
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const responses = [
+      { success: true, status: validSearchStatus() },
+      { success: true, settings: validRemoteSettings(true) },
+    ];
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (_input, init) => {
+        signals.push(init?.signal);
+        await Promise.resolve();
+        return Response.json(responses.shift());
+      },
+    });
+
+    try {
+      await client.rebuildTranscriptSearch();
+      await client.setTranscriptSearchEnabled(true);
+
+      expect(timeout).not.toHaveBeenCalled();
+      expect(signals).toEqual([undefined, undefined]);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  test('preserves caller cancellation for transcript search maintenance', async () => {
+    const controller = new AbortController();
+    const reason = new Error('maintenance cancelled');
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (_input, init) => {
+        const signal = init?.signal;
+        expect(signal).toBe(controller.signal);
+        return await new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    });
+
+    const request = client.rebuildTranscriptSearch(controller.signal);
+    await Promise.resolve();
+    controller.abort(reason);
+
+    await expect(request).rejects.toBe(reason);
+  });
+
   test('fetches and validates a correlated transcript export', async () => {
     let requestedUrl = '';
     const client = new GarconClient({
@@ -398,6 +829,29 @@ describe('GarconClient', () => {
     expect(redirect).toBe('error');
   });
 
+  test.each([
+    { status: 'applied', addedTags: ['cli'] },
+    { status: 'not-applied', errorCode: 'CHAT_TAG_SAVE_FAILED', retryable: true },
+    { status: 'unknown', errorCode: 'CHAT_TAG_SAVE_UNKNOWN', recoveryRequired: true },
+  ] as const)('preserves the $status post-admission tag outcome', async (tagMutation) => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: true,
+        commandType: 'agent-run',
+        clientRequestId: runRequest.clientRequestId,
+        chatId: runRequest.chatId,
+        turnId: 'turn-1',
+        status: 'accepted',
+        acceptedAt: new Date().toISOString(),
+        parentChat: null,
+        tagMutation,
+      }),
+    });
+
+    await expect(client.runChat(runRequest)).resolves.toMatchObject({ tagMutation });
+  });
+
   test('updates a chat title through the existing workspace API', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
     const client = new GarconClient({
@@ -408,17 +862,182 @@ describe('GarconClient', () => {
           method: init?.method,
           body: String(init?.body),
         };
-        return Response.json({ success: true });
+        return Response.json({
+          success: true,
+          chatId: runRequest.chatId,
+          title: 'Delegated review',
+          changed: true,
+        });
       },
     });
 
-    await client.updateChatTitle({ chatId: runRequest.chatId, title: 'Delegated review' });
+    await expect(client.updateChatTitle({
+      chatId: runRequest.chatId,
+      title: 'Delegated review',
+    })).resolves.toMatchObject({ title: 'Delegated review', changed: true });
 
     expect(request).toEqual({
       url: `${connection.baseUrl}/api/v1/app/session-name`,
       method: 'PUT',
       body: JSON.stringify({ chatId: runRequest.chatId, title: 'Delegated review' }),
     });
+  });
+
+  test('uses desired-state metadata routes and strictly correlates their responses', async () => {
+    const requests: Array<{ url: string; method: string | undefined; body: string }> = [];
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({ url, method: init?.method, body: String(init?.body) });
+        if (url.endsWith('/api/v1/chats/pin')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            orderGroup: 'pinned',
+            isPinned: true,
+            isArchived: false,
+            changed: true,
+          });
+        }
+        if (url.endsWith('/api/v1/chats/archive')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            orderGroup: 'archived',
+            isPinned: false,
+            isArchived: true,
+            changed: true,
+          });
+        }
+        if (url.includes('/api/v1/chats/tags?')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            tags: ['existing'],
+          });
+        }
+        return Response.json({
+          success: true,
+          chatId: runRequest.chatId,
+          tags: ['automation', 'review'],
+          addedTags: ['automation', 'review'],
+          removedTags: ['existing'],
+        });
+      },
+    });
+
+    await expect(client.setChatPinned({ chatId: runRequest.chatId, isPinned: true }))
+      .resolves.toMatchObject({ orderGroup: 'pinned', changed: true });
+    await expect(client.setChatArchived({ chatId: runRequest.chatId, isArchived: true }))
+      .resolves.toMatchObject({ orderGroup: 'archived', changed: true });
+    await expect(client.setChatTags({
+      chatId: runRequest.chatId,
+      tags: ['automation', 'review'],
+    })).resolves.toMatchObject({ tags: ['automation', 'review'], changed: true });
+
+    expect(requests).toEqual([
+      {
+        url: `${connection.baseUrl}/api/v1/chats/pin`,
+        method: 'PUT',
+        body: JSON.stringify({ chatId: runRequest.chatId, isPinned: true }),
+      },
+      {
+        url: `${connection.baseUrl}/api/v1/chats/archive`,
+        method: 'PUT',
+        body: JSON.stringify({ chatId: runRequest.chatId, isArchived: true }),
+      },
+      {
+        url: `${connection.baseUrl}/api/v1/chats/tags?chatId=${encodeURIComponent(runRequest.chatId)}`,
+        method: 'GET',
+        body: 'undefined',
+      },
+      {
+        url: `${connection.baseUrl}/api/v1/chats/tags`,
+        method: 'PATCH',
+        body: JSON.stringify({
+          chatId: runRequest.chatId,
+          expectedTags: ['existing'],
+          tags: ['automation', 'review'],
+        }),
+      },
+    ]);
+  });
+
+  test('retries an ambiguous permission decision byte-for-byte and accepts its duplicate receipt', async () => {
+    const request: PermissionDecisionCommandRequest = {
+      clientRequestId: 'permission-v1:request',
+      chatId: runRequest.chatId,
+      permissionOccurrenceId: 'occurrence-1',
+      allow: false,
+      alwaysAllow: false,
+      control: {
+        serverInstanceId: connection.instanceId,
+        chatId: runRequest.chatId,
+        runId: 'run-1',
+        permissionOccurrenceId: 'occurrence-1',
+      },
+    };
+    const bodies: string[] = [];
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        bodies.push(String(init?.body));
+        if (attempts === 1) throw new TypeError('connection reset');
+        return Response.json({
+          success: true,
+          commandType: 'permission-decision',
+          clientRequestId: request.clientRequestId,
+          chatId: request.chatId,
+          status: 'duplicate',
+          acceptedAt: '2026-09-08T00:00:00.000Z',
+        });
+      },
+    });
+
+    await expect(client.decidePermission(request)).resolves.toMatchObject({ status: 'duplicate' });
+    expect(attempts).toBe(2);
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  test('does not retry a definitive stale permission decision', async () => {
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async () => {
+        attempts += 1;
+        return Response.json({
+          success: false,
+          error: 'Permission request is no longer actionable',
+          errorCode: 'PERMISSION_NOT_ACTIONABLE',
+          retryable: false,
+        }, { status: 409 });
+      },
+    });
+
+    await expect(client.decidePermission({
+      clientRequestId: 'permission-v1:stale',
+      chatId: runRequest.chatId,
+      permissionOccurrenceId: 'occurrence-stale',
+      allow: false,
+      alwaysAllow: false,
+      control: {
+        serverInstanceId: connection.instanceId,
+        chatId: runRequest.chatId,
+        runId: 'run-stale',
+        permissionOccurrenceId: 'occurrence-stale',
+      },
+    })).rejects.toMatchObject({
+      status: 409,
+      errorCode: 'PERMISSION_NOT_ACTIONABLE',
+      retryable: false,
+    });
+    expect(attempts).toBe(1);
   });
 
   test('retries an ambiguous submission with the identical request body', async () => {
@@ -656,6 +1275,7 @@ describe('GarconClient', () => {
       clientRequestId: request.clientRequestId,
       chatId: request.chatId,
       turnId: 'turn-active',
+      parentChat: null,
       status: 'accepted',
       acceptedAt: new Date().toISOString(),
     });
@@ -778,6 +1398,7 @@ describe('GarconClient', () => {
       commandType: 'agent-stop',
       clientRequestId: stopRequest.clientRequestId,
       chatId: stopRequest.chatId,
+      parentChat: null,
       status: 'accepted',
       acceptedAt: new Date().toISOString(),
       outcome: 'interrupt-requested',

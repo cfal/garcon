@@ -130,6 +130,21 @@ describe('RemoteSettingsSection', () => {
 		expect(store.snapshot?.features.agentCommands.sendMessage).toBe(true);
 	});
 
+	it.each([['startAgent', 'Enable start agent'], ['resumeAgent', 'Enable resume agent'], ['schedule', 'Enable scheduling']] as const)(
+		'persists the %s command gate', async (key, name) => {
+			const store = new RemoteSettingsStore();
+			store.applySnapshot(makeRemoteSettingsSnapshot());
+			setTestRemoteSettingsStore(store);
+			mockRemoteSettingsUpdate(store);
+			render(RemoteSettingsSectionTestHost);
+			await fireEvent.click(screen.getByRole('switch', { name }));
+			await waitFor(() => {
+				expect(updateRemoteSettings).toHaveBeenCalledWith({ features: { agentCommands: { [key]: false } } });
+				expect(store.snapshot?.features.agentCommands[key]).toBe(false);
+			});
+		},
+	);
+
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(

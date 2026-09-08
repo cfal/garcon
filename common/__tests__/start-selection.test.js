@@ -106,6 +106,66 @@ function expectCode(operation, code) {
 }
 
 describe('shared start selection', () => {
+  test('resolves exact provider names to canonical routes without mutating the request', () => {
+    const namedCatalog = catalog();
+    namedCatalog.catalog.apiProviders = [{ ...provider, label: 'Example Proxy & Co' }];
+    for (const model of ['qwen', 'west:qwen']) {
+      const requested = Object.freeze({ agentId: 'codex', model, providerId: 'Example Proxy & Co', endpointId: 'west' });
+      expect(resolveStartSelection(namedCatalog, settings(), requested)).toMatchObject({
+        model: 'qwen', apiProviderId: 'acme', modelEndpointId: 'west', modelProtocol: 'openai-compatible',
+      });
+      expect(requested.providerId).toBe('Example Proxy & Co');
+    }
+  });
+
+  test('prefers an exact provider ID over matching names', () => {
+    const collision = catalog();
+    collision.catalog.apiProviders = [
+      { ...provider, id: 'other', label: 'acme' }, provider, { ...provider, id: 'third', label: 'acme' },
+    ];
+    expect(resolveModelSelection(collision, 'codex', {
+      model: 'west:qwen', providerId: 'acme',
+    }).apiProviderId).toBe('acme');
+  });
+
+  test('rejects duplicate names before endpoint or model filtering', () => {
+    const duplicate = catalog();
+    duplicate.catalog.apiProviders.push({ ...provider, id: 'other', endpoints: [] });
+    for (const requested of [
+      { model: 'qwen' }, { model: 'west:qwen' }, { model: 'qwen', endpointId: 'west' },
+    ]) expectCode(() => resolveModelSelection(duplicate, 'codex', {
+      ...requested, providerId: 'Acme',
+    }), 'AMBIGUOUS_PROVIDER');
+    expect(resolveModelSelection(duplicate, 'codex', {
+      model: 'west:qwen', providerId: 'acme',
+    }).apiProviderId).toBe('acme');
+  });
+
+  test('requires exact names and preserves model and endpoint validation', () => {
+    const nonStrict = catalog(agent({ requiresStrictModelDiscovery: false }));
+    for (const providerId of ['ACME', ' Acme ', 'missing']) {
+      expectCode(() => resolveModelSelection(nonStrict, 'codex', { model: 'future', providerId }), 'UNKNOWN_PROVIDER');
+    }
+    for (const [requested, code] of [
+      [{ model: 'future' }, 'UNKNOWN_MODEL'],
+      [{ model: 'gpt-5.4' }, 'UNKNOWN_MODEL'],
+      [{ model: 'qwen' }, 'AMBIGUOUS_MODEL'],
+      [{ model: 'west:qwen', endpointId: 'east' }, 'UNKNOWN_MODEL'],
+      [{ model: 'qwen', endpointId: 'missing' }, 'UNKNOWN_ENDPOINT'],
+    ]) expectCode(() => resolveModelSelection(nonStrict, 'codex', { ...requested, providerId: 'Acme' }), code);
+    expectCode(() => resolveModelSelection(catalog(agent({ acceptsApiProviderEndpoints: false })), 'codex', {
+      model: 'west:qwen', providerId: 'Acme',
+    }), 'PROVIDER_NOT_SUPPORTED');
+  });
+
+  test('resolves provider names before checking agent endpoint support', () => {
+    const unsupported = catalog(agent({ acceptsApiProviderEndpoints: false }));
+    unsupported.catalog.apiProviders.push({ ...provider, id: 'other', endpoints: [] });
+    for (const [providerId, code] of [
+      ['Acme', 'AMBIGUOUS_PROVIDER'], ['missing', 'UNKNOWN_PROVIDER'], ['acme', 'PROVIDER_NOT_SUPPORTED'],
+    ]) expectCode(() => resolveModelSelection(unsupported, 'codex', { model: 'gpt-5.4', providerId }), code);
+  });
+
   test('resolves raw routed models and captured execution defaults', () => {
     expect(resolveStartSelection(catalog(), settings(), {
       agentId: 'codex',

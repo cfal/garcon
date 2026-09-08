@@ -10,6 +10,7 @@ import {
   normalizeSupportedThinkingMode,
 } from '@garcon/common/execution-defaults';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
+import type { PreamblesSnapshot } from '@garcon/common/preambles';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import type { ListCliCommand } from './args.js';
 import {
@@ -19,6 +20,7 @@ import {
 import {
   requireCatalogAgent,
   requireCatalogModels,
+  requireCatalogProvider,
   resolveCatalogModelSelection,
 } from './catalog-selection.js';
 import { CliError } from './errors.js';
@@ -26,6 +28,7 @@ import type { CliOutput } from './output.js';
 
 export interface CatalogQueryClient {
   getModelCatalog(agentId?: string, signal?: AbortSignal): Promise<ModelCatalogResponse>;
+  getPreambles(signal?: AbortSignal): Promise<PreamblesSnapshot>;
   getSettings(signal?: AbortSignal): Promise<RemoteSettingsSnapshot>;
 }
 
@@ -78,19 +81,6 @@ function catalogProviders(catalog: ModelCatalogResponse): ApiProviderCatalogEntr
 
 function available(label: string, values: readonly string[]): string {
   return `${label}: ${values.length > 0 ? values.join(', ') : 'none'}`;
-}
-
-function requireProvider(
-  providers: readonly ApiProviderCatalogEntry[],
-  providerId: string,
-): ApiProviderCatalogEntry {
-  const provider = providers.find((entry) => entry.id === providerId);
-  if (!provider) {
-    throw catalogError(
-      `unknown API provider: ${providerId}; ${available('available providers', providers.map((entry) => entry.id))}`,
-    );
-  }
-  return provider;
 }
 
 function requireEndpoint(
@@ -153,7 +143,7 @@ function providerListing(
   const allProviders = catalogProviders(catalog);
   const providers = command.providerId === undefined
     ? allProviders
-    : [requireProvider(allProviders, command.providerId)];
+    : [requireCatalogProvider(allProviders, command.providerId)];
   const listed = providers.flatMap((provider) => {
     const endpoints = compatibleEndpoints(provider, agent);
     if (command.providerId !== undefined && agent) {
@@ -180,7 +170,7 @@ function endpointListing(
   agent: AgentCatalogEntry | undefined,
 ): QueryResult<'endpoints'> {
   if (!command.providerId) throw catalogError('list endpoints requires --provider');
-  const provider = requireProvider(catalogProviders(catalog), command.providerId);
+  const provider = requireCatalogProvider(catalogProviders(catalog), command.providerId);
   const compatible = compatibleEndpoints(provider, agent);
   if (agent) requireCompatibleEndpoints(provider, agent, compatible);
   let endpoints = compatible;
@@ -211,11 +201,13 @@ function modelListing(
   command: ListCliCommand,
   agent: AgentCatalogEntry,
 ): QueryResult<'models'> {
+  let providerId: string | undefined;
   if (command.providerId !== undefined) {
+    const provider = requireCatalogProvider(catalogProviders(catalog), command.providerId);
     if (!agent.acceptsApiProviderEndpoints) {
       throw catalogError(`agent ${agent.id} does not accept API provider endpoints`);
     }
-    const provider = requireProvider(catalogProviders(catalog), command.providerId);
+    providerId = provider.id;
     if (command.endpointId !== undefined) {
       const endpoint = requireEndpoint(provider, command.endpointId);
       if (!agent.supportedProtocols.includes(endpoint.protocol)) {
@@ -224,7 +216,7 @@ function modelListing(
     }
   }
   const models = requireCatalogModels(agent).filter((model) => (
-    (command.providerId === undefined || model.apiProviderId === command.providerId)
+    (providerId === undefined || model.apiProviderId === providerId)
     && (command.endpointId === undefined || model.endpointId === command.endpointId)
   ));
   const listed = models.map((model) => modelDetails(catalog, agent, model));
@@ -305,6 +297,14 @@ export async function runCatalogQuery(
   output: CliOutput,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (command.resource === 'preambles') {
+    const snapshot = await client.getPreambles(signal);
+    output.result(formatCatalogQueryResult({
+      resource: 'preambles',
+      ...snapshot,
+    }, command.json));
+    return;
+  }
   const needsSettings = command.resource === 'permissions'
     || command.resource === 'reasoning-efforts';
   const [catalog, settings] = await Promise.all([

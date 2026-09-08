@@ -5,6 +5,8 @@ import {
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
 } from '../local-settings.svelte';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import { DEFAULT_THEME_PREFERENCE } from '$lib/theme/themes.js';
+import { CHAT_BOARD_MAX_COUNT, type ChatBoard } from '$shared/chat-boards';
 
 describe('LocalSettingsStore', () => {
 	beforeEach(() => {
@@ -14,6 +16,7 @@ describe('LocalSettingsStore', () => {
 	it('defaults max chat width and file opening preferences', () => {
 		const store = createLocalSettingsStore();
 
+		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.chatListDock).toBe('left');
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.chatMaxWidth).toBe('none');
@@ -24,6 +27,9 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('compact');
+		expect(store.selectedChatBoardId).toBeNull();
+		expect(store.chatBoardItemLayout).toBeNull();
+		expect(store.chatBoardActiveColumnByBoardId).toEqual({});
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.sidebarSearchResultSort).toBe('relevance');
 		expect(store.reduceMotion).toBe(false);
@@ -36,6 +42,51 @@ describe('LocalSettingsStore', () => {
 		expect(store.steerWithCtrlEnter).toBe(true);
 
 		store.destroy();
+	});
+
+	it('persists fixed and System theme preferences atomically', () => {
+		const store = createLocalSettingsStore();
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+
+		let restored = createLocalSettingsStore();
+		expect(restored.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+		restored.destroy();
+
+		store.set('themePreference', {
+			mode: 'system',
+			lightThemeId: 'colorblind-light',
+			darkThemeId: 'phosphor-dark',
+		});
+		restored = createLocalSettingsStore();
+		expect(restored.themePreference).toEqual({
+			mode: 'system',
+			lightThemeId: 'colorblind-light',
+			darkThemeId: 'phosphor-dark',
+		});
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('cleanly cuts legacy and malformed theme settings over to the default', () => {
+		for (const value of [
+			{ theme: 'dark', colorblindMode: true },
+			{ themePreference: { mode: 'fixed', themeId: 'unknown' } },
+			{
+				themePreference: {
+					mode: 'system',
+					lightThemeId: 'classic-dark',
+					darkThemeId: 'classic-light',
+				},
+			},
+		]) {
+			localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify(value));
+			const store = createLocalSettingsStore();
+			expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+			expect(store.snapshot()).not.toHaveProperty('theme');
+			expect(store.snapshot()).not.toHaveProperty('colorblindMode');
+			store.destroy();
+		}
 	});
 
 	it('persists the CLI message expansion preference', () => {
@@ -72,6 +123,112 @@ describe('LocalSettingsStore', () => {
 		const malformed = createLocalSettingsStore();
 		expect(malformed.sidebarChatItemLayout).toBe('compact');
 		malformed.destroy();
+	});
+
+	it('migrates the legacy default chat layout to detailed', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarChatItemLayout: 'default' }),
+		);
+
+		const store = createLocalSettingsStore();
+		expect(store.sidebarChatItemLayout).toBe('detailed');
+		store.set('sidebarChatItemLayout', store.sidebarChatItemLayout);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ sidebarChatItemLayout: 'detailed' });
+		store.destroy();
+	});
+
+	it('persists and validates browser-local Chat Board presentation', () => {
+		const boardId = '11111111-1111-4111-8111-111111111111';
+		const columnId = '22222222-2222-4222-8222-222222222222';
+		const store = createLocalSettingsStore();
+		store.set('selectedChatBoardId', boardId);
+		store.set('chatBoardItemLayout', 'detailed');
+		store.set('chatBoardActiveColumnByBoardId', { [boardId]: columnId });
+		store.destroy();
+
+		const restored = createLocalSettingsStore();
+		expect(restored.selectedChatBoardId).toBe(boardId);
+		expect(restored.chatBoardItemLayout).toBe('detailed');
+		expect(restored.chatBoardActiveColumnByBoardId).toEqual({ [boardId]: columnId });
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				selectedChatBoardId: 'invalid',
+				chatBoardItemLayout: 'wide',
+				chatBoardActiveColumnByBoardId: { invalid: columnId, [boardId]: 'invalid' },
+			}),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.selectedChatBoardId).toBeNull();
+		expect(malformed.chatBoardItemLayout).toBeNull();
+		expect(malformed.chatBoardActiveColumnByBoardId).toEqual({});
+		malformed.destroy();
+	});
+
+	it('keeps the newest active-column preference after deleted boards are pruned', () => {
+		const boardIds = Array.from(
+			{ length: CHAT_BOARD_MAX_COUNT + 1 },
+			(_, index) => `${String(index + 1).padStart(8, '0')}-1111-4111-8111-111111111111`,
+		);
+		const columnIds = Array.from(
+			{ length: CHAT_BOARD_MAX_COUNT + 1 },
+			(_, index) => `${String(index + 1).padStart(8, '0')}-2222-4222-8222-222222222222`,
+		);
+		const store = createLocalSettingsStore();
+		store.set(
+			'chatBoardActiveColumnByBoardId',
+			Object.fromEntries(
+				boardIds
+					.slice(0, CHAT_BOARD_MAX_COUNT)
+					.map((boardId, index) => [boardId, columnIds[index]!]),
+			),
+		);
+		const retainedBoards: ChatBoard[] = boardIds
+			.slice(1, CHAT_BOARD_MAX_COUNT)
+			.map((boardId, index) => ({
+				id: boardId,
+				name: boardId,
+				columns: [{ id: columnIds[index + 1]!, name: 'Ready', match: 'all', tags: ['ready'] }],
+			}));
+		store.pruneChatBoardActiveColumns(retainedBoards);
+		store.set('chatBoardActiveColumnByBoardId', {
+			...store.chatBoardActiveColumnByBoardId,
+			[boardIds[CHAT_BOARD_MAX_COUNT]!]: columnIds[CHAT_BOARD_MAX_COUNT]!,
+		});
+		store.destroy();
+
+		const restored = createLocalSettingsStore();
+		expect(Object.keys(restored.chatBoardActiveColumnByBoardId)).toHaveLength(CHAT_BOARD_MAX_COUNT);
+		expect(restored.chatBoardActiveColumnByBoardId[boardIds[CHAT_BOARD_MAX_COUNT]!]).toBe(
+			columnIds[CHAT_BOARD_MAX_COUNT],
+		);
+		restored.destroy();
+	});
+
+	it('restores the newest active-column preferences from an oversized snapshot', () => {
+		const columnId = '22222222-2222-4222-8222-222222222222';
+		const boardIds = Array.from(
+			{ length: CHAT_BOARD_MAX_COUNT + 1 },
+			(_, index) => `${String(index + 1).padStart(8, '0')}-3333-4333-8333-333333333333`,
+		);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				chatBoardActiveColumnByBoardId: Object.fromEntries(
+					boardIds.map((boardId) => [boardId, columnId]),
+				),
+			}),
+		);
+
+		const restored = createLocalSettingsStore();
+		expect(restored.chatBoardActiveColumnByBoardId[boardIds[0]!]).toBeUndefined();
+		expect(restored.chatBoardActiveColumnByBoardId[boardIds[CHAT_BOARD_MAX_COUNT]!]).toBe(columnId);
+		restored.destroy();
 	});
 
 	it('persists Ctrl+Enter steering and defaults malformed values to enabled', () => {
@@ -562,12 +719,14 @@ describe('LocalSettingsStore', () => {
 				textEditorOpenPlacement: 'same-window',
 				imageViewerOpenPlacement: 'new-window',
 				markdownViewerOpenPlacement: 'same-window',
+				themePreference: { mode: 'fixed', themeId: 'colorblind-dark' },
 			}),
 		);
 		window.dispatchEvent(
 			new StorageEvent('storage', {
 				key: LOCAL_STORAGE_KEYS.localSettings,
 				newValue: localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings),
+				storageArea: localStorage,
 			}),
 		);
 
@@ -585,8 +744,77 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.textEditorOpenPlacement).toBe('same-window');
 		expect(secondStore.imageViewerOpenPlacement).toBe('new-window');
 		expect(secondStore.markdownViewerOpenPlacement).toBe('same-window');
+		expect(secondStore.themePreference).toEqual({
+			mode: 'fixed',
+			themeId: 'colorblind-dark',
+		});
 		firstStore.destroy();
 		secondStore.destroy();
+	});
+
+	it('restores defaults when the settings key is removed or local storage is cleared', () => {
+		const store = createLocalSettingsStore();
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: null,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+		localStorage.clear();
+		window.dispatchEvent(
+			new StorageEvent('storage', { key: null, newValue: null, storageArea: localStorage }),
+		);
+		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		store.destroy();
+	});
+
+	it('ignores unrelated and session-storage events, including session clear', () => {
+		const store = createLocalSettingsStore();
+		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+		const externalSnapshot = JSON.stringify({
+			themePreference: { mode: 'fixed', themeId: 'classic-light' },
+		});
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, externalSnapshot);
+
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: externalSnapshot,
+				storageArea: sessionStorage,
+			}),
+		);
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+
+		window.dispatchEvent(
+			new StorageEvent('storage', { key: null, newValue: null, storageArea: sessionStorage }),
+		);
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: 'unrelated',
+				newValue: externalSnapshot,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-dark' });
+
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: externalSnapshot,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.themePreference).toEqual({ mode: 'fixed', themeId: 'classic-light' });
+		store.destroy();
 	});
 
 	it('falls back to default for invalid nested project grouping setting', () => {

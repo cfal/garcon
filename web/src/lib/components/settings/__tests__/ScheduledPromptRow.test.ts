@@ -28,6 +28,14 @@ function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date) {
 }
 
 describe('ScheduledPromptRow', () => {
+  it.each([
+    ['<garcon-schedule-action />', 'Scheduled action'],
+    ['<garcon-schedule-action>\nReview A &amp; B\nSecond line\n</garcon-schedule-action>', 'Review A & B'],
+    ['<garcon-schedule-action>\nMalformed &unknown;\n</garcon-schedule-action>', '<garcon-schedule-action>'],
+  ])('renders the action title for %s', (prompt, title) => {
+    renderRow({ ...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), prompt }, new Date('2030-01-01T00:00:00.000Z'));
+    expect(screen.getByRole('heading', { name: title })).toBeTruthy();
+  });
 	it('shows new-chat agent and tags below the target row', () => {
 		const scheduledPrompt: ScheduledPrompt = {
 			...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:03:59.000Z' }),
@@ -70,7 +78,7 @@ describe('ScheduledPromptRow', () => {
 	it('shows and updates the next-run countdown for a recurring scheduled prompt', async () => {
 		const scheduledPrompt = makePrompt({
 			type: 'recurring',
-			intervalHours: 2,
+			intervalMinutes: 120,
 			nextRunAt: '2030-01-01T02:03:00.000Z',
 			endAt: null,
 		});
@@ -94,15 +102,19 @@ describe('ScheduledPromptRow', () => {
 	});
 
 	it.each([
-		{ intervalHours: 1, label: 'Hourly, forever' },
-		{ intervalHours: 5, label: 'Every 5 hours, forever' },
-		{ intervalHours: 24, label: 'Daily, forever' },
-		{ intervalHours: 48, label: 'Every 2 days, forever' },
-	])('labels a $intervalHours-hour cadence as "$label"', ({ intervalHours, label }) => {
+		{ intervalMinutes: 1, label: 'Every minute, forever' },
+		{ intervalMinutes: 5, label: 'Every 5 minutes, forever' },
+		{ intervalMinutes: 59, label: 'Every 59 minutes, forever' },
+		{ intervalMinutes: 90, label: 'Every 90 minutes, forever' },
+		{ intervalMinutes: 60, label: 'Hourly, forever' },
+		{ intervalMinutes: 300, label: 'Every 5 hours, forever' },
+		{ intervalMinutes: 1440, label: 'Daily, forever' },
+		{ intervalMinutes: 2880, label: 'Every 2 days, forever' },
+	])('labels a $intervalMinutes-minute cadence as "$label"', ({ intervalMinutes, label }) => {
 		const { container } = renderRow(
 			makePrompt({
 				type: 'recurring',
-				intervalHours,
+				intervalMinutes,
 				nextRunAt: '2030-01-01T02:03:00.000Z',
 				endAt: null,
 			}),

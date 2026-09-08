@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import {
-	AssistantMessage,
-	CliRowMessage,
-	ErrorMessage,
-	ToolResultMessage,
-	TranscriptNoticeMessage,
-	UserMessage,
+  AssistantMessage,
+  AskUserQuestionToolUseMessage,
+  BashToolUseMessage,
+  CliRowMessage,
+  ErrorMessage,
+  PermissionRequestMessage,
+  ToolResultMessage,
+  TranscriptNoticeMessage,
+  UserMessage,
 } from '@garcon/common/chat-types';
 import type { StatusCliCommand } from '../args.js';
 import { formatChatStatus, runChatStatus, type ChatStatusClient } from '../chat-status.js';
@@ -161,6 +164,81 @@ describe('chat status', () => {
     expect(value).not.toContain('transcript:');
   });
 
+  test('renders exact pending permission controls even when transcript messages are omitted', () => {
+    const permissionOccurrenceId = 'permission-occurrence-1';
+    const value = formatChatStatus(snapshot({
+      messageLimit: 0,
+      transcript: { availability: 'not-requested' },
+      transientFeed: {
+        serverInstanceId: 'instance-1',
+        chatId: CHAT_ID,
+        transcriptViewId: 'view-1',
+        transientRevision: 1,
+        rows: [{
+          permissionOccurrenceId,
+          runId: 'run-1',
+          transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+          displayOrder: 2,
+          message: new PermissionRequestMessage(
+            TIMESTAMP,
+            permissionOccurrenceId,
+            new BashToolUseMessage(TIMESTAMP, 'tool-1', 'bun test'),
+          ),
+        }],
+      },
+    }), command);
+
+    expect(value).toContain('pending permissions: 1');
+    expect(value).toContain(`permission occurrence: ${permissionOccurrenceId}`);
+    expect(value).toContain('permission run: run-1');
+    expect(value).toContain('requested tool: bash-tool-use');
+    expect(value).toContain('bun test');
+    expect(value).toContain(
+      `permission-decision '${CHAT_ID}' '${permissionOccurrenceId}' allow --run 'run-1' --server-instance 'instance-1'`,
+    );
+    expect(value).not.toContain('transcript:');
+  });
+
+  test('renders a typed answer template for structured permission requests', () => {
+    const permissionOccurrenceId = 'permission-occurrence-1';
+    const value = formatChatStatus(snapshot({
+      transientFeed: {
+        serverInstanceId: 'instance-1',
+        chatId: CHAT_ID,
+        transcriptViewId: 'view-1',
+        transientRevision: 1,
+        rows: [{
+          permissionOccurrenceId,
+          runId: 'run-1',
+          transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+          displayOrder: 2,
+          message: new PermissionRequestMessage(
+            TIMESTAMP,
+            permissionOccurrenceId,
+            new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-1', 'Choose a mode', [{
+              id: 'question-1',
+              prompt: 'Which mode?',
+              options: [{ id: 'option-1', label: 'Fast' }],
+            }]),
+          ),
+        }],
+      },
+    }), command);
+
+    expect(value).toContain('"id": "question-1"');
+    expect(value).toContain('"id": "option-1"');
+    expect(value).toContain(
+      `permission-answer '${CHAT_ID}' '${permissionOccurrenceId}' --answers `
+        + `'[{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"]}]' `
+        + `--run 'run-1' --server-instance 'instance-1'`,
+    );
+    expect(value).toContain(
+      `permission-decision '${CHAT_ID}' '${permissionOccurrenceId}' deny `
+        + `--run 'run-1' --server-instance 'instance-1'`,
+    );
+    expect(value).not.toContain('allow command:');
+  });
+
   test('redacts images and data URLs while preserving unrelated data fields', () => {
     const value = formatChatStatus(snapshot({
       transcript: {
@@ -207,7 +285,9 @@ describe('chat status', () => {
     }));
 
     expect(value).toContain('older messages available');
-    expect(value).toContain('... [truncated; use export for the complete transcript]');
+    expect(value).toContain(
+      '... [truncated; use read --json for the complete bounded value or export for the complete transcript]',
+    );
     expect(value).not.toContain('x'.repeat(4_001));
   });
 

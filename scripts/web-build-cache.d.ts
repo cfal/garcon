@@ -14,10 +14,6 @@ export interface WebBuildRecordOptions {
   markerPath?: string;
 }
 
-export interface WebBuildInvalidationOptions {
-  markerPath?: string;
-}
-
 export const repoRoot: string;
 export const webBuildDir: string;
 export const webBuildMarker: string;
@@ -33,12 +29,7 @@ export function computeWebBuildHash(
   ignoredPaths?: ReadonlySet<string>,
 ): Promise<string>;
 
-export function isWebBuildRecordedForHash(
-  hash: string,
-  options?: Pick<WebBuildCheckOptions, 'buildDir' | 'markerPath'>,
-): Promise<boolean>;
 export function isWebBuildCurrent(options?: WebBuildCheckOptions): Promise<boolean>;
 export function recordWebBuild(options?: WebBuildRecordOptions): Promise<void>;
-export function invalidateWebBuild(options?: WebBuildInvalidationOptions): Promise<void>;
 export function assertWebBuildCurrent(options?: WebBuildCheckOptions): Promise<void>;
 export function assertWebBuildInputsUnchanged(expectedHash: string, actualHash: string): void;

@@ -1,12 +1,8 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
 	import SidebarSearchDock from './SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
-	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
-	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
-	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
-	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import {
 		getAppShell,
 		getMinuteClock,
@@ -17,7 +13,7 @@
 		getSidebarSearch,
 		getRemoteSettings,
 	} from '$lib/context';
-	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
+	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
 		PersistedChatOrderGroup,
@@ -28,29 +24,27 @@
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
-	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
-	import {
-		EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
-		transcriptSearchInvalidationProjection,
-	} from '$lib/sidebar/search/transcript-search-invalidation.js';
+	import { addTagToQuery } from '$shared/chat-filter-query';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
-	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
+	import {
+		SIDEBAR_SECTION_COLLAPSE_KEYS,
+		sidebarSectionProjectKey,
+	} from './sidebar-virtual-chat-list';
 	import {
 		sidebarGroupingUsesProjects,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
 	import type {
 		SidebarChatGrouping,
-		SidebarChatItemLayout,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
-	import type { ChatSearchSort } from '$shared/chat-search';
-	import type { SavedChatSearch } from '$lib/api/settings';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
+	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface QuickMoveWrite {
 		list: PersistedChatOrderGroup;
@@ -152,7 +146,6 @@
 	let isBulkOperating = $state(false);
 	let currentTime = $derived(minuteClock.currentTime);
 	let isMarkingAllRead = $state(false);
-	let transcriptSearchRetryVersion = $state(0);
 	let displayOptions = $derived<SidebarDisplayOptions>({
 		grouping: localSettings.sidebarGrouping,
 		inactivityDuration: localSettings.sidebarInactivityDuration,
@@ -161,25 +154,6 @@
 		sortMode: localSettings.sidebarSortMode,
 		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 	});
-	let transcriptSearchTarget = $derived(
-		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
-	);
-	let transcriptSearchEnabled = $derived(
-		remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
-	);
-	let transcriptSearchInvalidation = $derived.by(() => {
-		if (!transcriptSearchEnabled) return EMPTY_TRANSCRIPT_SEARCH_INVALIDATION;
-		return transcriptSearchInvalidationProjection(
-			chats,
-			transcriptSearchTarget,
-			localSettings.sidebarSearchResultSort,
-		);
-	});
-	let transcriptSearchHasTerms = $derived(transcriptSearchInvalidation.hasTranscriptTerms);
-	let transcriptSearchCandidateSet = $derived(transcriptSearchInvalidation.candidateSignature);
-	let transcriptSearchContentRevision = $derived(transcriptSearchInvalidation.contentSignature);
-	let transcriptSearchTimeOrder = $derived(transcriptSearchInvalidation.timeOrderSignature);
-
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
@@ -205,42 +179,14 @@
 			displayedChats: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 		});
+		projectKeys.push(
+			...projectKeys.map((projectKey) => sidebarSectionProjectKey('inactive', projectKey)),
+		);
 		// Activity sections collapse through the same store; their keys stay in
 		// the pruning allowlist regardless of mode so section collapse
 		// preferences survive grouping-mode switches, like project keys do.
 		projectKeys.push(...SIDEBAR_SECTION_COLLAPSE_KEYS);
 		return projectKeys;
-	});
-
-	$effect(() => {
-		const query = transcriptSearchTarget;
-		const enabled = transcriptSearchEnabled;
-		const candidateSignature = transcriptSearchCandidateSet;
-		localSettings.sidebarSearchResultSort;
-		transcriptSearchRetryVersion;
-		untrack(() => sidebarSearch.updateTranscriptSearchCandidateSignature(candidateSignature));
-		if (!enabled || !transcriptSearchHasTerms) {
-			untrack(() => sidebarSearch.clearTranscriptSearch());
-			return;
-		}
-
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => {
-			void sidebarSearch.refreshTranscriptSearch(query, { signal: controller.signal });
-		}, 150);
-
-		return () => {
-			clearTimeout(timeoutId);
-			controller.abort();
-		};
-	});
-
-	$effect(() => {
-		const query = transcriptSearchTarget;
-		transcriptSearchContentRevision;
-		transcriptSearchTimeOrder;
-		if (query !== untrack(() => sidebarSearch.transcriptSearchQuery)) return;
-		untrack(() => sidebarSearch.scheduleTranscriptSearchRevalidation());
 	});
 
 	function handleChatClick(chatId: string) {
@@ -443,18 +389,12 @@
 		localSettings.toggle('sidebarGroupNestedProjectPaths');
 	}
 
-	function handleSetChatItemLayout(layout: SidebarChatItemLayout): void {
+	function handleSetChatItemLayout(layout: ChatItemLayout): void {
 		localSettings.set('sidebarChatItemLayout', layout);
 	}
 
 	function handleSetSortMode(sortMode: SidebarSortMode): void {
 		localSettings.set('sidebarSortMode', sortMode);
-	}
-
-	function handleSetSearchResultSort(sort: ChatSearchSort): void {
-		if (sort === localSettings.sidebarSearchResultSort) return;
-		localSettings.set('sidebarSearchResultSort', sort);
-		sidebarSearch.resetTranscriptSearchForSortChange();
 	}
 
 	function handleToggleChatListAutohide(): void {
@@ -468,20 +408,6 @@
 		localSettings.set('chatListDock', enabled ? 'right' : 'left');
 	}
 
-	// Search dialog actions.
-
-	function handleSearchSelectChat(chatId: string) {
-		sidebarSearch.confirmSearchDialog();
-		void sidebarSearch.openTranscriptResult(chatId, (id, seq) => {
-			if (seq !== null) searchResultNavigation.set(id, seq);
-			onChatSelect(id);
-		});
-	}
-
-	function handleApplySavedSearch(search: SavedChatSearch) {
-		sidebarSearch.updateDraftQuery(search.query);
-	}
-
 	function handleApplySidebarMenuSearch(query: string) {
 		sidebarSearch.applyQuery(query);
 	}
@@ -493,14 +419,6 @@
 	function handleClearActiveQuery() {
 		sidebarSearch.applyQuery('');
 	}
-
-	// Lifecycle.
-
-	onMount(() =>
-		appShell.onSidebarSearchRequested(() => {
-			sidebarSearch.toggleSearchDialog();
-		}),
-	);
 </script>
 
 <!-- The container delegates bubbled Escape handling for the sidebar subtree. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
@@ -673,104 +591,6 @@
 				onclick={() => {
 					void confirmBulkDelete();
 				}}>{m.sidebar_actions_delete()}</Button
-			>
-		</Dialog.Footer>
-	</Dialog.Content>
-</Dialog.Root>
-
-<SidebarSearchDialog
-	open={sidebarSearch.searchDialogOpen}
-	query={sidebarSearch.draftQuery}
-	filteredChats={sidebarSearch.dialogDisplayChats}
-	savedSearches={sidebarSearch.searchDialogSavedSearches}
-	transcriptMatchesByChatId={sidebarSearch.transcriptSearchResultsByChatId}
-	{transcriptSearchEnabled}
-	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
-	transcriptSearchIndexing={sidebarSearch.transcriptSearchIndexing}
-	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}
-	transcriptSearchStatus={sidebarSearch.transcriptSearchStatus}
-	transcriptSearchError={sidebarSearch.transcriptSearchError}
-	sort={localSettings.sidebarSearchResultSort}
-	showTranscriptPagination={sidebarSearch.transcriptSearchPage !== null}
-	hasMoreTranscriptResults={sidebarSearch.transcriptSearchPage?.hasMore === true &&
-		!sidebarSearch.transcriptSearchLimitReached}
-	loadingMoreTranscriptResults={sidebarSearch.transcriptSearchLoadingMore}
-	transcriptSearchPageError={sidebarSearch.transcriptSearchPageError}
-	transcriptSearchRevalidating={sidebarSearch.transcriptSearchRevalidating}
-	transcriptSearchRevalidationError={sidebarSearch.transcriptSearchRevalidationError}
-	transcriptSearchLimitReached={sidebarSearch.transcriptSearchLimitReached}
-	transcriptSearchAnnouncement={sidebarSearch.transcriptSearchAnnouncement}
-	transcriptSearchAnnouncementVersion={sidebarSearch.transcriptSearchAnnouncementVersion}
-	resultsResetVersion={sidebarSearch.transcriptSearchResultsResetVersion}
-	revalidationVersion={sidebarSearch.transcriptSearchRevalidationVersion}
-	{currentTime}
-	highlightedIndex={sidebarSearch.highlightedResultIndex}
-	onQueryChange={(q) => sidebarSearch.updateDraftQuery(q)}
-	onSelectChat={handleSearchSelectChat}
-	onApplySavedSearch={handleApplySavedSearch}
-	onOpenManager={() => sidebarSearch.openManagerFromSearchDialog()}
-	onCreateSavedSearch={() => sidebarSearch.openEditorForCreateFromSearchDialog()}
-	onHighlightChange={(i) => {
-		sidebarSearch.highlightedResultIndex = i;
-	}}
-	onRetryTranscriptSearch={() => {
-		transcriptSearchRetryVersion += 1;
-	}}
-	onSortChange={handleSetSearchResultSort}
-	onLoadMoreTranscriptResults={() => sidebarSearch.loadMoreTranscriptResults()}
-	onRetryTranscriptSearchRevalidation={() => sidebarSearch.retryTranscriptSearchRevalidation()}
-	reduceMotion={localSettings.reduceMotion}
-	onClose={() => sidebarSearch.closeSearchDialog()}
-/>
-
-<SavedSearchManagerDialog
-	open={sidebarSearch.managerOpen}
-	searches={sidebarSearch.savedSearches}
-	onClose={() => sidebarSearch.closeManager()}
-	onAdd={() => sidebarSearch.openEditorForCreate()}
-	onEdit={(search) => sidebarSearch.openEditorForEdit(search)}
-	onDelete={(id) => sidebarSearch.requestDelete(id)}
-	onReorder={(oldOrder, newOrder) => {
-		void sidebarSearch.reorder(oldOrder, newOrder);
-	}}
-/>
-
-<SavedSearchEditorDialog
-	editorState={sidebarSearch.editorState}
-	onClose={() => {
-		sidebarSearch.closeEditor();
-	}}
-	onSave={(data, searchId) => sidebarSearch.saveEditor(data, searchId)}
-/>
-
-<Dialog.Root
-	open={sidebarSearch.deleteConfirmation !== null}
-	onOpenChange={(open) => {
-		if (!open) sidebarSearch.clearDeleteConfirmation();
-	}}
->
-	<Dialog.Content
-		onOpenAutoFocus={(e) => {
-			e.preventDefault();
-			sidebarSearch.deleteButtonRef?.focus();
-		}}
-	>
-		<Dialog.Header>
-			<Dialog.Title>{m.sidebar_saved_searches_confirm_delete()}</Dialog.Title>
-			<Dialog.Description
-				>{m.sidebar_saved_searches_confirm_delete_description()}</Dialog.Description
-			>
-		</Dialog.Header>
-		<Dialog.Footer>
-			<Button variant="outline" onclick={() => sidebarSearch.clearDeleteConfirmation()}
-				>{m.sidebar_actions_cancel()}</Button
-			>
-			<Button
-				variant="destructive"
-				onclick={() => {
-					void sidebarSearch.confirmDelete();
-				}}
-				bind:ref={sidebarSearch.deleteButtonRef}>{m.sidebar_actions_delete()}</Button
 			>
 		</Dialog.Footer>
 	</Dialog.Content>

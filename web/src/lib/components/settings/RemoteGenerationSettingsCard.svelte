@@ -114,7 +114,7 @@
 				</label>
 				<select
 					id="agent-switch-context-window"
-					class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:text-sm"
+					class="select-native"
 					value={cardState.contextWindowTokens}
 					disabled={cardState.isSaving}
 					onchange={saveContextWindow}

@@ -3,15 +3,17 @@ import type {
   TranscriptExportOmittedCount,
 } from '../../common/chat-export-contracts.js';
 import {
-  isToolUseMessage,
   type ChatMessage,
 } from '../../common/chat-types.js';
-import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/transcript-notice-details.js';
+import {
+  transcriptEntryCategoryForMessage,
+  type TranscriptEntryCategory,
+} from '../../common/transcript-entry-categories.js';
 import type { AgentRunFailureDetail } from '@garcon/server-agent-interface';
 import type { LedgerRow } from './contracts.js';
 import { ledgerRowToMessage } from './presentation.js';
 
-export type TranscriptExportEntryCategory = TranscriptExportCategory | 'conversation';
+export type TranscriptExportEntryCategory = TranscriptEntryCategory;
 
 export type TranscriptExportEntry =
   | {
@@ -83,35 +85,5 @@ export function filterTranscriptExportEntries(
 }
 
 export function exportCategoryForMessage(message: ChatMessage): TranscriptExportEntryCategory {
-  if (isToolUseMessage(message)) return 'tool-calls';
-  switch (message.type) {
-    case 'user-message':
-    case 'assistant-message':
-    case 'compaction':
-      return 'conversation';
-    case 'thinking':
-      return 'reasoning';
-    case 'tool-result':
-      return 'tool-results';
-    case 'permission-request':
-    case 'permission-resolved':
-    case 'permission-cancelled':
-    case 'permission-expired':
-      return 'permissions';
-    case 'error':
-    case 'cli-row':
-      return 'diagnostics';
-    case 'transcript-notice':
-      return isCarryoverMigrationQuarantineNoticeDetail(message.detail)
-        ? 'conversation'
-        : 'diagnostics';
-    case 'agent-switch':
-      return 'handoffs';
-    default:
-      return assertNever(message);
-  }
-}
-
-function assertNever(value: never): never {
-  throw new TypeError(`Unsupported transcript export message: ${String(value)}`);
+  return transcriptEntryCategoryForMessage(message);
 }

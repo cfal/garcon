@@ -341,7 +341,7 @@ describe('workspace layout V2 schema', () => {
 		expect(result.snapshot.surfaces['chat-view:window-b']).toMatchObject({ chatId: null });
 	});
 
-	it('round-trips and globally deduplicates Chat Map and Canvas singletons', () => {
+	it('round-trips and globally deduplicates global chat singletons', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({
 				version: 2,
@@ -358,6 +358,7 @@ describe('workspace layout V2 schema', () => {
 								{ type: 'chat', chatId: 'chat-a' },
 								{ type: 'singleton', kind: 'chat-map' },
 								{ type: 'singleton', kind: 'chat-canvas' },
+								{ type: 'singleton', kind: 'chat-board' },
 							],
 							active: { type: 'singleton', kind: 'chat-map' },
 							mru: [],
@@ -369,6 +370,7 @@ describe('workspace layout V2 schema', () => {
 								{ type: 'chat', chatId: 'chat-b' },
 								{ type: 'singleton', kind: 'chat-map' },
 								{ type: 'singleton', kind: 'chat-canvas' },
+								{ type: 'singleton', kind: 'chat-board' },
 							],
 							active: { type: 'chat', chatId: 'chat-b' },
 							mru: [],
@@ -392,11 +394,18 @@ describe('workspace layout V2 schema', () => {
 		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).not.toContain(
 			'singleton:chat-canvas',
 		);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs.order).toContain(
+			'singleton:chat-board',
+		);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).not.toContain(
+			'singleton:chat-board',
+		);
 		expect(serializeWorkspaceLayout(result.snapshot).root).toMatchObject({
 			type: 'partition',
 		});
 		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-map');
 		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-canvas');
+		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-board');
 	});
 
 	it('repairs invalid active and MRU refs, clamps ratios, and collapses empty branches', () => {

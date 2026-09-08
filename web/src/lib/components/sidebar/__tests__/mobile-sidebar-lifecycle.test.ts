@@ -124,4 +124,55 @@ describe('mobile sidebar lifecycle', () => {
 			expect(injectedGetSavedSearches).not.toHaveBeenCalled();
 		});
 	});
+
+	it('closes an open search dialog when the drawer closes and does not reopen it', async () => {
+		const chats = [createChat({ id: 'chat-1', title: 'Chat one' })];
+		const sidebarSearch = createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => false,
+			getSearchResultSort: () => 'relevance',
+			getChats: () => chats,
+			getSelectedChatId: () => null,
+			notifyError: vi.fn(),
+			getSavedSearches: vi.fn().mockResolvedValue({ savedSearches: [] }),
+		});
+		render(MobileSidebarLifecycleHost, { chats, sidebarSearch });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Search chats...' }));
+		const searchDialog = screen.getByRole('dialog', { name: 'Search chats...' });
+		expect(searchDialog.parentElement).toBe(document.body);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-search-dialog-content][data-state="open"]')).toBeNull();
+		});
+		expect(screen.getByRole('button', { name: 'Search chats...' })).toBeTruthy();
+	});
+
+	it('closes the saved-search manager opened from the search dialog on drawer close', async () => {
+		const chats = [createChat({ id: 'chat-1', title: 'Chat one' })];
+		const sidebarSearch = createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => false,
+			getSearchResultSort: () => 'relevance',
+			getChats: () => chats,
+			getSelectedChatId: () => null,
+			notifyError: vi.fn(),
+			getSavedSearches: vi.fn().mockResolvedValue({ savedSearches: [] }),
+		});
+		sidebarSearch.setSavedSearches([createSavedSearch('unread', 'Unread', 'status:unread')]);
+		render(MobileSidebarLifecycleHost, { chats, sidebarSearch });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Search chats...' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Manage searches' }));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+
+		expect(sidebarSearch.searchDialogOpen).toBe(false);
+		expect(sidebarSearch.managerOpen).toBe(false);
+		await waitFor(() => {
+			expect(document.querySelector('[role="dialog"][data-state="open"]')).toBeNull();
+		});
+	});
 });

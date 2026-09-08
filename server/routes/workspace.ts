@@ -18,6 +18,7 @@ import {
   type JsonBody,
 } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { disableRequestIdleTimeout } from '../lib/http-route.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
@@ -38,9 +39,9 @@ import {
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 import { isGenerationTestTarget } from '../../common/generation-test-contracts.js';
-import type {
-  UpdateChatTitleRequest,
-  UpdateChatTitleResponse,
+import {
+  parseUpdateChatTitleRequest,
+  type UpdateChatTitleResponse,
 } from '../../common/chat-title-contracts.js';
 import { testGenerationModel } from '../settings/generation-model-test.js';
 import {
@@ -337,20 +338,20 @@ export default function createWorkspaceRoutes(
 
   async function putSessionNameHandler(body: JsonBody): Promise<Response> {
     try {
-      const { chatId, title } = asJsonBody(body) as Partial<UpdateChatTitleRequest>;
-      if (!chatId || typeof chatId !== 'string') {
-        return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
+      const request = parseUpdateChatTitleRequest(asJsonBody(body));
+      if (!request) {
+        return jsonError('Invalid chat title request', 400, 'VALIDATION_FAILED', false);
       }
-      if (registry && !registry.getChat(chatId)) {
+      if (registry && !registry.getChat(request.chatId)) {
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
-      const trimmed = typeof title === 'string' ? title.trim() : '';
-      if (!trimmed) {
-        return Response.json({ success: false, error: 'title is required' }, { status: 400 });
-      }
-      // setSessionName emits 'session-name-changed' for broadcast wiring.
-      await settings.setSessionName(chatId, trimmed);
-      return Response.json({ success: true } satisfies UpdateChatTitleResponse);
+      const result = await settings.setSessionName(request.chatId, request.title);
+      return Response.json({
+        success: true,
+        chatId: request.chatId,
+        title: result.title,
+        changed: result.changed,
+      } satisfies UpdateChatTitleResponse);
     } catch (error) {
       return jsonErrorFromUnknown(error);
     }
@@ -365,7 +366,12 @@ export default function createWorkspaceRoutes(
     }
   }
 
-  async function putAppSettings(body: JsonBody): Promise<Response> {
+  async function putAppSettings(
+    body: JsonBody,
+    request: Request,
+    _url: URL,
+    server?: unknown,
+  ): Promise<Response> {
     try {
       const input = asJsonBody(body);
       const promptPatchError = generationPromptPatchError(input.ui);
@@ -405,6 +411,7 @@ export default function createWorkspaceRoutes(
       }
       if (transcriptSearchEnabled !== undefined) {
         if (transcriptSearchSettings) {
+          disableRequestIdleTimeout(request, server);
           await transcriptSearchSettings.setEnabled(transcriptSearchEnabled, featurePatch);
         } else {
           await settings.setFeatureSettings({

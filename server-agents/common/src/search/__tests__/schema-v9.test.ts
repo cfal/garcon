@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SEARCH_QUERY_MATCH_ROW_LIMIT, searchTranscriptIndexV1 } from '../query.js';
+import { isReaderEvent } from '../worker-protocol.js';
 import {
   SEARCH_INGEST_ROW_MAX_BYTES,
   SEARCH_INGEST_TXN_MAX_ROWS,
@@ -331,6 +332,104 @@ describe('schema v9', () => {
     expect(db.query<{ value: number }, []>('SELECT total_changes() AS value').get()!.value)
       .toBe(before);
     db.close();
+  });
+
+  test('returns deterministic bounded failure details for the requested allowlist', async () => {
+    const db = await openFresh();
+    const allowedChats = Array.from({ length: 25 }, (_, index) => ({
+      chatId: String(1_785_337_200_000_000 + index),
+      transcriptViewId: `view-${String(index).padStart(2, '0')}`,
+      throughOrdinal: 0,
+    }));
+    for (const chat of allowedChats) {
+      markChatFailed(db, {
+        chatId: chat.chatId,
+        transcriptViewId: chat.transcriptViewId,
+        errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      });
+    }
+
+    const result = searchTranscriptIndexV1(db, {
+      query: { version: 1, clauses: [] },
+      allowedChats,
+    });
+
+    expect(result.index.failedChatCount).toBe(25);
+    expect(result.index.failedChats).toHaveLength(20);
+    expect(result.index.failedChatsOmittedCount).toBe(5);
+    expect(result.index.failedChats[0]).toEqual({
+      chatId: allowedChats[0]!.chatId,
+      transcriptViewId: allowedChats[0]!.transcriptViewId,
+      stage: 'indexing',
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      indexedThroughOrdinal: 0,
+      targetThroughOrdinal: 0,
+      recovery: 'source-required',
+    });
+    expect(result.index.failedChats.at(-1)?.chatId).toBe(allowedChats[19]!.chatId);
+    db.close();
+  });
+
+  test('reads failure counts and details from one database snapshot', async () => {
+    const writer = await openFresh();
+    const reader = openSearchReadDatabase(dbPath);
+    const chatId = '1785337200123456';
+    let injected = false;
+    const interleavedReader = new Proxy(reader, {
+      get(target, property) {
+        if (property !== 'query') {
+          const member = Reflect.get(target, property);
+          return typeof member === 'function' ? member.bind(target) : member;
+        }
+        return (sql: string) => {
+          const statement = target.query(sql);
+          if (!sql.includes('AS indexed')) return statement;
+          return new Proxy(statement, {
+            get(targetStatement, method) {
+              if (method !== 'get') {
+                const member = Reflect.get(targetStatement, method);
+                return typeof member === 'function' ? member.bind(targetStatement) : member;
+              }
+              return (...args: unknown[]) => {
+                const counts = Reflect.apply(targetStatement.get, targetStatement, args);
+                markChatFailed(writer, {
+                  chatId,
+                  transcriptViewId: 'view-1',
+                  errorCode: 'SEARCH_ROW_INVALID',
+                });
+                injected = true;
+                return counts;
+              };
+            },
+          });
+        };
+      },
+    });
+
+    const result = searchTranscriptIndexV1(interleavedReader, {
+      query: { version: 1, clauses: [] },
+      allowedChats: [{ chatId, transcriptViewId: 'view-1', throughOrdinal: 0 }],
+    });
+
+    expect(injected).toBe(true);
+    expect(result.index).toMatchObject({
+      failedChatCount: 0,
+      failedChats: [],
+      failedChatsOmittedCount: 0,
+      pendingChatCount: 1,
+    });
+    expect(isReaderEvent({
+      type: 'search-result',
+      requestId: 1,
+      lifecycleEpoch: 'epoch-1',
+      ...result,
+    })).toBe(true);
+    expect(searchTranscriptIndexV1(reader, {
+      query: { version: 1, clauses: [] },
+      allowedChats: [{ chatId, transcriptViewId: 'view-1', throughOrdinal: 0 }],
+    }).index).toMatchObject({ failedChatCount: 1, failedChats: [{ chatId }] });
+    reader.close();
+    writer.close();
   });
 
   test('[TLV5-SEARCH.09-SCHEMA-01] queries expose only the committed searchable prefix', async () => {

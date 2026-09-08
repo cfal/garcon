@@ -9,7 +9,10 @@ import {
 } from '../../support/integration-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
 import { requireCurrentWebBuild } from '../../support/web-build-gate.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import {
+  clickWorkspaceWindowAddAction,
+  collapseCanonicalFilesWindow,
+} from '../../support/chromium-workspace.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
@@ -284,10 +287,7 @@ async function openChatWorkspace(
 }
 
 async function openWorkspaceAddMenuItem(page: Page, label: string): Promise<void> {
-  await page
-    .locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]')
-    .click();
-  await page.getByRole('menuitem', { name: label }).click();
+  await clickWorkspaceWindowAddAction(page, label);
 }
 
 async function verifyHistoryBreakpoints(

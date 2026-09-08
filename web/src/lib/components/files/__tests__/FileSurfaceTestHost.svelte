@@ -134,7 +134,7 @@
 	session.baseline = session.content;
 	if (session.rendererMode !== 'image') {
 		session.editor = new CodeEditorController(session, {
-			isDark: false,
+			editorThemeId: 'standard-light',
 			wordWrap: false,
 			showLineNumbers: true,
 			fontSize: 12,

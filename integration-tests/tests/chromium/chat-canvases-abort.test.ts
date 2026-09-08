@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import type { Locator, Page } from 'playwright';
 import type { ChatCanvas } from '../../../common/chat-canvas.js';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 declare global {
   interface Window {
@@ -61,8 +61,7 @@ async function openBoard({ page, integration }: ChromiumFixture) {
   });
   await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
   await collapseCanonicalFilesWindow(page);
-  await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-  await page.getByRole('menuitem', { name: 'Open canvas', exact: true }).click();
+  await clickWorkspaceWindowAddAction(page, 'Open canvas');
   await page.locator('.svelte-flow__node[data-id="c"]').waitFor({ state: 'visible' });
   await settle(page);
 }

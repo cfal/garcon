@@ -65,7 +65,8 @@ describe('ChatActionDialogsState', () => {
 		expect(dialogs.tagDialog).toEqual({
 			chatId: chat.id,
 			chatTitle: 'New chat',
-			tags: ['review'],
+			baseTags: ['review'],
+			editingTags: ['review'],
 		});
 		expect(dialogs.shareChatDialog).toEqual({ chatId: chat.id, chatTitle: 'New chat' });
 	});

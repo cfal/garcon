@@ -36,8 +36,8 @@ function createController() {
 		extensions: [history()],
 	});
 	const settings = {
-		get isDark() {
-			return false;
+		get editorThemeId() {
+			return 'standard-light' as const;
 		},
 		get wordWrap() {
 			return false;

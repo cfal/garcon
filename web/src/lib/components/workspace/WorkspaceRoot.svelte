@@ -408,6 +408,7 @@
 			commit: m.workspace_surface_commit(),
 			'chat-map': m.workspace_surface_chat_map(),
 			'chat-canvas': m.workspace_surface_chat_canvas(),
+			'chat-board': m.workspace_surface_chat_board(),
 		};
 		return labels[surface.kind];
 	}

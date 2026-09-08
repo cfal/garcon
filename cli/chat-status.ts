@@ -1,14 +1,13 @@
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
-import type { TranscriptMessage } from '@garcon/common/chat-view';
-import { CliRowMessage } from '@garcon/common/chat-types';
 import type { StatusCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
-
-const STATUS_MESSAGE_TEXT_LIMIT = 4_000;
-const DATA_URL_OMISSION = '[data URL omitted from text output]';
-const TRUNCATION_MARKER = '... [truncated; use export for the complete transcript]';
+import { shellQuote } from './shell-quote.js';
+import {
+  formatPermissionRequestedTool,
+  formatTranscriptMessage,
+} from './transcript-message-format.js';
 
 export interface ChatStatusClient {
   getChatSnapshot(
@@ -41,10 +40,13 @@ export async function runChatStatus(
   }
   output.result(command.json
     ? JSON.stringify(snapshot, null, 2)
-    : formatChatStatus(snapshot));
+    : formatChatStatus(snapshot, command));
 }
 
-export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
+export function formatChatStatus(
+  snapshot: ChatSnapshotResponse,
+  connection?: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+): string {
   const lines = [
     `chat id: ${snapshot.chat.id}`,
     `status: ${snapshot.processingPhase ?? 'idle'}`,
@@ -75,6 +77,52 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
   if (snapshot.control.queue.pause !== null) {
     lines.push(`queue paused: ${snapshot.control.queue.pause.kind}`);
   }
+  if (snapshot.transientFeed.rows.length > 0) {
+    lines.push(`pending permissions: ${snapshot.transientFeed.rows.length}`);
+    for (const row of snapshot.transientFeed.rows) {
+      const message = row.message;
+      const structured = message.requestedTool.type === 'ask-user-question-tool-use'
+        || message.requestedTool.type === 'cursor-ask-question-tool-use';
+      lines.push(
+        '',
+        `permission occurrence: ${row.permissionOccurrenceId}`,
+        `permission run: ${row.runId}`,
+        `permission server instance: ${snapshot.transientFeed.serverInstanceId}`,
+        `requested tool: ${message.requestedTool.type}`,
+        `requested tool details:\n${formatPermissionRequestedTool(message.requestedTool)}`,
+      );
+      if (structured) {
+        lines.push(
+          'action: use permission-answer with the exact question and option IDs above',
+        );
+      }
+      if (connection) {
+        if (structured) {
+          lines.push(`answer command template: ${permissionAnswerCommand(
+            connection,
+            snapshot,
+            row.permissionOccurrenceId,
+            row.runId,
+          )}`);
+        } else {
+          lines.push(`allow command: ${permissionDecisionCommand(
+            connection,
+            snapshot,
+            row.permissionOccurrenceId,
+            row.runId,
+            'allow',
+          )}`);
+        }
+        lines.push(`deny command: ${permissionDecisionCommand(
+          connection,
+          snapshot,
+          row.permissionOccurrenceId,
+          row.runId,
+          'deny',
+        )}`);
+      }
+    }
+  }
   if (snapshot.transcript.availability === 'unavailable') {
     lines.push(
       `transcript: unavailable (${snapshot.transcript.errorCode}, retryable: `
@@ -89,53 +137,63 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
         + (snapshot.transcript.hasMore ? ', older messages available' : ''),
     );
     for (const entry of snapshot.transcript.messages) {
-      lines.push('', formatMessage(entry));
+      lines.push('', formatTranscriptMessage(entry));
     }
   }
   return lines.join('\n');
 }
 
-function formatMessage(entry: TranscriptMessage): string {
-  const { type, timestamp, ...payload } = entry.message;
-  const images = 'images' in payload && Array.isArray(payload.images)
-    ? payload.images
-    : undefined;
-  const textPayload = { ...payload } as Record<string, unknown>;
-  delete textPayload.images;
-  delete textPayload.title;
-  delete textPayload.presentation;
-  let content = typeof textPayload.content === 'string'
-    ? redactDataUrl(textPayload.content)
-    : JSON.stringify(textPayload, redactDataUrls, 2) ?? '{}';
-  if (images && images.length > 0) {
-    content += `\n[${images.length} image attachments omitted from text output]`;
-  }
-  const userPresentation = entry.message.type === 'user-message'
-    ? entry.message.presentation
-    : undefined;
-  const titleValue = userPresentation?.title
-    ?? ('title' in entry.message && typeof entry.message.title === 'string'
-      ? entry.message.title
-      : undefined);
-  const title = titleValue ? ` — ${titleValue}` : '';
-  const cliLabel = userPresentation
-    ? ` (CLI${userPresentation.style ? ` ${userPresentation.style}` : ''})`
-    : entry.message instanceof CliRowMessage
-      ? ` (CLI ${entry.message.presentation.style})`
-      : '';
-  return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${title}\n`
-    + truncateStatusText(content);
+function permissionAnswerCommand(
+  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+  snapshot: ChatSnapshotResponse,
+  permissionOccurrenceId: string,
+  runId: string,
+): string {
+  return [
+    ...permissionCommandPrefix(connection),
+    'permission-answer',
+    shellQuote(snapshot.chat.id),
+    shellQuote(permissionOccurrenceId),
+    '--answers',
+    shellQuote('[{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"]}]'),
+    '--run',
+    shellQuote(runId),
+    '--server-instance',
+    shellQuote(snapshot.transientFeed.serverInstanceId),
+  ].join(' ');
 }
 
-function redactDataUrls(_key: string, value: unknown): unknown {
-  return typeof value === 'string' ? redactDataUrl(value) : value;
+function permissionDecisionCommand(
+  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+  snapshot: ChatSnapshotResponse,
+  permissionOccurrenceId: string,
+  runId: string,
+  decision: 'allow' | 'deny',
+): string {
+  return [
+    ...permissionCommandPrefix(connection),
+    'permission-decision',
+    shellQuote(snapshot.chat.id),
+    shellQuote(permissionOccurrenceId),
+    decision,
+    '--run',
+    shellQuote(runId),
+    '--server-instance',
+    shellQuote(snapshot.transientFeed.serverInstanceId),
+  ].join(' ');
 }
 
-function redactDataUrl(value: string): string {
-  return value.startsWith('data:') ? DATA_URL_OMISSION : value;
-}
-
-function truncateStatusText(content: string): string {
-  if (content.length <= STATUS_MESSAGE_TEXT_LIMIT) return content;
-  return `${content.slice(0, STATUS_MESSAGE_TEXT_LIMIT)}${TRUNCATION_MARKER}`;
+function permissionCommandPrefix(
+  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+): string[] {
+  return [
+    'garcon-cli',
+    '--workspace',
+    shellQuote(connection.workspace),
+    '--config-dir',
+    shellQuote(connection.configDir),
+    ...(connection.serverUrl === undefined
+      ? []
+      : ['--server', shellQuote(connection.serverUrl)]),
+  ];
 }

@@ -10,6 +10,7 @@
 	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import Waypoints from '@lucide/svelte/icons/waypoints';
+	import Columns3 from '@lucide/svelte/icons/columns-3';
 	import type { ActiveSurfaceKind } from '$lib/workspace/surface-types.js';
 
 	let {
@@ -27,5 +28,6 @@
 {:else if kind === 'commit'}<GitCommitHorizontal class={className} />
 {:else if kind === 'chat-map'}<Waypoints class={className} />
 {:else if kind === 'chat-canvas'}<PanelsTopLeft class={className} />
+{:else if kind === 'chat-board'}<Columns3 class={className} />
 {:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal class={className} />
 {:else}<FileCode class={className} />{/if}

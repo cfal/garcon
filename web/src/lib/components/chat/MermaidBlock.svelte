@@ -4,12 +4,13 @@ Renders mermaid diagram from fenced code block source.
 Lazy-loads the mermaid library on first render via mermaid-loader.
 -->
 <script lang="ts">
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import MermaidViewerDialog from './MermaidViewerDialog.svelte';
-	import { renderMermaid } from './mermaid-loader';
+	import { renderMermaid, resolveMermaidThemeId } from './mermaid-loader';
+	import { getThemeRuntime } from '$lib/context';
 
 	interface Props {
 		text?: string;
@@ -17,8 +18,16 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	}
 
 	let { text = '', acquireTransientActivity }: Props = $props();
+	const theme = getThemeRuntime();
+	const mermaidThemeId = $derived(
+		resolveMermaidThemeId({
+			colorScheme: theme.profile.colorScheme,
+			rendererPalette: theme.profile.rendererPalette,
+		}),
+	);
 
 	let renderedSvg = $state('');
+	let renderedSource = $state('');
 	let renderError = $state('');
 	let loading = $state(true);
 	let copied = $state(false);
@@ -59,25 +68,35 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		if (!text) {
 			loading = false;
 			renderedSvg = '';
+			renderedSource = '';
 			renderError = '';
 			return;
 		}
 
 		const currentText = text;
+		const currentThemeId = mermaidThemeId;
 		loading = true;
-		renderedSvg = '';
+		if (untrack(() => renderedSource !== currentText)) {
+			renderedSvg = '';
+			renderedSource = '';
+		}
 		renderError = '';
 
 		let active = true;
-		renderMermaid(currentText).then(
+		const isCurrentRender = () =>
+			active && currentText === text && currentThemeId === mermaidThemeId;
+		renderMermaid(currentText, currentThemeId).then(
 			(svg) => {
-				if (!active || currentText !== text) return;
+				if (!isCurrentRender()) return;
 				renderedSvg = svg;
+				renderedSource = currentText;
 				loading = false;
 			},
-			(err) => {
-				if (!active || currentText !== text) return;
-				renderError = err instanceof Error ? err.message : m.chat_mermaid_render_failed();
+			(error) => {
+				if (!isCurrentRender()) return;
+				renderedSvg = '';
+				renderedSource = '';
+				renderError = error instanceof Error ? error.message : m.chat_mermaid_render_failed();
 				loading = false;
 			},
 		);
@@ -147,7 +166,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	</div>
 
 	<div class="mermaid-container overflow-x-auto p-4">
-		{#if loading}
+		{#if loading && !renderedSvg}
 			<div class="flex items-center gap-2 text-sm text-muted-foreground">
 				<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
 					<circle
@@ -175,7 +194,12 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	</div>
 </div>
 
-<MermaidViewerDialog open={viewerOpen} svg={renderedSvg} onOpenChange={handleViewerOpenChange} />
+<MermaidViewerDialog
+	open={viewerOpen}
+	source={renderedSource}
+	svg={renderedSvg}
+	onOpenChange={handleViewerOpenChange}
+/>
 
 <style>
 	.mermaid-container :global(svg) {

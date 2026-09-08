@@ -6,7 +6,7 @@ import type {
   CanvasListResponse,
 } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 const endpoint = '/api/v1/chat-canvases';
 const node = (id: string) => `.svelte-flow__node[data-id="${id}"]`;
@@ -79,12 +79,7 @@ describe('Chromium Chat Canvas', () => {
           )
           .waitFor();
         await collapseCanonicalFilesWindow(page);
-        await page
-          .locator(
-            '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
-          )
-          .click();
-        await page.getByRole('menuitem', { name: 'Open canvas' }).click();
+        await clickWorkspaceWindowAddAction(page, 'Open canvas');
         await page.locator(node('card')).waitFor({ state: 'visible' });
         markPhase('keeping graph node names in sync with live chat titles');
         await integration.client.updateSessionName(chatId, 'Accessible chat title');
@@ -257,8 +252,11 @@ describe('Chromium Chat Canvas', () => {
           const canvasWindow = page
             .locator('[data-workspace-window-id]')
             .filter({ has: page.locator('[data-canvas-panel]:visible') });
-          await canvasWindow.locator('[data-workspace-window-add-trigger]').click();
-          await page.getByRole('menuitem', { name: 'Open chat map' }).click();
+          await clickWorkspaceWindowAddAction(
+            page,
+            'Open chat map',
+            (await canvasWindow.getAttribute('data-workspace-window-id'))!,
+          );
           await page.locator('[data-chat-map-panel]').waitFor({ state: 'visible' });
           expect(await page.getByRole('button', { name: 'Lineage', exact: true }).count()).toBe(0);
           expect(await page.getByRole('button', { name: 'Canvases', exact: true }).count()).toBe(0);

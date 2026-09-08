@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GARCON_WS_AUTH_PROTOCOL_PREFIX, GARCON_WS_PROTOCOL } from '$shared/ws-auth';
 import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
-import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract';
 import { ChatProcessingReconciler } from '../chat-processing-reconciler.svelte';
 import { WsConnection } from '../connection.svelte';
 

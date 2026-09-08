@@ -1,7 +1,7 @@
 import { normalizeAgentSettings } from './agent-settings.js';
 import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from './agent-integration.js';
 import type { AgentCatalogEntry, AgentModelOption } from './agents.js';
-import type { ApiProtocol } from './api-providers.js';
+import type { ApiProtocol, ApiProviderCatalogEntry } from './api-providers.js';
 import {
   isPermissionMode,
   isThinkingMode,
@@ -22,6 +22,7 @@ export type StartSelectionErrorCode =
   | 'INVALID_CATALOG'
   | 'PROVIDER_NOT_SUPPORTED'
   | 'UNKNOWN_PROVIDER'
+  | 'AMBIGUOUS_PROVIDER'
   | 'UNKNOWN_ENDPOINT'
   | 'INCOMPATIBLE_ENDPOINT'
   | 'AMBIGUOUS_MODEL'
@@ -42,6 +43,7 @@ export class StartSelectionError extends Error {
 
 export interface RequestedModelSelection {
   readonly model: string;
+  /** Accepts a canonical ID or an exact, unique display name. */
   readonly providerId?: string;
   readonly endpointId?: string;
 }
@@ -125,6 +127,22 @@ export function requireCatalogModels(agent: AgentCatalogEntry): AgentModelOption
   return agent.models;
 }
 
+export function requireCatalogProvider(
+  providers: readonly ApiProviderCatalogEntry[],
+  selector: string,
+): ApiProviderCatalogEntry {
+  const byId = providers.find((entry) => entry?.id === selector);
+  if (byId) return byId;
+  const byName = providers.filter((entry) => entry?.label === selector);
+  if (byName.length > 1) {
+    fail('AMBIGUOUS_PROVIDER',
+      `API provider name ${selector} is ambiguous; specify a provider ID: ${byName.map((entry) => entry.id).join(', ')}`);
+  }
+  if (byName[0]) return byName[0];
+  fail('UNKNOWN_PROVIDER',
+    `unknown API provider: ${selector}; ${availableValues('available providers', providers.map((entry) => entry.id))}`);
+}
+
 export function resolveCatalogModelSelection(
   catalog: ModelCatalogResponse,
   agent: AgentCatalogEntry,
@@ -167,26 +185,21 @@ export function resolveCatalogModelSelection(
   };
 }
 
-function assertProviderAndEndpoint(
+function resolveProviderAndEndpoint(
   catalog: ModelCatalogResponse,
   agent: AgentCatalogEntry,
   requested: RequestedModelSelection,
-): void {
-  if (!requested.providerId) return;
+): RequestedModelSelection {
+  if (requested.providerId === undefined) return requested;
+  const provider = requireCatalogProvider(catalog.catalog.apiProviders, requested.providerId);
   if (!agent.acceptsApiProviderEndpoints) {
     fail('PROVIDER_NOT_SUPPORTED', `agent ${agent.id} does not accept API provider endpoints`);
   }
-  const provider = catalog.catalog.apiProviders.find((entry) => entry?.id === requested.providerId);
-  if (!provider || !Array.isArray(provider.endpoints)) {
-    fail(
-      'UNKNOWN_PROVIDER',
-      `unknown API provider: ${requested.providerId}; ${availableValues(
-        'available providers',
-        catalog.catalog.apiProviders.map((entry) => entry.id),
-      )}`,
-    );
+  if (!Array.isArray(provider.endpoints)) {
+    fail('INVALID_CATALOG', `endpoint catalog for provider ${provider.id} is invalid`);
   }
-  if (!requested.endpointId) return;
+  const resolved = { ...requested, providerId: provider.id };
+  if (!requested.endpointId) return resolved;
   const endpoint = provider.endpoints.find((entry) => entry?.id === requested.endpointId);
   if (!endpoint) {
     fail(
@@ -200,6 +213,7 @@ function assertProviderAndEndpoint(
   if (!agent.supportedProtocols.includes(endpoint.protocol)) {
     fail('INCOMPATIBLE_ENDPOINT', `endpoint ${requested.endpointId} is not compatible with agent ${agent.id}`);
   }
+  return resolved;
 }
 
 function matchingModels(
@@ -233,8 +247,8 @@ function resolveModelSelectionForAgent(
   agent: AgentCatalogEntry,
   requested: RequestedModelSelection,
 ): ResolvedModelSelection {
-  assertProviderAndEndpoint(catalog, agent, requested);
-  const matches = matchingModels(requireCatalogModels(agent), requested);
+  const resolved = resolveProviderAndEndpoint(catalog, agent, requested);
+  const matches = matchingModels(requireCatalogModels(agent), resolved);
   if (matches.length > 1) {
     const routes = matches.map(describeRouting).join(', ');
     fail(

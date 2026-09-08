@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ChatSummary from '../shared/ChatSummary.svelte';
+	import ChatSummary from '../chat/ChatSummary.svelte';
 	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatSearchResult, ChatSearchSnippetRole } from '$shared/chat-search';
@@ -50,6 +50,7 @@
 >
 	<ChatSummary
 		session={chat}
+		variant="sidebar"
 		isSelected={isHighlighted}
 		suppressUnread={false}
 		{currentTime}

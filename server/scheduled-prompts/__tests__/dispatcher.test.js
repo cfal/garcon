@@ -255,7 +255,7 @@ describe('scheduled prompt dispatcher', () => {
     );
     recurring.schedule = {
       type: 'recurring',
-      intervalHours: 24,
+      intervalMinutes: 1440,
       nextRunAt: '2030-01-01T09:00:00.000Z',
       endAt: null,
     };

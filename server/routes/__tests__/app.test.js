@@ -49,7 +49,7 @@ function createMockCtx() {
   return {
     settings: {
       getRemoteSettingsSnapshotSource: mock(() => remoteSettingsSource()),
-      setSessionName: mock(() => Promise.resolve(undefined)),
+      setSessionName: mock((_chatId, title) => Promise.resolve({ title, changed: true })),
       getRemoteSettingsVersion: mock(() => 0),
       getUiSettings: mock(() => ({})),
       setUiSettings: mock(() => Promise.resolve({})),
@@ -59,6 +59,9 @@ function createMockCtx() {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       })),
       getFeatureSettings: mock(() => ({
@@ -67,6 +70,9 @@ function createMockCtx() {
           enabled: true,
           chatIdDiscovery: true,
           sendMessage: true,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       })),
       getPathSettings: mock(() => ({})),
@@ -109,6 +115,9 @@ beforeEach(() => {
       enabled: true,
       chatIdDiscovery: true,
       sendMessage: true,
+      startAgent: true,
+      resumeAgent: true,
+      schedule: true,
     },
   }));
 });
@@ -156,7 +165,12 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
+    expect(body).toEqual({
+      success: true,
+      chatId: '123',
+      title: 'My Chat',
+      changed: true,
+    });
     expect(ctx.settings.setSessionName).toHaveBeenCalledWith('123', 'My Chat');
   });
 
@@ -167,7 +181,7 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('chatId is required');
+    expect(body.error).toBe('Invalid chat title request');
   });
 
   it('returns 400 when title is empty', async () => {
@@ -177,7 +191,7 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('title is required');
+    expect(body.error).toBe('Invalid chat title request');
   });
 
   it('returns 400 when title is whitespace-only', async () => {
@@ -187,7 +201,7 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('title is required');
+    expect(body.error).toBe('Invalid chat title request');
   });
 
   it('trims the title before saving', async () => {
@@ -831,6 +845,9 @@ describe('PUT /api/app/settings', () => {
           enabled: true,
           chatIdDiscovery: false,
           sendMessage: false,
+          startAgent: true,
+          resumeAgent: true,
+          schedule: true,
         },
       },
     }));
@@ -840,6 +857,9 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     }));
 
@@ -853,6 +873,9 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: false,
         sendMessage: false,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     });
   });
@@ -875,12 +898,16 @@ describe('PUT /api/app/settings', () => {
         enabled: false,
         chatIdDiscovery: true,
         sendMessage: true,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     });
   });
 
-  it('forwards the complete agent command object through the transcript search coordinator', async () => {
+  it('forwards the complete agent command object through unbounded transcript search maintenance', async () => {
     const transcriptSearchSettings = { setEnabled: mock(async () => undefined) };
+    const server = { timeout: mock(() => undefined) };
     const routes = createWorkspaceRoutes(
       ctx.settings,
       ctx.agents,
@@ -896,8 +923,11 @@ describe('PUT /api/app/settings', () => {
       },
     }));
 
+    const request = makeRequest('http://localhost/api/app/settings', 'PUT', {});
     const response = await routes['/api/v1/app/settings'].PUT(
-      makeRequest('http://localhost/api/app/settings', 'PUT', {}),
+      request,
+      new URL(request.url),
+      server,
     );
 
     expect(response.status).toBe(200);
@@ -906,8 +936,12 @@ describe('PUT /api/app/settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
+        startAgent: true,
+        resumeAgent: true,
+        schedule: true,
       },
     });
+    expect(server.timeout).toHaveBeenCalledWith(request, 0);
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 

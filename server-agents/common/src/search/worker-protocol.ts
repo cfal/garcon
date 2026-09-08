@@ -1,5 +1,6 @@
 import type {
   ChatSearchIndexStatus,
+  ChatSearchFailedChat,
   ChatSearchPage,
   ChatSearchQueryV1,
   ChatSearchResult,
@@ -8,6 +9,7 @@ import type {
 } from '@garcon/common/chat-search';
 import {
   CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_PREFIX_SIZE,
   CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS,
@@ -287,16 +289,53 @@ function searchQuery(value: unknown): boolean {
 
 function indexStatus(value: unknown): value is ChatSearchIndexStatus {
   const candidate = record(value);
-  return Boolean(candidate)
-    && Object.keys(candidate!).length === 6
-    && [
+  if (!candidate
+    || Object.keys(candidate).length !== 8
+    || ![
       'indexedChatCount',
       'pendingChatCount',
       'failedChatCount',
       'unindexedChatCount',
       'unsupportedChatCount',
-    ].every((key) => Object.hasOwn(candidate!, key) && nonNegativeInteger(candidate![key]))
-    && typeof candidate!.resultsTruncated === 'boolean';
+    ].every((key) => Object.hasOwn(candidate, key) && nonNegativeInteger(candidate[key]))
+    || typeof candidate.resultsTruncated !== 'boolean'
+    || !Array.isArray(candidate.failedChats)
+    || candidate.failedChats.length > CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS
+    || !nonNegativeInteger(candidate.failedChatsOmittedCount)) return false;
+  const failures = candidate.failedChats as unknown[];
+  return failures.every(failedChat)
+    && new Set(failures.map((valueFailure) => (valueFailure as ChatSearchFailedChat).chatId)).size
+      === failures.length
+    && failures.length + Number(candidate.failedChatsOmittedCount)
+      === Number(candidate.failedChatCount);
+}
+
+function failedChat(value: unknown): value is ChatSearchFailedChat {
+  const candidate = record(value);
+  return Boolean(candidate)
+    && Object.keys(candidate!).length === 7
+    && [
+      'chatId',
+      'transcriptViewId',
+      'stage',
+      'errorCode',
+      'indexedThroughOrdinal',
+      'targetThroughOrdinal',
+      'recovery',
+    ].every((key) => Object.hasOwn(candidate!, key))
+    && typeof candidate!.chatId === 'string'
+    && /^\d{16}$/u.test(candidate!.chatId)
+    && (candidate!.transcriptViewId === null || boundedIdentifier(candidate!.transcriptViewId))
+    && ['adoption', 'ledger', 'indexing'].includes(String(candidate!.stage))
+    && failureCode(candidate!.errorCode)
+    && (candidate!.indexedThroughOrdinal === null
+      || nonNegativeInteger(candidate!.indexedThroughOrdinal))
+    && (candidate!.targetThroughOrdinal === null
+      || nonNegativeInteger(candidate!.targetThroughOrdinal))
+    && !(typeof candidate!.indexedThroughOrdinal === 'number'
+      && typeof candidate!.targetThroughOrdinal === 'number'
+      && candidate!.indexedThroughOrdinal > candidate!.targetThroughOrdinal)
+    && ['source-required', 'index-retry', 'unknown'].includes(String(candidate!.recovery));
 }
 
 function searchResult(value: unknown, snippetLimit: number): value is ChatSearchResult {

@@ -1,14 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import type { ChatSession } from '$lib/types/session';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
+import { ChatTagMutationBlockedError } from '../chat-tag-mutation-result.js';
 
-vi.mock('$lib/api/chats.js', () => ({
+vi.mock('$lib/api/chats.js', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/api/chats.js')>(),
 	listChats: vi.fn(),
 	deleteChat: vi.fn(),
 	setLastSelectedChat: vi.fn(),
 	generateChatTitle: vi.fn(),
 	reorderChat: vi.fn(),
-	setChatTags: vi.fn(),
+	replaceChatTags: vi.fn(),
+	applyChatTagDelta: vi.fn(),
+	transitionChatTags: vi.fn(),
+	recoverChatTags: vi.fn(),
 	toggleArchive: vi.fn(),
 }));
 
@@ -21,7 +27,7 @@ import {
 	generateChatTitle,
 	listChats,
 	reorderChat,
-	setChatTags,
+	replaceChatTags,
 	setLastSelectedChat,
 	toggleArchive,
 } from '$lib/api/chats.js';
@@ -32,7 +38,7 @@ const mockDeleteChat = vi.mocked(deleteChat);
 const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
 const mockGenerateChatTitle = vi.mocked(generateChatTitle);
 const mockReorderChat = vi.mocked(reorderChat);
-const mockSetChatTags = vi.mocked(setChatTags);
+const mockReplaceChatTags = vi.mocked(replaceChatTags);
 const mockToggleArchive = vi.mocked(toggleArchive);
 const mockUpdateSessionName = vi.mocked(updateSessionName);
 
@@ -290,6 +296,48 @@ describe('ChatSessionsStore IO', () => {
 
 		expect(store.byId.target).toMatchObject({ isArchived: true, orderGroup: 'archived' });
 		expect(store.orderedChats.map((chat) => chat.id)).toEqual(['target', 'archived']);
+	});
+
+	it('keeps an acknowledged archive when a tag response settles during failed reconciliation', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const archive = deferred<{ success: boolean; isArchived: boolean }>();
+		const refresh = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const listChats = vi.fn()
+			.mockReturnValueOnce(refresh.promise)
+			.mockRejectedValueOnce(new Error('follow-up refresh failed'));
+		const applyChatTagDelta = vi.fn().mockResolvedValue({
+			success: true as const,
+			chatId: 'target',
+			tags: ['urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
+		});
+		const store = new ChatSessionsStore({
+			listChats,
+			applyChatTagDelta,
+			toggleArchive: () => archive.promise,
+		});
+		store.upsertFromServer([makeServerSession({ id: 'target' })]);
+
+		const archiveMutation = store.startArchivingChats(['target']);
+		await flushMicrotasks();
+		archive.resolve({ success: true, isArchived: true });
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledOnce());
+
+		await store.applyChatTagDelta({ chatId: 'target', addTags: ['urgent'] });
+		refresh.reject(new Error('refresh failed'));
+		await archiveMutation.completion;
+
+		expect(listChats).toHaveBeenCalledTimes(2);
+		expect(store.byId.target).toMatchObject({
+			isArchived: true,
+			orderGroup: 'archived',
+			tags: ['urgent'],
+		});
 	});
 
 	it('uses the final failed follow-up refresh when preserving an acknowledged archive', async () => {
@@ -600,7 +648,12 @@ describe('ChatSessionsStore IO', () => {
 
 	it('reports a successful remote rename', async () => {
 		const store = new ChatSessionsStore();
-		mockUpdateSessionName.mockResolvedValue({ success: true });
+		mockUpdateSessionName.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			title: 'Updated title',
+			changed: true,
+		});
 
 		const renamed = await store.renameChat('chat-1', 'New Title');
 
@@ -678,10 +731,12 @@ describe('ChatSessionsStore IO', () => {
 	it('persists tags and patches the server response into the chat record', async () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
-		mockSetChatTags.mockResolvedValue({
+		mockReplaceChatTags.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			tags: ['existing', 'urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
 		});
 		mockListChats.mockResolvedValue({
 			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing', 'urgent'] })],
@@ -689,9 +744,17 @@ describe('ChatSessionsStore IO', () => {
 			lastSelectedChatId: 'chat-1',
 		});
 
-		await expect(store.setChatTags('chat-1', ['existing', 'urgent'])).resolves.toBe(true);
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['existing', 'urgent'],
+		})).resolves.toMatchObject({ success: true });
 
-		expect(mockSetChatTags).toHaveBeenCalledWith('chat-1', ['existing', 'urgent']);
+		expect(mockReplaceChatTags).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['existing', 'urgent'],
+		});
 		expect(mockListChats).toHaveBeenCalledTimes(1);
 		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
 	});
@@ -709,14 +772,20 @@ describe('ChatSessionsStore IO', () => {
 			total: 1,
 			lastSelectedChatId: 'chat-1',
 		});
-		mockSetChatTags.mockResolvedValue({
+		mockReplaceChatTags.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			tags: ['existing', 'urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
 		});
 
 		const initialRefresh = store.quietRefreshChats();
-		const mutation = store.setChatTags('chat-1', ['existing', 'urgent']);
+		const mutation = store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['existing', 'urgent'],
+		});
 		await Promise.resolve();
 		staleFetch.resolve({
 			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing'] })],
@@ -724,38 +793,541 @@ describe('ChatSessionsStore IO', () => {
 			lastSelectedChatId: 'chat-1',
 		});
 
-		await expect(Promise.all([initialRefresh, mutation])).resolves.toEqual([undefined, true]);
+		await expect(Promise.all([initialRefresh, mutation])).resolves.toEqual([
+			undefined,
+			expect.objectContaining({ success: true }),
+		]);
 		expect(mockListChats).toHaveBeenCalledTimes(2);
 		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+	});
+
+	it('retains a reconciliation fence until a post-settlement chat-list read succeeds', async () => {
+		const staleFetch = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const mutation = deferred<{
+			success: true;
+			chatId: string;
+			tags: string[];
+			addedTags: string[];
+			removedTags: string[];
+		}>();
+		const listChats = vi.fn()
+			.mockReturnValueOnce(staleFetch.promise)
+			.mockRejectedValueOnce(new Error('refresh failed'))
+			.mockResolvedValueOnce({
+				sessions: [makeServerSession({ id: 'chat-1', tags: ['existing', 'urgent'] })],
+				total: 1,
+				lastSelectedChatId: null,
+			});
+		const replaceChatTags = vi.fn(() => mutation.promise);
+		const store = new ChatSessionsStore({ listChats, replaceChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+
+		const oldListRequest = store.quietRefreshChats();
+		const tagMutation = store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['existing', 'urgent'],
+		});
+		staleFetch.resolve({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		await oldListRequest;
+		mutation.resolve({
+			success: true,
+			chatId: 'chat-1',
+			tags: ['existing', 'urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
+		});
+
+		await expect(tagMutation).resolves.toMatchObject({ success: true });
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(2));
+		expect(store.byId['chat-1'].tags).toEqual(['existing']);
+		expect(store.tagReconciliationKind('chat-1')).toBe('committed-refresh');
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['review'],
+		})).rejects.toMatchObject({ reconciliationKind: 'committed-refresh' });
+		expect(replaceChatTags).toHaveBeenCalledTimes(1);
+
+		await expect(store.retryTagReconciliation('chat-1')).resolves.toBeUndefined();
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+		expect(store.tagReconciliationKind('chat-1')).toBeNull();
 	});
 
 	it('preserves a successful tag mutation when its convergence refresh fails', async () => {
 		const notifyError = vi.fn();
 		const store = new ChatSessionsStore({ notifyError });
 		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
-		mockSetChatTags.mockResolvedValue({
+		mockReplaceChatTags.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			tags: ['existing', 'urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
 		});
 		mockListChats.mockRejectedValue(new Error('refresh failed'));
 
-		await expect(store.setChatTags('chat-1', ['existing', 'urgent'])).resolves.toBe(true);
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['existing', 'urgent'],
+		})).resolves.toMatchObject({ success: true });
 
 		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
 		expect(notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
+	});
+
+	it('does not let a pre-settlement list response replace acknowledged tags', async () => {
+		const staleFetch = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const listChats = vi.fn()
+			.mockReturnValueOnce(staleFetch.promise)
+			.mockRejectedValueOnce(new Error('refresh failed'));
+		const replaceChatTags = vi.fn().mockResolvedValue({
+			success: true as const,
+			chatId: 'chat-1',
+			tags: ['existing', 'urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
+		});
+		const store = new ChatSessionsStore({ listChats, replaceChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+
+		const oldListRequest = store.quietRefreshChats();
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['existing', 'urgent'],
+		})).resolves.toMatchObject({ success: true });
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+
+		staleFetch.resolve({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		await oldListRequest;
+
+		expect(listChats).toHaveBeenCalledTimes(2);
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+		expect(store.tagReconciliationKind('chat-1')).toBeNull();
+	});
+
+	it('does not let a pre-recovery list response replace confirmed tags', async () => {
+		const staleFetch = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const listChats = vi.fn()
+			.mockReturnValueOnce(staleFetch.promise)
+			.mockRejectedValueOnce(new Error('refresh failed'));
+		const unknown = new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN');
+		const store = new ChatSessionsStore({
+			listChats,
+			applyChatTagDelta: vi.fn().mockRejectedValue(unknown),
+			recoverChatTags: vi.fn(() => recovery.promise),
+		});
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+
+		const oldListRequest = store.quietRefreshChats();
+		await expect(store.applyChatTagDelta({
+			chatId: 'chat-1',
+			addTags: ['urgent'],
+		})).rejects.toBe(unknown);
+		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['existing', 'urgent'] });
+		await vi.waitFor(() => expect(store.tagReconciliationKind('chat-1')).toBeNull());
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+
+		staleFetch.resolve({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		await oldListRequest;
+
+		expect(listChats).toHaveBeenCalledTimes(2);
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+		expect(store.tagReconciliationKind('chat-1')).toBeNull();
 	});
 
 	it('reports a failed persisted tag mutation without changing local tags', async () => {
 		const notifyError = vi.fn();
 		const store = new ChatSessionsStore({ notifyError });
 		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
-		mockSetChatTags.mockRejectedValue(new Error('tag update failed'));
+		mockReplaceChatTags.mockRejectedValue(new Error('tag update failed'));
 
-		await expect(store.setChatTags('chat-1', ['urgent'])).resolves.toBe(false);
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['urgent'],
+		})).rejects.toThrow('tag update failed');
 
-		expect(notifyError).toHaveBeenCalledWith('Failed to update chat tags.');
 		expect(store.byId['chat-1'].tags).toEqual(['existing']);
+	});
+
+	it('reconciles authoritative tags from a replacement conflict without WebSocket delivery', async () => {
+		const conflict = new ApiError(
+			409,
+			'Chat tags changed',
+			'CHAT_TAG_REVISION_CONFLICT',
+			undefined,
+			true,
+			{
+				success: false,
+				error: 'Chat tags changed',
+				errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+				retryable: true,
+				currentTags: ['approved', 'ready'],
+			},
+		);
+		const replaceChatTags = vi.fn().mockRejectedValue(conflict);
+		const listChats = vi.fn().mockResolvedValue({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['approved', 'ready'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		const store = new ChatSessionsStore({ replaceChatTags, listChats });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['ready'],
+			tags: ['ready', 'urgent'],
+		})).rejects.toBe(conflict);
+
+		expect(store.byId['chat-1'].tags).toEqual(['approved', 'ready']);
+		expect(replaceChatTags).toHaveBeenCalledOnce();
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledOnce());
+	});
+
+	it('distinguishes a rejected conflict that still needs a canonical refresh', async () => {
+		const conflict = new ApiError(
+			409,
+			'Chat tags changed',
+			'CHAT_TAG_REVISION_CONFLICT',
+			undefined,
+			true,
+			{
+				success: false,
+				error: 'Chat tags changed',
+				errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+				retryable: true,
+				currentTags: ['approved', 'ready'],
+			},
+		);
+		const mutation = deferred<never>();
+		const listChats = vi.fn().mockRejectedValue(new Error('refresh failed'));
+		const store = new ChatSessionsStore({
+			replaceChatTags: vi.fn(() => mutation.promise),
+			listChats,
+		});
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		const pending = store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['ready'],
+			tags: ['ready', 'urgent'],
+		});
+		store.upsertServerChat(makeServerSession({ id: 'chat-1', tags: ['newer'] }));
+		mutation.reject(conflict);
+
+		await expect(pending).rejects.toBe(conflict);
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(1));
+		expect(store.byId['chat-1'].tags).toEqual(['newer']);
+		expect(store.tagReconciliationKind('chat-1')).toBe('conflict-refresh');
+	});
+
+	it('marks every tag writer pending and enters recovery after an unknown outcome', async () => {
+		const mutation = deferred<{
+			success: true;
+			chatId: string;
+			tags: string[];
+			addedTags: string[];
+			removedTags: string[];
+		}>();
+		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const store = new ChatSessionsStore({
+			replaceChatTags: () => mutation.promise,
+			recoverChatTags: () => recovery.promise,
+		});
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		const pending = store.replaceChatTags({
+			chatId: 'chat-1', expectedTags: ['ready'], tags: ['review'],
+		});
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(true);
+		mutation.reject(new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN'));
+		await expect(pending).rejects.toMatchObject({ errorCode: 'CHAT_TAG_SAVE_UNKNOWN' });
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(false);
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+
+		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await vi.waitFor(() => expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false));
+		expect(store.byId['chat-1'].tags).toEqual(['review']);
+	});
+
+	it('coalesces durability recovery and rejects writers while confirmation is required', async () => {
+		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const recoverChatTags = vi.fn(() => recovery.promise);
+		const unknown = new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN');
+		const replaceChatTags = vi.fn().mockRejectedValue(unknown);
+		const fenced = new ChatSessionsStore({ replaceChatTags, recoverChatTags });
+		fenced.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+		await expect(fenced.replaceChatTags({
+			chatId: 'chat-1', expectedTags: ['ready'], tags: ['review'],
+		})).rejects.toBe(unknown);
+
+		const first = fenced.recoverChatTags('chat-1');
+		const second = fenced.recoverChatTags('chat-1');
+		expect(recoverChatTags).toHaveBeenCalledTimes(1);
+		await expect(fenced.applyChatTagDelta({
+			chatId: 'chat-1', addTags: ['urgent'],
+		})).rejects.toEqual(new ChatTagMutationBlockedError('durability'));
+		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await Promise.all([first, second]);
+	});
+
+	it('does not use a list refresh to settle a newer durability outcome', async () => {
+		const firstRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const secondRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const listRefresh = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const recoverChatTags = vi.fn()
+			.mockReturnValueOnce(firstRecovery.promise)
+			.mockReturnValueOnce(secondRecovery.promise);
+		const listChats = vi.fn(() => listRefresh.promise);
+		const store = new ChatSessionsStore({ listChats, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+		const unknownOutcome = {
+			status: 'unknown',
+			errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+			recoveryRequired: true,
+		} as const;
+
+		await store.observeCommandTagMutation('chat-1', unknownOutcome);
+		const firstConfirmation = store.recoverChatTags('chat-1');
+		const observeNewerOutcome = firstConfirmation.then(() =>
+			store.observeCommandTagMutation('chat-1', unknownOutcome),
+		);
+		const retry = store.retryTagReconciliation('chat-1');
+		const retryRejected = vi.fn();
+		void retry.catch(retryRejected);
+
+		firstRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await observeNewerOutcome;
+		await flushMicrotasks();
+		expect(retryRejected).toHaveBeenCalledWith(
+			expect.objectContaining({ message: 'Saved tags could not be refreshed' }),
+		);
+		expect(listChats).toHaveBeenCalledTimes(1);
+		expect(store.tagReconciliationKind('chat-1')).toBe('durability');
+
+		listRefresh.resolve({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['review'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		secondRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await vi.waitFor(() => expect(store.tagReconciliationKind('chat-1')).toBeNull());
+	});
+
+	it('treats a transport failure after dispatch as an unknown tag outcome', async () => {
+		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const recoverChatTags = vi.fn(() => recovery.promise);
+		const applyChatTagDelta = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.applyChatTagDelta({
+			chatId: 'chat-1', addTags: ['review'],
+		})).rejects.toThrow('Failed to fetch');
+
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+		expect(recoverChatTags).toHaveBeenCalledTimes(1);
+		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await vi.waitFor(() => expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false));
+	});
+
+	it('requires another recovery response after a newer unknown tag outcome', async () => {
+		const firstRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const secondRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const secondMutation = deferred<never>();
+		const recoverChatTags = vi.fn()
+			.mockImplementationOnce(() => firstRecovery.promise)
+			.mockImplementationOnce(() => secondRecovery.promise);
+		const unknown = new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN');
+		const applyChatTagDelta = vi.fn()
+			.mockRejectedValueOnce(unknown)
+			.mockImplementationOnce(() => secondMutation.promise);
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		const first = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['alpha'] });
+		const second = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['beta'] });
+		await expect(first).rejects.toBe(unknown);
+		secondMutation.reject(unknown);
+		await expect(second).rejects.toBe(unknown);
+		const confirmation = store.recoverChatTags('chat-1');
+
+		firstRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['alpha'] });
+		await vi.waitFor(() => expect(recoverChatTags).toHaveBeenCalledTimes(2));
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+		expect(store.byId['chat-1'].tags).toEqual(['ready']);
+
+		secondRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['beta'] });
+		await confirmation;
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false);
+		expect(store.byId['chat-1'].tags).toEqual(['beta']);
+	});
+
+	it('allows an explicit confirmation retry after automatic recovery fails', async () => {
+		const unknown = new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN');
+		const recoverChatTags = vi.fn()
+			.mockRejectedValueOnce(new TypeError('Offline'))
+			.mockResolvedValueOnce({ success: true, chatId: 'chat-1', tags: ['review'] });
+		const applyChatTagDelta = vi.fn().mockRejectedValueOnce(unknown);
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.applyChatTagDelta({
+			chatId: 'chat-1', addTags: ['review'],
+		})).rejects.toBe(unknown);
+		await flushMicrotasks();
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+
+		await expect(store.recoverChatTags('chat-1')).resolves.toMatchObject({ tags: ['review'] });
+		expect(recoverChatTags).toHaveBeenCalledTimes(2);
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false);
+	});
+
+	it.each([
+		{
+			name: 'an untyped gateway failure',
+			error: new ApiError(504, 'Gateway Timeout'),
+		},
+		{
+			name: 'malformed successful JSON',
+			error: new ApiMutationOutcomeUnknownError('The response was not valid JSON'),
+		},
+		{
+			name: 'an invalid successful envelope',
+			error: new ApiMutationOutcomeUnknownError('Invalid chat tag mutation response'),
+		},
+	])('fences writers and starts recovery after $name', async ({ error }) => {
+		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const recoverChatTags = vi.fn(() => recovery.promise);
+		const applyChatTagDelta = vi.fn().mockRejectedValue(error);
+		const replaceChatTags = vi.fn();
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags, replaceChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.applyChatTagDelta({
+			chatId: 'chat-1',
+			addTags: ['review'],
+		})).rejects.toBe(error);
+
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+		expect(recoverChatTags).toHaveBeenCalledTimes(1);
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['ready'],
+			tags: ['urgent'],
+		})).rejects.toEqual(new ChatTagMutationBlockedError('durability'));
+		expect(replaceChatTags).not.toHaveBeenCalled();
+		expect(applyChatTagDelta).toHaveBeenCalledTimes(1);
+
+		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await vi.waitFor(() => expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false));
+	});
+
+	it('keeps the pending tag projection until every concurrent writer settles', async () => {
+		const firstMutation = deferred<never>();
+		const secondMutation = deferred<never>();
+		const applyChatTagDelta = vi.fn()
+			.mockImplementationOnce(() => firstMutation.promise)
+			.mockImplementationOnce(() => secondMutation.promise);
+		const store = new ChatSessionsStore({ applyChatTagDelta });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		const first = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['alpha'] });
+		const second = store.applyChatTagDelta({ chatId: 'chat-1', addTags: ['beta'] });
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(true);
+		firstMutation.reject(new Error('First failed'));
+		await expect(first).rejects.toThrow('First failed');
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(true);
+		secondMutation.reject(new Error('Second failed'));
+		await expect(second).rejects.toThrow('Second failed');
+		expect(store.pendingTagMutationChatIds.has('chat-1')).toBe(false);
+	});
+
+	it('does not install an older tag response after newer server reconciliation', async () => {
+		const mutation = deferred<{
+			success: true;
+			chatId: string;
+			tags: string[];
+			addedTags: string[];
+			removedTags: string[];
+		}>();
+		const listChats = vi.fn().mockResolvedValue({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['newer'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		const store = new ChatSessionsStore({
+			replaceChatTags: () => mutation.promise,
+			listChats,
+		});
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+		const pending = store.replaceChatTags({
+			chatId: 'chat-1', expectedTags: ['ready'], tags: ['older'],
+		});
+		store.upsertServerChat(makeServerSession({ id: 'chat-1', tags: ['newer'] }));
+		mutation.resolve({
+			success: true,
+			chatId: 'chat-1',
+			tags: ['older'],
+			addedTags: ['older'],
+			removedTags: ['ready'],
+		});
+		await pending;
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalled());
+		expect(store.byId['chat-1'].tags).toEqual(['newer']);
+	});
+
+	it('preserves canonical chat fields when reconciling a delayed handoff projection', async () => {
+		const listChats = vi.fn().mockResolvedValue({ sessions: [], total: 0, lastSelectedChatId: null });
+		const store = new ChatSessionsStore({ listChats });
+		store.upsertFromServer([makeServerSession({
+			id: 'chat-1', title: 'Current title', tags: ['newer'], agentId: 'claude', model: 'sonnet',
+		})]);
+
+		store.reconcileAcceptedHandoffProjection(makeServerSession({
+			id: 'chat-1', title: 'Stale title', tags: ['older'], agentId: 'codex', model: 'gpt-5.5',
+		}));
+
+		expect(store.byId['chat-1']).toMatchObject({
+			title: 'Current title',
+			tags: ['newer'],
+			agentId: 'codex',
+			model: 'gpt-5.5',
+		});
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(1));
 	});
 
 	it('generates a chat title from a message and patches local state', async () => {

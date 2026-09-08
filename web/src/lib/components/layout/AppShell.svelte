@@ -55,6 +55,7 @@
 	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
+	import SidebarSearchDialogs from '$lib/components/sidebar/SidebarSearchDialogs.svelte';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -131,6 +132,7 @@
 		onRenameChat: handleChatRenamed,
 		onProjectPathUpdated: handleChatProjectPathUpdated,
 		onUpsertServerChat: (entry) => sessions.upsertServerChat(entry),
+		replaceChatTags: (input) => sessions.replaceChatTags(input),
 		onReloadChat: handleReloadChat,
 		notifyError(message) {
 			notifications.error(message);
@@ -190,6 +192,7 @@
 		mobileActiveDescriptor?.type === 'file' ||
 			(mobileActiveDescriptor?.type === 'singleton' &&
 				(mobileActiveDescriptor.kind === 'commit' ||
+					mobileActiveDescriptor.kind === 'chat-board' ||
 					mobileActiveDescriptor.kind === 'git-history' ||
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
@@ -308,6 +311,12 @@
 			cancelled = true;
 			if (retryTimer) clearTimeout(retryTimer);
 		};
+	});
+
+	// A mobile drawer remount must reopen on the chat list, not on the
+	// search dialog cluster that outlived the previous drawer instance.
+	$effect(() => {
+		if (isMobile && !appShell.sidebarOpen) sidebarSearch.resetDialogs();
 	});
 
 	// Tracks virtual keyboard height via visualViewport for mobile layout.
@@ -519,8 +528,12 @@
 		chatActionDialogs.requestTags(chat, m.sidebar_chats_new_chat());
 	}
 
-	async function confirmChatTags(chatId: string, tags: string[]): Promise<void> {
-		await chatActionController.updateTags(chatId, tags);
+	async function confirmChatTags(
+		chatId: string,
+		baseTags: readonly string[],
+		tags: string[],
+	): Promise<void> {
+		await chatActionController.updateTags(chatId, baseTags, tags);
 		chatActionDialogs.closeTagDialog();
 	}
 
@@ -771,6 +784,11 @@
 	</div>
 </div>
 
+<SidebarSearchDialogs
+	chats={sessions.orderedChats}
+	onSelectChat={isMobile ? handleMobileChatSelect : handleChatSelect}
+/>
+
 <ChatActionDialogs
 	chatDeleteConfirmation={chatActionDialogs.chatDeleteConfirmation}
 	onCancelDelete={() => chatActionDialogs.clearDeleteConfirmation()}
@@ -797,8 +815,15 @@
 <SidebarTagDialog
 	tagDialog={chatActionDialogs.tagDialog}
 	allKnownTags={sidebarSearch.allKnownTags}
+	currentTags={chatActionDialogs.tagDialog
+		? sessions.byId[chatActionDialogs.tagDialog.chatId]?.tags
+		: undefined}
+	reconciliationKind={chatActionDialogs.tagDialog
+		? sessions.tagReconciliationKind(chatActionDialogs.tagDialog.chatId)
+		: null}
 	onClose={() => chatActionDialogs.closeTagDialog()}
 	onSave={confirmChatTags}
+	onRetryReconciliation={(chatId) => sessions.retryTagReconciliation(chatId)}
 />
 
 <ShareChatDialog

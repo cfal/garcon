@@ -12,8 +12,7 @@ import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('scheduled-prompts');
-const SCHEDULED_PROMPTS_FILE_VERSION = 2;
-const HOURS_PER_DAY = 24;
+const SCHEDULED_PROMPTS_FILE_VERSION = 3;
 
 interface ScheduledPromptsFile {
   version: typeof SCHEDULED_PROMPTS_FILE_VERSION;
@@ -23,6 +22,7 @@ interface ScheduledPromptsFile {
 
 interface NormalizedScheduledPromptsFile {
   file: ScheduledPromptsFile;
+  sourceVersion: number;
   migrated: boolean;
   ignoredPromptCount: number;
   invalidContainerShape: boolean;
@@ -32,7 +32,7 @@ interface LoadedScheduledPromptsFile extends NormalizedScheduledPromptsFile {
   sourceBytes: Buffer | null;
 }
 
-const HOUR_MS = 3_600_000;
+const MINUTE_MS = 60_000;
 
 export interface OccurrenceClaim {
   scheduledPrompt: ScheduledPrompt;
@@ -69,32 +69,47 @@ function normalizeRevision(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-function normalizeVersionOneScheduledPrompt(value: unknown): ScheduledPrompt | null {
-  const scheduledPrompt = normalizeScheduledPrompt(value);
-  if (scheduledPrompt) return scheduledPrompt;
+function normalizeLegacyScheduledPrompt(value: unknown, version: 1 | 2): ScheduledPrompt | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const schedule = raw.schedule;
   if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) return null;
   const legacySchedule = schedule as Record<string, unknown>;
-  if (legacySchedule.type !== 'recurring') return null;
-  const intervalDays = legacySchedule.intervalDays;
-  if (typeof intervalDays !== 'number' || !Number.isSafeInteger(intervalDays)) return null;
-  return normalizeScheduledPrompt({
-    ...raw,
-    schedule: {
-      ...legacySchedule,
-      intervalHours: intervalDays * HOURS_PER_DAY,
-    },
-  });
+  if (legacySchedule.type !== 'recurring') return normalizeScheduledPrompt(value);
+  const convert = (
+    interval: unknown,
+    minutesPerUnit: number,
+    maximum: number,
+  ): ScheduledPrompt | null => {
+    if (typeof interval !== 'number' || !Number.isSafeInteger(interval) || interval < 1 || interval > maximum) {
+      return null;
+    }
+    return normalizeScheduledPrompt({
+      ...raw,
+      schedule: {
+        type: 'recurring',
+        nextRunAt: legacySchedule.nextRunAt,
+        intervalMinutes: interval * minutesPerUnit,
+        endAt: legacySchedule.endAt,
+      },
+    });
+  };
+  return convert(legacySchedule.intervalHours, 60, 3650 * 24)
+    ?? (version === 1 ? convert(legacySchedule.intervalDays, 1440, 3650) : null);
 }
 
 function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { file: emptyFile(), migrated: false, ignoredPromptCount: 0, invalidContainerShape: true };
+    return {
+      file: emptyFile(),
+      sourceVersion: SCHEDULED_PROMPTS_FILE_VERSION,
+      migrated: false,
+      ignoredPromptCount: 0,
+      invalidContainerShape: true,
+    };
   }
   const raw = value as Record<string, unknown>;
-  if (raw.version !== 1 && raw.version !== SCHEDULED_PROMPTS_FILE_VERSION) {
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== SCHEDULED_PROMPTS_FILE_VERSION) {
     throw new Error(`Unsupported scheduled-prompts.json version: ${String(raw.version)}`);
   }
   const normalizedRevision = normalizeRevision(raw.revision);
@@ -105,7 +120,9 @@ function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
   if (Array.isArray(raw.prompts)) {
     for (const value of raw.prompts) {
       const scheduledPrompt =
-        raw.version === 1 ? normalizeVersionOneScheduledPrompt(value) : normalizeScheduledPrompt(value);
+        raw.version === 1 || raw.version === 2
+          ? normalizeLegacyScheduledPrompt(value, raw.version)
+          : normalizeScheduledPrompt(value);
       if (!scheduledPrompt || seen.has(scheduledPrompt.id)) {
         ignoredPromptCount += 1;
         continue;
@@ -116,7 +133,8 @@ function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
   }
   return {
     file: { version: SCHEDULED_PROMPTS_FILE_VERSION, revision, prompts },
-    migrated: raw.version === 1,
+    sourceVersion: raw.version,
+    migrated: raw.version !== SCHEDULED_PROMPTS_FILE_VERSION,
     ignoredPromptCount,
     invalidContainerShape:
       (raw.revision !== undefined && normalizedRevision === null) ||
@@ -132,6 +150,7 @@ async function readFile(filePath: string): Promise<LoadedScheduledPromptsFile> {
     if (hasNodeErrorCode(error, 'ENOENT')) {
       return {
         file: emptyFile(),
+        sourceVersion: SCHEDULED_PROMPTS_FILE_VERSION,
         migrated: false,
         ignoredPromptCount: 0,
         invalidContainerShape: false,
@@ -209,7 +228,7 @@ function clonePrompt(scheduledPrompt: ScheduledPrompt): ScheduledPrompt {
 function nextRecurringRun(scheduledPrompt: ScheduledPrompt): string | null {
   if (scheduledPrompt.schedule.type !== 'recurring') return null;
   const next = new Date(
-    Date.parse(scheduledPrompt.schedule.nextRunAt) + scheduledPrompt.schedule.intervalHours * HOUR_MS,
+    Date.parse(scheduledPrompt.schedule.nextRunAt) + scheduledPrompt.schedule.intervalMinutes * MINUTE_MS,
   ).toISOString();
   return scheduledPrompt.schedule.endAt && next > scheduledPrompt.schedule.endAt ? null : next;
 }
@@ -228,8 +247,7 @@ export class ScheduledPromptStore {
     let backupPath: string | null = null;
     if (loaded.migrated || loaded.ignoredPromptCount > 0 || loaded.invalidContainerShape) {
       if (!loaded.sourceBytes) throw new Error('scheduled-prompts.json source is unavailable for backup');
-      const sourceVersion = loaded.migrated ? 1 : SCHEDULED_PROMPTS_FILE_VERSION;
-      backupPath = await backupScheduledPromptsFile(this.#filePath, loaded.sourceBytes, sourceVersion);
+      backupPath = await backupScheduledPromptsFile(this.#filePath, loaded.sourceBytes, loaded.sourceVersion);
     }
     const backupMessage = backupPath ? ` Original file backed up to ${backupPath}.` : '';
     if (loaded.invalidContainerShape) {
@@ -243,7 +261,7 @@ export class ScheduledPromptStore {
     if (loaded.migrated) {
       await this.#write(loaded.file);
       logger.info(
-        `Migrated scheduled-prompts.json from version 1 to version 2. Original file backed up to ${backupPath}.`,
+        `Migrated scheduled-prompts.json from version ${loaded.sourceVersion} to version ${SCHEDULED_PROMPTS_FILE_VERSION}. Original file backed up to ${backupPath}.`,
       );
     }
     this.#file = loaded.file;
@@ -377,7 +395,7 @@ export class ScheduledPromptStore {
             continue;
           }
           const nextRunMs = Date.parse(scheduledPrompt.schedule.nextRunAt);
-          const intervalMs = scheduledPrompt.schedule.intervalHours * HOUR_MS;
+          const intervalMs = scheduledPrompt.schedule.intervalMinutes * MINUTE_MS;
           const elapsedMs = minute - nextRunMs;
           const missedCount = options.includeCurrentMinute
             ? Math.floor(elapsedMs / intervalMs) + 1

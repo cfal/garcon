@@ -18,6 +18,8 @@ describe('SidebarTranscriptSearchStatus', () => {
 				unindexedChatCount: 3,
 				unsupportedChatCount: 0,
 				resultsTruncated: false,
+				failedChats: [],
+				failedChatsOmittedCount: 0,
 			},
 		});
 
@@ -40,6 +42,8 @@ describe('SidebarTranscriptSearchStatus', () => {
 				unindexedChatCount: 0,
 				unsupportedChatCount: 0,
 				resultsTruncated: true,
+				failedChats: [],
+				failedChatsOmittedCount: 0,
 			},
 		});
 
@@ -102,6 +106,8 @@ describe('SidebarTranscriptSearchStatus', () => {
 				unindexedChatCount: 0,
 				unsupportedChatCount: 0,
 				resultsTruncated: false,
+				failedChats: [],
+				failedChatsOmittedCount: 0,
 			},
 		});
 
@@ -122,6 +128,8 @@ describe('SidebarTranscriptSearchStatus', () => {
 				unindexedChatCount: 0,
 				unsupportedChatCount: 1,
 				resultsTruncated: false,
+				failedChats: [],
+				failedChatsOmittedCount: 1,
 			},
 		});
 
@@ -144,6 +152,8 @@ describe('SidebarTranscriptSearchStatus', () => {
 				unindexedChatCount: 0,
 				unsupportedChatCount: 1,
 				resultsTruncated: false,
+				failedChats: [],
+				failedChatsOmittedCount: 1,
 			},
 			error: m.sidebar_search_transcript_error(),
 		});

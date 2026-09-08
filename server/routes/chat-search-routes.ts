@@ -6,11 +6,13 @@ import type {
   ChatSearchResultMode,
   ChatSearchSort,
   TranscriptSearchQueryStatsV1,
+  TranscriptSearchRebuildResponse,
   TranscriptSearchStatusResponse,
   TranscriptSearchStatusV1,
 } from '../../common/chat-search.js';
 import {
   CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_CHAT_IDS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
   CHAT_SEARCH_MAX_PREFIX_SIZE,
   CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
@@ -27,15 +29,18 @@ import {
 } from '../../common/chat-order-sort.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
+import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { ValidationDomainError } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { disableRequestIdleTimeout } from '../lib/http-route.js';
+import { createLogger } from '../lib/log.js';
 
 const MAX_SEARCH_QUERY_CHARS = 4_096;
 const MAX_SEARCH_TEXT_TOKEN_CHARS = 1_024;
 const MAX_SEARCH_TEXT_CHARS = 8_192;
-const MAX_SEARCH_CHAT_IDS = 10_000;
 const MAX_SEARCH_CHAT_ID_CHARS = 512;
+const logger = createLogger('routes:chat-search');
 
 export interface ChatSearchDep {
   catalogMayHaveChanged(chatId: string): void;
@@ -58,16 +63,23 @@ export interface ChatSearchDep {
     results: ChatSearchResponse['results'];
     page: ChatSearchResponse['page'];
     index: ChatSearchResponse['index'];
+    removedStaleResultCount: number;
   }>;
+}
+
+export interface TranscriptSearchMaintenanceDep {
+  rebuild(): Promise<void>;
 }
 
 interface ChatSearchRouteDeps {
   registry: IChatRegistry;
   chatListProjector: ChatListProjector;
   searchIndex?: ChatSearchDep;
+  searchMaintenance?: TranscriptSearchMaintenanceDep;
 }
 
 interface NormalizedChatSearchRequest extends ChatSearchRequest {
+  effectiveQuery: string;
   sort: ChatSearchSort;
   mode: ChatSearchResultMode;
   offset: number;
@@ -79,11 +91,18 @@ const CLIENT_CLOSED_REQUEST_STATUS = 499;
 export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   postSearchChats(body: unknown, request?: Request): Promise<Response>;
   postSearchNavigate(body: unknown): Promise<Response>;
+  postSearchRebuild(request: Request, url: URL, server?: unknown): Promise<Response>;
   getSearchStatus(): Response;
 } {
-  const { registry, chatListProjector, searchIndex } = deps;
+  const { registry, chatListProjector, searchIndex, searchMaintenance } = deps;
 
   async function postSearchChats(body: unknown, request?: Request): Promise<Response> {
+    const requestStarted = performance.now();
+    let candidateAdmissionMs = 0;
+    let controllerMs = 0;
+    let explicitChatIds = false;
+    let requestedChatCount = 0;
+    let admittedChatCount = 0;
     try {
       if (!searchIndex) {
         throw new TranscriptSearchUnavailableError(
@@ -93,7 +112,10 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         );
       }
       const search = parseSearchRequest(body);
+      explicitChatIds = search.chatIds !== undefined;
+      requestedChatCount = search.chatIds?.length ?? 0;
       request?.signal.throwIfAborted();
+      const candidateAdmissionStarted = performance.now();
       const allowedChatIds = await searchableChatIds(
         registry,
         chatListProjector,
@@ -101,9 +123,12 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         search.sort,
         request?.signal,
       );
+      candidateAdmissionMs = performance.now() - candidateAdmissionStarted;
+      admittedChatCount = allowedChatIds.length;
       request?.signal.throwIfAborted();
+      const controllerStarted = performance.now();
       const result = await searchIndex.search({
-        query: search.query,
+        query: search.effectiveQuery,
         textTokens: search.textTokens,
         allowedChatIds,
         sort: search.sort,
@@ -113,6 +138,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         snippetLimit: search.snippetLimit,
         signal: request?.signal,
       });
+      controllerMs = performance.now() - controllerStarted;
       return Response.json({
         query: search.query,
         mode: result.mode,
@@ -120,8 +146,22 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
         results: result.results,
         page: result.page,
         index: result.index,
+        removedStaleResultCount: result.removedStaleResultCount,
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
+      if (error instanceof TranscriptSearchUnavailableError && error.code === 'SEARCH_TIMEOUT') {
+        logger.warn('Transcript search route timed out', {
+          code: error.code,
+          explicitChatIds,
+          requestedChatCount,
+          admittedChatCount,
+          candidateAdmissionMs: Math.round(candidateAdmissionMs),
+          controllerMs: Math.round(
+            controllerMs || performance.now() - requestStarted - candidateAdmissionMs,
+          ),
+          totalMs: Math.round(performance.now() - requestStarted),
+        });
+      }
       if (request?.signal.aborted && isAbortError(error)) {
         return new Response(null, { status: CLIENT_CLOSED_REQUEST_STATUS });
       }
@@ -146,41 +186,73 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
     }
   }
 
-  function getSearchStatus(): Response {
-    if (!searchIndex) {
+  async function postSearchRebuild(
+    request: Request,
+    _url: URL,
+    server?: unknown,
+  ): Promise<Response> {
+    try {
+      if (!searchIndex || !searchMaintenance) {
+        throw new TranscriptSearchUnavailableError(
+          'SEARCH_INDEX_UNAVAILABLE',
+          'Chat search index is not available',
+          true,
+        );
+      }
+      disableRequestIdleTimeout(request, server);
+      await searchMaintenance.rebuild();
       return Response.json({
-        version: 1,
-        phase: 'disabled',
-        chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
-        queuedJobs: 0,
-        resync: null,
-        backlogRows: 0,
-        activeChat: null,
-        lastErrorCode: null,
-        updatedAt: new Date(0).toISOString(),
-        queryStats: {
-          served: 0,
-          timedOut: 0,
-          rejectedBusy: 0,
-          p50Ms: 0,
-          p95Ms: 0,
-          maxMs: 0,
-          admissionP50Ms: 0,
-          admissionP95Ms: 0,
-          admissionMaxMs: 0,
-          totalP50Ms: 0,
-          totalP95Ms: 0,
-          totalMaxMs: 0,
-        },
-      } satisfies TranscriptSearchStatusResponse);
+        success: true,
+        status: currentSearchStatus(searchIndex),
+      } satisfies TranscriptSearchRebuildResponse);
+    } catch (error) {
+      if (error instanceof TranscriptSearchSettingsError) {
+        const disabled = error.code === 'TRANSCRIPT_SEARCH_DISABLED';
+        return jsonError(error.message, disabled ? 409 : 500, error.code, false);
+      }
+      return jsonErrorFromUnknown(error);
     }
-    return Response.json({
-      ...searchIndex.status(),
-      queryStats: searchIndex.queryStats(),
-    } satisfies TranscriptSearchStatusResponse);
   }
 
-  return { postSearchChats, postSearchNavigate, getSearchStatus };
+  function getSearchStatus(): Response {
+    return Response.json(currentSearchStatus(searchIndex));
+  }
+
+  return { postSearchChats, postSearchNavigate, postSearchRebuild, getSearchStatus };
+}
+
+function currentSearchStatus(searchIndex?: ChatSearchDep): TranscriptSearchStatusResponse {
+  if (!searchIndex) {
+    return {
+      version: 1,
+      phase: 'disabled',
+      chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
+      queuedJobs: 0,
+      resync: null,
+      backlogRows: 0,
+      activeChat: null,
+      lastErrorCode: null,
+      updatedAt: new Date(0).toISOString(),
+      queryStats: {
+        served: 0,
+        timedOut: 0,
+        rejectedBusy: 0,
+        p50Ms: 0,
+        p95Ms: 0,
+        maxMs: 0,
+        admissionP50Ms: 0,
+        admissionP95Ms: 0,
+        admissionMaxMs: 0,
+        totalP50Ms: 0,
+        totalP95Ms: 0,
+        totalMaxMs: 0,
+      },
+    };
+  }
+  return {
+    ...searchIndex.status(),
+    queryStats: searchIndex.queryStats(),
+  };
 }
 
 function isAbortError(error: unknown): boolean {
@@ -218,10 +290,11 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   if (rawQuery.length > MAX_SEARCH_QUERY_CHARS) {
     throw new ValidationDomainError(`query must be at most ${MAX_SEARCH_QUERY_CHARS} characters`);
   }
-  const query = rawQuery.trim();
+  const normalizedQuery = rawQuery.trim();
   const effectiveTerms = textTokens?.length
     ? textTokens
-    : [...query.matchAll(/"([^"]+)"|(\S+)/g)].map((match) => match[1] ?? match[2] ?? '');
+    : [...normalizedQuery.matchAll(/"([^"]+)"|(\S+)/g)]
+        .map((match) => match[1] ?? match[2] ?? '');
   if (effectiveTerms.length > CHAT_SEARCH_MAX_TERMS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_TERMS} terms`);
   }
@@ -232,7 +305,7 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   if (wordCount > CHAT_SEARCH_MAX_WORDS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
   }
-  const effectiveQuery = query || textTokens?.join(' ') || '';
+  const effectiveQuery = normalizedQuery || textTokens?.join(' ') || '';
   if (!effectiveQuery) throw new ValidationDomainError('query is required');
   const mode = optionalSearchResultMode(input.mode) ?? 'page';
   const offset = optionalBoundedOffset(input.offset) ?? 0;
@@ -243,12 +316,13 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   }
 
   return {
-    query: effectiveQuery,
+    query: rawQuery,
+    effectiveQuery,
     textTokens,
     chatIds: optionalBoundedStringArrayField(input, 'chatIds', {
-      maxItems: MAX_SEARCH_CHAT_IDS,
+      maxItems: CHAT_SEARCH_MAX_CHAT_IDS,
       maxItemChars: MAX_SEARCH_CHAT_ID_CHARS,
-      maxTotalChars: MAX_SEARCH_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
+      maxTotalChars: CHAT_SEARCH_MAX_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
     }),
     sort: optionalSearchSort(input.sort) ?? 'relevance',
     mode,

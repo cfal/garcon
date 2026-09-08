@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { Page } from 'playwright';
 import type { ChatCanvas, CanvasListResponse } from '../../../common/chat-canvas.js';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 import { Deferred } from '../../support/deferred.js';
 
 const endpoint = '/api/v1/chat-canvases';
@@ -16,8 +17,7 @@ async function openCanvas({ page, integration }: ChromiumFixture) {
 }
 
 async function reopenCanvas(page: Page) {
-  await page.locator('[data-workspace-window-add-trigger="window-files"]').click();
-  await page.getByRole('menuitem', { name: 'Open canvas', exact: true }).click();
+  await clickWorkspaceWindowAddAction(page, 'Open canvas', 'window-files');
   await page.getByRole('button', { name: 'Rename canvas', exact: true }).waitFor();
 }
 

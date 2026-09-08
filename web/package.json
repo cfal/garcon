@@ -13,7 +13,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --output-structure locale-modules",
-		"build": "bun ../scripts/build-web.js",
+		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"precheck": "bun run i18n:compile",
@@ -26,6 +26,7 @@
 		"profile:chat-ingestion": "bun scripts/benchmark-transcript-ingestion.ts",
 		"profile:eager-assets": "bun run build && bun scripts/report-eager-assets.ts",
 		"profile:sidebar-projection": "bun scripts/benchmark-sidebar-projection.ts",
+		"profile:chat-board-projection": "bun scripts/benchmark-chat-board-projection.ts",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},
@@ -96,6 +97,7 @@
 		"katex": "^0.18.6",
 		"marked": "^18.0.11",
 		"mermaid": "^11.17.2",
+		"tabbable": "^6.5.0",
 		"tailwind-merge": "^3.6.0",
 		"tailwind-variants": "^3.3.1"
 	}

@@ -258,7 +258,7 @@
 			<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
 				<select
 					bind:this={sessionPicker}
-					class="min-w-24 max-w-56 truncate rounded-md border border-border bg-background px-2 py-1 text-xs"
+					class="select-native select-native-surface min-w-24 max-w-56 truncate text-base md:pointer-fine:text-xs"
 					value={terminalId}
 					onchange={(event) => selectTerminal(event.currentTarget.value)}
 					aria-label={m.terminal_session()}

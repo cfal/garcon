@@ -28,10 +28,6 @@ const mocks = vi.hoisted(() => ({
 		openNewChatDialog: vi.fn(),
 		openSettings: vi.fn(),
 	},
-	localSettings: {
-		colorblindMode: false,
-		toggle: vi.fn(),
-	},
 	ghCapability: {
 		available: true,
 		hasChecked: true,
@@ -50,7 +46,6 @@ vi.mock('$lib/context', async (importOriginal) => ({
 	getWorkspaceCoordinator: () => mocks.workspace,
 	getTerminalRegistry: () => mocks.terminals,
 	getAppShell: () => mocks.appShell,
-	getLocalSettings: () => mocks.localSettings,
 	getGhCapability: () => mocks.ghCapability,
 	getNotifications: () => mocks.notifications,
 	getTransientLayers: () => mocks.transientLayers,
@@ -99,6 +94,7 @@ describe('CommandMenu', () => {
 		['Compare', 'git-compare'],
 		['Open chat map', 'chat-map'],
 		['Open canvas', 'chat-canvas'],
+		['Open Chat Board', 'chat-board'],
 	] as const)('opens standalone %s through generic desktop placement', async (label, kind) => {
 		const { component } = render(CommandMenu);
 		component.toggle();
@@ -112,6 +108,7 @@ describe('CommandMenu', () => {
 		['Compare', 'git-compare'],
 		['Open chat map', 'chat-map'],
 		['Open canvas', 'chat-canvas'],
+		['Open Chat Board', 'chat-board'],
 	] as const)('focuses standalone %s on mobile', async (label, kind) => {
 		mocks.workspace.isMobile = true;
 		const { component } = render(CommandMenu);

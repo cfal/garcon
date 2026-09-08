@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -7,6 +7,8 @@ import { DomainError } from '../../lib/domain-error.ts';
 import { ScheduledPromptRunLog } from '../run-log.ts';
 import { bunCronRuntime, cronExpressionForUtcInstant, ScheduledPromptScheduler } from '../scheduler.ts';
 import { ScheduledPromptStore } from '../store.ts';
+import { parseGarconSchedule, garconScheduleActionContent } from '../../../common/garcon-schedule.ts';
+import { AtomicJsonWriteError } from '../../lib/json-file-store.ts';
 
 const createdDirs = [];
 
@@ -20,7 +22,7 @@ async function tempDir() {
 function recurringPrompt(nextRunAt) {
   return {
     id: 'repeat',
-    schedule: { type: 'recurring', intervalHours: 1, nextRunAt, endAt: null },
+    schedule: { type: 'recurring', intervalMinutes: 60, nextRunAt, endAt: null },
     target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
     prompt: 'Continue the work',
     createdAt: '2029-01-01T00:00:00.000Z',
@@ -28,11 +30,11 @@ function recurringPrompt(nextRunAt) {
   };
 }
 
-function recurringDefinition(firstRunAtUtc, intervalHours = 24) {
+function recurringDefinition(firstRunAtUtc, intervalMinutes = 1440) {
   return {
     schedule: {
       type: 'recurring',
-      intervalHours,
+      intervalMinutes,
       firstRunAtUtc,
       endAtUtc: null,
     },
@@ -45,7 +47,7 @@ function newChatDefinition(firstRunAtUtc, thinkingMode = 'none') {
   return {
     schedule: {
       type: 'recurring',
-      intervalHours: 24,
+      intervalMinutes: 1440,
       firstRunAtUtc,
       endAtUtc: null,
     },
@@ -108,6 +110,28 @@ class FakeCron {
   }
 }
 
+async function sameChatScheduler() {
+  const store = new ScheduledPromptStore(await tempDir());
+  await store.init();
+  const cron = new FakeCron();
+  const scheduler = new ScheduledPromptScheduler({
+    store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
+    chats: { getChat: (chatId) => chatId === '123' ? {} : null },
+    dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+  });
+  return { store, cron, scheduler };
+}
+
+function commandScheduleRequest(content) {
+  const command = parseGarconSchedule(content);
+  if (!command) throw new Error('Invalid test command');
+  return {
+    chatId: '123', firstRun: command.firstRun, intervalMinutes: command.intervalMinutes,
+    endAtUtc: command.endAtUtc, busyBehavior: command.busyBehavior,
+    prompt: garconScheduleActionContent(command.body),
+  };
+}
+
 describe('scheduled prompt scheduler', () => {
   afterEach(async () => {
     for (const dir of createdDirs.splice(0)) {
@@ -133,12 +157,15 @@ describe('scheduled prompt scheduler', () => {
     }
   });
 
-  it('claims before dispatch, advances recurrence, and appends an outcome', async () => {
+  it.each([1, 5, 60, 90])('claims and registers the next %i-minute occurrence before dispatch', async (intervalMinutes) => {
     const dir = await tempDir();
     const store = new ScheduledPromptStore(dir);
     await store.init();
     const scheduledFor = '2030-01-01T09:00:00.000Z';
-    await store.create(recurringPrompt(scheduledFor), 0);
+    const prompt = recurringPrompt(scheduledFor);
+    prompt.schedule.intervalMinutes = intervalMinutes;
+    await store.create(prompt, 0);
+    const nextRunAt = new Date(Date.parse(scheduledFor) + intervalMinutes * 60_000).toISOString();
     const cron = new FakeCron();
     const observations = [];
     const runLog = new ScheduledPromptRunLog();
@@ -148,6 +175,7 @@ describe('scheduled prompt scheduler', () => {
       dispatcher: {
         async dispatch(prompt) {
           observations.push({ prompt, persisted: store.get(prompt.id) });
+          expect(cron.jobs.some((job) => !job.stopped && job.expression === cronExpressionForUtcInstant(nextRunAt))).toBe(true);
           return { message: 'Prompt sent to chat 123.' };
         },
       },
@@ -171,7 +199,8 @@ describe('scheduled prompt scheduler', () => {
     }
 
     expect(observations).toHaveLength(1);
-    expect(observations[0].persisted.schedule.nextRunAt).toBe('2030-01-01T10:00:00.000Z');
+    expect(observations[0].persisted.schedule.nextRunAt).toBe(nextRunAt);
+    expect(occurrence.stopped).toBe(true);
     expect(runLog.list().at(-1)).toContain('Prompt sent to chat 123.');
   });
 
@@ -199,12 +228,12 @@ describe('scheduled prompt scheduler', () => {
 
     const snapshot = await scheduler.create({
       expectedRevision: 0,
-      scheduledPrompt: recurringDefinition('2030-01-01T09:15:00.000Z', 6),
+      scheduledPrompt: recurringDefinition('2030-01-01T09:15:00.000Z', 360),
     });
 
     expect(snapshot.prompts[0]?.schedule).toMatchObject({
       type: 'recurring',
-      intervalHours: 6,
+      intervalMinutes: 360,
       nextRunAt: '2030-01-01T09:15:00.000Z',
     });
     expect(cron.jobs.some((job) => job.expression === '15 9 1 1 *')).toBe(true);
@@ -303,6 +332,81 @@ describe('scheduled prompt scheduler', () => {
     });
 
     expect(store.list()).toEqual([]);
+  });
+
+  it.each(['1m', '5m', '90m', '366d', '3650d'])('accepts parser-to-scheduler every=%s at one acceptance clock', async (every) => {
+    const { store, scheduler, cron } = await sameChatScheduler();
+    const request = commandScheduleRequest(`<garcon-schedule every="${every}" />`);
+    const now = new Date('2030-01-01T12:00:20.000Z');
+    const result = await scheduler.scheduleForChat(request, now);
+    const nextRunAt = new Date(Math.ceil((now.getTime() + request.intervalMinutes * 60_000) / 60_000) * 60_000).toISOString();
+    expect(result.scheduledPrompt).toMatchObject({
+      target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
+      prompt: '<garcon-schedule-action />',
+      schedule: { type: 'recurring', intervalMinutes: request.intervalMinutes, nextRunAt, endAt: null },
+      createdAt: now.toISOString(),
+    });
+    expect(cron.jobs[0].expression).toBe(cronExpressionForUtcInstant(nextRunAt));
+    expect(store.list()).toEqual([result.scheduledPrompt]);
+    scheduler.stop();
+  });
+
+  it('validates the same-chat runtime boundary independently of the command parser', async () => {
+    const { store, scheduler } = await sameChatScheduler();
+    const request = commandScheduleRequest('<garcon-schedule every="5m" />');
+    const now = new Date('2030-01-01T12:00:20.000Z');
+    for (const invalid of [
+      { firstRun: null }, { firstRun: { type: 'other' } },
+      { firstRun: { type: 'after', minutes: 366 * 1440 } },
+      { firstRun: { type: 'after', minutes: 1.5 } },
+      { firstRun: { type: 'after', minutes: 0 } },
+      { intervalMinutes: null }, { intervalMinutes: 0 }, { intervalMinutes: 1.5 },
+      { intervalMinutes: 3650 * 1440 + 1 }, { intervalMinutes: undefined },
+      { busyBehavior: 'steer' }, { endAtUtc: 'invalid' },
+      { firstRun: { type: 'at', atUtc: '2030-01-01T12:00:00.000Z' } },
+      { firstRun: { type: 'at', atUtc: '2030-01-01T12:01:01.000Z' } },
+      { firstRun: { type: 'after', minutes: 1 }, intervalMinutes: null, endAtUtc: '2030-01-02T12:00:00.000Z' },
+    ]) await expect(scheduler.scheduleForChat({ ...request, ...invalid }, now)).rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_VALIDATION_FAILED' });
+    expect(store.list()).toEqual([]);
+    scheduler.stop();
+  });
+
+  it('serializes same-chat creation with HTTP creation without external revisions or retry', async () => {
+    const { store, scheduler } = await sameChatScheduler();
+    const now = new Date('2030-01-01T12:00:20.000Z');
+    const request = commandScheduleRequest('<garcon-schedule in="1m" busy="skip">Check.</garcon-schedule>');
+    const [http, result] = await Promise.all([
+      scheduler.create({ expectedRevision: 0, scheduledPrompt: recurringDefinition('2030-01-02T12:00:00.000Z', 5) }),
+      scheduler.scheduleForChat(request, now),
+    ]);
+    expect(http.revision).toBe(1);
+    expect(result.snapshot.revision).toBe(2);
+    expect(new Set(store.list().map((prompt) => prompt.id)).size).toBe(2);
+    expect(result.scheduledPrompt).toMatchObject({
+      schedule: { type: 'once', nextRunAt: '2030-01-01T12:02:00.000Z' },
+      target: { type: 'existing-chat', chatId: '123', busyBehavior: 'skip' },
+    });
+    scheduler.stop();
+  });
+
+  it('reports uncertain creation with its schedule ID after a renamed write or failed rollback', async () => {
+    const { store, scheduler, cron } = await sameChatScheduler();
+    const request = commandScheduleRequest('<garcon-schedule in="1m" />');
+    const now = new Date('2030-01-01T12:00:00.000Z');
+    const create = spyOn(store, 'create').mockRejectedValue(new AtomicJsonWriteError('sync failed', true));
+    try {
+      await expect(scheduler.scheduleForChat(request, now)).rejects.toMatchObject({
+        message: 'Scheduled prompt creation outcome is unknown', scheduleId: expect.any(String),
+      });
+    } finally { create.mockRestore(); }
+    const register = spyOn(cron, 'schedule').mockImplementation(() => { throw new Error('register failed'); });
+    const remove = spyOn(store, 'remove').mockRejectedValue(new Error('rollback failed'));
+    try {
+      await expect(scheduler.scheduleForChat(request, now)).rejects.toMatchObject({
+        message: 'Scheduled prompt creation outcome is unknown', scheduleId: expect.any(String),
+      });
+      expect(store.list()).toHaveLength(1);
+    } finally { register.mockRestore(); remove.mockRestore(); scheduler.stop(); }
   });
 
   it('rejects unsupported new-chat effort before create or update persistence', async () => {
