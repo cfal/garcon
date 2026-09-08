@@ -27,10 +27,12 @@ const third: ChatBoard = {
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (reason: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 function catalog(
@@ -182,6 +184,27 @@ describe('ChatBoardController', () => {
 
 		await vi.waitFor(() => expect(test.controller.catalog.revision).toBe(2));
 		expect(test.api.load).toHaveBeenCalledTimes(3);
+	});
+
+	it('keeps initial loading truthful when a rejected catalog follow-up fails', async () => {
+		const staleResponse = deferred<ChatBoardCatalog>();
+		const currentResponse = deferred<ChatBoardCatalog>();
+		const test = harness();
+		test.api.load
+			.mockImplementationOnce(() => staleResponse.promise)
+			.mockImplementationOnce(() => currentResponse.promise);
+
+		test.controller.setPresentationVisible(true);
+		test.invalidations.publish({ kind: 'catalog', revision: 2, reason: 'updated' });
+		staleResponse.resolve(catalog(1));
+		await vi.waitFor(() => expect(test.api.load).toHaveBeenCalledTimes(2));
+
+		expect(test.controller.catalog).toEqual({ revision: 0, boards: [] });
+		expect(test.controller.status).toBe('loading');
+
+		currentResponse.reject(new Error('offline'));
+		await vi.waitFor(() => expect(test.controller.status).toBe('error'));
+		expect(test.controller.error).toBe('offline');
 	});
 
 	it('does not prune a newer cross-tab selection with an in-flight stale catalog', async () => {

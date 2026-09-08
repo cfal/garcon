@@ -123,16 +123,18 @@ export class ChatBoardController implements PortableSingletonController {
 		const generation = ++this.#fetchGeneration;
 		if (initial) this.#status = 'loading';
 		this.#needsRefresh = false;
-		let succeeded = false;
+		let receivedResponse = false;
 		this.#inFlight = (async () => {
 			try {
 				const catalog = await this.deps.api.load();
 				if (this.#disposed || generation !== this.#fetchGeneration) return;
-				if (catalog.revision >= this.#catalog.revision) this.#applyCatalog(catalog);
+				const accepted = this.#applyCatalog(catalog);
 				if (this.#catalog.revision < this.#requiredRevision) this.#needsRefresh = true;
-				this.#status = 'ready';
-				this.#error = null;
-				succeeded = true;
+				if (accepted) {
+					this.#status = 'ready';
+					this.#error = null;
+				}
+				receivedResponse = true;
 			} catch (error) {
 				if (this.#disposed || generation !== this.#fetchGeneration) return;
 				this.#error = error instanceof Error ? error.message : String(error);
@@ -142,7 +144,9 @@ export class ChatBoardController implements PortableSingletonController {
 			}
 		})();
 		await this.#inFlight;
-		if (succeeded && this.#needsRefresh && this.#presentationVisible) await this.refresh(false);
+		if (receivedResponse && this.#needsRefresh && this.#presentationVisible) {
+			await this.refresh(false);
+		}
 	}
 
 	async createBoard(name: string): Promise<string> {
@@ -195,9 +199,9 @@ export class ChatBoardController implements PortableSingletonController {
 		this.#unsubscribe = null;
 	}
 
-	#applyCatalog(catalog: ChatBoardCatalog): void {
+	#applyCatalog(catalog: ChatBoardCatalog): boolean {
 		if (catalog.revision < this.#catalog.revision || catalog.revision < this.#requiredRevision) {
-			return;
+			return false;
 		}
 		const previous = this.#catalog;
 		this.#catalog = catalog;
@@ -214,6 +218,7 @@ export class ChatBoardController implements PortableSingletonController {
 		} else if (!selected && catalog.boards[0]) {
 			this.deps.preferences.setSelectedBoardId(catalog.boards[0].id);
 		}
+		return true;
 	}
 
 	#applyConflictCatalog(error: unknown): void {

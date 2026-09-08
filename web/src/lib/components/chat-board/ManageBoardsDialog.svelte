@@ -31,6 +31,17 @@
 	let error = $state<string | null>(null);
 	let draggedId = $state<string | null>(null);
 	let dragOverId = $state<string | null>(null);
+	let pendingCreatedBoardId = $state<string | null>(null);
+
+	$effect(() => {
+		if (!pendingCreatedBoardId) return;
+		const board = controller.catalog.boards.find(
+			(candidate) => candidate.id === pendingCreatedBoardId,
+		);
+		if (!board) return;
+		pendingCreatedBoardId = null;
+		onEditBoard(board);
+	});
 
 	function presentError(value: unknown): string {
 		return value instanceof Error && value.message ? value.message : m.chat_board_save_failed();
@@ -38,7 +49,7 @@
 
 	async function createBoard(): Promise<void> {
 		const name = newName.trim();
-		if (!name || busy) {
+		if (!name || busy || pendingCreatedBoardId) {
 			if (!name) error = m.chat_board_name_required();
 			return;
 		}
@@ -47,8 +58,7 @@
 		try {
 			const id = await controller.createBoard(name);
 			newName = '';
-			const board = controller.catalog.boards.find((candidate) => candidate.id === id);
-			if (board) onEditBoard(board);
+			pendingCreatedBoardId = id;
 		} catch (value) {
 			error = presentError(value);
 		} finally {
@@ -177,9 +187,16 @@
 			>
 				<label class="min-w-0 flex-1 text-sm font-medium">
 					<span class="mb-1.5 block">{m.chat_board_board_name()}</span>
-					<Input bind:value={newName} maxlength={80} disabled={busy} autocomplete="off" />
+					<Input
+						bind:value={newName}
+						maxlength={80}
+						disabled={busy || Boolean(pendingCreatedBoardId)}
+						autocomplete="off"
+					/>
 				</label>
-				<Button type="submit" disabled={busy || !newName.trim()}>{m.chat_board_add()}</Button>
+				<Button type="submit" disabled={busy || Boolean(pendingCreatedBoardId) || !newName.trim()}
+					>{m.chat_board_add()}</Button
+				>
 			</form>
 
 			{#if error}
