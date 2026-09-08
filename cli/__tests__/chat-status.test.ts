@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import {
-	AssistantMessage,
-	CliRowMessage,
-	ErrorMessage,
-	ToolResultMessage,
-	TranscriptNoticeMessage,
-	UserMessage,
+  AssistantMessage,
+  BashToolUseMessage,
+  CliRowMessage,
+  ErrorMessage,
+  PermissionRequestMessage,
+  ToolResultMessage,
+  TranscriptNoticeMessage,
+  UserMessage,
 } from '@garcon/common/chat-types';
 import type { StatusCliCommand } from '../args.js';
 import { formatChatStatus, runChatStatus, type ChatStatusClient } from '../chat-status.js';
@@ -158,6 +160,41 @@ describe('chat status', () => {
       transcript: { availability: 'not-requested' },
     }));
 
+    expect(value).not.toContain('transcript:');
+  });
+
+  test('renders exact pending permission controls even when transcript messages are omitted', () => {
+    const permissionOccurrenceId = 'permission-occurrence-1';
+    const value = formatChatStatus(snapshot({
+      messageLimit: 0,
+      transcript: { availability: 'not-requested' },
+      transientFeed: {
+        serverInstanceId: 'instance-1',
+        chatId: CHAT_ID,
+        transcriptViewId: 'view-1',
+        transientRevision: 1,
+        rows: [{
+          permissionOccurrenceId,
+          runId: 'run-1',
+          transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+          displayOrder: 2,
+          message: new PermissionRequestMessage(
+            TIMESTAMP,
+            permissionOccurrenceId,
+            new BashToolUseMessage(TIMESTAMP, 'tool-1', 'bun test'),
+          ),
+        }],
+      },
+    }), command);
+
+    expect(value).toContain('pending permissions: 1');
+    expect(value).toContain(`permission occurrence: ${permissionOccurrenceId}`);
+    expect(value).toContain('permission run: run-1');
+    expect(value).toContain('requested tool: bash-tool-use');
+    expect(value).toContain('bun test');
+    expect(value).toContain(
+      `permission-decision '${CHAT_ID}' '${permissionOccurrenceId}' allow --run 'run-1' --server-instance 'instance-1'`,
+    );
     expect(value).not.toContain('transcript:');
   });
 

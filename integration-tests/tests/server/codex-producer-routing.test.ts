@@ -239,7 +239,7 @@ describe('Codex producer routing', () => {
       })).rejects.toMatchObject({
         status: 409,
         body: {
-          errorCode: 'VALIDATION_FAILED',
+          errorCode: 'PERMISSION_NOT_ACTIONABLE',
           retryable: false,
         },
       });

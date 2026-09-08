@@ -71,8 +71,10 @@ bun cli/main.ts --workspace default start-async \
   "Investigate the failing release check."
 ```
 
-`start-async` prints the accepted chat and turn IDs, then returns. Use the turn ID
-with `wait` when exact completion identity matters.
+`start-async` prints the accepted chat and turn IDs, then returns. `--json` emits
+one versioned envelope containing the exact receipt, parent relationship, server
+instance, workspace, and title-update outcome. Use the turn ID with `wait` when
+exact completion identity matters.
 
 New chats created through the CLI receive the `cli` tag. Add repeatable tags with `--tag review --tag delegated`. `--title` sets the chat title.
 
@@ -82,6 +84,13 @@ for example when one agent starts another for review. Garcon records an immutabl
 same workspace. Declaring it does not copy transcript content, inherit execution
 settings, or make either chat wait for the other. `--parent` is creation-only and
 cannot be used with `resume`.
+
+New chats resolve matching preambles from their own project, agent, and tags.
+Use `--no-preamble` to send an explicit empty selection, or repeat
+`--preamble <uuid>` to select exact IDs in order. These options are mutually
+exclusive. Omitting both preserves server-side default selection. Delegated CLI
+starts do not inherit parent tags or preamble selection; a child can independently
+match defaults only from its own creation context.
 
 ```bash
 bun cli/main.ts \
@@ -155,12 +164,21 @@ bun cli/main.ts --workspace default chats \
 ```
 
 Supported metadata operators are `title:`, `tag:`, `agent:`, `model:`,
-`project:`, `status:active|unread`, and `is:pinned|normal|archived`. Negate an
+`project:`, exact `id:`, direct-parent `parent:`, `created-before:`,
+`created-after:`, `updated-before:`, `updated-after:`, `status:active|unread`,
+and `is:pinned|normal|archived`. Negate an
 order group with `is:!pinned`, `is:!normal`, or `is:!archived`. Pipe-separated
-values are OR alternatives. Repeated title and tag groups are ANDed; agent,
+identity values are OR alternatives within one clause and repeated identity
+clauses are ANDed. Repeated title and tag groups are also ANDed; agent,
 model, and project values accumulate as alternatives. Bare terms are ANDed and
 match chat title, project path, first and last previews, and tags. `chats` sorts
 by effective activity descending and uses the chat ID as a stable tie-breaker.
+
+Date-only filter values mean `00:00:00.000Z`. Datetimes must be RFC3339 with an
+explicit `Z` or numeric offset and at most millisecond precision. Before and
+after comparisons are strict. `created-*` uses chat creation time; `updated-*`
+uses last transcript/list activity. Rename, tag, pin, and archive changes do not
+advance that activity field.
 
 Search normalized transcript content and join each hit to chat metadata:
 
@@ -190,11 +208,18 @@ totals between pages. `--sort created` is the least volatile order for long
 enumerations.
 
 Coverage diagnostics are written to stderr. Pending, failed, unindexed, or
-unsupported chats mean the result cannot establish absence. Likewise,
+unsupported chats mean the result cannot establish absence. Failed coverage
+includes up to 20 typed chat details with the affected chat ID, failure stage,
+error code, indexed frontier where available, and recovery classification; an
+omitted count preserves the total when more failures exist. Likewise,
 `resultsTruncated` means index row sampling can make matches and `page.total`
 incomplete; narrow the metadata filter or quote a phrase before drawing a
 negative conclusion. Tool inputs and results are indexed with size bounds, so a
 missing path match is not proof that the path was never used.
+If a transcript view changes after the index page is selected, the response
+reports how many stale hits were removed. The CLI warns for any positive count,
+including a partially retained page, and callers should rerun the search.
+`page.hasMore` and `page.nextOffset` remain authoritative.
 Disabled search exits with settings guidance. Busy, timeout, and unavailable
 index states remain retryable operational failures. Invalid search queries exit
 as argument failures.
@@ -252,9 +277,57 @@ bun cli/main.ts --workspace default status 1785337200123456 \
   --messages 20 --json
 ```
 
-`status` reports processing, execution controls, pending inputs, and 10 recent normalized transcript messages by default. `--messages` accepts 0 through 200; zero skips transcript loading. JSON is the stable machine-readable interface; plain text redacts image bodies and truncates long messages.
+`status` reports processing, execution controls, pending inputs, pending
+permission requests, and 10 recent normalized transcript messages by default.
+Plain permission rows include the exact occurrence, run, and server-instance
+fences plus shell-safe allow and deny commands where the request supports a
+boolean decision. They remain visible with `--messages 0` or an unavailable
+transcript. Structured questions must be answered in Garcon; allowing them does
+not supply question answers. `--messages` accepts 0 through 200; zero skips
+transcript loading. JSON is the stable machine-readable interface; plain text
+redacts image bodies and truncates long messages.
 
 Status is a one-shot, non-transactional observation. Use `wait` with the exact accepted chat and turn IDs when completion identity matters.
+
+Submit an exact pending permission decision using every fence shown by status:
+
+```bash
+bun cli/main.ts --workspace default permission-decision 1785337200123456 \
+  permission-occurrence-id allow \
+  --run run-id --server-instance server-instance-id --json
+```
+
+The command never fetches or substitutes the newest request. Its deterministic
+idempotency identity binds the server instance, chat, run, and occurrence while
+the complete payload also binds the decision. Repeating the same decision
+replays its retained outcome; attempting the opposite decision conflicts rather
+than answering a newer request. Old controls fail closed after restart. Replay
+and conflict protection apply while the bounded command record remains retained.
+After an ambiguous provider failure and later record eviction, retry protection
+is no longer guaranteed; inspect live permission status before another decision.
+Provider acknowledgement failure is reported as an unknown outcome and is not
+automatically redelivered while that record is retained.
+
+## Chat Metadata
+
+Set lifecycle and metadata to explicit desired values:
+
+```bash
+bun cli/main.ts archive 1785337200123456
+bun cli/main.ts unarchive 1785337200123456
+bun cli/main.ts pin 1785337200123456
+bun cli/main.ts unpin 1785337200123456
+bun cli/main.ts rename 1785337200123456 "Review complete"
+bun cli/main.ts set-tags 1785337200123456 --tag review --tag complete
+bun cli/main.ts set-tags 1785337200123456 --clear
+```
+
+These commands are desired-state setters, not wrappers around toggle routes.
+Repeating one converges without reordering or emitting another change. Pin and
+archive are mutually exclusive order groups. `set-tags` replaces the complete
+normalized set, including the `cli` tag; `--clear` is the explicit empty set.
+Each command supports `--json` and reports whether authoritative state changed.
+Concurrent metadata writers use last-writer-wins semantics.
 
 ## Export
 
@@ -321,7 +394,10 @@ bun cli/main.ts --workspace default resume-async 1785337200123456 \
   "Also update the migration test."
 ```
 
-Successful output identifies `delivery: new-turn|steer` and the accepted turn ID. Garcon bounds run/steer race retries and reports ambiguity rather than risking duplicate delivery.
+Successful output identifies `delivery: new-turn|steer` and the accepted turn
+ID. `--json` emits one versioned envelope with the exact receipt, delivery,
+parent relationship, server instance, and workspace. Garcon bounds run/steer
+race retries and reports ambiguity rather than risking duplicate delivery.
 
 CLI exit codes:
 
@@ -352,6 +428,10 @@ bun cli/main.ts --workspace default add-row 1785337200123456 \
 ```bash
 bun cli/main.ts --workspace default stop 1785337200123456
 ```
+
+`stop --json` emits one versioned envelope with the chat-scoped stop receipt,
+authoritative outcome and execution-control state. It does not invent an
+affected turn ID when the stop contract does not provide one.
 
 If queued messages exist, stopping pauses the queue. Resume it in Garcon before sending a new direct turn. Ctrl-C only detaches the terminal and does not send Stop.
 

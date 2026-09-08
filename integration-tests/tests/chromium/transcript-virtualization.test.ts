@@ -5240,7 +5240,7 @@ async function verifyReusedPermissionOccurrence(
   );
   expect(staleResponse).toMatchObject({
     status: 409,
-    body: { errorCode: 'VALIDATION_FAILED', retryable: false },
+    body: { errorCode: 'PERMISSION_NOT_ACTIONABLE', retryable: false },
   });
   await fixture.page.evaluate(
     () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
   AgentRunCommandRequest,
-  AgentTurnCommandResponse,
+  StartChatCommandResponse,
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import type { ChatListResponse } from '@garcon/common/chat-list';
@@ -21,7 +21,7 @@ import { GarconHttpError } from '../garcon-client.js';
 import type { CliOutput } from '../output.js';
 
 const CHAT_ID = '1785337200123456';
-const accepted: AgentTurnCommandResponse = {
+const accepted: StartChatCommandResponse = {
   success: true,
   commandType: 'chat-start',
   clientRequestId: 'request',
@@ -29,6 +29,8 @@ const accepted: AgentTurnCommandResponse = {
   turnId: 'turn-1',
   status: 'accepted',
   acceptedAt: new Date().toISOString(),
+  parentChat: null,
+  chat: null,
 };
 const receipt: AgentTurnReceipt = {
   state: 'completed',
@@ -147,7 +149,15 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
     async listChats() { throw new Error('chat list should not be loaded'); },
     async startChat(request) { this.starts.push(request); return accepted; },
     async runChat(request) { this.runs.push(request); return { ...accepted, commandType: 'agent-run' }; },
-    async updateChatTitle(request) { this.titles.push(request); },
+    async updateChatTitle(request) {
+      this.titles.push(request);
+      return {
+        success: true,
+        chatId: request.chatId,
+        title: request.title,
+        changed: true,
+      };
+    },
     async getTurnReceipt() { return receipt; },
     async verifyRuntime() { return true; },
     ...overrides,
@@ -159,7 +169,7 @@ describe('runConsultation', () => {
     const invocation: StartAsyncCliInvocation = {
       kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
-      title: 'Async review',
+      title: 'Async review', json: false,
     };
     let receiptRead = false;
     const testClient = client({
@@ -168,31 +178,38 @@ describe('runConsultation', () => {
         return receipt;
       },
     });
-    const testOutput = output();
-
-    await startConsultationAsync(invocation, 'Implement it', testClient, testOutput, undefined, {
+    const result = await startConsultationAsync(invocation, 'Implement it', testClient, undefined, {
       createId: () => 'request', createChatId: () => CHAT_ID,
     });
 
     expect(receiptRead).toBe(false);
-    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
+    expect(result).toMatchObject({
+      accepted: { chatId: CHAT_ID, turnId: 'turn-1' },
+      titleUpdate: {
+        status: 'succeeded',
+        response: { title: 'Async review', changed: true },
+      },
+    });
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Async review' }]);
-    expect(testOutput.messages).toEqual([]);
+    expect(testClient.starts[0]).not.toHaveProperty('orderedPreambleIds');
   });
 
   test('preserves the accepted async handle when title update fails', async () => {
-    const testOutput = output();
-    await expect(startConsultationAsync({
+    const result = await startConsultationAsync({
       kind: 'start-async', workspace: 'default', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
-      title: 'Async review',
+      title: 'Async review', json: false,
     }, 'Implement it', client({
       async updateChatTitle() { throw new CliError('title update', 'rename failed', 3); },
-    }), testOutput, undefined, {
+    }), undefined, {
       createId: () => 'request', createChatId: () => CHAT_ID,
-    })).rejects.toThrow('rename failed');
+    });
 
-    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
+    expect(result.accepted).toMatchObject({ chatId: CHAT_ID, turnId: 'turn-1' });
+    expect(result.titleUpdate).toMatchObject({
+      status: 'failed',
+      error: expect.objectContaining({ message: 'rename failed' }),
+    });
   });
 
   test('starts a tagged write-capable chat and prints its result', async () => {
@@ -201,6 +218,7 @@ describe('runConsultation', () => {
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       title: 'Implementation review',
       parentChatId: '1785337200123455',
+      orderedPreambleIds: [],
       userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
       additionalTags: ['review-needed'],
     };
@@ -219,6 +237,7 @@ describe('runConsultation', () => {
       permissionMode: 'acceptEdits',
       thinkingMode: 'high',
       tags: ['cli', 'review-needed'],
+      orderedPreambleIds: [],
       userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
     });
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);

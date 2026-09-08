@@ -1,7 +1,10 @@
 // /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
 import { withJsonBody } from '../lib/json-route.js';
-import type { IChatRegistry } from '../chats/store.js';
+import {
+  ChatRegistryDurabilityUnknownError,
+  type IChatRegistry,
+} from '../chats/store.js';
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
@@ -10,11 +13,14 @@ import type { JsonObject } from '../../common/json.js';
 import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../common/handoff-timeouts.js';
 import {
   parseReorderChatRequest,
+  parseSetChatArchivedRequest,
+  parseSetChatPinnedRequest,
   parseSortChatOrderRequest,
   type ReorderChatRequest,
   type ReorderChatResponse,
   type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
+import { parseSetChatTagsRequest } from '../../common/chat-tags-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
@@ -27,7 +33,6 @@ import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import {
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
-import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,
   ChatListResponse,
@@ -37,6 +42,7 @@ import type {
   SetLastSelectedChatRequest,
   SetLastSelectedChatResponse,
 } from '../../common/chat-list.js';
+import type { ParentChatRef } from '../../common/chat-parentage.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../lib/pagination.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
@@ -49,6 +55,7 @@ import { AttachmentValidationError, validateCommandAttachments } from '../attach
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import type {
   ChatOrderComparatorOverrides,
+  ChatOrderStateMutationResult,
   ChatReorderResult,
   ChatStartupPreferences,
   UiSettings,
@@ -136,12 +143,18 @@ function isRequestTimeoutServer(value: unknown): value is RequestTimeoutServer {
     && typeof (value as { timeout?: unknown }).timeout === 'function';
 }
 
-function acceptedTurnResponse(result: CommandAcceptedResponse): Response {
+function acceptedTurnResponse(
+  result: CommandAcceptedResponse,
+  parentChat: ParentChatRef | null,
+): Response {
   if (!result.chatId || !result.turnId) {
     throw new Error('Accepted agent turn is missing its receipt identity');
   }
   const location = `/api/v1/chats/turn-receipt?chatId=${encodeURIComponent(result.chatId)}&turnId=${encodeURIComponent(result.turnId)}`;
-  return Response.json(result, { status: 202, headers: { Location: location } });
+  return Response.json(
+    { ...result, parentChat },
+    { status: 202, headers: { Location: location } },
+  );
 }
 
 interface SettingsDep {
@@ -158,6 +171,16 @@ interface SettingsDep {
   removeSessionName(chatId: string): Promise<void>;
   togglePin(chatId: string): Promise<{ isPinned: boolean }>;
   toggleArchive(chatId: string): Promise<{ isArchived: boolean }>;
+  setPinned(
+    chatId: string,
+    isPinned: boolean,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatOrderStateMutationResult>;
+  setArchived(
+    chatId: string,
+    isArchived: boolean,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatOrderStateMutationResult>;
   reorderChat(
     request: ReorderChatRequest,
     isKnownChat: (chatId: string) => boolean,
@@ -412,7 +435,7 @@ export default function createChatRoutes({
       const input = parseCommandRequest(parseStartChatCommandRequest, body);
       const images = validatedCommandAttachments(input.images);
       const result = await commands.submitStart({ ...input, images });
-      return acceptedTurnResponse(result);
+      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
@@ -661,6 +684,46 @@ export default function createChatRoutes({
     }
   }
 
+  async function putPinned(body: unknown): Promise<Response> {
+    try {
+      const request = parseSetChatPinnedRequest(body);
+      if (!request) {
+        return jsonError('Invalid desired pinned state', 400, 'VALIDATION_FAILED', false);
+      }
+      const result = await settings.setPinned(
+        request.chatId,
+        request.isPinned,
+        (chatId) => registry.hasChat(chatId),
+      );
+      if (!result.success) {
+        return jsonError(result.error, result.status, result.errorCode, false);
+      }
+      return Response.json(result.response);
+    } catch (error: unknown) {
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function putArchived(body: unknown): Promise<Response> {
+    try {
+      const request = parseSetChatArchivedRequest(body);
+      if (!request) {
+        return jsonError('Invalid desired archived state', 400, 'VALIDATION_FAILED', false);
+      }
+      const result = await settings.setArchived(
+        request.chatId,
+        request.isArchived,
+        (chatId) => registry.hasChat(chatId),
+      );
+      if (!result.success) {
+        return jsonError(result.error, result.status, result.errorCode, false);
+      }
+      return Response.json(result.response);
+    } catch (error: unknown) {
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function postMarkRead(
     body: MarkChatsReadRequest & Record<string, unknown>,
   ): Promise<Response> {
@@ -755,24 +818,32 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchChatTags(body: Record<string, unknown>): Promise<Response> {
+  async function patchChatTags(body: unknown): Promise<Response> {
     try {
-      const chatId = String(body.chatId || '').trim();
-      if (!chatId) {
-        return jsonError('chatId is required', 400);
+      const request = parseSetChatTagsRequest(body);
+      if (!request) {
+        return jsonError('Invalid chat tags request', 400, 'VALIDATION_FAILED', false);
       }
 
-      const session = registry.getChat(chatId);
-      if (!session) {
+      const result = await registry.setTags(request.chatId, request.tags);
+      if (!result) {
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
-
-      const rawTags = Array.isArray(body.tags) ? body.tags : [];
-      const tags = normalizeTags(rawTags);
-
-      registry.updateChat(chatId, { tags });
-      return Response.json({ success: true, chatId, tags });
+      return Response.json({
+        success: true,
+        chatId: request.chatId,
+        tags: result.entry.tags,
+        changed: result.changed,
+      });
     } catch (error: unknown) {
+      if (error instanceof ChatRegistryDurabilityUnknownError) {
+        return jsonError(
+          'Chat tag save durability could not be confirmed. Retry after storage recovers.',
+          503,
+          'CHAT_TAGS_SAVE_UNKNOWN',
+          true,
+        );
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -811,7 +882,7 @@ export default function createChatRoutes({
       }
       const result = await commands.submitRun({ ...input, images });
 
-      return acceptedTurnResponse(result);
+      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null);
     } catch (error: unknown) {
       if (error instanceof CommandExecutionControlError) {
         const body: QueueCommandErrorResponse = {
@@ -1007,7 +1078,10 @@ export default function createChatRoutes({
     try {
       const input = parseCommandRequest(parseSteerCommandRequest, body);
       const result = await commands.submitSteer(input);
-      return Response.json(result, { status: 202 });
+      return Response.json({
+        ...result,
+        parentChat: registry.getChat(input.chatId)?.parentChat ?? null,
+      }, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
@@ -1081,7 +1155,10 @@ export default function createChatRoutes({
     try {
       const input = parseCommandRequest(parseAgentStopCommandRequest, body);
       const result = await commands.submitStop(input);
-      return Response.json(result);
+      return Response.json({
+        ...result,
+        parentChat: registry.getChat(input.chatId)?.parentChat ?? null,
+      });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
@@ -1240,8 +1317,14 @@ export default function createChatRoutes({
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
     '/api/v1/chats/project-path': { PATCH: withJsonBody(patchProjectPath) },
     '/api/v1/chats/details': { GET: getChatDetails },
-    '/api/v1/chats/pin': { POST: withJsonBody(postTogglePin) },
-    '/api/v1/chats/archive': { POST: withJsonBody(postToggleArchive) },
+    '/api/v1/chats/pin': {
+      POST: withJsonBody(postTogglePin),
+      PUT: withJsonBody(putPinned),
+    },
+    '/api/v1/chats/archive': {
+      POST: withJsonBody(postToggleArchive),
+      PUT: withJsonBody(putArchived),
+    },
     '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
     '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChat) },
     '/api/v1/chats/sort': { POST: withJsonBody(postSortChatOrder) },

@@ -12,6 +12,7 @@ function createHarness(enabled = false) {
       transcriptSearch: { enabled: current },
       agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true },
     }),
+    confirmDurability: mock(async () => undefined),
     setFeatureSettings: mock(async (patch) => {
       events.push(`persist:${patch.transcriptSearch.enabled}`);
       current = patch.transcriptSearch.enabled;
@@ -84,6 +85,19 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     expect(harness.events).toEqual(['start', 'start']);
     expect(harness.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
+
+  for (const [enabled, lifecycle] of [[true, 'start'], [false, 'delete']]) {
+    it(`confirms settings durability before the ${lifecycle} same-value lifecycle action`, async () => {
+      const harness = createHarness(enabled);
+      harness.settings.confirmDurability.mockImplementationOnce(async () => {
+        harness.events.push('confirm');
+      });
+
+      await harness.coordinator.setEnabled(enabled);
+
+      expect(harness.events).toEqual(['confirm', lifecycle]);
+    });
+  }
 
   it('persists a combined feature patch once', async () => {
     const harness = createHarness(false);

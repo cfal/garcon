@@ -3962,14 +3962,46 @@ describe('ChatCommandService', () => {
     };
 
     await expect(service.submitPermissionDecision(input)).rejects.toMatchObject({
-      code: 'VALIDATION_FAILED',
+      code: 'PERMISSION_NOT_ACTIONABLE',
       status: 409,
     });
-    await expect(service.submitPermissionDecision(input)).resolves.toMatchObject({
-      status: 'duplicate',
+    await expect(service.submitPermissionDecision(input)).rejects.toMatchObject({
+      code: 'PERMISSION_NOT_ACTIONABLE',
+      status: 409,
     });
     expect(validateAction).toHaveBeenCalledTimes(1);
     expect(agents.resolvePermission).not.toHaveBeenCalled();
+  });
+
+  it('replays an uncertain permission delivery failure without repeating provider IO', async () => {
+    const providerError = new Error('provider acknowledgement failed');
+    const { service, agents } = makeService();
+    agents.resolvePermission.mockRejectedValueOnce(providerError);
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      permissionOccurrenceId: 'incarnation-1',
+      allow: true,
+      alwaysAllow: false,
+      clientRequestId: 'req-perm-provider-failure',
+      control: {
+        serverInstanceId: 'server-instance-test',
+        chatId: SOURCE_CHAT_ID,
+        runId: 'run-1',
+        permissionOccurrenceId: 'incarnation-1',
+      },
+    };
+
+    await expect(service.submitPermissionDecision(input)).rejects.toMatchObject({
+      code: 'PERMISSION_DECISION_OUTCOME_UNKNOWN',
+      status: 500,
+      retryable: false,
+    });
+    await expect(service.submitPermissionDecision(input)).rejects.toMatchObject({
+      code: 'PERMISSION_DECISION_OUTCOME_UNKNOWN',
+      status: 500,
+      retryable: false,
+    });
+    expect(agents.resolvePermission).toHaveBeenCalledTimes(1);
   });
 
   it('routes /compact to the agent compaction dispatch', async () => {

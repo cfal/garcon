@@ -130,9 +130,12 @@ describe('chats API contract', () => {
 				pendingChatCount: 0,
 				failedChatCount: 0,
 				unindexedChatCount: 0,
-				unsupportedChatCount: 0,
-				resultsTruncated: false,
-			},
+					unsupportedChatCount: 0,
+					resultsTruncated: false,
+					failedChats: [],
+					failedChatsOmittedCount: 0,
+				},
+				removedStaleResultCount: 0,
 			...overrides,
 		};
 	}

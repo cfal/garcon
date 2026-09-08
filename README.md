@@ -105,7 +105,7 @@ Use an existing agent login or subscription where its CLI supports one, or confi
 
 ## Automate And Delegate
 
-Garcon's CLI starts or resumes ordinary visible chats through an already-running server. It also starts detached work, lists and searches chat history, reads bounded transcript context, records delegated parentage, queries the live agent and model catalog, observes exact turns, exports transcripts, builds bounded handoff artifacts, appends presentation-only rows, delivers asynchronous work, steers active turns, and stops execution.
+Garcon's CLI starts or resumes ordinary visible chats through an already-running server. It also starts detached work, lists and searches chat history, reads bounded transcript context, records delegated parentage, suppresses or explicitly selects new-chat preambles, queries the live agent and model catalog, observes exact turns and pending permissions, makes occurrence-bound permission decisions, sets archive/pin/title/tag state, exports transcripts, builds bounded handoff artifacts, appends presentation-only rows, delivers asynchronous work, steers active turns, and stops execution.
 
 ```bash
 # Start a visible delegated chat and record its lineage in Chat Map.

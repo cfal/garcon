@@ -1,0 +1,58 @@
+import crypto from 'node:crypto';
+import type {
+  CommandAcceptedResponse,
+  PermissionDecisionCommandRequest,
+} from '@garcon/common/chat-command-contracts';
+import type { PermissionDecisionCliCommand } from './args.js';
+import type { CliOutput } from './output.js';
+
+export interface PermissionDecisionClient {
+  decidePermission(
+    request: PermissionDecisionCommandRequest,
+    signal?: AbortSignal,
+  ): Promise<CommandAcceptedResponse>;
+}
+
+export function permissionDecisionClientRequestId(
+  command: Pick<
+    PermissionDecisionCliCommand,
+    'serverInstanceId' | 'chatId' | 'runId' | 'permissionOccurrenceId'
+  >,
+): string {
+  const digest = crypto.createHash('sha256').update(JSON.stringify([
+    command.serverInstanceId,
+    command.chatId,
+    command.runId,
+    command.permissionOccurrenceId,
+  ])).digest('hex');
+  return `permission-v1:${digest}`;
+}
+
+export async function runPermissionDecision(
+  command: PermissionDecisionCliCommand,
+  client: PermissionDecisionClient,
+  output: CliOutput,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await client.decidePermission({
+    clientRequestId: permissionDecisionClientRequestId(command),
+    chatId: command.chatId,
+    permissionOccurrenceId: command.permissionOccurrenceId,
+    allow: command.allow,
+    alwaysAllow: false,
+    control: {
+      serverInstanceId: command.serverInstanceId,
+      chatId: command.chatId,
+      runId: command.runId,
+      permissionOccurrenceId: command.permissionOccurrenceId,
+    },
+  }, signal);
+  output.result(command.json
+    ? JSON.stringify(response, null, 2)
+    : [
+      `chat id: ${response.chatId}`,
+      `permission occurrence: ${command.permissionOccurrenceId}`,
+      `decision: ${command.allow ? 'allow' : 'deny'}`,
+      `status: ${response.status}`,
+    ].join('\n'));
+}

@@ -29,6 +29,7 @@
     "./chat-preamble-selection-contracts": "./chat-preamble-selection-contracts.ts",
     "./chat-row-contracts": "./chat-row-contracts.ts",
     "./chat-snapshot": "./chat-snapshot.ts",
+    "./chat-tags-contracts": "./chat-tags-contracts.ts",
     "./chat-transient-feed": "./chat-transient-feed.ts",
     "./chat-search": "./chat-search.ts",
     "./chat-title-contracts": "./chat-title-contracts.ts",

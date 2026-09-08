@@ -16,6 +16,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { ChatRegistryDurabilityUnknownError } from '../../chats/store.js';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
@@ -23,7 +24,12 @@ const registry = {
   getChat: mock(() => undefined),
   hasChat: mock((chatId) => registry.getChat(chatId) != null),
   addChat: mock(() => undefined),
-  updateChat: mock(() => undefined),
+  updateChat: mock(() => Promise.resolve({ id: '100', tags: [] })),
+  setTags: mock((chatId, tags) => Promise.resolve({
+    entry: { id: chatId, tags: [...tags] },
+    durability: 'durable',
+    changed: true,
+  })),
   removeChat: mock(() => undefined),
   listAllChats: mock(() => ({})),
 };
@@ -95,6 +101,12 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   beforeEach(() => {
     registry.getChat.mockClear();
     registry.updateChat.mockClear();
+    registry.setTags.mockClear();
+    registry.setTags.mockImplementation((chatId, tags) => Promise.resolve({
+      entry: { id: chatId, tags: [...tags] },
+      durability: 'durable',
+      changed: true,
+    }));
     parseJsonBody.mockClear();
   });
 
@@ -166,5 +178,47 @@ describe('PATCH /api/v1/chats/tags – tag normalization', () => {
     const body = await res.json();
 
     expect(body.tags).toEqual(['alpha', 'mid', 'zebra']);
+  });
+
+  it('requires an explicit array instead of treating malformed input as clear', async () => {
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: ['keep'] });
+    parseJsonBody.mockResolvedValue({ chatId: '100' });
+
+    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
+
+    expect(res.status).toBe(400);
+    expect(registry.setTags).not.toHaveBeenCalled();
+  });
+
+  it('does not persist an already-satisfied normalized tag set', async () => {
+    registry.setTags.mockResolvedValueOnce({
+      entry: { id: '100', tags: ['ops', 'review'] },
+      durability: 'durable',
+      changed: false,
+    });
+    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['Review', 'ops'] });
+
+    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
+    const body = await res.json();
+
+    expect(body.changed).toBe(false);
+    expect(registry.setTags).toHaveBeenCalledWith('100', ['ops', 'review']);
+  });
+
+  it('reports unconfirmed tag durability as a typed retryable failure', async () => {
+    registry.setTags.mockRejectedValueOnce(new ChatRegistryDurabilityUnknownError(
+      'injected unknown durability',
+    ));
+    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['replacement'] });
+
+    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: 'Chat tag save durability could not be confirmed. Retry after storage recovers.',
+      errorCode: 'CHAT_TAGS_SAVE_UNKNOWN',
+      retryable: true,
+    });
   });
 });

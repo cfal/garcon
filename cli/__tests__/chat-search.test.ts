@@ -56,7 +56,10 @@ function response(overrides: Partial<ChatSearchResponse> = {}): ChatSearchRespon
       unindexedChatCount: 0,
       unsupportedChatCount: 0,
       resultsTruncated: false,
+      failedChats: [],
+      failedChatsOmittedCount: 0,
     },
+    removedStaleResultCount: 0,
     ...overrides,
   };
 }
@@ -74,6 +77,26 @@ describe('chat search', () => {
     expect(unfiltered.candidateChatCount).toBe(2);
 
     const filtered = buildChatSearchRequest({ ...command, filter: 'agent:codex' }, chats);
+    expect(filtered.request.chatIds).toEqual([CHAT_ID]);
+    expect(filtered.candidateChatCount).toBe(1);
+  });
+
+  test('uses the shared parent and date filters for transcript candidate admission', () => {
+    const child = chat({
+      id: CHAT_ID,
+      parentChat: { chatId: OTHER_CHAT_ID, relation: 'delegation' },
+      activity: {
+        createdAt: '2026-09-01T00:00:00.000Z',
+        lastActivityAt: '2026-09-03T00:00:00.000Z',
+        lastReadAt: null,
+      },
+    });
+    const unrelated = chat({ id: '1785337200123458' });
+    const filtered = buildChatSearchRequest({
+      ...command,
+      filter: `parent:${OTHER_CHAT_ID} created-before:2026-09-02 updated-after:2026-09-02`,
+    }, chatList([unrelated, child]));
+
     expect(filtered.request.chatIds).toEqual([CHAT_ID]);
     expect(filtered.candidateChatCount).toBe(1);
   });
@@ -202,6 +225,24 @@ describe('chat search', () => {
         unindexedChatCount: 4,
         unsupportedChatCount: 5,
         resultsTruncated: true,
+        failedChats: [{
+          chatId: CHAT_ID,
+          transcriptViewId: null,
+          stage: 'adoption',
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          indexedThroughOrdinal: null,
+          targetThroughOrdinal: null,
+          recovery: 'source-required',
+        }, {
+          chatId: OTHER_CHAT_ID,
+          transcriptViewId: 'view-2',
+          stage: 'indexing',
+          errorCode: 'SEARCH_INDEX_FAILED',
+          indexedThroughOrdinal: 10,
+          targetThroughOrdinal: 20,
+          recovery: 'index-retry',
+        }],
+        failedChatsOmittedCount: 1,
       },
     }), 15);
     const diagnostics = searchDiagnostics(result).join('\n');
@@ -211,6 +252,8 @@ describe('chat search', () => {
     expect(diagnostics).toContain('unsupported');
     expect(diagnostics).toContain('matches and total may be incomplete');
     expect(diagnostics).toContain('--offset 20');
+    expect(diagnostics).toContain(`chat ${CHAT_ID}; adoption; TRANSCRIPT_UNAVAILABLE`);
+    expect(diagnostics).toContain('1 additional failed chats omitted');
     expect(diagnostics).not.toContain('search complete');
   });
 
@@ -225,6 +268,8 @@ describe('chat search', () => {
         unindexedChatCount: 0,
         unsupportedChatCount: 0,
         resultsTruncated: false,
+        failedChats: [],
+        failedChatsOmittedCount: 0,
       },
     }), 0);
     expect(searchDiagnostics(result)).toEqual([
@@ -249,6 +294,22 @@ describe('chat search', () => {
     const diagnostics = searchDiagnostics(result);
     expect(diagnostics).toContainEqual(expect.stringContaining(expected));
     expect(diagnostics.join('\n')).not.toContain('no matching indexed transcript content');
+  });
+
+  test('warns when part of a page is removed as stale without changing the server cursor', () => {
+    const result = buildChatSearchResult(command, chatList([chat()]), response({
+      results: [response().results[0]!],
+      page: { offset: 0, limit: 20, total: 25, hasMore: true, nextOffset: 20 },
+      removedStaleResultCount: 1,
+    }), 1);
+
+    expect(result.page).toEqual({
+      offset: 0, limit: 20, total: 25, hasMore: true, nextOffset: 20,
+    });
+    expect(searchDiagnostics(result)).toEqual(expect.arrayContaining([
+      expect.stringContaining('1 stale result removed after paging'),
+      expect.stringContaining('--offset 20'),
+    ]));
   });
 
   test('maps disabled search to an actionable argument error', async () => {
@@ -286,6 +347,25 @@ describe('chat search', () => {
     }, output)).rejects.toMatchObject({
       exitCode: 3,
       message: 'temporarily unavailable',
+    } satisfies Partial<CliError>);
+  });
+
+  test('maps search timeouts to an actionable incomplete-coverage diagnostic', async () => {
+    const output = { result() {}, diagnostic() {} } as CliOutput;
+    await expect(runChatSearch(command, {
+      async listChats() { return chatList([]); },
+      async searchChats() {
+        throw new GarconHttpError(
+          'chat search',
+          'timed out',
+          503,
+          'SEARCH_TIMEOUT',
+          true,
+        );
+      },
+    }, output)).rejects.toMatchObject({
+      exitCode: 3,
+      message: expect.stringContaining('timed out before coverage could be reported'),
     } satisfies Partial<CliError>);
   });
 });

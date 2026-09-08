@@ -19,6 +19,7 @@ import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import { withCurrentExecutionControl } from '../lib/command-execution-control-error.js';
 import { resolveUpdatedProjectPath } from '../lib/command-project-path.js';
+import { permissionDecisionError } from '../lib/permission-decision-error.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -220,34 +221,33 @@ export class SessionCommands {
       },
     });
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
-    if (ledger.kind !== 'duplicate') {
-      try {
-        this.deps.transientFeeds.validateAction(input.control);
-        await this.deps.agents.resolvePermission(input.chatId, input.permissionOccurrenceId, {
-          allow: input.allow,
-          alwaysAllow: input.alwaysAllow,
-          response: input.response,
-        }, input.control);
-        await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
-      } catch (error) {
-        await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        if (
-          error instanceof TransientControlActionError
-          || error instanceof PermissionNotActionableError
-        ) {
-          throw new CommandValidationError(
-            'VALIDATION_FAILED',
-            'This permission request is no longer actionable',
-            409,
-            false,
-          );
-        }
-        throw error;
-      }
+    if (ledger.kind === 'duplicate') {
+      if (ledger.record.status === 'finished') return commandResultFromRecord(ledger.record, 'duplicate');
+      const failureCode = ledger.record.status === 'failed'
+        && ledger.record.errorCode === 'PERMISSION_NOT_ACTIONABLE'
+        ? 'PERMISSION_NOT_ACTIONABLE'
+        : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+      throw permissionDecisionError(failureCode);
     }
-    return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
+    try {
+      this.deps.transientFeeds.validateAction(input.control);
+      await this.deps.agents.resolvePermission(input.chatId, input.permissionOccurrenceId, {
+        allow: input.allow,
+        alwaysAllow: input.alwaysAllow,
+        response: input.response,
+      }, input.control);
+      await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
+    } catch (error) {
+      const failureCode = error instanceof TransientControlActionError || error instanceof PermissionNotActionableError
+        ? 'PERMISSION_NOT_ACTIONABLE'
+        : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+      const failure = permissionDecisionError(failureCode);
+      await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
+        error: failure.message, errorCode: failure.code,
+      });
+      throw failure;
+    }
+    return commandResultFromRecord(ledger.record);
   }
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {

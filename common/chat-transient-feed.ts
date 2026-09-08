@@ -57,8 +57,8 @@ export function parseTransientFeedRow(value: unknown): TransientFeedRow | null {
   if (!permissionOccurrenceId || !runId || !transcriptViewId
       || afterOrdinal === null || displayOrder === null || !parsedMessage) return null;
   if (
-    parsedMessage instanceof PermissionRequestMessage
-    && parsedMessage.permissionOccurrenceId !== permissionOccurrenceId
+    !(parsedMessage instanceof PermissionRequestMessage)
+    || parsedMessage.permissionOccurrenceId !== permissionOccurrenceId
   ) return null;
   return {
     permissionOccurrenceId,

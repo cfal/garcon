@@ -6,7 +6,11 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
-import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import {
+  AtomicJsonWriteError,
+  readJsonStateFile,
+  writeJsonFileAtomic,
+} from '../lib/json-file-store.ts';
 import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import {
   ChatNameStore,
@@ -80,6 +84,11 @@ interface SettingsStoreEvents {
   'list-changed': Parameters<ListChangedCallback>;
   'remote-settings-changed': Parameters<RemoteSettingsChangedCallback>;
 }
+
+type PendingSettingsNotification =
+  | { type: 'session-name-changed'; chatId: string; title: string }
+  | { type: 'list-changed'; reason: string; chatId: string }
+  | { type: 'remote-settings-changed' };
 
 function stringRecord(raw: Record<string, unknown>): Record<string, string> {
   const result: Record<string, string> = {};
@@ -242,6 +251,8 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
 export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   #cache: ProjectSettings | null = null;
   #mutationDraft: ProjectSettings | null = null;
+  #settingsDurabilityUnknown = false;
+  #pendingSettingsNotifications: PendingSettingsNotification[] = [];
   #workspaceDir: string;
   #writeLock = new KeyedPromiseLock();
   #chatNames: ChatNameStore;
@@ -258,12 +269,23 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     const context: SettingsStoreContext = {
       readSettings: () => this.#readSettings(),
       mutate: (fn) => this.#withLock(fn),
-      save: (settings) => this.saveSettings(settings),
+      save: (settings) => this.#saveSettingsWithNotificationsUnlocked(settings, []),
       saveAndMaybeEmitRemote: (settings, remoteSettingsChanged) => (
         this.#saveSettingsAndMaybeEmitRemote(settings, remoteSettingsChanged)
       ),
-      emitSessionNameChanged: (chatId, title) => this.emitSessionNameChanged(chatId, title),
-      emitListChanged: (reason, chatId) => this.emitListChanged(reason, chatId),
+      saveAndEmitSessionName: (settings, chatId, title) => (
+        this.#saveSettingsWithNotificationsUnlocked(settings, [
+          { type: 'session-name-changed', chatId, title },
+        ])
+      ),
+      saveAndEmitList: (settings, remoteSettingsChanged, reason, chatId) => (
+        this.#saveSettingsWithNotificationsUnlocked(settings, [
+          ...(remoteSettingsChanged
+            ? [{ type: 'remote-settings-changed' as const }]
+            : []),
+          { type: 'list-changed', reason, chatId },
+        ])
+      ),
     };
     this.#chatNames = new ChatNameStore(context);
     this.#uiSettings = new UiSettingsStore(context);
@@ -278,6 +300,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   // clobber each other's changes to project-settings.json.
   async #withLock<T>(fn: SettingsMutation<T>): Promise<T> {
     return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, async () => {
+      await this.#confirmSettingsDurability();
       const previousDraft = this.#mutationDraft;
       this.#mutationDraft = cloneSettings(this.#getCachedSettings());
       try {
@@ -319,18 +342,22 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     const { settings, migrated } = await this.#readFromDiskWithMigration();
     this.#cache = settings;
     if (migrated) {
-      await this.#writeToDisk(settings);
+      await this.#saveSettingsWithNotificationsUnlocked(settings, []);
     }
     return this.#cache;
   }
 
   async loadSettings(): Promise<ProjectSettings> {
-    const { settings: newCache, migrated } = await this.#readFromDiskWithMigration();
-    this.#cache = newCache;
-    if (migrated) {
-      await this.#writeToDisk(newCache);
-    }
-    return newCache;
+    return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, async () => {
+      const { settings: newCache, migrated } = await this.#readFromDiskWithMigration();
+      this.#cache = newCache;
+      this.#settingsDurabilityUnknown = false;
+      this.#pendingSettingsNotifications = [];
+      if (migrated) {
+        await this.#saveSettingsWithNotificationsUnlocked(newCache, []);
+      }
+      return this.#getCachedSettings();
+    });
   }
 
   #getCachedSettings(): ProjectSettings {
@@ -345,16 +372,71 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   }
 
   async saveSettings(settings: unknown): Promise<void> {
+    await this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, async () => {
+      await this.#confirmSettingsDurability();
+      await this.#saveSettingsWithNotificationsUnlocked(settings, []);
+    });
+  }
+
+  async #saveSettingsWithNotificationsUnlocked(
+    settings: unknown,
+    notifications: readonly PendingSettingsNotification[],
+  ): Promise<void> {
     const validated = sanitizeProjectSettings(settings).settings;
-    await this.#writeToDisk(validated);
+    try {
+      await this.#writeToDisk(validated);
+    } catch (error) {
+      if (error instanceof AtomicJsonWriteError && error.renamed) {
+        this.#cache = validated;
+        this.#settingsDurabilityUnknown = true;
+        this.#pendingSettingsNotifications.push(...notifications);
+      }
+      throw error;
+    }
     this.#cache = validated;
+    this.#settingsDurabilityUnknown = false;
+    this.#publishSettingsNotifications(notifications);
+  }
+
+  async #confirmSettingsDurability(): Promise<void> {
+    if (!this.#settingsDurabilityUnknown) return;
+    await this.#writeToDisk(this.#getCachedSettings());
+    this.#settingsDurabilityUnknown = false;
+    this.#publishSettingsNotifications([]);
+  }
+
+  #publishSettingsNotifications(
+    notifications: readonly PendingSettingsNotification[],
+  ): void {
+    const confirmed = [...this.#pendingSettingsNotifications, ...notifications];
+    this.#pendingSettingsNotifications = [];
+    for (const notification of confirmed) {
+      switch (notification.type) {
+        case 'session-name-changed':
+          this.emitSessionNameChanged(notification.chatId, notification.title);
+          break;
+        case 'list-changed':
+          this.emitListChanged(notification.reason, notification.chatId);
+          break;
+        case 'remote-settings-changed':
+          this.emitRemoteSettingsChanged();
+          break;
+      }
+    }
+  }
+
+  async confirmDurability(): Promise<void> {
+    await this.#writeLock.runExclusive(
+      SETTINGS_WRITE_LOCK_KEY,
+      () => this.#confirmSettingsDurability(),
+    );
   }
 
   async #saveSettingsAndMaybeEmitRemote(settings: ProjectSettings, remoteSettingsChanged: boolean): Promise<void> {
-    await this.saveSettings(settings);
-    if (remoteSettingsChanged) {
-      this.emitRemoteSettingsChanged();
-    }
+    await this.#saveSettingsWithNotificationsUnlocked(
+      settings,
+      remoteSettingsChanged ? [{ type: 'remote-settings-changed' }] : [],
+    );
   }
 
   async reconcileWithRegistry(registry: IChatRegistry): Promise<void> {
@@ -365,7 +447,10 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#chatNames.getChatName(chatId);
   }
 
-  async setSessionName(chatId: string, title: string): Promise<void> {
+  async setSessionName(
+    chatId: string,
+    title: string,
+  ): Promise<{ title: string; changed: boolean }> {
     return this.#chatNames.setSessionName(chatId, title);
   }
 
@@ -475,6 +560,22 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   async toggleArchive(chatId: string): Promise<{ isArchived: boolean }> {
     return this.#chatOrder.toggleArchive(chatId);
+  }
+
+  async setPinned(
+    chatId: string,
+    isPinned: boolean,
+    isKnownChat: (chatId: string) => boolean,
+  ): ReturnType<ChatOrderStore['setPinned']> {
+    return this.#chatOrder.setPinned(chatId, isPinned, isKnownChat);
+  }
+
+  async setArchived(
+    chatId: string,
+    isArchived: boolean,
+    isKnownChat: (chatId: string) => boolean,
+  ): ReturnType<ChatOrderStore['setArchived']> {
+    return this.#chatOrder.setArchived(chatId, isArchived, isKnownChat);
   }
 
   async reorderChat(

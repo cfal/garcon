@@ -49,7 +49,7 @@ function createMockCtx() {
   return {
     settings: {
       getRemoteSettingsSnapshotSource: mock(() => remoteSettingsSource()),
-      setSessionName: mock(() => Promise.resolve(undefined)),
+      setSessionName: mock((_chatId, title) => Promise.resolve({ title, changed: true })),
       getRemoteSettingsVersion: mock(() => 0),
       getUiSettings: mock(() => ({})),
       setUiSettings: mock(() => Promise.resolve({})),
@@ -165,7 +165,12 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
+    expect(body).toEqual({
+      success: true,
+      chatId: '123',
+      title: 'My Chat',
+      changed: true,
+    });
     expect(ctx.settings.setSessionName).toHaveBeenCalledWith('123', 'My Chat');
   });
 
@@ -176,7 +181,7 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('chatId is required');
+    expect(body.error).toBe('Invalid chat title request');
   });
 
   it('returns 400 when title is empty', async () => {
@@ -186,7 +191,7 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('title is required');
+    expect(body.error).toBe('Invalid chat title request');
   });
 
   it('returns 400 when title is whitespace-only', async () => {
@@ -196,7 +201,7 @@ describe('PUT /api/app/session-name', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('title is required');
+    expect(body.error).toBe('Invalid chat title request');
   });
 
   it('trims the title before saving', async () => {

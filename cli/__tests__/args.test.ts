@@ -4,6 +4,8 @@ import { CliError } from '../errors.js';
 
 const CHAT_ID = '1785337200123456';
 const PARENT_CHAT_ID = '1785337200123455';
+const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+const SECOND_PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1175';
 const ENV = { HOME: '/home/test' };
 
 describe('parseCliArgs', () => {
@@ -249,18 +251,38 @@ describe('parseCliArgs', () => {
       model: 'gpt-5.4',
       prompt: 'Review this',
       readsPromptFromStdin: false,
+      json: false,
+    });
+  });
+
+  test('parses explicit ordered and empty preamble selections for new chats', () => {
+    expect(parseCliArgs([
+      'start', '--agent', 'codex', '--model', 'gpt',
+      '--preamble', PREAMBLE_ID,
+      '--preamble', SECOND_PREAMBLE_ID,
+      'Review',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      orderedPreambleIds: [PREAMBLE_ID, SECOND_PREAMBLE_ID],
+    });
+    expect(parseCliArgs([
+      'start-async', '--agent', 'codex', '--model', 'gpt', '--no-preamble', '--json', 'Review',
+    ], ENV)).toMatchObject({
+      kind: 'start-async',
+      orderedPreambleIds: [],
+      json: true,
     });
   });
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] start [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
+      'garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
       'resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
-      'resume-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>',
+      'resume-async <chat-id> [--allow-steer] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>',
     );
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
@@ -397,6 +419,7 @@ describe('parseCliArgs', () => {
       allowSteer: false,
       message: 'Implement the review',
       readsMessageFromStdin: false,
+      json: false,
     });
   });
 
@@ -431,6 +454,7 @@ describe('parseCliArgs', () => {
       allowSteer: true,
       message: 'Follow up',
       readsMessageFromStdin: false,
+      json: false,
     });
     expect(parseCliArgs(['resume-async', CHAT_ID, '--allow-steer', 'Follow up'], ENV)).toMatchObject({
       kind: 'resume-async',
@@ -459,6 +483,7 @@ describe('parseCliArgs', () => {
       workspace: 'default',
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
+      json: false,
     });
     expect(parseCliArgs(['--workspace', 'work', 'stop', CHAT_ID], ENV)).toMatchObject({
       kind: 'stop',
@@ -515,7 +540,6 @@ describe('parseCliArgs', () => {
     { args: ['resume-async', CHAT_ID, '--title', 'T', 'message'], message: '--title cannot be used with resume-async' },
     { args: ['resume-async', CHAT_ID, '--tag', 'review', 'message'], message: '--tag cannot be used with resume-async' },
     { args: ['resume-async', CHAT_ID, '--resume', CHAT_ID, 'message'], message: 'Unknown option' },
-    { args: ['resume-async', CHAT_ID, '--json', 'message'], message: '--json cannot be used with resume-async' },
     { args: ['stop', CHAT_ID, '--cwd', '.'], message: '--cwd cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--agent', 'codex'], message: '--agent cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--provider', 'p'], message: '--provider cannot be used with stop' },
@@ -526,7 +550,6 @@ describe('parseCliArgs', () => {
     { args: ['stop', CHAT_ID, '--resume', CHAT_ID], message: 'Unknown option' },
     { args: ['stop', CHAT_ID, '--model', 'gpt'], message: '--model cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--tag', 'review'], message: '--tag cannot be used with stop' },
-    { args: ['stop', CHAT_ID, '--json'], message: '--json cannot be used with stop' },
     { args: ['stop', CHAT_ID, '--allow-steer'], message: '--allow-steer cannot be used with stop' },
     { args: ['stop', CHAT_ID, '-'], message: 'exactly one chat ID' },
     { args: ['list', 'agents', '--allow-steer'], message: '--allow-steer cannot be used with list' },
@@ -552,6 +575,65 @@ describe('parseCliArgs', () => {
       expect(error).toBeInstanceOf(CliError);
       expect((error as CliError).exitCode).toBe(2);
     }
+  });
+
+  test('parses JSON output for asynchronous delivery and stop', () => {
+    expect(parseCliArgs(['resume-async', CHAT_ID, '--json', 'message'], ENV)).toMatchObject({
+      kind: 'resume-async',
+      json: true,
+    });
+    expect(parseCliArgs(['stop', CHAT_ID, '--json'], ENV)).toMatchObject({
+      kind: 'stop',
+      json: true,
+    });
+  });
+
+  test('parses permission decisions and desired metadata state', () => {
+    expect(parseCliArgs([
+      '--workspace', 'work',
+      'permission-decision', CHAT_ID, 'permission-1', 'allow',
+      '--run', 'run-1', '--server-instance', 'instance-1', '--json',
+    ], ENV)).toEqual({
+      kind: 'permission-decision',
+      workspace: 'work',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      permissionOccurrenceId: 'permission-1',
+      runId: 'run-1',
+      serverInstanceId: 'instance-1',
+      allow: true,
+      json: true,
+    });
+    expect(parseCliArgs(['unarchive', CHAT_ID], ENV)).toMatchObject({
+      kind: 'unarchive', chatId: CHAT_ID, json: false,
+    });
+    expect(parseCliArgs(['rename', CHAT_ID, '  Review', 'results  ', '--json'], ENV)).toMatchObject({
+      kind: 'rename', chatId: CHAT_ID, title: 'Review results', json: true,
+    });
+    expect(parseCliArgs([
+      'set-tags', CHAT_ID, '--tag', 'Review Needed', '--tag', 'ops!', '--json',
+    ], ENV)).toMatchObject({
+      kind: 'set-tags', chatId: CHAT_ID, tags: ['ops', 'review-needed'], json: true,
+    });
+    expect(parseCliArgs(['set-tags', CHAT_ID, '--clear'], ENV)).toMatchObject({
+      kind: 'set-tags', chatId: CHAT_ID, tags: [], json: false,
+    });
+  });
+
+  test.each([
+    [['permission-decision', CHAT_ID, 'permission-1', 'allow', '--run', 'run-1'], '--server-instance'],
+    [['permission-decision', CHAT_ID, 'permission-1', 'maybe', '--run', 'run-1', '--server-instance', 'instance-1'], 'allow or deny'],
+    [['permission-decision', CHAT_ID, ' padded ', 'deny', '--run', 'run-1', '--server-instance', 'instance-1'], 'permission occurrence ID'],
+    [['archive', CHAT_ID, 'extra'], 'exactly one chat ID'],
+    [['rename', CHAT_ID], 'chat ID and title'],
+    [['set-tags', CHAT_ID], 'either repeatable --tag or --clear'],
+    [['set-tags', CHAT_ID, '--clear', '--tag', 'ops'], 'either repeatable --tag or --clear'],
+    [['start', '--agent', 'codex', '--model', 'gpt', '--no-preamble', '--preamble', PREAMBLE_ID, 'prompt'], 'cannot be combined'],
+    [['start', '--agent', 'codex', '--model', 'gpt', '--preamble', PREAMBLE_ID, '--preamble', PREAMBLE_ID, 'prompt'], 'duplicate IDs'],
+    [['start', '--agent', 'codex', '--model', 'gpt', '--preamble', 'not-a-uuid', 'prompt'], 'canonical UUID v4'],
+    [['resume', CHAT_ID, '--no-preamble', 'prompt'], '--no-preamble cannot be used with resume'],
+  ])('rejects invalid automation arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 });
 

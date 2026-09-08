@@ -8,6 +8,7 @@ import type {
   PersistedChatOrderGroup,
   ReorderChatErrorCode,
   ReorderChatResponse,
+  SetChatOrderStateResponse,
 } from '../../common/chat-order-contracts.js';
 import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import type {
@@ -125,8 +126,13 @@ export interface SettingsStoreContext {
   mutate<T>(fn: SettingsMutation<T>): Promise<T>;
   save(settings: ProjectSettings): Promise<void>;
   saveAndMaybeEmitRemote(settings: ProjectSettings, remoteSettingsChanged: boolean): Promise<void>;
-  emitSessionNameChanged(chatId: string, title: string): void;
-  emitListChanged(reason: string, chatId: string): void;
+  saveAndEmitSessionName(settings: ProjectSettings, chatId: string, title: string): Promise<void>;
+  saveAndEmitList(
+    settings: ProjectSettings,
+    remoteSettingsChanged: boolean,
+    reason: string,
+    chatId: string,
+  ): Promise<void>;
 }
 
 export type ReorderErrorCode =
@@ -170,3 +176,12 @@ export interface FailedChatReorder {
 }
 
 export type ChatReorderResult = SuccessfulChatReorder | FailedChatReorder;
+
+export interface SuccessfulChatOrderStateMutation {
+  success: true;
+  response: SetChatOrderStateResponse;
+}
+
+export type ChatOrderStateMutationResult =
+  | SuccessfulChatOrderStateMutation
+  | FailedChatReorder;
