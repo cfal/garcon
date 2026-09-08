@@ -738,7 +738,7 @@ describe('parseCliArgs', () => {
   });
 
   test('parses transcript search administration actions', () => {
-    for (const action of ['enable', 'disable', 'status'] as const) {
+    for (const action of ['enable', 'disable', 'rebuild', 'status'] as const) {
       expect(parseCliArgs([
         '--workspace', 'work', 'transcript-search', action, '--json',
       ], ENV)).toEqual({
@@ -753,7 +753,7 @@ describe('parseCliArgs', () => {
 
   test.each([
     [['transcript-search'], 'requires one action'],
-    [['transcript-search', 'rebuild'], 'requires one action'],
+    [['transcript-search', 'unknown'], 'requires one action'],
     [['transcript-search', 'status', 'extra'], 'requires one action'],
     [['transcript-search', 'enable', '--filter', 'tag:ops'], '--filter cannot be used'],
   ])('rejects invalid transcript search administration arguments', (args, message) => {

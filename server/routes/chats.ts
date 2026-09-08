@@ -123,7 +123,11 @@ import type {
 } from '../../common/chat-title-contracts.js';
 import type { ChatDetailsResponse } from '../../common/chat-details.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
-import { createChatSearchRoutes, type ChatSearchDep } from './chat-search-routes.js';
+import {
+  createChatSearchRoutes,
+  type ChatSearchDep,
+  type TranscriptSearchMaintenanceDep,
+} from './chat-search-routes.js';
 import {
   generateChatTitleFromMessage,
   TitleGenerationError,
@@ -322,6 +326,7 @@ interface ChatRouteDeps {
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   searchIndex?: ChatSearchDep;
+  transcriptSearchMaintenance?: TranscriptSearchMaintenanceDep;
   lastSelectedChat?: LastSelectedChatState;
   inspectProject?: typeof inspectProjectDirectory;
 }
@@ -338,6 +343,7 @@ export default function createChatRoutes({
   commandService,
   chatListProjector,
   searchIndex,
+  transcriptSearchMaintenance,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
   inspectProject = inspectProjectDirectory,
 }: ChatRouteDeps): RouteMap {
@@ -346,6 +352,7 @@ export default function createChatRoutes({
     registry,
     chatListProjector,
     searchIndex,
+    searchMaintenance: transcriptSearchMaintenance,
   });
 
   function validatedLastSelectedChatId(
@@ -1283,6 +1290,7 @@ export default function createChatRoutes({
     '/api/v1/chats/messages': { GET: getMessages },
     '/api/v1/chats/search': { POST: withJsonBody(searchRoutes.postSearchChats) },
     '/api/v1/chats/search/navigate': { POST: withJsonBody(searchRoutes.postSearchNavigate) },
+    '/api/v1/chats/search/rebuild': { POST: searchRoutes.postSearchRebuild },
     '/api/v1/chats/search/status': { GET: searchRoutes.getSearchStatus },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },

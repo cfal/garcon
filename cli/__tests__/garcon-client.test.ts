@@ -416,6 +416,38 @@ describe('GarconClient', () => {
     });
   });
 
+  test('rebuilds transcript search and strictly validates the returned status', async () => {
+    let requestedUrl = '';
+    let method = '';
+    const response = { success: true, status: validSearchStatus() };
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        requestedUrl = String(input);
+        method = init?.method ?? '';
+        return Response.json(response);
+      },
+    });
+
+    await expect(client.rebuildTranscriptSearch()).resolves.toEqual(response);
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats/search/rebuild`);
+    expect(method).toBe('POST');
+
+    for (const value of [
+      { ...response, success: false },
+      { ...response, status: { ...validSearchStatus(), phase: 'unknown' } },
+    ]) {
+      const malformed = new GarconClient({
+        ...connection,
+        fetch: async () => Response.json(value),
+      });
+      await expect(malformed.rebuildTranscriptSearch()).rejects.toMatchObject({
+        phase: 'chat search',
+        exitCode: 3,
+      });
+    }
+  });
+
   test('updates transcript search through the settings contract and verifies desired state', async () => {
     let requestedUrl = '';
     let submitted: unknown;

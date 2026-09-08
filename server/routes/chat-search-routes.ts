@@ -6,6 +6,7 @@ import type {
   ChatSearchResultMode,
   ChatSearchSort,
   TranscriptSearchQueryStatsV1,
+  TranscriptSearchRebuildResponse,
   TranscriptSearchStatusResponse,
   TranscriptSearchStatusV1,
 } from '../../common/chat-search.js';
@@ -28,6 +29,7 @@ import {
 } from '../../common/chat-order-sort.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
+import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { ValidationDomainError } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
@@ -64,10 +66,15 @@ export interface ChatSearchDep {
   }>;
 }
 
+export interface TranscriptSearchMaintenanceDep {
+  rebuild(): Promise<void>;
+}
+
 interface ChatSearchRouteDeps {
   registry: IChatRegistry;
   chatListProjector: ChatListProjector;
   searchIndex?: ChatSearchDep;
+  searchMaintenance?: TranscriptSearchMaintenanceDep;
 }
 
 interface NormalizedChatSearchRequest extends ChatSearchRequest {
@@ -83,9 +90,10 @@ const CLIENT_CLOSED_REQUEST_STATUS = 499;
 export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   postSearchChats(body: unknown, request?: Request): Promise<Response>;
   postSearchNavigate(body: unknown): Promise<Response>;
+  postSearchRebuild(): Promise<Response>;
   getSearchStatus(): Response;
 } {
-  const { registry, chatListProjector, searchIndex } = deps;
+  const { registry, chatListProjector, searchIndex, searchMaintenance } = deps;
 
   async function postSearchChats(body: unknown, request?: Request): Promise<Response> {
     const requestStarted = performance.now();
@@ -177,41 +185,68 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
     }
   }
 
-  function getSearchStatus(): Response {
-    if (!searchIndex) {
+  async function postSearchRebuild(): Promise<Response> {
+    try {
+      if (!searchIndex || !searchMaintenance) {
+        throw new TranscriptSearchUnavailableError(
+          'SEARCH_INDEX_UNAVAILABLE',
+          'Chat search index is not available',
+          true,
+        );
+      }
+      await searchMaintenance.rebuild();
       return Response.json({
-        version: 1,
-        phase: 'disabled',
-        chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
-        queuedJobs: 0,
-        resync: null,
-        backlogRows: 0,
-        activeChat: null,
-        lastErrorCode: null,
-        updatedAt: new Date(0).toISOString(),
-        queryStats: {
-          served: 0,
-          timedOut: 0,
-          rejectedBusy: 0,
-          p50Ms: 0,
-          p95Ms: 0,
-          maxMs: 0,
-          admissionP50Ms: 0,
-          admissionP95Ms: 0,
-          admissionMaxMs: 0,
-          totalP50Ms: 0,
-          totalP95Ms: 0,
-          totalMaxMs: 0,
-        },
-      } satisfies TranscriptSearchStatusResponse);
+        success: true,
+        status: currentSearchStatus(searchIndex),
+      } satisfies TranscriptSearchRebuildResponse);
+    } catch (error) {
+      if (error instanceof TranscriptSearchSettingsError) {
+        const disabled = error.code === 'TRANSCRIPT_SEARCH_DISABLED';
+        return jsonError(error.message, disabled ? 409 : 500, error.code, false);
+      }
+      return jsonErrorFromUnknown(error);
     }
-    return Response.json({
-      ...searchIndex.status(),
-      queryStats: searchIndex.queryStats(),
-    } satisfies TranscriptSearchStatusResponse);
   }
 
-  return { postSearchChats, postSearchNavigate, getSearchStatus };
+  function getSearchStatus(): Response {
+    return Response.json(currentSearchStatus(searchIndex));
+  }
+
+  return { postSearchChats, postSearchNavigate, postSearchRebuild, getSearchStatus };
+}
+
+function currentSearchStatus(searchIndex?: ChatSearchDep): TranscriptSearchStatusResponse {
+  if (!searchIndex) {
+    return {
+      version: 1,
+      phase: 'disabled',
+      chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
+      queuedJobs: 0,
+      resync: null,
+      backlogRows: 0,
+      activeChat: null,
+      lastErrorCode: null,
+      updatedAt: new Date(0).toISOString(),
+      queryStats: {
+        served: 0,
+        timedOut: 0,
+        rejectedBusy: 0,
+        p50Ms: 0,
+        p95Ms: 0,
+        maxMs: 0,
+        admissionP50Ms: 0,
+        admissionP95Ms: 0,
+        admissionMaxMs: 0,
+        totalP50Ms: 0,
+        totalP95Ms: 0,
+        totalMaxMs: 0,
+      },
+    };
+  }
+  return {
+    ...searchIndex.status(),
+    queryStats: searchIndex.queryStats(),
+  };
 }
 
 function isAbortError(error: unknown): boolean {

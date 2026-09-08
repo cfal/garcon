@@ -1,10 +1,14 @@
-import type { TranscriptSearchStatusResponse } from '@garcon/common/chat-search';
+import type {
+  TranscriptSearchRebuildResponse,
+  TranscriptSearchStatusResponse,
+} from '@garcon/common/chat-search';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import type { TranscriptSearchCliCommand } from './args.js';
 import type { CliOutput } from './output.js';
 
 export interface TranscriptSearchAdministrationClient {
   getTranscriptSearchStatus(signal?: AbortSignal): Promise<TranscriptSearchStatusResponse>;
+  rebuildTranscriptSearch(signal?: AbortSignal): Promise<TranscriptSearchRebuildResponse>;
   setTranscriptSearchEnabled(
     enabled: boolean,
     signal?: AbortSignal,
@@ -20,6 +24,17 @@ export async function runTranscriptSearchAdministration(
   if (command.action === 'status') {
     const status = await client.getTranscriptSearchStatus(signal);
     output.result(command.json ? JSON.stringify(status, null, 2) : formatTranscriptSearchStatus(status));
+    return;
+  }
+
+  if (command.action === 'rebuild') {
+    const result = await client.rebuildTranscriptSearch(signal);
+    output.result(command.json
+      ? JSON.stringify(result, null, 2)
+      : [
+        'transcript search: rebuild started',
+        `phase: ${result.status.phase}`,
+      ].join('\n'));
     return;
   }
 

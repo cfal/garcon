@@ -431,6 +431,11 @@ export type TranscriptSearchStatusResponse = TranscriptSearchStatusV1 & {
   readonly queryStats: TranscriptSearchQueryStatsV1;
 };
 
+export interface TranscriptSearchRebuildResponse {
+  readonly success: true;
+  readonly status: TranscriptSearchStatusResponse;
+}
+
 const TRANSCRIPT_SEARCH_STATUS_KEYS = [
   'version',
   'phase',
@@ -478,6 +483,28 @@ export function parseTranscriptSearchStatusResponse(
   return {
     ...rawStatus,
     queryStats: rawQueryStats,
+  };
+}
+
+export function parseTranscriptSearchRebuildResponse(
+  value: unknown,
+): TranscriptSearchRebuildResponse {
+  const response = chatSearchRecord(value);
+  if (!response || !hasExactChatSearchKeys(response, ['success', 'status'])) {
+    throw new Error('Invalid transcript search rebuild response: unexpected fields');
+  }
+  if (response.success !== true) {
+    throw new Error('Invalid transcript search rebuild response: rebuild was not accepted');
+  }
+  let status: TranscriptSearchStatusResponse;
+  try {
+    status = parseTranscriptSearchStatusResponse(response.status);
+  } catch (error) {
+    throw new Error('Invalid transcript search rebuild response: invalid status', { cause: error });
+  }
+  return {
+    success: true,
+    status,
   };
 }
 

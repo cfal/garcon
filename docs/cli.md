@@ -184,6 +184,7 @@ Search normalized transcript content and join each hit to chat metadata:
 
 ```bash
 bun cli/main.ts --workspace default transcript-search enable
+bun cli/main.ts --workspace default transcript-search rebuild --json
 bun cli/main.ts --workspace default transcript-search status --json
 bun cli/main.ts --workspace default search '"version bump"' \
   --filter 'project:/garcon agent:codex' \
@@ -191,7 +192,9 @@ bun cli/main.ts --workspace default search '"version bump"' \
 ```
 
 Transcript search is disabled by default and is enabled or disabled explicitly
-with `transcript-search enable|disable`. `transcript-search status` reports the
+with `transcript-search enable|disable`. While search is enabled,
+`transcript-search rebuild` deletes and recreates the derived index, then starts
+a complete resynchronization. `transcript-search status` reports the
 index phase, chat coverage, queued and active indexing work, backlog and resync
 progress, the last error code, and query admission/execution/total latency
 statistics. JSON status is the validated server status document.

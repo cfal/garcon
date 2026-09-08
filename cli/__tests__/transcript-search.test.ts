@@ -122,6 +122,7 @@ describe('transcript search administration', () => {
     const output = captureOutput();
     const client = {
       async getTranscriptSearchStatus() { return status; },
+      async rebuildTranscriptSearch() { throw new Error('must not rebuild'); },
       async setTranscriptSearchEnabled() { throw new Error('must not update settings'); },
     } satisfies TranscriptSearchAdministrationClient;
 
@@ -134,6 +135,7 @@ describe('transcript search administration', () => {
     const enabledValues: boolean[] = [];
     const client = {
       async getTranscriptSearchStatus() { throw new Error('must not fetch status'); },
+      async rebuildTranscriptSearch() { throw new Error('must not rebuild'); },
       async setTranscriptSearchEnabled(enabled: boolean) {
         enabledValues.push(enabled);
         return settings(enabled);
@@ -148,6 +150,21 @@ describe('transcript search administration', () => {
     expect(output.results).toEqual([
       'transcript search: enabled\nsettings version: 4',
       JSON.stringify({ enabled: false, settingsVersion: 4 }, null, 2),
+    ]);
+  });
+
+  test('starts a rebuild and reports its immediate authoritative status', async () => {
+    const output = captureOutput();
+    const client = {
+      async getTranscriptSearchStatus() { throw new Error('must not fetch status'); },
+      async rebuildTranscriptSearch() { return { success: true as const, status }; },
+      async setTranscriptSearchEnabled() { throw new Error('must not update settings'); },
+    } satisfies TranscriptSearchAdministrationClient;
+
+    await runTranscriptSearchAdministration(command('rebuild', true), client, output);
+
+    expect(output.results).toEqual([
+      JSON.stringify({ success: true, status }, null, 2),
     ]);
   });
 });

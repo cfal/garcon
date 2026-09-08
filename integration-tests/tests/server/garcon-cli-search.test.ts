@@ -101,6 +101,14 @@ describe('garcon-cli chat research', () => {
         queryStats: { served: 0, timedOut: 0, rejectedBusy: 0 },
       });
 
+      const rebuilt = await runCli(fixture, ['transcript-search', 'rebuild', '--json']);
+      expect(rebuilt).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(rebuilt.stdout)).toMatchObject({
+        success: true,
+        status: { version: 1 },
+      });
+      await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 60_000 });
+
       const child = (await fixture.client.listChats()).sessions.find((entry) => entry.id === chatId);
       if (!child?.activity.createdAt || !child.activity.lastActivityAt) {
         throw new Error('Child chat is missing activity timestamps.');
@@ -209,7 +217,14 @@ describe('garcon-cli chat research', () => {
       const result = await runCli(fixture, ['search', 'needle', '--json']);
       expect(result.exitCode).toBe(2);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toContain('garcon-cli transcript-search enable');
+      expect(result.stderr).toContain([
+        'garcon-cli',
+        '--workspace', `'${WORKSPACE}'`,
+        '--config-dir', `'${fixture.dirs.config}'`,
+        '--server', `'${fixture.garcon.baseUrl}'`,
+        'transcript-search',
+        'enable',
+      ].join(' '));
     }, { namedWorkspace: WORKSPACE });
   });
 });

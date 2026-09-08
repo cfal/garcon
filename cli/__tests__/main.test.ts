@@ -241,7 +241,7 @@ function transcriptSearchStatusResponse(): Record<string, unknown> {
 }
 
 describe('main', () => {
-  test('routes transcript search administration through typed settings and status endpoints', async () => {
+  test('routes transcript search administration through typed settings and search endpoints', async () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = [];
     const enableCapture = capturedOutput();
     const enableExit = await main(['transcript-search', 'enable', '--json'], {
@@ -280,6 +280,27 @@ describe('main', () => {
       body: undefined,
     });
     expect(JSON.parse(statusCapture.results[0]!)).toEqual(transcriptSearchStatusResponse());
+
+    const rebuildCapture = capturedOutput();
+    const rebuildResponse = {
+      success: true,
+      status: transcriptSearchStatusResponse(),
+    };
+    const rebuildExit = await main(['transcript-search', 'rebuild', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: rebuildCapture.output,
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), method: init?.method ?? 'GET', body: undefined });
+        return Response.json(rebuildResponse);
+      },
+    });
+    expect(rebuildExit).toBe(0);
+    expect(requests[2]).toEqual({
+      url: 'http://127.0.0.1:8080/api/v1/chats/search/rebuild',
+      method: 'POST',
+      body: undefined,
+    });
+    expect(JSON.parse(rebuildCapture.results[0]!)).toEqual(rebuildResponse);
   });
 
   test('prints only the native session lookup chat ID', async () => {

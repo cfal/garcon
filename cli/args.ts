@@ -97,7 +97,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] chats [--filter <expression>] [--limit <count>] [--offset <count>] [--json]
   garcon-cli [connection options] search <query> [--filter <expression>] [--sort <relevance|activity|created>] [--limit <count>] [--offset <count>] [--snippets <count>] [--json]
-  garcon-cli [connection options] transcript-search <enable|disable|status> [--json]
+  garcon-cli [connection options] transcript-search <enable|disable|rebuild|status> [--json]
   garcon-cli [connection options] read <chat-id> <ordinal> [-B <count>] [-A <count>] [--include <category>]... [--transcript-view-id <id>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
   garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
@@ -311,7 +311,7 @@ export interface PermissionAnswerCliCommand extends CliConnectionOptions {
 
 export interface TranscriptSearchCliCommand extends CliConnectionOptions {
   readonly kind: 'transcript-search';
-  readonly action: 'enable' | 'disable' | 'status';
+  readonly action: 'enable' | 'disable' | 'rebuild' | 'status';
   readonly json: boolean;
 }
 
@@ -837,9 +837,16 @@ function parseTranscriptSearch(
   const action = parsed.positionals[1];
   if (
     parsed.positionals.length !== 2
-    || (action !== 'enable' && action !== 'disable' && action !== 'status')
+    || (
+      action !== 'enable'
+      && action !== 'disable'
+      && action !== 'rebuild'
+      && action !== 'status'
+    )
   ) {
-    throw argumentError('transcript-search requires one action: enable, disable, or status');
+    throw argumentError(
+      'transcript-search requires one action: enable, disable, rebuild, or status',
+    );
   }
   return {
     kind: 'transcript-search',

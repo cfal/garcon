@@ -31,9 +31,11 @@ import {
 import {
   parseChatSearchResponse,
   parseTranscriptSearchStatusResponse,
+  parseTranscriptSearchRebuildResponse,
   type ChatSearchRequest,
   type ChatSearchResponse,
   type TranscriptSearchStatusResponse,
+  type TranscriptSearchRebuildResponse,
 } from '@garcon/common/chat-search';
 import { stableJsonStringify } from '@garcon/common/json';
 import {
@@ -435,6 +437,23 @@ export class GarconClient {
       return parseTranscriptSearchStatusResponse(value);
     } catch (error) {
       throw new CliError('chat search', 'server returned an invalid transcript search status', 3, {
+        cause: error,
+      });
+    }
+  }
+
+  async rebuildTranscriptSearch(signal?: AbortSignal): Promise<TranscriptSearchRebuildResponse> {
+    const value = await this.#request(
+      'chat search',
+      'POST',
+      '/api/v1/chats/search/rebuild',
+      undefined,
+      signal,
+    );
+    try {
+      return parseTranscriptSearchRebuildResponse(value);
+    } catch (error) {
+      throw new CliError('chat search', 'server returned an invalid transcript search rebuild response', 3, {
         cause: error,
       });
     }

@@ -4,6 +4,7 @@ import {
   classifyChatSearchFailureRecovery,
   compileChatSearchQuery,
   parseChatSearchResponse,
+  parseTranscriptSearchRebuildResponse,
   parseTranscriptSearchStatusResponse,
 } from '../chat-search.ts';
 
@@ -200,6 +201,44 @@ describe('chat search contracts', () => {
     ]) expect(() => parseTranscriptSearchStatusResponse(invalid)).toThrow(
       'Invalid transcript search status response',
     );
+  });
+
+  it('strictly parses transcript search rebuild responses', () => {
+    const status = {
+      version: 1,
+      phase: 'rebuilding',
+      chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
+      queuedJobs: 0,
+      resync: null,
+      backlogRows: 0,
+      activeChat: null,
+      lastErrorCode: null,
+      updatedAt: '2026-09-08T00:00:00.000Z',
+      queryStats: {
+        served: 0,
+        timedOut: 0,
+        rejectedBusy: 0,
+        p50Ms: 0,
+        p95Ms: 0,
+        maxMs: 0,
+        admissionP50Ms: 0,
+        admissionP95Ms: 0,
+        admissionMaxMs: 0,
+        totalP50Ms: 0,
+        totalP95Ms: 0,
+        totalMaxMs: 0,
+      },
+    };
+    const response = { success: true, status };
+    expect(parseTranscriptSearchRebuildResponse(response)).toEqual(response);
+    for (const invalid of [
+      { ...response, success: false },
+      { ...response, extra: true },
+      { ...response, status: { ...status, phase: 'unknown' } },
+    ]) {
+      expect(() => parseTranscriptSearchRebuildResponse(invalid))
+        .toThrow('Invalid transcript search rebuild response');
+    }
   });
 
   it('classifies failure recovery without treating source loss as an index retry', () => {
