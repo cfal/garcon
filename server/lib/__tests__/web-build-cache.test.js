@@ -9,6 +9,8 @@ import {
   isWebBuildCurrent,
   productionWebBuildEnvironment,
   recordWebBuild,
+  repoRoot,
+  webBuildInputs,
 } from '../../../scripts/web-build-cache.js';
 
 const temporaryDirectories = [];
@@ -116,6 +118,26 @@ describe('web build cache', () => {
 
     await recordWebBuild(options);
     await fs.writeFile(path.join(fixture.patches, 'dependency.patch'), 'changed patch');
+    expect(await isWebBuildCurrent(options)).toBe(false);
+  });
+
+  it('tracks the browser module boundary as a build input', async () => {
+    expect(webBuildInputs).toContain(
+      path.join(repoRoot, 'web', 'browser-module-boundary.ts'),
+    );
+
+    const fixture = await createFixture();
+    const browserBoundary = path.join(fixture.input, 'browser-module-boundary.ts');
+    await fs.writeFile(browserBoundary, 'first');
+    const options = {
+      ...fixture,
+      inputs: [browserBoundary],
+      sourcePath: fixture.input,
+    };
+    await recordWebBuild(options);
+    expect(await isWebBuildCurrent(options)).toBe(true);
+
+    await fs.writeFile(browserBoundary, 'second');
     expect(await isWebBuildCurrent(options)).toBe(false);
   });
 
