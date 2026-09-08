@@ -22,7 +22,7 @@ import {
   interAgentSendRequestNoticeDraft,
 } from './garcon-command-request.js';
 import type { LedgerRowDraft, LedgerAgentCommandOutcomeDetail } from './contracts.js';
-import { agentCommandOutcomeContent, parseGarconCommandResult } from '../../common/garcon-command-results.js';
+import { agentCommandOutcomeContent, agentCommandOutcomeTitle, parseGarconCommandResult } from '../../common/garcon-command-results.js';
 import type { PreambleHistoryEvidence } from './preamble-history.js';
 
 export interface ImportedRow {
@@ -90,7 +90,7 @@ function importedDraftFor(
     const result = parseGarconCommandResult(original.content);
     if (result) {
       return [{ kind: 'notice', at, message: agentCommandOutcomeContent(result),
-        detail: { ...result, nativeResultInput: true } satisfies LedgerAgentCommandOutcomeDetail, providerMeta: null }];
+        detail: { ...result, title: agentCommandOutcomeTitle(result), nativeResultInput: true } satisfies LedgerAgentCommandOutcomeDetail, providerMeta: null }];
     }
     const received = parseGarconMessage(original.content);
     if (received) {

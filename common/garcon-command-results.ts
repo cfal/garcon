@@ -106,6 +106,14 @@ export function parseGarconCommandResult(content: string): AgentCommandOutcomeNo
   return null;
 }
 
+export function agentCommandOutcomeTitle(detail: AgentCommandOutcomeNoticeDetail): string {
+  switch (detail.type) {
+    case 'agent-start-outcome': return 'Start agent';
+    case 'agent-resume-outcome': return 'Resume agent';
+    case 'agent-schedule-outcome': return 'Schedule prompt';
+  }
+}
+
 export function agentCommandOutcomeContent(detail: AgentCommandOutcomeNoticeDetail): string {
   if (detail.type !== 'agent-schedule-outcome') return agentChildOutcomeContent(detail);
   switch (detail.status) {

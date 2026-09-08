@@ -1,5 +1,6 @@
 import {
   agentCommandOutcomeContent,
+  agentCommandOutcomeTitle,
   garconCommandResultContent,
   type AgentCommandOutcomeNoticeDetail,
 } from '../../common/garcon-command-results.js';
@@ -71,8 +72,7 @@ export class AgentCommandReplies {
   record<T extends AgentCommandOutcomeNoticeDetail>(source: AgentCommandSource, detail: T): T | null {
     try {
       this.context.notices.appendNotice(source.chatId, source.viewId, {
-        title: detail.type === 'agent-start-outcome' ? 'Start agent'
-          : detail.type === 'agent-resume-outcome' ? 'Resume agent' : 'Schedule prompt',
+        title: agentCommandOutcomeTitle(detail),
         content: agentCommandOutcomeContent(detail),
         detail,
         at: new Date().toISOString(),

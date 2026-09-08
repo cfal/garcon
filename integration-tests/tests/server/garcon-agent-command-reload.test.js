@@ -144,6 +144,11 @@ describe('agent command reply reload boundaries', () => {
         expect(rows.filter((row) => row.kind === 'notice' && row.detail.type.endsWith('-request')).map((row) => row.ordinal)).toEqual([2, 3, 4]);
         const notices = ledgerRowsToTranscriptMessages(rows);
         expect(notices.map(({ message }) => message.detail)).toEqual(expect.arrayContaining(outcomes));
+        expect(notices.map(({ message }) => [message.detail.type, message.title])).toEqual(expect.arrayContaining([
+          ['agent-start-outcome', 'Start agent'],
+          ['agent-resume-outcome', 'Resume agent'],
+          ['agent-schedule-outcome', 'Schedule prompt'],
+        ]));
         expect(notices.every(({ message }) => message.detail.requestViewId === view.viewId)).toBe(true);
         expect(JSON.stringify(notices)).not.toContain('nativeResultInput');
         store.closeChat(CHAT);

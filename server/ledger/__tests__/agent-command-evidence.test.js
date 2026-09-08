@@ -25,6 +25,28 @@ async function withLedger(run, options = {}) {
 }
 
 describe('agent command durable evidence', () => {
+  it.each([
+    ['agent-start-outcome', 'Start agent'],
+    ['agent-resume-outcome', 'Resume agent'],
+    ['agent-schedule-outcome', 'Schedule prompt'],
+  ])('preserves the %s heading through native import and reopen', async (type, title) => {
+    await withLedger(async ({ ledger, store }) => {
+      const view = ledger.initializeChat(CHAT);
+      const detail = { type, requestViewId: view.viewId, requestOrdinal: 1, reason: 'action-failed',
+        ...(type === 'agent-schedule-outcome' ? { status: 'failed' } : { status: 'rejected', ref: 'task', async: true }) };
+      ledger.appendNotice(CHAT, view.viewId, { at: AT, title, content: agentCommandOutcomeContent(detail), detail });
+      store.append(CHAT, view.viewId, importedDrafts([
+        { message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null },
+      ], () => AT));
+      store.closeChat(CHAT);
+      const rendered = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT));
+      expect(rendered.map(({ message }) => message.title)).toEqual([title, title]);
+      expect(rendered.map(({ message }) => message.detail)).toEqual([detail, detail]);
+      expect(rendered[1].message.timestamp).toBe(LATER);
+      expect(JSON.stringify(rendered)).not.toContain('nativeResultInput');
+    });
+  });
+
   it.each(['agent-start-outcome', 'agent-resume-outcome'])('preserves trailing carriage returns in imported %s output', async (type) => {
     await withLedger(async ({ ledger, store }) => {
       const view = ledger.initializeChat(CHAT);
