@@ -265,6 +265,18 @@ index 93747cf85b8a8ed065f1d88b090c0fec3d7f8450..aea69956ef534dfbac94af450d168916
      providerContext?.setStore(
        createStore({
          width: 0,
+diff --git a/dist/lib/container/SvelteFlow/SvelteFlow.svelte.d.ts b/dist/lib/container/SvelteFlow/SvelteFlow.svelte.d.ts
+index 9de834404eeda52068c35f3ce00d2d9d2b6a5164..ec656582e0e4ca579a088d3c3fb05e866e9bf3a0 100644
+--- a/dist/lib/container/SvelteFlow/SvelteFlow.svelte.d.ts
++++ b/dist/lib/container/SvelteFlow/SvelteFlow.svelte.d.ts
+@@ -82,6 +82,7 @@ declare function $$render<NodeType extends Node = Node, EdgeType extends Edge =
+         onbeforeconnect?: import("../../types/index.js").OnBeforeConnect<EdgeType> | undefined;
+         onconnect?: import("@xyflow/system").OnConnect;
+         onconnectstart?: import("@xyflow/system").OnConnectStart;
++        oninteractioncancel?: (detail: import("@xyflow/system").InteractionCancel) => void;
+         onconnectend?: import("@xyflow/system").OnConnectEnd;
+         onreconnect?: import("@xyflow/system").OnReconnect<EdgeType> | undefined;
+         onreconnectstart?: import("@xyflow/system").OnReconnectStart<EdgeType> | undefined;
 diff --git a/dist/lib/container/SvelteFlow/types.d.ts b/dist/lib/container/SvelteFlow/types.d.ts
 index 704f90fb103ee237340f8cfbaeee60da77b49e65..a3f5f3496a83ceed9102c26d7e133a775b018e82 100644
 --- a/dist/lib/container/SvelteFlow/types.d.ts
