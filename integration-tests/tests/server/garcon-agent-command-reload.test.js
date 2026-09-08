@@ -30,7 +30,7 @@ async function withReload(run) {
   const registry = new ChatRegistry(root);
   const store = new TranscriptLedgerStore(join(root, 'transcripts'));
   const request = mock(() => {});
-  const ledger = new TranscriptLedgerService(store, { agentStarts: { request }, agentSchedules: { request } });
+  const ledger = new TranscriptLedgerService(store, { agentStarts: { request }, agentResumes: { request }, agentSchedules: { request } });
   const nativeSession = { ownerId: 'test', schemaVersion: 1, value: { id: 'synthetic-native' } };
   await registry.init();
   registry.addChat({ id: CHAT, agentId: 'test', agentOwnershipEpoch: 'synthetic-epoch',
@@ -121,14 +121,17 @@ describe('agent command reply reload boundaries', () => {
 
   test('reload preserves original request addresses and trailing result native evidence without redispatch', async () => {
     await withReload(async ({ ledger, store, registry, view, lease, reload, integration, integrations, request }) => {
-      const command = '<garcon-start-agent agent="test" model="synthetic-model">Task.</garcon-start-agent>\n<garcon-schedule every="5m" />';
+      const command = '<garcon-start-agent ref="task" agent="test" model="synthetic-model">Task.</garcon-start-agent>\n<garcon-schedule every="5m" />\n<garcon-resume-agent ref="followup" chat-id="2222222222222222">Follow up.</garcon-resume-agent>';
       ledger.appendNotice(CHAT, view.viewId, { title: 'Local-only', content: 'Local-only notice.', detail: {}, at: AT });
       lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, command) }] });
-      expect(request).toHaveBeenCalledTimes(2);
+      expect(request).toHaveBeenCalledTimes(3);
       request.mockClear();
       const outcomes = [
-        { type: 'agent-start-outcome', status: 'created', chatId: '2222222222222222', requestViewId: view.viewId, requestOrdinal: 3 },
+        { type: 'agent-start-outcome', ref: 'task', async: false, status: 'completed', chatId: '2222222222222222', requestViewId: view.viewId, requestOrdinal: 3,
+          output: { availability: 'available', completeness: 'complete', text: 'Synthetic start answer with A & B.' } },
         { type: 'agent-schedule-outcome', status: 'failed', reason: 'limit-reached', requestViewId: view.viewId, requestOrdinal: 4 },
+        { type: 'agent-resume-outcome', ref: 'followup', async: false, status: 'completed', chatId: '2222222222222222', requestViewId: view.viewId, requestOrdinal: 5,
+          output: { availability: 'available', completeness: 'best-effort', text: 'Synthetic resumed answer with <text>.' } },
       ];
       for (const trailing of outcomes) {
         integration.nativeHistoryImport.load = async function* () {
@@ -138,7 +141,7 @@ describe('agent command reply reload boundaries', () => {
         };
         const replaced = await reload.reload(CHAT);
         const rows = ledger.currentRows(CHAT);
-        expect(rows.filter((row) => row.kind === 'notice' && row.detail.type.endsWith('-request')).map((row) => row.ordinal)).toEqual([2, 3]);
+        expect(rows.filter((row) => row.kind === 'notice' && row.detail.type.endsWith('-request')).map((row) => row.ordinal)).toEqual([2, 3, 4]);
         const notices = ledgerRowsToTranscriptMessages(rows);
         expect(notices.map(({ message }) => message.detail)).toEqual(expect.arrayContaining(outcomes));
         expect(notices.every(({ message }) => message.detail.requestViewId === view.viewId)).toBe(true);
