@@ -1056,8 +1056,10 @@ describe('settings store', () => {
       archived,
     }) => {
       let failAfterWrite = false;
+      let writeCount = 0;
       const uncertainStore = new SettingsStore(tmpDir, {
         writeFile: async (...args) => {
+          writeCount += 1;
           await writeJsonFileAtomic(...args);
           if (!failAfterWrite) return;
           failAfterWrite = false;
@@ -1077,7 +1079,9 @@ describe('settings store', () => {
       await expect(mutation).rejects.toMatchObject({ renamed: true });
 
       expect(uncertainStore.isArchived('a')).toBe(archived);
+      const writesAfterMutation = writeCount;
       await expect(uncertainStore.confirmArchiveState('a')).resolves.toBe(archived);
+      expect(writeCount).toBe(writesAfterMutation + 1);
       const reloaded = new SettingsStore(tmpDir);
       await reloaded.init();
       expect(reloaded.isArchived('a')).toBe(archived);

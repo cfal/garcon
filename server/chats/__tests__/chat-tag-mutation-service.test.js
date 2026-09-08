@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { ChatBoardService } from '../../chat-boards/service.ts';
 import { ChatBoardStore } from '../../chat-boards/store.ts';
+import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../lib/json-file-store.ts';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
+import { SettingsStore } from '../../settings/store.ts';
 import { ChatTagMutationService } from '../chat-tag-mutation-service.ts';
 
 const CHAT_ID = '1788781395788500';
@@ -161,22 +163,58 @@ describe('ChatTagMutationService', () => {
     expect(current.registry.updateChatPhased).not.toHaveBeenCalled();
   });
 
-  it('does not write tags when archive-state confirmation fails', async () => {
-    const current = registryDouble();
-    const confirmationError = new Error('archive durability remains unknown');
-    const service = serviceWith(current.registry, undefined, {
-      confirmArchiveState: async () => { throw confirmationError; },
+  it('blocks transitions until an uncertain unarchive is durably confirmed', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-board-archive-'));
+    directories.push(directory);
+    let failAfterWrite = false;
+    let settingsWriteCount = 0;
+    const archiveState = new SettingsStore(directory, {
+      writeFile: async (...args) => {
+        settingsWriteCount += 1;
+        await writeJsonFileAtomic(...args);
+        if (failAfterWrite) {
+          throw new AtomicJsonWriteError('injected post-rename failure', true);
+        }
+      },
     });
+    await archiveState.init();
+    await archiveState.saveSettings({
+      ui: {},
+      paths: {},
+      chatNames: {},
+      pinnedChatIds: [],
+      normalChatIds: [],
+      archivedChatIds: [CHAT_ID],
+    });
+    failAfterWrite = true;
+    await expect(archiveState.toggleArchive(CHAT_ID)).rejects.toMatchObject({ renamed: true });
 
-    await expect(service.transition({
+    const current = registryDouble();
+    const service = serviceWith(current.registry, undefined, archiveState);
+    const transition = {
       chatId: CHAT_ID,
       boardId: BOARD_ID,
       sourceColumnId: SOURCE_ID,
       targetColumnId: TARGET_ID,
       expectedCatalogRevision: 4,
       expectedTags: ['project', 'ready'],
-    })).rejects.toBe(confirmationError);
+    };
+
+    const writesAfterUnarchive = settingsWriteCount;
+    await expect(service.transition(transition)).rejects.toMatchObject({ renamed: true });
+    expect(settingsWriteCount).toBe(writesAfterUnarchive + 1);
+    await expect(service.transition(transition)).rejects.toMatchObject({ renamed: true });
+    expect(settingsWriteCount).toBe(writesAfterUnarchive + 2);
     expect(current.registry.updateChatPhased).not.toHaveBeenCalled();
+    expect(current.tags()).toEqual(['project', 'ready']);
+
+    failAfterWrite = false;
+    const writesBeforeConfirmation = settingsWriteCount;
+    await expect(service.transition(transition)).resolves.toMatchObject({
+      tags: ['project', 'review'],
+    });
+    expect(settingsWriteCount).toBe(writesBeforeConfirmation + 1);
+    expect(current.registry.updateChatPhased).toHaveBeenCalledTimes(1);
   });
 
   it('honors the durability fence before returning any no-op and recovers explicitly', async () => {
