@@ -59,6 +59,42 @@ function setup() {
 }
 
 describe('CanvasController', () => {
+	it('replays an unacknowledged save before admitting deletion', async () => {
+		const { controller, api, boards } = setup();
+		await controller.activate();
+		const session = controller.session!;
+		api.update.mockImplementation(async (request) => {
+			const current = boards.get(request.id)!;
+			if (JSON.stringify(current.content) === JSON.stringify(request.content)) return current;
+			if (current.revision !== request.expectedRevision) throw new ApiError(409, 'Conflict');
+			const updated = canvas(request.content, current.revision + 1);
+			boards.set(request.id, updated);
+			throw new Error('Response lost');
+		});
+		api.remove.mockImplementation(async ({ id, expectedRevision }) => {
+			if (boards.get(id)?.revision !== expectedRevision) throw new ApiError(409, 'Conflict');
+			boards.delete(id);
+		});
+		session.document.rename('Committed remotely');
+		expect(await session.flush()).toBe(false);
+		expect(await controller.removeCurrent()).toBe(true);
+		expect(api.update.mock.calls[1]).toEqual(api.update.mock.calls[0]);
+		expect(api.remove).toHaveBeenCalledWith({ id: 'board', expectedRevision: 2 });
+	});
+
+	it('retains the board when reconciling an uncertain save still fails', async () => {
+		const { controller, api, memory } = setup();
+		await controller.activate();
+		const session = controller.session!;
+		api.update.mockRejectedValue(new Error('Offline'));
+		session.document.rename('Local');
+		await session.flush();
+		expect(await controller.removeCurrent()).toBe(false);
+		expect(api.remove).not.toHaveBeenCalled();
+		expect(controller.session).toBe(session);
+		expect(memory.drafts.get('board')?.content.title).toBe('Local');
+	});
+
 	it('pauses debounce-pending and exit-triggered saves until deletion settles', async () => {
 		const { controller, api, boards } = setup();
 		await controller.activate();

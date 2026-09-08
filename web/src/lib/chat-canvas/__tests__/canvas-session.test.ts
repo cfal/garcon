@@ -21,18 +21,63 @@ function setup(overrides: Partial<CanvasSessionPort> = {}) {
 }
 
 describe('canvas autosave', () => {
+	it.each(['Later edit', 'Work'])(
+		'reconciles a lost save response before saving %s',
+		async (title) => {
+			let remote = canvas();
+			const update = vi.fn<CanvasSessionPort['update']>(async (request) => {
+				if (JSON.stringify(request.content) === JSON.stringify(remote.content)) return remote;
+				if (request.expectedRevision !== remote.revision) throw new ApiError(409, 'Conflict');
+				remote = canvas(request.content, remote.revision + 1);
+				if (update.mock.calls.length === 1) throw new Error('Response lost');
+				return remote;
+			});
+			const { session } = setup({ update });
+			session.document.rename('Unacknowledged edit');
+			expect(await session.flush()).toBe(false);
+			session.document.rename(title);
+			expect(session.dirty).toBe(true);
+			expect(await session.flush()).toBe(true);
+			expect(update.mock.calls[1]).toEqual(update.mock.calls[0]);
+			expect(session.saved.revision).toBe(3);
+			expect(remote.content.title).toBe(title);
+			expect(session.conflict).toBe(false);
+			session.dispose();
+		},
+	);
+
+	it('rearms a newer edit whose debounce expired before the pending save failed', async () => {
+		const response = deferred<ChatCanvas>();
+		const update = vi
+			.fn<CanvasSessionPort['update']>()
+			.mockImplementationOnce(() => response.promise)
+			.mockImplementation(async (request) => canvas(request.content, request.expectedRevision + 1));
+		const { session } = setup({ update });
+		session.document.rename('First');
+		const pending = session.flush();
+		session.document.rename('Second');
+		await vi.advanceTimersByTimeAsync(500);
+		response.reject(new Error('Offline'));
+		expect(await pending).toBe(false);
+		await vi.advanceTimersByTimeAsync(500);
+		expect(session.saved.content.title).toBe('Second');
+		expect(session.dirty).toBe(false);
+		session.dispose();
+	});
+
 	it('retries a transient autosave failure when the user edits again', async () => {
 		const update = vi
 			.fn<CanvasSessionPort['update']>()
 			.mockRejectedValueOnce(new Error('Offline'))
-			.mockImplementation(async (request) => canvas(request.content, 2));
+			.mockImplementation(async (request) => canvas(request.content, request.expectedRevision + 1));
 		const { session } = setup({ update });
 		session.document.rename('First edit');
 		await vi.advanceTimersByTimeAsync(500);
 		expect(session.error).toBe('Offline');
 		session.document.rename('Later edit');
 		await vi.advanceTimersByTimeAsync(500);
-		expect(update).toHaveBeenCalledTimes(2);
+		expect(update).toHaveBeenCalledTimes(3);
+		expect(update.mock.calls[1]).toEqual(update.mock.calls[0]);
 		expect(session.saved.content.title).toBe('Later edit');
 		expect(session.dirty).toBe(false);
 		session.dispose();

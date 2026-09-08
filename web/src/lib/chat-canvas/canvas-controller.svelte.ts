@@ -119,10 +119,11 @@ export class CanvasController implements PortableSingletonController {
 	async removeCurrent(): Promise<boolean> {
 		if (this.loading || this.closing || !this.session || this.#disposed) return false;
 		this.loading = true;
-		let release: (() => void) | undefined;
+		let release: (() => void) | null = null;
 		try {
 			const current = this.session;
 			release = await current.prepareDelete();
+			if (!release) return false;
 			try {
 				await this.api.remove({ id: current.saved.id, expectedRevision: current.saved.revision });
 			} catch (error) {

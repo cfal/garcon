@@ -19,6 +19,8 @@ export class CanvasSession {
 	recoveryError = $state(false);
 	#timer: ReturnType<typeof setTimeout> | null = null;
 	#pending: Promise<boolean> | null = null;
+	#request = $state.raw<UpdateCanvasRequest | null>(null);
+	#editGeneration = 0;
 	#disposed = false;
 	#deleting = false;
 	readonly #recoveryLease: ReturnType<typeof claimCanvasRecovery>;
@@ -48,7 +50,10 @@ export class CanvasSession {
 	}
 
 	get dirty(): boolean {
-		return JSON.stringify(this.document.content) !== JSON.stringify(this.saved.content);
+		return (
+			this.#request !== null ||
+			JSON.stringify(this.document.content) !== JSON.stringify(this.saved.content)
+		);
 	}
 
 	async flush(): Promise<boolean> {
@@ -57,11 +62,15 @@ export class CanvasSession {
 		if (this.conflict) return false;
 		if (this.#pending) return this.#pending;
 		this.error = null;
+		const generation = this.#editGeneration;
+		let saved = false;
 		this.#pending = this.#save();
 		try {
-			return await this.#pending;
+			saved = await this.#pending;
+			return saved;
 		} finally {
 			this.#pending = null;
+			if (!saved && generation !== this.#editGeneration) this.#schedule();
 		}
 	}
 
@@ -70,15 +79,27 @@ export class CanvasSession {
 		return this.conflict && this.#writeRecovery(this.document.content);
 	}
 
-	async prepareDelete(): Promise<() => void> {
+	async prepareDelete(): Promise<(() => void) | null> {
 		this.#deleting = true;
 		this.#clearTimer();
-		if (this.#pending) await this.#pending;
-		return () => {
+		const resume = () => {
 			this.#deleting = false;
-			if (!this.#disposed && this.#recoveryLease.isCurrent() && this.dirty && !this.conflict)
-				this.#schedule();
+			this.#schedule();
 		};
+		let admitted = false;
+		try {
+			if (this.#pending) await this.#pending;
+			if (this.#disposed || !this.#recoveryLease.isCurrent()) return null;
+			if (this.#request) {
+				this.saving = true;
+				if (!(await this.#saveRequest(this.#request))) return null;
+			}
+			admitted = true;
+			return resume;
+		} finally {
+			this.saving = false;
+			if (!admitted) resume();
+		}
 	}
 
 	get interacting(): boolean {
@@ -147,6 +168,7 @@ export class CanvasSession {
 			const latest = await this.api.get(this.saved.id);
 			if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
 			this.saved = latest;
+			this.#request = null;
 			this.document.replace(latest.content);
 			this.conflict = false;
 			this.error = null;
@@ -179,6 +201,7 @@ export class CanvasSession {
 
 	#changed(content: CanvasContent): void {
 		if (this.#disposed || !this.#recoveryLease.isCurrent()) return;
+		this.#editGeneration += 1;
 		this.#writeRecovery(content);
 		if (!this.conflict) this.#schedule();
 	}
@@ -197,7 +220,14 @@ export class CanvasSession {
 
 	#schedule(): void {
 		this.#clearTimer();
-		if (this.#deleting) return;
+		if (
+			this.#deleting ||
+			this.#disposed ||
+			this.conflict ||
+			!this.#recoveryLease.isCurrent() ||
+			!this.dirty
+		)
+			return;
 		this.#timer = setTimeout(() => {
 			this.#timer = null;
 			void this.flush();
@@ -213,25 +243,41 @@ export class CanvasSession {
 		this.saving = true;
 		try {
 			while (this.dirty && !this.#deleting) {
-				const content = this.document.content;
-				const saved = await this.api.update({
+				this.#request ??= {
 					id: this.saved.id,
 					expectedRevision: this.saved.revision,
-					content,
-				});
-				if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
-				this.saved = saved;
-				this.onSaved(saved);
-				if (this.dirty) this.#writeRecovery(this.document.content);
+					content: this.document.content,
+				};
+				if (!(await this.#saveRequest(this.#request))) return false;
 			}
 			if (this.dirty) return false;
 			this.#removeRecovery();
 			return true;
-		} catch (error) {
-			this.#failure(error);
-			return false;
 		} finally {
 			this.saving = false;
+		}
+	}
+
+	async #saveRequest(request: UpdateCanvasRequest): Promise<boolean> {
+		try {
+			const saved = await this.api.update(request);
+			if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
+			this.#request = null;
+			this.saved = saved;
+			this.error = null;
+			this.onSaved(saved);
+			if (this.dirty) this.#writeRecovery(this.document.content);
+			return true;
+		} catch (error) {
+			if (
+				error instanceof ApiError &&
+				((error.status >= 400 && error.status < 500 && error.status !== 408) ||
+					error.errorCode === 'CANVAS_CORRUPT')
+			) {
+				this.#request = null;
+			}
+			this.#failure(error);
+			return false;
 		}
 	}
 
