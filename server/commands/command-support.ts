@@ -321,14 +321,9 @@ export class CommandSupport {
   }
 
   withChatMutationLocks<T>(chatIds: string[], fn: () => Promise<T>): Promise<T> {
-    const orderedChatIds = [...new Set(chatIds)].sort();
-    const acquire = (index: number): Promise<T> => {
-      const chatId = orderedChatIds[index];
-      return chatId === undefined
-        ? fn()
-        : this.withChatMutationLock(chatId, () => acquire(index + 1));
-    };
-    return acquire(0);
+    return this.#chatMutationLocks.runExclusiveMany(
+      chatIds.map((chatId) => `chat:${chatId}`), fn,
+    );
   }
 
   requireChat(chatId: string, message = 'Session not found'): void {
