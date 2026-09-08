@@ -249,11 +249,17 @@ function cursorPlanPhases(rawPhases: unknown): CursorPlanPhase[] | undefined {
 
 function cursorAskQuestionResponse(decision: PermissionDecisionPayload): Record<string, unknown> {
   const response = normalizeAskUserQuestionDecisionResponse(decision.response);
+  if (response?.outcome === 'answered') {
+    return {
+      outcome: { outcome: response.outcome, answers: response.answers },
+    };
+  }
   if (response) {
     return {
-      outcome: response.outcome === 'answered'
-        ? { outcome: response.outcome, answers: response.answers }
-        : { outcome: response.outcome, ...(response.reason ? { reason: response.reason } : {}) },
+      outcome: {
+        outcome: response.outcome,
+        ...(response.reason ? { reason: response.reason } : {}),
+      },
     };
   }
   if (decision.response) return decision.response;

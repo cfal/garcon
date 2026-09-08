@@ -18,6 +18,8 @@ export interface PermissionDecisionClient {
   ): Promise<CommandAcceptedResponse>;
 }
 
+type PermissionCliCommand = PermissionDecisionCliCommand | PermissionAnswerCliCommand;
+
 export function permissionDecisionClientRequestId(
   command: Pick<
     PermissionDecisionCliCommand,
@@ -33,6 +35,31 @@ export function permissionDecisionClientRequestId(
   return `permission-v1:${digest}`;
 }
 
+function permissionControl(
+  command: PermissionCliCommand,
+): PermissionDecisionCommandRequest['control'] {
+  return {
+    serverInstanceId: command.serverInstanceId,
+    chatId: command.chatId,
+    runId: command.runId,
+    permissionOccurrenceId: command.permissionOccurrenceId,
+  };
+}
+
+function formatPermissionReceipt(
+  command: PermissionCliCommand,
+  response: CommandAcceptedResponse,
+  detail: string,
+): string {
+  if (command.json) return JSON.stringify(response, null, 2);
+  return [
+    `chat id: ${response.chatId}`,
+    `permission occurrence: ${command.permissionOccurrenceId}`,
+    detail,
+    `status: ${response.status}`,
+  ].join('\n');
+}
+
 export async function runPermissionDecision(
   command: PermissionDecisionCliCommand,
   client: PermissionDecisionClient,
@@ -45,21 +72,13 @@ export async function runPermissionDecision(
     permissionOccurrenceId: command.permissionOccurrenceId,
     allow: command.allow,
     alwaysAllow: false,
-    control: {
-      serverInstanceId: command.serverInstanceId,
-      chatId: command.chatId,
-      runId: command.runId,
-      permissionOccurrenceId: command.permissionOccurrenceId,
-    },
+    control: permissionControl(command),
   }, signal);
-  output.result(command.json
-    ? JSON.stringify(response, null, 2)
-    : [
-      `chat id: ${response.chatId}`,
-      `permission occurrence: ${command.permissionOccurrenceId}`,
-      `decision: ${command.allow ? 'allow' : 'deny'}`,
-      `status: ${response.status}`,
-    ].join('\n'));
+  output.result(formatPermissionReceipt(
+    command,
+    response,
+    `decision: ${command.allow ? 'allow' : 'deny'}`,
+  ));
 }
 
 export async function runPermissionAnswer(
@@ -77,12 +96,7 @@ export async function runPermissionAnswer(
       allow: true,
       alwaysAllow: false,
       response: command.response,
-      control: {
-        serverInstanceId: command.serverInstanceId,
-        chatId: command.chatId,
-        runId: command.runId,
-        permissionOccurrenceId: command.permissionOccurrenceId,
-      },
+      control: permissionControl(command),
     }, signal);
   } catch (error) {
     if (
@@ -94,12 +108,9 @@ export async function runPermissionAnswer(
     }
     throw error;
   }
-  output.result(command.json
-    ? JSON.stringify(response, null, 2)
-    : [
-      `chat id: ${response.chatId}`,
-      `permission occurrence: ${command.permissionOccurrenceId}`,
-      `answers: ${command.response.answers.length}`,
-      `status: ${response.status}`,
-    ].join('\n'));
+  output.result(formatPermissionReceipt(
+    command,
+    response,
+    `answers: ${command.response.answers.length}`,
+  ));
 }

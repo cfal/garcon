@@ -226,14 +226,11 @@ export class SessionCommands {
     };
 
     if (input.response?.type === 'ask-user-question-response') {
-      const observed = await this.deps.ledger.observe(ledgerInput);
-      if (observed) {
-        this.support.throwOnConflict(observed, 'Conflicting permission decision retry');
-        if (observed.kind === 'duplicate') {
-          return this.replayPermissionDecision(observed.record);
-        }
-        throw new Error('Command ledger observation unexpectedly accepted a permission decision');
+      const existing = await this.deps.ledger.observe(ledgerInput);
+      if (existing?.kind === 'duplicate') {
+        return this.replayPermissionDecision(existing.record);
       }
+      if (existing) this.support.throwOnConflict(existing, 'Conflicting permission decision retry');
       this.validateStructuredPermissionDecision(input);
     }
 

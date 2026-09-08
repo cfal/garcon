@@ -155,14 +155,14 @@ function normalizeAnswers(response: Record<string, unknown>): AskUserQuestionAns
   const questionIds = new Set<string>();
   for (const value of response.answers) {
     const answer = asRecord(value);
+    if (!answer || !hasExactKeys(answer, ['questionId', 'selectedOptionIds'])) return null;
+    if (!boundedId(answer.questionId) || questionIds.has(answer.questionId)) return null;
     if (
-      !answer
-      || !hasExactKeys(answer, ['questionId', 'selectedOptionIds'])
-      || !boundedId(answer.questionId)
-      || questionIds.has(answer.questionId)
-      || !Array.isArray(answer.selectedOptionIds)
+      !Array.isArray(answer.selectedOptionIds)
       || answer.selectedOptionIds.length > ASK_USER_QUESTION_MAX_SELECTED_OPTIONS
-    ) return null;
+    ) {
+      return null;
+    }
     const selectedOptionIds = normalizeOptionIds(answer.selectedOptionIds);
     if (!selectedOptionIds) return null;
     questionIds.add(answer.questionId);

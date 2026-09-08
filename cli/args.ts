@@ -309,9 +309,12 @@ export interface PermissionAnswerCliCommand extends CliConnectionOptions {
   readonly json: boolean;
 }
 
+const TRANSCRIPT_SEARCH_ACTIONS = ['enable', 'disable', 'rebuild', 'status'] as const;
+type TranscriptSearchAction = (typeof TRANSCRIPT_SEARCH_ACTIONS)[number];
+
 export interface TranscriptSearchCliCommand extends CliConnectionOptions {
   readonly kind: 'transcript-search';
-  readonly action: 'enable' | 'disable' | 'rebuild' | 'status';
+  readonly action: TranscriptSearchAction;
   readonly json: boolean;
 }
 
@@ -835,15 +838,7 @@ function parseTranscriptSearch(
 ): TranscriptSearchCliCommand {
   rejectOptionsExcept(values, TRANSCRIPT_SEARCH_OPTIONS, 'transcript-search');
   const action = parsed.positionals[1];
-  if (
-    parsed.positionals.length !== 2
-    || (
-      action !== 'enable'
-      && action !== 'disable'
-      && action !== 'rebuild'
-      && action !== 'status'
-    )
-  ) {
+  if (parsed.positionals.length !== 2 || !isTranscriptSearchAction(action)) {
     throw argumentError(
       'transcript-search requires one action: enable, disable, rebuild, or status',
     );
@@ -854,6 +849,11 @@ function parseTranscriptSearch(
     action,
     json: values.json === true,
   };
+}
+
+function isTranscriptSearchAction(value: unknown): value is TranscriptSearchAction {
+  return typeof value === 'string'
+    && TRANSCRIPT_SEARCH_ACTIONS.includes(value as TranscriptSearchAction);
 }
 
 function parseChatOrderMutation(
@@ -1521,18 +1521,15 @@ export function parseCliArgs(
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
-    if (resource === 'agents') {
-      if (agentId !== undefined) throw argumentError('--agent cannot be used with list agents');
-      if (providerId !== undefined) throw argumentError('--provider cannot be used with list agents');
-      if (endpointId !== undefined) throw argumentError('--endpoint cannot be used with list agents');
-    }
-    if (resource === 'preambles') {
-      if (agentId !== undefined) throw argumentError('--agent cannot be used with list preambles');
+    if (resource === 'agents' || resource === 'preambles') {
+      if (agentId !== undefined) {
+        throw argumentError(`--agent cannot be used with list ${resource}`);
+      }
       if (providerId !== undefined) {
-        throw argumentError('--provider cannot be used with list preambles');
+        throw argumentError(`--provider cannot be used with list ${resource}`);
       }
       if (endpointId !== undefined) {
-        throw argumentError('--endpoint cannot be used with list preambles');
+        throw argumentError(`--endpoint cannot be used with list ${resource}`);
       }
     }
     if (resource === 'providers' && endpointId !== undefined) {

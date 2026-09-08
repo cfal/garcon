@@ -26,14 +26,14 @@ interface RequestTimeoutServer {
   timeout(request: Request, seconds: number): void;
 }
 
-export function disableRequestIdleTimeout(request: Request, server: unknown): void {
-  if (
-    server !== null
+function supportsRequestTimeout(server: unknown): server is RequestTimeoutServer {
+  return server !== null
     && typeof server === 'object'
-    && typeof (server as { timeout?: unknown }).timeout === 'function'
-  ) {
-    (server as RequestTimeoutServer).timeout(request, 0);
-  }
+    && typeof (server as { timeout?: unknown }).timeout === 'function';
+}
+
+export function disableRequestIdleTimeout(request: Request, server: unknown): void {
+  if (supportsRequestTimeout(server)) server.timeout(request, 0);
 }
 
 // Marks a route handler as publicly accessible without JWT auth.

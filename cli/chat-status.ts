@@ -3,7 +3,6 @@ import type { StatusCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
-import { PermissionRequestMessage } from '@garcon/common/chat-types';
 import { shellQuote } from './shell-quote.js';
 import {
   formatPermissionRequestedTool,
@@ -82,7 +81,6 @@ export function formatChatStatus(
     lines.push(`pending permissions: ${snapshot.transientFeed.rows.length}`);
     for (const row of snapshot.transientFeed.rows) {
       const message = row.message;
-      if (!(message instanceof PermissionRequestMessage)) continue;
       const structured = message.requestedTool.type === 'ask-user-question-tool-use'
         || message.requestedTool.type === 'cursor-ask-question-tool-use';
       lines.push(

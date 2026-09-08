@@ -21,35 +21,44 @@ export async function runTranscriptSearchAdministration(
   output: CliOutput,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (command.action === 'status') {
-    const status = await client.getTranscriptSearchStatus(signal);
-    output.result(command.json ? JSON.stringify(status, null, 2) : formatTranscriptSearchStatus(status));
-    return;
+  switch (command.action) {
+    case 'status': {
+      const status = await client.getTranscriptSearchStatus(signal);
+      const formatted = command.json
+        ? JSON.stringify(status, null, 2)
+        : formatTranscriptSearchStatus(status);
+      output.result(formatted);
+      return;
+    }
+    case 'rebuild': {
+      const result = await client.rebuildTranscriptSearch(signal);
+      const formatted = command.json
+        ? JSON.stringify(result, null, 2)
+        : [
+          'transcript search: rebuild started',
+          `phase: ${result.status.phase}`,
+        ].join('\n');
+      output.result(formatted);
+      return;
+    }
+    case 'enable':
+    case 'disable': {
+      const enabled = command.action === 'enable';
+      const settings = await client.setTranscriptSearchEnabled(enabled, signal);
+      const result = {
+        enabled: settings.features.transcriptSearch.enabled,
+        settingsVersion: settings.version,
+      };
+      const formatted = command.json
+        ? JSON.stringify(result, null, 2)
+        : [
+          `transcript search: ${result.enabled ? 'enabled' : 'disabled'}`,
+          `settings version: ${result.settingsVersion}`,
+        ].join('\n');
+      output.result(formatted);
+      return;
+    }
   }
-
-  if (command.action === 'rebuild') {
-    const result = await client.rebuildTranscriptSearch(signal);
-    output.result(command.json
-      ? JSON.stringify(result, null, 2)
-      : [
-        'transcript search: rebuild started',
-        `phase: ${result.status.phase}`,
-      ].join('\n'));
-    return;
-  }
-
-  const enabled = command.action === 'enable';
-  const settings = await client.setTranscriptSearchEnabled(enabled, signal);
-  const result = {
-    enabled: settings.features.transcriptSearch.enabled,
-    settingsVersion: settings.version,
-  };
-  output.result(command.json
-    ? JSON.stringify(result, null, 2)
-    : [
-      `transcript search: ${result.enabled ? 'enabled' : 'disabled'}`,
-      `settings version: ${result.settingsVersion}`,
-    ].join('\n'));
 }
 
 export function formatTranscriptSearchStatus(status: TranscriptSearchStatusResponse): string {

@@ -45,21 +45,14 @@ export class TranscriptSearchSettingsCoordinator {
           if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
           await this.#disableAndDelete();
         } else {
-          try {
-            await this.#controller.start();
-          } catch (error) {
-            throw new TranscriptSearchSettingsError(
-              'TRANSCRIPT_SEARCH_ENABLE_FAILED',
-              error instanceof Error ? error.message : String(error),
-            );
-          }
+          await this.#start();
           if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
         }
         return;
       }
       if (enabled) {
         try {
-          await this.#controller.start();
+          await this.#start();
           await this.#settings.setFeatureSettings(featurePatch);
         } catch (error) {
           await this.#controller.disableAndDelete().catch(() => undefined);
@@ -86,15 +79,19 @@ export class TranscriptSearchSettingsCoordinator {
         );
       }
       await this.#disableAndDelete();
-      try {
-        await this.#controller.start();
-      } catch (error) {
-        throw new TranscriptSearchSettingsError(
-          'TRANSCRIPT_SEARCH_ENABLE_FAILED',
-          error instanceof Error ? error.message : String(error),
-        );
-      }
+      await this.#start();
     });
+  }
+
+  async #start(): Promise<void> {
+    try {
+      await this.#controller.start();
+    } catch (error) {
+      throw new TranscriptSearchSettingsError(
+        'TRANSCRIPT_SEARCH_ENABLE_FAILED',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   async #disableAndDelete(): Promise<void> {

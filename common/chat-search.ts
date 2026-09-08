@@ -448,6 +448,23 @@ const TRANSCRIPT_SEARCH_STATUS_KEYS = [
   'updatedAt',
 ] as const;
 
+const TRANSCRIPT_SEARCH_CHAT_KEYS = [
+  'total',
+  'indexed',
+  'pending',
+  'failed',
+  'unindexed',
+] as const;
+
+const TRANSCRIPT_SEARCH_PHASES: readonly TranscriptSearchPhase[] = [
+  'disabled',
+  'opening',
+  'rebuilding',
+  'ready',
+  'degraded',
+  'failed',
+];
+
 const TRANSCRIPT_SEARCH_QUERY_STAT_KEYS = [
   'served',
   'timedOut',
@@ -512,7 +529,7 @@ function isTranscriptSearchQueryStatsV1(
   value: unknown,
 ): value is TranscriptSearchQueryStatsV1 {
   const queryStats = chatSearchRecord(value);
-  return !!queryStats
+  return queryStats !== null
     && hasExactChatSearchKeys(queryStats, TRANSCRIPT_SEARCH_QUERY_STAT_KEYS)
     && TRANSCRIPT_SEARCH_QUERY_STAT_KEYS.every(
       (key) => isNonNegativeSafeInteger(queryStats[key]),
@@ -522,54 +539,66 @@ function isTranscriptSearchQueryStatsV1(
 export function isTranscriptSearchStatusV1(value: unknown): value is TranscriptSearchStatusV1 {
   const raw = chatSearchRecord(value);
   if (!raw || !hasExactChatSearchKeys(raw, TRANSCRIPT_SEARCH_STATUS_KEYS)) return false;
-  const candidate = raw as Partial<TranscriptSearchStatusV1>;
-  const chats = candidate.chats;
-  const resync = candidate.resync;
-  const activeChat = candidate.activeChat;
-  return !!chats
-    && typeof chats === 'object'
-    && candidate.version === 1
-    && ['disabled', 'opening', 'rebuilding', 'ready', 'degraded', 'failed']
-      .includes(candidate.phase as TranscriptSearchPhase)
-    && [
-      chats.indexed,
-      chats.pending,
-      chats.failed,
-      chats.total,
-      chats.unindexed,
-      candidate.queuedJobs,
-      candidate.backlogRows,
-    ].every((count) => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)
-    && chats.indexed + chats.pending + chats.failed + chats.unindexed >= chats.total
-    && (resync === null
-      || (!!resync
-        && typeof resync === 'object'
-        && Number.isSafeInteger(resync.completedChats)
-        && Number.isSafeInteger(resync.totalChats)
-        && resync.completedChats >= 0
-        && resync.totalChats >= resync.completedChats))
-    && (activeChat === null
-      || (!!activeChat
-        && typeof activeChat === 'object'
-        && Number.isSafeInteger(activeChat.position)
-        && Number.isSafeInteger(activeChat.total)
-        && activeChat.position >= 0
-        && activeChat.total >= activeChat.position))
-    && (candidate.lastErrorCode === null
-      || (typeof candidate.lastErrorCode === 'string'
-        && /^[A-Z][A-Z0-9_]{0,63}$/u.test(candidate.lastErrorCode)))
-    && isCanonicalChatSearchTimestamp(candidate.updatedAt)
-    && hasExactChatSearchKeys(chats, [
-      'total', 'indexed', 'pending', 'failed', 'unindexed',
-    ])
-    && (resync === null || hasExactChatSearchKeys(
-      resync,
-      ['completedChats', 'totalChats'],
-    ))
-    && (activeChat === null || hasExactChatSearchKeys(
-      activeChat,
-      ['position', 'total'],
-    ));
+  return raw.version === 1
+    && isTranscriptSearchPhase(raw.phase)
+    && isTranscriptSearchChatCounts(raw.chats)
+    && isNonNegativeSafeInteger(raw.queuedJobs)
+    && isNonNegativeSafeInteger(raw.backlogRows)
+    && isTranscriptSearchResync(raw.resync)
+    && isTranscriptSearchActiveChat(raw.activeChat)
+    && isTranscriptSearchErrorCode(raw.lastErrorCode)
+    && isCanonicalChatSearchTimestamp(raw.updatedAt);
+}
+
+function isTranscriptSearchPhase(value: unknown): value is TranscriptSearchPhase {
+  return typeof value === 'string'
+    && TRANSCRIPT_SEARCH_PHASES.includes(value as TranscriptSearchPhase);
+}
+
+function isTranscriptSearchChatCounts(
+  value: unknown,
+): value is TranscriptSearchStatusV1['chats'] {
+  const chats = chatSearchRecord(value);
+  if (!chats || !hasExactChatSearchKeys(chats, TRANSCRIPT_SEARCH_CHAT_KEYS)) return false;
+  if (
+    !isNonNegativeSafeInteger(chats.total)
+    || !isNonNegativeSafeInteger(chats.indexed)
+    || !isNonNegativeSafeInteger(chats.pending)
+    || !isNonNegativeSafeInteger(chats.failed)
+    || !isNonNegativeSafeInteger(chats.unindexed)
+  ) {
+    return false;
+  }
+  return chats.indexed + chats.pending + chats.failed + chats.unindexed >= chats.total;
+}
+
+function isTranscriptSearchResync(
+  value: unknown,
+): value is TranscriptSearchStatusV1['resync'] {
+  if (value === null) return true;
+  const progress = chatSearchRecord(value);
+  return progress !== null
+    && hasExactChatSearchKeys(progress, ['completedChats', 'totalChats'])
+    && isNonNegativeSafeInteger(progress.completedChats)
+    && isNonNegativeSafeInteger(progress.totalChats)
+    && progress.totalChats >= progress.completedChats;
+}
+
+function isTranscriptSearchActiveChat(
+  value: unknown,
+): value is TranscriptSearchStatusV1['activeChat'] {
+  if (value === null) return true;
+  const progress = chatSearchRecord(value);
+  return progress !== null
+    && hasExactChatSearchKeys(progress, ['position', 'total'])
+    && isNonNegativeSafeInteger(progress.position)
+    && isNonNegativeSafeInteger(progress.total)
+    && progress.total >= progress.position;
+}
+
+function isTranscriptSearchErrorCode(value: unknown): value is string | null {
+  return value === null
+    || (typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/u.test(value));
 }
 
 function hasExactChatSearchKeys(
