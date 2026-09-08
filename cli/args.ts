@@ -132,7 +132,7 @@ Options:
   --cwd <path>                 Project directory for a new chat (default: current directory)
   --parent <chat-id>           Record an existing parent for a new delegated chat
   --agent <id>                 Agent ID; required for a new chat and scoped lists, optional for native-session lookup
-  --provider <id>              Configured API provider ID
+  --provider <id|name>          Configured API provider ID or exact unique name
   --endpoint <id>              Endpoint ID within --provider
   --model <id>                 Model value or raw model; required for a new chat
   --permissions <mode>         Permission mode: ${PERMISSION_MODE_VALUES.join(', ')}
