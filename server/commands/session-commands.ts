@@ -223,14 +223,11 @@ export class SessionCommands {
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
     if (ledger.kind === 'duplicate') {
       if (ledger.record.status === 'finished') return commandResultFromRecord(ledger.record, 'duplicate');
-      if (ledger.record.status === 'failed') {
-        throw permissionDecisionError(
-          ledger.record.errorCode === 'PERMISSION_NOT_ACTIONABLE'
-            ? ledger.record.errorCode
-            : 'PERMISSION_DECISION_OUTCOME_UNKNOWN',
-        );
-      }
-      throw permissionDecisionError('PERMISSION_DECISION_OUTCOME_UNKNOWN');
+      const failureCode = ledger.record.status === 'failed'
+        && ledger.record.errorCode === 'PERMISSION_NOT_ACTIONABLE'
+        ? 'PERMISSION_NOT_ACTIONABLE'
+        : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+      throw permissionDecisionError(failureCode);
     }
     try {
       this.deps.transientFeeds.validateAction(input.control);
@@ -241,14 +238,12 @@ export class SessionCommands {
       }, input.control);
       await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
     } catch (error) {
-      const failure = permissionDecisionError(
-        error instanceof TransientControlActionError || error instanceof PermissionNotActionableError
-          ? 'PERMISSION_NOT_ACTIONABLE'
-          : 'PERMISSION_DECISION_OUTCOME_UNKNOWN',
-      );
+      const failureCode = error instanceof TransientControlActionError || error instanceof PermissionNotActionableError
+        ? 'PERMISSION_NOT_ACTIONABLE'
+        : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+      const failure = permissionDecisionError(failureCode);
       await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
-        error: failure.message,
-        errorCode: failure.code,
+        error: failure.message, errorCode: failure.code,
       });
       throw failure;
     }
