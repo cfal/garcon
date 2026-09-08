@@ -10,6 +10,14 @@ import {
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from '../generation-prompts.js';
 
 describe('generation settings contracts', () => {
+  it('normalizes the independent resume gate without changing start or send authority', () => {
+    for (const resumeAgent of [false, true, null, 'false', 0]) {
+      const commands = normalizeRemoteFeatureSettings({ agentCommands: { resumeAgent, startAgent: false, sendMessage: false } }).agentCommands;
+      expect(commands.resumeAgent).toBe(typeof resumeAgent === 'boolean' ? resumeAgent : true);
+      expect(commands.startAgent).toBe(false);
+      expect(commands.sendMessage).toBe(false);
+    }
+  });
   it('defaults agent commands to enabled and normalizes partial command settings', () => {
     expect(normalizeRemoteFeatureSettings(undefined)).toEqual({
       transcriptSearch: { enabled: false },
@@ -18,6 +26,7 @@ describe('generation settings contracts', () => {
         chatIdDiscovery: true,
         sendMessage: true,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       },
     });
@@ -28,6 +37,7 @@ describe('generation settings contracts', () => {
       chatIdDiscovery: true,
       sendMessage: false,
       startAgent: true,
+      resumeAgent: true,
       schedule: true,
     });
   });
@@ -40,6 +50,7 @@ describe('generation settings contracts', () => {
       chatIdDiscovery: false,
       sendMessage: true,
       startAgent: true,
+      resumeAgent: true,
       schedule: true,
     });
     expect(normalizeRemoteFeatureSettings({

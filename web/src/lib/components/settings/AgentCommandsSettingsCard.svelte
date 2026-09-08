@@ -100,6 +100,18 @@
 			</div>
 			<div class="flex items-center justify-between gap-4">
 				<div>
+					<label for="resume-agent-enabled" class="text-sm text-foreground">{m.settings_enable_resume_agent()}</label>
+					<p class="text-xs text-muted-foreground">{m.settings_resume_agent_description()}</p>
+				</div>
+				<Switch
+					id="resume-agent-enabled"
+					checked={commands?.resumeAgent ?? true}
+					disabled={isSaving}
+					onCheckedChange={(checked) => void setCommandSetting('resumeAgent', checked)}
+				/>
+			</div>
+			<div class="flex items-center justify-between gap-4">
+				<div>
 					<label for="schedule-enabled" class="text-sm text-foreground">{m.settings_enable_schedule()}</label>
 					<p class="text-xs text-muted-foreground">{m.settings_schedule_description()}</p>
 				</div>

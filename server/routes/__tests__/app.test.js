@@ -60,6 +60,7 @@ function createMockCtx() {
           chatIdDiscovery: true,
           sendMessage: true,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       })),
@@ -70,6 +71,7 @@ function createMockCtx() {
           chatIdDiscovery: true,
           sendMessage: true,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       })),
@@ -114,6 +116,7 @@ beforeEach(() => {
       chatIdDiscovery: true,
       sendMessage: true,
       startAgent: true,
+      resumeAgent: true,
       schedule: true,
     },
   }));
@@ -838,6 +841,7 @@ describe('PUT /api/app/settings', () => {
           chatIdDiscovery: false,
           sendMessage: false,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       },
@@ -849,6 +853,7 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: true,
         sendMessage: false,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       },
     }));
@@ -864,6 +869,7 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: false,
         sendMessage: false,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       },
     });
@@ -888,6 +894,7 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: true,
         sendMessage: true,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       },
     });
@@ -921,6 +928,7 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: true,
         sendMessage: false,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       },
     });

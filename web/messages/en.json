@@ -1491,6 +1491,8 @@
 	"settings_enable_send_message": "Enable send message",
 	"settings_enable_start_agent": "Enable start agent",
 	"settings_start_agent_description": "Start one child chat with the parent's project path and permissions.",
+	"settings_enable_resume_agent": "Enable resume agent",
+	"settings_resume_agent_description": "Start a new turn only in a directly delegated child, using its current settings.",
 	"settings_enable_schedule": "Enable scheduling",
 	"settings_schedule_description": "Schedule prompts only in the requesting chat, without changing its configuration.",
 	"settings_transcript_search": "Transcript search",

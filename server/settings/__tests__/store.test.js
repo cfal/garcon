@@ -663,6 +663,7 @@ describe('settings store', () => {
             chatIdDiscovery: true,
             sendMessage: true,
             startAgent: true,
+            resumeAgent: true,
             schedule: true,
           },
         },
@@ -1132,6 +1133,7 @@ describe('settings store', () => {
             chatIdDiscovery: true,
             sendMessage: true,
             startAgent: true,
+            resumeAgent: true,
             schedule: true,
             removedCommand: true,
           },
@@ -1143,6 +1145,7 @@ describe('settings store', () => {
         chatIdDiscovery: true,
         sendMessage: true,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
@@ -1165,6 +1168,7 @@ describe('settings store', () => {
           chatIdDiscovery: true,
           sendMessage: true,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       });
@@ -1176,6 +1180,7 @@ describe('settings store', () => {
           chatIdDiscovery: true,
           sendMessage: true,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       });
@@ -1194,6 +1199,7 @@ describe('settings store', () => {
         chatIdDiscovery: false,
         sendMessage: true,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
@@ -1202,6 +1208,7 @@ describe('settings store', () => {
         chatIdDiscovery: false,
         sendMessage: true,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       });
       expect(persisted.features.chatIdDiscovery).toBeUndefined();
@@ -1218,6 +1225,7 @@ describe('settings store', () => {
           chatIdDiscovery: true,
           sendMessage: true,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       });
@@ -1233,6 +1241,7 @@ describe('settings store', () => {
           chatIdDiscovery: true,
           sendMessage: true,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       });
@@ -1247,6 +1256,7 @@ describe('settings store', () => {
           chatIdDiscovery: false,
           sendMessage: false,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       });
@@ -1258,6 +1268,7 @@ describe('settings store', () => {
           chatIdDiscovery: false,
           sendMessage: false,
           startAgent: true,
+          resumeAgent: true,
           schedule: true,
         },
       });
@@ -1271,6 +1282,7 @@ describe('settings store', () => {
         chatIdDiscovery: false,
         sendMessage: false,
         startAgent: true,
+        resumeAgent: true,
         schedule: true,
       });
     });

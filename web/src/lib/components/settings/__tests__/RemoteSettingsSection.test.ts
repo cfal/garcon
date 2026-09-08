@@ -130,7 +130,7 @@ describe('RemoteSettingsSection', () => {
 		expect(store.snapshot?.features.agentCommands.sendMessage).toBe(true);
 	});
 
-	it.each([['startAgent', 'Enable start agent'], ['schedule', 'Enable scheduling']] as const)(
+	it.each([['startAgent', 'Enable start agent'], ['resumeAgent', 'Enable resume agent'], ['schedule', 'Enable scheduling']] as const)(
 		'persists the %s command gate', async (key, name) => {
 			const store = new RemoteSettingsStore();
 			store.applySnapshot(makeRemoteSettingsSnapshot());
