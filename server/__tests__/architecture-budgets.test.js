@@ -14,9 +14,10 @@ const MAX_LINES = 1000;
 // admission also gates direct work, queue creation, and pre-dequeue dispatch.
 // Includes exact public-terminal receipt observation, guarded delegated resume,
 // fixed-watermark snapshot initialization, and custom-title, preamble-free start
-// admission with compensation. Reply orchestration stays in chats; control view
-// fencing remains independent of receipt creation.
-const EXECUTION_FOOTPRINT_BUDGET = 8595;
+// admission with compensation. Structured permission decisions validate answers
+// against the exact pending question before ledger acceptance. Reply orchestration
+// stays in chats; control view fencing remains independent of receipt creation.
+const EXECUTION_FOOTPRINT_BUDGET = 8640;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
