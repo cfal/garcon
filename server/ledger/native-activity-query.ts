@@ -36,11 +36,12 @@ export function readProviderActivityWatermark(
             'chat-id-disclosure',
             'inter-agent-send-request',
             'agent-start-request',
+            'agent-resume-request',
             'agent-schedule-request',
             'inter-agent-message-received'
           )
           OR (
-            json_extract(payload_json, '$.value.detail.type') IN ('agent-start-outcome', 'agent-schedule-outcome')
+            json_extract(payload_json, '$.value.detail.type') IN ('agent-start-outcome', 'agent-resume-outcome', 'agent-schedule-outcome')
             AND json_type(payload_json, '$.value.detail.nativeResultInput') = 'true'
           )
           OR (

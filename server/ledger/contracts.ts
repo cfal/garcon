@@ -37,7 +37,7 @@ export type LedgerAgentCommandOutcomeDetail = AgentCommandOutcomeNoticeDetail & 
 
 export function projectLedgerAgentCommandOutcome(detail: JsonObject): AgentCommandOutcomeNoticeDetail | null {
   const publicFields = ['type', 'requestViewId', 'requestOrdinal', 'status', 'chatId', 'reason',
-    'scheduleId', 'nextRunAt', 'intervalMinutes', 'endAtUtc', 'busyBehavior'];
+    'scheduleId', 'nextRunAt', 'intervalMinutes', 'endAtUtc', 'busyBehavior', 'ref', 'async', 'output', 'errorCode'];
   return parseAgentCommandOutcome(Object.fromEntries(publicFields
     .filter((key) => Object.hasOwn(detail, key)).map((key) => [key, detail[key]])));
 }

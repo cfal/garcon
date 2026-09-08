@@ -55,14 +55,14 @@ describe('assistant start and schedule commands', () => {
       const cursor = fixture.client.markEvents();
       const started = await fixture.client.startDirectChat({ chatId: source, content: prompt, projectPath: fixture.dirs.project, agent });
       await held.received;
-      held.releaseText(`<garcon-start-agent agent="${agent.agentId}" provider="${agent.provider.providerId}" model="${agent.provider.model}">${childPrompt}</garcon-start-agent>\n<garcon-schedule every="5m">Review task {{chat_id}} &amp; report.</garcon-schedule>`);
+      held.releaseText(`<garcon-start-agent ref="task" async="true" agent="${agent.agentId}" provider="${agent.provider.providerId}" model="${agent.provider.model}">${childPrompt}</garcon-start-agent>\n<garcon-schedule every="5m">Review task {{chat_id}} &amp; report.</garcon-schedule>`);
       const [startOutcome, scheduleOutcome, childRequest] = await Promise.all([
         waitForOutcome(fixture, source, 'agent-start-outcome', cursor),
         waitForOutcome(fixture, source, 'agent-schedule-outcome', cursor),
         child.received,
       ]);
-      expect(startOutcome).toMatchObject({ status: 'created' });
-      if (startOutcome.type !== 'agent-start-outcome' || startOutcome.status !== 'created') throw new Error('Child was not created');
+      expect(startOutcome).toMatchObject({ status: 'accepted' });
+      if (startOutcome.type !== 'agent-start-outcome' || startOutcome.status !== 'accepted') throw new Error('Child was not created');
       expect(scheduleOutcome).toMatchObject({ status: 'created', intervalMinutes: 5, busyBehavior: 'queue' });
       expect(childRequest.lastUserText).toBe(childPrompt);
       child.releaseText('Synthetic child complete.');
@@ -103,10 +103,10 @@ describe('assistant start and schedule commands', () => {
         expectedRevision: 0,
         preamble: { enabled: true, title: 'Synthetic default', content: 'Synthetic boundary instructions.', scope: { type: 'global' } },
       });
-      held.releaseText(`<garcon-start-agent agent="${agent.agentId}" provider="${agent.provider.providerId}" model="${agent.provider.model}">/synthetic-command</garcon-start-agent>`);
+      held.releaseText(`<garcon-start-agent ref="task" async="true" agent="${agent.agentId}" provider="${agent.provider.providerId}" model="${agent.provider.model}">/synthetic-command</garcon-start-agent>`);
       const outcome = await waitForOutcome(fixture, source, 'agent-start-outcome', cursor);
-      expect(outcome).toMatchObject({ status: 'created' });
-      if (outcome.type !== 'agent-start-outcome' || outcome.status !== 'created') throw new Error('Missing child');
+      expect(outcome).toMatchObject({ status: 'accepted' });
+      if (outcome.type !== 'agent-start-outcome' || outcome.status !== 'accepted') throw new Error('Missing child');
       const received = await fixture.fakeProviders.openAi.waitForRequest({ lastUserText: '/synthetic-command' });
       expect(received.lastUserText).toBe('/synthetic-command');
       const chats = await fixture.client.listChats();

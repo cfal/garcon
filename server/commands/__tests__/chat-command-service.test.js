@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -28,6 +28,11 @@ import {
 import { InMemoryChatExecutionControlRepository } from '../../chat-execution/chat-execution-control-repository.ts';
 import { TransientControlActionError } from '../../chats/chat-transient-feed.ts';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
+import { AtomicJsonWriteError } from '../../lib/json-file-store.js';
+import { AgentStartController } from '../../chats/agent-start-controller.js';
+import { AgentResumeController } from '../../chats/agent-resume-controller.js';
+import { CommandSupport, CommandValidationError } from '../command-support.js';
+import { parseGarconCommandResult } from '../../../common/garcon-command-results.js';
 import {
   COMMAND_CORRELATION_ID_MAX_BYTES,
   QUEUE_ENTRY_ID_MAX_BYTES,
@@ -702,7 +707,7 @@ function makeService(overrides = {}) {
   const fileMentions = overrides.fileMentions ?? {
     resolve: mock(async (command) => command),
   };
-  const service = new TestChatCommandService({
+  const dependencies = {
     chats,
     queue,
     ledger,
@@ -725,7 +730,8 @@ function makeService(overrides = {}) {
       snapshot: () => ({ revision: 0, preambles: [] }),
     },
     chatMutationLock: overrides.chatMutationLock,
-  });
+  };
+  const service = new TestChatCommandService(dependencies);
   activeServices.push(service);
   return {
     service,
@@ -741,6 +747,8 @@ function makeService(overrides = {}) {
     ownership,
     handoffs,
     handoffPreparations,
+    transcripts,
+    support: new CommandSupport(dependencies),
   };
 }
 
@@ -758,6 +766,7 @@ function makeRealQueue(
   inputProjection,
   turnRunnerOverrides = {},
   projectAdmission = { assertAvailable: mock(async () => undefined) },
+  controlRepository = new InMemoryChatExecutionControlRepository('server-instance-test'),
 ) {
   return new ChatExecutionCoordinator(
     workspaceDir,
@@ -771,7 +780,7 @@ function makeRealQueue(
     inputProjection,
     () => ({}),
     () => true,
-    new InMemoryChatExecutionControlRepository('server-instance-test'),
+    controlRepository,
     {
       projectAdmission,
       isControlInputViewCurrent: () => true,
@@ -867,6 +876,205 @@ describe('ChatCommandService', () => {
       clientRequestId: 'agent-start', clientMessageId: 'agent-start-message', ...overrides };
   }
 
+  it.each([false, true])('reports title-write failure by compensation durability, not title rename: uncertain=%s', async (uncertain) => {
+    const projection = makeInputProjection();
+    const queueService = makeRealQueue(projection);
+    const f = makeService({ queueService, session: { projectPath: projectBaseDir, permissionMode: 'default' } });
+    const names = new Map();
+    f.settings.setSessionName.mockImplementation(async (id, title) => {
+      names.set(id, title);
+      throw new AtomicJsonWriteError('Synthetic title directory sync failure', true);
+    });
+    f.settings.removeSessionName.mockImplementation(async (id) => { names.delete(id); });
+    if (uncertain) f.chats.flush.mockRejectedValue(new AtomicJsonWriteError('Synthetic registry sync failure', true));
+    const delivered = deferred();
+    const outcomes = [];
+    const viewId = '00000000-0000-4000-8000-000000000001';
+    const controller = new AgentStartController({
+      registry: f.chats, commands: f.service, turns: f.ledger, chatMutationLock: new KeyedPromiseLock(),
+      chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
+      settings: { getExecutionDefaults: () => ({}) },
+      selection: { catalog: async () => ({}), resolve: () => ({
+        permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
+      }) },
+      notices: { existingCurrentView: () => ({ viewId }), appendNotice: (_id, _view, notice) => outcomes.push(notice.detail) },
+      execution: { deliverServerControlInput: async (_id, input) => { delivered.resolve(input.content); return 'queued'; } },
+    });
+    f.transcripts.existingCurrentView.mockReturnValue({ viewId });
+    try {
+      controller.request({ chatId: SOURCE_CHAT_ID, viewId, requestOrdinal: 1, runId: null, at: '2030-01-01T00:00:00.000Z' }, {
+        type: 'start-agent', ref: 'title', async: true, fork: false, title: 'Synthetic title',
+        agentId: 'claude', model: 'opus', providerId: null, reasoningEffort: null, prompt: 'Synthetic task.',
+      });
+      const result = parseGarconCommandResult(await delivered.promise);
+      expect(result).toMatchObject(uncertain
+        ? { status: 'outcome-unknown', chatId: TARGET_CHAT_ID }
+        : { status: 'rejected', reason: 'action-failed' });
+      if (!uncertain) expect(result).not.toHaveProperty('chatId');
+      expect(outcomes).toEqual([result]);
+      expect(f.sessions.has(TARGET_CHAT_ID)).toBe(false);
+      expect(names.has(TARGET_CHAT_ID)).toBe(uncertain);
+      expect(projection.admitInput).not.toHaveBeenCalled();
+      expect(f.agents.startSession).not.toHaveBeenCalled();
+    } finally { controller.shutdown(); }
+  });
+
+  it.each([
+    ['adoption', 'TRANSCRIPT_UNAVAILABLE'], ['adoption', 'INTERNAL_ERROR'], ['scheduled', 'INTERNAL_ERROR'],
+  ])('classifies delegated resume failure by admission phase: %s / %s', async (phase, code) => {
+    const f = makeService();
+    const viewId = '00000000-0000-4000-8000-000000000001';
+    f.transcripts.existingCurrentView.mockReturnValue({ viewId });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    if (phase === 'adoption') f.agents.currentTranscriptViewId.mockRejectedValue(new DomainError(code, 'Synthetic adoption failure'));
+    else {
+      f.agents.currentTranscriptViewId.mockResolvedValue(viewId);
+      const schedule = f.queue.scheduleDirectInput.getMockImplementation();
+      f.queue.scheduleDirectInput.mockImplementation(async (input) => {
+        await schedule(input);
+        throw new CommandValidationError(code, 'Synthetic post-admission failure');
+      });
+    }
+    const accept = spyOn(f.ledger, 'accept');
+    const wait = spyOn(f.ledger, 'waitForTurnTerminal');
+    const delivered = deferred();
+    const controller = new AgentResumeController({
+      registry: f.chats, commands: f.service, turns: f.ledger, chatMutationLock: new KeyedPromiseLock(),
+      isEnabled: () => true,
+      notices: { existingCurrentView: () => ({ viewId }), appendNotice: () => undefined },
+      execution: { deliverServerControlInput: async (_id, input) => { delivered.resolve(input.content); return 'queued'; } },
+    });
+    try {
+      controller.request({ chatId: SOURCE_CHAT_ID, viewId, requestOrdinal: 1, runId: null, at: '2030-01-01T00:00:00.000Z' }, {
+        type: 'resume-agent', ref: 'adoption', async: false, chatId: TARGET_CHAT_ID, prompt: 'Synthetic follow-up.',
+      });
+      expect(parseGarconCommandResult(await delivered.promise)).toMatchObject(phase === 'adoption'
+        ? { status: 'rejected', reason: 'target-unavailable', chatId: TARGET_CHAT_ID }
+        : { status: 'outcome-unknown', chatId: TARGET_CHAT_ID });
+      expect(accept).toHaveBeenCalledTimes(phase === 'adoption' ? 0 : 1);
+      expect(wait).not.toHaveBeenCalled();
+      expect(f.queue.scheduleDirectInput).toHaveBeenCalledTimes(phase === 'adoption' ? 0 : 1);
+      expect(f.sessions.has(TARGET_CHAT_ID)).toBe(true);
+    } finally { controller.shutdown(); }
+  });
+
+  it('resumes a delegated child using only its current configuration and exact direct turn', async () => {
+    const f = makeService();
+    const child = { ...f.sessions.get(SOURCE_CHAT_ID), agentId: 'codex', model: 'synthetic-current-model',
+      projectPath: projectBaseDir, permissionMode: 'bypassPermissions', thinkingMode: 'high',
+      agentSettingsById: { codex: agentSettings('codex') },
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } };
+    f.sessions.set(TARGET_CHAT_ID, child);
+    const result = await f.service.submitAgentCommandResumeLocked({
+      sourceChatId: SOURCE_CHAT_ID, sourceViewId: 'view-1', chatId: TARGET_CHAT_ID,
+      command: 'Synthetic follow-up.', clientRequestId: 'resume-current', clientMessageId: 'resume-current-message',
+    }, new AbortController().signal);
+    expect(result).toMatchObject({ status: 'accepted', chatId: TARGET_CHAT_ID });
+    const admission = f.queue.scheduleDirectInput.mock.calls[0][0];
+    expect(admission.command.turnId).toBe(result.turnId);
+    expect(admission.options).toEqual({
+      clientRequestId: 'resume-current', clientMessageId: 'resume-current-message',
+      transcriptViewId: 'view-1', turnId: result.turnId, commandType: 'agent-run', images: [],
+    });
+    expect(f.sessions.get(TARGET_CHAT_ID)).toEqual(child);
+    expect(f.chats.updateChat).not.toHaveBeenCalled();
+    expect(f.queue.captureSteerTarget).not.toHaveBeenCalled();
+    expect(f.queue.createChatQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it.each(['paused', 'queued', 'control'])('rejects delegated resume with %s execution control without admitting input', async (blocked) => {
+    const projection = makeInputProjection();
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const queueService = makeRealQueue(projection, {}, undefined, repository);
+    const f = makeService({ queueService });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    if (blocked !== 'control') await queueService.createChatQueueEntry(TARGET_CHAT_ID, 'Synthetic pending input.');
+    if (blocked === 'paused') await queueService.pauseChatQueue(TARGET_CHAT_ID);
+    if (blocked === 'control') {
+      repository.save(TARGET_CHAT_ID, { ...repository.load(TARGET_CHAT_ID), controlEntries: [controlEntry('synthetic-control')] });
+    }
+    await expect(f.service.submitAgentCommandResumeLocked({
+      sourceChatId: SOURCE_CHAT_ID, sourceViewId: 'view-1', chatId: TARGET_CHAT_ID,
+      command: 'Synthetic follow-up.', clientRequestId: `resume-${blocked}`, clientMessageId: `resume-message-${blocked}`,
+    }, new AbortController().signal)).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(projection.admitInput).not.toHaveBeenCalled();
+  });
+
+  it('holds the ordered parent/child pair through admission outcome and releases it before acknowledgment and waiting', async () => {
+    const held = new Set();
+    class ObservedLock extends KeyedPromiseLock {
+      runExclusive(key, work) {
+        return super.runExclusive(key, async () => {
+          held.add(key);
+          try { return await work(); } finally { held.delete(key); }
+        });
+      }
+    }
+    const locks = new ObservedLock();
+    const f = makeService({ chatMutationLock: locks, session: { projectPath: projectBaseDir, permissionMode: 'default' } });
+    f.sessions.set(CLI_CHAT_ID, f.sessions.get(SOURCE_CHAT_ID));
+    const parentKey = `chat:${CLI_CHAT_ID}`;
+    const childKey = `chat:${TARGET_CHAT_ID}`;
+    const viewId = '00000000-0000-4000-8000-000000000001';
+    f.transcripts.existingCurrentView.mockReturnValue({ viewId });
+    const titleStarted = deferred();
+    const releaseTitle = deferred();
+    const ackStarted = deferred();
+    const releaseAck = deferred();
+    const ackFinished = deferred();
+    const blockerStarted = deferred();
+    const releaseBlocker = deferred();
+    const blocker = locks.runExclusive(childKey, async () => { blockerStarted.resolve(); await releaseBlocker.promise; });
+    await blockerStarted.promise;
+    f.settings.setSessionName.mockImplementation(async () => { titleStarted.resolve(); await releaseTitle.promise; });
+    const outcomes = [];
+    const controller = new AgentStartController({
+      registry: f.chats, commands: f.service, turns: f.ledger, chatMutationLock: locks,
+      chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
+      settings: { getExecutionDefaults: () => ({}) },
+      selection: { catalog: async () => ({}), resolve: () => ({
+        permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
+      }) },
+      notices: { existingCurrentView: () => ({ viewId }), appendNotice: (_id, _view, notice) => {
+        expect(held).toEqual(new Set([parentKey, childKey]));
+        outcomes.push(notice.detail);
+      } },
+      execution: { deliverServerControlInput: async () => {
+        ackStarted.resolve(); await releaseAck.promise; ackFinished.resolve(); return 'queued';
+      } },
+    });
+    try {
+      controller.request({ chatId: CLI_CHAT_ID, viewId, requestOrdinal: 1, runId: null, at: '2030-01-01T00:00:00.000Z' }, {
+        type: 'start-agent', ref: 'locks', async: false, fork: false, title: 'Synthetic title',
+        agentId: 'claude', model: 'opus', providerId: null, reasoningEffort: null, prompt: 'Synthetic task.',
+      });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      await locks.runExclusive(parentKey, async () => expect(held.has(childKey)).toBe(true));
+      releaseBlocker.resolve();
+      await blocker;
+      await titleStarted.promise;
+      let ordinaryEntered = false;
+      const ordinary = f.support.withChatMutationLocks([CLI_CHAT_ID, TARGET_CHAT_ID], async () => {
+        ordinaryEntered = true;
+        expect(outcomes).toHaveLength(1);
+      });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(ordinaryEntered).toBe(false);
+      releaseTitle.resolve();
+      await ackStarted.promise;
+      await ordinary;
+      await f.support.withChatMutationLocks([TARGET_CHAT_ID, CLI_CHAT_ID], async () => expect(outcomes).toHaveLength(1));
+      releaseAck.resolve();
+      await ackFinished.promise;
+      await f.support.withChatMutationLocks([CLI_CHAT_ID, TARGET_CHAT_ID], async () => expect(outcomes).toHaveLength(1));
+      expect(f.agents.startSession).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseBlocker.resolve(); releaseTitle.resolve(); releaseAck.resolve(); controller.shutdown();
+    }
+  });
+
   it.each(['claude', 'codex'])('seeds a fixed snapshot before publication with a custom title and no preambles: %s', async (agentId) => {
     const store = new TranscriptLedgerStore(path.join(workspaceDir, 'snapshot'));
     const transcripts = new TranscriptLedgerService(store);
@@ -921,6 +1129,32 @@ describe('ChatCommandService', () => {
       await expect(f.service.submitAgentCommandStartLocked({ ...input, title: 'Different title' }, new AbortController().signal))
         .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
       expect(f.settings.setSessionName).toHaveBeenCalledTimes(1);
+    } finally { store.close(); }
+  });
+
+  it('copies a large fixed synthetic prefix with one read and one target initialization', async () => {
+    const store = new TranscriptLedgerStore(path.join(workspaceDir, 'large-snapshot'));
+    const transcripts = new TranscriptLedgerService(store);
+    try {
+      const at = '2030-01-01T00:00:00.000Z';
+      const drafts = Array.from({ length: 4096 }, (_, index) => ({ kind: 'provider-row', at,
+        message: new AssistantMessage(at, `Synthetic context ${index}: ${'generic text '.repeat(64)}`),
+        providerMeta: { synthetic: index },
+      }));
+      const source = transcripts.initializeChat(SOURCE_CHAT_ID, drafts);
+      const snapshot = transcripts.highWatermark(SOURCE_CHAT_ID);
+      const expected = frozenConversationDrafts(transcripts.rowsThrough(SOURCE_CHAT_ID, snapshot));
+      const read = spyOn(transcripts, 'rowsThrough');
+      const initialize = spyOn(transcripts, 'initializeChat');
+      const f = makeService({ transcripts });
+      await f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
+        transcriptSnapshot: snapshot, title: 'Large synthetic snapshot',
+      }), new AbortController().signal);
+      expect(read.mock.calls).toEqual([[SOURCE_CHAT_ID, snapshot]]);
+      expect(initialize).toHaveBeenCalledTimes(1);
+      expect(initialize.mock.calls[0]).toEqual([TARGET_CHAT_ID, expected, drafts.length + 1]);
+      expect(transcripts.currentRows(TARGET_CHAT_ID)).toMatchObject(expected);
+      expect(f.agents.forkAgentSession).not.toHaveBeenCalled();
     } finally { store.close(); }
   });
 

@@ -34,6 +34,7 @@ import {
 import type { CommandLedgerRecord } from './command-ledger.js';
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
+import { AgentResumePreparationError } from './agent-resume-preparation-error.js';
 
 const logger = createLogger('commands:session');
 
@@ -60,7 +61,10 @@ export class SessionCommands {
     if (this.deps.transcripts.existingCurrentView(input.sourceChatId)?.viewId !== input.sourceViewId) {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
     }
-    const transcriptViewId = await this.deps.agents.currentTranscriptViewId(input.chatId, signal);
+    const transcriptViewId = await this.deps.agents.currentTranscriptViewId(input.chatId, signal).catch((error: unknown) => {
+      if (signal.aborted) throw error;
+      throw new AgentResumePreparationError(error);
+    });
     signal.throwIfAborted();
     return this.submitRunLocked({
       chatId: input.chatId, transcriptViewId, command: input.command, images: [],

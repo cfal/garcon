@@ -12,7 +12,7 @@ export interface GarconCommandEnvelope {
   readonly selfClosing: boolean;
 }
 
-export type GarconEnvelopeCommand = 'send-message' | 'start-agent' | 'schedule';
+export type GarconEnvelopeCommand = 'send-message' | 'start-agent' | 'resume-agent' | 'schedule';
 
 export interface GarconEnvelopeSpan {
   readonly command: GarconEnvelopeCommand;
@@ -21,7 +21,7 @@ export interface GarconEnvelopeSpan {
 }
 
 export function garconEnvelopeCommandAt(content: string, start: number): GarconEnvelopeCommand | null {
-  for (const command of ['send-message', 'start-agent', 'schedule'] as const) {
+  for (const command of ['send-message', 'start-agent', 'resume-agent', 'schedule'] as const) {
     const prefix = `<garcon-${command}`;
     if (content.startsWith(prefix, start) && /[\s/>]|^$/.test(content[start + prefix.length] ?? '')) return command;
   }
@@ -155,6 +155,15 @@ export function parseGarconCommandEnvelope(
   name: string,
   allowedAttributes: readonly string[],
 ): GarconCommandEnvelope | null {
+  const envelope = parseGarconXmlEnvelope(content, name, allowedAttributes);
+  return envelope ? { ...envelope, body: normalizeGarconCommandBody(envelope.body) } : null;
+}
+
+export function parseGarconXmlEnvelope(
+  content: string,
+  name: string,
+  allowedAttributes: readonly string[],
+): GarconCommandEnvelope | null {
   if (!content.isWellFormed() || encoder.encode(content).byteLength > GARCON_COMMAND_ENVELOPE_MAX_BYTES) return null;
   const prefix = `<${name}`;
   if (!content.startsWith(prefix)) return null;
@@ -182,5 +191,5 @@ export function parseGarconCommandEnvelope(
   const close = `</${name}>`;
   if (!content.endsWith(close) || content.length < openerEnd + close.length) return null;
   const body = decodeGarconXmlText(content.slice(openerEnd, -close.length));
-  return body === null ? null : { attributes, body: normalizeGarconCommandBody(body), selfClosing };
+  return body === null ? null : { attributes, body, selfClosing };
 }

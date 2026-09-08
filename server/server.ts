@@ -302,6 +302,7 @@ export async function startServer(): Promise<void> {
       chatIdRequests: agentCommands.chatIdRequests,
       interAgentMessages: agentCommands.interAgentMessages,
       agentStarts: agentCommands.agentStarts,
+      agentResumes: agentCommands.agentResumes,
       agentSchedules: agentCommands.agentSchedules,
     });
     const preparedCarryover = new PreparedCarryoverStore();
@@ -630,14 +631,9 @@ export async function startServer(): Promise<void> {
       settings,
       selection: new AgentStartSelectionService({ agents: agentRegistry, apiProviders }),
       commands: chatCommands,
+      turns: commandLedger,
       chatIds,
       scheduler: scheduledPrompts,
-      onChatIdError(error, chatId) {
-        logger.warn('Chat ID auto-discovery delivery failed', {
-          chatId,
-          reason: errorMessage(error),
-        });
-      },
     });
 
     const snippetStore = new SnippetStore(workspaceDir);

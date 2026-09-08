@@ -1,6 +1,6 @@
 import { parseChatId } from './chat-id.js';
-import { parseAgentCommandOutcome, type AgentStartOutcomeNoticeDetail, type AgentScheduleOutcomeNoticeDetail } from './garcon-command-results.js';
-export type { AgentStartOutcomeNoticeDetail, AgentScheduleOutcomeNoticeDetail } from './garcon-command-results.js';
+import { parseAgentCommandOutcome, type AgentStartOutcomeNoticeDetail, type AgentResumeOutcomeNoticeDetail, type AgentScheduleOutcomeNoticeDetail } from './garcon-command-results.js';
+export type { AgentStartOutcomeNoticeDetail, AgentResumeOutcomeNoticeDetail, AgentScheduleOutcomeNoticeDetail } from './garcon-command-results.js';
 import {
   isPreambleId,
   PREAMBLE_MAX_COUNT,
@@ -85,6 +85,7 @@ export type ServerControlReceiptDetail = InterAgentMessageReceivedNoticeDetail;
 
 export type TranscriptNoticeDetail =
   | AgentStartOutcomeNoticeDetail
+  | AgentResumeOutcomeNoticeDetail
   | AgentScheduleOutcomeNoticeDetail
   | PreambleApplicationNoticeDetail
   | PreambleSelectionChangedNoticeDetail

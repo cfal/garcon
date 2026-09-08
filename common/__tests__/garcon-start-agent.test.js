@@ -2,12 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { parseGarconStartAgent, GARCON_START_PROMPT_MAX_BYTES } from '../garcon-start-agent.ts';
 
 const start = (attributes = 'agent="codex" model="example-model"', body = 'Inspect the parser.') =>
-  `<garcon-start-agent ${attributes}>\n${body}\n</garcon-start-agent>`;
+  `<garcon-start-agent ref="task" ${attributes}>\n${body}\n</garcon-start-agent>`;
 
 describe('single-child start grammar', () => {
   it('requires only target selection and preserves decoded prompt text', () => {
     expect(parseGarconStartAgent(start())).toEqual({
-      type: 'start-agent', agentId: 'codex', model: 'example-model',
+      type: 'start-agent', ref: 'task', async: false, fork: false, title: null, agentId: 'codex', model: 'example-model',
       providerId: null, reasoningEffort: null, prompt: 'Inspect the parser.',
     });
     expect(parseGarconStartAgent(start('model="example-model" reasoning-effort="low" provider="example" agent="codex"',
@@ -16,7 +16,7 @@ describe('single-child start grammar', () => {
     });
   });
 
-  it.each(['params', 'ref', 'path', 'project-path', 'permissions', 'permissionMode', 'parent', 'chat-id', 'endpoint', 'tags', 'preambles', 'settings'])
+  it.each(['params', 'path', 'project-path', 'permissions', 'permissionMode', 'parent', 'chat-id', 'endpoint', 'tags', 'preambles', 'settings'])
   ('rejects the forbidden %s attribute', (field) => {
     expect(parseGarconStartAgent(start(`agent="codex" model="example-model" ${field}="x"`))).toBeNull();
   });
@@ -28,7 +28,7 @@ describe('single-child start grammar', () => {
       start('agent="codex" model="x"suffix'), start('agent="codex" model="x"', ''),
       start('agent="codex" model="x"', '<garcon-schedule in="1m" />'),
       '<garcon-start-agent>{"prompt":"x","params":[{}]}</garcon-start-agent>',
-      '<garcon-start-agent agent="codex" model="x" />',
+      '<garcon-start-agent ref="task" async="true" agent="codex" model="x" />',
       start(undefined, 'bad &unknown;'), start(undefined, 'bad &#60;'), start(undefined, 'bad &'),
       start(undefined, '\ud800'), start(undefined, '\0'), start(undefined, 'x').slice(0, -1),
     ]) expect(parseGarconStartAgent(content)).toBeNull();

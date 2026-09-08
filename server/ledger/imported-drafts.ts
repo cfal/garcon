@@ -71,6 +71,7 @@ function importedDraftFor(
       ...commandTransform.commands.map((command) => {
         switch (command.type) {
           case 'start-agent':
+          case 'resume-agent':
           case 'schedule':
             return agentActionRequestNoticeDraft(at, command);
           case 'get-chat-id':

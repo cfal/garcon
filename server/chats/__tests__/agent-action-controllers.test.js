@@ -12,7 +12,7 @@ import { parseGarconCommandResult } from '../../../common/garcon-command-results
 const SOURCE = { chatId: '1111111111111111', viewId: '00000000-0000-4000-8000-000000000001', requestOrdinal: 2, runId: 'run-1', at: '2030-01-01T00:00:00.000Z' };
 const CHILD = '2222222222222222';
 const SCHEDULE = '00000000-0000-4000-8000-000000000002';
-const START = { type: 'start-agent', agentId: 'test', providerId: null, model: 'test-model', reasoningEffort: null, prompt: 'Synthetic child task' };
+const START = { type: 'start-agent', ref: 'task', async: true, fork: false, title: null, agentId: 'test', providerId: null, model: 'test-model', reasoningEffort: null, prompt: 'Synthetic child task' };
 const SCHEDULING = { type: 'schedule', firstRun: { type: 'after', minutes: 5 }, intervalMinutes: null, endAtUtc: null, busyBehavior: 'queue', body: '' };
 
 function deferred() {
@@ -23,7 +23,7 @@ function deferred() {
 
 async function drain() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 
-function fixture() {
+function fixture(options = {}) {
   const parent = { projectPath: '/synthetic/project', permissionMode: 'bypassPermissions' };
   const chats = new Map([[SOURCE.chatId, parent]]);
   let currentView = SOURCE.viewId;
@@ -52,12 +52,12 @@ function fixture() {
   const agents = { getAgentCatalogEntry: mock(async () => entry) };
   const selection = new AgentStartSelectionService({ agents, apiProviders: { getCatalog: () => [] } });
   const commands = { submitAgentCommandStartLocked: mock(async (input) => {
-    events.push('start'); chats.set(input.chatId, {}); return { chat: { id: input.chatId } };
+    events.push('start'); chats.set(input.chatId, {}); return { chat: { id: input.chatId }, turnId: 'child-turn' };
   }) };
   const scheduler = { scheduleForChat: mock(async () => {
     events.push('schedule'); return { scheduledPrompt: { id: SCHEDULE, schedule: { type: 'once', nextRunAt: '2030-01-01T00:05:00.000Z' } } };
   }) };
-  const start = new AgentStartController({ ...context, selection, commands, chatIds: { allocate: () => CHILD },
+  const start = new AgentStartController({ ...context, selection, commands, turns: { waitForTurnTerminal: mock(async () => null) }, chatIds: options.chatIds ?? { allocate: () => CHILD },
     settings: { getExecutionDefaults: () => ({ global: { permissionMode: 'default', thinkingMode: 'high', agentSettingsById: {} }, byAgent: {} }) } });
   const schedule = new AgentScheduleController({ ...context, scheduler });
   return { parent, chats, context, entry, agents, commands, scheduler, start, schedule, replies, notices, events,
@@ -66,6 +66,22 @@ function fixture() {
 }
 
 describe('assistant action controllers', () => {
+  it('acknowledges allocator exhaustion without admitting child work', async () => {
+    const allocate = mock(() => { throw new Error('Synthetic allocator exhaustion'); });
+    const f = fixture({ chatIds: { allocate } });
+    f.start.request(SOURCE, START);
+    await drain();
+    expect(allocate).toHaveBeenCalledTimes(1);
+    expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
+    expect(f.notices).toHaveLength(1);
+    expect(f.replies).toHaveLength(1);
+    expect(parseGarconCommandResult(f.replies[0].input.content)).toEqual({
+      type: 'agent-start-outcome', ref: START.ref, async: true,
+      requestViewId: SOURCE.viewId, requestOrdinal: SOURCE.requestOrdinal,
+      status: 'rejected', reason: 'action-failed',
+    });
+  });
+
   it('inherits current path and explicit bypass permission, uses target defaults and source parentage', async () => {
     const f = fixture();
     const gate = deferred();
@@ -82,7 +98,7 @@ describe('assistant action controllers', () => {
     expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).not.toHaveProperty('tags');
     expect(f.events).toEqual(['start', 'notice', 'reply']);
     expect(f.replies[0].input.receipt).toBeNull();
-    expect(parseGarconCommandResult(f.replies[0].input.content)).toMatchObject({ status: 'created', chatId: CHILD, requestViewId: SOURCE.viewId, requestOrdinal: 2 });
+    expect(parseGarconCommandResult(f.replies[0].input.content)).toMatchObject({ status: 'accepted', chatId: CHILD, requestViewId: SOURCE.viewId, requestOrdinal: 2 });
   });
 
   it.each([
@@ -95,25 +111,12 @@ describe('assistant action controllers', () => {
     const f = fixture(); configure(f);
     f.start.request(SOURCE, command); await drain();
     expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
-    expect(f.notices[0].detail).toMatchObject({ status: 'failed', reason });
+    expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason });
   });
 
-  for (const [code, reason] of [['PREAMBLE_SLASH_COMMAND_BLOCKED', 'slash-command-blocked'], ['PREAMBLE_SELECTION_COMPOSITION_INVALID', 'composition-invalid']]) {
-    it(`identifies a child retained after ${code}`, async () => {
-      const f = fixture();
-      f.commands.submitAgentCommandStartLocked.mockImplementation(async () => {
-        f.chats.set(CHILD, {}); throw new DomainError(code, 'Synthetic preamble rejection');
-      });
-      f.start.request(SOURCE, START); await drain();
-      expect(f.notices[0].detail).toMatchObject({ status: 'preamble-rejected', chatId: CHILD, reason });
-      expect(f.chats.has(CHILD)).toBe(true);
-    });
-  }
-
-  it('distinguishes compensated, early preamble, and uncertain retained starts', async () => {
+  it('distinguishes compensated and uncertain retained starts', async () => {
     for (const [error, retained, status] of [
-      [new Error('failed start'), false, 'failed'],
-      [new DomainError('PREAMBLE_SLASH_COMMAND_BLOCKED', 'early failure'), false, 'failed'],
+      [new Error('failed start'), false, 'rejected'],
       [new Error('post-admission failure'), true, 'outcome-unknown'],
       [new AggregateError([new Error('rollback flush failed')]), false, 'outcome-unknown'],
     ]) {
@@ -131,7 +134,7 @@ describe('assistant action controllers', () => {
     ));
     f.start.request(SOURCE, START);
     await drain();
-    expect(f.notices[0].detail).toMatchObject({ status: 'failed', reason: 'project-unavailable' });
+    expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason: 'project-unavailable' });
     expect(f.chats.has(CHILD)).toBe(false);
   });
 

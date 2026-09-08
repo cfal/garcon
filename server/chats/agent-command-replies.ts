@@ -29,27 +29,15 @@ export class AgentCommandReplies {
 
   launch(
     source: AgentCommandSource,
-    operation: (signal: AbortSignal) => Promise<AgentCommandOutcomeNoticeDetail | null>,
+    operation: (signal: AbortSignal) => Promise<void>,
   ): void {
     if (this.#stopped) return;
     const abort = new AbortController();
     const attempts = this.#attempts.get(source.chatId) ?? new Set<AbortController>();
     attempts.add(abort);
     this.#attempts.set(source.chatId, attempts);
-    void (async () => {
-      const detail = await operation(abort.signal);
-      if (!detail || abort.signal.aborted) return;
-      const disposition = await this.context.execution.deliverServerControlInput(source.chatId, {
-        content: garconCommandResultContent(detail),
-        transcriptViewId: source.viewId,
-        createdAt: new Date().toISOString(),
-        receipt: null,
-      }, abort.signal);
-      logger.debug('Agent command result disposition', {
-        chatId: source.chatId, viewId: source.viewId, requestOrdinal: source.requestOrdinal, disposition,
-      });
-    })().catch((error: unknown) => {
-      if (!abort.signal.aborted) this.report(source, 'result-delivery', error);
+    void Promise.resolve().then(() => operation(abort.signal)).catch((error: unknown) => {
+      if (!abort.signal.aborted) this.report(source, 'operation', error);
     }).finally(() => {
       attempts.delete(abort);
       if (this.#attempts.get(source.chatId) === attempts && attempts.size === 0) {
@@ -58,15 +46,33 @@ export class AgentCommandReplies {
     });
   }
 
+  async deliver(source: AgentCommandSource, detail: AgentCommandOutcomeNoticeDetail, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
+    try {
+      const disposition = await this.context.execution.deliverServerControlInput(source.chatId, {
+        content: garconCommandResultContent(detail),
+        transcriptViewId: source.viewId,
+        createdAt: new Date().toISOString(),
+        receipt: null,
+      }, signal);
+      logger.debug('Agent command result disposition', {
+        chatId: source.chatId, viewId: source.viewId, requestOrdinal: source.requestOrdinal, disposition,
+      });
+    } catch (error) {
+      if (!signal.aborted) this.report(source, 'result-delivery', error, detail);
+    }
+  }
+
   current(source: AgentCommandSource, signal: AbortSignal): boolean {
     return !signal.aborted && this.context.registry.getChat(source.chatId) !== null
       && this.context.notices.existingCurrentView(source.chatId)?.viewId === source.viewId;
   }
 
-  record(source: AgentCommandSource, detail: AgentCommandOutcomeNoticeDetail): AgentCommandOutcomeNoticeDetail | null {
+  record<T extends AgentCommandOutcomeNoticeDetail>(source: AgentCommandSource, detail: T): T | null {
     try {
       this.context.notices.appendNotice(source.chatId, source.viewId, {
-        title: detail.type === 'agent-start-outcome' ? 'Start agent' : 'Schedule prompt',
+        title: detail.type === 'agent-start-outcome' ? 'Start agent'
+          : detail.type === 'agent-resume-outcome' ? 'Resume agent' : 'Schedule prompt',
         content: agentCommandOutcomeContent(detail),
         detail,
         at: new Date().toISOString(),

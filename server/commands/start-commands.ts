@@ -6,6 +6,7 @@ import {
 } from '../../common/chat-command-contracts.js';
 
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
+import { AgentStartCompensatedError } from './agent-start-compensated-error.js';
 import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import { createLogger } from '../lib/log.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
@@ -198,6 +199,7 @@ export class StartCommands {
     let registered = false;
     let seedOwned = false;
     let titleOwned = false;
+    let compensated = false;
     await this.deps.queue.runInitialInput({
       command: {
         key: ledger.record.key,
@@ -265,8 +267,7 @@ export class StartCommands {
           }
           if (seedOwned) this.deps.transcripts.deleteChat(input.chatId);
           if (titleOwned) await this.deps.settings.removeSessionName(input.chatId);
-          if (!registered) return;
-          try {
+          if (registered) try {
             await this.deps.settings.removeFromAllOrderLists(input.chatId);
           } catch (cleanupError: unknown) {
             logger.warn(
@@ -274,6 +275,7 @@ export class StartCommands {
               (cleanupError as Error).message,
             );
           }
+          compensated = true;
         },
       },
       dispatch: (executionAdmission) =>
@@ -286,6 +288,9 @@ export class StartCommands {
           executionAdmission,
           agentSettings: input.agentSettings,
         }),
+    }).catch((error: unknown) => {
+      if (input.origin === 'agent-command' && compensated) throw new AgentStartCompensatedError(error);
+      throw error;
     });
 
     if (!this.deps.metadata.getChatMetadata(input.chatId)) this.deps.metadata.addNewChatMetadata(input.chatId, input.command);

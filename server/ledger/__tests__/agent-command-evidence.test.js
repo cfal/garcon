@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.ts';
-import { garconCommandResultContent } from '../../../common/garcon-command-results.ts';
+import { garconCommandResultContent, agentCommandOutcomeContent } from '../../../common/garcon-command-results.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { importedDrafts, frozenDrafts } from '../imported-drafts.ts';
@@ -12,8 +12,9 @@ import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
 const CHAT = '1000000000000000';
 const AT = '2030-01-01T00:00:00.000Z';
 const LATER = '2030-01-01T01:00:00.000Z';
-const START = '<garcon-start-agent agent="codex" model="example">Inspect.</garcon-start-agent>';
+const START = '<garcon-start-agent ref="task" async="true" agent="codex" model="example">Inspect.</garcon-start-agent>';
 const SCHEDULE = '<garcon-schedule every="5m" />';
+const RESUME = '<garcon-resume-agent ref="followup" chat-id="2000000000000000">Continue.</garcon-resume-agent>';
 
 async function withLedger(run, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'garcon-command-evidence-'));
@@ -24,6 +25,48 @@ async function withLedger(run, options = {}) {
 }
 
 describe('agent command durable evidence', () => {
+  it.each(['agent-start-outcome', 'agent-resume-outcome'])('preserves trailing carriage returns in imported %s output', async (type) => {
+    await withLedger(async ({ ledger, store }) => {
+      const view = ledger.initializeChat(CHAT);
+      const detail = { type, ref: 'exact-output', async: false, requestViewId: view.viewId,
+        requestOrdinal: 1, status: 'completed', chatId: '2000000000000000',
+        output: { availability: 'available', completeness: 'complete', text: '\nSynthetic answer.\r' } };
+      store.append(CHAT, view.viewId, importedDrafts([
+        { message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null },
+      ], () => AT));
+      store.closeChat(CHAT);
+      const rendered = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT));
+      expect(rendered[0].message.detail).toEqual(detail);
+      expect(rendered[0].message.content).toBe(agentCommandOutcomeContent(detail));
+    });
+  });
+
+  it('appends a 48 KiB decoded completion notice and imports paired resume results without executing', async () => {
+    const request = mock(() => undefined);
+    await withLedger(async ({ ledger, store }) => {
+      const view = ledger.initializeChat(CHAT);
+      const detail = { type: 'agent-resume-outcome', ref: 'followup', async: false,
+        requestViewId: view.viewId, requestOrdinal: 3, status: 'completed', chatId: '2000000000000000',
+        output: { availability: 'available', completeness: 'complete', text: 'x'.repeat(48 * 1024) } };
+      ledger.appendNotice(CHAT, view.viewId, { at: AT, title: 'Resume agent', content: agentCommandOutcomeContent(detail), detail });
+      const native = importedDrafts([
+        { message: new AssistantMessage(AT, RESUME), providerMeta: null },
+        { message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null },
+      ], () => AT);
+      expect(native[0].detail.type).toBe('agent-resume-request');
+      const staged = ledger.stageView(CHAT, native, 1);
+      ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
+      store.closeChat(CHAT);
+      const rendered = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT));
+      expect(rendered).toHaveLength(1);
+      expect(rendered[0].message.detail).toEqual(detail);
+      expect(rendered[0].message.content).toBe(agentCommandOutcomeContent(detail));
+      expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });
+      expect(request).not.toHaveBeenCalled();
+      expect(JSON.stringify(rendered)).not.toContain('nativeResultInput');
+    }, { agentResumes: { request } });
+  });
+
   it('commits mixed visible/private drafts before dispatch with each actual request ordinal', async () => {
     const calls = [];
     const starts = mock((source, command) => calls.push({ source, command }));
@@ -33,21 +76,21 @@ describe('agent command durable evidence', () => {
       const lease = ledger.openProducer(CHAT, 'test');
       ledger.beginRun(CHAT, 'run-1');
       starts.mockImplementation((source, command) => {
-        expect(ledger.currentRows(CHAT)).toHaveLength(5);
+        expect(ledger.currentRows(CHAT)).toHaveLength(6);
         calls.push({ source, command });
       });
       lease.sink.publish({ type: 'rows', rows: [
         { message: new AssistantMessage(AT, `${START}\nRetained\n${SCHEDULE}`) },
-        { message: new AssistantMessage(AT, `${SCHEDULE}\n${START}`) },
+        { message: new AssistantMessage(AT, `${SCHEDULE}\n${START}\n${RESUME}`) },
       ] });
-      expect(calls.map(({ source }) => source.requestOrdinal)).toEqual([2, 3, 4, 5]);
+      expect(calls.map(({ source }) => source.requestOrdinal)).toEqual([2, 3, 4, 5, 6]);
       expect(calls.every(({ source }) => source.viewId === view.viewId && source.chatId === CHAT && source.runId === 'run-1')).toBe(true);
       expect(ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT))).toEqual([
         { ordinal: 1, message: new AssistantMessage(AT, 'Retained') },
       ]);
       store.closeChat(CHAT);
-      expect(ledger.currentRows(CHAT)).toHaveLength(5);
-    }, { agentStarts: { request: starts }, agentSchedules: { request: schedules } });
+      expect(ledger.currentRows(CHAT)).toHaveLength(6);
+    }, { agentStarts: { request: starts }, agentResumes: { request: starts }, agentSchedules: { request: schedules } });
   });
 
   it('does not invoke either action when the atomic append fails', async () => {
@@ -57,10 +100,10 @@ describe('agent command durable evidence', () => {
       const lease = ledger.openProducer(CHAT, 'test');
       const append = spyOn(store, 'append').mockImplementation(() => { throw new Error('commit failed'); });
       try {
-        expect(() => lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, `${START}\n${SCHEDULE}`) }] })).toThrow();
+        expect(() => lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, `${START}\n${RESUME}\n${SCHEDULE}`) }] })).toThrow();
         expect(request).not.toHaveBeenCalled();
       } finally { append.mockRestore(); }
-    }, { agentStarts: { request }, agentSchedules: { request } });
+    }, { agentStarts: { request }, agentResumes: { request }, agentSchedules: { request } });
   });
 
   it('imports requests without actions and preserves historical correlation when ordinals shift', async () => {
@@ -73,7 +116,7 @@ describe('agent command durable evidence', () => {
       expect(request).toHaveBeenCalledTimes(2);
       request.mockClear();
       const results = [
-        { type: 'agent-start-outcome', requestViewId: old.viewId, requestOrdinal: 2, status: 'created', chatId: '2000000000000000' },
+        { type: 'agent-start-outcome', ref: 'task', async: true, requestViewId: old.viewId, requestOrdinal: 2, status: 'accepted', chatId: '2000000000000000' },
         { type: 'agent-schedule-outcome', requestViewId: old.viewId, requestOrdinal: 3, status: 'failed', reason: 'limit-reached' },
       ];
       const native = [new AssistantMessage(AT, `${START}\n${SCHEDULE}`),
@@ -94,10 +137,11 @@ describe('agent command durable evidence', () => {
     }, { agentStarts: { request }, agentSchedules: { request } });
   });
 
-  it.each(['agent-start-outcome', 'agent-schedule-outcome'])('counts only imported %s results as native evidence', async (type) => {
+  it.each(['agent-start-outcome', 'agent-resume-outcome', 'agent-schedule-outcome'])('counts only imported %s results as native evidence', async (type) => {
     await withLedger(async ({ ledger, store }) => {
       const view = ledger.initializeChat(CHAT, [{ kind: 'provider-row', at: AT, message: new AssistantMessage(AT, 'Response'), providerMeta: null }]);
-      const detail = { type, requestViewId: view.viewId, requestOrdinal: 1, status: 'failed', reason: 'action-failed' };
+      const detail = { type, requestViewId: view.viewId, requestOrdinal: 1, reason: 'action-failed',
+        ...(type === 'agent-schedule-outcome' ? { status: 'failed' } : { status: 'rejected', ref: 'task', async: true }) };
       for (const flag of [undefined, false, 'true', 1]) {
         ledger.appendNotice(CHAT, view.viewId, { at: LATER, title: 'Outcome', content: 'Outcome', detail: { ...detail, ...(flag === undefined ? {} : { nativeResultInput: flag }) } });
         expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 1, at: AT });

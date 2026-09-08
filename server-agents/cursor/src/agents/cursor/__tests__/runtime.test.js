@@ -364,7 +364,7 @@ describe('Cursor ACP runtime', () => {
   it('publishes split assistant action envelopes intact for provider-neutral extraction', async () => {
     const { acp, runtime } = createRuntimeHarness();
     const published = collectOperation('run-actions');
-    const content = '<garcon-start-agent agent="cursor" model="default">Synthetic child.</garcon-start-agent>\n<garcon-schedule every="5m" />';
+    const content = '<garcon-start-agent ref="child" agent="cursor" model="default">Synthetic child.</garcon-start-agent>\n<garcon-resume-agent ref="followup" chat-id="1111111111111111">Synthetic followup.</garcon-resume-agent>\n<garcon-schedule every="5m" />';
     try {
       await runtime.startSession(startRequest({ operation: published.operation }));
       await acp.waitForClientMethod('session/prompt');
@@ -381,6 +381,7 @@ describe('Cursor ACP runtime', () => {
       expect(parsed.message).toBeNull();
       expect(parsed.commands).toMatchObject([
         { type: 'start-agent', agentId: 'cursor', prompt: 'Synthetic child.' },
+        { type: 'resume-agent', ref: 'followup', chatId: '1111111111111111', prompt: 'Synthetic followup.' },
         { type: 'schedule', intervalMinutes: 5, body: '' },
       ]);
     } finally {

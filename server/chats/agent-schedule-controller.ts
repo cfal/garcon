@@ -16,7 +16,8 @@ export class AgentScheduleController {
   }
 
   request(source: AgentCommandSource, command: GarconScheduleCommand): void {
-    this.#replies.launch(source, (signal) => this.options.chatMutationLock.runExclusive(
+    this.#replies.launch(source, async (signal) => {
+      const detail = await this.options.chatMutationLock.runExclusive(
       `chat:${source.chatId}`, async () => {
         if (!this.#replies.current(source, signal)) return null;
         let outcome: AgentScheduleOutcome;
@@ -53,7 +54,9 @@ export class AgentScheduleController {
           requestOrdinal: source.requestOrdinal, ...outcome,
         });
       },
-    ));
+      );
+      if (detail) await this.#replies.deliver(source, detail, signal);
+    });
   }
 
   discardSource(chatId: string): void { this.#replies.discardSource(chatId); }

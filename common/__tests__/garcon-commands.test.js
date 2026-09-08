@@ -254,7 +254,7 @@ describe('Garcon edge commands', () => {
   });
 
   it('extracts single starts and schedules across mixed edge chains without changing prose', () => {
-    const start = '<garcon-start-agent agent="codex" model="example">Inspect.</garcon-start-agent>';
+    const start = '<garcon-start-agent ref="task" async="true" agent="codex" model="example">Inspect.</garcon-start-agent>';
     const schedule = '<garcon-schedule every="5m" />';
     const result = extractGarconCommands(new AssistantMessage(AT,
       `${start}\n${schedule}\nAnswer  \n${send(FIRST, false)}\n${start}\n${GARCON_GET_CHAT_ID}\n`));
@@ -265,7 +265,7 @@ describe('Garcon edge commands', () => {
   });
 
   it('keeps mixed command envelopes opaque, including malformed and unclosed bodies', () => {
-    const start = '<garcon-start-agent agent="codex" model="example">';
+    const start = '<garcon-start-agent ref="task" async="true" agent="codex" model="example">';
     const schedule = '<garcon-schedule every="5m">';
     for (const opener of [start, schedule, `<garcon-send-message to="${FIRST}" hide-sender="false">`]) {
       for (const nested of [GARCON_GET_CHAT_ID, '<garcon-schedule in="1m" />', `${start}Inspect.</garcon-start-agent>`]) {
@@ -283,7 +283,7 @@ describe('Garcon edge commands', () => {
   });
 
   it('keeps unsupported markup opaque while finding an outer envelope boundary', () => {
-    for (const family of ['start-agent', 'schedule', 'send-message']) {
+    for (const family of ['start-agent', 'resume-agent', 'schedule', 'send-message']) {
       for (const prefix of ['', 'Answer\n']) {
         for (const [open, close] of [['<!--', '-->'], ['<![CDATA[', ']]>'], ['<?example', '?>']]) {
           for (const terminated of [false, true]) {
@@ -323,13 +323,13 @@ describe('Garcon edge commands', () => {
     expect(extractGarconCommands(new UserMessage(AT, '<garcon-schedule in="1m" />'))).toBeNull();
   });
 
-  for (const family of ['start-agent', 'schedule', 'send-message']) {
+  for (const family of ['start-agent', 'resume-agent', 'schedule', 'send-message']) {
     for (const prefix of ['', 'Answer\n']) {
       it(`preserves Markdown fences in a retained ${prefix ? 'trailing' : 'leading'} ${family}`, () => {
         for (const fence of ['~~~', '```', '   ~~~~']) {
           const malformed = `${prefix}<garcon-${family}>\n${fence}xml\n</garcon-${family}>`;
           for (const suffix of [GARCON_GET_CHAT_ID, '<garcon-schedule in="1m" />',
-            '<garcon-start-agent agent="codex" model="example">Inspect.</garcon-start-agent>', send(FIRST, false)]) {
+            '<garcon-start-agent ref="task" async="true" agent="codex" model="example">Inspect.</garcon-start-agent>', send(FIRST, false)]) {
             const content = `${malformed}\n${suffix}`;
             const result = extractGarconCommands(new AssistantMessage(AT, content));
             expect(result?.commands ?? []).toEqual([]);
@@ -346,7 +346,7 @@ describe('Garcon edge commands', () => {
 
   it('keeps fences opaque only inside envelopes that are removed', () => {
     for (const envelope of [
-      '<garcon-start-agent agent="codex" model="example">\n~~~xml\n</garcon-start-agent>',
+      '<garcon-start-agent ref="task" async="true" agent="codex" model="example">\n~~~xml\n</garcon-start-agent>',
       '<garcon-schedule in="1m">\n~~~xml\n</garcon-schedule>',
       send(FIRST, false, '~~~xml'),
     ]) {
@@ -363,7 +363,7 @@ describe('Garcon edge commands', () => {
   });
 
   it('never uses a nested self-closing command to close a malformed outer opener', () => {
-    for (const family of ['start-agent', 'schedule', 'send-message']) {
+    for (const family of ['start-agent', 'resume-agent', 'schedule', 'send-message']) {
       for (const attributes of ['', ' broken="']) {
         for (const prefix of ['', 'Answer\n']) {
           const malformed = `<garcon-${family}${attributes}\n<garcon-schedule in="1m" />\n<garcon-schedule in="5m" />`;
@@ -388,7 +388,7 @@ describe('Garcon edge commands', () => {
     }
   });
 
-  for (const family of ['start-agent', 'schedule', 'send-message']) {
+  for (const family of ['start-agent', 'resume-agent', 'schedule', 'send-message']) {
     for (const prefix of ['', 'Answer\n']) {
       const edge = prefix ? 'trailing' : 'leading';
       it(`shields commands after nested closers in an unclosed ${edge} ${family}`, () => {
@@ -401,7 +401,7 @@ describe('Garcon edge commands', () => {
           ]) {
             for (const suffix of [
               '<garcon-schedule in="1m" />', GARCON_GET_CHAT_ID,
-              '<garcon-start-agent agent="codex" model="example">Inspect.</garcon-start-agent>',
+              '<garcon-start-agent ref="task" async="true" agent="codex" model="example">Inspect.</garcon-start-agent>',
               send(FIRST, false),
             ]) {
               const content = `${prefix}${opener}\n${nested}\n${suffix}`;

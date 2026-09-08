@@ -3,15 +3,15 @@ import { garconCommandResultContent, parseGarconCommandResult, parseAgentCommand
 import { parseTranscriptNoticeDetail } from '../transcript-notice-details.ts';
 
 const correlation = { requestViewId: '00000000-0000-4000-8000-000000000001', requestOrdinal: 42 };
-const start = { type: 'agent-start-outcome', ...correlation };
+const start = { type: 'agent-start-outcome', ref: 'task', async: false, ...correlation };
 const schedule = { type: 'agent-schedule-outcome', ...correlation };
 const success = { ...schedule, status: 'created', scheduleId: '00000000-0000-4000-8000-000000000002',
   nextRunAt: '2030-01-01T12:00:00.000Z', intervalMinutes: 5, endAtUtc: null, busyBehavior: 'queue' };
 
 describe('agent command outcomes', () => {
   it.each([
-    { ...start, status: 'created', chatId: '1000000000000000' },
-    { ...start, status: 'failed', reason: 'unsupported-permission-mode' },
+    { ...start, status: 'accepted', chatId: '1000000000000000' },
+    { ...start, status: 'rejected', reason: 'unsupported-permission-mode' },
     { ...start, status: 'preamble-rejected', reason: 'slash-command-blocked', chatId: '1000000000000000' },
     { ...start, status: 'outcome-unknown' },
     { ...start, status: 'outcome-unknown', chatId: '1000000000000000' },
@@ -26,10 +26,10 @@ describe('agent command outcomes', () => {
 
   it('rejects invalid combinations, missing correlation, and private evidence', () => {
     for (const detail of [
-      { ...start, status: 'created' }, { ...start, status: 'created', chatId: 'bad' },
-      { ...start, status: 'failed', reason: 'limit-reached' },
+      { ...start, status: 'accepted' }, { ...start, status: 'accepted', chatId: 'bad' },
+      { ...start, status: 'rejected', reason: 'limit-reached' },
       { ...start, status: 'preamble-rejected', reason: 'composition-invalid' },
-      { ...start, status: 'failed', reason: 'action-failed', chatId: '1000000000000000' },
+      { ...start, status: 'accepted', reason: 'action-failed', chatId: '1000000000000000' },
       { ...success, requestOrdinal: 0 }, { ...success, requestOrdinal: Number.MAX_SAFE_INTEGER + 1 },
       { ...success, requestViewId: '' }, { ...success, requestViewId: undefined },
       { ...success, intervalMinutes: 1.5 }, { ...success, busyBehavior: 'steer' },
