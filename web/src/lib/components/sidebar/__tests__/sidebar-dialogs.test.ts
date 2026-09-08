@@ -509,9 +509,48 @@ describe('Sidebar dialogs', () => {
 			expect(screen.getByText('Tags changed since this editor opened. Review the latest saved tags before saving.')).toBeTruthy();
 
 			await fireEvent.click(screen.getByRole('button', { name: 'Review latest tags' }));
+			expect(screen.getByRole('button', { name: 'Remove tag saved' })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Remove tag staged' })).toBeTruthy();
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith('chat-1', ['saved'], ['existing', 'staged']);
+				expect(onSave).toHaveBeenCalledWith('chat-1', ['saved'], ['saved', 'staged']);
+			});
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('rebases staged tag edits onto unseen canonical changes before saving', async () => {
+		const onSave = vi.fn().mockResolvedValue(undefined);
+		const props = {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['ready'],
+				editingTags: ['ready', 'urgent'],
+			},
+			allKnownTags: [],
+			currentTags: ['ready'],
+			onClose: vi.fn(),
+			onSave,
+		};
+		const rendered = render(SidebarTagDialog, props);
+
+		try {
+			await rendered.rerender({ ...props, currentTags: ['approved', 'ready'] });
+			await fireEvent.click(screen.getByRole('button', { name: 'Review latest tags' }));
+
+			expect(screen.getByRole('button', { name: 'Remove tag approved' })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Remove tag ready' })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Remove tag urgent' })).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+			await waitFor(() => {
+				expect(onSave).toHaveBeenCalledWith(
+					'chat-1',
+					['approved', 'ready'],
+					['approved', 'ready', 'urgent'],
+				);
 			});
 		} finally {
 			await unmountDialog(rendered);

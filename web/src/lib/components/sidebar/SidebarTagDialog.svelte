@@ -155,7 +155,20 @@
 	}
 
 	function reviewLatestTags(): void {
-		baseTags = [...latestTags];
+		const normalizedBaseTags = normalizeTags(baseTags);
+		const normalizedDraftTags = normalizeTags(tagsForSave());
+		const normalizedLatestTags = normalizeTags(latestTags);
+		const baseTagSet = new Set(normalizedBaseTags);
+		const draftTagSet = new Set(normalizedDraftTags);
+		const removedTags = new Set(normalizedBaseTags.filter((tag) => !draftTagSet.has(tag)));
+		const addedTags = normalizedDraftTags.filter((tag) => !baseTagSet.has(tag));
+
+		baseTags = normalizedLatestTags;
+		editingTags = normalizeTags([
+			...normalizedLatestTags.filter((tag) => !removedTags.has(tag)),
+			...addedTags,
+		]);
+		inputValue = '';
 		saveError = null;
 		recoveryError = null;
 	}
