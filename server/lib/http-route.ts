@@ -22,6 +22,20 @@ export interface HttpRouteAuthOptions {
   localCapability?: string;
 }
 
+interface RequestTimeoutServer {
+  timeout(request: Request, seconds: number): void;
+}
+
+export function disableRequestIdleTimeout(request: Request, server: unknown): void {
+  if (
+    server !== null
+    && typeof server === 'object'
+    && typeof (server as { timeout?: unknown }).timeout === 'function'
+  ) {
+    (server as RequestTimeoutServer).timeout(request, 0);
+  }
+}
+
 // Marks a route handler as publicly accessible without JWT auth.
 export function markRouteNoAuth<T extends RouteHandler>(handler: T): T {
   if (typeof handler !== 'function') {

@@ -228,12 +228,12 @@ async function getStatus(routes) {
   return routes['/api/v1/chats/search/status'].GET(request, url);
 }
 
-async function postRebuild(routes) {
+async function postRebuild(routes, server) {
   const request = new Request('http://localhost/api/v1/chats/search/rebuild', {
     method: 'POST',
   });
   const url = new URL(request.url);
-  return routes['/api/v1/chats/search/rebuild'].POST(request, url);
+  return routes['/api/v1/chats/search/rebuild'].POST(request, url, server);
 }
 
 describe('POST /api/v1/chats/search', () => {
@@ -639,11 +639,13 @@ describe('GET /api/v1/chats/search/status', () => {
 describe('POST /api/v1/chats/search/rebuild', () => {
   it('rebuilds the index and returns its immediate typed status', async () => {
     const { routes, searchIndex, searchMaintenance } = createRoutesFixture();
+    const server = { timeout: mock(() => undefined) };
 
-    const response = await postRebuild(routes);
+    const response = await postRebuild(routes, server);
 
     expect(response.status).toBe(200);
     expect(searchMaintenance.rebuild).toHaveBeenCalledTimes(1);
+    expect(server.timeout).toHaveBeenCalledWith(expect.any(Request), 0);
     await expect(response.json()).resolves.toEqual({
       success: true,
       status: {
@@ -652,6 +654,35 @@ describe('POST /api/v1/chats/search/rebuild', () => {
       },
     });
   });
+
+  it('completes beyond a short Bun idle timeout', async () => {
+    const { routes, searchMaintenance } = createRoutesFixture();
+    searchMaintenance.rebuild.mockImplementationOnce(async () => {
+      await Bun.sleep(4_500);
+    });
+    const server = Bun.serve({
+      hostname: '0.0.0.0',
+      port: 0,
+      idleTimeout: 1,
+      fetch(request, bunServer) {
+        return routes['/api/v1/chats/search/rebuild'].POST(
+          request,
+          new URL(request.url),
+          bunServer,
+        );
+      },
+    });
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/v1/chats/search/rebuild`, {
+        method: 'POST',
+      });
+      expect(response.status).toBe(200);
+      expect(searchMaintenance.rebuild).toHaveBeenCalledTimes(1);
+    } finally {
+      await server.stop(true);
+    }
+  }, 10_000);
 
   it('rejects rebuild when transcript search is disabled', async () => {
     const { routes, searchMaintenance } = createRoutesFixture();

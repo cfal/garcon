@@ -33,6 +33,7 @@ import { TranscriptSearchSettingsError } from '../chats/search/settings-coordina
 import type { IChatRegistry } from '../chats/store.js';
 import { ValidationDomainError } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { disableRequestIdleTimeout } from '../lib/http-route.js';
 import { createLogger } from '../lib/log.js';
 
 const MAX_SEARCH_QUERY_CHARS = 4_096;
@@ -90,7 +91,7 @@ const CLIENT_CLOSED_REQUEST_STATUS = 499;
 export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
   postSearchChats(body: unknown, request?: Request): Promise<Response>;
   postSearchNavigate(body: unknown): Promise<Response>;
-  postSearchRebuild(): Promise<Response>;
+  postSearchRebuild(request: Request, url: URL, server?: unknown): Promise<Response>;
   getSearchStatus(): Response;
 } {
   const { registry, chatListProjector, searchIndex, searchMaintenance } = deps;
@@ -185,7 +186,11 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
     }
   }
 
-  async function postSearchRebuild(): Promise<Response> {
+  async function postSearchRebuild(
+    request: Request,
+    _url: URL,
+    server?: unknown,
+  ): Promise<Response> {
     try {
       if (!searchIndex || !searchMaintenance) {
         throw new TranscriptSearchUnavailableError(
@@ -194,6 +199,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
           true,
         );
       }
+      disableRequestIdleTimeout(request, server);
       await searchMaintenance.rebuild();
       return Response.json({
         success: true,
