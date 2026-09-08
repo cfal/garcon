@@ -181,6 +181,31 @@ test('rejects a connection whose target disappears before pointer-up', async () 
   });
 }, 120_000);
 
+test('completes and saves a native touch connection without retaining gesture listeners', async () => {
+  await withChromiumFixture('canvas-touch-connection-completion', async (fixture) => {
+    const { page, integration } = fixture;
+    await openBoard(fixture);
+    const baseline = await page.evaluate(() => window.canvasGestureListeners());
+    const start = await point(handle(page, 'a'));
+    const target = await point(handle(page, 'b'));
+    const protocol = await page.context().newCDPSession(page);
+    try {
+      await protocol.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 1 }] });
+      await protocol.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...target, id: 1 }] });
+      await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await settle(page);
+      fixture.assertNoBrowserErrors();
+      expect(await page.evaluate(() => window.canvasGestureListeners())).toEqual(baseline);
+      expect(await page.locator('.svelte-flow__connection').count()).toBe(0);
+      await page.waitForFunction(() => document.querySelector('[data-canvas-panel] [role="status"]')?.textContent === 'Saved');
+      const saved = await integration.client.get<ChatCanvas>('/api/v1/chat-canvases?id=diagram');
+      expect(saved.content.connections).toMatchObject([{ source: 'a', target: 'b' }]);
+    } finally {
+      await protocol.detach();
+    }
+  });
+}, 120_000);
+
 test('turning mobile editing off cancels an armed connection', async () => {
   await withChromiumFixture('canvas-abort-mobile-editing', async (fixture) => {
     const { page, integration } = fixture;

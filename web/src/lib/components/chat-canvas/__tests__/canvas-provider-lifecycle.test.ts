@@ -113,9 +113,15 @@ describe('patched Canvas provider lifecycle', () => {
 		}
 	});
 
-	it.each(['node', 'handle'] as const)(
-		'clears a removed target %s in terminal connection and reconnect callbacks',
-		(removed) => {
+	it.each([
+		{ pointer: 'mouse', removed: 'node' },
+		{ pointer: 'mouse', removed: 'handle' },
+		{ pointer: 'touch', removed: null },
+		{ pointer: 'touch', removed: 'node' },
+		{ pointer: 'touch', removed: 'handle' },
+	] as const)(
+		'completes $pointer connections with removed target $removed',
+		({ pointer, removed }) => {
 			const host = document.createElement('div');
 			const source = document.createElement('div');
 			const target = document.createElement('div');
@@ -138,7 +144,17 @@ describe('patched Canvas provider lifecycle', () => {
 			const end = vi.fn();
 			const reconnectEnd = vi.fn();
 			const update = vi.fn();
-			const down = new MouseEvent('mousedown', { clientX: 100, clientY: 50 });
+			const addListener = vi.spyOn(document, 'addEventListener');
+			const removeListener = vi.spyOn(document, 'removeEventListener');
+			const reset = vi.fn();
+			const touch = (type: string, x: number, ended = false) => {
+				const contact = new Touch({ identifier: 1, target: source, clientX: x, clientY: 50 });
+				return new TouchEvent(type, { touches: ended ? [] : [contact], changedTouches: [contact] });
+			};
+			const down =
+				pointer === 'touch'
+					? touch('touchstart', 100)
+					: new MouseEvent('mousedown', { clientX: 100, clientY: 50 });
 			source.dispatchEvent(down);
 			const cancel = XYHandle.onPointerDown(down, {
 				connectionMode: ConnectionMode.Strict,
@@ -153,7 +169,7 @@ describe('patched Canvas provider lifecycle', () => {
 				flowId: 'flow',
 				autoPanOnConnect: false,
 				panBy: async () => false,
-				cancelConnection: () => {},
+				cancelConnection: reset,
 				onConnect: connect,
 				onConnectEnd: end,
 				onReconnectEnd: reconnectEnd,
@@ -163,23 +179,43 @@ describe('patched Canvas provider lifecycle', () => {
 				handleDomNode: source,
 			});
 			try {
-				document.dispatchEvent(new MouseEvent('mousemove', { clientX: 300, clientY: 50 }));
+				document.dispatchEvent(
+					pointer === 'touch'
+						? touch('touchmove', 300)
+						: new MouseEvent('mousemove', { clientX: 300, clientY: 50 }),
+				);
 				expect(update).toHaveBeenLastCalledWith(
 					expect.objectContaining({ isValid: true, toNode: to }),
 				);
 				if (removed === 'node') lookup.delete(to.id);
-				else to.internals.handleBounds!.target = [];
-				document.dispatchEvent(new MouseEvent('mouseup', { clientX: 300, clientY: 50 }));
-				expect(connect).not.toHaveBeenCalled();
+				else if (removed === 'handle') to.internals.handleBounds!.target = [];
+				document.dispatchEvent(
+					pointer === 'touch'
+						? touch('touchend', 300, true)
+						: new MouseEvent('mouseup', { clientX: 300, clientY: 50 }),
+				);
+				expect(reset).toHaveBeenCalledTimes(1);
+				for (const [type, listener] of addListener.mock.calls) {
+					expect(removeListener).toHaveBeenCalledWith(type, listener);
+				}
+				if (removed) expect(connect).not.toHaveBeenCalled();
+				else {
+					expect(connect).toHaveBeenCalledExactlyOnceWith({
+						source: 'a',
+						sourceHandle: 'out',
+						target: 'b',
+						targetHandle: 'in',
+					});
+				}
 				for (const callback of [end, reconnectEnd]) {
 					expect(callback).toHaveBeenCalledTimes(1);
 					expect(callback).toHaveBeenLastCalledWith(
 						expect.anything(),
 						expect.objectContaining({
-							isValid: false,
-							toHandle: null,
-							toNode: null,
-							toPosition: null,
+							isValid: !removed,
+							toHandle: removed ? null : expect.objectContaining({ nodeId: 'b', id: 'in' }),
+							toNode: removed ? null : to,
+							toPosition: removed ? null : Position.Left,
 						}),
 					);
 				}
