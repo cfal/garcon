@@ -44,6 +44,13 @@
 	--color-chat-tabs-active-foreground: hsl(var(--chat-tabs-active-foreground));
 	--color-chat-tabs-active-border: hsl(var(--chat-tabs-active-border));
 	--color-chat-bash-row: hsl(var(--chat-bash-row-bg));
+	--color-chat-board-canvas: hsl(var(--background));
+	--color-chat-board-lane: color-mix(in oklab, hsl(var(--muted)) 72%, hsl(var(--background)));
+	--color-chat-board-lane-border: color-mix(in oklab, hsl(var(--border)) 82%, transparent);
+	--color-chat-board-card: hsl(var(--card));
+	--color-chat-board-card-hover: color-mix(in oklab, hsl(var(--card)) 94%, hsl(var(--accent)));
+	--color-chat-board-card-border: hsl(var(--border));
+	--color-chat-board-drop: color-mix(in oklab, hsl(var(--accent)) 14%, hsl(var(--muted)));
 
 	--color-sidebar: hsl(var(--sidebar-background));
 	--color-sidebar-foreground: hsl(var(--sidebar-foreground));
@@ -213,6 +220,30 @@
 	--app-viewport-offset-top: 0px;
 	--app-viewport-center-y: 50dvh;
 	--processing-pulse-duration: 2.4s;
+}
+
+.chat-board-reduce-motion [data-chat-board-skeleton],
+.chat-board-reduce-motion [data-chat-board-occurrence],
+.chat-board-reduce-motion [data-chat-board-column-id] {
+	animation: none;
+	transition: none;
+}
+
+.chat-board-reduce-motion [data-chat-board-occurrence]:hover {
+	transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	[data-chat-board-skeleton],
+	[data-chat-board-occurrence],
+	[data-chat-board-column-id] {
+		animation: none;
+		transition: none;
+	}
+
+	[data-chat-board-occurrence]:hover {
+		transform: none;
+	}
 }
 
 .mobile-shell {
