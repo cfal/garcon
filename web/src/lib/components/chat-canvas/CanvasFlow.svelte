@@ -55,6 +55,13 @@
 	let releaseInteraction: (() => void) | null = null;
 	let interactionCancelled = false;
 
+	$effect(() => {
+		const source = flowStore.clickConnectStartHandle;
+		if (source && !session.document.content.nodes.some((node) => node.id === source.nodeId)) {
+			untrack(cancelInteraction);
+		}
+	});
+
 	// Adapts durable document edits to the graph engine; graph gestures remain transient until release.
 	$effect(() => {
 		const content = session.document.content;

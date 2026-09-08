@@ -93,3 +93,79 @@ for (const interruption of ['blur', 'pointercancel', 'hide'] as const) {
     );
   }, 120_000);
 }
+
+for (const removal of ['delete', 'reload'] as const) {
+  test(`releases an armed connection when ${removal} removes its source`, async () => {
+    await withChromiumFixture(`canvas-click-source-${removal}`, async (fixture) => {
+      const { page, integration } = fixture;
+      const endpoint = '/api/v1/chat-canvases';
+      const original = await integration.client.post<ChatCanvas>(endpoint, {
+        id: 'diagram',
+        content: {
+          title: 'Source removal',
+          nodes: ['a', 'b', 'c'].map((id, index) => ({
+            id, type: 'box', title: id, position: { x: index * 500, y: 0 },
+          })),
+          connections: [],
+        },
+      });
+      if (removal === 'reload') {
+        await integration.client.put(endpoint, {
+          id: original.id,
+          expectedRevision: original.revision,
+          content: {
+            ...original.content,
+            nodes: original.content.nodes.filter((node) => node.id !== 'a'),
+          },
+        });
+        await page.addInitScript((draft) => {
+          sessionStorage.setItem(`chat-canvas-recovery-v1:${draft.id}`, JSON.stringify(draft));
+        }, original);
+      }
+      await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await collapseCanonicalFilesWindow(page);
+      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
+      await page.getByRole('menuitem', { name: 'Open canvas', exact: true }).click();
+      const node = (id: string) => page.locator(`.svelte-flow__node[data-id="${id}"]`);
+      const handle = (id: string) => node(id).locator('[data-handleid="right"]');
+      await node('a').click();
+      await handle('a').click();
+      if (removal === 'delete') {
+        await page.getByRole('button', { name: 'Remove from canvas', exact: true }).click();
+      } else {
+        await page.getByRole('button', { name: 'Load latest', exact: true }).click();
+        await page.getByRole('dialog').getByRole('button', { name: 'Discard local edits', exact: true }).click();
+        await page.getByRole('dialog').waitFor({ state: 'detached' });
+      }
+      await node('a').waitFor({ state: 'detached' });
+      await page.waitForFunction(() =>
+        document.querySelector('[data-canvas-panel] [role="status"]')?.textContent === 'Saved',
+      );
+      const saved = await integration.client.get<ChatCanvas>(`${endpoint}?id=diagram`);
+      const refreshed = await integration.client.put<ChatCanvas>(endpoint, {
+        id: saved.id,
+        expectedRevision: saved.revision,
+        content: {
+          ...saved.content,
+          nodes: saved.content.nodes.map((entry) =>
+            entry.type === 'box' && entry.id === 'b' ? { ...entry, title: 'Remote b' } : entry,
+          ),
+        },
+      });
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await node('b').getByText('Remote b', { exact: true }).waitFor();
+      await handle('b').click();
+      expect(await page.locator('.svelte-flow__edge').count()).toBe(0);
+      fixture.assertNoBrowserErrors();
+      await handle('c').click();
+      await page.locator('.svelte-flow__edge').waitFor({ state: 'attached' });
+      await page.waitForFunction(() =>
+        document.querySelector('[data-canvas-panel] [role="status"]')?.textContent === 'Saved',
+      );
+      const connected = await integration.client.get<ChatCanvas>(`${endpoint}?id=diagram`);
+      expect(connected.content.nodes).toEqual(refreshed.content.nodes);
+      expect(connected.content.connections).toMatchObject([{ source: 'b', target: 'c' }]);
+      fixture.assertNoBrowserErrors();
+    });
+  }, 120_000);
+}
