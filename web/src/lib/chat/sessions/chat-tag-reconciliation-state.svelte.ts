@@ -32,6 +32,10 @@ export class ChatTagReconciliationState {
 		return this.#refreshKindByChatId.get(chatId) ?? null;
 	}
 
+	hasRefreshRequirement(chatId: string): boolean {
+		return this.#refreshKindByChatId.has(chatId);
+	}
+
 	beginMutation(chatId: string): void {
 		const current = this.#pendingCountByChatId.get(chatId) ?? 0;
 		this.#pendingCountByChatId.set(chatId, current + 1);

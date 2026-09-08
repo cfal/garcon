@@ -440,7 +440,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (this.#tagReconciliation.recoveryRequiredChatIds.has(chatId)) {
 			await this.recoverChatTags(chatId);
 		}
-		if (this.#tagReconciliation.kind(chatId) !== null) {
+		if (this.#tagReconciliation.hasRefreshRequirement(chatId)) {
 			await this.quietRefreshChats();
 		}
 		if (this.tagReconciliationKind(chatId) !== null) {

@@ -1100,6 +1100,53 @@ describe('ChatSessionsStore IO', () => {
 		await Promise.all([first, second]);
 	});
 
+	it('does not use a list refresh to settle a newer durability outcome', async () => {
+		const firstRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const secondRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const listRefresh = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const recoverChatTags = vi.fn()
+			.mockReturnValueOnce(firstRecovery.promise)
+			.mockReturnValueOnce(secondRecovery.promise);
+		const listChats = vi.fn(() => listRefresh.promise);
+		const store = new ChatSessionsStore({ listChats, recoverChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+		const unknownOutcome = {
+			status: 'unknown',
+			errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+			recoveryRequired: true,
+		} as const;
+
+		await store.observeCommandTagMutation('chat-1', unknownOutcome);
+		const firstConfirmation = store.recoverChatTags('chat-1');
+		const observeNewerOutcome = firstConfirmation.then(() =>
+			store.observeCommandTagMutation('chat-1', unknownOutcome),
+		);
+		const retry = store.retryTagReconciliation('chat-1');
+		const retryRejected = vi.fn();
+		void retry.catch(retryRejected);
+
+		firstRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await observeNewerOutcome;
+		await flushMicrotasks();
+		expect(retryRejected).toHaveBeenCalledWith(
+			expect.objectContaining({ message: 'Saved tags could not be refreshed' }),
+		);
+		expect(listChats).toHaveBeenCalledTimes(1);
+		expect(store.tagReconciliationKind('chat-1')).toBe('durability');
+
+		listRefresh.resolve({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['review'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		secondRecovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await vi.waitFor(() => expect(store.tagReconciliationKind('chat-1')).toBeNull());
+	});
+
 	it('treats a transport failure after dispatch as an unknown tag outcome', async () => {
 		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
 		const recoverChatTags = vi.fn(() => recovery.promise);
