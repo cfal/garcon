@@ -7,6 +7,9 @@ import type {
 	TranscriptSearchStatusV1,
 } from '$shared/chat-search';
 
+export const SIDEBAR_SEARCH_DIALOG_CONTENT_CLASS =
+	'top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-screen sm:max-w-none min-[769px]:pointer-fine:top-[50%] min-[769px]:pointer-fine:h-[min(44rem,calc(var(--app-height)-2rem))] min-[769px]:pointer-fine:max-h-[44rem] min-[769px]:pointer-fine:w-[calc(100vw-2rem)] min-[769px]:pointer-fine:max-w-3xl min-[769px]:pointer-fine:rounded-2xl min-[769px]:pointer-fine:border';
+
 export interface SidebarSearchPanelProps {
 	query: string;
 	filteredChats: ChatSessionRecord[];

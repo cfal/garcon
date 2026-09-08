@@ -1,9 +1,67 @@
 import { describe, expect, test } from "bun:test";
-import type { CDPSession } from "playwright";
+import type { CDPSession, Locator } from "playwright";
 import {
   withChromiumFixture,
   type ChromiumFixture,
 } from "../../support/chromium-fixture.js";
+
+const MOBILE_SEARCH_ACTION_NAMES = [
+  "Sort search results: Best match",
+  "Search help",
+  "Add saved search",
+  "Manage searches",
+  "Close search",
+] as const;
+
+interface ViewportBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+async function expectBounds(
+  locator: Locator,
+  expected: ViewportBounds,
+): Promise<void> {
+  const bounds = await locator.boundingBox();
+  expect(
+    bounds && {
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height),
+    },
+  ).toEqual(expected);
+}
+
+async function expectIconOnlyMobileActionTargets(
+  searchDialog: Locator,
+): Promise<void> {
+  for (const name of MOBILE_SEARCH_ACTION_NAMES) {
+    const action = searchDialog.getByRole("button", { name, exact: true });
+    await action.waitFor();
+    expect((await action.textContent())?.trim()).toBe("");
+    const bounds = await action.boundingBox();
+    expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+}
+
+async function resizeSearchViewport(
+  fixture: ChromiumFixture,
+  width: number,
+): Promise<void> {
+  await fixture.page.setViewportSize({ width, height: 844 });
+  await fixture.page.waitForFunction((expectedWidth) => {
+    const content = document.querySelector<HTMLElement>(
+      "[data-search-dialog-content]",
+    );
+    if (!content) return false;
+    const bounds = content.getBoundingClientRect();
+    return Math.abs(bounds.x) < 1 && Math.abs(bounds.width - expectedWidth) < 1;
+  }, width);
+}
 
 async function seedScrollableChatList(fixture: ChromiumFixture): Promise<void> {
   for (let index = 0; index < 12; index += 1) {
@@ -104,65 +162,23 @@ describe("Chromium mobile sidebar search", () => {
             .locator("body")
             .evaluate((node) => node.style.pointerEvents),
         ).toBe("none");
-        const phoneBounds = await searchDialog.boundingBox();
-        expect(
-          phoneBounds && {
-            x: Math.round(phoneBounds.x),
-            y: Math.round(phoneBounds.y),
-            width: Math.round(phoneBounds.width),
-            height: Math.round(phoneBounds.height),
-          },
-        ).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+        await expectBounds(searchDialog, {
+          x: 0,
+          y: 0,
+          width: 390,
+          height: 844,
+        });
 
         markPhase("checking icon-only mobile actions");
-        for (const name of [
-          "Sort search results: Best match",
-          "Search help",
-          "Add saved search",
-          "Manage searches",
-          "Close search",
-        ]) {
-          const action = searchDialog.getByRole("button", {
-            name,
-            exact: true,
-          });
-          await action.waitFor();
-          expect((await action.textContent())?.trim()).toBe("");
-          const bounds = await action.boundingBox();
-          expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(44);
-          expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(44);
-        }
-        await fixture.page.setViewportSize({ width: 700, height: 844 });
-        await fixture.page.waitForFunction(() => {
-          const content = document.querySelector<HTMLElement>(
-            "[data-search-dialog-content]",
-          );
-          if (!content) return false;
-          const bounds = content.getBoundingClientRect();
-          return Math.abs(bounds.x) < 1 && Math.abs(bounds.width - 700) < 1;
+        await expectIconOnlyMobileActionTargets(searchDialog);
+        await resizeSearchViewport(fixture, 700);
+        await expectBounds(searchDialog, {
+          x: 0,
+          y: 0,
+          width: 700,
+          height: 844,
         });
-        const tabletBounds = await searchDialog.boundingBox();
-        expect(
-          tabletBounds && {
-            x: Math.round(tabletBounds.x),
-            y: Math.round(tabletBounds.y),
-            width: Math.round(tabletBounds.width),
-            height: Math.round(tabletBounds.height),
-          },
-        ).toEqual({ x: 0, y: 0, width: 700, height: 844 });
-        for (const name of [
-          "Sort search results: Best match",
-          "Search help",
-          "Add saved search",
-          "Manage searches",
-          "Close search",
-        ]) {
-          const bounds = await searchDialog
-            .getByRole("button", { name, exact: true })
-            .boundingBox();
-          expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(44);
-          expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(44);
-        }
+        await expectIconOnlyMobileActionTargets(searchDialog);
 
         await searchDialog
           .getByRole("button", { name: "Search help", exact: true })
@@ -174,28 +190,17 @@ describe("Chromium mobile sidebar search", () => {
           }),
         });
         await helpDialog.waitFor();
-        const helpBounds = await helpDialog.boundingBox();
-        expect(
-          helpBounds && {
-            x: Math.round(helpBounds.x),
-            y: Math.round(helpBounds.y),
-            width: Math.round(helpBounds.width),
-            height: Math.round(helpBounds.height),
-          },
-        ).toEqual({ x: 0, y: 0, width: 700, height: 844 });
+        await expectBounds(helpDialog, {
+          x: 0,
+          y: 0,
+          width: 700,
+          height: 844,
+        });
         await fixture.page.keyboard.press("Escape");
         await helpDialog.waitFor({ state: "detached" });
         await searchDialog.waitFor();
 
-        await fixture.page.setViewportSize({ width: 390, height: 844 });
-        await fixture.page.waitForFunction(() => {
-          const content = document.querySelector<HTMLElement>(
-            "[data-search-dialog-content]",
-          );
-          if (!content) return false;
-          const bounds = content.getBoundingClientRect();
-          return Math.abs(bounds.x) < 1 && Math.abs(bounds.width - 390) < 1;
-        });
+        await resizeSearchViewport(fixture, 390);
 
         markPhase("using search controls");
         await searchDialog

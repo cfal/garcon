@@ -69,6 +69,8 @@
 	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
 	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
+	const actionButtonClass =
+		'h-11 w-11 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground min-[769px]:pointer-fine:h-9 min-[769px]:pointer-fine:w-9';
 
 	function handleQueryInput(event: Event): void {
 		onQueryChange((event.target as HTMLInputElement).value);
@@ -183,7 +185,7 @@
 				<Button
 					variant="ghost"
 					size="icon"
-					class="h-11 w-11 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground min-[769px]:pointer-fine:order-last min-[769px]:pointer-fine:h-9 min-[769px]:pointer-fine:w-9"
+					class={cn(actionButtonClass, 'min-[769px]:pointer-fine:order-last')}
 					onclick={onClose}
 					title={m.sidebar_search_close()}
 					aria-label={m.sidebar_search_close()}
@@ -196,7 +198,10 @@
 				{#if onSortChange}
 					<DropdownMenu>
 						<DropdownMenuTrigger
-							class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[769px]:pointer-fine:h-9 min-[769px]:pointer-fine:w-9"
+							class={cn(
+								actionButtonClass,
+								'inline-flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+							)}
 							aria-label={sortTriggerLabel(sort)}
 							title={sortTriggerLabel(sort)}
 						>
@@ -229,7 +234,7 @@
 				<Button
 					variant="ghost"
 					size="icon"
-					class="h-11 w-11 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground min-[769px]:pointer-fine:h-9 min-[769px]:pointer-fine:w-9"
+					class={actionButtonClass}
 					onclick={() => (helpDialogOpen = true)}
 					title={m.sidebar_search_legend_help()}
 					aria-label={m.sidebar_search_legend_help()}
@@ -241,7 +246,7 @@
 					<Button
 						variant="ghost"
 						size="icon"
-						class="h-11 w-11 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground min-[769px]:pointer-fine:h-9 min-[769px]:pointer-fine:w-9"
+						class={actionButtonClass}
 						onclick={onCreateSavedSearch}
 						title={m.sidebar_saved_searches_add()}
 						aria-label={m.sidebar_saved_searches_add()}
@@ -252,7 +257,7 @@
 					<Button
 						variant="ghost"
 						size="icon"
-						class="h-11 w-11 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground min-[769px]:pointer-fine:h-9 min-[769px]:pointer-fine:w-9"
+						class={actionButtonClass}
 						onclick={onOpenManager}
 						title={m.sidebar_saved_searches_manage_menu_item()}
 						aria-label={m.sidebar_saved_searches_manage_menu_item()}
