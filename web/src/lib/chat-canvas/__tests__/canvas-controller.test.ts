@@ -59,6 +59,52 @@ function setup() {
 }
 
 describe('CanvasController', () => {
+	it('pauses debounce-pending and exit-triggered saves until deletion settles', async () => {
+		const { controller, api, boards } = setup();
+		await controller.activate();
+		const session = controller.session!;
+		session.document.rename('Pending deletion');
+		const response = deferred<void>();
+		api.remove.mockImplementation(async ({ id, expectedRevision }) => {
+			await response.promise;
+			if (boards.get(id)?.revision !== expectedRevision) throw new ApiError(409, 'Conflict');
+			boards.delete(id);
+		});
+		const deletion = controller.removeCurrent();
+		await vi.advanceTimersByTimeAsync(1000);
+		session.preserveForExit();
+		response.resolve();
+		expect(await deletion).toBe(true);
+		expect(api.update).not.toHaveBeenCalled();
+		expect(controller.session).toBeNull();
+	});
+
+	it('resumes pending autosave when deletion fails', async () => {
+		const { controller, api, boards } = setup();
+		await controller.activate();
+		controller.session!.document.rename('Retained edit');
+		api.remove.mockRejectedValueOnce(new Error('Delete failed'));
+		expect(await controller.removeCurrent()).toBe(false);
+		await vi.advanceTimersByTimeAsync(500);
+		expect(boards.get('board')?.content.title).toBe('Retained edit');
+		expect(api.update).toHaveBeenCalledTimes(1);
+	});
+
+	it('waits for an in-flight save and deletes its resulting revision', async () => {
+		const { controller, api } = setup();
+		await controller.activate();
+		const response = deferred<ChatCanvas>();
+		api.update.mockReturnValueOnce(response.promise);
+		const session = controller.session!;
+		session.document.rename('In-flight edit');
+		await vi.advanceTimersByTimeAsync(500);
+		const deletion = controller.removeCurrent();
+		expect(api.remove).not.toHaveBeenCalled();
+		response.resolve(canvas(session.document.content, 2));
+		expect(await deletion).toBe(true);
+		expect(api.remove).toHaveBeenCalledWith({ id: 'board', expectedRevision: 2 });
+	});
+
 	it('finishes a deletion whose successful response was lost', async () => {
 		const { controller, api, boards, memory } = setup();
 		await controller.activate();

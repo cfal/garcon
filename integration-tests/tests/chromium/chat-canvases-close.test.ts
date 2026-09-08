@@ -153,3 +153,43 @@ test('completes a confirmed deletion when its successful response was lost', asy
     expect(await integration.client.get<CanvasListResponse>(endpoint)).toEqual({ canvases: [], unavailableIds: [] });
   });
 }, 120_000);
+
+test('pauses autosave while a confirmed deletion waits for the server', async () => {
+  await withChromiumFixture('canvas-delete-debounce', async (fixture) => {
+    const { page, integration } = fixture;
+    await openCanvas(fixture);
+    await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
+    await page.getByRole('dialog').getByRole('textbox').fill('Pending deletion');
+    const clockStart = Date.now();
+    await page.clock.install({ time: clockStart });
+    await page.clock.pauseAt(clockStart + 1000);
+    const started = new Deferred<void>();
+    const release = new Deferred<void>();
+    let saves = 0;
+    await page.route('**/api/v1/chat-canvases*', async (route) => {
+      if (route.request().method() === 'PUT') saves += 1;
+      if (route.request().method() === 'DELETE') {
+        started.resolve();
+        await release.promise;
+      }
+      await route.continue();
+    });
+    try {
+      await page.getByRole('dialog').getByRole('button', { name: 'Apply', exact: true }).dispatchEvent('click');
+      await page.getByRole('button', { name: 'Delete canvas', exact: true }).dispatchEvent('click');
+      const dialog = page.getByRole('dialog');
+      await dialog.getByRole('button', { name: 'Delete canvas', exact: true }).dispatchEvent('click');
+      await started.promise;
+      await page.clock.runFor(1000);
+      await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+      release.resolve();
+      await dialog.waitFor({ state: 'detached' });
+      expect(saves).toBe(0);
+      expect(await integration.client.get<CanvasListResponse>(endpoint)).toEqual({ canvases: [], unavailableIds: [] });
+      fixture.assertNoBrowserErrors();
+    } finally {
+      release.resolve();
+      await page.clock.resume();
+    }
+  });
+}, 120_000);

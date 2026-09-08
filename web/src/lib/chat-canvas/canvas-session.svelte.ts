@@ -20,6 +20,7 @@ export class CanvasSession {
 	#timer: ReturnType<typeof setTimeout> | null = null;
 	#pending: Promise<boolean> | null = null;
 	#disposed = false;
+	#deleting = false;
 	readonly #recoveryLease: ReturnType<typeof claimCanvasRecovery>;
 	#interactions = new Set<symbol>();
 	#interactionGeneration = 0;
@@ -52,7 +53,7 @@ export class CanvasSession {
 
 	async flush(): Promise<boolean> {
 		this.#clearTimer();
-		if (this.#disposed || !this.#recoveryLease.isCurrent()) return false;
+		if (this.#disposed || this.#deleting || !this.#recoveryLease.isCurrent()) return false;
 		if (this.conflict) return false;
 		if (this.#pending) return this.#pending;
 		this.error = null;
@@ -67,6 +68,17 @@ export class CanvasSession {
 	async preserveBeforeSwitch(): Promise<boolean> {
 		if (await this.flush()) return true;
 		return this.conflict && this.#writeRecovery(this.document.content);
+	}
+
+	async prepareDelete(): Promise<() => void> {
+		this.#deleting = true;
+		this.#clearTimer();
+		if (this.#pending) await this.#pending;
+		return () => {
+			this.#deleting = false;
+			if (!this.#disposed && this.#recoveryLease.isCurrent() && this.dirty && !this.conflict)
+				this.#schedule();
+		};
 	}
 
 	get interacting(): boolean {
@@ -185,6 +197,7 @@ export class CanvasSession {
 
 	#schedule(): void {
 		this.#clearTimer();
+		if (this.#deleting) return;
 		this.#timer = setTimeout(() => {
 			this.#timer = null;
 			void this.flush();
@@ -199,7 +212,7 @@ export class CanvasSession {
 	async #save(): Promise<boolean> {
 		this.saving = true;
 		try {
-			while (this.dirty) {
+			while (this.dirty && !this.#deleting) {
 				const content = this.document.content;
 				const saved = await this.api.update({
 					id: this.saved.id,
@@ -211,6 +224,7 @@ export class CanvasSession {
 				this.onSaved(saved);
 				if (this.dirty) this.#writeRecovery(this.document.content);
 			}
+			if (this.dirty) return false;
 			this.#removeRecovery();
 			return true;
 		} catch (error) {
