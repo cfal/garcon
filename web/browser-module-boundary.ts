@@ -1,5 +1,5 @@
 import { builtinModules } from 'node:module';
-import type { Plugin } from 'vite';
+import type { Plugin, Rolldown } from 'vite';
 
 const NODE_BUILTINS = new Set(builtinModules);
 
@@ -29,6 +29,17 @@ export function rejectRuntimeBuiltinsFromBrowserBundle(): Plugin {
 		enforce: 'pre',
 		resolveId(source, importer) {
 			const error = browserModuleBoundaryError(source, importer, this.environment.config.consumer);
+			if (error !== null) this.error(error);
+			return null;
+		},
+	};
+}
+
+export function rejectRuntimeBuiltinsFromDependencyOptimization(): Rolldown.Plugin {
+	return {
+		name: 'reject-runtime-builtins-from-dependency-optimization',
+		resolveId(source, importer) {
+			const error = browserModuleBoundaryError(source, importer, 'client');
 			if (error !== null) this.error(error);
 			return null;
 		},

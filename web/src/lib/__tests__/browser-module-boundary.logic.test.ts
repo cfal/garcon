@@ -2,11 +2,12 @@ import { afterEach, describe, expect, test } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { build, type BuildOptions } from 'vite';
+import { build, optimizeDeps, resolveConfig, type BuildOptions } from 'vite';
 import {
 	browserModuleBoundaryError,
 	isForbiddenBrowserRuntimeSpecifier,
 	rejectRuntimeBuiltinsFromBrowserBundle,
+	rejectRuntimeBuiltinsFromDependencyOptimization,
 } from '../../../browser-module-boundary.js';
 
 const temporaryDirectories: string[] = [];
@@ -19,7 +20,11 @@ afterEach(async () => {
 	);
 });
 
-async function addFixturePackage(root: string, packageName: string): Promise<void> {
+async function addFixturePackage(
+	root: string,
+	packageName: string,
+	source = 'export const portable = true;',
+): Promise<void> {
 	const packageRoot = path.join(root, 'node_modules', packageName);
 	await fs.mkdir(packageRoot, { recursive: true });
 	await fs.writeFile(
@@ -31,7 +36,7 @@ async function addFixturePackage(root: string, packageName: string): Promise<voi
 			exports: './index.js',
 		}),
 	);
-	await fs.writeFile(path.join(packageRoot, 'index.js'), 'export const portable = true;');
+	await fs.writeFile(path.join(packageRoot, 'index.js'), source);
 }
 
 async function buildFixture(
@@ -61,6 +66,27 @@ async function buildFixture(
 		plugins: [rejectRuntimeBuiltinsFromBrowserBundle()],
 		build: buildOptions,
 	});
+}
+
+async function optimizeFixtureDependency(source: string) {
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-browser-boundary-optimize-'));
+	temporaryDirectories.push(root);
+	await addFixturePackage(root, 'fixture-dep', source);
+	const config = await resolveConfig(
+		{
+			configFile: false,
+			root,
+			logLevel: 'silent',
+			optimizeDeps: {
+				include: ['fixture-dep'],
+				rolldownOptions: {
+					plugins: [rejectRuntimeBuiltinsFromDependencyOptimization()],
+				},
+			},
+		},
+		'serve',
+	);
+	return optimizeDeps(config, true, true);
 }
 
 describe('browser module boundary', () => {
@@ -112,5 +138,11 @@ describe('browser module boundary', () => {
 
 	test('permits an ordinary package whose name exists only behind node:', async () => {
 		await expect(buildFixture('test', 'client', ['test'])).resolves.toBeDefined();
+	});
+
+	test('fails dependency prebundling that reaches a runtime built-in', async () => {
+		await expect(
+			optimizeFixtureDependency("import 'node:fs'; export const portable = true;"),
+		).rejects.toThrow('Browser bundle cannot import runtime built-in node:fs');
 	});
 });

@@ -3,7 +3,10 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import path from 'node:path';
-import { rejectRuntimeBuiltinsFromBrowserBundle } from './browser-module-boundary.js';
+import {
+	rejectRuntimeBuiltinsFromBrowserBundle,
+	rejectRuntimeBuiltinsFromDependencyOptimization,
+} from './browser-module-boundary.js';
 import { CODEMIRROR_PACKAGES } from './codemirror-packages.ts';
 
 function codeMirrorLanguageChunk(id: string): string | undefined {
@@ -90,6 +93,9 @@ export default defineConfig({
 	},
 	optimizeDeps: {
 		include: [...CODEMIRROR_PACKAGES],
+		rolldownOptions: {
+			plugins: [rejectRuntimeBuiltinsFromDependencyOptimization()],
+		},
 	},
 	build: {
 		rollupOptions: {
