@@ -6,6 +6,7 @@ import {
 	deleteChat as deleteChatApi,
 	applyChatTagDelta as applyChatTagDeltaApi,
 	generateChatTitle,
+	getChatTagConflictResponse,
 	listChats,
 	recoverChatTags as recoverChatTagsApi,
 	replaceChatTags as replaceChatTagsApi,
@@ -498,6 +499,15 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			this.#reconcileTagResponse(chatId, result.tags, generation);
 			return result;
 		} catch (error) {
+			const conflict = getChatTagConflictResponse(error);
+			if (conflict) {
+				this.#reconcileTagResponse(chatId, conflict.currentTags, generation);
+			} else if (
+				error instanceof ApiError &&
+				error.errorCode === 'CHAT_TAG_REVISION_CONFLICT'
+			) {
+				void this.quietRefreshChats();
+			}
 			if (isUnknownChatTagOutcome(error)) {
 				this.#requireTagRecovery(chatId);
 				void this.recoverChatTags(chatId).catch(() => {});

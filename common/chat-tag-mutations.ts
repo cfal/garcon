@@ -86,9 +86,31 @@ export function normalizeRecoverChatTagsResponse(value: unknown): RecoverChatTag
 
 export interface ChatTagConflictResponse {
   readonly success: false;
+  readonly error: string;
   readonly errorCode: 'CHAT_TAG_REVISION_CONFLICT';
   readonly retryable: true;
   readonly currentTags: readonly string[];
+}
+
+export function normalizeChatTagConflictResponse(value: unknown): ChatTagConflictResponse | null {
+  const raw = record(value);
+  if (
+    !raw
+    || !hasOnlyKeys(raw, ['success', 'error', 'errorCode', 'retryable', 'currentTags'])
+    || raw.success !== false
+    || typeof raw.error !== 'string'
+    || raw.errorCode !== 'CHAT_TAG_REVISION_CONFLICT'
+    || raw.retryable !== true
+  ) return null;
+  const currentTags = stringArray(raw.currentTags);
+  if (!currentTags) return null;
+  return {
+    success: false,
+    error: raw.error,
+    errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+    retryable: true,
+    currentTags,
+  };
 }
 
 export interface ChatBoardTransitionConflictResponse {

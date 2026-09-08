@@ -3,7 +3,8 @@ import { ChatSessionsStore } from '../chat-sessions.svelte';
 import type { ChatSession } from '$lib/types/session';
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
 
-vi.mock('$lib/api/chats.js', () => ({
+vi.mock('$lib/api/chats.js', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/api/chats.js')>(),
 	listChats: vi.fn(),
 	deleteChat: vi.fn(),
 	setLastSelectedChat: vi.fn(),
@@ -793,6 +794,41 @@ describe('ChatSessionsStore IO', () => {
 		})).rejects.toThrow('tag update failed');
 
 		expect(store.byId['chat-1'].tags).toEqual(['existing']);
+	});
+
+	it('reconciles authoritative tags from a replacement conflict without WebSocket delivery', async () => {
+		const conflict = new ApiError(
+			409,
+			'Chat tags changed',
+			'CHAT_TAG_REVISION_CONFLICT',
+			undefined,
+			true,
+			{
+				success: false,
+				error: 'Chat tags changed',
+				errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+				retryable: true,
+				currentTags: ['approved', 'ready'],
+			},
+		);
+		const replaceChatTags = vi.fn().mockRejectedValue(conflict);
+		const listChats = vi.fn().mockResolvedValue({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['approved', 'ready'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		const store = new ChatSessionsStore({ replaceChatTags, listChats });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['ready'],
+			tags: ['ready', 'urgent'],
+		})).rejects.toBe(conflict);
+
+		expect(store.byId['chat-1'].tags).toEqual(['approved', 'ready']);
+		expect(replaceChatTags).toHaveBeenCalledOnce();
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledOnce());
 	});
 
 	it('marks every tag writer pending and enters recovery after an unknown outcome', async () => {

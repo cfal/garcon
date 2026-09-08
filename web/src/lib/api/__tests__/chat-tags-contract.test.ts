@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { replaceChatTags } from '../chats.js';
+import { getChatTagConflictResponse, replaceChatTags } from '../chats.js';
 import { ApiError, ApiMutationOutcomeUnknownError } from '../client.js';
 
 describe('chat tag API contract', () => {
@@ -61,6 +61,29 @@ describe('chat tag API contract', () => {
 		} catch (error) {
 			expect(error).toBeInstanceOf(ApiError);
 			expect(error).not.toBeInstanceOf(ApiMutationOutcomeUnknownError);
+		}
+	});
+
+	it('normalizes authoritative tags from a replacement conflict', async () => {
+		fetchMock.mockResolvedValue(Response.json({
+			success: false,
+			error: 'Chat tags changed',
+			errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+			retryable: true,
+			currentTags: ['approved', 'ready'],
+		}, { status: 409 }));
+
+		try {
+			await replace();
+			expect.unreachable('Expected a tag conflict');
+		} catch (error) {
+			expect(getChatTagConflictResponse(error)).toEqual({
+				success: false,
+				error: 'Chat tags changed',
+				errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+				retryable: true,
+				currentTags: ['approved', 'ready'],
+			});
 		}
 	});
 });

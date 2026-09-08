@@ -76,9 +76,11 @@ import type {
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import {
+	normalizeChatTagConflictResponse,
 	normalizeChatTagsMutationResponse,
 	normalizeRecoverChatTagsResponse,
 	type ApplyChatTagDeltaRequest,
+	type ChatTagConflictResponse,
 	type ChatTagsMutationResponse,
 	type RecoverChatTagsResponse,
 	type ReplaceChatTagsRequest,
@@ -550,6 +552,13 @@ async function requestChatTagMutation(
 			{ cause: error },
 		);
 	}
+}
+
+export function getChatTagConflictResponse(error: unknown): ChatTagConflictResponse | null {
+	if (!(error instanceof ApiError) || error.errorCode !== 'CHAT_TAG_REVISION_CONFLICT') {
+		return null;
+	}
+	return normalizeChatTagConflictResponse(error.payload);
 }
 
 export async function replaceChatTags(

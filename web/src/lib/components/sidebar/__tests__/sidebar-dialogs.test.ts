@@ -538,13 +538,17 @@ describe('Sidebar dialogs', () => {
 
 		try {
 			await rendered.rerender({ ...props, currentTags: ['approved', 'ready'] });
+			const saveButton = screen.getByRole('button', { name: 'Save' });
+			expect(saveButton.hasAttribute('disabled')).toBe(true);
+			await fireEvent.click(saveButton);
+			expect(onSave).not.toHaveBeenCalled();
 			await fireEvent.click(screen.getByRole('button', { name: 'Review latest tags' }));
 
 			expect(screen.getByRole('button', { name: 'Remove tag approved' })).toBeTruthy();
 			expect(screen.getByRole('button', { name: 'Remove tag ready' })).toBeTruthy();
 			expect(screen.getByRole('button', { name: 'Remove tag urgent' })).toBeTruthy();
 
-			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+			await fireEvent.click(saveButton);
 			await waitFor(() => {
 				expect(onSave).toHaveBeenCalledWith(
 					'chat-1',

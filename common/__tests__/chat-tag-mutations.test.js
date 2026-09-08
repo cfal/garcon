@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  normalizeChatTagConflictResponse,
   normalizeChatTagsMutationResponse,
   normalizeCommandTagMutationOutcome,
   normalizeRecoverChatTagsResponse,
@@ -83,6 +84,28 @@ describe('chat tag mutation responses', () => {
       errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
       recoveryRequired: true,
       extra: true,
+    })).toBeNull();
+  });
+
+  it('parses a canonical tag conflict and rejects incomplete payloads', () => {
+    expect(normalizeChatTagConflictResponse({
+      success: false,
+      error: 'Chat tags changed',
+      errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+      retryable: true,
+      currentTags: ['approved', 'ready'],
+    })).toEqual({
+      success: false,
+      error: 'Chat tags changed',
+      errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+      retryable: true,
+      currentTags: ['approved', 'ready'],
+    });
+    expect(normalizeChatTagConflictResponse({
+      success: false,
+      error: 'Chat tags changed',
+      errorCode: 'CHAT_TAG_REVISION_CONFLICT',
+      retryable: true,
     })).toBeNull();
   });
 });
