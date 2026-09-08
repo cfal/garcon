@@ -5,6 +5,7 @@ import type { TransitionChatTagsRequest } from '$shared/chat-tag-mutations';
 import type { ChatBoardApi } from '$lib/api/chat-boards';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
+import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte';
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub';
 import ChatBoardTransitionDialog from '../ChatBoardTransitionDialog.svelte';
@@ -178,5 +179,33 @@ describe('ChatBoardTransitionDialog', () => {
 			expectedTags: ['context', 'extra', 'ready'],
 			selectedTargetTags: ['review'],
 		});
+	});
+
+	it('reports when reconciliation blocks submission before dispatch', async () => {
+		const sessions = new ChatSessionsStore({
+			transitionChatTags: vi.fn().mockRejectedValue(
+				new ChatTagMutationBlockedError('committed-refresh'),
+			),
+		});
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		render(ChatBoardTransitionDialog, {
+			open: true,
+			controller: await controller(),
+			sessions,
+			board,
+			occurrence: { key: `${source.id}:chat-1`, columnId: source.id, chat: chat() },
+			onClose: vi.fn(),
+			onApplied: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('checkbox', { name: 'review' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Apply tag changes' }));
+
+		expect(
+			await screen.findByText(
+				'This tag change was not submitted because an earlier tag change still needs attention. Refresh or confirm the saved tags before trying again.',
+			),
+		).toBeTruthy();
 	});
 });

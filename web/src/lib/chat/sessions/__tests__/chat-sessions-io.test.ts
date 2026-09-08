@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import type { ChatSession } from '$lib/types/session';
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
+import { ChatTagMutationBlockedError } from '../chat-tag-mutation-result.js';
 
 vi.mock('$lib/api/chats.js', async (importOriginal) => ({
 	...await importOriginal<typeof import('$lib/api/chats.js')>(),
@@ -295,6 +296,48 @@ describe('ChatSessionsStore IO', () => {
 
 		expect(store.byId.target).toMatchObject({ isArchived: true, orderGroup: 'archived' });
 		expect(store.orderedChats.map((chat) => chat.id)).toEqual(['target', 'archived']);
+	});
+
+	it('keeps an acknowledged archive when a tag response settles during failed reconciliation', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const archive = deferred<{ success: boolean; isArchived: boolean }>();
+		const refresh = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const listChats = vi.fn()
+			.mockReturnValueOnce(refresh.promise)
+			.mockRejectedValueOnce(new Error('follow-up refresh failed'));
+		const applyChatTagDelta = vi.fn().mockResolvedValue({
+			success: true as const,
+			chatId: 'target',
+			tags: ['urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
+		});
+		const store = new ChatSessionsStore({
+			listChats,
+			applyChatTagDelta,
+			toggleArchive: () => archive.promise,
+		});
+		store.upsertFromServer([makeServerSession({ id: 'target' })]);
+
+		const archiveMutation = store.startArchivingChats(['target']);
+		await flushMicrotasks();
+		archive.resolve({ success: true, isArchived: true });
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledOnce());
+
+		await store.applyChatTagDelta({ chatId: 'target', addTags: ['urgent'] });
+		refresh.reject(new Error('refresh failed'));
+		await archiveMutation.completion;
+
+		expect(listChats).toHaveBeenCalledTimes(2);
+		expect(store.byId.target).toMatchObject({
+			isArchived: true,
+			orderGroup: 'archived',
+			tags: ['urgent'],
+		});
 	});
 
 	it('uses the final failed follow-up refresh when preserving an acknowledged archive', async () => {
@@ -811,7 +854,7 @@ describe('ChatSessionsStore IO', () => {
 			chatId: 'chat-1',
 			expectedTags: ['existing'],
 			tags: ['review'],
-		})).rejects.toThrow('Refreshing saved tags');
+		})).rejects.toMatchObject({ reconciliationKind: 'committed-refresh' });
 		expect(replaceChatTags).toHaveBeenCalledTimes(1);
 
 		await expect(store.retryTagReconciliation('chat-1')).resolves.toBeUndefined();
@@ -1052,7 +1095,7 @@ describe('ChatSessionsStore IO', () => {
 		expect(recoverChatTags).toHaveBeenCalledTimes(1);
 		await expect(fenced.applyChatTagDelta({
 			chatId: 'chat-1', addTags: ['urgent'],
-		})).rejects.toMatchObject({ errorCode: 'CHAT_TAG_SAVE_UNKNOWN' });
+		})).rejects.toEqual(new ChatTagMutationBlockedError('durability'));
 		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
 		await Promise.all([first, second]);
 	});
@@ -1158,7 +1201,7 @@ describe('ChatSessionsStore IO', () => {
 			chatId: 'chat-1',
 			expectedTags: ['ready'],
 			tags: ['urgent'],
-		})).rejects.toMatchObject({ errorCode: 'CHAT_TAG_SAVE_UNKNOWN' });
+		})).rejects.toEqual(new ChatTagMutationBlockedError('durability'));
 		expect(replaceChatTags).not.toHaveBeenCalled();
 		expect(applyChatTagDelta).toHaveBeenCalledTimes(1);
 

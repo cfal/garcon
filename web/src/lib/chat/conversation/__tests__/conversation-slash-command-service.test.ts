@@ -7,6 +7,7 @@ import { AssistantMessage } from '$shared/chat-types';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
+import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 import {
 	ConversationSlashCommandService,
 	type ConversationSlashCommandDeps,
@@ -810,6 +811,30 @@ describe('ConversationSlashCommandService', () => {
 			'chat-1',
 			'error',
 			'Garcon could not confirm whether the tag change was saved. Confirm the saved tags before editing again.',
+		);
+	});
+
+	it('reports when an earlier reconciliation blocks the tag command before dispatch', async () => {
+		const chat = createChat();
+		const { deps, appendLocalNoticeForChat } = createDeps(chat);
+		deps.sessions.applyChatTagDelta.mockRejectedValue(
+			new ChatTagMutationBlockedError('committed-refresh'),
+		);
+		deps.sessions.tagReconciliationKind.mockReturnValue('committed-refresh');
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			'This tag change was not submitted because an earlier tag change still needs attention. Refresh or confirm the saved tags before trying again.',
 		);
 	});
 

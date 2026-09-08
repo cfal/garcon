@@ -46,6 +46,7 @@ import {
 	type ProjectPathChangedListener,
 } from './chat-project-binding-state.js';
 import {
+	ChatTagMutationBlockedError,
 	createChatTagMutationResult,
 	isUnknownChatTagOutcome,
 	sameChatTags,
@@ -73,6 +74,11 @@ interface ArchiveMutationSettlement {
 	serverEntryGenerationAtSettlement: number;
 }
 
+interface ChatTagSnapshotVersion {
+	serverEntryGeneration: number;
+	tagSettlementGeneration: number;
+}
+
 type ChatTagRefreshKind = Exclude<ChatTagReconciliationKind, 'durability' | null>;
 type ChatTagMutationSettlement = 'committed' | 'conflict';
 
@@ -97,6 +103,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#nextServerEntryGeneration = 0;
 	readonly #serverEntryGenerationByChatId = new Map<string, number>();
 	readonly #serverEntryFetchGenerationByChatId = new Map<string, number>();
+	readonly #tagSettlementGenerationByChatId = new Map<string, number>();
 	readonly #pendingTagMutationCountByChatId = new Map<string, number>();
 	readonly #tagRecoveryGenerationByChatId = new Map<string, number>();
 	readonly #tagRecoveryByChatId = new Map<string, Promise<RecoverChatTagsResponse>>();
@@ -138,7 +145,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	set byId(records: Record<string, ChatSessionRecord>) {
 		this.#baseById = records;
-		this.#pruneServerEntryGenerations(records);
+		this.#pruneSnapshotGenerations(records);
 	}
 
 	get order(): string[] {
@@ -459,13 +466,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		try {
 			while (true) {
 				const recoveryGeneration = this.#tagRecoveryGenerationByChatId.get(chatId) ?? 0;
-				const serverEntryGeneration = this.#serverEntryGenerationByChatId.get(chatId) ?? 0;
+				const snapshotVersion = this.#captureTagSnapshotVersion(chatId);
 				const result = await (this.#deps.recoverChatTags ?? recoverChatTagsApi)(chatId);
 				if ((this.#tagRecoveryGenerationByChatId.get(chatId) ?? 0) !== recoveryGeneration) {
 					continue;
 				}
 				this.#setTagRecoveryRequired(chatId, false);
-				this.#reconcileTagResponse(chatId, result.tags, serverEntryGeneration, 'committed');
+				this.#reconcileTagResponse(chatId, result.tags, snapshotVersion, 'committed');
 				return result;
 			}
 		} finally {
@@ -515,22 +522,18 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		chatId: string,
 		request: () => Promise<ChatTagsMutationResponse>,
 	): Promise<ChatTagsMutationResponse> {
-		if (this.#tagRecoveryRequiredChatIds.has(chatId)) {
-			throw new ApiError(503, 'Confirming saved tags', 'CHAT_TAG_SAVE_UNKNOWN');
-		}
-		if (this.#tagRefreshKindByChatId.has(chatId)) {
-			throw new Error('Refreshing saved tags');
-		}
-		const generation = this.#serverEntryGenerationByChatId.get(chatId) ?? 0;
+		const reconciliationKind = this.tagReconciliationKind(chatId);
+		if (reconciliationKind) throw new ChatTagMutationBlockedError(reconciliationKind);
+		const snapshotVersion = this.#captureTagSnapshotVersion(chatId);
 		this.#setTagPending(chatId, true);
 		try {
 			const result = await request();
-			this.#reconcileTagResponse(chatId, result.tags, generation, 'committed');
+			this.#reconcileTagResponse(chatId, result.tags, snapshotVersion, 'committed');
 			return result;
 		} catch (error) {
 			const conflict = getChatTagConflictResponse(error);
 			if (conflict) {
-				this.#reconcileTagResponse(chatId, conflict.currentTags, generation, 'conflict');
+				this.#reconcileTagResponse(chatId, conflict.currentTags, snapshotVersion, 'conflict');
 			} else if (
 				error instanceof ApiError &&
 				error.errorCode === 'CHAT_TAG_REVISION_CONFLICT'
@@ -551,10 +554,10 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#reconcileTagResponse(
 		chatId: string,
 		tags: readonly string[],
-		generation: number,
+		snapshotVersion: ChatTagSnapshotVersion,
 		settlement: ChatTagMutationSettlement,
 	): void {
-		if ((this.#serverEntryGenerationByChatId.get(chatId) ?? 0) > generation) {
+		if (this.#hasNewerTagSnapshot(chatId, snapshotVersion)) {
 			this.#requireTagRefresh(
 				chatId,
 				settlement === 'committed' ? 'committed-refresh' : 'conflict-refresh',
@@ -563,12 +566,26 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			return;
 		}
 		this.patchChat(chatId, { tags: [...tags] });
-		this.#serverEntryGenerationByChatId.set(chatId, ++this.#nextServerEntryGeneration);
-		this.#serverEntryFetchGenerationByChatId.delete(chatId);
+		this.#tagSettlementGenerationByChatId.set(
+			chatId,
+			(this.#tagSettlementGenerationByChatId.get(chatId) ?? 0) + 1,
+		);
 		// Prevents requests started before settlement from replacing this authoritative snapshot.
 		this.#minimumTagFetchGenerationByChatId.set(chatId, this.#nextFetchGeneration + 1);
 		this.#clearTagRefresh(chatId);
 		void this.quietRefreshChats();
+	}
+
+	#captureTagSnapshotVersion(chatId: string): ChatTagSnapshotVersion {
+		return {
+			serverEntryGeneration: this.#serverEntryGenerationByChatId.get(chatId) ?? 0,
+			tagSettlementGeneration: this.#tagSettlementGenerationByChatId.get(chatId) ?? 0,
+		};
+	}
+
+	#hasNewerTagSnapshot(chatId: string, version: ChatTagSnapshotVersion): boolean {
+		return (this.#serverEntryGenerationByChatId.get(chatId) ?? 0) > version.serverEntryGeneration
+			|| (this.#tagSettlementGenerationByChatId.get(chatId) ?? 0) > version.tagSettlementGeneration;
 	}
 
 	#setTagPending(chatId: string, pending: boolean): void {
@@ -780,7 +797,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 		this.#baseById = nextById;
 		this.#baseOrder = [...draftOrder, ...nextOrder];
-		this.#pruneServerEntryGenerations(nextById);
+		this.#pruneSnapshotGenerations(nextById);
 		if (this.selectedChatId && !nextById[this.selectedChatId]) {
 			this.selectedChatId = null;
 		}
@@ -893,6 +910,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
+		this.#tagSettlementGenerationByChatId.delete(chatId);
 		this.#pendingTagMutationCountByChatId.delete(chatId);
 		this.#setTagPending(chatId, false);
 		this.#tagRecoveryGenerationByChatId.delete(chatId);
@@ -919,11 +937,14 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		}
 	}
 
-	#pruneServerEntryGenerations(records: Readonly<Record<string, ChatSessionRecord>>): void {
+	#pruneSnapshotGenerations(records: Readonly<Record<string, ChatSessionRecord>>): void {
 		for (const chatId of this.#serverEntryGenerationByChatId.keys()) {
 			if (records[chatId]) continue;
 			this.#serverEntryGenerationByChatId.delete(chatId);
 			this.#serverEntryFetchGenerationByChatId.delete(chatId);
+		}
+		for (const chatId of this.#tagSettlementGenerationByChatId.keys()) {
+			if (!records[chatId]) this.#tagSettlementGenerationByChatId.delete(chatId);
 		}
 	}
 

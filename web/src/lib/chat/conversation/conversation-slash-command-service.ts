@@ -52,6 +52,7 @@ import * as m from '$lib/paraglide/messages.js';
 import type { ReorderChatResponse } from '$shared/chat-order-contracts';
 import type { ApplyChatTagDeltaRequest, ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
+import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 
 interface SlashCommandSessions {
 	selectedChatId: string | null;
@@ -451,7 +452,7 @@ export class ConversationSlashCommandService {
 						? { addTags: command.tags }
 						: { removeTags: command.tags }),
 				});
-			} catch {
+			} catch (error) {
 				this.#restoreComposerIfUntouched({
 					chatId,
 					ownsComposer,
@@ -462,7 +463,7 @@ export class ConversationSlashCommandService {
 				deps.chatState.appendLocalNoticeForChat(
 					chatId,
 					'error',
-					tagMutationFailureNotice(deps.sessions.tagReconciliationKind(chatId)),
+					tagMutationFailureNotice(error, deps.sessions.tagReconciliationKind(chatId)),
 				);
 				return 'rejected';
 			}
@@ -915,7 +916,8 @@ function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {
 	return changed ? m.chat_notice_move_bottom_success() : m.chat_notice_move_bottom_unchanged();
 }
 
-function tagMutationFailureNotice(kind: ChatTagReconciliationKind): string {
+function tagMutationFailureNotice(error: unknown, kind: ChatTagReconciliationKind): string {
+	if (error instanceof ChatTagMutationBlockedError) return m.chat_tags_mutation_blocked();
 	switch (kind) {
 		case 'durability':
 			return m.chat_tags_confirmation_unknown();

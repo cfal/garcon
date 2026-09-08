@@ -1,6 +1,14 @@
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
+import type { ChatTagReconciliationKind } from './chat-sessions-contract.js';
 import type { ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
 import { normalizeTags } from '$shared/tags';
+
+export class ChatTagMutationBlockedError extends Error {
+	constructor(readonly reconciliationKind: Exclude<ChatTagReconciliationKind, null>) {
+		super(`Tag mutation blocked by ${reconciliationKind}`);
+		this.name = 'ChatTagMutationBlockedError';
+	}
+}
 
 export function sameChatTags(left: readonly string[], right: readonly string[]): boolean {
 	const normalizedLeft = normalizeTags(left);

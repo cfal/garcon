@@ -17,6 +17,7 @@
 	} from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { chatMatchesBoardColumn, type ChatBoard } from '$shared/chat-boards';
 	import { ApiError } from '$lib/api/client.js';
+	import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -194,7 +195,10 @@
 			onApplied(occurrence.chat.id, target.id);
 		} catch (value) {
 			const currentReconciliation = sessions.tagReconciliationKind(occurrence.chat.id);
-			if (
+			if (value instanceof ChatTagMutationBlockedError) {
+				forcedOutdated = true;
+				submitError = m.chat_tags_mutation_blocked();
+			} else if (
 				(value instanceof ApiError && value.errorCode === 'CHAT_TAG_SAVE_UNKNOWN') ||
 				currentReconciliation === 'durability'
 			) {
