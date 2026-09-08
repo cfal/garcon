@@ -102,8 +102,9 @@
 		if (!rootRef || typeof ResizeObserver === 'undefined') return;
 		const observer = new ResizeObserver(([entry]) => {
 			const width = entry?.contentRect.width ?? rootRef?.clientWidth ?? 0;
-			const nextBand: ChatBoardPresentationBand =
-				width < 560 ? 'narrow' : width < 900 ? 'medium' : 'wide';
+			let nextBand: ChatBoardPresentationBand = 'wide';
+			if (width < 560) nextBand = 'narrow';
+			else if (width < 900) nextBand = 'medium';
 			if (nextBand === presentationBand) return;
 			const generation = beginLaneRemount();
 			focusController.preparePresentationChange(nextBand, activeColumnId);
@@ -313,13 +314,20 @@
 		focusController.focusToolbar();
 	}
 
-	async function retryTagRecovery(chatId: string): Promise<void> {
-		announcement = m.chat_board_confirming_tags();
+	async function retryTagConfirmation(chatId: string): Promise<void> {
+		const confirmationKind = sessions.tagConfirmationKind(chatId);
+		announcement = confirmationKind === 'reconciliation'
+			? m.chat_board_refreshing_tags()
+			: m.chat_board_confirming_tags();
 		try {
-			await sessions.recoverChatTags(chatId);
-			announcement = m.chat_tags_confirmation_complete();
+			await sessions.retryTagConfirmation(chatId);
+			announcement = confirmationKind === 'reconciliation'
+				? m.chat_tags_refresh_complete()
+				: m.chat_tags_confirmation_complete();
 		} catch {
-			announcement = m.chat_tags_confirmation_failed();
+			announcement = confirmationKind === 'reconciliation'
+				? m.chat_tags_refresh_failed()
+				: m.chat_tags_confirmation_failed();
 		}
 	}
 
@@ -511,11 +519,11 @@
 							narrow
 							isDropTarget={false}
 							pendingChatIds={sessions.pendingTagMutationChatIds}
-							recoveryChatIds={sessions.tagRecoveryRequiredChatIds}
+							tagConfirmationKind={(chatId) => sessions.tagConfirmationKind(chatId)}
 							canTransition={selectedBoard.columns.length > 1}
 							onOpen={onOpenChat}
 							onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
-							onRecover={(chatId) => void retryTagRecovery(chatId)}
+							onConfirmTags={(chatId) => void retryTagConfirmation(chatId)}
 							onRegisterScroller={registerScroller}
 							initialScrollTop={laneScrollTop(selectedBoard.id, narrowLane.column.id)}
 							onScrollTopChange={rememberLaneScroll}
@@ -541,11 +549,11 @@
 						narrow={false}
 						isDropTarget={dropTargetColumnId === lane.column.id}
 						pendingChatIds={sessions.pendingTagMutationChatIds}
-						recoveryChatIds={sessions.tagRecoveryRequiredChatIds}
+						tagConfirmationKind={(chatId) => sessions.tagConfirmationKind(chatId)}
 						canTransition={selectedBoard.columns.length > 1}
 						onOpen={onOpenChat}
 						onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
-						onRecover={(chatId) => void retryTagRecovery(chatId)}
+						onConfirmTags={(chatId) => void retryTagConfirmation(chatId)}
 						onRegisterScroller={registerScroller}
 						initialScrollTop={laneScrollTop(selectedBoard.id, lane.column.id)}
 						onScrollTopChange={rememberLaneScroll}

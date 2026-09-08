@@ -73,4 +73,14 @@ describe('ChatBoardCard', () => {
 
 		expect(await screen.findByText('2m ago')).toBeTruthy();
 	});
+
+	it('labels a known-committed reconciliation separately from durability confirmation', () => {
+		render(ChatBoardCardTestHost, {
+			occurrence: occurrence(),
+			currentTime: new Date('2026-09-07T10:00:30.000Z'),
+			confirmationKind: 'reconciliation',
+		});
+
+		expect(screen.getByRole('button', { name: /Refreshing saved tags.*Try again/ })).toBeTruthy();
+	});
 });

@@ -758,6 +758,67 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
 	});
 
+	it('retains a reconciliation fence until a post-settlement chat-list read succeeds', async () => {
+		const staleFetch = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		const mutation = deferred<{
+			success: true;
+			chatId: string;
+			tags: string[];
+			addedTags: string[];
+			removedTags: string[];
+		}>();
+		const listChats = vi.fn()
+			.mockReturnValueOnce(staleFetch.promise)
+			.mockRejectedValueOnce(new Error('refresh failed'))
+			.mockResolvedValueOnce({
+				sessions: [makeServerSession({ id: 'chat-1', tags: ['existing', 'urgent'] })],
+				total: 1,
+				lastSelectedChatId: null,
+			});
+		const replaceChatTags = vi.fn(() => mutation.promise);
+		const store = new ChatSessionsStore({ listChats, replaceChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+
+		const oldListRequest = store.quietRefreshChats();
+		const tagMutation = store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['existing', 'urgent'],
+		});
+		staleFetch.resolve({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing'] })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		await oldListRequest;
+		mutation.resolve({
+			success: true,
+			chatId: 'chat-1',
+			tags: ['existing', 'urgent'],
+			addedTags: ['urgent'],
+			removedTags: [],
+		});
+
+		await expect(tagMutation).resolves.toMatchObject({ success: true });
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(2));
+		expect(store.byId['chat-1'].tags).toEqual(['existing']);
+		expect(store.tagConfirmationKind('chat-1')).toBe('reconciliation');
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['review'],
+		})).rejects.toThrow('Refreshing saved tags');
+		expect(replaceChatTags).toHaveBeenCalledTimes(1);
+
+		await expect(store.retryTagConfirmation('chat-1')).resolves.toBeUndefined();
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+		expect(store.tagConfirmationKind('chat-1')).toBeNull();
+	});
+
 	it('preserves a successful tag mutation when its convergence refresh fails', async () => {
 		const notifyError = vi.fn();
 		const store = new ChatSessionsStore({ notifyError });

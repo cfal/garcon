@@ -53,6 +53,7 @@ export interface ChatProcessingTransition {
 }
 
 export type ChatListLoadStatus = 'loading' | 'ready' | 'error';
+export type ChatTagConfirmationKind = 'durability' | 'reconciliation' | null;
 
 export interface ChatSessionsPort {
 	byId: Record<string, ChatSessionRecord>;
@@ -72,6 +73,8 @@ export interface ChatSessionsPort {
 	readonly orderedChats: ChatSessionRecord[];
 	readonly pendingTagMutationChatIds: ReadonlySet<string>;
 	readonly tagRecoveryRequiredChatIds: ReadonlySet<string>;
+	tagConfirmationKind(chatId: string): ChatTagConfirmationKind;
+	retryTagConfirmation(chatId: string): Promise<void>;
 	replaceChatTags(request: ReplaceChatTagsRequest): Promise<ChatTagsMutationResponse>;
 	applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse>;
 	transitionChatTags(request: TransitionChatTagsRequest): Promise<ChatTagsMutationResponse>;

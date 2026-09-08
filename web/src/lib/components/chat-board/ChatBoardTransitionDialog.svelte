@@ -78,7 +78,7 @@
 		initialDestination ? [...initialTargetTags(initial.tags, initialDestination)] : [],
 	);
 	let submitting = $state(false);
-	let recovering = $state(false);
+	let confirming = $state(false);
 	let submitError = $state<string | null>(null);
 	let forcedOutdated = $state(false);
 	let currentChat = $derived(sessions.byId[occurrence.chat.id] ?? null);
@@ -100,7 +100,17 @@
 			: null,
 	);
 	let sourceMatches = $derived(Boolean(source && chatMatchesBoardColumn(baseTags, source)));
-	let recoveryRequired = $derived(sessions.tagRecoveryRequiredChatIds.has(occurrence.chat.id));
+	let confirmationKind = $derived(sessions.tagConfirmationKind(occurrence.chat.id));
+	let confirmationProgressLabel = $derived(
+		confirmationKind === 'reconciliation'
+			? m.chat_board_refreshing_tags()
+			: m.chat_board_confirming_tags(),
+	);
+	let confirmationRetryLabel = $derived(
+		confirmationKind === 'reconciliation'
+			? m.chat_tags_retry_refresh()
+			: m.chat_tags_retry_confirmation(),
+	);
 	let canSubmit = $derived(
 		Boolean(
 			preview &&
@@ -112,7 +122,7 @@
 			!outdated &&
 			!preview.isNoop &&
 			(target.match === 'all' || preview.appliedTargetTags.length > 0) &&
-			!recoveryRequired,
+				confirmationKind === null,
 		),
 	);
 	let title = $derived(occurrence.chat.title || m.sidebar_chats_unnamed());
@@ -181,7 +191,7 @@
 		} catch (value) {
 			if (
 				(value instanceof ApiError && value.errorCode === 'CHAT_TAG_SAVE_UNKNOWN') ||
-				recoveryRequired
+				confirmationKind !== null
 			) {
 				forcedOutdated = true;
 				submitError = m.chat_tags_confirmation_unknown();
@@ -201,22 +211,34 @@
 		}
 	}
 
-	async function retryRecovery(): Promise<void> {
-		if (!recoveryRequired || recovering) return;
-		recovering = true;
+	async function retryConfirmation(): Promise<void> {
+		if (!confirmationKind || confirming) return;
+		const requestedKind = confirmationKind;
+		confirming = true;
 		submitError = null;
 		try {
-			await sessions.recoverChatTags(occurrence.chat.id);
-			submitError = m.chat_board_transition_unknown();
+			await sessions.retryTagConfirmation(occurrence.chat.id);
+			submitError = requestedKind === 'reconciliation'
+				? m.chat_board_transition_outdated()
+				: m.chat_board_transition_unknown();
 		} catch {
-			submitError = m.chat_tags_confirmation_failed();
+			submitError = requestedKind === 'reconciliation'
+				? m.chat_tags_refresh_failed()
+				: m.chat_tags_confirmation_failed();
 		} finally {
-			recovering = false;
+			confirming = false;
 		}
 	}
 
 	function tagGroup(tags: readonly string[]): readonly string[] {
 		return tags.length > 0 ? tags : ['—'];
+	}
+
+	function transitionErrorMessage(): string {
+		if (currentChat?.isArchived) return m.chat_board_transition_missing();
+		if (outdated) return m.chat_board_transition_outdated();
+		if (!sourceMatches) return m.chat_board_transition_source_missing();
+		return m.chat_board_transition_no_changes();
 	}
 
 	function preventAutomaticFocusRestore(event: Event): void {
@@ -365,26 +387,19 @@
 							class="rounded-lg border border-status-error-border bg-status-error px-3 py-2 text-sm text-status-error-foreground"
 							role="alert"
 						>
-							{submitError ??
-								(currentChat.isArchived
-									? m.chat_board_transition_missing()
-									: outdated
-										? m.chat_board_transition_outdated()
-										: !sourceMatches
-											? m.chat_board_transition_source_missing()
-											: m.chat_board_transition_no_changes())}
+							{submitError ?? transitionErrorMessage()}
 						</p>
 					{/if}
-					{#if recoveryRequired}
+					{#if confirmationKind}
 						<Button
 							variant="outline"
-							disabled={submitting || recovering}
-							onclick={() => void retryRecovery()}
+							disabled={submitting || confirming}
+							onclick={() => void retryConfirmation()}
 						>
-							{recovering ? m.chat_board_confirming_tags() : m.chat_tags_retry_confirmation()}
+							{confirming ? confirmationProgressLabel : confirmationRetryLabel}
 						</Button>
 					{:else if outdated}
-						<Button variant="outline" disabled={submitting || recovering} onclick={reviewLatest}>
+						<Button variant="outline" disabled={submitting || confirming} onclick={reviewLatest}>
 							{m.chat_board_review_latest()}
 						</Button>
 					{/if}

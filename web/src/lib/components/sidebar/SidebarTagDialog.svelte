@@ -7,6 +7,7 @@
 	import ColoredTag from '../shared/ColoredTag.svelte';
 	import { getTagColorClasses } from '$lib/utils/tag-colors';
 	import { normalizeTags } from '$shared/tags';
+	import type { ChatTagConfirmationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import SidebarTagRecoveryNotice from './SidebarTagRecoveryNotice.svelte';
 
 	interface TagDialogState {
@@ -20,20 +21,20 @@
 		tagDialog: TagDialogState | null;
 		allKnownTags: string[];
 		currentTags?: readonly string[];
-		recoveryRequired?: boolean;
+		confirmationKind?: ChatTagConfirmationKind;
 		onClose: () => void;
 		onSave: (chatId: string, baseTags: readonly string[], tags: string[]) => Promise<void> | void;
-		onRetryRecovery?: (chatId: string) => Promise<void> | void;
+		onRetryConfirmation?: (chatId: string) => Promise<void> | void;
 	}
 
 	let {
 		tagDialog,
 		allKnownTags,
 		currentTags,
-		recoveryRequired = false,
+		confirmationKind = null,
 		onClose,
 		onSave,
-		onRetryRecovery,
+		onRetryConfirmation,
 	}: SidebarTagDialogProps = $props();
 
 	let isOpen = $derived(tagDialog !== null);
@@ -41,9 +42,9 @@
 	let inputValue = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let isSaving = $state(false);
-	let isRecovering = $state(false);
+	let isConfirming = $state(false);
 	let saveError = $state<string | null>(null);
-	let recoveryError = $state<string | null>(null);
+	let confirmationError = $state<string | null>(null);
 	let baseTags = $state<string[]>([]);
 
 	$effect(() => {
@@ -52,9 +53,9 @@
 			editingTags = [...tagDialog.editingTags];
 			inputValue = '';
 			saveError = null;
-			recoveryError = null;
+			confirmationError = null;
 			isSaving = false;
-			isRecovering = false;
+			isConfirming = false;
 		}
 	});
 
@@ -62,7 +63,7 @@
 	let baselineOutdated = $derived(
 		Boolean(tagDialog) && JSON.stringify(normalizeTags(baseTags)) !== JSON.stringify(normalizeTags(latestTags)),
 	);
-	let editsDisabled = $derived(isSaving || isRecovering || recoveryRequired || baselineOutdated);
+	let editsDisabled = $derived(isSaving || isConfirming || confirmationKind !== null || baselineOutdated);
 
 	let suggestions = $derived.by(() => {
 		const q = inputValue.trim().toLowerCase();
@@ -140,17 +141,20 @@
 		}
 	}
 
-	async function retryRecovery(): Promise<void> {
-		if (!tagDialog || !onRetryRecovery || isRecovering) return;
-		isRecovering = true;
-		recoveryError = null;
+	async function retryConfirmation(): Promise<void> {
+		if (!tagDialog || !onRetryConfirmation || isConfirming || !confirmationKind) return;
+		const requestedKind = confirmationKind;
+		isConfirming = true;
+		confirmationError = null;
 		try {
-			await onRetryRecovery(tagDialog.chatId);
+			await onRetryConfirmation(tagDialog.chatId);
 			saveError = null;
 		} catch {
-			recoveryError = m.chat_tags_confirmation_failed();
+			confirmationError = requestedKind === 'reconciliation'
+				? m.chat_tags_refresh_failed()
+				: m.chat_tags_confirmation_failed();
 		} finally {
-			isRecovering = false;
+			isConfirming = false;
 		}
 	}
 
@@ -170,11 +174,11 @@
 		]);
 		inputValue = '';
 		saveError = null;
-		recoveryError = null;
+		confirmationError = null;
 	}
 
 	function requestClose() {
-		if (isSaving || isRecovering) return;
+		if (isSaving || isConfirming) return;
 		onClose();
 	}
 
@@ -186,9 +190,9 @@
 <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		class="max-w-md"
-		showCloseButton={!isSaving && !isRecovering}
-		escapeKeydownBehavior={isSaving || isRecovering ? 'ignore' : 'close'}
-		interactOutsideBehavior={isSaving || isRecovering ? 'ignore' : 'close'}
+		showCloseButton={!isSaving && !isConfirming}
+		escapeKeydownBehavior={isSaving || isConfirming ? 'ignore' : 'close'}
+		interactOutsideBehavior={isSaving || isConfirming ? 'ignore' : 'close'}
 	>
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_tags_manage()}</Dialog.Title>
@@ -269,11 +273,11 @@
 			{/if}
 
 			<SidebarTagRecoveryNotice
-				{recoveryRequired}
+				{confirmationKind}
 				{baselineOutdated}
-				recovering={isRecovering}
-				{recoveryError}
-				onRetry={() => void retryRecovery()}
+				confirming={isConfirming}
+				{confirmationError}
+				onRetry={() => void retryConfirmation()}
 				onReviewLatest={reviewLatestTags}
 			/>
 
@@ -283,7 +287,7 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={requestClose} disabled={isSaving || isRecovering}
+			<Button variant="outline" onclick={requestClose} disabled={isSaving || isConfirming}
 				>{m.sidebar_actions_cancel()}</Button
 			>
 			<Button

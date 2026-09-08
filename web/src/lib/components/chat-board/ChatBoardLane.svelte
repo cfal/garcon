@@ -7,6 +7,7 @@
 		ChatBoardOccurrence,
 	} from '$lib/chat-board/projection/chat-board-projection.js';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
+	import type { ChatTagConfirmationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { CHAT_BOARD_COLUMN_DROP_TYPE, isChatBoardCardDragData } from './chat-board-dnd.js';
 	import ChatBoardLaneList from './ChatBoardLaneList.svelte';
@@ -20,11 +21,11 @@
 		narrow,
 		isDropTarget,
 		pendingChatIds,
-		recoveryChatIds,
+		tagConfirmationKind,
 		canTransition,
 		onOpen,
 		onTransition,
-		onRecover,
+		onConfirmTags,
 		onRegisterScroller,
 		initialScrollTop,
 		onScrollTopChange,
@@ -37,11 +38,11 @@
 		narrow: boolean;
 		isDropTarget: boolean;
 		pendingChatIds: ReadonlySet<string>;
-		recoveryChatIds: ReadonlySet<string>;
+		tagConfirmationKind: (chatId: string) => ChatTagConfirmationKind;
 		canTransition: boolean;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
-		onRecover: (chatId: string) => void;
+		onConfirmTags: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 		initialScrollTop: number;
 		onScrollTopChange: (boardId: string, columnId: string, scrollTop: number) => void;
@@ -137,11 +138,11 @@
 		{layout}
 		{canDrag}
 		{pendingChatIds}
-		{recoveryChatIds}
+		{tagConfirmationKind}
 		{canTransition}
 		{onOpen}
 		{onTransition}
-		{onRecover}
+		{onConfirmTags}
 		{onRegisterScroller}
 		{initialScrollTop}
 		{onScrollTopChange}

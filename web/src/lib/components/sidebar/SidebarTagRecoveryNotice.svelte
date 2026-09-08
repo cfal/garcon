@@ -1,33 +1,50 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { ChatTagConfirmationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 
 	let {
-		recoveryRequired,
+		confirmationKind,
 		baselineOutdated,
-		recovering,
-		recoveryError,
+		confirming,
+		confirmationError,
 		onRetry,
 		onReviewLatest,
 	}: {
-		recoveryRequired: boolean;
+		confirmationKind: ChatTagConfirmationKind;
 		baselineOutdated: boolean;
-		recovering: boolean;
-		recoveryError: string | null;
+		confirming: boolean;
+		confirmationError: string | null;
 		onRetry: () => void;
 		onReviewLatest: () => void;
 	} = $props();
+
+	let confirmationMessage = $derived(
+		confirmationKind === 'reconciliation'
+			? m.chat_tags_refresh_required()
+			: m.chat_tags_confirmation_unknown(),
+	);
+	let retryLabel = $derived(
+		confirmationKind === 'reconciliation'
+			? m.chat_tags_retry_refresh()
+			: m.chat_tags_retry_confirmation(),
+	);
+	let confirmingLabel = $derived(
+		confirmationKind === 'reconciliation'
+			? m.chat_board_refreshing_tags()
+			: m.chat_board_confirming_tags(),
+	);
 </script>
 
-{#if recoveryRequired}
+{#if confirmationKind}
 	<div
 		class="rounded-lg border border-status-warning-border bg-status-warning/10 p-3 text-sm text-status-warning-muted-foreground"
 		role="alert"
 	>
-		<p>{m.chat_tags_confirmation_unknown()}</p>
-		{#if recoveryError}<p class="mt-1">{recoveryError}</p>{/if}
-		<Button class="mt-3" variant="outline" disabled={recovering} onclick={onRetry}>
-			{recovering ? m.chat_board_confirming_tags() : m.chat_tags_retry_confirmation()}
+		<p>{confirmationMessage}</p>
+		{#if confirmationError}<p class="mt-1">{confirmationError}</p>{/if}
+		<Button class="mt-3" variant="outline" disabled={confirming} onclick={onRetry}>
+			{confirming ? confirmingLabel : retryLabel}
 		</Button>
 	</div>
 {:else if baselineOutdated}

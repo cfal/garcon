@@ -2,6 +2,7 @@
 	import { onDestroy, untrack } from 'svelte';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
+	import type { ChatTagConfirmationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 	import {
 		virtualItems as selectVirtualItems,
@@ -21,11 +22,11 @@
 		layout,
 		canDrag,
 		pendingChatIds,
-		recoveryChatIds,
+		tagConfirmationKind,
 		canTransition,
 		onOpen,
 		onTransition,
-		onRecover,
+		onConfirmTags,
 		onRegisterScroller,
 		initialScrollTop,
 		onScrollTopChange,
@@ -37,11 +38,11 @@
 		layout: ChatItemLayout;
 		canDrag: boolean;
 		pendingChatIds: ReadonlySet<string>;
-		recoveryChatIds: ReadonlySet<string>;
+		tagConfirmationKind: (chatId: string) => ChatTagConfirmationKind;
 		canTransition: boolean;
 		onOpen: (chatId: string) => void;
 		onTransition: (occurrence: ChatBoardOccurrence, invoker: HTMLElement) => void;
-		onRecover: (chatId: string) => void;
+		onConfirmTags: (chatId: string) => void;
 		onRegisterScroller?: (columnId: string, scroll: ((key: string) => void) | null) => void;
 		initialScrollTop: number;
 		onScrollTopChange: (boardId: string, columnId: string, scrollTop: number) => void;
@@ -60,7 +61,19 @@
 		},
 	});
 	let viewportRef = $state<HTMLDivElement | null>(null);
-	let estimate = $derived(layout === 'single-line' ? 53 : layout === 'compact' ? 81 : 129);
+
+	function estimatedRowHeight(itemLayout: ChatItemLayout): number {
+		switch (itemLayout) {
+			case 'single-line':
+				return 53;
+			case 'compact':
+				return 81;
+			case 'detailed':
+				return 129;
+		}
+	}
+
+	let estimate = $derived(estimatedRowHeight(layout));
 	let snapshot = $derived(virtual.snapshot);
 	let virtualItems = $derived(selectVirtualItems(snapshot, indexesInRange(snapshot.overscanRange)));
 	let renderedItems = $derived.by(() => {
@@ -184,12 +197,12 @@
 								{boardId}
 								{canDrag}
 								pending={pendingChatIds.has(occurrence.chat.id)}
-								recoveryRequired={recoveryChatIds.has(occurrence.chat.id)}
+								confirmationKind={tagConfirmationKind(occurrence.chat.id)}
 								{canTransition}
 								occurrenceIndex={virtualItem.index}
 								{onOpen}
 								{onTransition}
-								{onRecover}
+								{onConfirmTags}
 							/>
 							{#snippet failed()}
 								<button

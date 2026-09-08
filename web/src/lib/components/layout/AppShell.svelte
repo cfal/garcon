@@ -817,13 +817,12 @@
 	currentTags={chatActionDialogs.tagDialog
 		? sessions.byId[chatActionDialogs.tagDialog.chatId]?.tags
 		: undefined}
-	recoveryRequired={Boolean(
-		chatActionDialogs.tagDialog &&
-			sessions.tagRecoveryRequiredChatIds.has(chatActionDialogs.tagDialog.chatId),
-	)}
+	confirmationKind={chatActionDialogs.tagDialog
+		? sessions.tagConfirmationKind(chatActionDialogs.tagDialog.chatId)
+		: null}
 	onClose={() => chatActionDialogs.closeTagDialog()}
 	onSave={confirmChatTags}
-	onRetryRecovery={(chatId) => sessions.recoverChatTags(chatId).then(() => undefined)}
+	onRetryConfirmation={(chatId) => sessions.retryTagConfirmation(chatId)}
 />
 
 <ShareChatDialog

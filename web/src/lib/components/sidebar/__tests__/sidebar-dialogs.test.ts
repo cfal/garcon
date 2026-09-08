@@ -472,7 +472,7 @@ describe('Sidebar dialogs', () => {
 	});
 
 	it('retries tag confirmation without discarding the staged edit', async () => {
-		const onRetryRecovery = vi.fn()
+		const onRetryConfirmation = vi.fn()
 			.mockRejectedValueOnce(new TypeError('Offline'))
 			.mockResolvedValueOnce(undefined);
 		const onSave = vi.fn().mockResolvedValue(undefined);
@@ -485,10 +485,10 @@ describe('Sidebar dialogs', () => {
 			},
 			allKnownTags: [],
 			currentTags: ['existing'],
-			recoveryRequired: true,
+			confirmationKind: 'durability' as const,
 			onClose: vi.fn(),
 			onSave,
-			onRetryRecovery,
+			onRetryConfirmation,
 		};
 		const rendered = render(SidebarTagDialog, props);
 
@@ -499,11 +499,11 @@ describe('Sidebar dialogs', () => {
 			expect(await screen.findByText('Saved tags still could not be confirmed. Check your connection and try again.')).toBeTruthy();
 
 			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
-			await waitFor(() => expect(onRetryRecovery).toHaveBeenCalledTimes(2));
+			await waitFor(() => expect(onRetryConfirmation).toHaveBeenCalledTimes(2));
 			await rendered.rerender({
 				...props,
 				currentTags: ['saved'],
-				recoveryRequired: false,
+				confirmationKind: null,
 			});
 			expect(screen.getByRole('button', { name: 'Remove tag staged' })).toBeTruthy();
 			expect(screen.getByText('Tags changed since this editor opened. Review the latest saved tags before saving.')).toBeTruthy();
@@ -515,6 +515,41 @@ describe('Sidebar dialogs', () => {
 			await waitFor(() => {
 				expect(onSave).toHaveBeenCalledWith('chat-1', ['saved'], ['saved', 'staged']);
 			});
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('distinguishes a required canonical tag refresh from durability confirmation', async () => {
+		const onRetryConfirmation = vi.fn().mockRejectedValue(new TypeError('Offline'));
+		const rendered = render(SidebarTagDialog, {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['existing'],
+				editingTags: ['existing', 'staged'],
+			},
+			allKnownTags: [],
+			currentTags: ['existing'],
+			confirmationKind: 'reconciliation',
+			onClose: vi.fn(),
+			onSave: vi.fn(),
+			onRetryConfirmation,
+		});
+
+		try {
+			expect(
+				screen.getByText(
+					'The tag change was saved, but the latest tags could not be loaded. Refresh them before editing again.',
+				),
+			).toBeTruthy();
+			await fireEvent.click(screen.getByRole('button', { name: 'Refresh saved tags' }));
+			expect(
+				await screen.findByText(
+					'Saved tags still could not be refreshed. Check your connection and try again.',
+				),
+			).toBeTruthy();
+			expect(onRetryConfirmation).toHaveBeenCalledWith('chat-1');
 		} finally {
 			await unmountDialog(rendered);
 		}
