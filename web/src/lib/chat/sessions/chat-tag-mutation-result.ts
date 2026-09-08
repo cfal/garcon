@@ -1,4 +1,4 @@
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import type { ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
 import { normalizeTags } from '$shared/tags';
 
@@ -26,9 +26,14 @@ export function createChatTagMutationResult(
 }
 
 export function isUnknownChatTagOutcome(error: unknown): boolean {
+	if (error instanceof ApiMutationOutcomeUnknownError) return true;
+	if (error instanceof ApiError) {
+		if (error.errorCode === 'CHAT_TAG_SAVE_UNKNOWN') return true;
+		return error.errorCode === undefined && (
+			error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
+		);
+	}
 	return (
-		error instanceof ApiError && error.errorCode === 'CHAT_TAG_SAVE_UNKNOWN'
-	) || (
 		error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')
 	) || error instanceof TypeError;
 }

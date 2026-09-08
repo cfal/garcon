@@ -95,6 +95,13 @@ export class ApiError extends Error {
 	}
 }
 
+export class ApiMutationOutcomeUnknownError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options);
+		this.name = 'ApiMutationOutcomeUnknownError';
+	}
+}
+
 function isHttpErrorResponse(value: unknown): value is HttpErrorResponse {
 	return (
 		isRecord(value) &&

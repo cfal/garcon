@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import type { ChatSession } from '$lib/types/session';
-import { ApiError } from '$lib/api/client';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
 
 vi.mock('$lib/api/chats.js', () => ({
 	listChats: vi.fn(),
@@ -912,6 +912,46 @@ describe('ChatSessionsStore IO', () => {
 		await expect(store.recoverChatTags('chat-1')).resolves.toMatchObject({ tags: ['review'] });
 		expect(recoverChatTags).toHaveBeenCalledTimes(2);
 		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false);
+	});
+
+	it.each([
+		{
+			name: 'an untyped gateway failure',
+			error: new ApiError(504, 'Gateway Timeout'),
+		},
+		{
+			name: 'malformed successful JSON',
+			error: new ApiMutationOutcomeUnknownError('The response was not valid JSON'),
+		},
+		{
+			name: 'an invalid successful envelope',
+			error: new ApiMutationOutcomeUnknownError('Invalid chat tag mutation response'),
+		},
+	])('fences writers and starts recovery after $name', async ({ error }) => {
+		const recovery = deferred<{ success: true; chatId: string; tags: string[] }>();
+		const recoverChatTags = vi.fn(() => recovery.promise);
+		const applyChatTagDelta = vi.fn().mockRejectedValue(error);
+		const replaceChatTags = vi.fn();
+		const store = new ChatSessionsStore({ applyChatTagDelta, recoverChatTags, replaceChatTags });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['ready'] })]);
+
+		await expect(store.applyChatTagDelta({
+			chatId: 'chat-1',
+			addTags: ['review'],
+		})).rejects.toBe(error);
+
+		expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(true);
+		expect(recoverChatTags).toHaveBeenCalledTimes(1);
+		await expect(store.replaceChatTags({
+			chatId: 'chat-1',
+			expectedTags: ['ready'],
+			tags: ['urgent'],
+		})).rejects.toMatchObject({ errorCode: 'CHAT_TAG_SAVE_UNKNOWN' });
+		expect(replaceChatTags).not.toHaveBeenCalled();
+		expect(applyChatTagDelta).toHaveBeenCalledTimes(1);
+
+		recovery.resolve({ success: true, chatId: 'chat-1', tags: ['review'] });
+		await vi.waitFor(() => expect(store.tagRecoveryRequiredChatIds.has('chat-1')).toBe(false));
 	});
 
 	it('keeps the pending tag projection until every concurrent writer settles', async () => {
