@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import crypto from 'node:crypto';
 import type {
   AgentRunCommandRequest,
@@ -481,6 +481,54 @@ describe('GarconClient', () => {
         exitCode: 3,
       });
     }
+  });
+
+  test('leaves transcript search maintenance unbounded', async () => {
+    const timeout = spyOn(AbortSignal, 'timeout');
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const responses = [
+      { success: true, status: validSearchStatus() },
+      { success: true, settings: validRemoteSettings(true) },
+    ];
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (_input, init) => {
+        signals.push(init?.signal);
+        await Promise.resolve();
+        return Response.json(responses.shift());
+      },
+    });
+
+    try {
+      await client.rebuildTranscriptSearch();
+      await client.setTranscriptSearchEnabled(true);
+
+      expect(timeout).not.toHaveBeenCalled();
+      expect(signals).toEqual([undefined, undefined]);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  test('preserves caller cancellation for transcript search maintenance', async () => {
+    const controller = new AbortController();
+    const reason = new Error('maintenance cancelled');
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (_input, init) => {
+        const signal = init?.signal;
+        expect(signal).toBe(controller.signal);
+        return await new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    });
+
+    const request = client.rebuildTranscriptSearch(controller.signal);
+    await Promise.resolve();
+    controller.abort(reason);
+
+    await expect(request).rejects.toBe(reason);
   });
 
   test('fetches and validates a correlated transcript export', async () => {

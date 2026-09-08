@@ -449,6 +449,7 @@ export class GarconClient {
       '/api/v1/chats/search/rebuild',
       undefined,
       signal,
+      null,
     );
     try {
       return parseTranscriptSearchRebuildResponse(value);
@@ -469,6 +470,7 @@ export class GarconClient {
       '/api/v1/app/settings',
       { features: { transcriptSearch: { enabled } } },
       signal,
+      null,
     );
     const response = record(value);
     const rawSettings = record(response?.settings);
