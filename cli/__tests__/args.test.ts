@@ -1,4 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import {
+  ASK_USER_QUESTION_ID_MAX_BYTES,
+  ASK_USER_QUESTION_MAX_ANSWERS,
+  ASK_USER_QUESTION_MAX_SELECTED_OPTIONS,
+} from '@garcon/common/chat-command-contracts';
 import { PREAMBLE_MAX_COUNT } from '@garcon/common/preambles';
 import { CLI_HELP, parseCliArgs } from '../args.js';
 import { CliError } from '../errors.js';
@@ -631,6 +636,31 @@ describe('parseCliArgs', () => {
       allow: true,
       json: true,
     });
+    expect(parseCliArgs([
+      'permission-answer', CHAT_ID, 'permission-1',
+      '--answers', JSON.stringify([{
+        questionId: 'question-1',
+        selectedOptionIds: ['option-1', 'option-2'],
+      }]),
+      '--run', 'run-1', '--server-instance', 'instance-1', '--json',
+    ], ENV)).toEqual({
+      kind: 'permission-answer',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      permissionOccurrenceId: 'permission-1',
+      runId: 'run-1',
+      serverInstanceId: 'instance-1',
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{
+          questionId: 'question-1',
+          selectedOptionIds: ['option-1', 'option-2'],
+        }],
+      },
+      json: true,
+    });
     expect(parseCliArgs(['unarchive', CHAT_ID], ENV)).toMatchObject({
       kind: 'unarchive', chatId: CHAT_ID, json: false,
     });
@@ -661,6 +691,50 @@ describe('parseCliArgs', () => {
     [['resume', CHAT_ID, '--no-preamble', 'prompt'], '--no-preamble cannot be used with resume'],
   ])('rejects invalid automation arguments: %s', (args, message) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test.each([
+    [undefined, 'requires --answers'],
+    ['not-json', 'valid JSON'],
+    [JSON.stringify({ questionId: 'question-1' }), 'bounded array'],
+    [JSON.stringify([
+      { questionId: 'question-1', selectedOptionIds: [] },
+      { questionId: 'question-1', selectedOptionIds: [] },
+    ]), 'bounded array'],
+    [JSON.stringify([{
+      questionId: 'question-1',
+      selectedOptionIds: ['option-1', 'option-1'],
+    }]), 'bounded array'],
+    [JSON.stringify(Array.from(
+      { length: ASK_USER_QUESTION_MAX_ANSWERS + 1 },
+      (_, index) => ({ questionId: `question-${index}`, selectedOptionIds: [] }),
+    )), 'bounded array'],
+    [JSON.stringify([{
+      questionId: 'question-1',
+      selectedOptionIds: Array.from(
+        { length: ASK_USER_QUESTION_MAX_SELECTED_OPTIONS + 1 },
+        (_, index) => `option-${index}`,
+      ),
+    }]), 'bounded array'],
+    [JSON.stringify([{
+      questionId: 'q'.repeat(ASK_USER_QUESTION_ID_MAX_BYTES + 1),
+      selectedOptionIds: [],
+    }]), 'bounded array'],
+  ])('rejects invalid structured permission answers', (answers, message) => {
+    const args = [
+      'permission-answer', CHAT_ID, 'permission-1',
+      '--run', 'run-1', '--server-instance', 'instance-1',
+    ];
+    if (answers !== undefined) args.push('--answers', answers);
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('rejects repeated structured permission answer payloads', () => {
+    expect(() => parseCliArgs([
+      'permission-answer', CHAT_ID, 'permission-1',
+      '--answers', '[]', '--answers', '[]',
+      '--run', 'run-1', '--server-instance', 'instance-1',
+    ], ENV)).toThrow('option may be specified only once: --answers');
   });
 });
 

@@ -383,6 +383,14 @@ export interface AskUserQuestionAnswerPayload {
   selectedOptionIds: string[];
 }
 
+export const ASK_USER_QUESTION_MAX_ANSWERS = 100;
+export const ASK_USER_QUESTION_MAX_SELECTED_OPTIONS = 100;
+export const ASK_USER_QUESTION_ID_MAX_BYTES = 1_024;
+export const ASK_USER_QUESTION_REASON_MAX_BYTES = 4_096;
+export const ASK_USER_QUESTION_RESPONSE_MAX_BYTES = 64 * 1_024;
+
+const permissionResponseEncoder = new TextEncoder();
+
 export interface AskUserQuestionAnsweredResponse extends Record<string, unknown> {
   type: 'ask-user-question-response';
   outcome: 'answered';
@@ -396,6 +404,88 @@ export interface AskUserQuestionSkippedResponse extends Record<string, unknown> 
 }
 
 export type AskUserQuestionDecisionResponse = AskUserQuestionAnsweredResponse | AskUserQuestionSkippedResponse;
+
+export function normalizeAskUserQuestionDecisionResponse(
+  value: unknown,
+): AskUserQuestionDecisionResponse | null {
+  const response = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  if (!response || response.type !== 'ask-user-question-response') return null;
+
+  let normalized: AskUserQuestionDecisionResponse;
+  if (response.outcome === 'answered') {
+    if (
+      !hasExactKeys(response, ['type', 'outcome', 'answers'])
+      || !Array.isArray(response.answers)
+      || response.answers.length > ASK_USER_QUESTION_MAX_ANSWERS
+    ) return null;
+    const answers: AskUserQuestionAnswerPayload[] = [];
+    const questionIds = new Set<string>();
+    for (const valueAnswer of response.answers) {
+      const answer = valueAnswer && typeof valueAnswer === 'object' && !Array.isArray(valueAnswer)
+        ? valueAnswer as Record<string, unknown>
+        : null;
+      if (
+        !answer
+        || !hasExactKeys(answer, ['questionId', 'selectedOptionIds'])
+        || !boundedQuestionResponseId(answer.questionId)
+        || questionIds.has(answer.questionId)
+        || !Array.isArray(answer.selectedOptionIds)
+        || answer.selectedOptionIds.length > ASK_USER_QUESTION_MAX_SELECTED_OPTIONS
+      ) return null;
+      const selectedOptionIds: string[] = [];
+      const optionIds = new Set<string>();
+      for (const optionId of answer.selectedOptionIds) {
+        if (!boundedQuestionResponseId(optionId) || optionIds.has(optionId)) return null;
+        optionIds.add(optionId);
+        selectedOptionIds.push(optionId);
+      }
+      questionIds.add(answer.questionId);
+      answers.push({ questionId: answer.questionId, selectedOptionIds });
+    }
+    normalized = { type: 'ask-user-question-response', outcome: 'answered', answers };
+  } else if (response.outcome === 'skipped') {
+    if (!hasExactKeys(response, ['type', 'outcome'], ['reason'])) return null;
+    if (
+      response.reason !== undefined
+      && (!boundedQuestionResponseText(response.reason, ASK_USER_QUESTION_REASON_MAX_BYTES))
+    ) return null;
+    normalized = {
+      type: 'ask-user-question-response',
+      outcome: 'skipped',
+      ...(response.reason === undefined ? {} : { reason: response.reason }),
+    };
+  } else {
+    return null;
+  }
+
+  return permissionResponseEncoder.encode(JSON.stringify(normalized)).byteLength
+    <= ASK_USER_QUESTION_RESPONSE_MAX_BYTES
+    ? normalized
+    : null;
+}
+
+function boundedQuestionResponseId(value: unknown): value is string {
+  return boundedQuestionResponseText(value, ASK_USER_QUESTION_ID_MAX_BYTES);
+}
+
+function boundedQuestionResponseText(value: unknown, maxBytes: number): value is string {
+  return typeof value === 'string'
+    && value.trim().length > 0
+    && value.isWellFormed()
+    && permissionResponseEncoder.encode(value).byteLength <= maxBytes;
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const keys = Object.keys(value);
+  return required.every((key) => Object.hasOwn(value, key))
+    && keys.every((key) => required.includes(key) || optional.includes(key));
+}
 
 export interface PermissionDecisionPayload {
   allow: boolean;
@@ -869,7 +959,14 @@ export function parsePermissionDecisionCommandRequest(value: unknown): Permissio
   const body = requestRecord(value);
   if (typeof body.allow !== 'boolean') throw new CommandRequestValidationError('allow must be a boolean');
   if (typeof body.alwaysAllow !== 'boolean') throw new CommandRequestValidationError('alwaysAllow must be a boolean');
-  const response = optionalRecord(body.response, 'response');
+  let response = optionalRecord(body.response, 'response');
+  if (response?.type === 'ask-user-question-response') {
+    const normalized = normalizeAskUserQuestionDecisionResponse(response);
+    if (!normalized) {
+      throw new CommandRequestValidationError('response contains an invalid structured answer');
+    }
+    response = normalized;
+  }
   const control = parseChatTransientControlAction(body.control);
   if (!control) throw new CommandRequestValidationError('control is invalid');
   const chatId = requiredChatId(body, 'chatId');

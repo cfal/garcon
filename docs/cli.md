@@ -281,11 +281,11 @@ bun cli/main.ts --workspace default status 1785337200123456 \
 permission requests, and 10 recent normalized transcript messages by default.
 Plain permission rows include the exact occurrence, run, and server-instance
 fences plus shell-safe allow and deny commands where the request supports a
-boolean decision. They remain visible with `--messages 0` or an unavailable
-transcript. Structured questions must be answered in Garcon; allowing them does
-not supply question answers. `--messages` accepts 0 through 200; zero skips
-transcript loading. JSON is the stable machine-readable interface; plain text
-redacts image bodies and truncates long messages.
+boolean decision. Structured rows include a typed answer template instead of an
+allow command. They remain visible with `--messages 0` or an unavailable
+transcript. `--messages` accepts 0 through 200; zero skips transcript loading.
+JSON is the stable machine-readable interface; plain text redacts image bodies
+and truncates long messages.
 
 Status is a one-shot, non-transactional observation. Use `wait` with the exact accepted chat and turn IDs when completion identity matters.
 
@@ -296,6 +296,19 @@ bun cli/main.ts --workspace default permission-decision 1785337200123456 \
   permission-occurrence-id allow \
   --run run-id --server-instance server-instance-id --json
 ```
+
+Answer a structured question with the exact IDs shown by `status`:
+
+```bash
+bun cli/main.ts --workspace default permission-answer 1785337200123456 \
+  permission-occurrence-id \
+  --answers '[{"questionId":"question-id","selectedOptionIds":["option-id"]}]' \
+  --run run-id --server-instance server-instance-id --json
+```
+
+`--answers` is a JSON array with one row per answered question. Each row has a
+unique `questionId` and a `selectedOptionIds` array containing unique option
+IDs. Use `permission-decision ... deny` to skip or decline the request.
 
 The command never fetches or substitutes the newest request. Its deterministic
 idempotency identity binds the server instance, chat, run, and occurrence while

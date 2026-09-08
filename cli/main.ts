@@ -12,7 +12,7 @@ import { runConsultation, startConsultationAsync } from './consultation.js';
 import { runChatCatalog } from './chat-catalog.js';
 import { runChatSearch } from './chat-search.js';
 import { runChatRead } from './chat-read.js';
-import { runPermissionDecision } from './chat-permission.js';
+import { runPermissionAnswer, runPermissionDecision } from './chat-permission.js';
 import { runChatOrderMutation, runRename, runSetTags } from './chat-metadata.js';
 import {
   resumeAsyncJsonEnvelope,
@@ -156,6 +156,7 @@ function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
       'resume-async',
       'stop',
       'permission-decision',
+      'permission-answer',
       'archive',
       'unarchive',
       'pin',
@@ -239,6 +240,11 @@ export async function main(
     if (command.kind === 'permission-decision') {
       const client = await connectedClient(command, options);
       await runPermissionDecision(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'permission-answer') {
+      const client = await connectedClient(command, options);
+      await runPermissionAnswer(command, client, output, options.signal);
       return 0;
     }
     if (

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	AskUserQuestionToolUseMessage,
+	CursorAskQuestionToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
 } from '$shared/chat-types';
@@ -28,6 +29,20 @@ function askUserQuestionRequest(): PermissionRequestMessage {
 					},
 				],
 				allowMultiple: false,
+			},
+		]),
+	);
+}
+
+function cursorAskQuestionRequest(): PermissionRequestMessage {
+	return new PermissionRequestMessage(
+		TS,
+		'incarnation-cursor-question',
+		new CursorAskQuestionToolUseMessage(TS, 'tool-cursor-question', 'Choose a mode', [
+			{
+				id: 'mode',
+				prompt: 'Which mode?',
+				options: [{ id: 'agent', label: 'Agent' }],
 			},
 		]),
 	);
@@ -62,6 +77,23 @@ describe('PermissionRequestRow', () => {
 				type: 'ask-user-question-response',
 				outcome: 'answered',
 				answers: [{ questionId: 'Which mode?', selectedOptionIds: ['Careful'] }],
+			},
+		});
+	});
+
+	it('submits Cursor question answers through the provider-neutral permission response', async () => {
+		const onDecision = vi.fn();
+		render(PermissionRequestRowTestHost, { request: cursorAskQuestionRequest(), onDecision });
+
+		await fireEvent.click(screen.getByRole('radio', { name: /Agent/ }));
+		await fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
+
+		expect(onDecision).toHaveBeenCalledWith('incarnation-cursor-question', {
+			allow: true,
+			response: {
+				type: 'ask-user-question-response',
+				outcome: 'answered',
+				answers: [{ questionId: 'mode', selectedOptionIds: ['agent'] }],
 			},
 		});
 	});

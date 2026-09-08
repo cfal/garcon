@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { PermissionDecisionCommandRequest } from '@garcon/common/chat-command-contracts';
-import type { PermissionDecisionCliCommand } from '../args.js';
+import type { PermissionAnswerCliCommand, PermissionDecisionCliCommand } from '../args.js';
 import {
   permissionDecisionClientRequestId,
+  runPermissionAnswer,
   runPermissionDecision,
 } from '../chat-permission.js';
 import type { CliOutput } from '../output.js';
@@ -17,6 +18,16 @@ const command: PermissionDecisionCliCommand = {
   serverInstanceId: 'instance-1',
   allow: true,
   json: false,
+};
+
+const answerCommand: PermissionAnswerCliCommand = {
+  ...command,
+  kind: 'permission-answer',
+  response: {
+    type: 'ask-user-question-response',
+    outcome: 'answered',
+    answers: [{ questionId: 'question-1', selectedOptionIds: ['option-1'] }],
+  },
 };
 
 function captureOutput(): CliOutput & { readonly results: string[] } {
@@ -84,5 +95,46 @@ describe('permission decision', () => {
       chatId: command.chatId,
       status: 'accepted',
     });
+  });
+
+  test('submits structured answers through the same occurrence-bound identity', async () => {
+    let request: PermissionDecisionCommandRequest | undefined;
+    const output = captureOutput();
+    await runPermissionAnswer(answerCommand, {
+      async decidePermission(value) {
+        request = value;
+        return {
+          success: true,
+          commandType: 'permission-decision',
+          clientRequestId: value.clientRequestId,
+          chatId: value.chatId,
+          status: 'duplicate',
+          acceptedAt: '2026-09-08T00:00:00.000Z',
+        };
+      },
+    }, output);
+
+    expect(request).toEqual({
+      clientRequestId: permissionDecisionClientRequestId(answerCommand),
+      chatId: answerCommand.chatId,
+      permissionOccurrenceId: 'permission-1',
+      allow: true,
+      alwaysAllow: false,
+      response: answerCommand.response,
+      control: {
+        serverInstanceId: 'instance-1',
+        chatId: answerCommand.chatId,
+        runId: 'run-1',
+        permissionOccurrenceId: 'permission-1',
+      },
+    });
+    expect(output.results).toEqual([
+      [
+        `chat id: ${answerCommand.chatId}`,
+        'permission occurrence: permission-1',
+        'answers: 1',
+        'status: duplicate',
+      ].join('\n'),
+    ]);
   });
 });

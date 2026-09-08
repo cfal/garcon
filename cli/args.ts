@@ -24,7 +24,11 @@ import {
   type CliPresentation,
   type CliRowFormat,
 } from '@garcon/common/cli-presentation';
-import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
+import {
+  isCommandCorrelationIdWithinLimit,
+  normalizeAskUserQuestionDecisionResponse,
+  type AskUserQuestionAnsweredResponse,
+} from '@garcon/common/chat-command-contracts';
 import {
   isPreambleId,
   PREAMBLE_MAX_COUNT,
@@ -85,6 +89,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] list <resource>
   garcon-cli [options] stop <chat-id> [--json]
   garcon-cli [connection options] permission-decision <chat-id> <occurrence-id> <allow|deny> --run <run-id> --server-instance <instance-id> [--json]
+  garcon-cli [connection options] permission-answer <chat-id> <occurrence-id> --answers <json> --run <run-id> --server-instance <instance-id> [--json]
   garcon-cli [connection options] archive|unarchive|pin|unpin <chat-id> [--json]
   garcon-cli [connection options] rename <chat-id> <title> [--json]
   garcon-cli [connection options] set-tags <chat-id> (--tag <tag>... | --clear) [--json]
@@ -161,6 +166,7 @@ Options:
   --allow-steer                With resume-async, steer the active turn when busy; never queues
   --run <run-id>               Exact permission request run fence
   --server-instance <id>       Exact permission request server-instance fence
+  --answers <json>             Structured question answers as typed JSON rows
   --clear                      Replace the complete tag set with no tags
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
@@ -292,6 +298,16 @@ export interface PermissionDecisionCliCommand extends CliConnectionOptions {
   readonly json: boolean;
 }
 
+export interface PermissionAnswerCliCommand extends CliConnectionOptions {
+  readonly kind: 'permission-answer';
+  readonly chatId: ChatId;
+  readonly permissionOccurrenceId: string;
+  readonly runId: string;
+  readonly serverInstanceId: string;
+  readonly response: AskUserQuestionAnsweredResponse;
+  readonly json: boolean;
+}
+
 export type ChatOrderMutationKind = 'archive' | 'unarchive' | 'pin' | 'unpin';
 
 export type ChatOrderMutationCliCommand = {
@@ -401,6 +417,7 @@ export type ParsedCliCommand =
   | ResumeAsyncCliCommand
   | StopCliCommand
   | PermissionDecisionCliCommand
+  | PermissionAnswerCliCommand
   | ChatOrderMutationCliCommand
   | RenameCliCommand
   | SetTagsCliCommand
@@ -448,6 +465,7 @@ const SINGLE_STRING_OPTIONS = [
   'transcript-view-id',
   'run',
   'server-instance',
+  'answers',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -574,6 +592,7 @@ type ControlCommandKind =
   | 'add-row'
   | 'read'
   | 'permission-decision'
+  | 'permission-answer'
   | ChatOrderMutationKind
   | 'rename'
   | 'set-tags';
@@ -606,6 +625,7 @@ const RESUME_ASYNC_OPTIONS = optionSet(
 );
 const STOP_OPTIONS = optionSet('json');
 const PERMISSION_DECISION_OPTIONS = optionSet('run', 'server-instance', 'json');
+const PERMISSION_ANSWER_OPTIONS = optionSet('run', 'server-instance', 'answers', 'json');
 const CHAT_ORDER_MUTATION_OPTIONS = optionSet('json');
 const RENAME_OPTIONS = optionSet('json');
 const SET_TAGS_OPTIONS = optionSet('tag', 'clear', 'json');
@@ -751,6 +771,50 @@ function parsePermissionDecision(
     runId: parseOpaqueControlId(values.run, '--run'),
     serverInstanceId: parseOpaqueControlId(values['server-instance'], '--server-instance'),
     allow: decision === 'allow',
+    json: values.json === true,
+  };
+}
+
+function parsePermissionAnswer(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): PermissionAnswerCliCommand {
+  rejectOptionsExcept(values, PERMISSION_ANSWER_OPTIONS, 'permission-answer');
+  if (parsed.positionals.length !== 3) {
+    throw argumentError('permission-answer requires a chat ID and permission occurrence ID');
+  }
+  const rawAnswers = values.answers;
+  if (typeof rawAnswers !== 'string') {
+    throw argumentError('permission-answer requires --answers with a JSON array');
+  }
+  let answers: unknown;
+  try {
+    answers = JSON.parse(rawAnswers);
+  } catch (error) {
+    throw argumentError('--answers must be valid JSON', { cause: error });
+  }
+  const response = normalizeAskUserQuestionDecisionResponse({
+    type: 'ask-user-question-response',
+    outcome: 'answered',
+    answers,
+  });
+  if (!response || response.outcome !== 'answered') {
+    throw argumentError(
+      '--answers must be a bounded array of unique question IDs and selected option IDs',
+    );
+  }
+  return {
+    kind: 'permission-answer',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'permission-answer'),
+    permissionOccurrenceId: parseOpaqueControlId(
+      parsed.positionals[2],
+      'permission occurrence ID',
+    ),
+    runId: parseOpaqueControlId(values.run, '--run'),
+    serverInstanceId: parseOpaqueControlId(values['server-instance'], '--server-instance'),
+    response,
     json: values.json === true,
   };
 }
@@ -1313,6 +1377,7 @@ export function parseCliArgs(
         'transcript-view-id': { type: 'string' },
         run: { type: 'string' },
         'server-instance': { type: 'string' },
+        answers: { type: 'string' },
         force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
         'no-preamble': { type: 'boolean' },
@@ -1381,6 +1446,9 @@ export function parseCliArgs(
   if (commandName === 'stop') return parseStop(parsed, values, connection);
   if (commandName === 'permission-decision') {
     return parsePermissionDecision(parsed, values, connection);
+  }
+  if (commandName === 'permission-answer') {
+    return parsePermissionAnswer(parsed, values, connection);
   }
   if (
     commandName === 'archive'

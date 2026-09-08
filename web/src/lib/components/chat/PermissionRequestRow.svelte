@@ -304,18 +304,21 @@
 		setSelectedOptions(question.id, checked ? [optionId] : []);
 	}
 
-	function cursorQuestionResponse(outcome: 'answered' | 'skipped'): Record<string, unknown> {
+	function cursorQuestionResponse(outcome: 'answered' | 'skipped'): AskUserQuestionDecisionResponse {
 		if (outcome === 'skipped') {
-			return { outcome: { outcome: 'skipped', reason: 'User skipped question' } };
+			return {
+				type: 'ask-user-question-response',
+				outcome: 'skipped',
+				reason: 'User skipped question',
+			};
 		}
 		return {
-			outcome: {
-				outcome: 'answered',
-				answers: (cursorAskQuestionRequest?.questions ?? []).map((question) => ({
-					questionId: question.id,
-					selectedOptionIds: selectedOptionsFor(question.id),
-				})),
-			},
+			type: 'ask-user-question-response',
+			outcome: 'answered',
+			answers: (cursorAskQuestionRequest?.questions ?? []).map((question) => ({
+				questionId: question.id,
+				selectedOptionIds: selectedOptionsFor(question.id),
+			})),
 		};
 	}
 

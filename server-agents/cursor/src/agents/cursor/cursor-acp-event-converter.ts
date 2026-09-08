@@ -11,7 +11,10 @@ import {
   type CursorPlanTodoStatus,
   type ToolUseChatMessage,
 } from '@garcon/common/chat-types';
-import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
+import {
+  normalizeAskUserQuestionDecisionResponse,
+  type PermissionDecisionPayload,
+} from '@garcon/common/chat-command-contracts';
 import { normalizeCursorToolResultContent } from './tool-result-converter.js';
 import { convertCursorToolUse } from './tool-use-converter.js';
 import {
@@ -245,6 +248,14 @@ function cursorPlanPhases(rawPhases: unknown): CursorPlanPhase[] | undefined {
 }
 
 function cursorAskQuestionResponse(decision: PermissionDecisionPayload): Record<string, unknown> {
+  const response = normalizeAskUserQuestionDecisionResponse(decision.response);
+  if (response) {
+    return {
+      outcome: response.outcome === 'answered'
+        ? { outcome: response.outcome, answers: response.answers }
+        : { outcome: response.outcome, ...(response.reason ? { reason: response.reason } : {}) },
+    };
+  }
   if (decision.response) return decision.response;
   if (!decision.allow) {
     return { outcome: { outcome: 'skipped', reason: 'User skipped question' } };
