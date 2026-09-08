@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, test } from 'bun:test';
 
 import {
 	parseChatSearch,
@@ -8,7 +8,8 @@ import {
 	queryHasTag,
 	emptyFilterSpec,
 	matchesChatFilter,
-} from '$shared/chat-filter-query';
+	parseChatFilterQuery,
+} from '../chat-filter-query.ts';
 
 describe('parseChatSearch', () => {
 	it('returns empty spec for empty string', () => {
@@ -164,7 +165,14 @@ describe('parseChatSearch', () => {
 		["it's fine tag:ops", ["it's", 'fine']],
 		['foo"bar baz"', ['foo', 'bar baz']],
 	] as const)('preserves word quoting in %s', (query, expected) => {
-		expect(parseChatSearch(query).textTokens).toEqual(expected);
+		expect(parseChatSearch(query).textTokens).toEqual([...expected]);
+	});
+
+	test('reports invalid operator tokens without adding them to text search', () => {
+		const result = parseChatFilterQuery('status:bogus is:missing hello');
+		expect(result.invalidTokens).toEqual(['status:bogus', 'is:missing']);
+		expect(result.spec.textTokens).toEqual(['hello']);
+		expect(parseChatSearch('status:bogus is:missing hello').textTokens).toEqual(['hello']);
 	});
 });
 
@@ -459,7 +467,7 @@ describe('matchesChatFilter is: filters', () => {
 		const matches = Object.entries(chats)
 			.filter(([, chat]) => matchesChatFilter(chat, spec))
 			.map(([group]) => group);
-		expect(matches).toEqual(expected);
+		expect(matches).toEqual([...expected]);
 	});
 
 	it('uses pinned precedence if target flags overlap', () => {
@@ -483,10 +491,12 @@ describe('matchesChatFilter OR groups', () => {
 	};
 
 	it('matches title groups only against the title', () => {
-		expect(matchesChatFilter(
-			{ ...chat, title: 'Authentication Error Handling' },
-			parseChatSearch('title:AUTH|login title:"Error Handling"'),
-		)).toBe(true);
+		expect(
+			matchesChatFilter(
+				{ ...chat, title: 'Authentication Error Handling' },
+				parseChatSearch('title:AUTH|login title:"Error Handling"'),
+			),
+		).toBe(true);
 		expect(matchesChatFilter(chat, parseChatSearch('title:workspace'))).toBe(false);
 	});
 

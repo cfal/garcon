@@ -23,7 +23,7 @@ import {
 	parseSteerCommand,
 	parseTagCommand,
 } from '$lib/chat/composer/slash-commands.js';
-import { createClientChatId } from '$shared/client-chat-id';
+import { createClientChatId } from '$shared/client/client-chat-id';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import type {
 	ScheduleInCommandError,

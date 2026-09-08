@@ -13,7 +13,7 @@ import {
 	updateChatProjectPath,
 } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
-import { createClientChatId } from '$shared/client-chat-id';
+import { createClientChatId } from '$shared/client/client-chat-id';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatListEntry } from '$shared/chat-list';

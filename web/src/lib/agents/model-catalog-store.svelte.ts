@@ -7,7 +7,7 @@ import {
 } from '$lib/utils/local-persistence';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
-import type { ResolvedModelSelection } from '$shared/start-selection';
+import type { ResolvedModelSelection } from '$shared/client/model-selection';
 import {
 	isAgentSettingLabelKey,
 	isAgentSettingOptionDescriptionKey,
@@ -16,7 +16,7 @@ import {
 	type AgentSettingDescriptor,
 	type AgentSettingsEnvelope,
 } from '$shared/agent-integration';
-import { createEmptyAgentSettings } from '$shared/agent-settings';
+import { createEmptyAgentSettings } from '$shared/client/agent-settings';
 import { isAgentId } from '$shared/agents';
 import {
 	isPermissionMode,

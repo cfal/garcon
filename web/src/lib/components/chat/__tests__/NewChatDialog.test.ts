@@ -6,7 +6,7 @@ import * as refinementApi from '$lib/api/prompt-refinement';
 import * as settingsApi from '$lib/api/settings';
 import * as snippetsApi from '$lib/api/snippets';
 import * as navigation from '$lib/chat/actions/chat-navigation.js';
-import * as clientChatId from '$shared/client-chat-id';
+import * as clientChatId from '$shared/client/client-chat-id';
 import NewChatDialogTestHost from './NewChatDialogTestHost.svelte';
 import { resetPromptEditorStub } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 
@@ -45,7 +45,7 @@ vi.mock('$lib/api/snippets', async (importOriginal) => {
 
 vi.mock('$lib/chat/actions/chat-navigation.js', () => ({ gotoChat: vi.fn() }));
 
-vi.mock('$shared/client-chat-id', () => ({
+vi.mock('$shared/client/client-chat-id', () => ({
 	createClientChatId: vi.fn(() => '1787471053739199'),
 }));
 

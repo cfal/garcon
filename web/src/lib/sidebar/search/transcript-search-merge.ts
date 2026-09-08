@@ -3,7 +3,7 @@ import {
 	matchesChatFilter,
 	parseChatSearch,
 	type ChatFilterSpec,
-} from '$shared/chat-filter-query';
+} from '$shared/client/chat-filter-query';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatSearchResult } from '$shared/chat-search';
 

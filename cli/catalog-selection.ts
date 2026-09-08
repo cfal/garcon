@@ -1,4 +1,5 @@
-import { normalizeAgentSettings } from '@garcon/common/agent-settings';
+import { normalizeAgentSettings } from '@garcon/common/client/agent-settings';
+import type { ResolvedModelSelection } from '@garcon/common/client/model-selection';
 import type { AgentCatalogEntry, AgentModelOption } from '@garcon/common/agents';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentHandoffTarget } from '@garcon/common/chat-command-contracts';
@@ -10,17 +11,16 @@ import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import {
   StartSelectionError,
-  requireCatalogAgent as requireSharedCatalogAgent,
-  requireCatalogModels as requireSharedCatalogModels,
-  resolveCatalogModelSelection as resolveSharedCatalogModelSelection,
-  resolveModelSelection as resolveSharedModelSelection,
-  resolveStartSelection as resolveSharedStartSelection,
-  validateExplicitModes as validateSharedExplicitModes,
+  requireCatalogAgent as requireSelectionCatalogAgent,
+  requireCatalogModels as requireSelectionCatalogModels,
+  resolveCatalogModelSelection as resolveSelectionCatalogModel,
+  resolveModelSelection as resolveSelectionModel,
+  resolveStartSelection as resolveSelectionStart,
+  validateExplicitModes as validateSelectionModes,
   type RequestedModelSelection,
   type RequestedStartSelection,
-  type ResolvedModelSelection,
   type ResolvedStartSelection,
-} from '@garcon/common/start-selection';
+} from './start-selection.js';
 import { CliError } from './errors.js';
 
 export type {
@@ -50,11 +50,11 @@ export function requireCatalogAgent(
   catalog: ModelCatalogResponse,
   agentId: string,
 ): AgentCatalogEntry {
-  return withCliCatalogErrors(() => requireSharedCatalogAgent(catalog, agentId));
+  return withCliCatalogErrors(() => requireSelectionCatalogAgent(catalog, agentId));
 }
 
 export function requireCatalogModels(agent: AgentCatalogEntry): AgentModelOption[] {
-  return withCliCatalogErrors(() => requireSharedCatalogModels(agent));
+  return withCliCatalogErrors(() => requireSelectionCatalogModels(agent));
 }
 
 export function resolveCatalogModelSelection(
@@ -62,7 +62,7 @@ export function resolveCatalogModelSelection(
   agent: AgentCatalogEntry,
   model: AgentModelOption,
 ): ResolvedModelSelection {
-  return withCliCatalogErrors(() => resolveSharedCatalogModelSelection(catalog, agent, model));
+  return withCliCatalogErrors(() => resolveSelectionCatalogModel(catalog, agent, model));
 }
 
 export function resolveModelSelection(
@@ -70,7 +70,7 @@ export function resolveModelSelection(
   agentId: string,
   requested: RequestedModelSelection,
 ): ResolvedModelSelection {
-  return withCliCatalogErrors(() => resolveSharedModelSelection(catalog, agentId, requested));
+  return withCliCatalogErrors(() => resolveSelectionModel(catalog, agentId, requested));
 }
 
 export function validateExplicitModes(
@@ -78,7 +78,7 @@ export function validateExplicitModes(
   agentId: string,
   requested: { readonly permissionMode?: PermissionMode; readonly thinkingMode?: ThinkingMode },
 ): void {
-  withCliCatalogErrors(() => validateSharedExplicitModes(catalog, agentId, requested));
+  withCliCatalogErrors(() => validateSelectionModes(catalog, agentId, requested));
 }
 
 export function resolveStartSelection(
@@ -86,7 +86,7 @@ export function resolveStartSelection(
   settings: RemoteSettingsSnapshot,
   requested: RequestedStartSelection,
 ): ResolvedStartSelection {
-  return withCliCatalogErrors(() => resolveSharedStartSelection(catalog, settings, requested));
+  return withCliCatalogErrors(() => resolveSelectionStart(catalog, settings, requested));
 }
 
 export function resolveHandoffSelection(

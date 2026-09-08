@@ -2,7 +2,7 @@ import {
   matchesChatFilter,
   parseChatFilterQuery,
   type ChatFilterSpec,
-} from '@garcon/common/chat-filter-query';
+} from '@garcon/common/client/chat-filter-query';
 import type { ChatListEntry, ChatListResponse } from '@garcon/common/chat-list';
 import { chatActivityTimeMs } from '@garcon/common/chat-order-sort';
 import type { ChatsCliCommand } from './args.js';

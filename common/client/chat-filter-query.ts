@@ -1,7 +1,7 @@
 import {
   PERSISTED_CHAT_ORDER_GROUPS,
   type PersistedChatOrderGroup,
-} from './chat-order-contracts.js';
+} from '../chat-order-contracts.js';
 
 export type ChatFilterOrGroup = string[];
 
