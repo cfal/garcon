@@ -4037,15 +4037,35 @@ describe('ChatCommandService', () => {
       expect(await readLedgerRecord(ledger, 'permission-decision', clientRequestId)).toBeNull();
     }
 
-    const result = await service.submitPermissionDecision({
+    const acceptedInput = {
       ...request,
       response: {
         type: 'ask-user-question-response',
         outcome: 'answered',
         answers: [{ questionId: 'mode', selectedOptionIds: ['careful'] }],
       },
-    });
+    };
+    const result = await service.submitPermissionDecision(acceptedInput);
     expect(result.status).toBe('accepted');
+    expect(agents.resolvePermission).toHaveBeenCalledTimes(1);
+
+    const validationCallCount = validateAction.mock.calls.length;
+    validateAction.mockImplementation(() => {
+      throw new TransientControlActionError('TRANSIENT_CONTROL_STALE');
+    });
+
+    await expect(service.submitPermissionDecision(acceptedInput)).resolves.toMatchObject({
+      status: 'duplicate',
+    });
+    await expect(service.submitPermissionDecision({
+      ...acceptedInput,
+      response: {
+        ...acceptedInput.response,
+        answers: [{ questionId: 'mode', selectedOptionIds: ['fast'] }],
+      },
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', status: 409 });
+
+    expect(validateAction).toHaveBeenCalledTimes(validationCallCount);
     expect(agents.resolvePermission).toHaveBeenCalledTimes(1);
   });
 
