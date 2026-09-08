@@ -22,7 +22,7 @@ import type {
 	PromptRefinementUiSettings,
 	RemoteUiSettings,
 } from '$shared/settings';
-import type { ResolvedModelSelection } from '$shared/start-selection';
+import type { ResolvedModelSelection } from '$shared/client/model-selection';
 
 export type GenerationSettingsKey =
 	| 'chatTitle'

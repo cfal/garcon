@@ -28,7 +28,7 @@
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
-	import { addTagToQuery } from '$shared/chat-filter-query';
+	import { addTagToQuery } from '$shared/client/chat-filter-query';
 	import {
 		EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
 		transcriptSearchInvalidationProjection,

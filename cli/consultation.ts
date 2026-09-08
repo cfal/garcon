@@ -4,7 +4,7 @@ import type {
   AgentTurnCommandResponse,
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
-import { createClientChatId } from '@garcon/common/client-chat-id';
+import { createClientChatId } from '@garcon/common/client/client-chat-id';
 import type { ChatListEntry } from '@garcon/common/chat-list';
 import type { ChatListResponse } from '@garcon/common/chat-list';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';

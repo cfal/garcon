@@ -1,5 +1,5 @@
-import type { AgentSettingDescriptor, AgentSettingsEnvelope } from './agent-integration.js';
-import type { JsonObject, JsonValue } from './json.js';
+import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '../agent-integration.js';
+import type { JsonObject, JsonValue } from '../json.js';
 
 export function createEmptyAgentSettings(ownerId: string): AgentSettingsEnvelope {
   return { ownerId, schemaVersion: 1, values: {} };

@@ -7,7 +7,7 @@ import {
 	partitionSidebarChats,
 } from '../src/lib/components/sidebar/sidebar-row-model.js';
 import { sortChatsByRecencyDesc } from '../src/lib/components/sidebar/chat-recency-sort.js';
-import { matchesChatFilter, parseChatSearch } from '../../common/chat-filter-query.js';
+import { matchesChatFilter, parseChatSearch } from '../../common/client/chat-filter-query.js';
 
 const SIZES = [200, 500, 2_000];
 const SAMPLES = Number(process.env.GARCON_PROFILE_SAMPLES ?? 7);

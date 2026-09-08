@@ -73,7 +73,7 @@
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
-	import { createClientChatId } from '$shared/client-chat-id';
+	import { createClientChatId } from '$shared/client/client-chat-id';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';

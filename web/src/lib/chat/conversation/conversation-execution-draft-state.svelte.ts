@@ -7,7 +7,7 @@ import {
 	type PermissionMode,
 	type ThinkingMode,
 } from '$shared/chat-modes';
-import { cloneAgentSettings } from '$shared/agent-settings';
+import { cloneAgentSettings } from '$shared/client/agent-settings';
 import { isRecord } from '$shared/json';
 import {
 	chatExecutionDraftStorageKey,

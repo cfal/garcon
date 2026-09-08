@@ -2,7 +2,7 @@ import {
 	isEmptyFilter,
 	matchesChatFilter,
 	parseChatSearch,
-} from '$shared/chat-filter-query';
+} from '$shared/client/chat-filter-query';
 import { captureChatSearchTimeOrder } from '$lib/sidebar/search/search-result-order.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatSearchSort } from '$shared/chat-search';

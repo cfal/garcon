@@ -5,7 +5,7 @@ import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
-import * as clientChatId from '$shared/client-chat-id';
+import * as clientChatId from '$shared/client/client-chat-id';
 import * as preamblesApi from '$lib/api/chat-preambles';
 import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
@@ -43,7 +43,7 @@ vi.mock('$lib/api/snippets', async (importOriginal) => {
 	return { ...actual, expandSnippet: vi.fn() };
 });
 
-vi.mock('$shared/client-chat-id', () => ({
+vi.mock('$shared/client/client-chat-id', () => ({
 	createClientChatId: vi.fn(() => '1787471053739199'),
 }));
 

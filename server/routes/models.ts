@@ -5,10 +5,10 @@ import {
   catalogResponseFromSnapshot,
   type ModelCatalog,
   type ModelCatalogResponseCache,
-  type ModelCatalogResponseBody,
 } from './model-catalog-cache.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
+import type { ModelCatalogResponse } from '../../common/model-catalog.js';
 
 interface ModelDiscoveryUnavailableError extends Error {
   staleModels?: AgentModelOption[];
@@ -24,7 +24,7 @@ function staleModelsFromDiscoveryError(error: unknown): AgentModelOption[] {
 
 function modelDiscoveryUnavailableResponse(
   error: unknown,
-  catalog: ModelCatalogResponseBody['catalog'],
+  catalog: ModelCatalogResponse['catalog'],
   entry: AgentCatalogEntry | undefined,
 ): Response {
   const reason = error instanceof Error ? error.message : String(error);
@@ -32,7 +32,7 @@ function modelDiscoveryUnavailableResponse(
   const body: {
     error: string;
     reason: string;
-    catalog?: ModelCatalogResponseBody['catalog'];
+    catalog?: ModelCatalogResponse['catalog'];
   } = {
     error: 'Model discovery unavailable',
     reason,
@@ -57,7 +57,7 @@ export default function createModelsRoutes({
   modelCatalog: ModelCatalog;
   responseCache: ModelCatalogResponseCache;
 }): RouteMap {
-  const catalog = async () => ({
+  const catalog = async (): Promise<ModelCatalogResponse['catalog']> => ({
     agents: await modelCatalog.agents.getAgentCatalogEntries(),
     apiProviders: modelCatalog.apiProviders.getCatalog(),
   });
@@ -88,7 +88,7 @@ export default function createModelsRoutes({
           agents: [entry],
           apiProviders: currentCatalog.apiProviders,
         },
-      });
+      } satisfies ModelCatalogResponse);
     }
 
     const snapshot = await responseCache.getSnapshot(modelCatalog);

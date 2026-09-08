@@ -1,5 +1,5 @@
 import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
-import { withAgentSetting } from '$shared/agent-settings';
+import { withAgentSetting } from '$shared/client/agent-settings';
 import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,

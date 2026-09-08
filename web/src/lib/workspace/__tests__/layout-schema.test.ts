@@ -19,7 +19,7 @@ import { collectWindowNodes, windowNodeById } from '../window-tree';
 import type {
 	PersistedWorkspaceLayoutNode,
 	PersistedWorkspaceSurfaceRef,
-} from '$shared/workspace-layout';
+} from '../persisted-layout';
 
 function persistedWindow(index: number): PersistedWorkspaceLayoutNode {
 	return {

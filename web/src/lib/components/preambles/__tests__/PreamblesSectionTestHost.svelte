@@ -15,7 +15,7 @@
 		type AgentMetadata,
 	} from '$lib/agents/model-catalog-store.svelte';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
-	import { createEmptyAgentSettings } from '$shared/agent-settings';
+	import { createEmptyAgentSettings } from '$shared/client/agent-settings';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,

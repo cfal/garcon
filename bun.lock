@@ -4,6 +4,10 @@
   "workspaces": {
     "": {
       "name": "garcon",
+      "devDependencies": {
+        "svelte": "^5.57.0",
+        "typescript": "^6.0.3",
+      },
     },
     "cli": {
       "name": "@garcon/cli",
