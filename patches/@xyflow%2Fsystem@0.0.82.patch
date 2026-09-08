@@ -1,5 +1,5 @@
 diff --git a/dist/esm/index.d.ts b/dist/esm/index.d.ts
-index 74847ff6f2b8aa67bb7e1c82eceef48a941fc30f..ad9d08b271a5bfa6b02190aff17d7483ff7f3243 100644
+index 74847ff6f2b8aa67bb7e1c82eceef48a941fc30f..b75dcb4e5a66b2050c3503c0c099f689dfbf4e99 100644
 --- a/dist/esm/index.d.ts
 +++ b/dist/esm/index.d.ts
 @@ -7,3 +7,6 @@ export * from './xyminimap';
@@ -9,7 +9,6 @@ index 74847ff6f2b8aa67bb7e1c82eceef48a941fc30f..ad9d08b271a5bfa6b02190aff17d7483
 +export type InteractionCancel = { kind: 'connection' | 'reconnect' | 'node-drag' | 'selection-drag' | 'marquee-selection' };
 +export declare function abortInteractions(host: Element | null | undefined): void;
 +export declare function registerInteractionAbort(host: Element | null | undefined, abort: () => void): () => void;
-\ No newline at end of file
 diff --git a/dist/esm/index.js b/dist/esm/index.js
 index 4565fb7003cc676d238baa6af40c006f28cb4e19..92c82971bad4da67be0b70a1c4bdd77d8c856e6f 100644
 --- a/dist/esm/index.js
@@ -1499,7 +1498,7 @@ index 01c735d191fd7a26e727f8f39592079ef58c5a27..fc5eadedb5703a9e7877518d314ce0a5
  };
  export type Result = {
 diff --git a/dist/umd/index.d.ts b/dist/umd/index.d.ts
-index 74847ff6f2b8aa67bb7e1c82eceef48a941fc30f..ad9d08b271a5bfa6b02190aff17d7483ff7f3243 100644
+index 74847ff6f2b8aa67bb7e1c82eceef48a941fc30f..b75dcb4e5a66b2050c3503c0c099f689dfbf4e99 100644
 --- a/dist/umd/index.d.ts
 +++ b/dist/umd/index.d.ts
 @@ -7,3 +7,6 @@ export * from './xyminimap';
@@ -1509,7 +1508,6 @@ index 74847ff6f2b8aa67bb7e1c82eceef48a941fc30f..ad9d08b271a5bfa6b02190aff17d7483
 +export type InteractionCancel = { kind: 'connection' | 'reconnect' | 'node-drag' | 'selection-drag' | 'marquee-selection' };
 +export declare function abortInteractions(host: Element | null | undefined): void;
 +export declare function registerInteractionAbort(host: Element | null | undefined, abort: () => void): () => void;
-\ No newline at end of file
 diff --git a/dist/umd/index.js b/dist/umd/index.js
 index 872054ebbdf84421a1c4e1ae73badff3b1ce4449..cc1e2f052625f36bb9c1c9448523322c690d0564 100644
 --- a/dist/umd/index.js
