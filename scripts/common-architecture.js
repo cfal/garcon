@@ -1,8 +1,19 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parse as parseSvelte } from 'svelte/compiler';
 import ts from 'typescript';
 
-const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.svelte']);
+const SOURCE_EXTENSIONS = new Set([
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.cts',
+  '.svelte',
+]);
 const PRODUCTION_SKIPPED_DIRECTORIES = new Set([
   '.svelte-kit',
   '__tests__',
@@ -19,13 +30,6 @@ const RETIRED_COMMON_SUBPATHS = [
   'start-selection',
   'workspace-layout',
 ];
-
-function sourceUnits(fileName, source) {
-  if (!fileName.endsWith('.svelte')) return [{ fileName, source }];
-  return [...source.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gu)].map(
-    (match, index) => ({ fileName: `${fileName}.${index}.ts`, source: match[1] }),
-  );
-}
 
 function callModuleSpecifier(node) {
   if (!ts.isCallExpression(node) || node.arguments.length === 0) return null;
@@ -76,23 +80,90 @@ function moduleSpecifier(node) {
     ?? callModuleSpecifier(node);
 }
 
-export function extractModuleSpecifiers(source, fileName = 'source.ts') {
+function extractTypeScriptModuleSpecifiers(source, fileName) {
   const specifiers = [];
-  for (const unit of sourceUnits(fileName, source)) {
-    const sourceFile = ts.createSourceFile(
-      unit.fileName,
-      unit.source,
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    function visit(node) {
-      const specifier = moduleSpecifier(node);
-      if (specifier !== null) specifiers.push(specifier);
-      ts.forEachChild(node, visit);
-    }
-    visit(sourceFile);
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  function visit(node) {
+    const specifier = moduleSpecifier(node);
+    if (specifier !== null) specifiers.push(specifier);
+    ts.forEachChild(node, visit);
   }
+  visit(sourceFile);
   return specifiers;
+}
+
+function svelteStringValue(node) {
+  if (!node || typeof node !== 'object') return null;
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node.type !== 'TemplateLiteral' || node.expressions?.length !== 0) return null;
+  const [quasi] = node.quasis ?? [];
+  return quasi?.value?.cooked ?? quasi?.value?.raw ?? null;
+}
+
+function svelteCallModuleSpecifier(node) {
+  if (node.type !== 'CallExpression' || node.arguments?.length === 0) return null;
+  const specifier = svelteStringValue(node.arguments[0]);
+  if (specifier === null) return null;
+  if (node.callee?.type === 'Identifier' && node.callee.name === 'require') return specifier;
+  if (node.callee?.type !== 'MemberExpression' || node.callee.computed) return null;
+  const method = node.callee.property?.name;
+  if (MODULE_LOADER_METHODS.has(method)) return specifier;
+  if (
+    method === 'module'
+    && node.callee.object?.type === 'Identifier'
+    && node.callee.object.name === 'mock'
+  ) {
+    return specifier;
+  }
+  return null;
+}
+
+function svelteModuleSpecifier(node) {
+  if (
+    node.type === 'ImportDeclaration'
+    || node.type === 'ExportNamedDeclaration'
+    || node.type === 'ExportAllDeclaration'
+    || node.type === 'ImportExpression'
+  ) {
+    return svelteStringValue(node.source);
+  }
+  if (node.type === 'TSImportType') return svelteStringValue(node.argument);
+  if (node.type === 'TSImportEqualsDeclaration') {
+    return svelteStringValue(node.moduleReference?.expression);
+  }
+  return svelteCallModuleSpecifier(node);
+}
+
+function extractSvelteModuleSpecifiers(source) {
+  const discovered = [];
+  const visited = new WeakSet();
+  let order = 0;
+
+  function visit(node) {
+    if (!node || typeof node !== 'object' || visited.has(node)) return;
+    visited.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+
+    const specifier = svelteModuleSpecifier(node);
+    if (specifier !== null) {
+      discovered.push({ specifier, start: node.start ?? Number.MAX_SAFE_INTEGER, order });
+      order += 1;
+    }
+    for (const child of Object.values(node)) visit(child);
+  }
+
+  visit(parseSvelte(source, { modern: true }));
+  discovered.sort((left, right) => left.start - right.start || left.order - right.order);
+  return discovered.map(({ specifier }) => specifier);
+}
+
+export function extractModuleSpecifiers(source, fileName = 'source.ts') {
+  return fileName.endsWith('.svelte')
+    ? extractSvelteModuleSpecifiers(source)
+    : extractTypeScriptModuleSpecifiers(source, fileName);
 }
 
 function isWithin(parent, candidate) {

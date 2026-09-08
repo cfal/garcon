@@ -76,8 +76,11 @@ describe('common architecture', () => {
     ]);
   });
 
-  test('reads both Svelte scripts without matching comments or strings', () => {
+  test('reads Svelte scripts and template expressions without matching comments or strings', () => {
     expect(extractModuleSpecifiers(`
+      <!--
+        <script>import './commented-script.js';</script>
+      -->
       <script context="module">
         export { moduleValue } from './module.js';
       </script>
@@ -86,7 +89,10 @@ describe('common architecture', () => {
         // import './commented.js';
         const ignored = "import './string.js'";
       </script>
-    `, 'Fixture.svelte')).toEqual(['./module.js', './instance.js']);
+      {#await import('./template.js') then loaded}
+        {loaded}
+      {/await}
+    `, 'Fixture.svelte')).toEqual(['./module.js', './instance.js', './template.js']);
     expect(extractModuleSpecifiers(`
       import type {
         A,
@@ -117,12 +123,22 @@ describe('common architecture', () => {
         type AliasValue = import('$shared/client/shared').Shared;
         export type Value = PackageValue | AliasValue;
       `,
+      'server/bad.mts': `
+        import type { Shared } from '@garcon/common/client/shared';
+        export type Value = Shared;
+      `,
+      'server/bad.cts': `
+        import type { Shared } from '$shared/client/shared';
+        export type Value = Shared;
+      `,
     });
     const errors = await commonArchitectureErrors(root);
     expect(errors).toContain('common/root.ts cannot import @garcon/common/client/shared');
     expect(errors).toContain('common/root.ts cannot import ./client/shared.js');
     expect(errors).toContain('server/index.ts cannot import @garcon/common/client/shared');
     expect(errors).toContain('server/index.ts cannot import $shared/client/shared');
+    expect(errors).toContain('server/bad.mts cannot import @garcon/common/client/shared');
+    expect(errors).toContain('server/bad.cts cannot import $shared/client/shared');
   });
 
   test('keeps client helpers independent of runtimes and application implementations', async () => {
@@ -163,11 +179,15 @@ describe('common architecture', () => {
       'web/src/legacy.test.ts': "vi.mock('$shared/client-chat-id', () => ({}));",
       'web/scripts/benchmark.ts': "import '../../common/chat-filter-query.js';",
       'server/legacy.test.ts': "mock.module('@garcon/common/agent-settings', () => ({}));",
+      'cli/legacy.mts': "import '@garcon/common/workspace-layout';",
+      'web/src/legacy.cts': "require('$shared/start-selection');",
     });
     expect(await commonArchitectureErrors(root)).toEqual(expect.arrayContaining([
       'cli/legacy.ts uses retired import @garcon/common/start-selection',
+      'cli/legacy.mts uses retired import @garcon/common/workspace-layout',
       'server/legacy.test.ts uses retired import @garcon/common/agent-settings',
       'web/scripts/benchmark.ts uses retired import ../../common/chat-filter-query.js',
+      'web/src/legacy.cts uses retired import $shared/start-selection',
       'web/src/legacy.test.ts uses retired import $shared/client-chat-id',
     ]));
   });
