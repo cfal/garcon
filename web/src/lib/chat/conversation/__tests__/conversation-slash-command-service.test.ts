@@ -6,6 +6,7 @@ import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage } from '$shared/chat-types';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
+import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 import {
 	ConversationSlashCommandService,
 	type ConversationSlashCommandDeps,
@@ -162,6 +163,7 @@ function createDeps(chat = createChat()) {
 			orderGroup: 'normal',
 			changed: true,
 		}),
+		tagReconciliationKind: vi.fn((_chatId: string): ChatTagReconciliationKind => null),
 		applyChatTagDelta: vi.fn(async (request: {
 			chatId: string;
 			addTags?: readonly string[];
@@ -746,7 +748,7 @@ describe('ConversationSlashCommandService', () => {
 
 	it('continues a queued tag mutation after the preceding mutation fails', async () => {
 		const chat = createChat();
-		const { deps, composerState } = createDeps(chat);
+		const { deps, composerState, appendLocalNoticeForChat } = createDeps(chat);
 		const first = deferred<void>();
 		deps.sessions.applyChatTagDelta.mockImplementationOnce(async () => {
 			await first.promise;
@@ -780,6 +782,35 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.sessions.byId[chat.id].tags).toEqual(['beta']);
 		expect(composerState.inputText).toBe('');
 		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			'Failed to update chat tags.',
+		);
+	});
+
+	it('reports an ambiguous tag outcome as requiring durability confirmation', async () => {
+		const chat = createChat();
+		const { deps, appendLocalNoticeForChat } = createDeps(chat);
+		deps.sessions.applyChatTagDelta.mockRejectedValue(
+			new ApiError(503, 'Confirmation required', 'CHAT_TAG_SAVE_UNKNOWN'),
+		);
+		deps.sessions.tagReconciliationKind.mockReturnValue('durability');
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			'Garcon could not confirm whether the tag change was saved. Confirm the saved tags before editing again.',
+		);
 	});
 
 	it('removes existing tags and ignores requested tags that are absent', async () => {

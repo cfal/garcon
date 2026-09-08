@@ -550,6 +550,7 @@ function createDeps(chat = createRunningChat()) {
 				orderGroup: 'normal',
 				changed: true,
 			}),
+			tagReconciliationKind: vi.fn(() => null),
 			applyChatTagDelta: vi.fn(async (request: {
 				chatId: string;
 				addTags?: readonly string[];

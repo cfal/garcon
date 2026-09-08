@@ -51,6 +51,7 @@ import type { ConversationSubmissionOutcome } from './conversation-submission-ou
 import * as m from '$lib/paraglide/messages.js';
 import type { ReorderChatResponse } from '$shared/chat-order-contracts';
 import type { ApplyChatTagDeltaRequest, ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
+import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 
 interface SlashCommandSessions {
 	selectedChatId: string | null;
@@ -60,6 +61,7 @@ interface SlashCommandSessions {
 		chatId: string,
 		boundary: 'top' | 'bottom',
 	): Promise<ReorderChatResponse | null>;
+	tagReconciliationKind(chatId: string): ChatTagReconciliationKind;
 	applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse>;
 	upsertServerChat(entry: ChatListEntry): void;
 	setSelectedChatId(chatId: string | null): void;
@@ -457,6 +459,11 @@ export class ConversationSlashCommandService {
 					images: previousImages,
 					clearedContentRevision,
 				});
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					tagMutationFailureNotice(deps.sessions.tagReconciliationKind(chatId)),
+				);
 				return 'rejected';
 			}
 			const changedTags = command.action === 'add'
@@ -906,6 +913,19 @@ function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {
 		return changed ? m.chat_notice_move_top_success() : m.chat_notice_move_top_unchanged();
 	}
 	return changed ? m.chat_notice_move_bottom_success() : m.chat_notice_move_bottom_unchanged();
+}
+
+function tagMutationFailureNotice(kind: ChatTagReconciliationKind): string {
+	switch (kind) {
+		case 'durability':
+			return m.chat_tags_confirmation_unknown();
+		case 'committed-refresh':
+			return m.chat_tags_refresh_required();
+		case 'conflict-refresh':
+			return m.chat_tags_conflict_refresh_required();
+		case null:
+			return m.notifications_update_chat_tags_failed();
+	}
 }
 
 function scheduleInErrorMessage(error: ScheduleInCommandError): string {

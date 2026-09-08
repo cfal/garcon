@@ -19,5 +19,6 @@ export type ConversationSessionsPort = Pick<
 	| 'setSelectedChatId'
 	| 'renameChat'
 	| 'moveChatToBoundary'
+	| 'tagReconciliationKind'
 	| 'applyChatTagDelta'
 >;
