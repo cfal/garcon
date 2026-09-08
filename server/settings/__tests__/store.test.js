@@ -3,8 +3,10 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import {
+  AtomicJsonWriteError,
   CorruptStateFileError,
   QUARANTINE_INFIX,
+  writeJsonFileAtomic,
 } from '../../lib/json-file-store.ts';
 import { SettingsStore } from '../store.js';
 
@@ -1030,6 +1032,55 @@ describe('settings store', () => {
       expect(settings.archivedChatIds).toEqual(['a']);
       expect(settings.remoteSettingsVersion).toBe(1);
       expect(remoteEvents).toEqual(['changed']);
+    });
+
+    it.each([
+      {
+        operation: 'archive',
+        initial: { pinnedChatIds: [], normalChatIds: ['a'], archivedChatIds: [] },
+        archived: true,
+      },
+      {
+        operation: 'unarchive',
+        initial: { pinnedChatIds: [], normalChatIds: [], archivedChatIds: ['a'] },
+        archived: false,
+      },
+      {
+        operation: 'pin archived chat',
+        initial: { pinnedChatIds: [], normalChatIds: [], archivedChatIds: ['a'] },
+        archived: false,
+      },
+    ])('confirms archive state after an uncertain $operation write', async ({
+      operation,
+      initial,
+      archived,
+    }) => {
+      let failAfterWrite = false;
+      const uncertainStore = new SettingsStore(tmpDir, {
+        writeFile: async (...args) => {
+          await writeJsonFileAtomic(...args);
+          if (!failAfterWrite) return;
+          failAfterWrite = false;
+          throw new AtomicJsonWriteError('injected post-rename failure', true);
+        },
+      });
+      await uncertainStore.init();
+      await uncertainStore.saveSettings({ ui: {}, paths: {}, chatNames: {}, ...initial });
+      failAfterWrite = true;
+
+      let mutation;
+      if (operation === 'pin archived chat') {
+        mutation = uncertainStore.togglePin('a');
+      } else {
+        mutation = uncertainStore.toggleArchive('a');
+      }
+      await expect(mutation).rejects.toMatchObject({ renamed: true });
+
+      expect(uncertainStore.isArchived('a')).toBe(archived);
+      await expect(uncertainStore.confirmArchiveState('a')).resolves.toBe(archived);
+      const reloaded = new SettingsStore(tmpDir);
+      await reloaded.init();
+      expect(reloaded.isArchived('a')).toBe(archived);
     });
   });
 

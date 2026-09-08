@@ -15,7 +15,7 @@ export async function initializeChatBoardRuntime(options: {
   workspaceDir: string;
   registry: IChatRegistry;
   chatMutationLock: KeyedPromiseLock;
-  archiveState: Pick<SettingsStore, 'isArchived'>;
+  archiveState: Pick<SettingsStore, 'confirmArchiveState'>;
 }) {
   const chatBoards = await initializeChatBoardService(options.workspaceDir);
   const chatTags = new ChatTagMutationService({

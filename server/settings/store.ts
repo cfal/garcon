@@ -254,6 +254,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   #settingsDurabilityUnknown = false;
   #pendingSettingsNotifications: PendingSettingsNotification[] = [];
   #workspaceDir: string;
+  readonly #writeFile: typeof writeJsonFileAtomic;
   #writeLock = new KeyedPromiseLock();
   #chatNames: ChatNameStore;
   #uiSettings: UiSettingsStore;
@@ -263,9 +264,13 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   #savedSearches: SavedSearchStore;
   #folders: FolderStore;
 
-  constructor(workspaceDir: string) {
+  constructor(
+    workspaceDir: string,
+    deps: { readonly writeFile?: typeof writeJsonFileAtomic } = {},
+  ) {
     super();
     this.#workspaceDir = workspaceDir;
+    this.#writeFile = deps.writeFile ?? writeJsonFileAtomic;
     const context: SettingsStoreContext = {
       readSettings: () => this.#readSettings(),
       mutate: (fn) => this.#withLock(fn),
@@ -323,7 +328,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   }
 
   async #writeToDisk(settings: ProjectSettings): Promise<void> {
-    await writeJsonFileAtomic(this.#settingsPath(), settings, { mode: 0o600 });
+    await this.#writeFile(this.#settingsPath(), settings, { mode: 0o600 });
   }
 
   async #readFromDiskWithMigration(): Promise<SanitizedSettingsResult> {
@@ -517,6 +522,14 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   isArchived(chatId: string): boolean {
     return this.#chatOrder.getArchivedChatIds().includes(chatId);
+  }
+
+  // Confirms a post-rename candidate before exposing archive state to tag transitions.
+  async confirmArchiveState(chatId: string): Promise<boolean> {
+    return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, async () => {
+      await this.#confirmSettingsDurability();
+      return this.isArchived(chatId);
+    });
   }
 
   getRecentAgentSettings(): ProjectSettings['recentAgentSettings'] {

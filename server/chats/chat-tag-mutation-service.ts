@@ -22,7 +22,7 @@ import {
 } from './store.js';
 
 interface ChatArchiveStatePort {
-  isArchived(chatId: string): boolean;
+  confirmArchiveState(chatId: string): Promise<boolean>;
 }
 
 interface ChatTagMutationServiceDeps {
@@ -105,7 +105,7 @@ export class ChatTagMutationService {
     catalog: ChatBoardCatalog,
   ): Promise<ChatTagsMutationResponse> {
     const current = this.#requireChat(input.chatId);
-    if (this.deps.archiveState.isArchived(input.chatId)) {
+    if (await this.deps.archiveState.confirmArchiveState(input.chatId)) {
       throw new ChatBoardDomainError(
         'CHAT_BOARD_TRANSITION_CHAT_ARCHIVED',
         'Archived chats cannot be transitioned',

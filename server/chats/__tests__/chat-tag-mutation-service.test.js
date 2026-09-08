@@ -58,7 +58,7 @@ function serviceWith(registry, boards = {
     if (revision !== 4) throw new Error('stale revision');
     return work({ revision: 4, boards: [board()] });
   },
-}, archiveState = { isArchived: () => false }) {
+}, archiveState = { confirmArchiveState: async () => false }) {
   return new ChatTagMutationService({
     registry,
     boards,
@@ -152,10 +152,30 @@ describe('ChatTagMutationService', () => {
     await expect(service.transition(input)).rejects.toMatchObject({
       code: 'CHAT_BOARD_TRANSITION_INVALID',
     });
-    await expect(serviceWith(current.registry, boards, { isArchived: () => true }).transition({
+    await expect(serviceWith(current.registry, boards, {
+      confirmArchiveState: async () => true,
+    }).transition({
       ...input,
       selectedTargetTags: ['review'],
     })).rejects.toMatchObject({ code: 'CHAT_BOARD_TRANSITION_CHAT_ARCHIVED' });
+    expect(current.registry.updateChatPhased).not.toHaveBeenCalled();
+  });
+
+  it('does not write tags when archive-state confirmation fails', async () => {
+    const current = registryDouble();
+    const confirmationError = new Error('archive durability remains unknown');
+    const service = serviceWith(current.registry, undefined, {
+      confirmArchiveState: async () => { throw confirmationError; },
+    });
+
+    await expect(service.transition({
+      chatId: CHAT_ID,
+      boardId: BOARD_ID,
+      sourceColumnId: SOURCE_ID,
+      targetColumnId: TARGET_ID,
+      expectedCatalogRevision: 4,
+      expectedTags: ['project', 'ready'],
+    })).rejects.toBe(confirmationError);
     expect(current.registry.updateChatPhased).not.toHaveBeenCalled();
   });
 
