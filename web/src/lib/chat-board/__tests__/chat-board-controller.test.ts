@@ -20,6 +20,14 @@ const second: ChatBoard = {
 	columns: [],
 };
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
+
 function catalog(
 	revision: number,
 	boards: readonly ChatBoard[] = [first, second],
@@ -85,6 +93,9 @@ function harness(initialCatalog = catalog(1), initialActiveColumns: Record<strin
 		},
 		get activeColumns() {
 			return { ...activeColumns };
+		},
+		setActiveColumnPreference(boardId: string, columnId: string) {
+			activeColumns[boardId] = columnId;
 		},
 	};
 }
@@ -166,6 +177,30 @@ describe('ChatBoardController', () => {
 
 		await vi.waitFor(() => expect(test.controller.catalog.revision).toBe(2));
 		expect(test.api.load).toHaveBeenCalledTimes(3);
+	});
+
+	it('does not prune a newer cross-tab selection with an in-flight stale catalog', async () => {
+		const addedColumn = {
+			id: '66666666-6666-4666-8666-666666666666',
+			name: 'Review',
+			match: 'all' as const,
+			tags: ['review'],
+		};
+		const updatedFirst = { ...first, columns: [...first.columns, addedColumn] };
+		const staleResponse = deferred<ChatBoardCatalog>();
+		const test = harness();
+		test.api.load
+			.mockImplementationOnce(() => staleResponse.promise)
+			.mockResolvedValueOnce(catalog(2, [updatedFirst, second]));
+
+		test.controller.setPresentationVisible(true);
+		test.invalidations.publish({ kind: 'catalog', revision: 2, reason: 'updated' });
+		test.setActiveColumnPreference(first.id, addedColumn.id);
+		staleResponse.resolve(catalog(1));
+
+		await vi.waitFor(() => expect(test.controller.catalog.revision).toBe(2));
+		expect(test.activeColumns[first.id]).toBe(addedColumn.id);
+		expect(test.controller.activeColumnId).toBe(addedColumn.id);
 	});
 
 	it('stops responding after disposal', async () => {

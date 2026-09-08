@@ -198,8 +198,9 @@ export class ChatBoardController implements PortableSingletonController {
 	#applyCatalog(catalog: ChatBoardCatalog): void {
 		if (catalog.revision < this.#catalog.revision) return;
 		const previous = this.#catalog;
-		this.deps.preferences.pruneActiveColumns(catalog.boards);
 		this.#catalog = catalog;
+		if (catalog.revision < this.#requiredRevision) return;
+		this.deps.preferences.pruneActiveColumns(catalog.boards);
 		const selected = this.deps.preferences.selectedBoardId;
 		if (selected && !catalog.boards.some((board) => board.id === selected)) {
 			const previousIndex = previous.boards.findIndex((board) => board.id === selected);
