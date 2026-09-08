@@ -523,6 +523,10 @@ describe('garcon-cli', () => {
       const puckId = catalog.preambles.find((entry) => entry.title === 'Puck only')?.id;
       if (!puckId) throw new Error('Puck preamble was not created.');
 
+      const listed = await runCli(controlArguments(fixture, ['list', 'preambles', '--json']));
+      expect(listed).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(listed.stdout)).toEqual(catalog);
+
       const parentArgs = startArguments(fixture, 'puck-parent');
       parentArgs.splice(-1, 0, '--tag', 'puck', '--preamble', puckId);
       const parent = await runCli(parentArgs);

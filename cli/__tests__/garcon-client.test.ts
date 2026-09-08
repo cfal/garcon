@@ -191,6 +191,43 @@ function validSearch(): Record<string, unknown> {
 }
 
 describe('GarconClient', () => {
+  test('fetches and validates the preamble catalog', async () => {
+    const snapshot = {
+      revision: 1,
+      preambles: [{
+        id: '3502b645-222b-49d2-ac39-1c91f9fb1174',
+        enabled: true,
+        title: 'Repository guidance',
+        content: 'Follow the repository guidance.',
+        scope: { type: 'global' },
+        agentIds: [],
+        tagFilter: { mode: 'all', tags: [] },
+        createdAt: '2026-09-08T00:00:00.000Z',
+        updatedAt: '2026-09-08T00:00:00.000Z',
+      }],
+    };
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(snapshot);
+      },
+    });
+
+    await expect(client.getPreambles()).resolves.toEqual(snapshot);
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/preambles`);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ ...snapshot, revision: -1 }),
+    });
+    await expect(malformed.getPreambles()).rejects.toMatchObject({
+      phase: 'catalog resolution',
+      exitCode: 3,
+    });
+  });
+
   test('fetches and strictly validates the complete chat catalog', async () => {
     let requestedUrl = '';
     const client = new GarconClient({

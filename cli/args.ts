@@ -119,6 +119,7 @@ Reload and provider-native fork segments may drop Garcon-only presentation.
 
 List resources:
   agents
+  preambles                 Lists IDs, titles, enabled state, and scope
   providers                 Optionally filter with --agent or --provider
   endpoints                 Requires --provider; optionally filter with --agent or --endpoint
   models                    Requires --agent; optionally filter with --provider and --endpoint
@@ -246,6 +247,7 @@ export type CliInvocation = StartCliInvocation | ResumeCliInvocation;
 
 export const LIST_RESOURCE_VALUES = [
   'agents',
+  'preambles',
   'providers',
   'endpoints',
   'models',
@@ -1415,6 +1417,15 @@ export function parseCliArgs(
       if (agentId !== undefined) throw argumentError('--agent cannot be used with list agents');
       if (providerId !== undefined) throw argumentError('--provider cannot be used with list agents');
       if (endpointId !== undefined) throw argumentError('--endpoint cannot be used with list agents');
+    }
+    if (resource === 'preambles') {
+      if (agentId !== undefined) throw argumentError('--agent cannot be used with list preambles');
+      if (providerId !== undefined) {
+        throw argumentError('--provider cannot be used with list preambles');
+      }
+      if (endpointId !== undefined) {
+        throw argumentError('--endpoint cannot be used with list preambles');
+      }
     }
     if (resource === 'providers' && endpointId !== undefined) {
       throw argumentError('--endpoint cannot be used with list providers');

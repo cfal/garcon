@@ -55,6 +55,10 @@ import {
   type SetChatTagsResponse,
 } from '@garcon/common/chat-tags-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
+import {
+  normalizePreamblesSnapshot,
+  type PreamblesSnapshot,
+} from '@garcon/common/preambles';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import {
   parseNativeSessionLookupResponse,
@@ -338,6 +342,21 @@ export class GarconClient {
     const settings = normalizeRemoteSettingsSnapshot(value);
     if (!settings) throw new CliError('catalog resolution', 'server returned invalid settings', 3);
     return settings;
+  }
+
+  async getPreambles(signal?: AbortSignal): Promise<PreamblesSnapshot> {
+    const value = await this.#request(
+      'catalog resolution',
+      'GET',
+      '/api/v1/preambles',
+      undefined,
+      signal,
+    );
+    const snapshot = normalizePreamblesSnapshot(value);
+    if (!snapshot) {
+      throw new CliError('catalog resolution', 'server returned an invalid preamble catalog', 3);
+    }
+    return snapshot;
   }
 
   async listChats(signal?: AbortSignal): Promise<ChatListResponse> {

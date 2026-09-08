@@ -133,6 +133,13 @@ describe('parseCliArgs', () => {
       configDir: '/home/test/.garcon',
       json: false,
     });
+    expect(parseCliArgs(['list', 'preambles', '--json'], ENV)).toEqual({
+      kind: 'list',
+      resource: 'preambles',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      json: true,
+    });
   });
 
   test('normalizes and deduplicates repeatable additional tags', () => {
@@ -211,6 +218,7 @@ describe('parseCliArgs', () => {
     { args: ['list', 'endpoints'], message: 'requires --provider' },
     { args: ['list', 'models', '--agent', 'codex', '--endpoint', 'east'], message: 'requires --provider' },
     { args: ['list', 'agents', '--agent', 'codex'], message: '--agent cannot be used' },
+    { args: ['list', 'preambles', '--provider', 'acme'], message: '--provider cannot be used' },
     { args: ['start', '--json', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--json cannot be used with start' },
     { args: ['list', 'agents', '--title', 'Review'], message: '--title cannot be used' },
     { args: ['start', '--title', '  ', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--title must not be empty' },
