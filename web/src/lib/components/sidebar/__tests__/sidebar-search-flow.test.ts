@@ -271,7 +271,7 @@ describe('sidebar search dialog flow', () => {
 		await waitFor(() => {
 			expect(document.querySelector('[data-sidebar-section-header="inactive"]')).toBeTruthy();
 		});
-		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull();
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
 	});
 
 	it('toggles nested project grouping from the sidebar actions menu when project grouping is enabled', async () => {

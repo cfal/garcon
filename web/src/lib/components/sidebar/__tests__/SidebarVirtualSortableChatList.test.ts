@@ -129,6 +129,7 @@ function makeProjectHeader(
 		type: 'project-header',
 		key: `project:${sidebarProjectKey(projectPath)}`,
 		projectKey: sidebarProjectKey(projectPath),
+		collapseKey: sidebarProjectKey(projectPath),
 		projectPath,
 		count,
 		chatIds,
@@ -592,26 +593,45 @@ describe('SidebarVirtualSortableChatList', () => {
 
 		expect(readVirtualRowOrder()).toEqual([
 			'inactive',
+			'/tmp/project-a',
 			'chat-0',
+			'/tmp/project-b',
 			'chat-1',
 			'archived',
 			'chat-2',
 		]);
 
 		await fireEvent.click(sectionHeader('inactive'));
-		await view.rerender({ chats, displayOptions, collapsedProjectKeys, onToggleProjectCollapsed: toggleCollapsed });
+		await view.rerender({
+			chats,
+			displayOptions,
+			collapsedProjectKeys,
+			onToggleProjectCollapsed: toggleCollapsed,
+		});
 		expect(readVirtualRowOrder()).toEqual(['inactive', 'archived', 'chat-2']);
 
 		await fireEvent.click(sectionHeader('archived'));
-		await view.rerender({ chats, displayOptions, collapsedProjectKeys, onToggleProjectCollapsed: toggleCollapsed });
+		await view.rerender({
+			chats,
+			displayOptions,
+			collapsedProjectKeys,
+			onToggleProjectCollapsed: toggleCollapsed,
+		});
 		expect(readVirtualRowOrder()).toEqual(['inactive', 'archived']);
 
 		await fireEvent.click(sectionHeader('inactive'));
 		await fireEvent.click(sectionHeader('archived'));
-		await view.rerender({ chats, displayOptions, collapsedProjectKeys, onToggleProjectCollapsed: toggleCollapsed });
+		await view.rerender({
+			chats,
+			displayOptions,
+			collapsedProjectKeys,
+			onToggleProjectCollapsed: toggleCollapsed,
+		});
 		expect(readVirtualRowOrder()).toEqual([
 			'inactive',
+			'/tmp/project-a',
 			'chat-0',
+			'/tmp/project-b',
 			'chat-1',
 			'archived',
 			'chat-2',

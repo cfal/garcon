@@ -16,7 +16,7 @@
 	let displayLabel = $derived(formatCompactProjectPath(fullLabel));
 
 	function handleToggle(): void {
-		onToggle?.(row.projectKey);
+		onToggle?.(row.collapseKey);
 	}
 </script>
 
