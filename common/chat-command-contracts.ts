@@ -18,11 +18,24 @@ import type { ParentChatRef } from './chat-parentage.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
+import { normalizeAskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 
 export {
   parseDeleteChatCommandRequest,
   parseForkChatCommandRequest,
 } from './chat-fork-command-parsing.js';
+export {
+  ASK_USER_QUESTION_ID_MAX_BYTES,
+  ASK_USER_QUESTION_MAX_ANSWERS,
+  ASK_USER_QUESTION_MAX_SELECTED_OPTIONS,
+  ASK_USER_QUESTION_REASON_MAX_BYTES,
+  ASK_USER_QUESTION_RESPONSE_MAX_BYTES,
+  normalizeAskUserQuestionDecisionResponse,
+  type AskUserQuestionAnswerPayload,
+  type AskUserQuestionAnsweredResponse,
+  type AskUserQuestionDecisionResponse,
+  type AskUserQuestionSkippedResponse,
+} from './ask-user-question-response.js';
 import { isPreambleId, PREAMBLE_MAX_COUNT, type PreambleId } from './preambles.js';
 import {
   parseUserMessagePresentation,
@@ -376,115 +389,6 @@ export interface QueueMutationResponse {
   success: true;
   chatId: string;
   control: ChatExecutionControlState;
-}
-
-export interface AskUserQuestionAnswerPayload {
-  questionId: string;
-  selectedOptionIds: string[];
-}
-
-export const ASK_USER_QUESTION_MAX_ANSWERS = 100;
-export const ASK_USER_QUESTION_MAX_SELECTED_OPTIONS = 100;
-export const ASK_USER_QUESTION_ID_MAX_BYTES = 1_024;
-export const ASK_USER_QUESTION_REASON_MAX_BYTES = 4_096;
-export const ASK_USER_QUESTION_RESPONSE_MAX_BYTES = 64 * 1_024;
-
-const permissionResponseEncoder = new TextEncoder();
-
-export interface AskUserQuestionAnsweredResponse extends Record<string, unknown> {
-  type: 'ask-user-question-response';
-  outcome: 'answered';
-  answers: AskUserQuestionAnswerPayload[];
-}
-
-export interface AskUserQuestionSkippedResponse extends Record<string, unknown> {
-  type: 'ask-user-question-response';
-  outcome: 'skipped';
-  reason?: string;
-}
-
-export type AskUserQuestionDecisionResponse = AskUserQuestionAnsweredResponse | AskUserQuestionSkippedResponse;
-
-export function normalizeAskUserQuestionDecisionResponse(
-  value: unknown,
-): AskUserQuestionDecisionResponse | null {
-  const response = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  if (!response || response.type !== 'ask-user-question-response') return null;
-
-  let normalized: AskUserQuestionDecisionResponse;
-  if (response.outcome === 'answered') {
-    if (
-      !hasExactKeys(response, ['type', 'outcome', 'answers'])
-      || !Array.isArray(response.answers)
-      || response.answers.length > ASK_USER_QUESTION_MAX_ANSWERS
-    ) return null;
-    const answers: AskUserQuestionAnswerPayload[] = [];
-    const questionIds = new Set<string>();
-    for (const valueAnswer of response.answers) {
-      const answer = valueAnswer && typeof valueAnswer === 'object' && !Array.isArray(valueAnswer)
-        ? valueAnswer as Record<string, unknown>
-        : null;
-      if (
-        !answer
-        || !hasExactKeys(answer, ['questionId', 'selectedOptionIds'])
-        || !boundedQuestionResponseId(answer.questionId)
-        || questionIds.has(answer.questionId)
-        || !Array.isArray(answer.selectedOptionIds)
-        || answer.selectedOptionIds.length > ASK_USER_QUESTION_MAX_SELECTED_OPTIONS
-      ) return null;
-      const selectedOptionIds: string[] = [];
-      const optionIds = new Set<string>();
-      for (const optionId of answer.selectedOptionIds) {
-        if (!boundedQuestionResponseId(optionId) || optionIds.has(optionId)) return null;
-        optionIds.add(optionId);
-        selectedOptionIds.push(optionId);
-      }
-      questionIds.add(answer.questionId);
-      answers.push({ questionId: answer.questionId, selectedOptionIds });
-    }
-    normalized = { type: 'ask-user-question-response', outcome: 'answered', answers };
-  } else if (response.outcome === 'skipped') {
-    if (!hasExactKeys(response, ['type', 'outcome'], ['reason'])) return null;
-    if (
-      response.reason !== undefined
-      && (!boundedQuestionResponseText(response.reason, ASK_USER_QUESTION_REASON_MAX_BYTES))
-    ) return null;
-    normalized = {
-      type: 'ask-user-question-response',
-      outcome: 'skipped',
-      ...(response.reason === undefined ? {} : { reason: response.reason }),
-    };
-  } else {
-    return null;
-  }
-
-  return permissionResponseEncoder.encode(JSON.stringify(normalized)).byteLength
-    <= ASK_USER_QUESTION_RESPONSE_MAX_BYTES
-    ? normalized
-    : null;
-}
-
-function boundedQuestionResponseId(value: unknown): value is string {
-  return boundedQuestionResponseText(value, ASK_USER_QUESTION_ID_MAX_BYTES);
-}
-
-function boundedQuestionResponseText(value: unknown, maxBytes: number): value is string {
-  return typeof value === 'string'
-    && value.trim().length > 0
-    && value.isWellFormed()
-    && permissionResponseEncoder.encode(value).byteLength <= maxBytes;
-}
-
-function hasExactKeys(
-  value: Record<string, unknown>,
-  required: readonly string[],
-  optional: readonly string[] = [],
-): boolean {
-  const keys = Object.keys(value);
-  return required.every((key) => Object.hasOwn(value, key))
-    && keys.every((key) => required.includes(key) || optional.includes(key));
 }
 
 export interface PermissionDecisionPayload {
