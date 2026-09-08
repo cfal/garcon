@@ -6,6 +6,7 @@ import {
   runPermissionAnswer,
   runPermissionDecision,
 } from '../chat-permission.js';
+import { GarconHttpError } from '../garcon-client.js';
 import type { CliOutput } from '../output.js';
 
 const command: PermissionDecisionCliCommand = {
@@ -136,5 +137,22 @@ describe('permission decision', () => {
         'status: duplicate',
       ].join('\n'),
     ]);
+  });
+
+  test('maps a rejected structured answer to an invalid request', async () => {
+    await expect(runPermissionAnswer(answerCommand, {
+      async decidePermission() {
+        throw new GarconHttpError(
+          'submission',
+          'Structured answers contain an unknown option ID',
+          400,
+          'VALIDATION_FAILED',
+          false,
+        );
+      },
+    }, captureOutput())).rejects.toMatchObject({
+      phase: 'arguments',
+      exitCode: 2,
+    });
   });
 });

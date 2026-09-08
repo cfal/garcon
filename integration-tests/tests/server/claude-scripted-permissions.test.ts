@@ -145,6 +145,23 @@ describe('scripted Claude permissions', () => {
         'permission-resolved',
       )).toEqual([]);
 
+      const invalidDecision = await runCli(fixture, [
+        'permission-answer', chatId, permissionOccurrenceId,
+        '--answers', JSON.stringify([{
+          questionId: 'Which database?',
+          selectedOptionIds: ['Unknown database'],
+        }]),
+        '--run', control.runId,
+        '--server-instance', control.serverInstanceId,
+        '--json',
+      ]);
+      expect(invalidDecision).toMatchObject({ exitCode: 2, stdout: '' });
+      expect(invalidDecision.stderr).toContain('unknown option ID');
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'permission-resolved',
+      )).toEqual([]);
+
       const decision = await runCli(fixture, [
         'permission-answer', chatId, permissionOccurrenceId,
         '--answers', JSON.stringify([{

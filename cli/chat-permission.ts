@@ -7,6 +7,8 @@ import type {
   PermissionAnswerCliCommand,
   PermissionDecisionCliCommand,
 } from './args.js';
+import { argumentError } from './errors.js';
+import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 
 export interface PermissionDecisionClient {
@@ -66,20 +68,32 @@ export async function runPermissionAnswer(
   output: CliOutput,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await client.decidePermission({
-    clientRequestId: permissionDecisionClientRequestId(command),
-    chatId: command.chatId,
-    permissionOccurrenceId: command.permissionOccurrenceId,
-    allow: true,
-    alwaysAllow: false,
-    response: command.response,
-    control: {
-      serverInstanceId: command.serverInstanceId,
+  let response: CommandAcceptedResponse;
+  try {
+    response = await client.decidePermission({
+      clientRequestId: permissionDecisionClientRequestId(command),
       chatId: command.chatId,
-      runId: command.runId,
       permissionOccurrenceId: command.permissionOccurrenceId,
-    },
-  }, signal);
+      allow: true,
+      alwaysAllow: false,
+      response: command.response,
+      control: {
+        serverInstanceId: command.serverInstanceId,
+        chatId: command.chatId,
+        runId: command.runId,
+        permissionOccurrenceId: command.permissionOccurrenceId,
+      },
+    }, signal);
+  } catch (error) {
+    if (
+      error instanceof GarconHttpError
+      && error.status === 400
+      && error.errorCode === 'VALIDATION_FAILED'
+    ) {
+      throw argumentError(error.message, { cause: error });
+    }
+    throw error;
+  }
   output.result(command.json
     ? JSON.stringify(response, null, 2)
     : [

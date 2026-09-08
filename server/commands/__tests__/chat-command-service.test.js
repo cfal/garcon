@@ -8,7 +8,13 @@ import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { ChatCommandService } from '../chat-command-service.ts';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
-import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
+import {
+  AskUserQuestionToolUseMessage,
+  AssistantMessage,
+  BashToolUseMessage,
+  PermissionRequestMessage,
+  UserMessage,
+} from '../../../common/chat-types.js';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
@@ -3934,6 +3940,113 @@ describe('ChatCommandService', () => {
 
     const record = await readLedgerRecord(ledger, 'permission-decision', 'req-perm-1');
     expect(record).toMatchObject({ status: 'finished', payload: {} });
+  });
+
+  it('rejects structured answers for non-question permissions before ledger acceptance', async () => {
+    const permissionOccurrenceId = 'incarnation-1';
+    const validateAction = mock(() => ({
+      permissionOccurrenceId,
+      runId: 'run-1',
+      transcript: { transcriptViewId: 'view-1', afterOrdinal: 1 },
+      displayOrder: 1,
+      message: new PermissionRequestMessage(
+        '2026-09-08T00:00:00.000Z',
+        permissionOccurrenceId,
+        new BashToolUseMessage('2026-09-08T00:00:00.000Z', 'tool-1', 'echo hello'),
+      ),
+    }));
+    const { service, agents, ledger } = makeService({ transientFeeds: { validateAction } });
+    const clientRequestId = 'req-perm-non-question';
+
+    await expect(service.submitPermissionDecision({
+      chatId: SOURCE_CHAT_ID,
+      permissionOccurrenceId,
+      allow: true,
+      alwaysAllow: false,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{ questionId: 'mode', selectedOptionIds: ['careful'] }],
+      },
+      clientRequestId,
+      control: {
+        serverInstanceId: 'server-instance-test',
+        chatId: SOURCE_CHAT_ID,
+        runId: 'run-1',
+        permissionOccurrenceId,
+      },
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+    });
+
+    expect(await readLedgerRecord(ledger, 'permission-decision', clientRequestId)).toBeNull();
+    expect(agents.resolvePermission).not.toHaveBeenCalled();
+  });
+
+  it('validates structured answer identities and cardinality before reserving the retry key', async () => {
+    const permissionOccurrenceId = 'incarnation-1';
+    const validateAction = mock(() => ({
+      permissionOccurrenceId,
+      runId: 'run-1',
+      transcript: { transcriptViewId: 'view-1', afterOrdinal: 1 },
+      displayOrder: 1,
+      message: new PermissionRequestMessage(
+        '2026-09-08T00:00:00.000Z',
+        permissionOccurrenceId,
+        new AskUserQuestionToolUseMessage(
+          '2026-09-08T00:00:00.000Z',
+          'tool-1',
+          'Choose a mode',
+          [{
+            id: 'mode',
+            prompt: 'Which mode?',
+            options: [
+              { id: 'fast', label: 'Fast' },
+              { id: 'careful', label: 'Careful' },
+            ],
+          }],
+        ),
+      ),
+    }));
+    const { service, agents, ledger } = makeService({ transientFeeds: { validateAction } });
+    const clientRequestId = 'req-perm-structured-validation';
+    const request = {
+      chatId: SOURCE_CHAT_ID,
+      permissionOccurrenceId,
+      allow: true,
+      alwaysAllow: false,
+      clientRequestId,
+      control: {
+        serverInstanceId: 'server-instance-test',
+        chatId: SOURCE_CHAT_ID,
+        runId: 'run-1',
+        permissionOccurrenceId,
+      },
+    };
+
+    for (const answers of [
+      [{ questionId: 'unknown', selectedOptionIds: ['careful'] }],
+      [{ questionId: 'mode', selectedOptionIds: ['unknown'] }],
+      [{ questionId: 'mode', selectedOptionIds: ['fast', 'careful'] }],
+    ]) {
+      await expect(service.submitPermissionDecision({
+        ...request,
+        response: { type: 'ask-user-question-response', outcome: 'answered', answers },
+      })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      expect(await readLedgerRecord(ledger, 'permission-decision', clientRequestId)).toBeNull();
+    }
+
+    const result = await service.submitPermissionDecision({
+      ...request,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{ questionId: 'mode', selectedOptionIds: ['careful'] }],
+      },
+    });
+    expect(result.status).toBe('accepted');
+    expect(agents.resolvePermission).toHaveBeenCalledTimes(1);
   });
 
   it('fails a stale permission action once and does not re-enter provider IO on retry', async () => {

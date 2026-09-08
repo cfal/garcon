@@ -1,3 +1,5 @@
+import type { ToolUseChatMessage } from './chat-types.js';
+
 export interface AskUserQuestionAnswerPayload {
   questionId: string;
   selectedOptionIds: string[];
@@ -26,6 +28,13 @@ export interface AskUserQuestionSkippedResponse extends Record<string, unknown> 
 export type AskUserQuestionDecisionResponse =
   | AskUserQuestionAnsweredResponse
   | AskUserQuestionSkippedResponse;
+
+type StructuredQuestionTool = Extract<
+  ToolUseChatMessage,
+  { type: 'ask-user-question-tool-use' | 'cursor-ask-question-tool-use' }
+>;
+
+type StructuredQuestion = StructuredQuestionTool['questions'][number];
 
 export function normalizeAskUserQuestionDecisionResponse(
   value: unknown,
@@ -57,6 +66,82 @@ export function normalizeAskUserQuestionDecisionResponse(
     return null;
   }
   return normalized;
+}
+
+export function askUserQuestionDecisionValidationError(
+  requestedTool: ToolUseChatMessage,
+  allow: boolean,
+  response: AskUserQuestionDecisionResponse,
+): string | null {
+  const questions = structuredQuestions(requestedTool);
+  if (!questions) return 'Structured answers require a pending question request';
+
+  if (response.outcome === 'skipped') {
+    return allow ? 'A skipped question response must deny the request' : null;
+  }
+  if (!allow) return 'An answered question response must allow the request';
+
+  const questionsById = new Map(questions.map((question) => [question.id, question]));
+  if (questionsById.size !== questions.length) {
+    return 'The pending question request contains duplicate question IDs';
+  }
+
+  const answersById = new Map(response.answers.map((answer) => [answer.questionId, answer]));
+  for (const answer of response.answers) {
+    if (!questionsById.has(answer.questionId)) {
+      return `Structured answers contain an unknown question ID: ${answer.questionId}`;
+    }
+  }
+  if (answersById.size !== questions.length) {
+    return 'Structured answers must answer every pending question exactly once';
+  }
+
+  for (const question of questions) {
+    const answer = answersById.get(question.id)!;
+    const error = selectedOptionsValidationError(question, answer.selectedOptionIds);
+    if (error) return error;
+  }
+  return null;
+}
+
+function structuredQuestions(
+  requestedTool: ToolUseChatMessage,
+): readonly StructuredQuestion[] | null {
+  switch (requestedTool.type) {
+    case 'ask-user-question-tool-use':
+    case 'cursor-ask-question-tool-use':
+      return requestedTool.questions;
+    default:
+      return null;
+  }
+}
+
+function selectedOptionsValidationError(
+  question: StructuredQuestion,
+  selectedOptionIds: readonly string[],
+): string | null {
+  const optionIds = new Set(question.options.map((option) => option.id));
+  if (optionIds.size !== question.options.length) {
+    return `Pending question ${question.id} contains duplicate option IDs`;
+  }
+  for (const optionId of selectedOptionIds) {
+    if (!optionIds.has(optionId)) {
+      return `Structured answers contain an unknown option ID for ${question.id}: ${optionId}`;
+    }
+  }
+
+  if (question.options.length === 0) {
+    return selectedOptionIds.length === 0
+      ? null
+      : `Question ${question.id} does not accept option selections`;
+  }
+  if (selectedOptionIds.length === 0) {
+    return `Question ${question.id} requires an option selection`;
+  }
+  if (!question.allowMultiple && selectedOptionIds.length !== 1) {
+    return `Question ${question.id} accepts exactly one option`;
+  }
+  return null;
 }
 
 function normalizeAnswers(response: Record<string, unknown>): AskUserQuestionAnswerPayload[] | null {
