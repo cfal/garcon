@@ -158,7 +158,7 @@ describe('ScheduledPromptFormState', () => {
 		expect(definition.schedule.firstRunAtUtc).toBe(new Date(2030, 0, 1, 9, 0, 0, 0).toISOString());
 	});
 
-	it('builds hourly and daily intervals through one hourly contract', () => {
+	it('builds minute, hourly and daily intervals through one minute contract', () => {
 		const form = createForm();
 		form.scheduleType = 'recurring';
 		form.targetType = 'existing-chat';
@@ -169,18 +169,54 @@ describe('ScheduledPromptFormState', () => {
 		const now = new Date(2030, 0, 1, 8, 0, 0, 0);
 
 		const hourly = form.buildDefinition(now);
-		expect(hourly?.schedule).toMatchObject({ type: 'recurring', intervalHours: 6 });
+		expect(hourly?.schedule).toMatchObject({ type: 'recurring', intervalMinutes: 360 });
 
 		form.intervalUnit = 'days';
 		form.intervalAmount = 2;
 		const daily = form.buildDefinition(now);
-		expect(daily?.schedule).toMatchObject({ type: 'recurring', intervalHours: 48 });
+		expect(daily?.schedule).toMatchObject({ type: 'recurring', intervalMinutes: 2880 });
 
 		form.intervalAmount = 3_651;
 		expect(form.buildDefinition(now)).toBeNull();
 
 		form.intervalAmount = 1.5;
 		expect(form.buildDefinition(now)).toBeNull();
+
+		form.intervalUnit = 'minutes';
+		for (const intervalMinutes of [1, 5, 90, 3650 * 1440]) {
+			form.intervalAmount = intervalMinutes;
+			expect(form.buildDefinition(now)?.schedule).toMatchObject({ intervalMinutes });
+		}
+		for (const invalid of [0, 1.5, 3650 * 1440 + 1]) {
+			form.intervalAmount = invalid;
+			expect(form.buildDefinition(now)).toBeNull();
+		}
+	});
+
+	it('hydrates 90 minutes exactly and preserves UTC anchors when units change', async () => {
+		const form = createForm();
+		const nextRunAt = '2030-01-02T09:00:00.000Z';
+		const endAt = '2030-01-03T10:00:00.000Z';
+		await form.initialize(
+			existingPrompt({ type: 'recurring', intervalMinutes: 90, nextRunAt, endAt }),
+		);
+		expect(form.intervalUnit).toBe('minutes');
+		expect(form.intervalAmount).toBe(90);
+		const now = new Date('2030-01-01T00:00:00.000Z');
+		expect(form.buildDefinition(now)?.schedule).toEqual({
+			type: 'recurring',
+			intervalMinutes: 90,
+			firstRunAtUtc: nextRunAt,
+			endAtUtc: endAt,
+		});
+		form.intervalUnit = 'hours';
+		form.intervalAmount = 2;
+		expect(form.buildDefinition(now)?.schedule).toEqual({
+			type: 'recurring',
+			intervalMinutes: 120,
+			firstRunAtUtc: nextRunAt,
+			endAtUtc: endAt,
+		});
 	});
 
 	it('preserves an unchanged recurring UTC end instant', async () => {
@@ -188,7 +224,7 @@ describe('ScheduledPromptFormState', () => {
 		const nextRunAt = new Date(2030, 0, 2, 9, 0, 0, 0).toISOString();
 		const endAt = new Date(2030, 0, 10, 10, 0, 0, 0).toISOString();
 		await form.initialize(
-			existingPrompt({ type: 'recurring', intervalHours: 48, nextRunAt, endAt }),
+			existingPrompt({ type: 'recurring', intervalMinutes: 2880, nextRunAt, endAt }),
 		);
 
 		const definition = form.buildDefinition(new Date(2030, 0, 1, 8, 0, 0, 0));
@@ -197,7 +233,7 @@ describe('ScheduledPromptFormState', () => {
 		if (definition?.schedule.type !== 'recurring') throw new Error('Expected recurring schedule');
 		expect(form.intervalUnit).toBe('days');
 		expect(form.intervalAmount).toBe(2);
-		expect(definition.schedule.intervalHours).toBe(48);
+		expect(definition.schedule.intervalMinutes).toBe(2880);
 		expect(definition.schedule.endAtUtc).toBe(endAt);
 	});
 
@@ -205,14 +241,14 @@ describe('ScheduledPromptFormState', () => {
 		const form = createForm();
 		const nextRunAt = new Date(2030, 0, 2, 9, 0, 0, 0).toISOString();
 		await form.initialize(
-			existingPrompt({ type: 'recurring', intervalHours: 5, nextRunAt, endAt: null }),
+			existingPrompt({ type: 'recurring', intervalMinutes: 300, nextRunAt, endAt: null }),
 		);
 
 		expect(form.intervalUnit).toBe('hours');
 		expect(form.intervalAmount).toBe(5);
 		expect(form.buildDefinition(new Date(2030, 0, 1, 8, 0, 0, 0))?.schedule).toMatchObject({
 			type: 'recurring',
-			intervalHours: 5,
+			intervalMinutes: 300,
 			firstRunAtUtc: nextRunAt,
 		});
 	});

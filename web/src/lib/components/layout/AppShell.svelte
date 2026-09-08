@@ -55,6 +55,7 @@
 	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
+	import SidebarSearchDialogs from '$lib/components/sidebar/SidebarSearchDialogs.svelte';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -775,6 +776,11 @@
 		</div>
 	</div>
 </div>
+
+<SidebarSearchDialogs
+	chats={sessions.orderedChats}
+	onSelectChat={isMobile ? handleMobileChatSelect : handleChatSelect}
+/>
 
 <ChatActionDialogs
 	chatDeleteConfirmation={chatActionDialogs.chatDeleteConfirmation}

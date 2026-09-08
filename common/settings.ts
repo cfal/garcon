@@ -142,6 +142,9 @@ export const AGENT_COMMAND_SETTING_KEYS = [
   'enabled',
   'chatIdDiscovery',
   'sendMessage',
+  'startAgent',
+  'resumeAgent',
+  'schedule',
 ] as const;
 
 export type AgentCommandSettingKey = typeof AGENT_COMMAND_SETTING_KEYS[number];
@@ -158,6 +161,9 @@ export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
     enabled: true,
     chatIdDiscovery: true,
     sendMessage: true,
+    startAgent: true,
+    resumeAgent: true,
+    schedule: true,
   },
 };
 
@@ -524,6 +530,15 @@ export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSet
         : true,
       sendMessage: typeof agentCommands?.sendMessage === 'boolean'
         ? agentCommands.sendMessage
+        : true,
+      startAgent: typeof agentCommands?.startAgent === 'boolean'
+        ? agentCommands.startAgent
+        : true,
+      resumeAgent: typeof agentCommands?.resumeAgent === 'boolean'
+        ? agentCommands.resumeAgent
+        : true,
+      schedule: typeof agentCommands?.schedule === 'boolean'
+        ? agentCommands.schedule
         : true,
     },
   };

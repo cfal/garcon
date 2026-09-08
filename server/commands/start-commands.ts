@@ -1,19 +1,23 @@
 import crypto from 'crypto';
+import { parseChatRowTitle } from '../../common/chat-row-contracts.js';
 import {
   recordsStartupPreferences,
   type StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
 
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
+import { AgentStartCompensatedError } from './agent-start-compensated-error.js';
 import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import { createLogger } from '../lib/log.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import { resolveNewChatPreambleSelection } from '../preambles/selection.js';
+import { frozenConversationDrafts } from '../ledger/projection.js';
 import {
   CommandSupport,
   CommandValidationError,
   agentTurnResultFromRecord,
   type ChatStartInput,
+  type AgentCommandStartInput,
   type NormalizedChatStart,
   type ScheduledChatStartInput,
 } from './command-support.js';
@@ -37,12 +41,21 @@ export class StartCommands {
     const chatId = this.support.requireChatId(input.chatId);
     return this.support.withChatMutationLock(
       chatId,
-      async () => {
-        const replay = await this.replayStart(input, chatId);
-        if (replay) return replay;
-        return this.submitNormalizedStart(await this.normalizeStart(input, chatId));
-      },
+      () => this.submitStartLocked(input, chatId),
     );
+  }
+
+  private async submitStartLocked(
+    input: ChatStartInput,
+    chatId: NormalizedChatStart['chatId'],
+    signal?: AbortSignal,
+  ): Promise<StartChatCommandResponse> {
+    signal?.throwIfAborted();
+    const replay = await this.replayStart(input, chatId);
+    if (replay) return replay;
+    const normalized = await this.normalizeStart(input, chatId);
+    signal?.throwIfAborted();
+    return this.submitNormalizedStart(normalized, signal);
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
@@ -52,6 +65,23 @@ export class StartCommands {
       images: [],
       agentSettings: input.agentSettingsById[input.agentId],
     });
+  }
+
+  submitAgentCommandStartLocked(
+    input: AgentCommandStartInput,
+    signal: AbortSignal,
+  ): Promise<StartChatCommandResponse> {
+    signal.throwIfAborted();
+    this.support.requireChat(input.parentChatId);
+    if (this.deps.transcripts.existingCurrentView(input.parentChatId)?.viewId !== input.sourceViewId) {
+      throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
+    }
+    if (input.transcriptSnapshot && input.transcriptSnapshot.viewId !== input.sourceViewId) {
+      throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'Snapshot does not belong to the requesting view', 409);
+    }
+    return this.submitStartLocked({
+      ...input, origin: 'agent-command', images: [], orderedPreambleIds: [],
+    }, this.support.requireChatId(input.chatId), signal);
   }
 
   private async normalizeStart(
@@ -76,6 +106,17 @@ export class StartCommands {
         `Parent chat not found: ${parentChatId}`,
         404,
       );
+    }
+    const title = input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
+    const transcriptSnapshot = input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null;
+    if (transcriptSnapshot) {
+      if (parentChatId === null || !Number.isSafeInteger(transcriptSnapshot.ordinal) || transcriptSnapshot.ordinal < 1) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'Snapshot requires a committed parent ordinal');
+      }
+      const tip = this.deps.transcripts.highWatermark(parentChatId);
+      if (tip.viewId !== transcriptSnapshot.viewId || transcriptSnapshot.ordinal > tip.ordinal) {
+        throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'Snapshot is outside the current parent transcript', 409);
+      }
     }
     this.support.assertContent(input.command, images);
     await this.support.assertAttachmentsSupported({
@@ -105,6 +146,8 @@ export class StartCommands {
     });
 
     return {
+      title,
+      transcriptSnapshot: transcriptSnapshot ? { ...transcriptSnapshot } : null,
       origin: input.origin,
       chatId,
       parentChatId,
@@ -131,9 +174,9 @@ export class StartCommands {
     };
   }
 
-  private async submitNormalizedStart(input: NormalizedChatStart): Promise<StartChatCommandResponse> {
+  private async submitNormalizedStart(input: NormalizedChatStart, signal?: AbortSignal): Promise<StartChatCommandResponse> {
     const existing = this.deps.chats.getChat(input.chatId);
-    if (existing) {
+    if (existing || input.transcriptSnapshot && this.deps.transcripts.existingCurrentView(input.chatId)) {
       throw new CommandValidationError(
         'CHAT_ID_COLLISION',
         `Session already exists: ${input.chatId}`,
@@ -153,6 +196,10 @@ export class StartCommands {
       return this.replayedStart(ledger.record);
     }
 
+    let registered = false;
+    let seedOwned = false;
+    let titleOwned = false;
+    let compensated = false;
     await this.deps.queue.runInitialInput({
       command: {
         key: ledger.record.key,
@@ -173,10 +220,21 @@ export class StartCommands {
       preparation: {
         operation: 'chat-start',
         prepare: async () => {
-          this.deps.chats.addChat({
+          signal?.throwIfAborted();
+          if (input.transcriptSnapshot) {
+            if (this.deps.chats.getChat(input.chatId) || this.deps.transcripts.existingCurrentView(input.chatId)) {
+              throw new CommandValidationError('CHAT_ID_COLLISION', 'Snapshot target already exists', 409);
+            }
+            const rows = frozenConversationDrafts(this.deps.transcripts.rowsThrough(
+              input.parentChatId!, input.transcriptSnapshot,
+            ));
+            seedOwned = true;
+            this.deps.transcripts.initializeChat(input.chatId, rows, rows.length + 1);
+          }
+          registered = this.deps.chats.addChat({
             id: input.chatId,
             agentId: input.agentId,
-            ...createPreambleBoundaryBinding('new-chat'),
+            ...createPreambleBoundaryBinding(input.transcriptSnapshot ? 'fork' : 'new-chat'),
             nativeSession: null,
             projectPath: input.projectPath,
             tags: input.tags,
@@ -193,13 +251,23 @@ export class StartCommands {
               ? null
               : { chatId: input.parentChatId, relation: 'delegation' },
           });
+          if (!registered) throw new CommandValidationError('CHAT_ID_COLLISION', 'Start target already exists', 409);
+          if (input.title !== null) {
+            titleOwned = true;
+            await this.deps.settings.setSessionName(input.chatId, input.title);
+          }
           await this.deps.settings.ensureInNormal(input.chatId);
           await this.deps.chats.flush();
+          signal?.throwIfAborted();
         },
         compensate: async () => {
-          this.deps.chats.removeChat(input.chatId, 'start-compensation');
-          await this.deps.chats.flush();
-          try {
+          if (registered) {
+            this.deps.chats.removeChat(input.chatId, 'start-compensation');
+            await this.deps.chats.flush();
+          }
+          if (seedOwned) this.deps.transcripts.deleteChat(input.chatId);
+          if (titleOwned) await this.deps.settings.removeSessionName(input.chatId);
+          if (registered) try {
             await this.deps.settings.removeFromAllOrderLists(input.chatId);
           } catch (cleanupError: unknown) {
             logger.warn(
@@ -207,6 +275,7 @@ export class StartCommands {
               (cleanupError as Error).message,
             );
           }
+          compensated = true;
         },
       },
       dispatch: (executionAdmission) =>
@@ -219,6 +288,9 @@ export class StartCommands {
           executionAdmission,
           agentSettings: input.agentSettings,
         }),
+    }).catch((error: unknown) => {
+      if (input.origin === 'agent-command' && compensated) throw new AgentStartCompensatedError(error);
+      throw error;
     });
 
     if (!this.deps.metadata.getChatMetadata(input.chatId)) this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
@@ -231,7 +303,7 @@ export class StartCommands {
       }
     }
 
-    void maybeGenerateChatTitle({
+    if (input.title === null) void maybeGenerateChatTitle({
       chatId: input.chatId,
       projectPath: input.projectPath,
       firstPrompt: input.command,
@@ -289,6 +361,8 @@ export class StartCommands {
 
 function startPayload(input: NormalizedChatStart): Record<string, unknown> {
   return {
+    title: input.title,
+    transcriptSnapshot: input.transcriptSnapshot,
     origin: input.origin,
     chatId: input.chatId,
     parentChatId: input.parentChatId,
@@ -317,6 +391,8 @@ function startReplayPayload(
   chatId: NormalizedChatStart['chatId'],
 ): Record<string, unknown> {
   return {
+    title: input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null,
+    transcriptSnapshot: input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null,
     origin: input.origin,
     chatId,
     parentChatId: input.parentChatId ?? null,

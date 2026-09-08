@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
-	import SidebarSearchDialog from '$lib/components/sidebar/SidebarSearchDialog.svelte';
+	import SidebarSearchPanel from '$lib/components/sidebar/SidebarSearchPanel.svelte';
+	import { SIDEBAR_SEARCH_DIALOG_CONTENT_CLASS } from '$lib/components/sidebar/sidebar-search-panel';
 	import { matchesChatFilter, parseChatSearch } from '$shared/chat-filter-query';
 	import { getChatSessions } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -42,14 +43,10 @@
 	}
 </script>
 
-<Dialog.Root {open} onOpenChange={(value) => !value && onClose()}>
-	<Dialog.Content
-		class="h-dvh w-screen max-w-none border-0 bg-transparent p-0 shadow-none sm:max-w-none"
-		showCloseButton={false}
-	>
+<Dialog.Root {open} requestClose={onClose}>
+	<Dialog.Content class={SIDEBAR_SEARCH_DIALOG_CONTENT_CLASS} showCloseButton={false}>
 		<Dialog.Title class="sr-only">{m.scheduled_prompts_select_chat()}</Dialog.Title>
-		<SidebarSearchDialog
-			{open}
+		<SidebarSearchPanel
 			{query}
 			{filteredChats}
 			{currentTime}
@@ -66,9 +63,6 @@
 			onHighlightChange={(index) => (highlightedIndex = index)}
 			{onClose}
 			showSavedSearchActions={false}
-			overlayClass="z-[70]"
-			backdropTreatment="interaction-only"
-			contentRole="presentation"
 		/>
 	</Dialog.Content>
 </Dialog.Root>

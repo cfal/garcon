@@ -55,6 +55,7 @@ import {
 } from './chats/carryover-compaction.js';
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
 import { AgentCommandComposition } from './chats/agent-command-composition.js';
+import { AgentStartSelectionService } from './agents/agent-start-selection-service.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
@@ -300,6 +301,9 @@ export async function startServer(): Promise<void> {
       },
       chatIdRequests: agentCommands.chatIdRequests,
       interAgentMessages: agentCommands.interAgentMessages,
+      agentStarts: agentCommands.agentStarts,
+      agentResumes: agentCommands.agentResumes,
+      agentSchedules: agentCommands.agentSchedules,
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {
@@ -537,6 +541,8 @@ export async function startServer(): Promise<void> {
         projectAdmission,
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
         appendControlReceipt: agentCommands.appendControlReceipt,
+        isControlInputViewCurrent: (chatId, viewId) => chatRegistry.getChat(chatId) !== null
+          && transcriptLedger.existingCurrentView(chatId)?.viewId === viewId,
         selectionAdmissionLock,
       },
     );
@@ -608,6 +614,14 @@ export async function startServer(): Promise<void> {
       preambles,
       chatMutationLock,
     });
+    const scheduledPrompts = new ScheduledPromptScheduler({
+      store: new ScheduledPromptStore(workspaceDir),
+      runLog: new ScheduledPromptRunLog(),
+      dispatcher: new ScheduledPromptDispatcher({ commands: chatCommands, chatIds }),
+      chats: chatRegistry,
+      agents: agentRegistry,
+    });
+
     agentCommands.initialize({
       registry: chatRegistry,
       adoption: transcriptAdoption,
@@ -615,25 +629,11 @@ export async function startServer(): Promise<void> {
       notices: transcriptLedger,
       chatMutationLock,
       settings,
-      onChatIdError(error, chatId) {
-        logger.warn('Chat ID auto-discovery delivery failed', {
-          chatId,
-          reason: errorMessage(error),
-        });
-      },
-    });
-
-    const scheduledPromptStore = new ScheduledPromptStore(workspaceDir);
-    const scheduledPromptRunLog = new ScheduledPromptRunLog();
-    const scheduledPrompts = new ScheduledPromptScheduler({
-      store: scheduledPromptStore,
-      runLog: scheduledPromptRunLog,
-      dispatcher: new ScheduledPromptDispatcher({
-        commands: chatCommands,
-        chatIds,
-      }),
-      chats: chatRegistry,
-      agents: agentRegistry,
+      selection: new AgentStartSelectionService({ agents: agentRegistry, apiProviders }),
+      commands: chatCommands,
+      turns: commandLedger,
+      chatIds,
+      scheduler: scheduledPrompts,
     });
 
     const snippetStore = new SnippetStore(workspaceDir);
@@ -900,6 +900,7 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
+      agentCommands.shutdown();
       carryOverGarbageCollector.shutdown();
       logger.info('server: shutting down...');
       const reservedChatIds = queue.beginShutdown();

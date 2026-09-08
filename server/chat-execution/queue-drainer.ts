@@ -25,6 +25,7 @@ export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
   registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
   appendControlReceipt(chatId: string, entry: StoredControlInputEntry): void;
+  isControlInputViewCurrent(chatId: string, viewId: string): boolean;
   discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void;
   publishIdle(chatId: string): void;
   publishProjectUnavailable(chatId: string, error: ProjectUnavailableError): void;
@@ -127,6 +128,14 @@ export class QueueDrainer {
           () => controls.dequeueNextTurn(chatId, (input) => {
             options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
             if (input.kind === 'control') {
+              if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
+                logger.debug('queue: discarded stale control input', {
+                  chatId,
+                  entryId: input.entry.id,
+                  transcriptViewId: input.entry.transcriptViewId,
+                });
+                return false;
+              }
               callbacks.appendControlReceipt(chatId, input.entry);
               inputInserted = true;
               return true;

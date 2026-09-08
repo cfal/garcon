@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
+	import SidebarSearchDialogs from '../SidebarSearchDialogs.svelte';
 	import {
 		setAppShell,
 		setLocalSettings,
@@ -290,3 +291,5 @@
 	onShowSettings={() => {}}
 	newWindowEdges={workspaceSplitAdmissions()}
 />
+
+<SidebarSearchDialogs chats={displayedChats} onSelectChat={onChatSelect} />

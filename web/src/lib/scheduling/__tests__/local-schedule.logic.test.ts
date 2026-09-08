@@ -69,7 +69,7 @@ describe('scheduled prompt validation', () => {
 			schedule: {
 				type: 'recurring',
 				firstRunAtUtc: '2030-01-02T09:00:00.000Z',
-				intervalHours: 2,
+				intervalMinutes: 120,
 				endAtUtc: '2030-01-10T09:00:00.000Z',
 			},
 			target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
@@ -78,7 +78,7 @@ describe('scheduled prompt validation', () => {
 		expect(definition?.schedule).toEqual({
 			type: 'recurring',
 			firstRunAtUtc: '2030-01-02T09:00:00.000Z',
-			intervalHours: 2,
+			intervalMinutes: 120,
 			endAtUtc: '2030-01-10T09:00:00.000Z',
 		});
 	});
