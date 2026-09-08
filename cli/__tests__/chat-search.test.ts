@@ -327,7 +327,7 @@ describe('chat search', () => {
       },
     }, output)).rejects.toMatchObject({
       exitCode: 2,
-      message: expect.stringContaining('features.transcriptSearch.enabled'),
+      message: expect.stringContaining('garcon-cli transcript-search enable'),
     } satisfies Partial<CliError>);
   });
 

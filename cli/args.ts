@@ -97,6 +97,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] chats [--filter <expression>] [--limit <count>] [--offset <count>] [--json]
   garcon-cli [connection options] search <query> [--filter <expression>] [--sort <relevance|activity|created>] [--limit <count>] [--offset <count>] [--snippets <count>] [--json]
+  garcon-cli [connection options] transcript-search <enable|disable|status> [--json]
   garcon-cli [connection options] read <chat-id> <ordinal> [-B <count>] [-A <count>] [--include <category>]... [--transcript-view-id <id>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
   garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
@@ -308,6 +309,12 @@ export interface PermissionAnswerCliCommand extends CliConnectionOptions {
   readonly json: boolean;
 }
 
+export interface TranscriptSearchCliCommand extends CliConnectionOptions {
+  readonly kind: 'transcript-search';
+  readonly action: 'enable' | 'disable' | 'status';
+  readonly json: boolean;
+}
+
 export type ChatOrderMutationKind = 'archive' | 'unarchive' | 'pin' | 'unpin';
 
 export type ChatOrderMutationCliCommand = {
@@ -418,6 +425,7 @@ export type ParsedCliCommand =
   | StopCliCommand
   | PermissionDecisionCliCommand
   | PermissionAnswerCliCommand
+  | TranscriptSearchCliCommand
   | ChatOrderMutationCliCommand
   | RenameCliCommand
   | SetTagsCliCommand
@@ -626,6 +634,7 @@ const RESUME_ASYNC_OPTIONS = optionSet(
 const STOP_OPTIONS = optionSet('json');
 const PERMISSION_DECISION_OPTIONS = optionSet('run', 'server-instance', 'json');
 const PERMISSION_ANSWER_OPTIONS = optionSet('run', 'server-instance', 'answers', 'json');
+const TRANSCRIPT_SEARCH_OPTIONS = optionSet('json');
 const CHAT_ORDER_MUTATION_OPTIONS = optionSet('json');
 const RENAME_OPTIONS = optionSet('json');
 const SET_TAGS_OPTIONS = optionSet('tag', 'clear', 'json');
@@ -815,6 +824,27 @@ function parsePermissionAnswer(
     runId: parseOpaqueControlId(values.run, '--run'),
     serverInstanceId: parseOpaqueControlId(values['server-instance'], '--server-instance'),
     response,
+    json: values.json === true,
+  };
+}
+
+function parseTranscriptSearch(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): TranscriptSearchCliCommand {
+  rejectOptionsExcept(values, TRANSCRIPT_SEARCH_OPTIONS, 'transcript-search');
+  const action = parsed.positionals[1];
+  if (
+    parsed.positionals.length !== 2
+    || (action !== 'enable' && action !== 'disable' && action !== 'status')
+  ) {
+    throw argumentError('transcript-search requires one action: enable, disable, or status');
+  }
+  return {
+    kind: 'transcript-search',
+    ...connection,
+    action,
     json: values.json === true,
   };
 }
@@ -1449,6 +1479,9 @@ export function parseCliArgs(
   }
   if (commandName === 'permission-answer') {
     return parsePermissionAnswer(parsed, values, connection);
+  }
+  if (commandName === 'transcript-search') {
+    return parseTranscriptSearch(parsed, values, connection);
   }
   if (
     commandName === 'archive'

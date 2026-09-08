@@ -431,9 +431,71 @@ export type TranscriptSearchStatusResponse = TranscriptSearchStatusV1 & {
   readonly queryStats: TranscriptSearchQueryStatsV1;
 };
 
+const TRANSCRIPT_SEARCH_STATUS_KEYS = [
+  'version',
+  'phase',
+  'chats',
+  'queuedJobs',
+  'resync',
+  'backlogRows',
+  'activeChat',
+  'lastErrorCode',
+  'updatedAt',
+] as const;
+
+const TRANSCRIPT_SEARCH_QUERY_STAT_KEYS = [
+  'served',
+  'timedOut',
+  'rejectedBusy',
+  'p50Ms',
+  'p95Ms',
+  'maxMs',
+  'admissionP50Ms',
+  'admissionP95Ms',
+  'admissionMaxMs',
+  'totalP50Ms',
+  'totalP95Ms',
+  'totalMaxMs',
+] as const;
+
+export function parseTranscriptSearchStatusResponse(
+  value: unknown,
+): TranscriptSearchStatusResponse {
+  const response = chatSearchRecord(value);
+  if (!response || !hasExactChatSearchKeys(response, [
+    ...TRANSCRIPT_SEARCH_STATUS_KEYS,
+    'queryStats',
+  ])) {
+    throw new Error('Invalid transcript search status response: unexpected fields');
+  }
+  const { queryStats: rawQueryStats, ...rawStatus } = response;
+  if (!isTranscriptSearchStatusV1(rawStatus)) {
+    throw new Error('Invalid transcript search status response: invalid status');
+  }
+  if (!isTranscriptSearchQueryStatsV1(rawQueryStats)) {
+    throw new Error('Invalid transcript search status response: invalid query statistics');
+  }
+  return {
+    ...rawStatus,
+    queryStats: rawQueryStats,
+  };
+}
+
+function isTranscriptSearchQueryStatsV1(
+  value: unknown,
+): value is TranscriptSearchQueryStatsV1 {
+  const queryStats = chatSearchRecord(value);
+  return !!queryStats
+    && hasExactChatSearchKeys(queryStats, TRANSCRIPT_SEARCH_QUERY_STAT_KEYS)
+    && TRANSCRIPT_SEARCH_QUERY_STAT_KEYS.every(
+      (key) => isNonNegativeSafeInteger(queryStats[key]),
+    );
+}
+
 export function isTranscriptSearchStatusV1(value: unknown): value is TranscriptSearchStatusV1 {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<TranscriptSearchStatusV1>;
+  const raw = chatSearchRecord(value);
+  if (!raw || !hasExactChatSearchKeys(raw, TRANSCRIPT_SEARCH_STATUS_KEYS)) return false;
+  const candidate = raw as Partial<TranscriptSearchStatusV1>;
   const chats = candidate.chats;
   const resync = candidate.resync;
   const activeChat = candidate.activeChat;
@@ -466,6 +528,33 @@ export function isTranscriptSearchStatusV1(value: unknown): value is TranscriptS
         && Number.isSafeInteger(activeChat.total)
         && activeChat.position >= 0
         && activeChat.total >= activeChat.position))
-    && (candidate.lastErrorCode === null || typeof candidate.lastErrorCode === 'string')
-    && typeof candidate.updatedAt === 'string';
+    && (candidate.lastErrorCode === null
+      || (typeof candidate.lastErrorCode === 'string'
+        && /^[A-Z][A-Z0-9_]{0,63}$/u.test(candidate.lastErrorCode)))
+    && isCanonicalChatSearchTimestamp(candidate.updatedAt)
+    && hasExactChatSearchKeys(chats, [
+      'total', 'indexed', 'pending', 'failed', 'unindexed',
+    ])
+    && (resync === null || hasExactChatSearchKeys(
+      resync,
+      ['completedChats', 'totalChats'],
+    ))
+    && (activeChat === null || hasExactChatSearchKeys(
+      activeChat,
+      ['position', 'total'],
+    ));
+}
+
+function hasExactChatSearchKeys(
+  value: object,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
+function isCanonicalChatSearchTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }

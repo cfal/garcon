@@ -30,8 +30,10 @@ import {
 } from '@garcon/common/chat-view';
 import {
   parseChatSearchResponse,
+  parseTranscriptSearchStatusResponse,
   type ChatSearchRequest,
   type ChatSearchResponse,
+  type TranscriptSearchStatusResponse,
 } from '@garcon/common/chat-search';
 import { stableJsonStringify } from '@garcon/common/json';
 import {
@@ -419,6 +421,50 @@ export class GarconClient {
         cause: error,
       });
     }
+  }
+
+  async getTranscriptSearchStatus(signal?: AbortSignal): Promise<TranscriptSearchStatusResponse> {
+    const value = await this.#request(
+      'chat search',
+      'GET',
+      '/api/v1/chats/search/status',
+      undefined,
+      signal,
+    );
+    try {
+      return parseTranscriptSearchStatusResponse(value);
+    } catch (error) {
+      throw new CliError('chat search', 'server returned an invalid transcript search status', 3, {
+        cause: error,
+      });
+    }
+  }
+
+  async setTranscriptSearchEnabled(
+    enabled: boolean,
+    signal?: AbortSignal,
+  ): Promise<RemoteSettingsSnapshot> {
+    const value = await this.#request(
+      'chat search',
+      'PUT',
+      '/api/v1/app/settings',
+      { features: { transcriptSearch: { enabled } } },
+      signal,
+    );
+    const response = record(value);
+    const rawSettings = record(response?.settings);
+    const rawFeatures = record(rawSettings?.features);
+    const rawTranscriptSearch = record(rawFeatures?.transcriptSearch);
+    const settings = normalizeRemoteSettingsSnapshot(rawSettings);
+    if (
+      response?.success !== true
+      || rawTranscriptSearch?.enabled !== enabled
+      || !settings
+      || settings.features.transcriptSearch.enabled !== enabled
+    ) {
+      throw new CliError('chat search', 'server returned an invalid transcript search setting', 3);
+    }
+    return settings;
   }
 
   async getChatSnapshot(

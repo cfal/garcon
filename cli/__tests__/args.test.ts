@@ -736,6 +736,29 @@ describe('parseCliArgs', () => {
       '--run', 'run-1', '--server-instance', 'instance-1',
     ], ENV)).toThrow('option may be specified only once: --answers');
   });
+
+  test('parses transcript search administration actions', () => {
+    for (const action of ['enable', 'disable', 'status'] as const) {
+      expect(parseCliArgs([
+        '--workspace', 'work', 'transcript-search', action, '--json',
+      ], ENV)).toEqual({
+        kind: 'transcript-search',
+        workspace: 'work',
+        configDir: '/home/test/.garcon',
+        action,
+        json: true,
+      });
+    }
+  });
+
+  test.each([
+    [['transcript-search'], 'requires one action'],
+    [['transcript-search', 'rebuild'], 'requires one action'],
+    [['transcript-search', 'status', 'extra'], 'requires one action'],
+    [['transcript-search', 'enable', '--filter', 'tag:ops'], '--filter cannot be used'],
+  ])('rejects invalid transcript search administration arguments', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
 });
 
 describe('chat research arguments', () => {

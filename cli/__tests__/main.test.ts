@@ -178,11 +178,11 @@ function startModelCatalogResponse(): Response {
   });
 }
 
-function remoteSettingsResponse(): Response {
-  return Response.json({
+function remoteSettingsSnapshot(transcriptSearchEnabled = false): Record<string, unknown> {
+  return {
     version: 1,
     features: {
-      transcriptSearch: { enabled: false },
+      transcriptSearch: { enabled: transcriptSearchEnabled },
       agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
     },
     ui: {},
@@ -205,10 +205,83 @@ function remoteSettingsResponse(): Response {
       pendingLink: false,
       linkUrl: null,
     },
-  });
+  };
+}
+
+function remoteSettingsResponse(): Response {
+  return Response.json(remoteSettingsSnapshot());
+}
+
+function transcriptSearchStatusResponse(): Record<string, unknown> {
+  return {
+    version: 1,
+    phase: 'ready',
+    chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
+    queuedJobs: 0,
+    resync: null,
+    backlogRows: 0,
+    activeChat: null,
+    lastErrorCode: null,
+    updatedAt: '2026-09-08T00:00:00.000Z',
+    queryStats: {
+      served: 2,
+      timedOut: 0,
+      rejectedBusy: 0,
+      p50Ms: 10,
+      p95Ms: 20,
+      maxMs: 20,
+      admissionP50Ms: 1,
+      admissionP95Ms: 2,
+      admissionMaxMs: 2,
+      totalP50Ms: 11,
+      totalP95Ms: 22,
+      totalMaxMs: 22,
+    },
+  };
 }
 
 describe('main', () => {
+  test('routes transcript search administration through typed settings and status endpoints', async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const enableCapture = capturedOutput();
+    const enableExit = await main(['transcript-search', 'enable', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: enableCapture.output,
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        });
+        return Response.json({ success: true, settings: remoteSettingsSnapshot(true) });
+      },
+    });
+    expect(enableExit).toBe(0);
+    expect(requests[0]).toEqual({
+      url: 'http://127.0.0.1:8080/api/v1/app/settings',
+      method: 'PUT',
+      body: { features: { transcriptSearch: { enabled: true } } },
+    });
+    expect(JSON.parse(enableCapture.results[0]!)).toEqual({ enabled: true, settingsVersion: 1 });
+
+    const statusCapture = capturedOutput();
+    const statusExit = await main(['transcript-search', 'status', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: statusCapture.output,
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), method: init?.method ?? 'GET', body: undefined });
+        return Response.json(transcriptSearchStatusResponse());
+      },
+    });
+    expect(statusExit).toBe(0);
+    expect(requests[1]).toEqual({
+      url: 'http://127.0.0.1:8080/api/v1/chats/search/status',
+      method: 'GET',
+      body: undefined,
+    });
+    expect(JSON.parse(statusCapture.results[0]!)).toEqual(transcriptSearchStatusResponse());
+  });
+
   test('prints only the native session lookup chat ID', async () => {
     const capture = capturedStreams();
     let submitted: unknown;

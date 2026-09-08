@@ -4,6 +4,7 @@ import {
   classifyChatSearchFailureRecovery,
   compileChatSearchQuery,
   parseChatSearchResponse,
+  parseTranscriptSearchStatusResponse,
 } from '../chat-search.ts';
 
 const request = {
@@ -158,6 +159,47 @@ describe('chat search contracts', () => {
     };
     expect(() => parseChatSearchResponse(request, countMismatch))
       .toThrow('failed chat details');
+  });
+
+  it('strictly parses transcript search status and query statistics', () => {
+    const status = {
+      version: 1,
+      phase: 'rebuilding',
+      chats: { total: 3, indexed: 1, pending: 1, failed: 0, unindexed: 1 },
+      queuedJobs: 2,
+      resync: { completedChats: 1, totalChats: 3 },
+      backlogRows: 7,
+      activeChat: { position: 2, total: 5 },
+      lastErrorCode: null,
+      updatedAt: '2026-09-08T00:00:00.000Z',
+      queryStats: {
+        served: 4,
+        timedOut: 1,
+        rejectedBusy: 2,
+        p50Ms: 10,
+        p95Ms: 20,
+        maxMs: 30,
+        admissionP50Ms: 1,
+        admissionP95Ms: 2,
+        admissionMaxMs: 3,
+        totalP50Ms: 11,
+        totalP95Ms: 22,
+        totalMaxMs: 33,
+      },
+    };
+    expect(parseTranscriptSearchStatusResponse(status)).toEqual(status);
+
+    for (const invalid of [
+      { ...status, extra: true },
+      { ...status, updatedAt: '2026-09-08' },
+      { ...status, lastErrorCode: 'invalid code' },
+      { ...status, chats: { ...status.chats, extra: 1 } },
+      { ...status, resync: { completedChats: 4, totalChats: 3 } },
+      { ...status, queryStats: { ...status.queryStats, served: -1 } },
+      { ...status, queryStats: { ...status.queryStats, extra: 1 } },
+    ]) expect(() => parseTranscriptSearchStatusResponse(invalid)).toThrow(
+      'Invalid transcript search status response',
+    );
   });
 
   it('classifies failure recovery without treating source loss as an index retry', () => {

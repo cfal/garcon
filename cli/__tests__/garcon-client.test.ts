@@ -7,6 +7,7 @@ import type {
   SteerCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import { runtimeProofPayload } from '@garcon/common/server-runtime';
+import { DEFAULT_REMOTE_FEATURE_SETTINGS } from '@garcon/common/settings';
 import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-client.js';
 
 const connection = {
@@ -190,6 +191,64 @@ function validSearch(): Record<string, unknown> {
   };
 }
 
+function validSearchStatus(): Record<string, unknown> {
+  return {
+    version: 1,
+    phase: 'ready',
+    chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
+    queuedJobs: 0,
+    resync: null,
+    backlogRows: 0,
+    activeChat: null,
+    lastErrorCode: null,
+    updatedAt: '2026-09-08T00:00:00.000Z',
+    queryStats: {
+      served: 2,
+      timedOut: 0,
+      rejectedBusy: 0,
+      p50Ms: 10,
+      p95Ms: 20,
+      maxMs: 20,
+      admissionP50Ms: 1,
+      admissionP95Ms: 2,
+      admissionMaxMs: 2,
+      totalP50Ms: 11,
+      totalP95Ms: 22,
+      totalMaxMs: 22,
+    },
+  };
+}
+
+function validRemoteSettings(enabled: boolean): Record<string, unknown> {
+  return {
+    version: 2,
+    features: {
+      ...DEFAULT_REMOTE_FEATURE_SETTINGS,
+      transcriptSearch: { enabled },
+    },
+    ui: {},
+    uiEffective: {},
+    paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
+    pinnedChatIds: [],
+    recentAgentSettings: [],
+    executionDefaults: {
+      global: { permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {} },
+      byAgent: {},
+    },
+    projectBasePath: '/project',
+    telegram: {
+      botTokenAvailable: false,
+      botUsername: null,
+      botFirstName: null,
+      recipientUsername: null,
+      recipientDisplayName: null,
+      recipientLinked: false,
+      pendingLink: false,
+      linkUrl: null,
+    },
+  };
+}
+
 describe('GarconClient', () => {
   test('fetches and validates the preamble catalog', async () => {
     const snapshot = {
@@ -329,6 +388,67 @@ describe('GarconClient', () => {
       exitCode: 2,
       errorCode: 'VALIDATION_FAILED',
     });
+  });
+
+  test('fetches and strictly validates transcript search status', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validSearchStatus());
+      },
+    });
+
+    await expect(client.getTranscriptSearchStatus()).resolves.toEqual(validSearchStatus());
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats/search/status`);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        ...validSearchStatus(),
+        queryStats: { ...(validSearchStatus().queryStats as object), served: '2' },
+      }),
+    });
+    await expect(malformed.getTranscriptSearchStatus()).rejects.toMatchObject({
+      phase: 'chat search',
+      exitCode: 3,
+    });
+  });
+
+  test('updates transcript search through the settings contract and verifies desired state', async () => {
+    let requestedUrl = '';
+    let submitted: unknown;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input, init) => {
+        requestedUrl = String(input);
+        submitted = JSON.parse(String(init?.body));
+        return Response.json({ success: true, settings: validRemoteSettings(true) });
+      },
+    });
+
+    await expect(client.setTranscriptSearchEnabled(true)).resolves.toMatchObject({
+      version: 2,
+      features: { transcriptSearch: { enabled: true } },
+    });
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/app/settings`);
+    expect(submitted).toEqual({ features: { transcriptSearch: { enabled: true } } });
+
+    for (const value of [
+      { success: true, settings: validRemoteSettings(false) },
+      { success: false, settings: validRemoteSettings(true) },
+      { success: true, settings: { ...validRemoteSettings(true), features: {} } },
+    ]) {
+      const malformed = new GarconClient({
+        ...connection,
+        fetch: async () => Response.json(value),
+      });
+      await expect(malformed.setTranscriptSearchEnabled(true)).rejects.toMatchObject({
+        phase: 'chat search',
+        exitCode: 3,
+      });
+    }
   });
 
   test('fetches and validates a correlated transcript export', async () => {

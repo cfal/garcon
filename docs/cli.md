@@ -183,10 +183,18 @@ advance that activity field.
 Search normalized transcript content and join each hit to chat metadata:
 
 ```bash
+bun cli/main.ts --workspace default transcript-search enable
+bun cli/main.ts --workspace default transcript-search status --json
 bun cli/main.ts --workspace default search '"version bump"' \
   --filter 'project:/garcon agent:codex' \
   --sort relevance --limit 20 --offset 0 --snippets 3 --json
 ```
+
+Transcript search is disabled by default and is enabled or disabled explicitly
+with `transcript-search enable|disable`. `transcript-search status` reports the
+index phase, chat coverage, queued and active indexing work, backlog and resync
+progress, the last error code, and query admission/execution/total latency
+statistics. JSON status is the validated server status document.
 
 Search is lexical. Quoted phrases require adjacent words in one indexed entry.
 Unquoted terms are ANDed at chat scope and can occur in different messages;
@@ -220,9 +228,9 @@ If a transcript view changes after the index page is selected, the response
 reports how many stale hits were removed. The CLI warns for any positive count,
 including a partially retained page, and callers should rerun the search.
 `page.hasMore` and `page.nextOffset` remain authoritative.
-Disabled search exits with settings guidance. Busy, timeout, and unavailable
-index states remain retryable operational failures. Invalid search queries exit
-as argument failures.
+Disabled search exits with the exact enable-command guidance. Busy, timeout, and
+unavailable index states remain retryable operational failures. Invalid search
+queries exit as argument failures.
 
 Read bounded context around a search ordinal while pinning the transcript view:
 

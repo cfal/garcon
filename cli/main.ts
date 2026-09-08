@@ -14,6 +14,7 @@ import { runChatSearch } from './chat-search.js';
 import { runChatRead } from './chat-read.js';
 import { runPermissionAnswer, runPermissionDecision } from './chat-permission.js';
 import { runChatOrderMutation, runRename, runSetTags } from './chat-metadata.js';
+import { runTranscriptSearchAdministration } from './transcript-search.js';
 import {
   resumeAsyncJsonEnvelope,
   startAsyncJsonEnvelope,
@@ -144,6 +145,11 @@ function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
   if (command?.kind === 'handoff') {
     return 'terminal interrupted; no handoff artifact was written';
   }
+  if (command?.kind === 'transcript-search') {
+    return command.action === 'status'
+      ? 'terminal interrupted; the read-only operation was canceled'
+      : 'terminal interrupted; the command may have reached Garcon; inspect transcript-search status before retrying';
+  }
   if (
     command !== undefined
     && ['list', 'chats', 'search', 'read', 'status', 'wait', 'lookup-native-session']
@@ -211,6 +217,11 @@ export async function main(
     if (command.kind === 'search') {
       const client = await connectedClient(command, options);
       await runChatSearch(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'transcript-search') {
+      const client = await connectedClient(command, options);
+      await runTranscriptSearchAdministration(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'read') {

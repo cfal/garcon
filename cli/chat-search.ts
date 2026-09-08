@@ -212,7 +212,7 @@ export async function runChatSearch(
     if (error instanceof GarconHttpError && error.errorCode === 'TRANSCRIPT_SEARCH_DISABLED') {
       throw new CliError(
         'chat search',
-        'transcript search is disabled; enable features.transcriptSearch.enabled in Garcon settings',
+        'transcript search is disabled; run `garcon-cli transcript-search enable`',
         2,
         { cause: error },
       );
