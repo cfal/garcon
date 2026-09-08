@@ -12,7 +12,11 @@ const MAX_LINES = 1000;
 // provider-neutral control routes include one-shot discovery delivery and one
 // bounded private lane sharing the existing queue drainer. Fresh project
 // admission also gates direct work, queue creation, and pre-dequeue dispatch.
-const EXECUTION_FOOTPRINT_BUDGET = 8415;
+// Includes exact public-terminal receipt observation, guarded delegated resume,
+// fixed-watermark snapshot initialization, and custom-title, preamble-free start
+// admission with compensation. Reply orchestration stays in chats; control view
+// fencing remains independent of receipt creation.
+const EXECUTION_FOOTPRINT_BUDGET = 8595;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

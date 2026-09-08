@@ -94,14 +94,22 @@ describe('agent architecture boundaries', () => {
     }
   });
 
-  test('stops handoff recovery before graceful shutdown drains dependencies', () => {
+  test('fences agent actions synchronously and stops handoff recovery before shutdown drains dependencies', () => {
     const source = readFileSync('server/server.ts', 'utf8');
     const shutdownStart = source.indexOf('const shutdown = async () =>');
+    const shutdownLatch = source.indexOf('shuttingDown = true', shutdownStart);
+    const actionStop = source.indexOf('agentCommands.shutdown()', shutdownStart);
+    const queueStop = source.indexOf('queue.beginShutdown()', shutdownStart);
+    const firstAwait = source.indexOf('await ', shutdownStart);
     const handoffStop = source.indexOf('handoffs.shutdown()', shutdownStart);
     const executionAbort = source.indexOf('abortRunningSessionsWithTimeout({', shutdownStart);
     const ledgerClose = source.indexOf('transcriptLedger.close()', shutdownStart);
 
     expect(shutdownStart).toBeGreaterThanOrEqual(0);
+    expect(shutdownLatch).toBeGreaterThan(shutdownStart);
+    expect(actionStop).toBeGreaterThan(shutdownLatch);
+    expect(queueStop).toBeGreaterThan(actionStop);
+    expect(firstAwait).toBeGreaterThan(actionStop);
     expect(handoffStop).toBeGreaterThan(shutdownStart);
     expect(handoffStop).toBeLessThan(executionAbort);
     expect(handoffStop).toBeLessThan(ledgerClose);

@@ -30,7 +30,7 @@ interface InterAgentMessageAttempt {
 }
 
 export interface InterAgentMessageExecution {
-  deliverInterAgentControlInput(
+  deliverServerControlInput(
     chatId: string,
     input: ServerControlInput,
     signal: AbortSignal,
@@ -192,7 +192,7 @@ export class InterAgentMessageController {
 
       let disposition: ServerControlDisposition;
       try {
-        disposition = await this.options.execution.deliverInterAgentControlInput(
+        disposition = await this.options.execution.deliverServerControlInput(
           targetChatId,
           controlInput,
           signal,
@@ -297,7 +297,7 @@ export class InterAgentMessageController {
 function receivedMessageNotice(
   fromChatId: ChatId | null,
   body: string,
-): ServerControlInput['receipt'] {
+): NonNullable<ServerControlInput['receipt']> {
   const detail: InterAgentMessageReceivedNoticeDetail = {
     type: 'inter-agent-message-received',
     fromChatId,

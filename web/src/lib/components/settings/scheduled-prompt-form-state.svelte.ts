@@ -10,8 +10,8 @@ import {
 	nextLocalTimeUtcIso,
 } from '$lib/scheduling/local-schedule';
 import {
-	SCHEDULED_PROMPT_INTERVAL_HOURS_MAX,
-	SCHEDULED_PROMPT_INTERVAL_HOURS_MIN,
+	SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX,
+	SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN,
 	SCHEDULED_PROMPT_MAX_LENGTH,
 	hasLeadingSlashCommand,
 	scheduledPromptFitsRenderedLimit,
@@ -20,7 +20,7 @@ import {
 } from '$shared/scheduled-prompts';
 import * as m from '$lib/paraglide/messages.js';
 
-const HOURS_PER_DAY = 24;
+const MINUTES_BY_UNIT = { minutes: 1, hours: 60, days: 1440 } as const;
 
 export interface ScheduledPromptFormStateOptions {
 	get selectableAgentIds(): readonly SessionAgentId[];
@@ -34,7 +34,7 @@ export class ScheduledPromptFormState {
 	date = $state('');
 	time = $state('09:00');
 	intervalAmount = $state(1);
-	intervalUnit = $state<'hours' | 'days'>('days');
+	intervalUnit = $state<keyof typeof MINUTES_BY_UNIT>('days');
 	recurrenceEnd = $state<'forever' | 'until'>('forever');
 	endDate = $state('');
 	targetType = $state<'new-chat' | 'existing-chat'>('new-chat');
@@ -68,9 +68,7 @@ export class ScheduledPromptFormState {
 	}
 
 	get intervalAmountMax(): number {
-		return this.intervalUnit === 'days'
-			? SCHEDULED_PROMPT_INTERVAL_HOURS_MAX / HOURS_PER_DAY
-			: SCHEDULED_PROMPT_INTERVAL_HOURS_MAX;
+		return Math.floor(SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX / MINUTES_BY_UNIT[this.intervalUnit]);
 	}
 
 	get promptError(): string | null {
@@ -124,13 +122,16 @@ export class ScheduledPromptFormState {
 		if (scheduledPrompt.schedule.type === 'recurring') {
 			this.#originalNextRunAt = scheduledPrompt.schedule.nextRunAt;
 			this.#originalLocalTime = this.time;
-			const intervalHours = scheduledPrompt.schedule.intervalHours;
-			if (intervalHours % HOURS_PER_DAY === 0) {
+			const intervalMinutes = scheduledPrompt.schedule.intervalMinutes;
+			if (intervalMinutes % MINUTES_BY_UNIT.days === 0) {
 				this.intervalUnit = 'days';
-				this.intervalAmount = intervalHours / HOURS_PER_DAY;
-			} else {
+				this.intervalAmount = intervalMinutes / MINUTES_BY_UNIT.days;
+			} else if (intervalMinutes % MINUTES_BY_UNIT.hours === 0) {
 				this.intervalUnit = 'hours';
-				this.intervalAmount = intervalHours;
+				this.intervalAmount = intervalMinutes / MINUTES_BY_UNIT.hours;
+			} else {
+				this.intervalUnit = 'minutes';
+				this.intervalAmount = intervalMinutes;
 			}
 			this.recurrenceEnd = scheduledPrompt.schedule.endAt ? 'until' : 'forever';
 			this.endDate = scheduledPrompt.schedule.endAt
@@ -215,13 +216,12 @@ export class ScheduledPromptFormState {
 			const runAtUtc = localDateTimeToUtcIso(this.date, this.time);
 			return runAtUtc && Date.parse(runAtUtc) >= minimum ? { type: 'once', runAtUtc } : null;
 		}
-		const intervalHours =
-			this.intervalUnit === 'days' ? this.intervalAmount * HOURS_PER_DAY : this.intervalAmount;
+		const intervalMinutes = this.intervalAmount * MINUTES_BY_UNIT[this.intervalUnit];
 		if (
 			!Number.isSafeInteger(this.intervalAmount) ||
-			!Number.isSafeInteger(intervalHours) ||
-			intervalHours < SCHEDULED_PROMPT_INTERVAL_HOURS_MIN ||
-			intervalHours > SCHEDULED_PROMPT_INTERVAL_HOURS_MAX
+			!Number.isSafeInteger(intervalMinutes) ||
+			intervalMinutes < SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN ||
+			intervalMinutes > SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX
 		)
 			return null;
 		let firstRunAtUtc: string | null;
@@ -237,6 +237,6 @@ export class ScheduledPromptFormState {
 		if (!firstRunAtUtc || Date.parse(firstRunAtUtc) < minimum) return null;
 		const endAtUtc = this.buildRecurringEndAtUtc();
 		if (this.recurrenceEnd === 'until' && (!endAtUtc || endAtUtc < firstRunAtUtc)) return null;
-		return { type: 'recurring', firstRunAtUtc, intervalHours, endAtUtc };
+		return { type: 'recurring', firstRunAtUtc, intervalMinutes, endAtUtc };
 	}
 }

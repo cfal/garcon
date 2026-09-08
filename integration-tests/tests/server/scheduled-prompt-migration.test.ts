@@ -16,9 +16,9 @@ function legacyScheduledPrompt(index: number, intervalDays: number) {
       endAt: null,
     },
     target: {
-      type: 'existing-chat',
+      type: 'existing-chat' as const,
       chatId: '1000000000000000',
-      busyBehavior: 'queue',
+      busyBehavior: 'queue' as const,
     },
     prompt: `Run scheduled prompt ${index}`,
     createdAt: CREATED_AT,
@@ -35,6 +35,38 @@ function legacyScheduledPromptsFile() {
 }
 
 describe('scheduled prompt persistence migration', () => {
+  test('preserves version-two records through minute migration and restart', async () => {
+    const original = {
+      version: 2, revision: 12,
+      prompts: [1, 6, 87600].map((hours, index) => {
+        const prompt = legacyScheduledPrompt(index, 1);
+        return { ...prompt, schedule: {
+          type: 'recurring', intervalHours: hours, nextRunAt: prompt.schedule.nextRunAt, endAt: null,
+        } };
+      }),
+    };
+    await withIntegrationFixture('scheduled-prompt-v2-migration', async (fixture) => {
+      const snapshot = await fixture.client.getScheduledPrompts();
+      expect(snapshot.revision).toBe(12);
+      expect(snapshot.prompts).toEqual(original.prompts.map((prompt) => ({
+        ...prompt, schedule: {
+          type: 'recurring', intervalMinutes: prompt.schedule.intervalHours * 60,
+          nextRunAt: prompt.schedule.nextRunAt, endAt: null,
+        },
+      })));
+      const backups = (await readdir(fixture.dirs.workspace)).filter((name) => name.includes('.v2-backup-'));
+      expect(backups).toHaveLength(1);
+      const backupPath = join(fixture.dirs.workspace, backups[0]!);
+      expect(await readFile(backupPath, 'utf8')).toBe(JSON.stringify(original));
+      expect((await stat(backupPath)).mode & 0o777).toBe(0o600);
+      await fixture.restartGarcon();
+      expect(await fixture.client.getScheduledPrompts()).toEqual(snapshot);
+      expect((await readdir(fixture.dirs.workspace)).filter((name) => name.includes('-backup-'))).toEqual(backups);
+    }, { prepareWorkspace: async ({ workspace }) => {
+      await writeFile(join(workspace, 'scheduled-prompts.json'), JSON.stringify(original));
+    } });
+  });
+
   test('migrates every legacy recurring prompt before serving the snapshot', async () => {
     await withIntegrationFixture(
       'scheduled-prompt-migration',
@@ -46,14 +78,14 @@ describe('scheduled prompt persistence migration', () => {
         expect(snapshot.prompts.map((scheduledPrompt) => scheduledPrompt.schedule)).toEqual(
           INTERVAL_DAYS.map((days, index) => ({
             type: 'recurring',
-            intervalHours: days * 24,
+            intervalMinutes: days * 1440,
             nextRunAt: `2099-0${index + 1}-01T09:00:00.000Z`,
             endAt: null,
           })),
         );
 
         const migrated = JSON.parse(await readFile(scheduledPromptsPath, 'utf8'));
-        expect(migrated.version).toBe(2);
+        expect(migrated.version).toBe(3);
         expect(migrated.revision).toBe(50);
         expect(migrated.prompts).toHaveLength(5);
         expect(
