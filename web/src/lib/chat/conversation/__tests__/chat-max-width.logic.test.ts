@@ -7,6 +7,7 @@ import {
 	CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
 	CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
 	CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
+	CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
 	chatDockFrameClass,
 } from '$lib/chat/conversation/chat-max-width.js';
 
@@ -50,6 +51,7 @@ describe('chat max width classes', () => {
 
 	it('keeps the elevated composer shell transparent', () => {
 		expect(CHAT_DOCK_SHELL_BASE_CLASS).not.toContain('bg-');
+		expect(CHAT_DOCK_SHELL_BASE_CLASS).not.toContain('px-');
 	});
 
 	it('reduces the none transcript inset below the previous values', () => {
@@ -62,7 +64,7 @@ describe('chat max width classes', () => {
 	it('keeps the none transcript width inside the composer in both layouts', () => {
 		// Mobile (small layout): feed px-4 (16px) must exceed composer px-2 (8px).
 		const feedMobile = extractPx(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.none, '');
-		const composerMobile = extractPx(CHAT_DOCK_SHELL_BASE_CLASS, '');
+		const composerMobile = extractPx(CHAT_MAX_WIDTH_DOCK_SHELL_CLASS.none, '');
 		expect(feedMobile).toBe(16);
 		expect(composerMobile).toBe(8);
 		expect(feedMobile!).toBeGreaterThan(composerMobile!);
@@ -75,10 +77,21 @@ describe('chat max width classes', () => {
 		expect(feedDesktop!).toBeGreaterThan(composerDesktop!);
 	});
 
-	it('preserves the mobile transcript inset for constrained width options', () => {
-		expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.large).toContain('px-[29px]');
-		expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.medium).toContain('px-[29px]');
-		expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.small).toContain('px-[29px]');
+	it('shrinks constrained gutters against each chat pane while preserving wide caps', () => {
+		for (const option of ['large', 'medium', 'small'] as const) {
+			expect(CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[option]).toBe(
+				'px-2 lg:px-[clamp(0.5rem,3%,1.5rem)]',
+			);
+			expect(CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[option]).toBe(
+				CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[option],
+			);
+			expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[option]).toContain(
+				'px-[clamp(0.5rem,3%,1.3125rem)]',
+			);
+			expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[option]).toContain(
+				'lg:px-[clamp(0.5rem,3%,1.25rem)]',
+			);
+		}
 	});
 
 	it('defines one shared frame for the composer and queued-input tray', () => {
