@@ -1,10 +1,20 @@
 <script lang="ts">
-	import { SvelteFlowProvider } from '@xyflow/svelte';
+	import { SvelteFlowProvider, type useStore } from '@xyflow/svelte';
 	import type { CanvasSession } from '$lib/chat-canvas/canvas-session.svelte';
 	import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
 	import { setCanvasView } from '$lib/context/canvas-context';
 	import CanvasFlow from '../CanvasFlow.svelte';
-	let { session }: { session: CanvasSession } = $props();
+	import type { CanvasFlowNode } from '../canvas-node-types';
+	import CanvasFlowStoreProbe from './CanvasFlowStoreProbe.svelte';
+	let {
+		session,
+		editing = true,
+		onstore,
+	}: {
+		session: CanvasSession;
+		editing?: boolean;
+		onstore?: (store: ReturnType<typeof useStore<CanvasFlowNode>>) => void;
+	} = $props();
 	const controller = new CanvasController();
 	setCanvasView({
 		get document() {
@@ -12,7 +22,9 @@
 		},
 		chats: {},
 		currentTime: new Date('2026-09-07T00:00:00Z'),
-		readOnly: false,
+		get readOnly() {
+			return !editing;
+		},
 		openChat: () => {},
 	});
 </script>
@@ -22,7 +34,7 @@
 		{session}
 		{controller}
 		selectedIds={new Set()}
-		editing
+		{editing}
 		visible
 		presentation="window-main"
 		onselect={() => {}}
@@ -30,4 +42,5 @@
 			throw new Error(message);
 		}}
 	/>
+	{#if onstore}<CanvasFlowStoreProbe {onstore} />{/if}
 </SvelteFlowProvider>

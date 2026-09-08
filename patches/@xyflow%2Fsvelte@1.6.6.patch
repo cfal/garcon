@@ -1,0 +1,323 @@
+diff --git a/dist/lib/actions/drag/index.js b/dist/lib/actions/drag/index.js
+index 9ad68e6ec2726219b0ffeb821b85c5f77069f162..ff733001b0db789b699a61b9cce61d903cd736b5 100644
+--- a/dist/lib/actions/drag/index.js
++++ b/dist/lib/actions/drag/index.js
+@@ -2,6 +2,7 @@ import { XYDrag } from '@xyflow/system';
+ export default function drag(domNode, params) {
+     const { store, onDrag, onDragStart, onDragStop, onNodeMouseDown } = params;
+     const dragInstance = XYDrag({
++        onCancel: (detail) => store.oninteractioncancel?.(detail),
+         onDrag,
+         onDragStart,
+         onDragStop,
+diff --git a/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte b/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte
+index 3d48da2bc7d8dc8b1e4dfb576ebe9ac144b39200..178725949cebadca03e88d44c09831f9553aee2c 100644
+--- a/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte
++++ b/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte
+@@ -1,4 +1,7 @@
+ <script lang="ts">
++  import { onDestroy } from 'svelte';
++  let cancelPointer: (() => void) | undefined;
++  onDestroy(() => cancelPointer?.());
+   import { useStore } from '../../store/index.js';
+   import { getEdgeIdContext } from '../../store/context.js';
+   import type { Edge } from '../../types/index.js';
+@@ -63,7 +66,8 @@
+             type: 'target' as HandleType
+           };
+ 
+-    XYHandle.onPointerDown(event, {
++    cancelPointer?.();
++    cancelPointer = XYHandle.onPointerDown(event, {
+       autoPanOnConnect,
+       connectionMode,
+       connectionRadius,
+@@ -101,6 +105,7 @@
+       getTransform: () => [store.viewport.x, store.viewport.y, store.viewport.zoom],
+       getFromHandle: () => store.connection.fromHandle,
+       dragThreshold: dragThreshold ?? store.connectionDragThreshold,
++      onCancel: (detail) => { reconnecting = false; store.oninteractioncancel?.(detail); },
+       handleDomNode: event.currentTarget as HTMLElement
+     });
+   };
+diff --git a/dist/lib/components/Handle/Handle.svelte b/dist/lib/components/Handle/Handle.svelte
+index 024f21ea2f8864fb2049ce30b6f3d65617c34c65..7930286e2ac6d3ea09976856578625f6bb69ed01 100644
+--- a/dist/lib/components/Handle/Handle.svelte
++++ b/dist/lib/components/Handle/Handle.svelte
+@@ -1,4 +1,7 @@
+ <script lang="ts">
++  import { onDestroy } from 'svelte';
++  let cancelPointer: (() => void) | undefined;
++  onDestroy(() => cancelPointer?.());
+   import {
+     Position,
+     XYHandle,
+@@ -114,7 +117,8 @@
+     const isMouseTriggered = isMouseEvent(event);
+ 
+     if (event.currentTarget && ((isMouseTriggered && event.button === 0) || !isMouseTriggered)) {
+-      XYHandle.onPointerDown(event, {
++      cancelPointer?.();
++      cancelPointer = XYHandle.onPointerDown(event, {
+         handleId,
+         nodeId,
+         isTarget,
+@@ -137,7 +141,8 @@
+         getTransform: () => [store.viewport.x, store.viewport.y, store.viewport.zoom],
+         getFromHandle: () => store.connection.fromHandle,
+         dragThreshold: store.connectionDragThreshold,
+-        handleDomNode: event.currentTarget as HTMLElement
++        onCancel: (detail) => store.oninteractioncancel?.(detail),
++      handleDomNode: event.currentTarget as HTMLElement
+       });
+     }
+   }
+diff --git a/dist/lib/container/Pane/Pane.svelte b/dist/lib/container/Pane/Pane.svelte
+index 800fd3d09deb89ed9bcef4d35ca1fa605ca07cb8..57cf4049246184ed1319d36fe418ab8d179828d4 100644
+--- a/dist/lib/container/Pane/Pane.svelte
++++ b/dist/lib/container/Pane/Pane.svelte
+@@ -39,8 +39,10 @@
+ </script>
+ 
+ <script lang="ts" generics="NodeType extends Node = Node, EdgeType extends Edge = Edge">
+-  import { onDestroy } from 'svelte';
++  import { onDestroy, untrack } from 'svelte';
+   import {
++    abortInteractions,
++    registerInteractionAbort,
+     SelectionMode,
+     getEventPosition,
+     getNodesInside,
+@@ -93,6 +95,16 @@
+   let autoPanId: number = 0;
+   let position: XYPosition = { x: 0, y: 0 };
+   let autoPanStarted = false;
++  let pointerId: number | null = null;
++  let captureTarget: Element | null = null;
++  let generation = 0;
++  let unregister = () => {};
++
++  $effect(() => {
++    if (!store.elementsSelectable || (!selectionOnDrag && !store.selectionKeyPressed)) {
++      untrack(cancelSelection);
++    }
++  });
+ 
+   // We start the selection process when the user clicks down on the pane
+   function onPointerDownCapture(event: PointerEvent) {
+@@ -123,7 +135,12 @@
+       return;
+     }
+ 
+-    (event.target as Partial<Element>)?.setPointerCapture?.(event.pointerId);
++    abortInteractions(store.domNode);
++    pointerId = event.pointerId;
++    captureTarget = event.target as Element;
++    generation++;
++    unregister = registerInteractionAbort(store.domNode, cancelSelection);
++    captureTarget.setPointerCapture?.(pointerId);
+ 
+     selectionInProgress = false;
+     autoPanStarted = false;
+@@ -215,18 +232,16 @@
+   }
+ 
+   function autoPan(): void {
+-    if (!autoPanOnSelection || !containerBounds) {
++    const token = generation;
++    if (pointerId === null || !autoPanOnSelection || !containerBounds) {
+       return;
+     }
+     const [x, y] = calcAutoPan(position, containerBounds, store.autoPanSpeed);
+ 
+     store.panBy({ x, y }).then((panned) => {
+-      if (!selectionInProgress || !panned) {
+-        autoPanId = requestAnimationFrame(autoPan);
+-        return;
+-      }
+-      commitUserSelectionRect(position.x, position.y);
+-      autoPanId = requestAnimationFrame(autoPan);
++      if (pointerId === null || token !== generation) return;
++      if (selectionInProgress && panned) commitUserSelectionRect(position.x, position.y);
++      if (pointerId !== null && token === generation) autoPanId = requestAnimationFrame(autoPan);
+     });
+   }
+ 
+@@ -236,14 +251,32 @@
+     autoPanStarted = false;
+   }
+ 
+-  onDestroy(() => {
+-    if (typeof window !== 'undefined') {
+-      cleanupAutoPan();
+-    }
+-  });
++  function finishSelection(): void {
++    const id = pointerId;
++    const target = captureTarget;
++    pointerId = null;
++    captureTarget = null;
++    generation++;
++    unregister();
++    unregister = () => {};
++    cleanupAutoPan();
++    store.selectionRect = null;
++    store.selectionRectMode = selectedNodeIds.size ? 'nodes' : null;
++    if (id !== null && target?.hasPointerCapture?.(id)) target.releasePointerCapture(id);
++  }
++
++  function cancelSelection(): void {
++    if (pointerId === null) return;
++    const started = selectionInProgress;
++    selectionInProgress = false;
++    finishSelection();
++    if (started) store.oninteractioncancel?.({ kind: 'marquee-selection' });
++  }
++
++  onDestroy(cancelSelection);
+ 
+   function onPointerMove(event: PointerEvent) {
+-    if (!isSelecting || !containerBounds || !store.selectionRect) {
++    if (event.pointerId !== pointerId || !isSelecting || !containerBounds || !store.selectionRect) {
+       return;
+     }
+ 
+@@ -264,7 +297,9 @@
+         return;
+       }
+       store.unselectNodesAndEdges();
++      selectionInProgress = true;
+       onselectionstart?.(event);
++      if (event.pointerId !== pointerId) return;
+     }
+ 
+     selectionInProgress = true;
+@@ -285,35 +320,15 @@
+       return;
+     }
+ 
+-    if (event.button !== 0) {
+-      return;
+-    }
+-
+-    (event.target as Partial<Element>)?.releasePointerCapture?.(event.pointerId);
+-
+-    // We only want to trigger click functions when in selection mode if
+-    // the user did not move the mouse.
+-
+-    if (!selectionInProgress && event.target === container) {
+-      onClick?.(event);
+-    }
+-
+-    store.selectionRect = null;
+-
+-    if (selectionInProgress) {
+-      store.selectionRectMode = selectedNodeIds.size > 0 ? 'nodes' : null;
+-    }
+-
+-    if (selectionInProgress) {
+-      onselectionend?.(event);
+-    }
+-
+-    cleanupAutoPan();
++    if (event.button !== 0 || event.pointerId !== pointerId) return;
++    const started = selectionInProgress;
++    finishSelection();
++    if (!started && event.target === container) onClick(event);
++    if (started) onselectionend?.(event);
+   }
+ 
+   function onPointerCancel(event: PointerEvent) {
+-    (event.target as Partial<Element>)?.releasePointerCapture?.(event.pointerId);
+-    cleanupAutoPan();
++    if (event.pointerId === pointerId) cancelSelection();
+   }
+ 
+   const onContextMenu = (event: MouseEvent) => {
+@@ -360,7 +375,8 @@
+   onpointerdowncapture={isSelectionEnabled ? onPointerDownCapture : undefined}
+   onpointermove={isSelectionEnabled ? onPointerMove : undefined}
+   onpointerup={onPointerUp}
+-  onpointercancel={isSelectionEnabled ? onPointerCancel : undefined}
++  onpointercancel={onPointerCancel}
++  onlostpointercapture={onPointerCancel}
+   oncontextmenu={wrapHandler(onContextMenu, container)}
+   onclickcapture={isSelectionEnabled ? onClickCapture : undefined}
+ >
+diff --git a/dist/lib/container/SvelteFlow/SvelteFlow.svelte b/dist/lib/container/SvelteFlow/SvelteFlow.svelte
+index 93747cf85b8a8ed065f1d88b090c0fec3d7f8450..aea69956ef534dfbac94af450d16891678e19b42 100644
+--- a/dist/lib/container/SvelteFlow/SvelteFlow.svelte
++++ b/dist/lib/container/SvelteFlow/SvelteFlow.svelte
+@@ -2,7 +2,7 @@
+   import type { Edge, Node } from '../../types/index.js';
+   import { getContext, setContext, onDestroy, untrack } from 'svelte';
+   import type { HTMLAttributes } from 'svelte/elements';
+-  import { ConnectionLineType, PanOnScrollMode } from '@xyflow/system';
++  import { abortInteractions, ConnectionLineType, PanOnScrollMode } from '@xyflow/system';
+ 
+   import { key, createStore } from '../../store/index.js';
+   import { Zoom } from '../Zoom/index.js';
+@@ -125,6 +125,7 @@
+   });
+ 
+   onDestroy(() => {
++    abortInteractions(store.domNode);
+     providerContext?.setStore(
+       createStore({
+         width: 0,
+diff --git a/dist/lib/container/SvelteFlow/types.d.ts b/dist/lib/container/SvelteFlow/types.d.ts
+index 704f90fb103ee237340f8cfbaeee60da77b49e65..a3f5f3496a83ceed9102c26d7e133a775b018e82 100644
+--- a/dist/lib/container/SvelteFlow/types.d.ts
++++ b/dist/lib/container/SvelteFlow/types.d.ts
+@@ -7,6 +7,7 @@ export type SvelteFlowProps<NodeType extends Node = Node, EdgeType extends Edge
+     /**
+      * The id of the flow. This is necessary if you want to render multiple flows.
+      */
++    oninteractioncancel?: (detail: import('@xyflow/system').InteractionCancel) => void;
+     id?: string;
+     /** Sets a fixed width for the flow */
+     width?: number;
+diff --git a/dist/lib/index.d.ts b/dist/lib/index.d.ts
+index 8e8d33d7100dad8ecacac193e9094571bb20dff4..0b70b787d06beb7945e9911d1d1c8c0f009ede2c 100644
+--- a/dist/lib/index.d.ts
++++ b/dist/lib/index.d.ts
+@@ -32,3 +32,5 @@ export * from './types/events.js';
+ export type { SvelteFlowStore } from './store/types.js';
+ export { type Align, type SmoothStepPathOptions, type BezierPathOptions, ConnectionLineType, type EdgeMarker, type EdgeMarkerType, MarkerType, type OnMove, type OnMoveStart, type OnMoveEnd, type Connection, ConnectionMode, type OnConnectStartParams, type OnConnectStart, type OnConnect, type OnConnectEnd, type Viewport, type SnapGrid, PanOnScrollMode, type ViewportHelperFunctionOptions, type SetCenterOptions, type FitBoundsOptions, type PanelPosition, SelectionMode, type SelectionRect, type OnError, type NodeOrigin, type OnSelectionDrag, Position, type XYPosition, type XYZPosition, type Dimensions, type Rect, type Box, type Transform, type CoordinateExtent, type ColorMode, type ColorModeClass, type ShouldResize, type OnResizeStart, type OnResize, type OnResizeEnd, type OnReconnect, type OnReconnectStart, type OnReconnectEnd, type ControlPosition, type ControlLinePosition, ResizeControlVariant, type ResizeParams, type ResizeParamsWithDirection, type ResizeDragEvent, type IsValidConnection, type NodeConnection, type AriaLabelConfig, type SetCenter, type SetViewport, type FitBounds, type HandleConnection, type ZIndexMode, type NodeHandle, type UseNodeConnectionsParams } from '@xyflow/system';
+ export { type GetBezierPathParams, getBezierEdgeCenter, getBezierPath, getEdgeCenter, type GetSmoothStepPathParams, getSmoothStepPath, type GetStraightPathParams, getStraightPath, getViewportForBounds, getNodesBounds, getIncomers, getOutgoers, getConnectedEdges } from '@xyflow/system';
++
++export { abortInteractions } from '@xyflow/system';
+diff --git a/dist/lib/index.js b/dist/lib/index.js
+index 8638dc031367b5d4d1664805ded7e9cc94be927f..621792b20add6794af44e66b69c25c491f253d81 100644
+--- a/dist/lib/index.js
++++ b/dist/lib/index.js
+@@ -37,3 +37,5 @@ export * from './types/events.js';
+ export { ConnectionLineType, MarkerType, ConnectionMode, PanOnScrollMode, SelectionMode, Position, ResizeControlVariant } from '@xyflow/system';
+ // system utils
+ export { getBezierEdgeCenter, getBezierPath, getEdgeCenter, getSmoothStepPath, getStraightPath, getViewportForBounds, getNodesBounds, getIncomers, getOutgoers, getConnectedEdges } from '@xyflow/system';
++
++export { abortInteractions } from '@xyflow/system';
+diff --git a/dist/lib/store/initial-store.svelte.d.ts b/dist/lib/store/initial-store.svelte.d.ts
+index 61a1524bcb13b1d80d7f2a8d4e5f0a4a70aa6bcd..73881c8ba3b462dc7fc365f6e4d95bda30f58f44 100644
+--- a/dist/lib/store/initial-store.svelte.d.ts
++++ b/dist/lib/store/initial-store.svelte.d.ts
+@@ -100,6 +100,7 @@ export declare function getInitialStore<NodeType extends Node = Node, EdgeType e
+     onbeforeconnect?: OnBeforeConnect<EdgeType>;
+     onconnect?: OnConnect;
+     onconnectstart?: OnConnectStart;
++    oninteractioncancel?: (detail: import('@xyflow/system').InteractionCancel) => void;
+     onconnectend?: OnConnectEnd;
+     onbeforereconnect?: OnBeforeReconnect<EdgeType>;
+     onreconnect?: OnReconnect<EdgeType>;
+diff --git a/dist/lib/store/initial-store.svelte.js b/dist/lib/store/initial-store.svelte.js
+index fc6b6c6d07b7b7adf6e2794eb3e004c4385614cb..f3b525095a02b0bbebe05d73be4873784f5e68ec 100644
+--- a/dist/lib/store/initial-store.svelte.js
++++ b/dist/lib/store/initial-store.svelte.js
+@@ -259,6 +259,7 @@ export function getInitialStore(signals) {
+         onbeforeconnect = $derived(signals.props.onbeforeconnect);
+         onconnect = $derived(signals.props.onconnect);
+         onconnectstart = $derived(signals.props.onconnectstart);
++        oninteractioncancel = $derived(signals.props.oninteractioncancel);
+         onconnectend = $derived(signals.props.onconnectend);
+         onbeforereconnect = $derived(signals.props.onbeforereconnect);
+         onreconnect = $derived(signals.props.onreconnect);

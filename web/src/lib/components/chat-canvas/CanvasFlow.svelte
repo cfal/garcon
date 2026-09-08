@@ -5,6 +5,7 @@
 		ConnectionMode,
 		useSvelteFlow,
 		useStore,
+		abortInteractions,
 		type Edge,
 		type Connection,
 	} from '@xyflow/svelte';
@@ -54,10 +55,15 @@
 	let viewportApplied = false;
 	let releaseInteraction: (() => void) | null = null;
 	let interactionCancelled = false;
+	let draggedIds = $state.raw<readonly string[]>([]);
 
 	$effect(() => {
-		const source = flowStore.clickConnectStartHandle;
-		if (source && !session.document.content.nodes.some((node) => node.id === source.nodeId)) {
+		const liveIds = new Set(session.document.content.nodes.map((node) => node.id));
+		const sources = [flowStore.clickConnectStartHandle, flowStore.connection.fromHandle];
+		if (
+			sources.some((source) => source && !liveIds.has(source.nodeId)) ||
+			draggedIds.some((id) => !liveIds.has(id))
+		) {
 			untrack(cancelInteraction);
 		}
 	});
@@ -114,18 +120,24 @@
 		return () => cancelAnimationFrame(frame);
 	});
 	$effect(() => {
-		if (!visible) {
+		if (!visible || !editing) {
 			untrack(cancelInteraction);
 			return;
 		}
 		window.addEventListener('blur', cancelInteraction);
 		window.addEventListener('pointercancel', cancelInteraction);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
 			window.removeEventListener('blur', cancelInteraction);
 			window.removeEventListener('pointercancel', cancelInteraction);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 		};
 	});
-	onDestroy(endInteraction);
+	onDestroy(cancelInteraction);
+
+	function handleVisibilityChange() {
+		if (document.hidden) cancelInteraction();
+	}
 
 	function beginInteraction() {
 		flowStore.clickConnectStartHandle = null;
@@ -135,14 +147,22 @@
 	function endInteraction() {
 		// Click connections retain a separate source handle after pointer cancellation.
 		flowStore.clickConnectStartHandle = null;
+		draggedIds = [];
 		releaseInteraction?.();
 		releaseInteraction = null;
 	}
 	function cancelInteraction() {
-		if (!releaseInteraction) return;
 		interactionCancelled = true;
-		nodes = flowNodes(session.document.content, selectedIds);
-		endInteraction();
+		try {
+			abortInteractions(flowStore.domNode);
+		} finally {
+			nodes = flowNodes(session.document.content, selectedIds);
+			endInteraction();
+		}
+	}
+	function beginDrag({ nodes: moved }: { nodes: CanvasFlowNode[] }) {
+		beginInteraction();
+		draggedIds = moved.map((node) => node.id);
 	}
 
 	function initialize() {
@@ -174,6 +194,8 @@
 	function connect(connection: Connection) {
 		if (!visible || !editing || interactionCancelled || connection.source === connection.target)
 			return;
+		const liveIds = new Set(session.document.content.nodes.map((node) => node.id));
+		if (!liveIds.has(connection.source) || !liveIds.has(connection.target)) return;
 		if (session.document.content.connections.length >= CANVAS_MAX_CONNECTIONS) {
 			onerror(m.canvas_limit());
 			return;
@@ -241,10 +263,12 @@
 		}}
 		onclickconnectstart={beginInteraction}
 		onclickconnectend={endInteraction}
+		oninteractioncancel={cancelInteraction}
 		isValidConnection={(edge) => edge.source !== edge.target}
 		onnodedragstop={({ nodes: moved }) => finishDrag(moved)}
-		onnodedragstart={beginInteraction}
-		onselectiondragstart={beginInteraction}
+		onnodedragstart={beginDrag}
+		onselectionstart={beginInteraction}
+		onselectionend={endInteraction}
 		onselectionchange={({ nodes: selectedNodes, edges: selectedEdges }) =>
 			untrack(() => {
 				const next = new Set([

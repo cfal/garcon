@@ -30,6 +30,7 @@ FROM base AS build
 WORKDIR /app
 
 COPY package.json bun.lock bunfig.toml ./
+COPY patches/ patches/
 COPY common/package.json common/
 COPY server/package.json server/
 COPY web/package.json web/
