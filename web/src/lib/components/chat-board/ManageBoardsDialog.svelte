@@ -7,6 +7,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { copyChatBoard } from '$lib/chat-board/catalog/chat-board-copy.js';
 	import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 	import type { ChatBoard } from '$shared/chat-boards';
 	import * as m from '$lib/paraglide/messages.js';
@@ -23,15 +24,23 @@
 		onEditBoard: (board: ChatBoard) => void;
 	} = $props();
 
+	interface BoardRenameDraft {
+		board: ChatBoard;
+		catalogRevision: number;
+		name: string;
+	}
+
 	let newName = $state('');
-	let editingId = $state<string | null>(null);
-	let editingName = $state('');
+	let renameDraft = $state<BoardRenameDraft | null>(null);
 	let deletingId = $state<string | null>(null);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let draggedId = $state<string | null>(null);
 	let dragOverId = $state<string | null>(null);
 	let pendingBoardEditor = $state<{ boardId: string; catalogRevision: number } | null>(null);
+	let renameOutdated = $derived(
+		renameDraft !== null && renameDraft.catalogRevision !== controller.catalog.revision,
+	);
 
 	$effect(() => {
 		const pending = pendingBoardEditor;
@@ -71,27 +80,48 @@
 	}
 
 	function startRename(board: ChatBoard): void {
-		editingId = board.id;
-		editingName = board.name;
+		renameDraft = {
+			board: copyChatBoard(board),
+			catalogRevision: controller.catalog.revision,
+			name: board.name,
+		};
 		deletingId = null;
 	}
 
-	async function saveRename(board: ChatBoard): Promise<void> {
-		const name = editingName.trim();
-		if (!name || busy) {
+	async function saveRename(): Promise<void> {
+		const draft = renameDraft;
+		const name = draft?.name.trim() ?? '';
+		if (!draft || !name || busy || renameOutdated) {
 			if (!name) error = m.chat_board_name_required();
 			return;
 		}
 		busy = true;
 		error = null;
 		try {
-			await controller.updateBoard({ ...board, name });
-			editingId = null;
+			await controller.updateBoard({ ...draft.board, name }, draft.catalogRevision);
+			renameDraft = null;
 		} catch (value) {
 			error = presentError(value);
 		} finally {
 			busy = false;
 		}
+	}
+
+	function restartRenameFromLatest(): void {
+		if (!renameDraft) return;
+		const boardId = renameDraft.board.id;
+		const latest = controller.catalog.boards.find((board) => board.id === boardId);
+		if (!latest) {
+			renameDraft = null;
+			error = m.chat_board_board_removed();
+			return;
+		}
+		renameDraft = {
+			board: copyChatBoard(latest),
+			catalogRevision: controller.catalog.revision,
+			name: latest.name,
+		};
+		error = null;
 	}
 
 	async function commitOrder(ids: readonly string[]): Promise<void> {
@@ -156,7 +186,7 @@
 	async function removeBoard(board: ChatBoard): Promise<void> {
 		if (deletingId !== board.id || busy) {
 			deletingId = board.id;
-			editingId = null;
+			renameDraft = null;
 			return;
 		}
 		busy = true;
@@ -225,26 +255,49 @@
 						ondrop={(event) => handleDrop(event, board.id)}
 						data-chat-board-manager-row={board.id}
 					>
-						{#if editingId === board.id}
+						{#if renameDraft?.board.id === board.id}
 							<form
-								class="flex gap-2"
+								class="space-y-2"
 								onsubmit={(event) => {
 									event.preventDefault();
-									void saveRename(board);
+									void saveRename();
 								}}
 							>
-								<Input
-									bind:value={editingName}
-									maxlength={80}
-									disabled={busy}
-									aria-label={m.chat_board_board_name()}
-								/>
-								<Button size="sm" type="submit" disabled={busy || !editingName.trim()}
-									>{m.chat_board_save()}</Button
-								>
-								<Button size="sm" variant="ghost" onclick={() => (editingId = null)}
-									>{m.common_cancel()}</Button
-								>
+								<div class="flex gap-2">
+									<Input
+										bind:value={renameDraft.name}
+										maxlength={80}
+										disabled={busy || renameOutdated}
+										aria-label={m.chat_board_board_name()}
+									/>
+									<Button
+										size="sm"
+										type="submit"
+										disabled={busy || renameOutdated || !renameDraft.name.trim()}
+										>{m.chat_board_save()}</Button
+									>
+									<Button
+										size="sm"
+										type="button"
+										variant="ghost"
+										onclick={() => (renameDraft = null)}>{m.common_cancel()}</Button
+									>
+								</div>
+								{#if renameOutdated}
+									<div
+										class="rounded-md border border-status-warning-border bg-status-warning/10 px-3 py-2 text-xs text-status-warning-muted-foreground"
+										role="alert"
+									>
+										<p>{m.chat_board_outdated()}</p>
+										<Button
+											class="mt-2"
+											size="sm"
+											type="button"
+											variant="outline"
+											onclick={restartRenameFromLatest}>{m.chat_board_start_latest()}</Button
+										>
+									</div>
+								{/if}
 							</form>
 						{:else}
 							<div class="flex min-w-0 items-center gap-1">

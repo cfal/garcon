@@ -8,9 +8,12 @@ import {
 	type ChatBoard,
 	type ChatBoardCatalog,
 } from '$shared/chat-boards';
+import * as m from '$lib/paraglide/messages.js';
 import type { ChatBoardInvalidationHub } from './chat-board-invalidation-hub.js';
 
 export type ChatBoardLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+const CHAT_BOARD_CATCH_UP_REQUEST_LIMIT = 3;
 
 export interface ChatBoardPreferencesPort {
 	get selectedBoardId(): string | null;
@@ -116,6 +119,10 @@ export class ChatBoardController implements PortableSingletonController {
 	}
 
 	async refresh(initial = this.#status === 'idle'): Promise<void> {
+		await this.#refresh(initial, 1);
+	}
+
+	async #refresh(initial: boolean, catchUpRequest: number): Promise<void> {
 		if (this.#inFlight) {
 			this.#needsRefresh = true;
 			return this.#inFlight;
@@ -145,7 +152,12 @@ export class ChatBoardController implements PortableSingletonController {
 		})();
 		await this.#inFlight;
 		if (receivedResponse && this.#needsRefresh && this.#presentationVisible) {
-			await this.refresh(false);
+			if (catchUpRequest < CHAT_BOARD_CATCH_UP_REQUEST_LIMIT) {
+				await this.#refresh(false, catchUpRequest + 1);
+				return;
+			}
+			this.#error = m.chat_board_catalog_stale();
+			if (this.#status !== 'ready') this.#status = 'error';
 		}
 	}
 

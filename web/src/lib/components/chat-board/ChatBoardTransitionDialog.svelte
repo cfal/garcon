@@ -5,6 +5,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import ColoredTag from '$lib/components/shared/ColoredTag.svelte';
+	import { copyChatBoard } from '$lib/chat-board/catalog/chat-board-copy.js';
 	import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import {
@@ -40,21 +41,8 @@
 		onApplied: (chatId: string, targetColumnId: string) => void;
 	} = $props();
 
-	function copyBoard(value: ChatBoard): ChatBoard {
-		return {
-			id: value.id,
-			name: value.name,
-			columns: value.columns.map((column) => ({
-				id: column.id,
-				name: column.name,
-				match: column.match,
-				tags: [...column.tags],
-			})),
-		};
-	}
-
 	const initial = untrack(() => ({
-		board: copyBoard(board),
+		board: copyChatBoard(board),
 		revision: controller.catalog.revision,
 		tags: [...occurrence.chat.tags],
 	}));
@@ -162,7 +150,7 @@
 			latestDestinations.find((column) => column.id === targetColumnId) ??
 			latestDestinations[0] ??
 			null;
-		baseBoard = copyBoard(latestBoard);
+		baseBoard = copyChatBoard(latestBoard);
 		baseRevision = controller.catalog.revision;
 		baseTags = [...latestChat.tags];
 		targetColumnId = latestTarget?.id ?? '';

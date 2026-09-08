@@ -9,8 +9,10 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { copyChatBoard } from '$lib/chat-board/catalog/chat-board-copy.js';
 	import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 	import {
+		CHAT_BOARD_COLUMN_MAX_COUNT,
 		normalizeBoardTagInput,
 		normalizeChatBoardCatalog,
 		type ChatBoard,
@@ -24,19 +26,6 @@
 		name: string;
 		match: ChatBoardMatchMode;
 		tagsInput: string;
-	}
-
-	function copyBoard(value: ChatBoard): ChatBoard {
-		return {
-			id: value.id,
-			name: value.name,
-			columns: value.columns.map((column) => ({
-				id: column.id,
-				name: column.name,
-				match: column.match,
-				tags: [...column.tags],
-			})),
-		};
 	}
 
 	let {
@@ -55,9 +44,9 @@
 		revision: controller.catalog.revision,
 		catalog: {
 			revision: controller.catalog.revision,
-			boards: controller.catalog.boards.map(copyBoard),
+			boards: controller.catalog.boards.map(copyChatBoard),
 		},
-		board: copyBoard(board),
+		board: copyChatBoard(board),
 	}));
 	let baseRevision = $state(initial.revision);
 	let baseCatalog = $state(initial.catalog);
@@ -70,12 +59,17 @@
 	let draggedColumnId = $state<string | null>(null);
 	let dragOverColumnId = $state<string | null>(null);
 	let outdated = $derived(controller.catalog.revision !== baseRevision);
+	let columnLimitReached = $derived(columns.length >= CHAT_BOARD_COLUMN_MAX_COUNT);
 
 	function toDraft(column: ChatBoardColumn): ColumnDraft {
 		return { ...column, tagsInput: column.tags.join(', ') };
 	}
 
 	function addColumn(): void {
+		if (columnLimitReached) {
+			error = m.chat_board_column_limit({ count: CHAT_BOARD_COLUMN_MAX_COUNT });
+			return;
+		}
 		columns = [
 			...columns,
 			{
@@ -90,6 +84,10 @@
 	function duplicateColumn(index: number): void {
 		const source = columns[index];
 		if (!source) return;
+		if (columnLimitReached) {
+			error = m.chat_board_column_limit({ count: CHAT_BOARD_COLUMN_MAX_COUNT });
+			return;
+		}
 		columns = [
 			...columns.slice(0, index + 1),
 			{ ...source, id: crypto.randomUUID(), name: `${source.name} copy` },
@@ -181,6 +179,10 @@
 	}
 
 	function validate(): ChatBoard | null {
+		if (columns.length > CHAT_BOARD_COLUMN_MAX_COUNT) {
+			error = m.chat_board_column_limit({ count: CHAT_BOARD_COLUMN_MAX_COUNT });
+			return null;
+		}
 		const errors: Record<string, string> = {};
 		const name = boardName.trim().normalize('NFC');
 		if (!name) errors.boardName = m.chat_board_name_required();
@@ -238,7 +240,7 @@
 		baseRevision = controller.catalog.revision;
 		baseCatalog = {
 			revision: controller.catalog.revision,
-			boards: controller.catalog.boards.map(copyBoard),
+			boards: controller.catalog.boards.map(copyChatBoard),
 		};
 		boardName = latest.name;
 		columns = latest.columns.map(toDraft);
@@ -359,6 +361,7 @@
 									size="icon-sm"
 									variant="ghost"
 									aria-label={m.chat_board_duplicate_column()}
+									disabled={columnLimitReached}
 									onclick={() => duplicateColumn(index)}><Copy class="size-3.5" /></Button
 								>
 								<Button
@@ -404,11 +407,16 @@
 				class="mt-3 gap-2"
 				variant="outline"
 				onclick={addColumn}
-				disabled={submitting || outdated}
+				disabled={submitting || outdated || columnLimitReached}
 			>
 				<Plus class="size-4" />
 				{m.chat_board_add_column()}
 			</Button>
+			{#if columnLimitReached}
+				<p class="mt-2 text-xs text-muted-foreground" role="status">
+					{m.chat_board_column_limit({ count: CHAT_BOARD_COLUMN_MAX_COUNT })}
+				</p>
+			{/if}
 			<p class="mt-3 text-xs text-muted-foreground">{m.chat_board_columns_delete_note()}</p>
 			{#if error}<p
 					class="mt-3 rounded-md border border-status-error-border bg-status-error px-3 py-2 text-sm text-status-error-foreground"

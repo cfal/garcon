@@ -30,7 +30,13 @@ async function setup() {
 	const api = {
 		load: vi.fn(async () => current),
 		create: vi.fn(),
-		update: vi.fn(),
+		update: vi.fn(async (_revision: number, updated: ChatBoard) => {
+			current = {
+				revision: current.revision + 1,
+				boards: current.boards.map((board) => (board.id === updated.id ? updated : board)),
+			};
+			return { success: true as const, catalog: current };
+		}),
 		remove: vi.fn(async (_revision: number, boardId: string) => {
 			current = {
 				revision: current.revision + 1,
@@ -68,7 +74,14 @@ async function setup() {
 		sidebarLayout: () => 'compact',
 	});
 	await controller.refresh(true);
-	return { api, controller, invalidations };
+	return {
+		api,
+		controller,
+		invalidations,
+		setRemoteCatalog(catalog: ChatBoardCatalog) {
+			current = catalog;
+		},
+	};
 }
 
 afterEach(() => cleanup());
@@ -115,6 +128,39 @@ describe('ManageBoardsDialog', () => {
 		expect(api.remove).not.toHaveBeenCalled();
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 		await waitFor(() => expect(api.remove).toHaveBeenCalledWith(1, first.id));
+	});
+
+	it('requires an explicit restart before renaming against a newer catalog', async () => {
+		const { api, controller, setRemoteCatalog } = await setup();
+		render(ManageBoardsDialog, {
+			open: true,
+			controller,
+			onClose: vi.fn(),
+			onEditBoard: vi.fn(),
+		});
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Rename' })[0]!);
+		const renameInput = screen.getAllByLabelText('Board name').at(-1) as HTMLInputElement;
+		await fireEvent.input(renameInput, { target: { value: 'Local rename' } });
+
+		const remoteBoard = { ...first, name: 'Remote rename' };
+		setRemoteCatalog({ revision: 2, boards: [remoteBoard, second] });
+		await controller.refresh(false);
+
+		expect(renameInput.value).toBe('Local rename');
+		expect(
+			screen.getByText('This board changed elsewhere. Review the latest version before saving.'),
+		).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
+		expect(api.update).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Start again from latest' }));
+		expect(renameInput.value).toBe('Remote rename');
+		await fireEvent.input(renameInput, { target: { value: 'Reviewed rename' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() =>
+			expect(api.update).toHaveBeenCalledWith(2, { ...remoteBoard, name: 'Reviewed rename' }),
+		);
 	});
 
 	it('opens the new board editor after a newer catalog supersedes its create response', async () => {

@@ -24,8 +24,8 @@ const board: ChatBoard = {
 	columns: [ready, review],
 };
 
-async function setup() {
-	let current: ChatBoardCatalog = { revision: 1, boards: [board] };
+async function setup(initialBoard = board) {
+	let current: ChatBoardCatalog = { revision: 1, boards: [initialBoard] };
 	const api = {
 		load: vi.fn(async () => current),
 		create: vi.fn(),
@@ -41,7 +41,7 @@ async function setup() {
 		invalidations: new ChatBoardInvalidationHub(),
 		preferences: {
 			get selectedBoardId() {
-				return board.id;
+				return initialBoard.id;
 			},
 			setSelectedBoardId() {},
 			get itemLayout() {
@@ -117,5 +117,25 @@ describe('EditColumnsDialog', () => {
 		expect(onClose).toHaveBeenCalledOnce();
 		expect(api.update).not.toHaveBeenCalled();
 		view.unmount();
+	});
+
+	it('disables add and duplicate actions at the column limit with explicit feedback', async () => {
+		const columns = Array.from({ length: 20 }, (_, index) => ({
+			id: `${String(index + 1).padStart(8, '0')}-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+			name: `Column ${index + 1}`,
+			match: 'all' as const,
+			tags: [`tag-${index + 1}`],
+		}));
+		const fullBoard = { ...board, columns };
+		const { controller } = await setup(fullBoard);
+		render(EditColumnsDialog, { open: true, controller, board: fullBoard, onClose: vi.fn() });
+
+		expect(screen.getByText('Boards can have up to 20 columns.')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Add column' }).hasAttribute('disabled')).toBe(true);
+		expect(
+			screen
+				.getAllByRole('button', { name: 'Duplicate column' })
+				.every((button) => button.hasAttribute('disabled')),
+		).toBe(true);
 	});
 });

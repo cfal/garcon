@@ -186,6 +186,30 @@ describe('ChatBoardController', () => {
 		expect(test.api.load).toHaveBeenCalledTimes(3);
 	});
 
+	it('bounds stale catalog catch-up requests and keeps manual retry available', async () => {
+		const test = harness();
+		test.controller.setPresentationVisible(true);
+		await vi.waitFor(() => expect(test.controller.status).toBe('ready'));
+		test.api.load.mockResolvedValue(catalog(1));
+
+		test.invalidations.publish({ kind: 'catalog', revision: 2, reason: 'updated' });
+
+		await vi.waitFor(() =>
+			expect(test.controller.error).toBe(
+				'Chat Board could not load the latest changes. Try again.',
+			),
+		);
+		expect(test.api.load).toHaveBeenCalledTimes(4);
+		expect(test.controller.status).toBe('ready');
+		expect(test.controller.catalog.revision).toBe(1);
+
+		test.api.load.mockResolvedValueOnce(catalog(2));
+		await test.controller.refresh(false);
+		expect(test.controller.catalog.revision).toBe(2);
+		expect(test.controller.error).toBeNull();
+		expect(test.api.load).toHaveBeenCalledTimes(5);
+	});
+
 	it('keeps initial loading truthful when a rejected catalog follow-up fails', async () => {
 		const staleResponse = deferred<ChatBoardCatalog>();
 		const currentResponse = deferred<ChatBoardCatalog>();
