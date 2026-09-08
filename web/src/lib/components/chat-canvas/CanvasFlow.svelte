@@ -4,6 +4,7 @@
 		Background,
 		ConnectionMode,
 		useSvelteFlow,
+		useStore,
 		type Edge,
 		type Connection,
 	} from '@xyflow/svelte';
@@ -42,6 +43,7 @@
 	} = $props();
 	const nodeTypes = { canvasBox: CanvasBoxNode, canvasChat: CanvasChatNode };
 	const flow = useSvelteFlow<CanvasFlowNode>();
+	const flowStore = $derived(useStore<CanvasFlowNode>());
 	const dnd = getWorkspaceWindowDnd();
 	let nodes = $state.raw<CanvasFlowNode[]>([]);
 	let edges = $state.raw<Edge[]>([]);
@@ -119,10 +121,13 @@
 	onDestroy(endInteraction);
 
 	function beginInteraction() {
+		flowStore.clickConnectStartHandle = null;
 		interactionCancelled = false;
 		releaseInteraction ??= session.beginInteraction();
 	}
 	function endInteraction() {
+		// Click connections retain a separate source handle after pointer cancellation.
+		flowStore.clickConnectStartHandle = null;
 		releaseInteraction?.();
 		releaseInteraction = null;
 	}
@@ -227,9 +232,8 @@
 			endInteraction();
 			interactionCancelled = false;
 		}}
-		onclickconnectstart={() => {
-			interactionCancelled = false;
-		}}
+		onclickconnectstart={beginInteraction}
+		onclickconnectend={endInteraction}
 		isValidConnection={(edge) => edge.source !== edge.target}
 		onnodedragstop={({ nodes: moved }) => finishDrag(moved)}
 		onnodedragstart={beginInteraction}
