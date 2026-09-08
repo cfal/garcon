@@ -988,6 +988,65 @@ describe('Chromium workspace windows', () => {
         },
         { expectedActionId: promotedActionId, expectedWindowId: windowId },
       );
+      await menu.waitFor({ state: 'detached' });
+      await fixture.page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
+      expect(
+        await addControls
+          .locator(`[data-workspace-window-add-action="${promotedActionId}"]`)
+          .evaluate((element) => element === document.activeElement),
+      ).toBe(true);
+
+      await titlebar.evaluate((element) => {
+        const header = element as HTMLElement;
+        header.style.width = `${header.getBoundingClientRect().width - 30}px`;
+      });
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        return (
+          workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length === 2 &&
+          workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') !== null
+        );
+      }, windowId);
+      await addControls.locator('[data-workspace-window-add-trigger]').click();
+      const retainedMenuAction = menu.getByRole('menuitem').nth(1);
+      const retainedActionId = await retainedMenuAction.getAttribute(
+        'data-workspace-window-add-action',
+      );
+      if (!retainedActionId) throw new Error('Retained overflow action has no stable identity.');
+      await retainedMenuAction.focus();
+      await titlebar.evaluate((element) => {
+        const header = element as HTMLElement;
+        header.style.width = `${header.getBoundingClientRect().width + 30}px`;
+      });
+      await fixture.page.waitForFunction(
+        ({ expectedActionId, expectedWindowId }) => {
+          const workspaceWindow = document.querySelector<HTMLElement>(
+            `[data-workspace-window-id="${expectedWindowId}"]`,
+          );
+          const openMenu = [
+            ...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]'),
+          ].find(
+            (element) =>
+              element.dataset.workspaceWindowAddMenu === expectedWindowId &&
+              element.dataset.state === 'open',
+          );
+          const retainedAction = openMenu?.querySelector<HTMLElement>(
+            `[data-workspace-window-add-action="${expectedActionId}"]`,
+          );
+          return (
+            retainedAction === document.activeElement &&
+            workspaceWindow?.querySelectorAll('[data-workspace-window-add-inline]').length === 3 &&
+            workspaceWindow?.querySelector('[data-workspace-window-add-trigger]') !== null
+          );
+        },
+        { expectedActionId: retainedActionId, expectedWindowId: windowId },
+      );
+      await fixture.page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'detached' });
 
       await titlebar.evaluate((element) => (element as HTMLElement).style.removeProperty('width'));
       await fixture.page.waitForFunction(

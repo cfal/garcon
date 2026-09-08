@@ -58,6 +58,9 @@
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
 	let addControlsElement: HTMLElement;
+	let overflowMenuContent = $state<HTMLElement | null>(null);
+	let overflowMenuOpen = $state(false);
+	let pendingPromotedAction: HTMLElement | null = null;
 	let creatingTerminal = $state(false);
 	let inlineActionCount = $state(0);
 	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
@@ -116,6 +119,14 @@
 			eligibleCount: eligibleActions.length,
 			currentInlineCount,
 		});
+		const focusedOverflowActionWasPromoted =
+			focusedElement !== null && isPromotedOverflowAction(focusedElement, nextInlineCount);
+		if (focusedOverflowActionWasPromoted) {
+			pendingPromotedAction = focusedElement;
+		}
+		if (focusedOverflowActionWasPromoted || nextInlineCount === eligibleActions.length) {
+			overflowMenuOpen = false;
+		}
 		if (nextInlineCount !== untrack(() => inlineActionCount)) {
 			inlineActionCount = nextInlineCount;
 		}
@@ -128,29 +139,62 @@
 		const focusedElement = document.activeElement;
 		if (!(focusedElement instanceof HTMLElement)) return null;
 		if (addControlsElement?.contains(focusedElement)) return focusedElement;
-		const menu = [
+		const menuHasFocus = [
 			...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]'),
-		].find((element) => element.dataset.workspaceWindowAddMenu === windowId);
-		return menu?.contains(focusedElement) ? focusedElement : null;
+		].some(
+			(element) =>
+				element.dataset.workspaceWindowAddMenu === windowId && element.contains(focusedElement),
+		);
+		return menuHasFocus ? focusedElement : null;
+	}
+
+	function isPromotedOverflowAction(element: HTMLElement, nextInlineCount: number): boolean {
+		const actionId = element.dataset.workspaceWindowAddAction;
+		if (!actionId || !overflowMenuContent?.contains(element)) return false;
+		return eligibleActions.slice(0, nextInlineCount).some((action) => action.id === actionId);
 	}
 
 	async function restoreAddControlFocus(previouslyFocused: HTMLElement): Promise<void> {
 		const actionId = previouslyFocused.dataset.workspaceWindowAddAction;
-		await tick();
-		if (previouslyFocused.isConnected) return;
-		if (document.activeElement !== document.body && !focusedAddControl()) return;
+		const isPromotion = pendingPromotedAction === previouslyFocused;
+		try {
+			await tick();
+			if (!addControlsElement?.isConnected || previouslyFocused.isConnected) return;
+			if (isPromotion && (pendingPromotedAction !== previouslyFocused || overflowMenuOpen)) return;
+			if (document.activeElement !== document.body && !focusedAddControl()) return;
+			const trigger = addControlsElement.querySelector<HTMLButtonElement>(
+				'[data-workspace-window-add-trigger]',
+			);
+			const matchingAction = actionId
+				? addControlsElement.querySelector<HTMLButtonElement>(
+						`[data-workspace-window-add-action="${CSS.escape(actionId)}"]`,
+					)
+				: null;
+			const fallbackControl = addControlsElement.querySelector<HTMLButtonElement>(
+				'[data-workspace-window-add-inline]:not(:disabled), [data-workspace-window-add-terminal-trigger]',
+			);
+			(matchingAction ?? trigger ?? fallbackControl)?.focus();
+		} finally {
+			if (pendingPromotedAction === previouslyFocused) pendingPromotedAction = null;
+		}
+	}
+
+	function handleOverflowMenuOpenAutoFocus(event: Event): void {
+		event.preventDefault();
+		const content = overflowMenuContent;
 		const trigger = addControlsElement?.querySelector<HTMLButtonElement>(
 			'[data-workspace-window-add-trigger]',
 		);
-		const matchingAction = actionId
-			? addControlsElement?.querySelector<HTMLButtonElement>(
-					`[data-workspace-window-add-action="${CSS.escape(actionId)}"]`,
-				)
-			: null;
-		const fallbackControl = addControlsElement?.querySelector<HTMLButtonElement>(
-			'[data-workspace-window-add-inline]:not(:disabled), [data-workspace-window-add-terminal-trigger]',
-		);
-		(matchingAction ?? trigger ?? fallbackControl)?.focus();
+		requestAnimationFrame(() => {
+			if (!overflowMenuOpen || !content?.isConnected || content !== overflowMenuContent) return;
+			const activeElement = document.activeElement;
+			if (activeElement !== document.body && activeElement !== trigger) return;
+			content.focus({ preventScroll: true });
+		});
+	}
+
+	function handleOverflowMenuCloseAutoFocus(event: Event): void {
+		if (pendingPromotedAction) event.preventDefault();
 	}
 
 	function canOffer(kind: PortableSingletonKind): boolean {
@@ -261,7 +305,7 @@
 		{/if}
 	{/each}
 	{#if showOverflowMenu}
-		<DropdownMenu>
+		<DropdownMenu bind:open={overflowMenuOpen}>
 			<DropdownMenuTrigger
 				class={ADD_ACTION_CONTROL_CLASS}
 				aria-label={m.workspace_add_to_window()}
@@ -270,7 +314,14 @@
 			>
 				<Plus class="h-3.5 w-3.5" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" class="w-64" data-workspace-window-add-menu={windowId}>
+			<DropdownMenuContent
+				bind:ref={overflowMenuContent}
+				align="end"
+				class="w-64"
+				data-workspace-window-add-menu={windowId}
+				onOpenAutoFocus={handleOverflowMenuOpenAutoFocus}
+				onCloseAutoFocus={handleOverflowMenuCloseAutoFocus}
+			>
 				{#each menuActions as action (action.id)}
 					{@render addActionMenuItem(action)}
 				{/each}

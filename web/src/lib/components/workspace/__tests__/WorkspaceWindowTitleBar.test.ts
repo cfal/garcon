@@ -1081,6 +1081,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			),
 		);
 		expect(screen.getByRole('button', { name: addLabel })).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: secondActionLabel })).toBeNull();
 	});
 
 	it('moves saved terminals into the inline terminal menu', async () => {
