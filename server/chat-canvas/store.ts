@@ -15,6 +15,10 @@ export class CanvasError extends Error {
   }
 }
 
+function unreadableCanvas(): CanvasError {
+  return new CanvasError('CANVAS_CORRUPT', 'Canvas data could not be read. Restore it from a backup.', 500);
+}
+
 export class CanvasStore {
   readonly #directory: string;
   readonly #lock = new KeyedPromiseLock();
@@ -55,6 +59,9 @@ export class CanvasStore {
     try { raw = await fs.readFile(filePath, 'utf8'); }
     catch (error) {
       if (hasNodeErrorCode(error, 'ENOENT')) throw new CanvasError('CANVAS_NOT_FOUND', 'Canvas not found', 404);
+      if (['EACCES', 'EPERM', 'EISDIR', 'ELOOP'].some((code) => hasNodeErrorCode(error, code))) {
+        throw unreadableCanvas();
+      }
       throw error;
     }
     try {
@@ -62,7 +69,7 @@ export class CanvasStore {
       if (canvas.id !== id) throw new Error('Canvas ID does not match its file');
       return canvas;
     } catch {
-      throw new CanvasError('CANVAS_CORRUPT', 'Canvas data could not be read. Restore it from a backup.', 500);
+      throw unreadableCanvas();
     }
   }
 

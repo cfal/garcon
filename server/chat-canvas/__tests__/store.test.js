@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { promises as fs } from 'node:fs';
+import { mkdtemp, mkdir, symlink, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CanvasStore } from '../store.ts';
@@ -14,6 +15,38 @@ async function fixture() {
 }
 
 describe('CanvasStore', () => {
+  it('isolates directories and symlink loops named as canvas files', async () => {
+    const { dir, store } = await fixture();
+    await store.create('healthy', content());
+    await mkdir(join(dir, 'chat-canvases/directory.json'));
+    await symlink('loop.json', join(dir, 'chat-canvases/loop.json'));
+    const catalog = await store.list();
+    expect(catalog.unavailableIds).toEqual(['directory', 'loop']);
+    expect(catalog.canvases.map((entry) => entry.id)).toEqual(['healthy']);
+    for (const id of catalog.unavailableIds) {
+      await expect(store.get(id)).rejects.toMatchObject({ code: 'CANVAS_CORRUPT' });
+      await expect(store.create(id, content())).rejects.toMatchObject({ code: 'CANVAS_CORRUPT' });
+    }
+  });
+
+  it.each(['EACCES', 'EPERM', 'EIO', 'EMFILE'])('classifies %s without masking systemic failures', async (code) => {
+    const { dir, store } = await fixture();
+    await store.create('healthy', content());
+    await store.create('unreadable', content());
+    const read = fs.readFile;
+    const failure = Object.assign(new Error(code), { code });
+    const mock = spyOn(fs, 'readFile').mockImplementation((file, ...args) => {
+      if (file === join(dir, 'chat-canvases/unreadable.json')) return Promise.reject(failure);
+      return read(file, ...args);
+    });
+    try {
+      if (code === 'EACCES' || code === 'EPERM') {
+        expect((await store.list()).unavailableIds).toEqual(['unreadable']);
+        await expect(store.get('unreadable')).rejects.toMatchObject({ code: 'CANVAS_CORRUPT' });
+      } else await expect(store.list()).rejects.toBe(failure);
+    } finally { mock.mockRestore(); }
+  });
+
   it('reports unreadable boards without blocking healthy boards or overwriting damaged data', async () => {
     const { dir, store } = await fixture();
     await store.create('healthy', content());

@@ -1,10 +1,28 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatCanvas, CanvasListResponse, CanvasContent } from '../../../common/chat-canvas.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 describe('chat canvas API', () => {
+  test('keeps healthy boards available beside unreadable filesystem entries', async () => {
+    await withIntegrationFixture('chat-canvases-file-types', async (fixture) => {
+      const endpoint = '/api/v1/chat-canvases';
+      const content: CanvasContent = { title: 'Healthy', nodes: [], connections: [] };
+      await fixture.client.post(endpoint, { id: 'healthy', content });
+      await mkdir(join(fixture.dirs.workspace, 'chat-canvases/directory.json'));
+      await symlink('loop.json', join(fixture.dirs.workspace, 'chat-canvases/loop.json'));
+      const catalog = await fixture.client.get<CanvasListResponse>(endpoint);
+      expect(catalog.canvases.map((entry) => entry.id)).toEqual(['healthy']);
+      expect(catalog.unavailableIds).toEqual(['directory', 'loop']);
+      for (const id of catalog.unavailableIds) {
+        await expect(fixture.client.get(`${endpoint}?id=${id}`)).rejects.toMatchObject({ status: 500 });
+        await expect(fixture.client.post(endpoint, { id, content })).rejects.toMatchObject({ status: 500 });
+      }
+      expect((await fixture.client.get<CanvasListResponse>(endpoint)).unavailableIds).toEqual(['directory', 'loop']);
+    });
+  });
+
   test('persists boards across restart and rejects conflicting or invalid writes', async () => {
     await withIntegrationFixture('chat-canvases', async (fixture) => {
       const endpoint = '/api/v1/chat-canvases';
