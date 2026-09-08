@@ -1,4 +1,4 @@
-// Matches ADD_ACTION_CONTROL_CLASS and gap-0.5 in WorkspaceWindowAddMenu.svelte.
+// Matches h-[28px] w-[28px] and gap-[2px] in WorkspaceWindowAddMenu.svelte.
 const WORKSPACE_WINDOW_ADD_CONTROL_WIDTH_PX = 28;
 const WORKSPACE_WINDOW_ADD_CONTROL_GAP_PX = 2;
 

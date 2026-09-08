@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import { mergeProps } from 'bits-ui';
+	import { tabbable } from 'tabbable';
 	import { ContextMenu, ContextMenuTrigger } from '$lib/components/ui/context-menu';
 	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
 	import type {
@@ -61,7 +62,8 @@
 	let measurementRail: HTMLDivElement | null = $state(null);
 	let tabPresentation = $state.raw<WindowTabPresentation | null>(null);
 	let closeFocusReturnTarget: HTMLElement | null = null;
-	let singleTabMenuDismissedByOutsideInteraction = false;
+	let singleTabMenuOpen = $state(false);
+	let singleTabMenuShouldRestoreTabFocus = true;
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
 	const singleTabMenuSurfaceId = $derived.by(() => {
@@ -70,7 +72,8 @@
 	});
 
 	$effect.pre(() => {
-		singleTabMenuSurfaceId;
+		const menuSurfaceId = singleTabMenuSurfaceId;
+		if (!menuSurfaceId) singleTabMenuOpen = false;
 		const viewport = untrack(() => tabViewport);
 		const focusedElement = document.activeElement;
 		if (focusedElement instanceof HTMLElement && viewport?.contains(focusedElement)) {
@@ -144,12 +147,15 @@
 			if (surfaceId) widths.set(surfaceId, item.getBoundingClientRect().width);
 		}
 		const viewportWidth = tabViewport.clientWidth;
+		const measuredGap = Number.parseFloat(getComputedStyle(measurementRail).columnGap);
+		const tabGap = Number.isFinite(measuredGap) ? measuredGap : 2;
 		const hasCompleteMeasurements = tabs.order.every((surfaceId) => widths.has(surfaceId));
 		onMeasureChange?.(
 			hasCompleteMeasurements
 				? {
-						naturalWidth: tabs.order.reduce(
-							(sum, surfaceId, index) => sum + (widths.get(surfaceId) ?? 0) + (index > 0 ? 2 : 0),
+							naturalWidth: tabs.order.reduce(
+							(sum, surfaceId, index) =>
+								sum + (widths.get(surfaceId) ?? 0) + (index > 0 ? tabGap : 0),
 							0,
 						),
 						viewportWidth,
@@ -169,7 +175,7 @@
 			pinnedIds: [],
 			availableWidth: capacity.contentWidth,
 			widths,
-			gap: 2,
+			gap: tabGap,
 			trailingReservedWidths: new Map(
 				tabs.order.flatMap((surfaceId) =>
 					supportsInlineClose(surfaceId)
@@ -309,19 +315,44 @@
 		) {
 			return;
 		}
-		singleTabMenuDismissedByOutsideInteraction = true;
+		singleTabMenuShouldRestoreTabFocus = false;
 	}
 
 	function handleSingleTabMenuOpenChange(open: boolean): void {
-		if (open) singleTabMenuDismissedByOutsideInteraction = false;
+		if (open) singleTabMenuShouldRestoreTabFocus = true;
 	}
 
 	function restoreSingleTabMenuFocus(event: Event): void {
 		event.preventDefault();
-		if (singleTabMenuDismissedByOutsideInteraction) {
-			return;
-		}
-		focusSelectedTab();
+		if (!singleTabMenuShouldRestoreTabFocus) return;
+		// Queues behind the transient layer's Escape restoration so the selected tab wins.
+		queueMicrotask(() => {
+			const activeElement = document.activeElement;
+			if (activeElement instanceof Element && activeElement.closest('[data-slot="dialog-content"]')) {
+				return;
+			}
+			focusSelectedTab();
+		});
+	}
+
+	async function handleSingleTabMenuKeydown(event: KeyboardEvent): Promise<void> {
+		if (event.key !== 'Tab') return;
+		const selectedTab = tabViewport?.querySelector<HTMLButtonElement>(
+			'[role="tab"][aria-selected="true"]',
+		);
+		if (!selectedTab) return;
+		const tabStops = tabbable(document.body);
+		const selectedTabIndex = tabStops.indexOf(selectedTab);
+		if (selectedTabIndex < 0) return;
+		const targetIndex = selectedTabIndex + (event.shiftKey ? -1 : 1);
+		const focusTarget = tabStops[targetIndex];
+		if (!focusTarget) return;
+
+		event.preventDefault();
+		singleTabMenuShouldRestoreTabFocus = false;
+		singleTabMenuOpen = false;
+		await tick();
+		focusTarget.focus();
 	}
 </script>
 
@@ -476,10 +507,10 @@
 {/snippet}
 
 {#if singleTabMenuSurfaceId}
-	<ContextMenu onOpenChange={handleSingleTabMenuOpenChange}>
+	<ContextMenu bind:open={singleTabMenuOpen} onOpenChange={handleSingleTabMenuOpenChange}>
 		<ContextMenuTrigger>
 			{#snippet child({ props })}
-				{@render tabList(props)}
+				{@render tabList({ ...props, disabled: undefined })}
 			{/snippet}
 		</ContextMenuTrigger>
 		<WorkspaceWindowTabMenu
@@ -493,6 +524,7 @@
 			{surfaceMenuItems}
 			onContextMenuCloseAutoFocus={restoreSingleTabMenuFocus}
 			onContextMenuInteractOutside={handleSingleTabMenuInteractOutside}
+			onContextMenuKeydownCapture={handleSingleTabMenuKeydown}
 		/>
 	</ContextMenu>
 {:else}

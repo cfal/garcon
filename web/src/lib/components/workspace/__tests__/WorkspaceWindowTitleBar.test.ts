@@ -605,6 +605,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 		const tablist = screen.getByRole('tablist');
 		const tab = screen.getByRole('tab', { name: 'Chat A' });
+		expect(tablist.hasAttribute('disabled')).toBe(false);
 
 		await fireEvent.contextMenu(tablist, { clientX: 300, clientY: 12 });
 		const trailingSpaceMenu = await screen.findByRole('menu');
@@ -1003,6 +1004,34 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
 	});
 
+	it('keeps a busy inline terminal action focused while creation is pending', async () => {
+		let resolveTerminalCreation!: (terminalId: string) => void;
+		createTerminal.mockImplementationOnce(
+			() =>
+				new Promise<string>((resolve) => {
+					resolveTerminalCreation = resolve;
+				}),
+		);
+		const node = workspaceWindow([chatSurface.id]);
+		render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		const terminalAction = await screen.findByRole('button', {
+			name: m.workspace_new_terminal(),
+		});
+		terminalAction.focus();
+
+		await fireEvent.click(terminalAction);
+
+		await waitFor(() => expect(terminalAction.getAttribute('aria-disabled')).toBe('true'));
+		expect(terminalAction.hasAttribute('disabled')).toBe(false);
+		expect(document.activeElement).toBe(terminalAction);
+		resolveTerminalCreation('terminal-created');
+		await waitFor(() => expect(terminalAction.hasAttribute('aria-disabled')).toBe(false));
+	});
+
 	it('restores focus when adaptive add controls move between the toolbar and menu', async () => {
 		const node = workspaceWindow([chatSurface.id]);
 		const rendered = render(WorkspaceWindowAddMenu, {
@@ -1036,6 +1065,22 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(document.activeElement).toBe(screen.getByRole('button', { name: addLabel })),
 		);
+
+		await fireEvent.click(screen.getByRole('button', { name: addLabel }));
+		const secondActionLabel = m.workspace_open_git_history();
+		const menuAction = await screen.findByRole('menuitem', { name: secondActionLabel });
+		menuAction.focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 260 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: secondActionLabel }),
+			),
+		);
+		expect(screen.getByRole('button', { name: addLabel })).toBeTruthy();
 	});
 
 	it('moves saved terminals into the inline terminal menu', async () => {

@@ -21,24 +21,41 @@ export function interactWithWorkspaceWindowAddAction({
     ...(addControls?.querySelectorAll<HTMLButtonElement>('[data-workspace-window-add-inline]') ?? []),
   ].find((button) => button.getAttribute('aria-label') === expectedLabel);
   const menu = [...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]')].find(
-    (element) => element.dataset.workspaceWindowAddMenu === workspaceWindow?.dataset.workspaceWindowId,
+    (element) =>
+      element.dataset.workspaceWindowAddMenu === workspaceWindow?.dataset.workspaceWindowId &&
+      element.dataset.state === 'open',
   );
   const menuAction = [...(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])].find(
     (element) => (element.getAttribute('aria-label') || element.textContent?.trim()) === expectedLabel,
   );
   const action = inlineAction ?? menuAction;
+  const trigger =
+    addControls?.querySelector<HTMLButtonElement>('[data-workspace-window-add-trigger]') ??
+    addControls?.querySelector<HTMLButtonElement>('[data-workspace-window-add-terminal-trigger]');
+
+  if (
+    expectedIntent === 'observe' &&
+    trigger?.dataset.workspaceWindowAddObserveClosing === expectedLabel
+  ) {
+    if (menu) return false;
+    delete trigger.dataset.workspaceWindowAddObserveClosing;
+    return true;
+  }
 
   if (action) {
     if ((action instanceof HTMLButtonElement && action.disabled) || action.getAttribute('aria-disabled') === 'true') {
       return false;
     }
-    if (expectedIntent === 'activate') action.click();
+    if (expectedIntent === 'activate') {
+      action.click();
+    } else if (trigger?.getAttribute('aria-expanded') === 'true') {
+      trigger.dataset.workspaceWindowAddObserveClosing = expectedLabel;
+      trigger.click();
+      return false;
+    }
     return true;
   }
 
-  const trigger =
-    addControls?.querySelector<HTMLButtonElement>('[data-workspace-window-add-trigger]') ??
-    addControls?.querySelector<HTMLButtonElement>('[data-workspace-window-add-terminal-trigger]');
   if (trigger?.getAttribute('aria-expanded') !== 'true') trigger?.click();
   return false;
 }

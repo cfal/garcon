@@ -51,7 +51,7 @@
 		readonly busy?: boolean;
 	}
 	const ADD_ACTION_CONTROL_CLASS =
-		'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
+		'flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 disabled:pointer-events-none disabled:opacity-50';
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
@@ -92,7 +92,7 @@
 			kind: 'terminal',
 			label: terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal(),
 			onclick: () => void createTerminal(),
-			disabled: creatingTerminal || terminalLimitReached,
+			disabled: terminalLimitReached,
 			busy: creatingTerminal,
 		},
 	]);
@@ -103,7 +103,7 @@
 
 	$effect.pre(() => {
 		const focusedElement = focusedAddControl();
-		const terminalActionUsesMenu = hasUnplacedTerminalSessions;
+		hasUnplacedTerminalSessions;
 		const currentInlineCount = Math.min(
 			eligibleActions.length,
 			Math.max(
@@ -120,7 +120,7 @@
 			inlineActionCount = nextInlineCount;
 		}
 		if (focusedElement) {
-			void restoreAddControlFocus(focusedElement, terminalActionUsesMenu);
+			void restoreAddControlFocus(focusedElement);
 		}
 	});
 
@@ -134,29 +134,23 @@
 		return menu?.contains(focusedElement) ? focusedElement : null;
 	}
 
-	async function restoreAddControlFocus(
-		previouslyFocused: HTMLElement,
-		terminalActionUsesMenu: boolean,
-	): Promise<void> {
-		const terminalControlWasFocused = previouslyFocused.matches(
-			'[data-workspace-window-add-terminal-trigger], [data-workspace-window-add-inline="new-terminal"]',
-		);
+	async function restoreAddControlFocus(previouslyFocused: HTMLElement): Promise<void> {
+		const actionId = previouslyFocused.dataset.workspaceWindowAddAction;
 		await tick();
-		if (previouslyFocused.isConnected || document.activeElement !== document.body) return;
+		if (previouslyFocused.isConnected) return;
+		if (document.activeElement !== document.body && !focusedAddControl()) return;
 		const trigger = addControlsElement?.querySelector<HTMLButtonElement>(
 			'[data-workspace-window-add-trigger]',
 		);
-		let terminalControl: HTMLButtonElement | null | undefined = null;
-		if (terminalControlWasFocused) {
-			const terminalSelector = terminalActionUsesMenu
-				? '[data-workspace-window-add-terminal-trigger]'
-				: '[data-workspace-window-add-inline="new-terminal"]';
-			terminalControl = addControlsElement?.querySelector<HTMLButtonElement>(terminalSelector);
-		}
+		const matchingAction = actionId
+			? addControlsElement?.querySelector<HTMLButtonElement>(
+					`[data-workspace-window-add-action="${CSS.escape(actionId)}"]`,
+				)
+			: null;
 		const fallbackControl = addControlsElement?.querySelector<HTMLButtonElement>(
 			'[data-workspace-window-add-inline]:not(:disabled), [data-workspace-window-add-terminal-trigger]',
 		);
-		(trigger ?? terminalControl ?? fallbackControl)?.focus();
+		(matchingAction ?? trigger ?? fallbackControl)?.focus();
 	}
 
 	function canOffer(kind: PortableSingletonKind): boolean {
@@ -198,6 +192,7 @@
 
 {#snippet addActionMenuItem(action: WorkspaceWindowAddAction)}
 	<DropdownMenuItem
+		data-workspace-window-add-action={action.id}
 		disabled={action.disabled || action.busy}
 		aria-busy={action.busy || undefined}
 		title={action.disabled ? action.label : undefined}
@@ -222,7 +217,7 @@
 
 <div
 	bind:this={addControlsElement}
-	class="flex shrink-0 items-center gap-0.5"
+	class="flex shrink-0 items-center gap-[2px]"
 	data-workspace-window-add-controls={windowId}
 >
 	{#each inlineActions as action (action.id)}
@@ -232,6 +227,7 @@
 					class={ADD_ACTION_CONTROL_CLASS}
 					aria-label={m.workspace_terminal_actions()}
 					title={m.workspace_terminal_actions()}
+					data-workspace-window-add-action={action.id}
 					data-workspace-window-add-terminal-trigger={windowId}
 				>
 					<WorkspaceSurfaceIcon kind="terminal" />
@@ -254,9 +250,11 @@
 				aria-label={action.label}
 				title={action.label}
 				disabled={action.disabled}
+				aria-disabled={action.busy || undefined}
 				aria-busy={action.busy || undefined}
+				data-workspace-window-add-action={action.id}
 				data-workspace-window-add-inline={action.id}
-				onclick={action.busy ? undefined : action.onclick}
+				onclick={action.disabled || action.busy ? undefined : action.onclick}
 			>
 				<WorkspaceSurfaceIcon kind={action.kind} />
 			</button>
