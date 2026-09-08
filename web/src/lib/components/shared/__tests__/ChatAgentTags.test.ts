@@ -42,6 +42,23 @@ describe('ChatAgentTags', () => {
 		expect(root.classList.contains('whitespace-nowrap')).toBe(true);
 	});
 
+	it('keeps long agent labels on one clipped line in detailed cards', () => {
+		const { container } = render(ChatAgentTags, {
+			agentId: 'direct-openai-compatible',
+			tags: ['customer-experience', 'release-management'],
+			tagLimit: 6,
+			wrap: 'two-lines',
+		});
+		const root = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags"]');
+		const agent = root?.firstElementChild;
+		if (!(agent instanceof HTMLElement)) throw new Error('Expected rendered agent pill');
+
+		expect(agent.classList.contains('max-w-full')).toBe(true);
+		expect(agent.classList.contains('overflow-hidden')).toBe(true);
+		expect(agent.classList.contains('text-ellipsis')).toBe(true);
+		expect(agent.classList.contains('whitespace-nowrap')).toBe(true);
+	});
+
 	it('keeps the measured overflow control visible for long tags in a narrow card', async () => {
 		const tags = Array.from({ length: 7 }, (_, index) => `long-tag-${index + 1}`);
 		const { container } = render(ChatAgentTags, {

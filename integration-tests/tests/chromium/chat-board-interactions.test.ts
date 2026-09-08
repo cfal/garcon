@@ -13,6 +13,15 @@ import {
 
 const READY_COLUMN_ID = '22222222-2222-4222-8222-222222222222';
 const REVIEW_COLUMN_ID = '33333333-3333-4333-8333-333333333333';
+const LONG_CARD_TAGS = [
+  'customer-experience',
+  'release-management',
+  'frontend-platform',
+  'production-support',
+  'quality-assurance',
+  'security-review',
+  'urgent',
+] as const;
 
 async function seedBoard(fixture: ChromiumFixture): Promise<void> {
   const catalog = await fixture.integration.client.get<ChatBoardCatalog>('/api/v1/chat-boards');
@@ -48,7 +57,7 @@ async function seedChats(fixture: ChromiumFixture, count: number): Promise<strin
     await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId);
     await fixture.integration.client.patch<ChatTagsMutationResponse>('/api/v1/chats/tags/delta', {
       chatId,
-      addTags: ['ready', 'review'],
+      addTags: ['ready', 'review', ...LONG_CARD_TAGS],
     });
   }
   return firstChatId;
@@ -208,7 +217,7 @@ async function expectTransitionFocus(
 }
 
 describe('Chromium Chat Board interactions', () => {
-  test('restores the invoking action and preserves lane scroll through responsive remounts', async () => {
+  test('preserves responsive interaction state and detailed tag geometry', async () => {
     await withChromiumFixture('chat-board-responsive-interactions', async (fixture, markPhase) => {
       await fixture.page.setViewportSize({ width: 1_440, height: 600 });
       markPhase('seeding the board and overlapping cards');
@@ -270,6 +279,36 @@ describe('Chromium Chat Board interactions', () => {
         await expectTransitionFocus(fixture, READY_COLUMN_ID);
         expect(await invoker.evaluate((element) => document.activeElement === element)).toBe(true);
       }
+
+      markPhase('keeping long direct-agent labels within detailed tag rows');
+      await fixture.page.getByRole('button', { name: 'View', exact: true }).click();
+      await fixture.page.getByRole('menuitemradio', { name: 'Detailed', exact: true }).click();
+      const agentTags = fixture.page
+        .locator(`[data-chat-board-column-id="${READY_COLUMN_ID}"] [data-slot="chat-agent-tags"]`)
+        .first();
+      await agentTags.evaluate((element) => {
+        const row = element as HTMLElement;
+        row.style.width = '130.5px';
+        row.style.flex = '0 0 auto';
+      });
+      await fixture.page.waitForFunction(
+        () => new Promise((resolve) => requestAnimationFrame(resolve)),
+      );
+      const tagGeometry = await agentTags.evaluate((element) => {
+        const row = element as HTMLElement;
+        const agent = row.firstElementChild;
+        const overflow = row.lastElementChild;
+        if (!(agent instanceof HTMLElement) || !(overflow instanceof HTMLElement)) {
+          throw new Error('Expected agent and overflow elements.');
+        }
+        return {
+          rowBottom: row.getBoundingClientRect().bottom,
+          overflowBottom: overflow.getBoundingClientRect().bottom,
+          agentWhiteSpace: getComputedStyle(agent).whiteSpace,
+        };
+      });
+      expect(tagGeometry.agentWhiteSpace).toBe('nowrap');
+      expect(tagGeometry.overflowBottom).toBeLessThanOrEqual(tagGeometry.rowBottom + 0.1);
       fixture.assertNoBrowserErrors();
     });
   });

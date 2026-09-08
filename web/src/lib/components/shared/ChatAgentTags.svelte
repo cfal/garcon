@@ -54,6 +54,11 @@
 		if (wrap === 'none') return 'overflow-hidden whitespace-nowrap';
 		return undefined;
 	});
+	let agentLayoutClass = $derived(
+		wrap === 'two-lines'
+			? 'min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap'
+			: undefined,
+	);
 
 	function recomputeVisibleTags(availableWidth: number): void {
 		const rail = measurementRail;
@@ -134,7 +139,12 @@
 		className,
 	)}
 >
-	<AgentPill {agentId} label={agentId || m.agent_claude()} fallbackAgentId="claude" />
+	<AgentPill
+		{agentId}
+		label={agentId || m.agent_claude()}
+		fallbackAgentId="claude"
+		class={agentLayoutClass}
+	/>
 	{#each visibleTags as tag (tag)}
 		<ColoredTag
 			label={tag}
@@ -168,7 +178,12 @@
 		data-slot="chat-agent-tags-measurement"
 	>
 		<span class="inline-flex shrink-0" data-chat-agent-tags-agent-measure>
-			<AgentPill {agentId} label={agentId || m.agent_claude()} fallbackAgentId="claude" />
+			<AgentPill
+				{agentId}
+				label={agentId || m.agent_claude()}
+				fallbackAgentId="claude"
+				class={agentLayoutClass}
+			/>
 		</span>
 		{#each measuredTags as tag, index (`${index}:${tag}`)}
 			<span class="inline-flex shrink-0" data-chat-agent-tags-tag-measure>
