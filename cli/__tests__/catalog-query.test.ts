@@ -113,6 +113,41 @@ function command(
 }
 
 describe('runCatalogQuery', () => {
+  test('provider names and IDs produce identical canonical catalog listings', async () => {
+    for (const resource of ['providers', 'endpoints', 'models'] as const) {
+      const byId = output();
+      const byName = output();
+      const options = { agentId: 'codex', endpointId: 'east', json: true };
+      await runCatalogQuery(command(resource, { ...options, providerId: 'acme' }), client(), byId);
+      await runCatalogQuery(command(resource, { ...options, providerId: 'Acme' }), client(), byName);
+      expect(byName.listings).toEqual(byId.listings);
+      expect(JSON.parse(byName.listings[0]!)[resource]).toHaveLength(1);
+    }
+  });
+
+  test('rejects duplicate names even when agent, endpoint and model filters could disambiguate', async () => {
+    const duplicate = structuredClone(catalog);
+    duplicate.catalog.apiProviders.push({ ...duplicate.catalog.apiProviders[0]!, id: 'other', endpoints: [] });
+    for (const resource of ['providers', 'endpoints', 'models'] as const) {
+      await expect(runCatalogQuery(command(resource, {
+        agentId: 'codex', providerId: 'Acme', endpointId: 'east',
+      }), client(duplicate), output())).rejects.toMatchObject({
+        exitCode: 2, message: expect.stringContaining('ambiguous'),
+      });
+    }
+  });
+
+  test('resolves model-list provider names before checking agent endpoint support', async () => {
+    const unsupported = structuredClone(catalog);
+    unsupported.catalog.agents[0]!.acceptsApiProviderEndpoints = false;
+    unsupported.catalog.apiProviders.push({ ...unsupported.catalog.apiProviders[0]!, id: 'other', endpoints: [] });
+    for (const [providerId, message] of [
+      ['Acme', 'ambiguous'], ['missing', 'unknown API provider'], ['acme', 'does not accept API provider endpoints'],
+    ] as const) await expect(runCatalogQuery(command('models', {
+      agentId: 'codex', providerId,
+    }), client(unsupported), output())).rejects.toThrow(message);
+  });
+
   test('prints actionable agent and model selections', async () => {
     const agents = output();
     await runCatalogQuery(command('agents'), client(), agents);

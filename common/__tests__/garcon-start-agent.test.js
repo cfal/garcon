@@ -21,6 +21,11 @@ describe('single-child start grammar', () => {
     expect(parseGarconStartAgent(start(`agent="codex" model="example-model" ${field}="x"`))).toBeNull();
   });
 
+  it('preserves exact provider names after XML decoding', () => {
+    expect(parseGarconStartAgent(start('agent="codex" model="example" provider="Example Proxy &amp; Co"')))
+      .toMatchObject({ providerId: 'Example Proxy & Co' });
+  });
+
   it('rejects incomplete, duplicate, unquoted, nested, batch, and malformed text', () => {
     for (const content of [
       start('model="example-model"'), start('agent="codex"'), start('agent="" model="example-model"'),

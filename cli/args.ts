@@ -143,7 +143,7 @@ Options:
   --no-preamble               Disable all preambles for this new chat
   --preamble <id>             Select a preamble by UUID in order; repeatable
   --agent <id>                 Agent ID; required for a new chat and scoped lists, optional for native-session lookup
-  --provider <id>              Configured API provider ID
+  --provider <id|name>          Configured API provider ID or exact unique name
   --endpoint <id>              Endpoint ID within --provider
   --model <id>                 Model value or raw model; required for a new chat
   --permissions <mode>         Permission mode: ${PERMISSION_MODE_VALUES.join(', ')}

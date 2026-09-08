@@ -123,6 +123,8 @@ bun cli/main.ts list reasoning-efforts --agent codex
 
 List commands print compact tables and accept `--json` for scripts and agents.
 
+`--provider` accepts a configured provider ID or its exact, case-sensitive display name. Quote names containing spaces. IDs take precedence over names. If multiple providers have the same name, use an ID; agent, model, and endpoint filters do not disambiguate provider names. This applies to catalog lists, starts, and resume model overrides. Resolved routing and saved chat configuration always use canonical IDs. Renaming a provider changes which name future commands can select, without changing existing chats.
+
 ## Lookup By Native Session
 
 Resolve an agent's current native session binding through the authenticated server:

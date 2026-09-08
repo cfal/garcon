@@ -212,6 +212,18 @@ describe('resolveModelSelection', () => {
 });
 
 describe('execution selection', () => {
+  test('start and handoff resolve provider names through the shared selector', () => {
+    const request = { agentId: 'codex', model: 'west:qwen', providerId: 'Acme' };
+    for (const resolve of [resolveStartSelection, resolveHandoffSelection]) {
+      expect(resolve(catalog(), settings(), request)).toMatchObject({
+        model: 'qwen', apiProviderId: 'acme', modelEndpointId: 'west', modelProtocol: 'openai-compatible',
+      });
+      const duplicate = catalog();
+      duplicate.catalog.apiProviders.push({ ...provider, id: 'other', endpoints: [] });
+      expect(() => resolve(duplicate, settings(), request)).toThrow('ambiguous');
+    }
+  });
+
   test('requires an explicit model when a handoff target has no default', () => {
     const modelLessCatalog = catalog(agent({
       defaultModel: '',

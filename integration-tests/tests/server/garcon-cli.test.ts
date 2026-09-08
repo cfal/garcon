@@ -128,6 +128,42 @@ function controlArguments(fixture: IntegrationFixture, command: string[]): strin
 }
 
 describe('garcon-cli', () => {
+  test('resolves provider names in catalog queries and starts, rejecting duplicate names', async () => {
+    await withIntegrationFixture('garcon-cli-provider-names', async (fixture) => {
+      const agent = fixture.directAgents.openAi;
+      const providerName = (await fixture.client.listAgentCatalog()).apiProviders
+        .find((provider) => provider.id === agent.provider.providerId)?.label;
+      if (!providerName) throw new Error('Missing fixture provider');
+      for (const resource of ['providers', 'endpoints', 'models']) {
+        const byId = await runCli(controlArguments(fixture, [
+          'list', resource, '--agent', agent.agentId, '--provider', agent.provider.providerId, '--json',
+        ]));
+        const byName = await runCli(controlArguments(fixture, [
+          'list', resource, '--agent', agent.agentId, '--provider', providerName, '--json',
+        ]));
+        expect(byName).toEqual(byId);
+        expect(byName).toMatchObject({ exitCode: 0, stderr: '' });
+        expect(JSON.parse(byName.stdout)[resource]).toHaveLength(1);
+      }
+      const args = startArguments(fixture, 'Synthetic named-provider task.');
+      args[args.indexOf('--provider') + 1] = providerName;
+      const started = await runCli(args);
+      expect(started).toMatchObject({ exitCode: 0, stderr: '' });
+      const chatId = started.stdout.match(/^chat id: (\d{16})/m)?.[1];
+      expect(chatId).toBeDefined();
+      const persisted = await fixture.client.listChats();
+      expect(persisted.sessions).toHaveLength(1);
+      expect(persisted.sessions[0]).toMatchObject({ id: chatId, apiProviderId: agent.provider.providerId });
+
+      await fixture.client.createOpenAiProvider(fixture.fakeProviders.openAi.baseUrl);
+      const rejected = await runCli(args);
+      expect(rejected).toMatchObject({ exitCode: 2, stdout: '' });
+      expect(rejected.stderr).toContain('ambiguous');
+      expect(rejected.stderr).toContain(agent.provider.providerId);
+      expect((await fixture.client.listChats()).sessions).toHaveLength(1);
+    }, { namedWorkspace: WORKSPACE });
+  }, 60_000);
+
   test('documents native session lookup help without runtime discovery', async () => {
     const help = await runCli(['lookup-native-session', '--help']);
 

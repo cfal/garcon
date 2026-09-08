@@ -22,6 +22,7 @@ for (const type of ['agent-start-outcome', 'agent-resume-outcome']) {
       for (const outcome of [
         { status: 'accepted', chatId }, { status: 'accepted', chatId, async: true },
         { status: 'rejected', reason: 'not-delegated' }, { status: 'rejected', reason: 'busy', chatId },
+        { status: 'rejected', reason: 'ambiguous-provider' },
         { status: 'preamble-rejected', reason: 'composition-invalid', chatId },
         { status: 'preamble-rejected', reason: 'slash-command-blocked', chatId },
         { status: 'outcome-unknown' }, { status: 'outcome-unknown', chatId }, ...terminals,
