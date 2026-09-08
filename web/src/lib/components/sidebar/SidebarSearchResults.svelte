@@ -243,7 +243,7 @@
 
 <div
 	bind:this={viewportRef}
-	class="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] sm:pb-0"
+	class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] [-webkit-overflow-scrolling:touch] min-[769px]:pointer-fine:pb-0"
 	data-slot="search-dialog-results"
 	aria-busy={resultsBusy}
 >
