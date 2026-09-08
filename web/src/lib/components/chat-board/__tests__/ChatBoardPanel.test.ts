@@ -108,6 +108,7 @@ function createController(initial: ChatBoardCatalog) {
 				if (value) activeColumnIds.set(boardId, value);
 				else activeColumnIds.delete(boardId);
 			},
+			pruneActiveColumns() {},
 		},
 		sidebarLayout: () => 'compact',
 	});

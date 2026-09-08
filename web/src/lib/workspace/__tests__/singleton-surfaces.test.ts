@@ -109,6 +109,7 @@ function createRegistry() {
 						return null;
 					},
 					setActiveColumnId() {},
+					pruneActiveColumns() {},
 				},
 				sidebarLayout: () => 'compact',
 			});

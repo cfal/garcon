@@ -30,7 +30,12 @@ import {
 	parseChatItemLayout as parseStoredChatItemLayout,
 	type ChatItemLayout,
 } from '$lib/layout/chat-item-layout.js';
-import { isChatBoardColumnId, isChatBoardId } from '$shared/chat-boards';
+import {
+	CHAT_BOARD_MAX_COUNT,
+	isChatBoardColumnId,
+	isChatBoardId,
+	type ChatBoard,
+} from '$shared/chat-boards';
 
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
 export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
@@ -308,12 +313,14 @@ function parseSidebarChatItemLayout(value: unknown): ChatItemLayout {
 
 function parseChatBoardActiveColumns(value: unknown): Record<string, string> {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-	const result: Record<string, string> = {};
-	for (const [boardId, columnId] of Object.entries(value)) {
-		if (isChatBoardId(boardId) && isChatBoardColumnId(columnId)) result[boardId] = columnId;
-		if (Object.keys(result).length === 50) break;
-	}
-	return result;
+	return Object.fromEntries(
+		Object.entries(value)
+			.filter(
+				(entry): entry is [string, string] =>
+					isChatBoardId(entry[0]) && isChatBoardColumnId(entry[1]),
+			)
+			.slice(-CHAT_BOARD_MAX_COUNT),
+	);
 }
 
 export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementPreference {
@@ -540,6 +547,21 @@ export class LocalSettingsStore {
 			? Array.from(new Set([...this.hiddenToolTypes, ...selected]))
 			: this.hiddenToolTypes.filter((toolType) => !selected.has(toolType));
 		this.set('hiddenToolTypes', hiddenToolTypes);
+	}
+
+	pruneChatBoardActiveColumns(boards: readonly ChatBoard[]): void {
+		const columnsByBoardId = new Map(
+			boards.map((board) => [board.id, new Set(board.columns.map((column) => column.id))]),
+		);
+		const retained = Object.fromEntries(
+			Object.entries(this.chatBoardActiveColumnByBoardId).filter(([boardId, columnId]) =>
+				columnsByBoardId.get(boardId)?.has(columnId),
+			),
+		);
+		if (Object.keys(retained).length === Object.keys(this.chatBoardActiveColumnByBoardId).length) {
+			return;
+		}
+		this.set('chatBoardActiveColumnByBoardId', retained);
 	}
 
 	snapshot(): LocalSettingsSnapshot {

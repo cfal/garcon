@@ -27,10 +27,10 @@ function catalog(
 	return { revision, boards };
 }
 
-function harness(initialCatalog = catalog(1)) {
+function harness(initialCatalog = catalog(1), initialActiveColumns: Record<string, string> = {}) {
 	let selectedBoardId: string | null = null;
 	let itemLayout: ChatBoardPreferencesPort['itemLayout'] = null;
-	const activeColumns: Record<string, string> = {};
+	const activeColumns = { ...initialActiveColumns };
 	const preferences: ChatBoardPreferencesPort = {
 		get selectedBoardId() {
 			return selectedBoardId;
@@ -49,6 +49,14 @@ function harness(initialCatalog = catalog(1)) {
 		},
 		setActiveColumnId(boardId, columnId) {
 			activeColumns[boardId] = columnId;
+		},
+		pruneActiveColumns(boards) {
+			const columnsByBoardId = new Map(
+				boards.map((board) => [board.id, new Set(board.columns.map((column) => column.id))]),
+			);
+			for (const [boardId, columnId] of Object.entries(activeColumns)) {
+				if (!columnsByBoardId.get(boardId)?.has(columnId)) delete activeColumns[boardId];
+			}
 		},
 	};
 	const api = {
@@ -74,6 +82,9 @@ function harness(initialCatalog = catalog(1)) {
 		},
 		get itemLayout() {
 			return itemLayout;
+		},
+		get activeColumns() {
+			return { ...activeColumns };
 		},
 	};
 }
@@ -118,6 +129,20 @@ describe('ChatBoardController', () => {
 		test.api.load.mockResolvedValueOnce(catalog(3, []));
 		await test.controller.refresh(false);
 		expect(test.selectedBoardId).toBeNull();
+	});
+
+	it('prunes active-column preferences when boards or columns disappear', async () => {
+		const removedBoardId = '44444444-4444-4444-8444-444444444444';
+		const removedColumnId = '55555555-5555-4555-8555-555555555555';
+		const test = harness(catalog(1), {
+			[first.id]: first.columns[0]!.id,
+			[second.id]: removedColumnId,
+			[removedBoardId]: removedColumnId,
+		});
+
+		await test.controller.refresh(true);
+
+		expect(test.activeColumns).toEqual({ [first.id]: first.columns[0]!.id });
 	});
 
 	it('refreshes a visible loaded controller after catalog invalidation and reconnect', async () => {

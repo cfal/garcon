@@ -19,6 +19,7 @@ export interface ChatBoardPreferencesPort {
 	setItemLayout(layout: ChatItemLayout): void;
 	getActiveColumnId(boardId: string): string | null;
 	setActiveColumnId(boardId: string, columnId: string): void;
+	pruneActiveColumns(boards: readonly ChatBoard[]): void;
 }
 
 export interface ChatBoardControllerDeps {
@@ -197,6 +198,7 @@ export class ChatBoardController implements PortableSingletonController {
 	#applyCatalog(catalog: ChatBoardCatalog): void {
 		if (catalog.revision < this.#catalog.revision) return;
 		const previous = this.#catalog;
+		this.deps.preferences.pruneActiveColumns(catalog.boards);
 		this.#catalog = catalog;
 		const selected = this.deps.preferences.selectedBoardId;
 		if (selected && !catalog.boards.some((board) => board.id === selected)) {

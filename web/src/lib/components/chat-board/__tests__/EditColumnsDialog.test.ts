@@ -52,6 +52,7 @@ async function setup() {
 				return ready.id;
 			},
 			setActiveColumnId() {},
+			pruneActiveColumns() {},
 		},
 		sidebarLayout: () => 'compact',
 	});

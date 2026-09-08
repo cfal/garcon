@@ -78,6 +78,7 @@ async function controller() {
 				return source.id;
 			},
 			setActiveColumnId() {},
+			pruneActiveColumns() {},
 		},
 		sidebarLayout: () => 'compact',
 	});

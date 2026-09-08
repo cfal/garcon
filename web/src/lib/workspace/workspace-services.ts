@@ -299,6 +299,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 							[boardId]: columnId,
 						});
 					},
+					pruneActiveColumns(boards) {
+						deps.localSettings.pruneChatBoardActiveColumns(boards);
+					},
 				},
 				sidebarLayout: () => deps.localSettings.sidebarChatItemLayout,
 			}),
