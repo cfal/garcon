@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { build } from 'vite';
+import { build, type BuildOptions } from 'vite';
 import {
 	browserModuleBoundaryError,
 	isForbiddenBrowserRuntimeSpecifier,
@@ -44,19 +44,22 @@ async function buildFixture(
 	await Promise.all(fixturePackages.map((packageName) => addFixturePackage(root, packageName)));
 	const entry = path.join(root, 'entry.ts');
 	await fs.writeFile(entry, `import ${JSON.stringify(specifier)}; export const loaded = true;`);
+	let buildOptions: BuildOptions;
+	if (consumer === 'server') {
+		buildOptions = { ssr: entry, write: false };
+	} else {
+		buildOptions = {
+			lib: { entry, formats: ['es'], fileName: 'fixture' },
+			write: false,
+		};
+	}
 
 	return build({
 		configFile: false,
 		root,
 		logLevel: 'silent',
 		plugins: [rejectRuntimeBuiltinsFromBrowserBundle()],
-		build:
-			consumer === 'server'
-				? { ssr: entry, write: false }
-				: {
-						lib: { entry, formats: ['es'], fileName: 'fixture' },
-						write: false,
-					},
+		build: buildOptions,
 	});
 }
 

@@ -51,6 +51,31 @@ function importTypeModuleSpecifier(node) {
   return ts.isStringLiteral(node.argument.literal) ? node.argument.literal.text : null;
 }
 
+function declarationModuleSpecifier(node) {
+  if (
+    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+    && node.moduleSpecifier
+    && ts.isStringLiteral(node.moduleSpecifier)
+  ) {
+    return node.moduleSpecifier.text;
+  }
+  if (
+    ts.isImportEqualsDeclaration(node)
+    && ts.isExternalModuleReference(node.moduleReference)
+    && node.moduleReference.expression
+    && ts.isStringLiteral(node.moduleReference.expression)
+  ) {
+    return node.moduleReference.expression.text;
+  }
+  return null;
+}
+
+function moduleSpecifier(node) {
+  return declarationModuleSpecifier(node)
+    ?? importTypeModuleSpecifier(node)
+    ?? callModuleSpecifier(node);
+}
+
 export function extractModuleSpecifiers(source, fileName = 'source.ts') {
   const specifiers = [];
   for (const unit of sourceUnits(fileName, source)) {
@@ -61,28 +86,8 @@ export function extractModuleSpecifiers(source, fileName = 'source.ts') {
       true,
     );
     function visit(node) {
-      if (
-        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
-        && node.moduleSpecifier
-        && ts.isStringLiteral(node.moduleSpecifier)
-      ) {
-        specifiers.push(node.moduleSpecifier.text);
-      } else if (
-        ts.isImportEqualsDeclaration(node)
-        && ts.isExternalModuleReference(node.moduleReference)
-        && node.moduleReference.expression
-        && ts.isStringLiteral(node.moduleReference.expression)
-      ) {
-        specifiers.push(node.moduleReference.expression.text);
-      } else {
-        const importedType = importTypeModuleSpecifier(node);
-        if (importedType !== null) {
-          specifiers.push(importedType);
-        } else {
-          const calledModule = callModuleSpecifier(node);
-          if (calledModule !== null) specifiers.push(calledModule);
-        }
-      }
+      const specifier = moduleSpecifier(node);
+      if (specifier !== null) specifiers.push(specifier);
       ts.forEachChild(node, visit);
     }
     visit(sourceFile);
@@ -180,17 +185,19 @@ async function productionFiles(repositoryRoot, errors) {
   const files = [];
   for (const root of roots) {
     const discoveredFiles = await existingSourceFiles(root, PRODUCTION_SKIPPED_DIRECTORIES);
-    const rootFiles = discoveredFiles === null
-      ? null
-      : discoveredFiles.filter((fileName) => !/\.(?:spec|test)\.[^.]+$/u.test(fileName));
     const label = path.relative(repositoryRoot, root);
-    if (rootFiles === null) {
+    if (discoveredFiles === null) {
       errors.push(`Common architecture scan root is missing: ${label}`);
-    } else if (rootFiles.length === 0) {
-      errors.push(`Common architecture scan root has no production files: ${label}`);
-    } else {
-      files.push(...rootFiles);
+      continue;
     }
+    const rootFiles = discoveredFiles.filter(
+      (fileName) => !/\.(?:spec|test)\.[^.]+$/u.test(fileName),
+    );
+    if (rootFiles.length === 0) {
+      errors.push(`Common architecture scan root has no production files: ${label}`);
+      continue;
+    }
+    files.push(...rootFiles);
   }
   return files;
 }
@@ -253,6 +260,7 @@ export async function commonArchitectureErrors(repositoryRoot) {
 
   const files = await productionFiles(repositoryRoot, errors);
   for (const file of files) {
+    const relativeFile = path.relative(repositoryRoot, file);
     const inClient = isWithin(clientRoot, file);
     const inRootCommon = isWithin(commonRoot, file) && !inClient;
     const inServer = isWithin(serverRoot, file) || isWithin(agentRoot, file);
@@ -265,13 +273,13 @@ export async function commonArchitectureErrors(repositoryRoot) {
         packageExports,
       });
       if ((inRootCommon || inServer) && commonTarget && isWithin(clientRoot, commonTarget)) {
-        errors.push(`${path.relative(repositoryRoot, file)} cannot import ${specifier}`);
+        errors.push(`${relativeFile} cannot import ${specifier}`);
       }
       if (inClient && (commonTarget === null || !isWithin(commonRoot, commonTarget))) {
-        errors.push(`${path.relative(repositoryRoot, file)} cannot import ${specifier}`);
+        errors.push(`${relativeFile} cannot import ${specifier}`);
       }
       if (inRootCommon && targetsApplicationImplementation(file, specifier, repositoryRoot)) {
-        errors.push(`${path.relative(repositoryRoot, file)} cannot import ${specifier}`);
+        errors.push(`${relativeFile} cannot import ${specifier}`);
       }
     }
   }
