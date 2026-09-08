@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { CANVAS_MAX_COUNT, type ChatCanvas, type CanvasListResponse } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 const endpoint = '/api/v1/chat-canvases';
 
@@ -46,8 +46,7 @@ describe('Chromium canvas recovery', () => {
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
-      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-      await page.getByRole('menuitem', { name: 'Open canvas' }).click();
+      await clickWorkspaceWindowAddAction(page, 'Open canvas');
       await saved(page);
       await page.getByLabel('Choose canvas').selectOption('damaged');
       await page.locator('.svelte-flow__node[data-id="research"]').waitFor();
@@ -120,8 +119,7 @@ describe('Chromium canvas recovery', () => {
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);
-      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]').click();
-      await page.getByRole('menuitem', { name: 'Open canvas' }).click();
+      await clickWorkspaceWindowAddAction(page, 'Open canvas');
       await page.locator('[data-canvas-flow]').waitFor();
       await page.getByText('Some saved canvases could not be read.', { exact: false }).waitFor();
 
