@@ -87,6 +87,10 @@ describe('chat search contracts', () => {
     expect(parseChatSearchResponse(request, response())).toEqual(response());
     expect(() => parseChatSearchResponse(request, {
       ...response(),
+      query: 'different',
+    })).toThrow('query does not match request');
+    expect(() => parseChatSearchResponse(request, {
+      ...response(),
       page: { ...response().page, offset: 1 },
     })).toThrow('offset does not match request');
     expect(() => parseChatSearchResponse(request, {

@@ -145,6 +145,7 @@ export function parseChatSearchResponse(
 ): ChatSearchResponse {
   const response = chatSearchRecord(value);
   if (!response || typeof response.query !== 'string') invalidChatSearchResponse('response');
+  if (response.query !== request.query) invalidChatSearchResponse('query does not match request');
   const expectedMode = request.mode ?? 'page';
   const expectedSnippetLimit = request.snippetLimit ?? CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
   const expectedOffset = request.offset ?? 0;

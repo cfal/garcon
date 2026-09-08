@@ -25,7 +25,11 @@ import {
   type CliRowFormat,
 } from '@garcon/common/cli-presentation';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
-import { isPreambleId, type PreambleId } from '@garcon/common/preambles';
+import {
+  isPreambleId,
+  PREAMBLE_MAX_COUNT,
+  type PreambleId,
+} from '@garcon/common/preambles';
 import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import {
   CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
@@ -820,6 +824,9 @@ function parsePreambleSelection(
   }
   if (noPreamble) return [];
   if (rawIds === undefined) return undefined;
+  if (rawIds.length > PREAMBLE_MAX_COUNT) {
+    throw argumentError(`--preamble may be specified at most ${PREAMBLE_MAX_COUNT} times`);
+  }
   const ids: PreambleId[] = [];
   const seen = new Set<string>();
   for (const rawId of rawIds) {

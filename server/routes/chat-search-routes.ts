@@ -71,6 +71,7 @@ interface ChatSearchRouteDeps {
 }
 
 interface NormalizedChatSearchRequest extends ChatSearchRequest {
+  effectiveQuery: string;
   sort: ChatSearchSort;
   mode: ChatSearchResultMode;
   offset: number;
@@ -118,7 +119,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
       request?.signal.throwIfAborted();
       const controllerStarted = performance.now();
       const result = await searchIndex.search({
-        query: search.query,
+        query: search.effectiveQuery,
         textTokens: search.textTokens,
         allowedChatIds,
         sort: search.sort,
@@ -248,10 +249,11 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   if (rawQuery.length > MAX_SEARCH_QUERY_CHARS) {
     throw new ValidationDomainError(`query must be at most ${MAX_SEARCH_QUERY_CHARS} characters`);
   }
-  const query = rawQuery.trim();
+  const normalizedQuery = rawQuery.trim();
   const effectiveTerms = textTokens?.length
     ? textTokens
-    : [...query.matchAll(/"([^"]+)"|(\S+)/g)].map((match) => match[1] ?? match[2] ?? '');
+    : [...normalizedQuery.matchAll(/"([^"]+)"|(\S+)/g)]
+        .map((match) => match[1] ?? match[2] ?? '');
   if (effectiveTerms.length > CHAT_SEARCH_MAX_TERMS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_TERMS} terms`);
   }
@@ -262,7 +264,7 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   if (wordCount > CHAT_SEARCH_MAX_WORDS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
   }
-  const effectiveQuery = query || textTokens?.join(' ') || '';
+  const effectiveQuery = normalizedQuery || textTokens?.join(' ') || '';
   if (!effectiveQuery) throw new ValidationDomainError('query is required');
   const mode = optionalSearchResultMode(input.mode) ?? 'page';
   const offset = optionalBoundedOffset(input.offset) ?? 0;
@@ -273,7 +275,8 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   }
 
   return {
-    query: effectiveQuery,
+    query: rawQuery,
+    effectiveQuery,
     textTokens,
     chatIds: optionalBoundedStringArrayField(input, 'chatIds', {
       maxItems: CHAT_SEARCH_MAX_CHAT_IDS,

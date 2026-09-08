@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { PREAMBLE_MAX_COUNT } from '@garcon/common/preambles';
 import { CLI_HELP, parseCliArgs } from '../args.js';
 import { CliError } from '../errors.js';
 
@@ -272,6 +273,24 @@ describe('parseCliArgs', () => {
       orderedPreambleIds: [],
       json: true,
     });
+  });
+
+  test('accepts at most the shared preamble selection limit', () => {
+    const preambleIds = Array.from(
+      { length: PREAMBLE_MAX_COUNT },
+      (_, index) => `3502b645-222b-49d2-ac39-${index.toString().padStart(12, '0')}`,
+    );
+    const selectionArgs = preambleIds.flatMap((id) => ['--preamble', id]);
+
+    expect(parseCliArgs([
+      'start', '--agent', 'codex', '--model', 'gpt', ...selectionArgs, 'Review',
+    ], ENV)).toMatchObject({ orderedPreambleIds: preambleIds });
+    expect(() => parseCliArgs([
+      'start', '--agent', 'codex', '--model', 'gpt',
+      ...selectionArgs,
+      '--preamble', '3502b645-222b-49d2-ac39-000000000100',
+      'Review',
+    ], ENV)).toThrow(`--preamble may be specified at most ${PREAMBLE_MAX_COUNT} times`);
   });
 
   test('documents presentation on conversational commands and its native-history boundary', () => {

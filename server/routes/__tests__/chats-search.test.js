@@ -285,6 +285,22 @@ describe('POST /api/v1/chats/search', () => {
     expect(chatListProjector.buildMany.mock.calls[0][0].map(([chatId]) => chatId)).toEqual(['c2']);
   });
 
+  it('echoes the exact submitted query while executing its normalized form', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+
+    const response = await postSearch(routes, {
+      query: '  needle  ',
+      textTokens: [' needle '],
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ query: '  needle  ' });
+    expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+      query: 'needle',
+      textTokens: ['needle'],
+    }));
+  });
+
   it('includes chats without checking project path availability', async () => {
     const { routes, searchIndex } = createRoutesFixture();
 
