@@ -309,6 +309,12 @@
 		};
 	});
 
+	// A mobile drawer remount must reopen on the chat list, not on the
+	// search dialog cluster that outlived the previous drawer instance.
+	$effect(() => {
+		if (isMobile && !appShell.sidebarOpen) sidebarSearch.resetDialogs();
+	});
+
 	// Tracks virtual keyboard height via visualViewport for mobile layout.
 	$effect(() => {
 		if (typeof window === 'undefined' || !window.visualViewport) return;

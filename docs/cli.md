@@ -36,6 +36,7 @@ Start a visible chat and wait for its accepted turn:
 ```bash
 bun cli/main.ts \
   --workspace default \
+  start \
   --cwd /path/to/project \
   --agent codex \
   --model gpt-5.4 \
@@ -56,9 +57,22 @@ turn id: 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
 Resume the same agent session without repeating its saved selection:
 
 ```bash
-bun cli/main.ts --workspace default --resume 1785337200123456 \
+bun cli/main.ts --workspace default resume 1785337200123456 \
   "Address the review findings."
 ```
+
+Start a chat without waiting for its turn to settle:
+
+```bash
+bun cli/main.ts --workspace default start-async \
+  --cwd /path/to/project \
+  --agent codex \
+  --model gpt-5.4 \
+  "Investigate the failing release check."
+```
+
+`start-async` prints the accepted chat and turn IDs, then returns. Use the turn ID
+with `wait` when exact completion identity matters.
 
 New chats created through the CLI receive the `cli` tag. Add repeatable tags with `--tag review --tag delegated`. `--title` sets the chat title.
 
@@ -67,11 +81,12 @@ for example when one agent starts another for review. Garcon records an immutabl
 `delegation` relationship and shows it in Chat Map. The parent must exist in the
 same workspace. Declaring it does not copy transcript content, inherit execution
 settings, or make either chat wait for the other. `--parent` is creation-only and
-cannot be used with `--resume`.
+cannot be used with `resume`.
 
 ```bash
 bun cli/main.ts \
   --workspace default \
+  start \
   --cwd /path/to/project \
   --parent 1785337200123456 \
   --agent claude \
@@ -80,7 +95,7 @@ bun cli/main.ts \
   "Review the parent chat's implementation."
 ```
 
-The CLI supports write-capable delegation and does not force plan mode. Permission and reasoning values use the selected agent's live catalog. A single `-` prompt reads UTF-8 stdin. Use `--` before a prompt whose first word is a CLI subcommand.
+The CLI supports write-capable delegation and does not force plan mode. Permission and reasoning values use the selected agent's live catalog. A single `-` prompt reads UTF-8 stdin. Use `--` before prompt text that begins with an option-like token. Prompts beginning with command words are unambiguous after `start`, `start-async`, or `resume`.
 
 Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
@@ -112,12 +127,12 @@ The optional `--agent` filter uses an exact agent ID. Without it, every current 
 
 ## Message Presentation
 
-Start, resume, and `send-async` messages can add a visual header with `--message-title` and `--message-style info|notice|error|custom`. A title alone uses `notice`. Custom styling uses `--color <light[,dark]>`.
+Start, resume, and `resume-async` messages can add a visual header with `--message-title` and `--message-style info|notice|error|custom`. A title alone uses `notice`. Custom styling uses `--color <light[,dark]>`.
 
 Presentation distinguishes the ordinary user message in Garcon and is not included in the prompt sent to the agent. `--collapsible` starts the message body collapsed.
 
 ```bash
-bun cli/main.ts --workspace default --resume 1785337200123456 \
+bun cli/main.ts --workspace default resume 1785337200123456 \
   --message-title "Deployment constraint" \
   --color 0ea5e9,7dd3fc \
   --collapsible \
@@ -125,6 +140,96 @@ bun cli/main.ts --workspace default --resume 1785337200123456 \
 ```
 
 Restart, replay, shares, and frozen forks preserve CLI presentation. Explicit native-history Reload and provider-native fork segments may drop it.
+
+## Search And Chat History
+
+List the complete chat metadata snapshot, optionally using the same filter language as the sidebar:
+
+```bash
+bun cli/main.ts --workspace default chats --json
+bun cli/main.ts --workspace default chats \
+  --filter 'project:/garcon tag:cli is:!archived' \
+  --limit 50 --offset 0
+```
+
+Supported metadata operators are `title:`, `tag:`, `agent:`, `model:`,
+`project:`, `status:active|unread`, and `is:pinned|normal|archived`. Negate an
+order group with `is:!pinned`, `is:!normal`, or `is:!archived`. Pipe-separated
+values are OR alternatives. Repeated title and tag groups are ANDed; agent,
+model, and project values accumulate as alternatives. Bare terms are ANDed and
+match chat title, project path, first and last previews, and tags. `chats` sorts
+by effective activity descending and uses the chat ID as a stable tie-breaker.
+
+Search normalized transcript content and join each hit to chat metadata:
+
+```bash
+bun cli/main.ts --workspace default search '"version bump"' \
+  --filter 'project:/garcon agent:codex' \
+  --sort relevance --limit 20 --offset 0 --snippets 3 --json
+```
+
+Search is lexical. Quoted phrases require adjacent words in one indexed entry.
+Unquoted terms are ANDed at chat scope and can occur in different messages;
+terms of at least three code points use prefix matching. The plain result shows
+the interpreted query, labels chat activity separately from snippet timestamps,
+and prints an exact follow-up `read` command carrying the resolved workspace,
+config directory, optional server assertion, and any category includes needed to
+retain the matched anchor. Snippet timestamps answer when the matching message was
+written; activity sorting does not order mentions by time.
+
+Metadata filtering happens before ranking and restricts the server candidate
+set. An empty filter omits the candidate list. A filter selecting more than
+10,000 chats is rejected rather than split into independently ranked searches.
+
+Search results are paged. Follow only `page.hasMore` and `page.nextOffset`; a
+short result array is not proof that paging is complete. Offset pages are not a
+snapshot while chats change, so callers should deduplicate chat IDs and compare
+totals between pages. `--sort created` is the least volatile order for long
+enumerations.
+
+Coverage diagnostics are written to stderr. Pending, failed, unindexed, or
+unsupported chats mean the result cannot establish absence. Likewise,
+`resultsTruncated` means index row sampling can make matches and `page.total`
+incomplete; narrow the metadata filter or quote a phrase before drawing a
+negative conclusion. Tool inputs and results are indexed with size bounds, so a
+missing path match is not proof that the path was never used.
+Disabled search exits with settings guidance. Busy, timeout, and unavailable
+index states remain retryable operational failures. Invalid search queries exit
+as argument failures.
+
+Read bounded context around a search ordinal while pinning the transcript view:
+
+```bash
+bun cli/main.ts --workspace default read 1785337200123456 84 \
+  -B 5 -A 5 --transcript-view-id view-1
+
+bun cli/main.ts --workspace default read 1785337200123456 84 \
+  --before-context 3 --after-context 8 --include tools --json
+```
+
+`-B` and `-A` count displayed entries after filtering. By default, `read`
+retains the conversation spine: user and assistant messages, compaction
+summaries, and carryover-quarantine notices. Optional `--include` categories are
+repeatable or comma-separated:
+
+- `tool-calls`
+- `tool-results`
+- `reasoning`
+- `permissions`
+- `diagnostics`
+- `handoffs`
+- `tools`, shorthand for both tool categories
+
+Tool entries are opt-in because they can consume an entire bounded context
+window, but they are often the decisive evidence for commands, file paths, and
+failures. If the anchor itself is excluded, `read` fails and names the required
+category. A supplied transcript view ID prevents a changed or forked transcript
+from returning mismatched context; rerun search when the view is stale.
+
+Plain read output redacts data URLs and truncates each rendered entry at 4,000
+characters. `read --json` preserves the complete normalized values in the
+bounded window and may expose sensitive tool inputs or results when those
+categories are included. Use `export` for the complete archival transcript.
 
 ## Wait And Status
 
@@ -197,17 +302,17 @@ Use a handoff artifact for comprehensive high-level synthesis. Use complete XML 
 
 ## Asynchronous Delivery And Steering
 
-`send-async` submits to an existing chat and returns as soon as Garcon accepts it. The turn stays visible and stoppable in the SPA and inherits the target chat's saved execution settings.
+`resume-async` submits to an existing chat and returns as soon as Garcon accepts it. The turn stays visible and stoppable in the SPA and inherits the target chat's saved execution settings.
 
 ```bash
-bun cli/main.ts --workspace default send-async 1785337200123456 \
+bun cli/main.ts --workspace default resume-async 1785337200123456 \
   "Implement the reviewed changes and run the focused tests."
 ```
 
 If the target is busy, the command exits `3` without queueing or steering. Pass `--allow-steer` to deliver into the active turn instead. `--allow-steer` never queues:
 
 ```bash
-bun cli/main.ts --workspace default send-async 1785337200123456 \
+bun cli/main.ts --workspace default resume-async 1785337200123456 \
   --allow-steer \
   --message-title "New blocker" \
   --message-style error \

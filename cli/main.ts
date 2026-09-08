@@ -2,13 +2,16 @@ import packageJson from '../package.json' with { type: 'json' };
 import fs from 'node:fs/promises';
 import { CLI_HELP, parseCliArgs, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
-import { sendChatAsync, stopChat } from './chat-control.js';
+import { resumeChatAsync, stopChat } from './chat-control.js';
 import { runAddRow, validateAddRowContent } from './chat-row.js';
 import { runChatStatus } from './chat-status.js';
 import { runChatExport } from './chat-export.js';
 import { runChatHandoff } from './chat-handoff.js';
 import { runChatWait } from './chat-wait.js';
-import { runConsultation } from './consultation.js';
+import { runConsultation, startConsultationAsync } from './consultation.js';
+import { runChatCatalog } from './chat-catalog.js';
+import { runChatSearch } from './chat-search.js';
+import { runChatRead } from './chat-read.js';
 import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
 import { GarconClient } from './garcon-client.js';
@@ -133,7 +136,13 @@ function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
   if (command?.kind === 'handoff') {
     return 'terminal interrupted; no handoff artifact was written';
   }
-  return command !== undefined && (command.kind === 'send-async' || command.kind === 'stop')
+  if (
+    command !== undefined
+    && ['list', 'chats', 'search', 'read', 'status', 'wait', 'lookup-native-session']
+      .includes(command.kind)
+  ) return 'terminal interrupted; the read-only operation was canceled';
+  return command !== undefined
+    && (command.kind === 'resume-async' || command.kind === 'stop' || command.kind === 'start-async')
     ? 'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying'
     : 'terminal interrupted; no Garcon agent was stopped';
 }
@@ -169,6 +178,21 @@ export async function main(
       await runChatStatus(command, client, output, options.signal);
       return 0;
     }
+    if (command.kind === 'chats') {
+      const client = await connectedClient(command, options);
+      await runChatCatalog(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'search') {
+      const client = await connectedClient(command, options);
+      await runChatSearch(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'read') {
+      const client = await connectedClient(command, options);
+      await runChatRead(command, client, output, options.signal);
+      return 0;
+    }
     if (command.kind === 'export') {
       const client = await connectedClient(command, options);
       await runChatExport(command, client, output, options.signal);
@@ -193,7 +217,7 @@ export async function main(
       await stopChat(command.chatId, client, output, options.signal);
       return 0;
     }
-    if (command.kind === 'send-async') {
+    if (command.kind === 'resume-async') {
       const message = command.readsMessageFromStdin
         ? await readConfiguredStdin(options)
         : command.message ?? '';
@@ -201,7 +225,7 @@ export async function main(
         throw new CliError('arguments', 'the message read from stdin must not be empty', 2);
       }
       const client = await connectedClient(command, options);
-      await sendChatAsync({
+      await resumeChatAsync({
         chatId: command.chatId,
         content: message,
         allowSteer: command.allowSteer,
@@ -226,11 +250,15 @@ export async function main(
     if (prompt.trim().length === 0) {
       throw new CliError('arguments', 'the prompt read from stdin must not be empty', 2);
     }
-    const invocation = command.kind === 'start'
+    const invocation = command.kind === 'start' || command.kind === 'start-async'
       ? { ...command, cwd: await canonicalProjectDirectory(command.cwd) }
       : command;
     const client = await connectedClient(invocation, options);
-    await runConsultation(invocation, prompt, client, output, options.signal);
+    if (invocation.kind === 'start-async') {
+      await startConsultationAsync(invocation, prompt, client, output, options.signal);
+    } else {
+      await runConsultation(invocation, prompt, client, output, options.signal);
+    }
     return 0;
   } catch (error) {
     if (options.signal?.aborted) {

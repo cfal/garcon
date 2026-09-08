@@ -73,6 +73,69 @@ describe('sidebar search interactions', () => {
 		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
 	});
 
+	it('renders the overlay in place by default', async () => {
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [createChat('chat-1', 'First chat')],
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const overlay = await screen
+			.findByText('First chat')
+			.then((row) => row.closest('[data-slot="search-dialog-overlay"]'));
+		expect(overlay?.parentElement).not.toBe(document.body);
+	});
+
+	it('mounts the overlay at document.body level when portaling is requested', async () => {
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [createChat('chat-1', 'First chat')],
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			portalToBody: true,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const row = await screen.findByText('First chat');
+		const overlay = row.closest('[data-slot="search-dialog-overlay"]');
+		expect(overlay?.parentElement).toBe(document.body);
+	});
+
+	it('renders labeled full-width action buttons below the input row on mobile', () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+		});
+
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
+		expect(inputShell?.className).toContain('h-11');
+		expect(inputShell?.className).toContain('sm:h-9');
+
+		for (const name of ['Search help', 'Add saved search', 'Manage searches']) {
+			const button = screen.getByRole('button', { name });
+			expect(button.textContent).toContain(name);
+			expect(button.className).toContain('flex-1');
+			expect(button.className).toContain('h-11');
+		}
+	});
+
 	it('opens the highlighted chat from the query input and respects arrow selection', async () => {
 		const onSelectChat = vi.fn();
 
@@ -96,9 +159,9 @@ describe('sidebar search interactions', () => {
 	it('prefetches once keyboard navigation reaches the final eight loaded rows', async () => {
 		const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
 		render(SidebarSearchDialogHost, {
-			filteredChats: Array.from({ length: 10 }, (_, index) => (
-				createChat(`chat-${index}`, `Chat ${index}`)
-			)),
+			filteredChats: Array.from({ length: 10 }, (_, index) =>
+				createChat(`chat-${index}`, `Chat ${index}`),
+			),
 			hasMoreTranscriptResults: true,
 			onLoadMoreTranscriptResults,
 		});
@@ -114,27 +177,27 @@ describe('sidebar search interactions', () => {
 	it.each([
 		['page', { transcriptSearchPageError: 'Loading more results failed.' }],
 		['revalidation', { transcriptSearchRevalidationError: 'Updating results failed.' }],
-	])('does not prefetch from the keyboard while a %s error requires explicit retry', async (
-		_errorKind,
-		errorProps,
-	) => {
-		const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
-		render(SidebarSearchDialogHost, {
-			filteredChats: Array.from({ length: 10 }, (_, index) => (
-				createChat(`chat-${index}`, `Chat ${index}`)
-			)),
-			hasMoreTranscriptResults: true,
-			onLoadMoreTranscriptResults,
-			...errorProps,
-		});
+	])(
+		'does not prefetch from the keyboard while a %s error requires explicit retry',
+		async (_errorKind, errorProps) => {
+			const onLoadMoreTranscriptResults = vi.fn(async () => undefined);
+			render(SidebarSearchDialogHost, {
+				filteredChats: Array.from({ length: 10 }, (_, index) =>
+					createChat(`chat-${index}`, `Chat ${index}`),
+				),
+				hasMoreTranscriptResults: true,
+				onLoadMoreTranscriptResults,
+				...errorProps,
+			});
 
-		const input = await screen.findByRole('textbox');
-		input.focus();
-		await fireEvent.keyDown(input, { key: 'ArrowDown' });
-		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+			const input = await screen.findByRole('textbox');
+			input.focus();
+			await fireEvent.keyDown(input, { key: 'ArrowDown' });
+			await fireEvent.keyDown(input, { key: 'ArrowDown' });
 
-		expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
-	});
+			expect(onLoadMoreTranscriptResults).not.toHaveBeenCalled();
+		},
+	);
 
 	it('changes the search-result sort from the keyboard-reachable menu', async () => {
 		const onSortChange = vi.fn();
@@ -348,7 +411,7 @@ describe('sidebar search interactions', () => {
 		expect(onApplySavedSearch).not.toHaveBeenCalled();
 	});
 
-	it('closes from the compact header close button beside search settings', async () => {
+	it('closes from the header close button beside the query input', async () => {
 		const onClose = vi.fn();
 
 		render(SidebarSearchDialogHost, {
@@ -357,12 +420,12 @@ describe('sidebar search interactions', () => {
 		});
 
 		await screen.findByRole('textbox');
-		const settingsButton = screen.getByRole('button', { name: 'Manage searches' });
+		const inputShell = document.querySelector('[data-slot="search-dialog-input-shell"]');
 		const closeButton = screen.getByRole('button', { name: 'Close search' });
 
-		expect(settingsButton.nextElementSibling).toBe(closeButton);
-		expect(closeButton.className).toContain('h-9');
-		expect(closeButton.className).toContain('w-9');
+		expect(inputShell?.nextElementSibling).toBe(closeButton);
+		expect(closeButton.className).toContain('h-11');
+		expect(closeButton.className).toContain('w-11');
 		expect(closeButton.className).toContain('sm:hidden');
 
 		await fireEvent.click(closeButton);
@@ -578,15 +641,11 @@ describe('sidebar search interactions', () => {
 		expect(items[5]?.textContent).toContain('No grouping');
 		expect(screen.getByRole('menuitemradio', { name: 'Project' })).toBeTruthy();
 		expect(items[6]?.textContent).toContain('Project');
-		expect(
-			screen.getByRole('menuitemradio', { name: 'Project and activity' }),
-		).toBeTruthy();
+		expect(screen.getByRole('menuitemradio', { name: 'Project and activity' })).toBeTruthy();
 		expect(items[7]?.textContent).toContain('Project and activity');
 		expect(screen.getByRole('menuitemradio', { name: 'Activity' })).toBeTruthy();
 		expect(items[8]?.textContent).toContain('Activity');
-		expect(
-			screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' }),
-		).toBeTruthy();
+		expect(screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' })).toBeTruthy();
 		expect(items[9]?.textContent).toContain('Combine nested paths');
 		expect(screen.getByRole('menuitemradio', { name: 'Default' })).toBeTruthy();
 		expect(items[10]?.textContent).toContain('Default');

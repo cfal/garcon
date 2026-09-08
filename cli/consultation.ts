@@ -12,7 +12,7 @@ import type { UpdateChatTitleRequest } from '@garcon/common/chat-title-contracts
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import { normalizeTags } from '@garcon/common/tags';
-import type { CliInvocation } from './args.js';
+import type { CliInvocation, StartAsyncCliInvocation } from './args.js';
 import {
   resolveModelSelection,
   resolveHandoffSelection,
@@ -52,7 +52,7 @@ export interface ConsultationDependencies {
 const START_CHAT_ID_ATTEMPTS = 3;
 
 // The cli tag records creation provenance only. Every started chat receives it;
-// resumes, send-async, steer, and stop never add it.
+// resumes, resume-async, steer, and stop never add it.
 function startTags(additionalTags: readonly string[] | undefined): string[] {
   return normalizeTags(['cli', ...(additionalTags ?? [])]);
 }
@@ -74,7 +74,7 @@ function requireResumeChat(sessions: readonly ChatListEntry[], chatId: string): 
 }
 
 async function submitStart(
-  invocation: Extract<CliInvocation, { kind: 'start' }>,
+  invocation: Extract<CliInvocation, { kind: 'start' }> | StartAsyncCliInvocation,
   prompt: string,
   client: ConsultationClient,
   signal: AbortSignal | undefined,
@@ -127,6 +127,17 @@ async function submitStart(
     3,
     { cause: lastCollision },
   );
+}
+
+async function updateRequestedTitle(
+  invocation: Pick<CliInvocation | StartAsyncCliInvocation, 'title'>,
+  chatId: string,
+  client: ConsultationClient,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (invocation.title !== undefined) {
+    await client.updateChatTitle({ chatId, title: invocation.title }, signal);
+  }
 }
 
 async function submitResume(
@@ -215,12 +226,10 @@ export async function runConsultation(
     : await submitResume(invocation, prompt, client, signal, createId);
   output.accepted(accepted);
   let titleError: unknown | undefined;
-  if (invocation.title !== undefined) {
-    try {
-      await client.updateChatTitle({ chatId: accepted.chatId, title: invocation.title }, signal);
-    } catch (error) {
-      titleError = error;
-    }
+  try {
+    await updateRequestedTitle(invocation, accepted.chatId, client, signal);
+  } catch (error) {
+    titleError = error;
   }
   const receipt = await pollTurnReceipt(
     client,
@@ -232,4 +241,24 @@ export async function runConsultation(
   );
   writeTerminalResult(receipt, output);
   if (titleError !== undefined) throw titleError;
+}
+
+export async function startConsultationAsync(
+  invocation: StartAsyncCliInvocation,
+  prompt: string,
+  client: ConsultationClient,
+  output: CliOutput,
+  signal?: AbortSignal,
+  dependencies: ConsultationDependencies = {},
+): Promise<void> {
+  const accepted = await submitStart(
+    invocation,
+    prompt,
+    client,
+    signal,
+    dependencies.createId ?? crypto.randomUUID,
+    dependencies.createChatId ?? createClientChatId,
+  );
+  output.accepted(accepted);
+  await updateRequestedTitle(invocation, accepted.chatId, client, signal);
 }

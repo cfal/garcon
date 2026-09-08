@@ -6,7 +6,7 @@ import type {
   SteerCommandRequest,
   SteerCommandResponse,
 } from '@garcon/common/chat-command-contracts';
-import { sendChatAsync, stopChat, type ChatControlClient, type ChatControlDependencies } from '../chat-control.js';
+import { resumeChatAsync, stopChat, type ChatControlClient, type ChatControlDependencies } from '../chat-control.js';
 import { CliError } from '../errors.js';
 import { GarconHttpError, GarconTransportError } from '../garcon-client.js';
 import type { CliOutput } from '../output.js';
@@ -140,11 +140,11 @@ function client(overrides: Partial<ChatControlClient> = {}): ChatControlClient &
   };
 }
 
-describe('sendChatAsync', () => {
+describe('resumeChatAsync', () => {
   test('accepts a run on the first attempt and never calls steer', async () => {
     const testClient = client();
     const testOutput = output();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Implement it', allowSteer: false }, testClient, testOutput, undefined, noDelayDependencies());
+    await resumeChatAsync({ chatId: CHAT_ID, content: 'Implement it', allowSteer: false }, testClient, testOutput, undefined, noDelayDependencies());
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(0);
     expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
@@ -153,7 +153,7 @@ describe('sendChatAsync', () => {
   test('uses a new turn for an idle chat even when steering is allowed', async () => {
     const testClient = client();
     const testOutput = output();
-    await sendChatAsync(
+    await resumeChatAsync(
       { chatId: CHAT_ID, content: 'Implement it', allowSteer: true },
       testClient,
       testOutput,
@@ -168,7 +168,7 @@ describe('sendChatAsync', () => {
   test('fails without steering when the chat is busy and --allow-steer is absent', async () => {
     const testClient = client({ async runChat() { throw busyError(); } });
     const testOutput = output();
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: false },
       testClient, testOutput, undefined, noDelayDependencies(),
     )).rejects.toMatchObject({
@@ -186,7 +186,7 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
     });
     const testOutput = output();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, testOutput, undefined, noDelayDependencies());
+    await resumeChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, testOutput, undefined, noDelayDependencies());
     expect(testClient.runs).toHaveLength(1);
     expect(testClient.steers).toHaveLength(1);
     expect(testClient.steers[0]).toMatchObject({ chatId: CHAT_ID, content: 'Message' });
@@ -204,7 +204,7 @@ describe('sendChatAsync', () => {
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
     });
     const testOutput = output();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, testOutput, undefined, noDelayDependencies());
+    await resumeChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, testOutput, undefined, noDelayDependencies());
     expect(testClient.runs).toHaveLength(2);
     expect(testClient.steers).toHaveLength(1);
     expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
@@ -221,7 +221,7 @@ describe('sendChatAsync', () => {
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
     });
     const presentation = { origin: 'cli', style: 'info', title: 'Context' } as const;
-    await sendChatAsync({
+    await resumeChatAsync({
       chatId: CHAT_ID,
       content: 'Message',
       allowSteer: true,
@@ -240,7 +240,7 @@ describe('sendChatAsync', () => {
       async steerChat() { throw steerError('STEER_TURN_CHANGED'); },
     });
     const testOutput = output();
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
       testClient, testOutput, undefined, noDelayDependencies(),
     )).rejects.toMatchObject({
@@ -262,7 +262,7 @@ describe('sendChatAsync', () => {
       },
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
     });
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, output(), undefined, noDelayDependencies(() => 'fixed-id'));
+    await resumeChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, output(), undefined, noDelayDependencies(() => 'fixed-id'));
     expect(testClient.runs).toHaveLength(2);
     expect(testClient.runs[0]).toEqual(testClient.runs[1]);
     expect(testClient.runs[0]).toEqual({
@@ -277,7 +277,7 @@ describe('sendChatAsync', () => {
   test('gives the steer attempt an identity distinct from the run request', async () => {
     const ids = ['run-request', 'run-message', 'steer-request', 'steer-message'];
     const testClient = client({ async runChat() { throw busyError(); } });
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, output(), undefined, noDelayDependencies(() => ids.shift()!));
+    await resumeChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: true }, testClient, output(), undefined, noDelayDependencies(() => ids.shift()!));
     expect(testClient.steers[0]).toMatchObject({
       clientRequestId: 'steer-request',
       clientMessageId: 'steer-message',
@@ -300,7 +300,7 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
       async steerChat() { throw steerFailure; },
     });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
       testClient, output(), undefined, noDelayDependencies(),
     )).rejects.toBeInstanceOf(CliError);
@@ -311,7 +311,7 @@ describe('sendChatAsync', () => {
   test('does not steer when a busy code arrives on a non-409 status', async () => {
     const nonConflict = new GarconHttpError('submission', 'busy', 500, 'SESSION_BUSY', true);
     const testClient = client({ async runChat() { throw nonConflict; } });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
       testClient, output(), undefined, noDelayDependencies(),
     )).rejects.toBe(nonConflict);
@@ -328,7 +328,7 @@ describe('sendChatAsync', () => {
       false,
     );
     const testClient = client({ async runChat() { throw rejection; } });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
       testClient, output(), undefined, noDelayDependencies(),
     )).rejects.toBe(rejection);
@@ -348,7 +348,7 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
       async steerChat() { throw nonConflict; },
     });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
       testClient, output(), undefined, noDelayDependencies(),
     )).rejects.toBe(nonConflict);
@@ -363,7 +363,7 @@ describe('sendChatAsync', () => {
       async runChat() { throw busyError(); },
       async steerChat() { throw steerError('STEER_TURN_CHANGED'); },
     });
-    await expect(sendChatAsync(
+    await expect(resumeChatAsync(
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
       testClient, output(), controller.signal, {
         createId: () => 'id',
@@ -375,7 +375,7 @@ describe('sendChatAsync', () => {
 
   test('omits tags, overrides, and permission fallback from the run payload', async () => {
     const testClient = client();
-    await sendChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: false }, testClient, output(), undefined, noDelayDependencies());
+    await resumeChatAsync({ chatId: CHAT_ID, content: 'Message', allowSteer: false }, testClient, output(), undefined, noDelayDependencies());
     expect(testClient.runs[0]).toEqual({
       clientRequestId: 'id',
       clientMessageId: 'id',

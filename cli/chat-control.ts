@@ -63,7 +63,7 @@ function isSafeSteerStateFlip(error: unknown): boolean {
 // the message was not delivered. The normal run request is allocated once and
 // reused byte-for-byte when returning to /run, because the server's pre-schedule
 // failure replay path resets an exact failed run identity.
-export async function sendChatAsync(
+export async function resumeChatAsync(
   input: {
     chatId: string;
     content: string;

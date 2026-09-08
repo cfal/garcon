@@ -130,7 +130,7 @@ hidden new-turn fallback. Core still strips the exact assistant marker before
 storage, but stores no request notice. Delivery first targets the active turn;
 definitive steering state changes fall back to a direct turn carrying only the
 disclosure envelope, using the same three-attempt run/steer alternation as
-`garcon-cli send-async --allow-steer`. Server control accepts a deliberately
+`garcon-cli resume-async --allow-steer`. Server control accepts a deliberately
 wider set of definitive non-delivery outcomes because it has no committed user
 row to reuse. A definitive steer rejection waits for
 that captured execution attempt to settle before selecting the next route.

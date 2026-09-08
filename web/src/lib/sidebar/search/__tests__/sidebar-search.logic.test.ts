@@ -8,7 +8,7 @@ import {
 	queryHasTag,
 	emptyFilterSpec,
 	matchesChatFilter,
-} from '$lib/sidebar/search/sidebar-search.js';
+} from '$shared/chat-filter-query';
 
 describe('parseChatSearch', () => {
 	it('returns empty spec for empty string', () => {

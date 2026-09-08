@@ -46,6 +46,11 @@ import type { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { WorkspaceHostGeometryState } from '$lib/workspace/workspace-host-geometry.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ThemeProfile } from '$lib/theme/themes.js';
+
+export interface ThemeRuntime {
+	readonly profile: ThemeProfile;
+}
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -116,6 +121,7 @@ export interface WorkspaceChatActions {
 }
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
+export const [getThemeRuntime, setThemeRuntime] = createContext<ThemeRuntime>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();
 
 // Chat-level contexts (set in ConversationWorkspace.svelte)

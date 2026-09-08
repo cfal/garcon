@@ -5,23 +5,18 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import SunIcon from '@lucide/svelte/icons/sun';
-	import MoonIcon from '@lucide/svelte/icons/moon';
-	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import { getAppShell, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn.js';
-	import type {
-		ChatMaxWidth,
-		SidebarChatItemLayout,
-		ThemeMode,
-	} from '$lib/stores/local-settings.svelte.js';
+	import type { ChatMaxWidth, SidebarChatItemLayout } from '$lib/stores/local-settings.svelte.js';
 	import {
 		OnboardingWizardState,
 		type OnboardingPageId,
 	} from './onboarding-wizard-state.svelte.js';
+	import { ONBOARDING_OPTION_CARD_CLASS } from './onboarding-option-card.js';
 	import OnboardingChatLayoutPreview from './OnboardingChatLayoutPreview.svelte';
+	import OnboardingThemePage from './OnboardingThemePage.svelte';
 
 	const appShell = getAppShell();
 	const ls = getLocalSettings();
@@ -62,32 +57,6 @@
 		done: m.onboarding_done_description,
 	};
 
-	const themeOptions: Array<{
-		value: ThemeMode;
-		label: () => string;
-		hint: () => string;
-		icon: typeof SunIcon;
-	}> = [
-		{
-			value: 'system',
-			label: m.settings_theme_system,
-			hint: m.onboarding_theme_system_hint,
-			icon: MonitorIcon,
-		},
-		{
-			value: 'light',
-			label: m.settings_theme_light,
-			hint: m.onboarding_theme_light_hint,
-			icon: SunIcon,
-		},
-		{
-			value: 'dark',
-			label: m.settings_theme_dark,
-			hint: m.onboarding_theme_dark_hint,
-			icon: MoonIcon,
-		},
-	];
-
 	const layoutOptions: Array<{
 		value: SidebarChatItemLayout;
 		label: () => string;
@@ -120,9 +89,6 @@
 		{ value: 'medium', label: m.settings_chat_max_width_medium, previewClass: 'w-3/5' },
 		{ value: 'small', label: m.settings_chat_max_width_small, previewClass: 'w-2/5' },
 	];
-
-	const optionCardClass =
-		'flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-border bg-card p-3 text-center transition-colors hover:border-primary/50 has-checked:border-primary has-checked:bg-accent/50 has-checked:shadow-xs has-focus-visible:ring-2 has-focus-visible:ring-ring has-focus-visible:ring-offset-1 has-focus-visible:ring-offset-background';
 </script>
 
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
@@ -147,29 +113,12 @@
 
 		<div class="min-h-40">
 			{#if wizard.pageId === 'theme'}
-				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-					<legend class="sr-only">{m.onboarding_theme_title()}</legend>
-					{#each themeOptions as option (option.value)}
-						<label class={optionCardClass}>
-							<input
-								type="radio"
-								class="sr-only"
-								name="onboarding-theme"
-								value={option.value}
-								checked={ls.theme === option.value}
-								onchange={() => wizard.selectTheme(option.value)}
-							/>
-							<option.icon class="size-6 text-muted-foreground" />
-							<span class="text-sm font-medium text-foreground">{option.label()}</span>
-							<span class="text-xs text-muted-foreground">{option.hint()}</span>
-						</label>
-					{/each}
-				</fieldset>
+				<OnboardingThemePage onSelect={(preference) => wizard.selectTheme(preference)} />
 			{:else if wizard.pageId === 'chat-layout'}
 				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 					<legend class="sr-only">{m.onboarding_layout_title()}</legend>
 					{#each layoutOptions as option (option.value)}
-						<label class={optionCardClass}>
+						<label class={ONBOARDING_OPTION_CARD_CLASS}>
 							<input
 								type="radio"
 								class="sr-only"
@@ -198,7 +147,7 @@
 					</legend>
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 						{#each chatMaxWidthOptions as option (option.value)}
-							<label class={cn(optionCardClass, 'gap-1.5 p-2')}>
+							<label class={cn(ONBOARDING_OPTION_CARD_CLASS, 'gap-1.5 p-2')}>
 								<input
 									type="radio"
 									class="sr-only"

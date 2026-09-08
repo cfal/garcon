@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { main } from '../main.js';
 import { createCliOutput, type CliOutput } from '../output.js';
+import { AssistantMessage } from '@garcon/common/chat-types';
+import { chat, chatList, TS } from './chat-research-fixtures.js';
 
 const CHAT_ID = '1785337200123456';
 
@@ -357,10 +359,97 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
+  test('routes chats, search, and read through their read-only endpoints', async () => {
+    const catalogCapture = capturedOutput();
+    const catalogExit = await main(['chats', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: catalogCapture.output,
+      fetch: async () => Response.json(chatList([chat()])),
+    });
+    expect(catalogExit).toBe(0);
+    expect(JSON.parse(catalogCapture.results[0]!)).toMatchObject({
+      page: { total: 1 },
+      chats: [{ chatId: CHAT_ID }],
+    });
+
+    const searchCapture = capturedOutput();
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const searchExit = await main(['search', 'needle', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: searchCapture.output,
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({
+          url,
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        });
+        if (url.endsWith('/api/v1/chats')) return Response.json(chatList([chat()]));
+        return Response.json({
+          query: 'needle',
+          mode: 'page',
+          snippetLimit: 3,
+          results: [{
+            chatId: CHAT_ID,
+            transcriptViewId: 'view-1',
+            score: 1,
+            matchedMessageCount: 1,
+            snippets: [{ ordinal: 1, role: 'assistant', timestamp: TS, text: 'needle' }],
+          }],
+          page: { offset: 0, limit: 20, total: 1, hasMore: false, nextOffset: null },
+          index: {
+            indexedChatCount: 1,
+            pendingChatCount: 0,
+            failedChatCount: 0,
+            unindexedChatCount: 0,
+            unsupportedChatCount: 0,
+            resultsTruncated: false,
+          },
+        });
+      },
+    });
+    expect(searchExit).toBe(0);
+    expect(requests[1]).toMatchObject({
+      url: expect.stringContaining('/api/v1/chats/search'),
+      body: { query: 'needle', mode: 'page', offset: 0, limit: 20, snippetLimit: 3 },
+    });
+    expect(JSON.parse(searchCapture.results[0]!)).toMatchObject({
+      results: [{ chatId: CHAT_ID, chat: { chatId: CHAT_ID } }],
+    });
+
+    const readCapture = capturedOutput();
+    const readExit = await main(['read', CHAT_ID, '1', '-B', '0', '-A', '0', '--json'], {
+      discoverRuntime: stubDiscovery,
+      output: readCapture.output,
+      fetch: async (input) => {
+        const query = new URL(String(input)).searchParams;
+        const limit = Number(query.get('limit'));
+        return Response.json({
+          historyState: { kind: 'complete' },
+          chatId: CHAT_ID,
+          transcriptViewId: 'view-1',
+          messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'answer') }],
+          resendCandidates: [],
+          lastOrdinal: 1,
+          pageOldestOrdinal: 1,
+          pageNewestOrdinal: 1,
+          nextBeforeOrdinal: null,
+          hasMore: false,
+          limit,
+        });
+      },
+    });
+    expect(readExit).toBe(0);
+    expect(JSON.parse(readCapture.results[0]!)).toMatchObject({
+      anchorOrdinal: 1,
+      messages: [{ ordinal: 1, message: { content: 'answer' } }],
+    });
+  });
+
   test('interrupts a pending stdin read before runtime discovery', async () => {
     const controller = new AbortController();
     const capture = capturedOutput();
     const result = main([
+      'start',
       '--agent', 'codex',
       '--model', 'gpt-5.4',
       '-',
@@ -385,6 +474,7 @@ describe('main', () => {
     const capture = capturedOutput();
     try {
       const exitCode = await main([
+        'start',
         '--cwd', file,
         '--agent', 'codex',
         '--model', 'gpt-5.4',
@@ -407,6 +497,7 @@ describe('main', () => {
       const child = Bun.spawn([
         process.execPath,
         cliEntry,
+        'start',
         '--agent', 'codex',
         '--model', 'gpt-5.4',
         '-',
@@ -436,10 +527,10 @@ describe('main', () => {
     }
   });
 
-  test('send-async delivers to an idle chat and exits after acceptance', async () => {
+  test('resume-async delivers to an idle chat and exits after acceptance', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, 'Implement the review',
+      'resume-async', CHAT_ID, 'Implement the review',
     ], {
       fetch: (input, init) => String(input).includes('/snapshot?')
         ? controlSnapshotResponse()
@@ -451,10 +542,10 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
-  test('send-async without --allow-steer reports busy and exits 3', async () => {
+  test('resume-async without --allow-steer reports busy and exits 3', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, 'Implement the review',
+      'resume-async', CHAT_ID, 'Implement the review',
     ], {
       fetch: async (input) => String(input).includes('/snapshot?')
         ? controlSnapshotResponse()
@@ -471,11 +562,11 @@ describe('main', () => {
     expect(capture.diagnostics[0]).toContain('--allow-steer');
   });
 
-  test('send-async with --allow-steer steers the active turn', async () => {
+  test('resume-async with --allow-steer steers the active turn', async () => {
     const capture = capturedOutput();
     let runCalls = 0;
     const exitCode = await main([
-      'send-async', CHAT_ID, '--allow-steer', 'Also update the migration test.',
+      'resume-async', CHAT_ID, '--allow-steer', 'Also update the migration test.',
     ], {
       fetch: async (input, init) => {
         const url = String(input);
@@ -508,10 +599,10 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([]);
   });
 
-  test('send-async rejects empty stdin content before any network submission', async () => {
+  test('resume-async rejects empty stdin content before any network submission', async () => {
     const capture = capturedOutput();
     const exitCode = await main([
-      'send-async', CHAT_ID, '-',
+      'resume-async', CHAT_ID, '-',
     ], {
       fetch: async () => { throw new Error('network must not be reached'); },
       discoverRuntime: stubDiscovery,
@@ -759,11 +850,11 @@ describe('main', () => {
     expect(capture.diagnostics[0]).toContain('could not stop');
   });
 
-  test('interrupts a send-async stdin read with the control-aware diagnostic', async () => {
+  test('interrupts a resume-async stdin read with the control-aware diagnostic', async () => {
     const controller = new AbortController();
     const capture = capturedOutput();
     const result = main([
-      'send-async', CHAT_ID, '-',
+      'resume-async', CHAT_ID, '-',
     ], {
       signal: controller.signal,
       readStdin: () => new Promise(() => undefined),

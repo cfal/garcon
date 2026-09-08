@@ -47,6 +47,21 @@ import {
   isHandoffContextWindowTokens,
 } from '@garcon/common/handoff-sizing';
 import {
+  CHAT_SEARCH_DEFAULT_PAGE_SIZE,
+  CHAT_SEARCH_MAX_OFFSET,
+  CHAT_SEARCH_MAX_PAGE_SIZE,
+  CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
+  CHAT_SEARCH_SORT_VALUES,
+  type ChatSearchSort,
+} from '@garcon/common/chat-search';
+import {
+  TRANSCRIPT_ENTRY_CATEGORY_ALIASES,
+  TRANSCRIPT_ENTRY_OPTIONAL_CATEGORIES,
+  canonicalTranscriptEntryOptionalCategories,
+  isTranscriptEntryOptionalCategory,
+  type TranscriptEntryOptionalCategory,
+} from '@garcon/common/transcript-entry-categories';
+import {
   NativeSessionLookupValidationError,
   parseNativeSessionId,
 } from '@garcon/common/native-session-lookup';
@@ -58,23 +73,26 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
-  garcon-cli [options] [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
-  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] start [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] start-async [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] resume-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
   garcon-cli [options] list <resource>
-  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
   garcon-cli [options] stop <chat-id>
   garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
+  garcon-cli [connection options] chats [--filter <expression>] [--limit <count>] [--offset <count>] [--json]
+  garcon-cli [connection options] search <query> [--filter <expression>] [--sort <relevance|activity|created>] [--limit <count>] [--offset <count>] [--snippets <count>] [--json]
+  garcon-cli [connection options] read <chat-id> <ordinal> [-B <count>] [-A <count>] [--include <category>]... [--transcript-view-id <id>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
   garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
   garcon-cli [connection options] handoff <chat-id> [--context-window-size <tokens>] [--output <path>] [--force]
   garcon-cli [connection options] lookup-native-session <native-session-id> [--agent <agent-id>]
 
-Starts or resumes a visible chat through an already-running Garcon server.
+start and resume wait for the accepted turn. start-async and resume-async return after acceptance.
 The selected permission mode may allow the agent to edit files and run tools.
-send-async submits one turn and returns immediately; it inherits the chat's
-saved execution settings, so it may edit files or run tools. Use - as the
-message to read UTF-8 text from stdin. stop uses the same command as the SPA
+resume-async inherits the chat's saved execution settings, so it may edit files
+or run tools. Use - as the message to read UTF-8 text from stdin. stop uses the same command as the SPA
 Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
 add-row appends one durable presentation-only CLI row to chat history.
@@ -98,6 +116,15 @@ List resources:
   permissions               Requires --agent
   reasoning-efforts         Requires --agent
 
+Chat research:
+  chats filters the complete visible metadata snapshot and sorts by activity.
+  search performs paged lexical transcript search; quoted phrases are adjacent,
+  while separate terms may match different entries in the same chat.
+  read shows bounded context around one durable ordinal. It defaults to the
+  conversation spine; use --include tools for tool calls and results.
+  Search coverage warnings are diagnostics. A truncated or partially indexed
+  result cannot establish that no other matching chat exists.
+
 Options:
   --workspace <name>           Named Garcon data workspace (default: default)
   --config-dir <path>          Garcon config root (default: ~/.garcon)
@@ -115,8 +142,7 @@ Options:
   --message-style <style>      Style this CLI user message: info, notice, error, or custom
   --color <light[,dark]>       Custom six-digit hex accent; one value applies to both themes
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
-  --resume <chat-id>           Resume an existing chat
-  --allow-steer                With send-async, steer the active turn when busy; never queues
+  --allow-steer                With resume-async, steer the active turn when busy; never queues
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
   --type <style>               Add-row style: info, notice, error, or custom
@@ -125,6 +151,16 @@ Options:
   --format <markdown|xml>      Transcript export format (default: markdown)
   --exclude <category>         Export exclusion; repeatable or comma-separated:
                                ${TRANSCRIPT_EXPORT_CATEGORIES.join(', ')}; tools excludes calls and results
+  --filter <expression>        Chat metadata filter expression
+  --sort <mode>                Search ordering: ${CHAT_SEARCH_SORT_VALUES.join(', ')}
+  --limit <count>              chats/search page size, 1-${CHAT_SEARCH_MAX_PAGE_SIZE}
+  --offset <count>             chats/search page offset
+  --snippets <count>           Search snippets per chat, 1-${CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT}
+  -B, --before-context <count> Read entries before the anchor, 0-100 (default: 5)
+  -A, --after-context <count>  Read entries after the anchor, 0-100 (default: 5)
+  --include <category>         Read category; repeatable or comma-separated:
+                               ${TRANSCRIPT_ENTRY_OPTIONAL_CATEGORIES.join(', ')}; tools includes calls and results
+  --transcript-view-id <id>    Require the read anchor to remain in this transcript view
   --context-window-size <tokens>
                                Context window of the model that will read the
                                handoff artifact (default: ${DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS}). Garcon limits
@@ -132,13 +168,13 @@ Options:
                                an estimate; token usage varies by model.
   --output <path>              Write export or handoff artifact atomically to a file
   --force                      Replace an existing export or handoff output file
-  --json                       Print list, status, or wait results as JSON
+  --json                       Print supported read-only results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, wait, export, handoff, or lookup-native-session.
-The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
+Use -- before prompt text that begins with an option-like token.
+The cli tag records creation through garcon-cli; resume, resume-async, and stop never add it.`;
 
 export interface CliEnvironment {
   GARCON_CONFIG_DIR?: string;
@@ -162,7 +198,6 @@ export interface CliConnectionOptions {
 }
 
 interface CliInvocationBase extends CliSelectionOptions, CliConnectionOptions {
-  kind: 'start' | 'resume';
   title?: string;
   additionalTags?: string[];
   prompt: string | null;
@@ -176,6 +211,10 @@ export interface StartCliInvocation extends CliInvocationBase {
   model: string;
   cwd: string;
   parentChatId?: ChatId;
+}
+
+export interface StartAsyncCliInvocation extends Omit<StartCliInvocation, 'kind'> {
+  kind: 'start-async';
 }
 
 export interface ResumeCliInvocation extends CliInvocationBase {
@@ -205,8 +244,8 @@ export interface ListCliCommand extends CliConnectionOptions {
   endpointId?: string;
 }
 
-export interface SendAsyncCliCommand extends CliConnectionOptions {
-  kind: 'send-async';
+export interface ResumeAsyncCliCommand extends CliConnectionOptions {
+  kind: 'resume-async';
   chatId: ChatId;
   allowSteer: boolean;
   message: string | null;
@@ -267,11 +306,41 @@ export interface LookupNativeSessionCliCommand extends CliConnectionOptions {
   readonly agentId?: AgentId;
 }
 
+export interface ChatsCliCommand extends CliConnectionOptions {
+  readonly kind: 'chats';
+  readonly filter: string;
+  readonly limit: number;
+  readonly offset: number;
+  readonly json: boolean;
+}
+
+export interface SearchCliCommand extends CliConnectionOptions {
+  readonly kind: 'search';
+  readonly query: string;
+  readonly filter: string;
+  readonly sort: ChatSearchSort;
+  readonly limit: number;
+  readonly offset: number;
+  readonly snippetLimit: number;
+  readonly json: boolean;
+}
+
+export interface ReadCliCommand extends CliConnectionOptions {
+  readonly kind: 'read';
+  readonly chatId: ChatId;
+  readonly anchorOrdinal: number;
+  readonly beforeContext: number;
+  readonly afterContext: number;
+  readonly includedCategories: readonly TranscriptEntryOptionalCategory[];
+  readonly transcriptViewId?: string;
+  readonly json: boolean;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
   | ListCliCommand
-  | SendAsyncCliCommand
+  | ResumeAsyncCliCommand
   | StopCliCommand
   | AddRowCliCommand
   | StatusCliCommand
@@ -279,6 +348,10 @@ export type ParsedCliCommand =
   | ExportCliCommand
   | HandoffCliCommand
   | LookupNativeSessionCliCommand
+  | ChatsCliCommand
+  | SearchCliCommand
+  | ReadCliCommand
+  | StartAsyncCliInvocation
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
@@ -297,13 +370,20 @@ const SINGLE_STRING_OPTIONS = [
   'message-title',
   'message-style',
   'color',
-  'resume',
   'turn',
   'messages',
   'type',
   'format',
   'output',
   'context-window-size',
+  'filter',
+  'sort',
+  'limit',
+  'offset',
+  'snippets',
+  'before-context',
+  'after-context',
+  'transcript-view-id',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -421,53 +501,80 @@ function isListResource(value: string): value is ListResource {
   return (LIST_RESOURCE_VALUES as readonly string[]).includes(value);
 }
 
-function rejectListOption(value: unknown, flag: string): void {
-  if (value !== undefined) throw argumentError(`${flag} cannot be used with list`);
+type ControlCommandKind = 'resume-async' | 'stop' | 'add-row' | 'read';
+
+const CONNECTION_OPTION_KEYS = ['workspace', 'config-dir', 'server'] as const;
+
+function optionSet(...keys: string[]): ReadonlySet<string> {
+  return new Set([...CONNECTION_OPTION_KEYS, ...keys]);
 }
 
-// Reserved subcommands are recognized only when the first positional token appears
-// before an option terminator, so `-- send-async ...` remains a new-chat prompt.
-function startsReservedCommand(
-  tokens: NonNullable<ReturnType<typeof parseArgs>['tokens']>,
-  name: string,
-): boolean {
-  const positional = tokens.find((token) => token.kind === 'positional');
-  if (positional?.value !== name) return false;
-  const terminator = tokens.find((token) => token.kind === 'option-terminator');
-  return terminator === undefined || positional.index < terminator.index;
-}
-
-type ControlCommandKind = 'send-async' | 'stop' | 'add-row';
-
-const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
-  ['cwd', '--cwd'],
-  ['parent', '--parent'],
-  ['agent', '--agent'],
-  ['provider', '--provider'],
-  ['endpoint', '--endpoint'],
-  ['model', '--model'],
-  ['permissions', '--permissions'],
-  ['reasoning-effort', '--reasoning-effort'],
-  ['tag', '--tag'],
-  ['resume', '--resume'],
-  ['json', '--json'],
-  ['turn', '--turn'],
-  ['messages', '--messages'],
-  ['format', '--format'],
-  ['exclude', '--exclude'],
-  ['output', '--output'],
-  ['force', '--force'],
-  ['context-window-size', '--context-window-size'],
-] as const;
-
-function rejectControlForbiddenOptions(
+function rejectOptionsExcept(
   values: Record<string, ParsedOptionValue>,
-  command: ControlCommandKind,
+  allowed: ReadonlySet<string>,
+  command: string,
 ): void {
-  for (const [key, flag] of CONTROL_FORBIDDEN_OPTIONS) {
-    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && !allowed.has(key)) {
+      throw argumentError(`--${key} cannot be used with ${command}`);
+    }
   }
 }
+
+const RESUME_ASYNC_OPTIONS = optionSet(
+  'allow-steer',
+  'message-title',
+  'message-style',
+  'color',
+  'collapsible',
+);
+const STOP_OPTIONS = optionSet();
+const ADD_ROW_OPTIONS = optionSet('title', 'type', 'color', 'markdown', 'collapsible');
+const WAIT_OPTIONS = optionSet('turn', 'json');
+const STATUS_OPTIONS = optionSet('messages', 'json');
+const EXPORT_OPTIONS = optionSet('format', 'exclude', 'output', 'force');
+const HANDOFF_OPTIONS = optionSet('context-window-size', 'output', 'force');
+const LOOKUP_NATIVE_SESSION_OPTIONS = optionSet('agent');
+const CHATS_OPTIONS = optionSet('filter', 'limit', 'offset', 'json');
+const SEARCH_OPTIONS = optionSet('filter', 'sort', 'limit', 'offset', 'snippets', 'json');
+const READ_OPTIONS = optionSet(
+  'before-context',
+  'after-context',
+  'include',
+  'transcript-view-id',
+  'json',
+);
+const LIST_OPTIONS = optionSet('agent', 'provider', 'endpoint', 'json');
+const START_OPTIONS = optionSet(
+  'cwd',
+  'parent',
+  'agent',
+  'provider',
+  'endpoint',
+  'model',
+  'permissions',
+  'reasoning-effort',
+  'title',
+  'message-title',
+  'message-style',
+  'color',
+  'tag',
+  'collapsible',
+);
+const RESUME_OPTIONS = optionSet(
+  'agent',
+  'provider',
+  'endpoint',
+  'model',
+  'permissions',
+  'reasoning-effort',
+  'title',
+  'message-title',
+  'message-style',
+  'color',
+  'tag',
+  'collapsible',
+);
 
 function parseControlChatId(value: string, command: ControlCommandKind): ChatId {
   try {
@@ -477,19 +584,16 @@ function parseControlChatId(value: string, command: ControlCommandKind): ChatId 
   }
 }
 
-function parseSendAsync(
+function parseResumeAsync(
   parsed: ReturnType<typeof parseArgs>,
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
-): SendAsyncCliCommand {
-  rejectControlForbiddenOptions(values, 'send-async');
-  if (values.title !== undefined) throw argumentError('--title cannot be used with send-async');
-  if (values.type !== undefined) throw argumentError('--type cannot be used with send-async');
-  if (values.markdown !== undefined) throw argumentError('--markdown cannot be used with send-async');
+): ResumeAsyncCliCommand {
+  rejectOptionsExcept(values, RESUME_ASYNC_OPTIONS, 'resume-async');
   if (parsed.positionals.length !== 3) {
-    throw argumentError('send-async requires a chat ID and one message');
+    throw argumentError('resume-async requires a chat ID and one message');
   }
-  const chatId = parseControlChatId(parsed.positionals[1]!, 'send-async');
+  const chatId = parseControlChatId(parsed.positionals[1]!, 'resume-async');
   const messageArgument = parsed.positionals[2]!;
   const readsMessageFromStdin = messageArgument === '-';
   const message = readsMessageFromStdin ? null : messageArgument;
@@ -498,7 +602,7 @@ function parseSendAsync(
   }
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   return {
-    kind: 'send-async',
+    kind: 'resume-async',
     ...connection,
     chatId,
     allowSteer: values['allow-steer'] === true,
@@ -513,21 +617,7 @@ function parseStop(
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
 ): StopCliCommand {
-  rejectControlForbiddenOptions(values, 'stop');
-  if (values.title !== undefined) throw argumentError('--title cannot be used with stop');
-  if (values['allow-steer'] !== undefined) {
-    throw argumentError('--allow-steer cannot be used with stop');
-  }
-  if (values.type !== undefined) throw argumentError('--type cannot be used with stop');
-  if (
-    values['message-title'] !== undefined
-    || values['message-style'] !== undefined
-    || values.color !== undefined
-    || values.collapsible !== undefined
-  ) {
-    throw argumentError('message presentation cannot be used with stop');
-  }
-  if (values.markdown !== undefined) throw argumentError('--markdown cannot be used with stop');
+  rejectOptionsExcept(values, STOP_OPTIONS, 'stop');
   if (parsed.positionals.length !== 2) {
     throw argumentError('stop requires exactly one chat ID');
   }
@@ -543,13 +633,7 @@ function parseAddRow(
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
 ): AddRowCliCommand {
-  rejectControlForbiddenOptions(values, 'add-row');
-  if (values['allow-steer'] !== undefined) {
-    throw argumentError('--allow-steer cannot be used with add-row');
-  }
-  if (values['message-title'] !== undefined || values['message-style'] !== undefined) {
-    throw argumentError('message presentation cannot be used with add-row');
-  }
+  rejectOptionsExcept(values, ADD_ROW_OPTIONS, 'add-row');
   if (parsed.positionals.length !== 3) {
     throw argumentError('add-row requires a chat ID and one content argument');
   }
@@ -598,48 +682,12 @@ function parseAddRow(
   };
 }
 
-type ObservationCommandKind = 'status' | 'wait' | 'export' | 'handoff';
-
-const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
-  ['cwd', '--cwd'],
-  ['parent', '--parent'],
-  ['agent', '--agent'],
-  ['provider', '--provider'],
-  ['endpoint', '--endpoint'],
-  ['model', '--model'],
-  ['permissions', '--permissions'],
-  ['reasoning-effort', '--reasoning-effort'],
-  ['title', '--title'],
-  ['tag', '--tag'],
-  ['resume', '--resume'],
-  ['allow-steer', '--allow-steer'],
-  ['type', '--type'],
-  ['message-title', '--message-title'],
-  ['message-style', '--message-style'],
-  ['color', '--color'],
-  ['collapsible', '--collapsible'],
-  ['markdown', '--markdown'],
-] as const;
-
-function rejectObservationMutationOptions(
-  values: Record<string, ParsedOptionValue>,
-  command: ObservationCommandKind,
-): void {
-  for (const [key, flag] of OBSERVATION_FORBIDDEN_OPTIONS) {
-    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
-  }
-}
-
 function parseWait(
   parsed: ReturnType<typeof parseArgs>,
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
 ): WaitCliCommand {
-  rejectObservationMutationOptions(values, 'wait');
-  rejectDocumentOptions(values, 'wait');
-  if (values.messages !== undefined) {
-    throw argumentError('--messages cannot be used with wait');
-  }
+  rejectOptionsExcept(values, WAIT_OPTIONS, 'wait');
   if (parsed.positionals.length !== 2) {
     throw argumentError('wait requires exactly one chat ID');
   }
@@ -689,9 +737,7 @@ function parseStatus(
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
 ): StatusCliCommand {
-  rejectObservationMutationOptions(values, 'status');
-  rejectDocumentOptions(values, 'status');
-  if (values.turn !== undefined) throw argumentError('--turn cannot be used with status');
+  rejectOptionsExcept(values, STATUS_OPTIONS, 'status');
   if (parsed.positionals.length !== 2) {
     throw argumentError('status requires exactly one chat ID');
   }
@@ -710,33 +756,12 @@ function parseStatus(
   };
 }
 
-function rejectDocumentOptions(
-  values: Record<string, ParsedOptionValue>,
-  command: Exclude<ObservationCommandKind, 'export' | 'handoff'>,
-): void {
-  for (const [key, flag] of [
-    ['format', '--format'],
-    ['exclude', '--exclude'],
-    ['output', '--output'],
-    ['force', '--force'],
-    ['context-window-size', '--context-window-size'],
-  ] as const) {
-    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
-  }
-}
-
 function parseExport(
   parsed: ReturnType<typeof parseArgs>,
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
 ): ExportCliCommand {
-  rejectObservationMutationOptions(values, 'export');
-  if (values['context-window-size'] !== undefined) {
-    throw argumentError('--context-window-size cannot be used with export');
-  }
-  if (values.json !== undefined) throw argumentError('--json cannot be used with export');
-  if (values.turn !== undefined) throw argumentError('--turn cannot be used with export');
-  if (values.messages !== undefined) throw argumentError('--messages cannot be used with export');
+  rejectOptionsExcept(values, EXPORT_OPTIONS, 'export');
   if (parsed.positionals.length !== 2) {
     throw argumentError('export requires exactly one chat ID');
   }
@@ -766,12 +791,7 @@ function parseHandoff(
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
 ): HandoffCliCommand {
-  rejectObservationMutationOptions(values, 'handoff');
-  if (values.json !== undefined) throw argumentError('--json cannot be used with handoff');
-  if (values.turn !== undefined) throw argumentError('--turn cannot be used with handoff');
-  if (values.messages !== undefined) throw argumentError('--messages cannot be used with handoff');
-  if (values.format !== undefined) throw argumentError('--format cannot be used with handoff');
-  if (values.exclude !== undefined) throw argumentError('--exclude cannot be used with handoff');
+  rejectOptionsExcept(values, HANDOFF_OPTIONS, 'handoff');
   if (parsed.positionals.length !== 2) {
     throw argumentError('handoff requires exactly one chat ID');
   }
@@ -805,45 +825,13 @@ function parseContextWindowSize(value: ParsedOptionValue): number {
   return parsed;
 }
 
-const LOOKUP_NATIVE_SESSION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
-  ['cwd', '--cwd'],
-  ['parent', '--parent'],
-  ['provider', '--provider'],
-  ['endpoint', '--endpoint'],
-  ['model', '--model'],
-  ['permissions', '--permissions'],
-  ['reasoning-effort', '--reasoning-effort'],
-  ['title', '--title'],
-  ['message-title', '--message-title'],
-  ['message-style', '--message-style'],
-  ['color', '--color'],
-  ['tag', '--tag'],
-  ['resume', '--resume'],
-  ['allow-steer', '--allow-steer'],
-  ['turn', '--turn'],
-  ['messages', '--messages'],
-  ['type', '--type'],
-  ['markdown', '--markdown'],
-  ['collapsible', '--collapsible'],
-  ['format', '--format'],
-  ['exclude', '--exclude'],
-  ['output', '--output'],
-  ['force', '--force'],
-  ['context-window-size', '--context-window-size'],
-  ['json', '--json'],
-] as const;
-
 function parseLookupNativeSession(
   parsed: ReturnType<typeof parseArgs>,
   values: Record<string, ParsedOptionValue>,
   connection: CliConnectionOptions,
   agentId: string | undefined,
 ): LookupNativeSessionCliCommand {
-  for (const [key, flag] of LOOKUP_NATIVE_SESSION_FORBIDDEN_OPTIONS) {
-    if (values[key] !== undefined) {
-      throw argumentError(`${flag} cannot be used with lookup-native-session`);
-    }
-  }
+  rejectOptionsExcept(values, LOOKUP_NATIVE_SESSION_OPTIONS, 'lookup-native-session');
   if (parsed.positionals.length < 2) {
     throw argumentError('lookup-native-session requires one native session ID');
   }
@@ -911,6 +899,161 @@ function parseExportExclusions(value: ParsedOptionValue): TranscriptExportCatego
   return canonicalTranscriptExportCategories(selected);
 }
 
+function parseIncludedCategories(value: ParsedOptionValue): TranscriptEntryOptionalCategory[] {
+  if (value === undefined) return [];
+  const selected: TranscriptEntryOptionalCategory[] = [];
+  for (const option of value as string[]) {
+    for (const rawToken of option.split(',')) {
+      const token = rawToken.trim();
+      if (token.length === 0) throw argumentError('--include must not contain an empty category');
+      if (Object.hasOwn(TRANSCRIPT_ENTRY_CATEGORY_ALIASES, token)) {
+        selected.push(...TRANSCRIPT_ENTRY_CATEGORY_ALIASES[
+          token as keyof typeof TRANSCRIPT_ENTRY_CATEGORY_ALIASES
+        ]);
+      } else if (isTranscriptEntryOptionalCategory(token)) {
+        selected.push(token);
+      } else {
+        throw argumentError(
+          `--include must be one of: ${TRANSCRIPT_ENTRY_OPTIONAL_CATEGORIES.join(', ')}, tools`,
+        );
+      }
+    }
+  }
+  return canonicalTranscriptEntryOptionalCategories(selected);
+}
+
+function parseIntegerOption(
+  value: ParsedOptionValue,
+  flag: string,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
+  const raw = value as string;
+  if (!/^\d+$/.test(raw)) {
+    throw argumentError(`${flag} must be an integer from ${minimum} through ${maximum}`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw argumentError(`${flag} must be an integer from ${minimum} through ${maximum}`);
+  }
+  return parsed;
+}
+
+function parseChats(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): ChatsCliCommand {
+  rejectOptionsExcept(values, CHATS_OPTIONS, 'chats');
+  if (parsed.positionals.length !== 1) throw argumentError('chats accepts no positional arguments');
+  return {
+    kind: 'chats',
+    ...connection,
+    filter: nonEmptyOption(values.filter as string | undefined, '--filter') ?? '',
+    limit: parseIntegerOption(values.limit, '--limit', 1, CHAT_SEARCH_MAX_PAGE_SIZE, 50),
+    offset: parseIntegerOption(values.offset, '--offset', 0, Number.MAX_SAFE_INTEGER, 0),
+    json: values.json === true,
+  };
+}
+
+function parseSearch(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): SearchCliCommand {
+  rejectOptionsExcept(values, SEARCH_OPTIONS, 'search');
+  if (parsed.positionals.length < 2) throw argumentError('search requires a query');
+  const query = parsed.positionals.slice(1).join(' ').trim();
+  if (query.length === 0) throw argumentError('the search query must not be empty');
+  const rawSort = values.sort ?? 'relevance';
+  if (!CHAT_SEARCH_SORT_VALUES.includes(rawSort as ChatSearchSort)) {
+    throw argumentError(`--sort must be one of: ${CHAT_SEARCH_SORT_VALUES.join(', ')}`);
+  }
+  return {
+    kind: 'search',
+    ...connection,
+    query,
+    filter: nonEmptyOption(values.filter as string | undefined, '--filter') ?? '',
+    sort: rawSort as ChatSearchSort,
+    limit: parseIntegerOption(
+      values.limit,
+      '--limit',
+      1,
+      CHAT_SEARCH_MAX_PAGE_SIZE,
+      CHAT_SEARCH_DEFAULT_PAGE_SIZE,
+    ),
+    offset: parseIntegerOption(values.offset, '--offset', 0, CHAT_SEARCH_MAX_OFFSET, 0),
+    snippetLimit: parseIntegerOption(
+      values.snippets,
+      '--snippets',
+      1,
+      CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
+      CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT,
+    ),
+    json: values.json === true,
+  };
+}
+
+function parseRead(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): ReadCliCommand {
+  rejectOptionsExcept(values, READ_OPTIONS, 'read');
+  if (parsed.positionals.length !== 3) {
+    throw argumentError('read requires one chat ID and one anchor ordinal');
+  }
+  const rawOrdinal = parsed.positionals[2]!;
+  const anchorOrdinal = Number(rawOrdinal);
+  if (!/^\d+$/.test(rawOrdinal) || anchorOrdinal < 1 || !Number.isSafeInteger(anchorOrdinal)) {
+    throw argumentError('read requires a positive integer anchor ordinal');
+  }
+  const transcriptViewId = nonEmptyOption(
+    values['transcript-view-id'] as string | undefined,
+    '--transcript-view-id',
+  );
+  return {
+    kind: 'read',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'read'),
+    anchorOrdinal,
+    beforeContext: parseIntegerOption(
+      values['before-context'],
+      '--before-context',
+      0,
+      100,
+      5,
+    ),
+    afterContext: parseIntegerOption(
+      values['after-context'],
+      '--after-context',
+      0,
+      100,
+      5,
+    ),
+    includedCategories: parseIncludedCategories(values.include),
+    ...(transcriptViewId === undefined ? {} : { transcriptViewId }),
+    json: values.json === true,
+  };
+}
+
+function parsePrompt(
+  positionals: readonly string[],
+  startIndex: number,
+): { prompt: string | null; readsPromptFromStdin: boolean } {
+  const promptArguments = positionals.slice(startIndex);
+  if (promptArguments.length === 0) throw argumentError('a prompt is required');
+  const readsPromptFromStdin = promptArguments.length === 1 && promptArguments[0] === '-';
+  if (!readsPromptFromStdin && promptArguments.includes('-')) {
+    throw argumentError('stdin marker - must be the only prompt argument');
+  }
+  const prompt = readsPromptFromStdin ? null : promptArguments.join(' ');
+  if (prompt !== null && prompt.trim().length === 0) throw argumentError('the prompt must not be empty');
+  return { prompt, readsPromptFromStdin };
+}
+
 export function parseCliArgs(
   argv: readonly string[],
   environment: CliEnvironment = process.env as CliEnvironment,
@@ -939,7 +1082,6 @@ export function parseCliArgs(
         'message-style': { type: 'string' },
         color: { type: 'string' },
         tag: { type: 'string', multiple: true },
-        resume: { type: 'string' },
         turn: { type: 'string' },
         messages: { type: 'string' },
         type: { type: 'string' },
@@ -947,6 +1089,15 @@ export function parseCliArgs(
         exclude: { type: 'string', multiple: true },
         output: { type: 'string' },
         'context-window-size': { type: 'string' },
+        filter: { type: 'string' },
+        sort: { type: 'string' },
+        limit: { type: 'string' },
+        offset: { type: 'string' },
+        snippets: { type: 'string' },
+        'before-context': { type: 'string', short: 'B' },
+        'after-context': { type: 'string', short: 'A' },
+        include: { type: 'string', multiple: true },
+        'transcript-view-id': { type: 'string' },
         force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
         markdown: { type: 'boolean' },
@@ -1000,76 +1151,46 @@ export function parseCliArgs(
   const model = nonEmptyOption(values.model as string | undefined, '--model');
   const cwd = nonEmptyOption(values.cwd as string | undefined, '--cwd');
   const parent = nonEmptyOption(values.parent as string | undefined, '--parent');
-  const resume = nonEmptyOption(values.resume as string | undefined, '--resume');
   const additionalTags = parseAdditionalTags(values.tag);
-  const tokens = parsed.tokens ?? [];
   const connection = {
     workspace,
     configDir,
     ...(serverUrl === undefined ? {} : { serverUrl }),
   };
 
-  if (startsReservedCommand(tokens, 'send-async')) {
-    return parseSendAsync(parsed, values, connection);
-  }
-  if (startsReservedCommand(tokens, 'stop')) {
-    return parseStop(parsed, values, connection);
-  }
-  if (startsReservedCommand(tokens, 'add-row')) {
-    return parseAddRow(parsed, values, connection);
-  }
-  if (startsReservedCommand(tokens, 'wait')) {
-    return parseWait(parsed, values, connection);
-  }
-  if (startsReservedCommand(tokens, 'status')) {
-    return parseStatus(parsed, values, connection);
-  }
-  if (startsReservedCommand(tokens, 'export')) {
-    return parseExport(parsed, values, connection);
-  }
-  if (startsReservedCommand(tokens, 'handoff')) {
-    return parseHandoff(parsed, values, connection);
-  }
-  if (startsReservedCommand(tokens, 'lookup-native-session')) {
+  const commandName = parsed.positionals[0];
+  if (commandName === undefined) throw argumentError('a command is required');
+  if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
+  if (commandName === 'stop') return parseStop(parsed, values, connection);
+  if (commandName === 'add-row') return parseAddRow(parsed, values, connection);
+  if (commandName === 'wait') return parseWait(parsed, values, connection);
+  if (commandName === 'status') return parseStatus(parsed, values, connection);
+  if (commandName === 'export') return parseExport(parsed, values, connection);
+  if (commandName === 'handoff') return parseHandoff(parsed, values, connection);
+  if (commandName === 'lookup-native-session') {
     return parseLookupNativeSession(parsed, values, connection, agentId);
   }
+  if (commandName === 'chats') return parseChats(parsed, values, connection);
+  if (commandName === 'search') return parseSearch(parsed, values, connection);
+  if (commandName === 'read') return parseRead(parsed, values, connection);
 
-  if (startsReservedCommand(tokens, 'list')) {
+  if (commandName === 'list') {
     const resource = parsed.positionals[1] ?? '';
     if (parsed.positionals.length !== 2 || !isListResource(resource)) {
       throw argumentError(`list requires one resource: ${LIST_RESOURCE_VALUES.join(', ')}`);
     }
-    rejectListOption(cwd, '--cwd');
-    rejectListOption(parent, '--parent');
-    rejectListOption(values.model, '--model');
-    rejectListOption(values.permissions, '--permissions');
-    rejectListOption(values['reasoning-effort'], '--reasoning-effort');
-    rejectListOption(values.title, '--title');
-    rejectListOption(values.tag, '--tag');
-    rejectListOption(resume, '--resume');
-    rejectListOption(values['allow-steer'], '--allow-steer');
-    rejectListOption(values.turn, '--turn');
-    rejectListOption(values.messages, '--messages');
-    rejectListOption(values.type, '--type');
-    rejectListOption(values['message-title'], '--message-title');
-    rejectListOption(values['message-style'], '--message-style');
-    rejectListOption(values.color, '--color');
-    rejectListOption(values.markdown, '--markdown');
-    rejectListOption(values.collapsible, '--collapsible');
-    rejectListOption(values.format, '--format');
-    rejectListOption(values.exclude, '--exclude');
-    rejectListOption(values.output, '--output');
-    rejectListOption(values.force, '--force');
-    rejectListOption(values['context-window-size'], '--context-window-size');
+    rejectOptionsExcept(values, LIST_OPTIONS, 'list');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
     if (resource === 'agents') {
-      rejectListOption(agentId, '--agent');
-      rejectListOption(providerId, '--provider');
-      rejectListOption(endpointId, '--endpoint');
+      if (agentId !== undefined) throw argumentError('--agent cannot be used with list agents');
+      if (providerId !== undefined) throw argumentError('--provider cannot be used with list agents');
+      if (endpointId !== undefined) throw argumentError('--endpoint cannot be used with list agents');
     }
-    if (resource === 'providers') rejectListOption(endpointId, '--endpoint');
+    if (resource === 'providers' && endpointId !== undefined) {
+      throw argumentError('--endpoint cannot be used with list providers');
+    }
     if (resource === 'endpoints' && providerId === undefined) {
       throw argumentError('list endpoints requires --provider');
     }
@@ -1080,8 +1201,12 @@ export function parseCliArgs(
       throw argumentError(`list ${resource} requires --agent`);
     }
     if (resource === 'permissions' || resource === 'reasoning-efforts') {
-      rejectListOption(providerId, '--provider');
-      rejectListOption(endpointId, '--endpoint');
+      if (providerId !== undefined) {
+        throw argumentError(`--provider cannot be used with list ${resource}`);
+      }
+      if (endpointId !== undefined) {
+        throw argumentError(`--endpoint cannot be used with list ${resource}`);
+      }
     }
     return {
       kind: 'list',
@@ -1096,27 +1221,14 @@ export function parseCliArgs(
     };
   }
 
-  if (values.json !== undefined) {
-    throw argumentError('--json can only be used with list, status, or wait');
+  if (commandName !== 'start' && commandName !== 'start-async' && commandName !== 'resume') {
+    throw argumentError(`unknown command: ${commandName}`);
   }
-  if (values.turn !== undefined) throw argumentError('--turn can only be used with wait');
-  if (values.messages !== undefined) throw argumentError('--messages can only be used with status');
-  if (values['allow-steer'] !== undefined) {
-    throw argumentError('--allow-steer can only be used with send-async');
-  }
-  if (values.type !== undefined) throw argumentError('--type can only be used with add-row');
-  if (values.markdown !== undefined) throw argumentError('--markdown can only be used with add-row');
-  if (values.format !== undefined) throw argumentError('--format can only be used with export');
-  if (values.exclude !== undefined) throw argumentError('--exclude can only be used with export');
-  if (values['context-window-size'] !== undefined) {
-    throw argumentError('--context-window-size can only be used with handoff');
-  }
-  if (values.output !== undefined) {
-    throw argumentError('--output can only be used with export or handoff');
-  }
-  if (values.force !== undefined) {
-    throw argumentError('--force can only be used with export or handoff');
-  }
+  rejectOptionsExcept(
+    values,
+    commandName === 'resume' ? RESUME_OPTIONS : START_OPTIONS,
+    commandName,
+  );
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   const modes = parseModeOptions(values);
@@ -1124,17 +1236,14 @@ export function parseCliArgs(
   if (endpointId !== undefined && providerId === undefined) {
     throw argumentError('--endpoint requires --provider');
   }
-  if (resume !== undefined && (providerId !== undefined || endpointId !== undefined) && model === undefined) {
+  if (commandName === 'resume' && (providerId !== undefined || endpointId !== undefined) && model === undefined) {
     throw argumentError('--provider and --endpoint require --model when resuming');
   }
 
-  if (parsed.positionals.length === 0) throw argumentError('a prompt is required');
-  const readsPromptFromStdin = parsed.positionals.length === 1 && parsed.positionals[0] === '-';
-  if (!readsPromptFromStdin && parsed.positionals.includes('-')) {
-    throw argumentError('stdin marker - must be the only prompt argument');
+  if (commandName === 'resume' && parsed.positionals.length < 3) {
+    throw argumentError('resume requires one chat ID and a prompt');
   }
-  const prompt = readsPromptFromStdin ? null : parsed.positionals.join(' ');
-  if (prompt !== null && prompt.trim().length === 0) throw argumentError('the prompt must not be empty');
+  const promptInput = parsePrompt(parsed.positionals, commandName === 'resume' ? 2 : 1);
 
   const shared = {
     workspace,
@@ -1148,21 +1257,22 @@ export function parseCliArgs(
     ...(additionalTags === undefined ? {} : { additionalTags }),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
     ...modes,
-    prompt,
-    readsPromptFromStdin,
+    ...promptInput,
   };
 
-  if (resume !== undefined) {
-    if (cwd !== undefined) throw argumentError('--cwd cannot be used with --resume');
-    if (parent !== undefined) throw argumentError('--parent cannot be used with --resume');
-    return { kind: 'resume', ...shared, chatId: parseChatIdOption(resume, '--resume') };
+  if (commandName === 'resume') {
+    return {
+      kind: 'resume',
+      ...shared,
+      chatId: parseChatIdOption(parsed.positionals[1]!, 'resume chat ID'),
+    };
   }
 
   if (agentId === undefined) throw argumentError('--agent is required for a new chat');
   if (model === undefined) throw argumentError('--model is required for a new chat');
   const parentChatId = parent === undefined ? undefined : parseChatIdOption(parent, '--parent');
   return {
-    kind: 'start',
+    kind: commandName,
     ...shared,
     agentId,
     model,

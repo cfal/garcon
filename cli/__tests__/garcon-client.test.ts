@@ -99,7 +99,195 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
+function validChatList(): Record<string, unknown> {
+  return {
+    sessions: [{
+      id: runRequest.chatId,
+      parentChat: null,
+      agentId: 'codex',
+      agentOwnershipEpoch: 'epoch-1',
+      model: 'gpt-5.4',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      title: 'Review',
+      projectPath: '/project',
+      orderGroup: 'normal',
+      tags: ['cli'],
+      activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+      preview: { firstMessage: 'Review', lastMessage: 'Done' },
+      isPinned: false,
+      isArchived: false,
+      isActive: false,
+      isProcessing: false,
+      processingPhase: null,
+      canReloadFromNativeHistory: false,
+      isUnread: false,
+    }],
+    total: 1,
+    lastSelectedChatId: runRequest.chatId,
+  };
+}
+
+function validHistory(): Record<string, unknown> {
+  return {
+    historyState: { kind: 'complete' },
+    chatId: runRequest.chatId,
+    transcriptViewId: 'view-1',
+    messages: [{
+      ordinal: 84,
+      message: {
+        type: 'assistant-message',
+        timestamp: '2026-09-07T00:00:00.000Z',
+        content: 'answer',
+      },
+    }],
+    resendCandidates: [],
+    lastOrdinal: 100,
+    pageOldestOrdinal: 84,
+    pageNewestOrdinal: 100,
+    nextBeforeOrdinal: 51,
+    hasMore: true,
+    limit: 50,
+  };
+}
+
+function validSearch(): Record<string, unknown> {
+  return {
+    query: 'needle',
+    mode: 'page',
+    snippetLimit: 1,
+    results: [{
+      chatId: runRequest.chatId,
+      transcriptViewId: 'view-1',
+      score: 1,
+      matchedMessageCount: 1,
+      snippets: [{
+        ordinal: 84,
+        role: 'assistant',
+        timestamp: '2026-09-07T00:00:00.000Z',
+        text: 'needle',
+      }],
+    }],
+    page: { offset: 0, limit: 20, total: 1, hasMore: false, nextOffset: null },
+    index: {
+      indexedChatCount: 1,
+      pendingChatCount: 0,
+      failedChatCount: 0,
+      unindexedChatCount: 0,
+      unsupportedChatCount: 0,
+      resultsTruncated: false,
+    },
+  };
+}
+
 describe('GarconClient', () => {
+  test('fetches and strictly validates the complete chat catalog', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validChatList());
+      },
+    });
+    await expect(client.listChats()).resolves.toMatchObject({ total: 1 });
+    expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats`);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ ...validChatList(), total: 2 }),
+    });
+    await expect(malformed.listChats()).rejects.toMatchObject({
+      phase: 'chat discovery',
+      exitCode: 3,
+    });
+  });
+
+  test('fetches and validates a view-qualified transcript page', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validHistory());
+      },
+    });
+    await expect(client.getChatMessages({
+      chatId: runRequest.chatId,
+      transcriptViewId: 'view-1',
+      beforeOrdinal: 101,
+      limit: 50,
+    })).resolves.toMatchObject({ transcriptViewId: 'view-1', lastOrdinal: 100 });
+    expect(requestedUrl).toBe(
+      `${connection.baseUrl}/api/v1/chats/messages?chatId=${runRequest.chatId}&limit=50&beforeOrdinal=101&transcriptViewId=view-1`,
+    );
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ ...validHistory(), transcriptViewId: 'view-2' }),
+    });
+    await expect(malformed.getChatMessages({
+      chatId: runRequest.chatId,
+      transcriptViewId: 'view-1',
+      beforeOrdinal: 101,
+      limit: 50,
+    })).rejects.toMatchObject({ phase: 'chat read', exitCode: 3 });
+  });
+
+  test('posts and validates a request-correlated transcript search', async () => {
+    let submitted: unknown;
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (_input, init) => {
+        submitted = JSON.parse(String(init?.body));
+        return Response.json(validSearch());
+      },
+    });
+    const request = {
+      query: 'needle',
+      mode: 'page' as const,
+      offset: 0,
+      limit: 20,
+      snippetLimit: 1,
+    };
+    await expect(client.searchChats(request)).resolves.toMatchObject({
+      query: 'needle',
+      results: [{ chatId: runRequest.chatId }],
+    });
+    expect(submitted).toEqual(request);
+
+    const malformed = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        ...validSearch(),
+        page: { ...validSearch().page as object, offset: 1 },
+      }),
+    });
+    await expect(malformed.searchChats(request)).rejects.toMatchObject({
+      phase: 'chat search',
+      exitCode: 3,
+    });
+
+    const invalid = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: false,
+        error: 'Search query has too many terms',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      }, { status: 400 }),
+    });
+    await expect(invalid.searchChats(request)).rejects.toMatchObject({
+      phase: 'chat search',
+      exitCode: 2,
+      errorCode: 'VALIDATION_FAILED',
+    });
+  });
+
   test('fetches and validates a correlated transcript export', async () => {
     let requestedUrl = '';
     const client = new GarconClient({

@@ -21,6 +21,7 @@ import type {
 	TerminalStreamServerMessage,
 } from '$shared/terminal';
 import { TerminalThemeStore } from '$lib/terminal/runtime/terminal-theme.svelte.js';
+import type { TerminalThemePresentation } from '$lib/terminal/runtime/terminal-theme.svelte.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -28,11 +29,7 @@ import * as m from '$lib/paraglide/messages.js';
 export const TERMINAL_CREATE_RETRY_WINDOW_MS = 10 * 60 * 1000;
 
 export type TerminalAttachmentState =
-	| 'connecting'
-	| 'attached'
-	| 'detached'
-	| 'taken-over'
-	| 'unavailable';
+	'connecting' | 'attached' | 'detached' | 'taken-over' | 'unavailable';
 
 export interface TerminalClientSession {
 	metadata: TerminalMetadata;
@@ -399,8 +396,8 @@ export class TerminalRegistry {
 		this.runtimeIfPresent(terminalId)?.prepareRendererTransfer();
 	}
 
-	setDarkTheme(isDark: boolean): void {
-		this.#theme.setDark(isDark);
+	setThemePresentation(presentation: TerminalThemePresentation): void {
+		this.#theme.setPresentation(presentation);
 	}
 
 	authChanged(authenticated: boolean): void {

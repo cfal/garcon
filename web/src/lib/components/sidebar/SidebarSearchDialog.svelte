@@ -21,6 +21,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import * as m from '$lib/paraglide/messages.js';
+	import { bodyPortal } from './body-portal-attachment';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import type {
@@ -72,6 +73,10 @@
 		overlayClass?: string;
 		backdropTreatment?: 'standard' | 'interaction-only';
 		contentRole?: 'dialog' | 'presentation';
+		// Renders the overlay at document.body level so it escapes the
+		// mobile drawer subtree and fills the visible viewport instead of
+		// the drawer box.
+		portalToBody?: boolean;
 	}
 
 	let {
@@ -116,6 +121,7 @@
 		overlayClass,
 		backdropTreatment = 'standard',
 		contentRole = 'dialog',
+		portalToBody = false,
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
@@ -124,6 +130,14 @@
 	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
 	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
+	// The portaled frame replicates the .mobile-shell keyboard geometry
+	// (--app-height + viewport offset are maintained on :root by AppShell)
+	// so the overlay fills the visible viewport, not the layout viewport.
+	let overlayFrameClass = $derived(
+		portalToBody
+			? 'fixed inset-x-0 top-0 z-50 h-(--app-height) translate-y-(--app-viewport-offset-top)'
+			: 'fixed inset-0 z-50',
+	);
 
 	function handleQueryInput(e: Event) {
 		const target = e.target as HTMLInputElement;
@@ -147,9 +161,8 @@
 		const nextIndex = Math.min(Math.max(currentIndex + offset, 0), filteredChats.length - 1);
 		onHighlightChange(nextIndex);
 		highlightRevealVersion += 1;
-		const canPrefetchTranscriptResults = hasMoreTranscriptResults
-			&& !transcriptSearchPageError
-			&& !transcriptSearchRevalidationError;
+		const canPrefetchTranscriptResults =
+			hasMoreTranscriptResults && !transcriptSearchPageError && !transcriptSearchRevalidationError;
 		if (offset > 0 && canPrefetchTranscriptResults && nextIndex >= filteredChats.length - 8) {
 			void onLoadMoreTranscriptResults?.();
 		}
@@ -174,7 +187,8 @@
 		}
 		const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
 		const atBoundary =
-			currentIndex === -1 || (e.shiftKey ? currentIndex === 0 : currentIndex === focusable.length - 1);
+			currentIndex === -1 ||
+			(e.shiftKey ? currentIndex === 0 : currentIndex === focusable.length - 1);
 		if (!atBoundary) return false;
 		e.preventDefault();
 		focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
@@ -245,13 +259,15 @@
 
 {#if open}
 	<div
+		data-slot="search-dialog-overlay"
 		class={cn(
-			'fixed inset-0 z-50',
+			overlayFrameClass,
 			backdropTreatment === 'standard' && 'transient-backdrop',
 			reduceMotion && 'sidebar-reduce-motion',
 			overlayClass,
 		)}
 		role="presentation"
+		{@attach portalToBody && bodyPortal}
 	>
 		<button
 			class="absolute inset-0 h-full w-full cursor-default"
@@ -261,14 +277,21 @@
 		></button>
 
 		<div
-			class="fixed inset-0 flex items-stretch justify-center sm:items-start sm:p-4 sm:pt-[10vh]"
+			class={cn(
+				portalToBody ? 'absolute inset-0' : 'fixed inset-0',
+				'flex items-stretch justify-center sm:items-start sm:p-4 sm:pt-[10vh]',
+			)}
 			role="presentation"
 			onclick={handleContainerClick}
 		>
 			<div
 				bind:this={dialogRef}
 				data-slot="search-dialog-content"
-				class="flex h-dvh w-screen min-w-0 flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border"
+				class={cn(
+					'flex min-w-0 flex-col overflow-hidden bg-background shadow-2xl',
+					portalToBody ? 'h-full w-full' : 'h-dvh w-screen',
+					'sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border',
+				)}
 				role={contentRole}
 				aria-label={contentRole === 'dialog' ? m.sidebar_projects_search_placeholder() : undefined}
 				aria-modal={contentRole === 'dialog' ? 'true' : undefined}
@@ -276,109 +299,120 @@
 				onkeydown={handleDialogKeydown}
 			>
 				<div class="shrink-0 border-b border-border">
-					<div class="flex min-w-0 items-center gap-2 px-4 py-3">
-						<div
-							data-slot="search-dialog-input-shell"
-							class="relative h-9 min-w-0 flex-1 rounded-lg border border-sidebar-border/70 bg-muted/50 text-sm text-foreground transition-colors focus-within:border-border focus-within:bg-background"
-						>
-							<Search
-								class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-							/>
-							<input
-								bind:this={inputRef}
-								type="text"
-								value={query}
-								oninput={handleQueryInput}
-								placeholder={m.sidebar_projects_search_placeholder()}
-								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-base leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm sm:pointer-fine:leading-5"
-							/>
-							{#if query.length > 0}
-								<button
-									type="button"
-									class="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-									onclick={clearQuery}
-									aria-label={m.filetree_clear_search()}
-									title={m.filetree_clear_search()}
+					<div
+						class="flex min-w-0 flex-col gap-2 px-4 pb-3 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] sm:flex-row sm:items-center sm:gap-2 sm:py-3"
+					>
+						<!-- Mobile keeps the query input on its own full-width row so
+							it is never starved by the action buttons. -->
+						<div class="flex min-w-0 items-center gap-2 sm:contents">
+							<div
+								data-slot="search-dialog-input-shell"
+								class="relative h-11 min-w-0 flex-1 rounded-lg border border-sidebar-border/70 bg-muted/50 text-sm text-foreground transition-colors focus-within:border-border focus-within:bg-background sm:h-9"
+							>
+								<Search
+									class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+								/>
+								<input
+									bind:this={inputRef}
+									type="text"
+									value={query}
+									oninput={handleQueryInput}
+									placeholder={m.sidebar_projects_search_placeholder()}
+									class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-base leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm sm:pointer-fine:leading-5"
+								/>
+								{#if query.length > 0}
+									<button
+										type="button"
+										class="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+										onclick={clearQuery}
+										aria-label={m.filetree_clear_search()}
+										title={m.filetree_clear_search()}
+									>
+										<X class="h-3 w-3" />
+									</button>
+								{/if}
+							</div>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								class="h-11 w-11 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:hidden"
+								onclick={onClose}
+								title={m.sidebar_search_close()}
+								aria-label={m.sidebar_search_close()}
+							>
+								<X class="h-4 w-4" />
+							</Button>
+						</div>
+
+						<div class="flex items-center gap-2">
+							{#if onSortChange}
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										class="inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground sm:h-9 sm:w-auto sm:flex-none sm:shrink-0 sm:justify-start sm:px-2.5"
+									>
+										<ArrowUpDown class="h-3.5 w-3.5 shrink-0" />
+										<span class="truncate">{sortLabel(sort)}</span>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end">
+										<DropdownMenuGroup>
+											<DropdownMenuGroupHeading>
+												{m.sidebar_search_sort_heading()}
+											</DropdownMenuGroupHeading>
+											<DropdownMenuRadioGroup
+												value={sort}
+												onValueChange={(value) => onSortChange(value as ChatSearchSort)}
+											>
+												<DropdownMenuRadioItem value="relevance">
+													{m.sidebar_search_sort_relevance()}
+												</DropdownMenuRadioItem>
+												<DropdownMenuRadioItem value="activity">
+													{m.sidebar_search_sort_activity()}
+												</DropdownMenuRadioItem>
+												<DropdownMenuRadioItem value="created">
+													{m.sidebar_search_sort_created()}
+												</DropdownMenuRadioItem>
+											</DropdownMenuRadioGroup>
+										</DropdownMenuGroup>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							{/if}
+							<Button
+								variant="ghost"
+								class="h-11 min-w-0 flex-1 gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:h-9 sm:w-9 sm:flex-none sm:shrink-0"
+								onclick={() => (helpDialogOpen = true)}
+								title={m.sidebar_search_legend_help()}
+								aria-label={m.sidebar_search_legend_help()}
+							>
+								<CircleHelp class="h-4 w-4 shrink-0" />
+								<span class="truncate text-sm sm:hidden">{m.sidebar_search_legend_help()}</span>
+							</Button>
+
+							{#if showSavedSearchActions}
+								<Button
+									variant="ghost"
+									class="h-11 min-w-0 flex-1 gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:h-9 sm:w-9 sm:flex-none sm:shrink-0"
+									onclick={onCreateSavedSearch}
+									title={m.sidebar_saved_searches_add()}
+									aria-label={m.sidebar_saved_searches_add()}
+									disabled={!canCreateSavedSearch}
 								>
-									<X class="h-3 w-3" />
-								</button>
+									<Save class="h-4 w-4 shrink-0" />
+									<span class="truncate text-sm sm:hidden">{m.sidebar_saved_searches_add()}</span>
+								</Button>
+								<Button
+									variant="ghost"
+									class="h-11 min-w-0 flex-1 gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:h-9 sm:w-9 sm:flex-none sm:shrink-0"
+									onclick={onOpenManager}
+									title={m.sidebar_saved_searches_manage_menu_item()}
+									aria-label={m.sidebar_saved_searches_manage_menu_item()}
+								>
+									<Settings class="h-4 w-4 shrink-0" />
+									<span class="truncate text-sm sm:hidden"
+										>{m.sidebar_saved_searches_manage_menu_item()}</span
+									>
+								</Button>
 							{/if}
 						</div>
-						{#if onSortChange}
-							<DropdownMenu>
-								<DropdownMenuTrigger
-									class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-								>
-									<ArrowUpDown class="h-3.5 w-3.5" />
-									<span class="sr-only sm:not-sr-only">{sortLabel(sort)}</span>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="end">
-									<DropdownMenuGroup>
-										<DropdownMenuGroupHeading>
-											{m.sidebar_search_sort_heading()}
-										</DropdownMenuGroupHeading>
-										<DropdownMenuRadioGroup
-											value={sort}
-											onValueChange={(value) => onSortChange(value as ChatSearchSort)}
-										>
-											<DropdownMenuRadioItem value="relevance">
-												{m.sidebar_search_sort_relevance()}
-											</DropdownMenuRadioItem>
-											<DropdownMenuRadioItem value="activity">
-												{m.sidebar_search_sort_activity()}
-											</DropdownMenuRadioItem>
-											<DropdownMenuRadioItem value="created">
-												{m.sidebar_search_sort_created()}
-											</DropdownMenuRadioItem>
-										</DropdownMenuRadioGroup>
-									</DropdownMenuGroup>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						{/if}
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-							onclick={() => (helpDialogOpen = true)}
-							title={m.sidebar_search_legend_help()}
-							aria-label={m.sidebar_search_legend_help()}
-						>
-							<CircleHelp class="h-4 w-4" />
-						</Button>
-
-						{#if showSavedSearchActions}
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-								onclick={onCreateSavedSearch}
-								title={m.sidebar_saved_searches_add()}
-								aria-label={m.sidebar_saved_searches_add()}
-								disabled={!canCreateSavedSearch}
-							>
-								<Save class="h-4 w-4" />
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-								onclick={onOpenManager}
-								title={m.sidebar_saved_searches_manage_menu_item()}
-								aria-label={m.sidebar_saved_searches_manage_menu_item()}
-							>
-								<Settings class="h-4 w-4" />
-							</Button>
-						{/if}
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:hidden"
-							onclick={onClose}
-							title={m.sidebar_search_close()}
-							aria-label={m.sidebar_search_close()}
-						>
-							<X class="h-4 w-4" />
-						</Button>
 					</div>
 
 					{#if showSavedSearchActions && savedSearches.length > 0}

@@ -3,6 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
+	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
 	import type { LoadingStatus as ChatLoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
 	import Square from '@lucide/svelte/icons/square';
@@ -126,6 +127,7 @@
 			role={announcementsEnabled ? 'status' : undefined}
 			aria-live={announcementsEnabled ? 'polite' : 'off'}
 			data-slot="chat-processing-status"
+			{@attach attachProcessingPulse}
 		>
 			<div class="flex min-w-0 items-center gap-1.5">
 				<span

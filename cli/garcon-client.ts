@@ -18,7 +18,17 @@ import {
 } from '@garcon/common/chat-row-contracts';
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
-import type { ChatListResponse } from '@garcon/common/chat-list';
+import { parseChatListResponse, type ChatListResponse } from '@garcon/common/chat-list';
+import {
+  parseChatHistoryResponse,
+  type ChatHistoryResponse,
+  type ChatMessagesRequest,
+} from '@garcon/common/chat-view';
+import {
+  parseChatSearchResponse,
+  type ChatSearchRequest,
+  type ChatSearchResponse,
+} from '@garcon/common/chat-search';
 import { stableJsonStringify } from '@garcon/common/json';
 import {
   parseChatSnapshotResponse,
@@ -79,10 +89,12 @@ export class GarconHttpError extends CliError {
         || errorCode === 'UNSUPPORTED_AGENT'
         || errorCode === 'EXPECTED_AGENT_MISMATCH'
         || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
+        || errorCode === 'TRANSCRIPT_SEARCH_DISABLED'
         || ((phase === 'catalog resolution'
           || phase === 'title update'
           || phase === 'export'
-          || phase === 'handoff artifact') && status === 400)
+          || phase === 'handoff artifact'
+          || phase === 'chat search') && status === 400)
         ? 2
         : 3,
     );
@@ -260,12 +272,65 @@ export class GarconClient {
   }
 
   async listChats(signal?: AbortSignal): Promise<ChatListResponse> {
-    const value = await this.#request('resume admission', 'GET', '/api/v1/chats', undefined, signal);
-    const raw = record(value);
-    if (!Array.isArray(raw?.sessions) || typeof raw.total !== 'number') {
-      throw new CliError('resume admission', 'server returned an invalid chat list', 3);
+    const value = await this.#request('chat discovery', 'GET', '/api/v1/chats', undefined, signal);
+    try {
+      return parseChatListResponse(value);
+    } catch (error) {
+      throw new CliError('chat discovery', 'server returned an invalid chat list', 3, {
+        cause: error,
+      });
     }
-    return value as ChatListResponse;
+  }
+
+  async getChatMessages(
+    request: ChatMessagesRequest,
+    signal?: AbortSignal,
+  ): Promise<ChatHistoryResponse> {
+    const query = new URLSearchParams({
+      chatId: request.chatId,
+      limit: String(request.limit ?? 50),
+    });
+    if (request.beforeOrdinal !== undefined) {
+      query.set('beforeOrdinal', String(request.beforeOrdinal));
+    }
+    if (request.transcriptViewId !== undefined) {
+      query.set('transcriptViewId', request.transcriptViewId);
+    }
+    if (request.purpose !== undefined) query.set('purpose', request.purpose);
+    const value = await this.#request(
+      'chat read',
+      'GET',
+      `/api/v1/chats/messages?${query.toString()}`,
+      undefined,
+      signal,
+    );
+    try {
+      return parseChatHistoryResponse(request, value);
+    } catch (error) {
+      throw new CliError('chat read', 'server returned an invalid transcript page', 3, {
+        cause: error,
+      });
+    }
+  }
+
+  async searchChats(
+    request: ChatSearchRequest,
+    signal?: AbortSignal,
+  ): Promise<ChatSearchResponse> {
+    const value = await this.#request(
+      'chat search',
+      'POST',
+      '/api/v1/chats/search',
+      request,
+      signal,
+    );
+    try {
+      return parseChatSearchResponse(request, value);
+    } catch (error) {
+      throw new CliError('chat search', 'server returned an invalid search response', 3, {
+        cause: error,
+      });
+    }
   }
 
   async getChatSnapshot(

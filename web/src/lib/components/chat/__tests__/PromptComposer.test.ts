@@ -827,8 +827,8 @@ describe('PromptComposer focus', () => {
 		expect(staticTreatmentRule?.groups?.body).toContain(
 			'--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));',
 		);
-		expect(motionAllowedRule?.groups?.body).toContain(
-			'--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;',
+		expect(motionAllowedRule?.groups?.body).toMatch(
+			/--composer-thinking-animation: composer-thinking-border-pulse var\(--processing-pulse-duration\)\s+ease-in-out infinite;/,
 		);
 		expect(motionAllowedRule?.groups?.body).not.toContain('composer-thinking-static-start');
 	});
