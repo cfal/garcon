@@ -1,5 +1,8 @@
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
-import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-settings';
+import {
+	createEmptyAgentSettings,
+	normalizeAgentSettings,
+} from '$shared/client/agent-settings';
 import type { ChatOrderGroup } from '$shared/chat-list';
 import { normalizePermissionMode, normalizeThinkingMode } from '$shared/chat-modes';
 import { stableJsonStringify } from '$shared/json';

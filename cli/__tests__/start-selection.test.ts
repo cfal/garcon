@@ -1,11 +1,17 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentCatalogEntry } from '@garcon/common/agents';
+import type { ApiProviderCatalogEntry } from '@garcon/common/api-providers';
+import type { PermissionMode } from '@garcon/common/chat-modes';
+import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
+import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import {
   StartSelectionError,
   resolveModelSelection,
   resolveStartSelection,
-} from '../start-selection.ts';
+  type StartSelectionErrorCode,
+} from '../start-selection.js';
 
-const provider = {
+const provider: ApiProviderCatalogEntry = {
   id: 'acme',
   label: 'Acme',
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -32,7 +38,7 @@ const provider = {
   ],
 };
 
-function agent(overrides = {}) {
+function agent(overrides: Partial<AgentCatalogEntry> = {}): AgentCatalogEntry {
   return {
     id: 'codex',
     label: 'Codex',
@@ -75,11 +81,13 @@ function agent(overrides = {}) {
   };
 }
 
-function catalog(entry = agent()) {
+function catalog(entry = agent()): ModelCatalogResponse {
   return { catalog: { agents: [entry], apiProviders: [provider] } };
 }
 
-function settings(permissionMode = 'acceptEdits') {
+function settings(
+  permissionMode: PermissionMode = 'acceptEdits',
+): Pick<RemoteSettingsSnapshot, 'executionDefaults'> {
   return {
     executionDefaults: {
       global: {
@@ -94,18 +102,18 @@ function settings(permissionMode = 'acceptEdits') {
   };
 }
 
-function expectCode(operation, code) {
+function expectCode(operation: () => unknown, code: StartSelectionErrorCode): void {
   try {
     operation();
   } catch (error) {
-    expect(error).toBeInstanceOf(StartSelectionError);
+    if (!(error instanceof StartSelectionError)) throw error;
     expect(error.code).toBe(code);
     return;
   }
   throw new Error(`Expected ${code}`);
 }
 
-describe('shared start selection', () => {
+describe('start selection', () => {
   test('resolves raw routed models and captured execution defaults', () => {
     expect(resolveStartSelection(catalog(), settings(), {
       agentId: 'codex',
@@ -208,7 +216,13 @@ describe('shared start selection', () => {
 
   test('classifies malformed catalog data separately from user selections', () => {
     expectCode(
-      () => resolveModelSelection(catalog(agent({ models: [{ value: 'broken', label: 'Broken', protocol: 'bad' }] })), 'codex', {
+      () => resolveModelSelection(catalog(agent({
+        models: [{
+          value: 'broken',
+          label: 'Broken',
+          protocol: 'bad',
+        }] as unknown as AgentCatalogEntry['models'],
+      })), 'codex', {
         model: 'broken',
       }),
       'INVALID_CATALOG',

@@ -2,7 +2,7 @@ import type {
 	PersistedWorkspaceLayoutNode,
 	PersistedWorkspaceLayoutV2,
 	PersistedWorkspaceSurfaceRef,
-} from '$shared/workspace-layout';
+} from './persisted-layout.js';
 import { isRecord } from '$shared/json';
 import {
 	WORKSPACE_WINDOW_RESOURCE_CEILING,

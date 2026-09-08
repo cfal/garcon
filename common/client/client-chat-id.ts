@@ -1,4 +1,4 @@
-import { chatIdFromEpochMicroseconds, type ChatId } from './chat-id.js';
+import { chatIdFromEpochMicroseconds, type ChatId } from '../chat-id.js';
 
 let lastIssued = 0n;
 const MIN_CANONICAL_EPOCH_MS = 1_000_000_000_000;

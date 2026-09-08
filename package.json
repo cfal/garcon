@@ -43,9 +43,10 @@
     "bench:eager-assets": "bun run --cwd web profile:eager-assets",
     "bench:sidebar-projection": "bun run --cwd web profile:sidebar-projection",
     "test": "bun run test:server && bun run test:cli && bun run --cwd web test",
+    "test:common": "bun scripts/run-test-files.js 'common/**/__tests__/*.{test.js,test.ts}'",
     "test:transcript-inventory": "bun scripts/validate-transcript-ledger-v5-cases.js",
     "test:cli": "bun run --cwd cli test",
-    "test:server": "bun test common/__tests__/*.test.js && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.test.js'",
+    "test:server": "bun run test:common && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.test.js'",
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",
@@ -75,5 +76,9 @@
   "overrides": {
     "@codemirror/view": "6.43.11",
     "cookie": "0.7.2"
+  },
+  "devDependencies": {
+    "svelte": "^5.57.0",
+    "typescript": "^6.0.3"
   }
 }

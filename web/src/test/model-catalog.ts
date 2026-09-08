@@ -1,5 +1,5 @@
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
-import type { ResolvedModelSelection } from '$shared/start-selection';
+import type { ResolvedModelSelection } from '$shared/client/model-selection';
 
 function matchesModel(entry: ModelOption, model: string): boolean {
 	return entry.value === model || entry.rawModel === model;

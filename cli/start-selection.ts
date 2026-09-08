@@ -1,21 +1,25 @@
-import { normalizeAgentSettings } from './agent-settings.js';
-import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from './agent-integration.js';
-import type { AgentCatalogEntry, AgentModelOption } from './agents.js';
-import type { ApiProtocol } from './api-providers.js';
+import { normalizeAgentSettings } from '@garcon/common/client/agent-settings';
+import type { ResolvedModelSelection } from '@garcon/common/client/model-selection';
+import {
+  parseAgentSettingsEnvelope,
+  type AgentSettingsEnvelope,
+} from '@garcon/common/agent-integration';
+import type { AgentCatalogEntry, AgentModelOption } from '@garcon/common/agents';
+import type { ApiProtocol } from '@garcon/common/api-providers';
 import {
   isPermissionMode,
   isThinkingMode,
   type PermissionMode,
   type ThinkingMode,
-} from './chat-modes.js';
+} from '@garcon/common/chat-modes';
 import {
   executionDefaultsForAgent,
   isThinkingModeSupported,
   normalizeSupportedPermissionMode,
   normalizeSupportedThinkingMode,
-} from './execution-defaults.js';
-import type { ModelCatalogResponse } from './model-catalog.js';
-import type { RemoteSettingsSnapshot } from './settings.js';
+} from '@garcon/common/execution-defaults';
+import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
+import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 
 export type StartSelectionErrorCode =
   | 'UNKNOWN_AGENT'
@@ -50,13 +54,6 @@ export interface RequestedStartSelection extends RequestedModelSelection {
   readonly agentId: string;
   readonly permissionMode?: PermissionMode;
   readonly thinkingMode?: string;
-}
-
-export interface ResolvedModelSelection {
-  readonly model: string;
-  readonly apiProviderId: string | null;
-  readonly modelEndpointId: string | null;
-  readonly modelProtocol: ApiProtocol | null;
 }
 
 export interface ResolvedStartSelection extends ResolvedModelSelection {
@@ -166,7 +163,6 @@ export function resolveCatalogModelSelection(
     modelProtocol: model.protocol,
   };
 }
-
 function assertProviderAndEndpoint(
   catalog: ModelCatalogResponse,
   agent: AgentCatalogEntry,

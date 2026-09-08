@@ -10,7 +10,7 @@ import {
   type ChatSearchSnippet,
   type ChatSearchSort,
 } from '@garcon/common/chat-search';
-import { isEmptyFilter } from '@garcon/common/chat-filter-query';
+import { isEmptyFilter } from '@garcon/common/client/chat-filter-query';
 import type { ChatListResponse } from '@garcon/common/chat-list';
 import type { CliConnectionOptions, SearchCliCommand } from './args.js';
 import {

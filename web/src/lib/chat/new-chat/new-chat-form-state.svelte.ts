@@ -24,10 +24,10 @@ import {
 	cloneAgentSettings,
 	normalizeAgentSettings,
 	withAgentSetting,
-} from '$shared/agent-settings';
+} from '$shared/client/agent-settings';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
-import type { ResolvedModelSelection } from '$shared/start-selection';
+import type { ResolvedModelSelection } from '$shared/client/model-selection';
 import {
 	executionDefaultsForAgent,
 	normalizeSupportedPermissionMode,

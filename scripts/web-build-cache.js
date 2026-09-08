@@ -25,6 +25,7 @@ export const webBuildInputs = [
   path.join(repoRoot, 'web', 'static'),
   path.join(repoRoot, 'bun.lock'),
   path.join(repoRoot, 'patches'),
+  path.join(repoRoot, 'web', 'browser-module-boundary.ts'),
   path.join(repoRoot, 'web', 'codemirror-packages.ts'),
   path.join(repoRoot, 'web', 'package.json'),
   path.join(repoRoot, 'web', 'project.inlang', 'settings.json'),

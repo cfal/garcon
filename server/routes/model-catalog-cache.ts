@@ -1,7 +1,6 @@
 import crypto from 'crypto';
-import type { AgentCatalogEntry } from '../../common/agents.js';
-import type { ApiProviderCatalogEntry } from '../../common/api-providers.js';
 import { isRecord } from '../../common/json.js';
+import type { ModelCatalogResponse } from '../../common/model-catalog.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 
@@ -15,15 +14,8 @@ export interface ModelCatalog {
   apiProviders: ApiProviderService;
 }
 
-export interface ModelCatalogResponseBody {
-  catalog: {
-    agents: AgentCatalogEntry[];
-    apiProviders: ApiProviderCatalogEntry[];
-  };
-}
-
 export interface ModelCatalogSnapshot {
-  body: ModelCatalogResponseBody;
+  body: ModelCatalogResponse;
   etag: string;
   createdAt: number;
 }
@@ -49,7 +41,7 @@ function sortedByStringField<T>(items: T[], field: keyof T): T[] {
   );
 }
 
-function catalogForHash(body: ModelCatalogResponseBody): unknown {
+function catalogForHash(body: ModelCatalogResponse): unknown {
   const agents = sortedByStringField(body.catalog.agents, 'id')
     .map((agent) => ({
       ...agent,
@@ -80,7 +72,7 @@ function catalogForHash(body: ModelCatalogResponseBody): unknown {
   });
 }
 
-export function createCatalogEtag(body: ModelCatalogResponseBody): string {
+export function createCatalogEtag(body: ModelCatalogResponse): string {
   const canonical = JSON.stringify(catalogForHash(body));
   const hash = crypto.createHash('sha256').update(canonical).digest('base64url');
   return `W/"model-catalog:${hash}"`;
@@ -100,7 +92,7 @@ function isFresh(snapshot: ModelCatalogSnapshot): boolean {
 }
 
 async function buildCatalogResponse(modelCatalog: ModelCatalog): Promise<ModelCatalogSnapshot> {
-  const body = {
+  const body: ModelCatalogResponse = {
     catalog: {
       agents: await modelCatalog.agents.getAgentCatalogEntries(),
       apiProviders: modelCatalog.apiProviders.getCatalog(),

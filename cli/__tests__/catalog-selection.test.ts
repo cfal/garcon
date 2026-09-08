@@ -10,6 +10,8 @@ import {
   resolveStartSelection,
   validateExplicitModes,
 } from '../catalog-selection.js';
+import { CliError } from '../errors.js';
+import { StartSelectionError } from '../start-selection.js';
 
 function agent(overrides: Partial<AgentCatalogEntry> = {}): AgentCatalogEntry {
   return {
@@ -194,6 +196,31 @@ describe('resolveModelSelection', () => {
       .toThrow('model catalog for codex is invalid');
   });
 
+  test('maps catalog corruption separately from invalid user selection', () => {
+    const malformed = catalog(agent({
+      models: [{
+        value: 'broken',
+        label: 'Broken',
+        protocol: 'invalid',
+      } as unknown as AgentCatalogEntry['models'][number]],
+    }));
+    const cases: ReadonlyArray<readonly [() => unknown, 2 | 3]> = [
+      [() => resolveModelSelection(malformed, 'codex', { model: 'broken' }), 3],
+      [() => resolveModelSelection(catalog(), 'missing', { model: 'gpt-5.4' }), 2],
+    ];
+
+    for (const [operation, exitCode] of cases) {
+      try {
+        operation();
+        throw new Error('Expected catalog resolution to fail');
+      } catch (error) {
+        if (!(error instanceof CliError)) throw error;
+        expect(error).toMatchObject({ phase: 'catalog resolution', exitCode });
+        expect(error.cause).toBeInstanceOf(StartSelectionError);
+      }
+    }
+  });
+
   test('rejects routed models that disagree with their provider endpoint', () => {
     const malformed = agent({
       models: [{
@@ -210,7 +237,6 @@ describe('resolveModelSelection', () => {
       .toThrow('incompatible');
   });
 });
-
 describe('execution selection', () => {
   test('requires an explicit model when a handoff target has no default', () => {
     const modelLessCatalog = catalog(agent({

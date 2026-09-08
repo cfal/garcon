@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import type { AgentSettingDescriptor } from '$shared/agent-integration';
+import { describe, expect, it } from 'bun:test';
+import type { AgentSettingDescriptor } from '../../agent-integration.js';
 import {
+	cloneAgentSettings,
 	createEmptyAgentSettings,
 	normalizeAgentSettings,
 	withAgentSetting,
-} from '$shared/agent-settings';
+} from '../agent-settings.ts';
 
 const effort = {
 	key: 'effort',
@@ -40,5 +41,18 @@ describe('agent settings', () => {
 			schemaVersion: 1,
 			values: {},
 		});
+	});
+
+	it('deeply clones JSON settings values', () => {
+		const original = {
+			ownerId: 'sample',
+			schemaVersion: 1,
+			values: { nested: { choices: ['one', 'two'] } },
+		};
+		const cloned = cloneAgentSettings(original);
+
+		expect(cloned).toEqual(original);
+		expect(cloned).not.toBe(original);
+		expect(cloned.values.nested).not.toBe(original.values.nested);
 	});
 });
