@@ -114,6 +114,7 @@ function startFailureReason(error: unknown): AgentChildRejectionReason {
     switch (error.code) {
       case 'UNKNOWN_AGENT': return 'unsupported-agent';
       case 'UNKNOWN_PROVIDER': case 'PROVIDER_NOT_SUPPORTED': return 'unknown-provider';
+      case 'AMBIGUOUS_PROVIDER': return 'ambiguous-provider';
       case 'AMBIGUOUS_MODEL': return 'ambiguous-model';
       case 'UNKNOWN_MODEL': return 'unknown-model';
       case 'UNSUPPORTED_PERMISSION_MODE': return 'unsupported-permission-mode';

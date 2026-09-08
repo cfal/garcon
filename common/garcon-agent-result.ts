@@ -8,7 +8,7 @@ import type { AgentCommandCorrelation } from './garcon-command-results.js';
 
 export const GARCON_AGENT_OUTPUT_MAX_BYTES = 48 * 1024;
 export const AGENT_CHILD_REJECTION_REASONS = [
-  'disabled', 'unsupported-agent', 'unknown-provider', 'ambiguous-model', 'unknown-model',
+  'disabled', 'unsupported-agent', 'unknown-provider', 'ambiguous-provider', 'ambiguous-model', 'unknown-model',
   'unsupported-permission-mode', 'unsupported-reasoning-effort', 'project-unavailable',
   'source-unavailable', 'action-failed', 'not-delegated', 'target-unavailable', 'busy', 'invalid-configuration',
 ] as const;

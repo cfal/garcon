@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ChatRegistrySnapshot } from '../../../server/chats/store.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { PreamblesMutationResponse } from '../../../common/preambles.js';
+import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -19,6 +20,44 @@ async function waitForOutcome(fixture: IntegrationFixture, chatId: string, type:
 }
 
 describe('assistant start and schedule commands', () => {
+  test.each([false, true])('resolves provider display names before child admission (ambiguous: %s)', async (ambiguous) => {
+    await withIntegrationFixture(`agent-command-provider-name-${ambiguous}`, async (fixture) => {
+      const agent = fixture.directAgents.openAi;
+      if (ambiguous) await fixture.client.createOpenAiProvider(fixture.fakeProviders.openAi.baseUrl);
+      const providerName = (await fixture.client.listAgentCatalog()).apiProviders
+        .find((provider) => provider.id === agent.provider.providerId)?.label;
+      if (!providerName) throw new Error('Missing fixture provider');
+      const source = fixture.newChatId();
+      const prompt = 'Request a child through a named provider.';
+      const childPrompt = 'Synthetic named-provider child task.';
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: prompt });
+      const cursor = fixture.client.markEvents();
+      await fixture.client.startDirectChat({ chatId: source, content: prompt, projectPath: fixture.dirs.project, agent });
+      await held.received;
+      held.releaseText(`<garcon-start-agent ref="named-provider" async="true" agent="${agent.agentId}" provider="${providerName}" model="${agent.provider.model}">${childPrompt}</garcon-start-agent>`);
+      const outcome = await waitForOutcome(fixture, source, 'agent-start-outcome', cursor);
+      expect(outcome).toMatchObject({ type: 'agent-start-outcome', ref: 'named-provider', async: true });
+      if (ambiguous) {
+        expect(outcome).toMatchObject({ status: 'rejected', reason: 'ambiguous-provider' });
+        expect(outcome).not.toHaveProperty('chatId');
+      } else {
+        expect(outcome.status).toBe('accepted');
+        if (outcome.type !== 'agent-start-outcome' || outcome.status !== 'accepted') throw new Error('Missing child');
+        expect((await fixture.fakeProviders.openAi.waitForRequest({ lastUserText: childPrompt })).lastUserText).toBe(childPrompt);
+        const persisted: ChatRegistrySnapshot = JSON.parse(await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'));
+        expect(persisted.sessions[outcome.chatId]).toMatchObject({
+          apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId,
+          parentChat: { chatId: source, relation: 'delegation' },
+        });
+      }
+      const control = await fixture.fakeProviders.openAi.waitForRequest({ lastUserText: garconCommandResultContent(outcome) });
+      expect(control.lastUserText).toBe(garconCommandResultContent(outcome));
+      expect((await fixture.client.listChats()).sessions).toHaveLength(ambiguous ? 1 : 2);
+      if (ambiguous) expect(fixture.fakeProviders.openAi.requests().some((request) => request.lastUserText === childPrompt)).toBe(false);
+      expect(userContents((await fixture.client.getMessages(source)).messages)).toEqual([prompt]);
+    });
+  }, 60_000);
+
   test('delivers an empty scheduled action through the actual UTC cron job as ordinary same-chat input', async () => {
     await withIntegrationFixture('agent-command-cron-delivery', async (fixture) => {
       const agent = fixture.directAgents.openAi;

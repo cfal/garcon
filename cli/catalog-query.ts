@@ -19,6 +19,7 @@ import {
 import {
   requireCatalogAgent,
   requireCatalogModels,
+  requireCatalogProvider,
   resolveCatalogModelSelection,
 } from './catalog-selection.js';
 import { CliError } from './errors.js';
@@ -78,19 +79,6 @@ function catalogProviders(catalog: ModelCatalogResponse): ApiProviderCatalogEntr
 
 function available(label: string, values: readonly string[]): string {
   return `${label}: ${values.length > 0 ? values.join(', ') : 'none'}`;
-}
-
-function requireProvider(
-  providers: readonly ApiProviderCatalogEntry[],
-  providerId: string,
-): ApiProviderCatalogEntry {
-  const provider = providers.find((entry) => entry.id === providerId);
-  if (!provider) {
-    throw catalogError(
-      `unknown API provider: ${providerId}; ${available('available providers', providers.map((entry) => entry.id))}`,
-    );
-  }
-  return provider;
 }
 
 function requireEndpoint(
@@ -153,7 +141,7 @@ function providerListing(
   const allProviders = catalogProviders(catalog);
   const providers = command.providerId === undefined
     ? allProviders
-    : [requireProvider(allProviders, command.providerId)];
+    : [requireCatalogProvider(allProviders, command.providerId)];
   const listed = providers.flatMap((provider) => {
     const endpoints = compatibleEndpoints(provider, agent);
     if (command.providerId !== undefined && agent) {
@@ -180,7 +168,7 @@ function endpointListing(
   agent: AgentCatalogEntry | undefined,
 ): QueryResult<'endpoints'> {
   if (!command.providerId) throw catalogError('list endpoints requires --provider');
-  const provider = requireProvider(catalogProviders(catalog), command.providerId);
+  const provider = requireCatalogProvider(catalogProviders(catalog), command.providerId);
   const compatible = compatibleEndpoints(provider, agent);
   if (agent) requireCompatibleEndpoints(provider, agent, compatible);
   let endpoints = compatible;
@@ -211,11 +199,13 @@ function modelListing(
   command: ListCliCommand,
   agent: AgentCatalogEntry,
 ): QueryResult<'models'> {
+  let providerId: string | undefined;
   if (command.providerId !== undefined) {
+    const provider = requireCatalogProvider(catalogProviders(catalog), command.providerId);
     if (!agent.acceptsApiProviderEndpoints) {
       throw catalogError(`agent ${agent.id} does not accept API provider endpoints`);
     }
-    const provider = requireProvider(catalogProviders(catalog), command.providerId);
+    providerId = provider.id;
     if (command.endpointId !== undefined) {
       const endpoint = requireEndpoint(provider, command.endpointId);
       if (!agent.supportedProtocols.includes(endpoint.protocol)) {
@@ -224,7 +214,7 @@ function modelListing(
     }
   }
   const models = requireCatalogModels(agent).filter((model) => (
-    (command.providerId === undefined || model.apiProviderId === command.providerId)
+    (providerId === undefined || model.apiProviderId === providerId)
     && (command.endpointId === undefined || model.endpointId === command.endpointId)
   ));
   const listed = models.map((model) => modelDetails(catalog, agent, model));
