@@ -157,6 +157,30 @@ for (const gesture of ['connection', 'node'] as const) {
   }, 120_000);
 }
 
+test('rejects a connection whose target disappears before pointer-up', async () => {
+  await withChromiumFixture('canvas-removed-connection-target', async (fixture) => {
+    const { page, integration } = fixture;
+    await openBoard(fixture);
+    await node(page, 'b').click();
+    await settle(page);
+    const baseline = await page.evaluate(() => window.canvasGestureListeners());
+    const start = await point(handle(page, 'a'));
+    const target = await point(handle(page, 'b'));
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(target.x, target.y, { steps: 8 });
+    await page.getByRole('button', { name: 'Remove from canvas', exact: true }).dispatchEvent('click');
+    await node(page, 'b').waitFor({ state: 'detached' });
+    await page.mouse.up();
+    await settle(page);
+    expect(await page.evaluate(() => window.canvasGestureListeners())).toEqual(baseline);
+    await page.waitForFunction(() => document.querySelector('[data-canvas-panel] [role="status"]')?.textContent === 'Saved');
+    const saved = await integration.client.get<ChatCanvas>('/api/v1/chat-canvases?id=diagram');
+    expect(saved.content.connections).toEqual([]);
+    fixture.assertNoBrowserErrors();
+  });
+}, 120_000);
+
 test('turning mobile editing off cancels an armed connection', async () => {
   await withChromiumFixture('canvas-abort-mobile-editing', async (fixture) => {
     const { page, integration } = fixture;

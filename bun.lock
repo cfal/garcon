@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "garcon",
+      "devDependencies": {
+        "@xyflow/system": "0.0.82",
+      },
     },
     "cli": {
       "name": "@garcon/cli",

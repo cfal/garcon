@@ -81,5 +81,8 @@
     "d3-drag@3.0.0": "patches/d3-drag@3.0.0.patch",
     "@xyflow/system@0.0.82": "patches/@xyflow%2Fsystem@0.0.82.patch",
     "@xyflow/svelte@1.6.6": "patches/@xyflow%2Fsvelte@1.6.6.patch"
+  },
+  "devDependencies": {
+    "@xyflow/system": "0.0.82"
   }
 }
