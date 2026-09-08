@@ -891,6 +891,7 @@
 	"workspace_workspace_region": "Workspace",
 	"workspace_open_tabs": "Open tabs",
 	"workspace_add_to_window": "Add to window",
+	"workspace_terminal_actions": "Terminal actions",
 	"workspace_window_actions": "Window actions",
 	"workspace_chat_metadata_copy_project_path": "Copy project path",
 	"workspace_chat_metadata_copy_chat_id": "Copy chat ID",

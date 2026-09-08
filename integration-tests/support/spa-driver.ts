@@ -3,6 +3,10 @@ import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 import { assertLightpandaWorkspaceGeometry } from './lightpanda-workspace-geometry.js';
+import {
+  interactWithWorkspaceWindowAddAction,
+  type WorkspaceWindowAddActionIntent,
+} from './workspace-window-add-action.js';
 
 interface ClickOptions {
   contains?: boolean;
@@ -831,17 +835,6 @@ export class SpaDriver {
     }, targetWindowId);
   }
 
-  async openWorkspaceWindowAddMenu(windowId?: string): Promise<void> {
-    const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
-    await this.#page.evaluate((expectedWindowId) => {
-      const trigger = [
-        ...document.querySelectorAll<HTMLButtonElement>('[data-workspace-window-add-trigger]'),
-      ].find((element) => element.dataset.workspaceWindowAddTrigger === expectedWindowId);
-      if (!trigger) throw new Error(`Missing workspace window add menu: ${expectedWindowId}`);
-      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
-    }, targetWindowId);
-  }
-
   async clickWorkspaceWindowAddAction(name: string, windowId?: string): Promise<void> {
     const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
     await this.#waitForWorkspaceWindowAddAction(name, targetWindowId, 'activate');
@@ -855,53 +848,14 @@ export class SpaDriver {
   async #waitForWorkspaceWindowAddAction(
     name: string,
     windowId: string,
-    intent: 'activate' | 'observe',
+    intent: WorkspaceWindowAddActionIntent,
   ): Promise<void> {
     try {
       await this.#page.waitForFunction(
-        ({ expectedName, expectedWindowId, expectedIntent }) => {
-          const workspaceWindow = document.querySelector<HTMLElement>(
-            `[data-workspace-window-id="${expectedWindowId}"]`,
-          );
-          const addControls = workspaceWindow?.querySelector<HTMLElement>(
-            '[data-workspace-window-add-controls]',
-          );
-          const inlineAction = [
-            ...(addControls?.querySelectorAll<HTMLButtonElement>(
-              '[data-workspace-window-add-inline]',
-            ) ?? []),
-          ].find((button) => button.getAttribute('aria-label') === expectedName);
-          const menu = [
-            ...document.querySelectorAll<HTMLElement>('[data-workspace-window-add-menu]'),
-          ].find((element) => element.dataset.workspaceWindowAddMenu === expectedWindowId);
-          const menuAction = [
-            ...(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []),
-          ].find(
-            (element) =>
-              (element.getAttribute('aria-label') || element.textContent?.trim()) === expectedName,
-          );
-          const action = inlineAction ?? menuAction;
-
-          if (action) {
-            if (
-              (action instanceof HTMLButtonElement && action.disabled) ||
-              action.getAttribute('aria-disabled') === 'true'
-            ) {
-              return false;
-            }
-            if (expectedIntent === 'activate') action.click();
-            return true;
-          }
-
-          const trigger = addControls?.querySelector<HTMLButtonElement>(
-            '[data-workspace-window-add-trigger]',
-          );
-          if (trigger?.getAttribute('aria-expanded') !== 'true') trigger?.click();
-          return false;
-        },
+        interactWithWorkspaceWindowAddAction,
         { timeout: 20_000 },
         {
-          expectedName: name,
+          expectedLabel: name,
           expectedWindowId: windowId,
           expectedIntent: intent,
         },

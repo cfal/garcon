@@ -61,6 +61,7 @@
 	let measurementRail: HTMLDivElement | null = $state(null);
 	let tabPresentation = $state.raw<WindowTabPresentation | null>(null);
 	let closeFocusReturnTarget: HTMLElement | null = null;
+	let singleTabMenuDismissedByOutsideInteraction = false;
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
 	const singleTabMenuSurfaceId = $derived.by(() => {
@@ -68,11 +69,19 @@
 		return tabs.order.length === 1 && surfaceId && hasContextMenu(surfaceId) ? surfaceId : null;
 	});
 
+	$effect.pre(() => {
+		singleTabMenuSurfaceId;
+		const viewport = untrack(() => tabViewport);
+		const focusedElement = document.activeElement;
+		if (focusedElement instanceof HTMLElement && viewport?.contains(focusedElement)) {
+			void restoreTabStripFocus(focusedElement);
+		}
+	});
+
 	$effect(() => {
 		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
 		const viewport = tabViewport;
 		const rail = measurementRail;
-		onMeasureChange?.(null);
 		if (!viewport || !rail || typeof ResizeObserver === 'undefined') return;
 		const observer = new ResizeObserver(recomputeVisibleTabs);
 		observer.observe(viewport);
@@ -81,10 +90,7 @@
 			observer.observe(item);
 		}
 		queueMicrotask(recomputeVisibleTabs);
-		return () => {
-			observer.disconnect();
-			onMeasureChange?.(null);
-		};
+		return () => observer.disconnect();
 	});
 
 	$effect(() => {
@@ -271,10 +277,7 @@
 			return;
 		}
 		if (!isCurrent) return;
-		const activeTab = Array.from(
-			tabViewport?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
-		).find((button) => button.getAttribute('aria-selected') === 'true');
-		activeTab?.focus();
+		focusSelectedTab();
 	}
 
 	async function closeTab(surfaceId: string, trigger: HTMLButtonElement): Promise<void> {
@@ -289,11 +292,36 @@
 		}
 	}
 
+	function focusSelectedTab(): void {
+		tabViewport?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
+	}
+
+	async function restoreTabStripFocus(previouslyFocused: HTMLElement): Promise<void> {
+		await tick();
+		if (previouslyFocused.isConnected || document.activeElement !== document.body) return;
+		focusSelectedTab();
+	}
+
+	function handleSingleTabMenuInteractOutside(event: PointerEvent): void {
+		if (
+			event.target instanceof Element &&
+			event.target.closest('[data-slot="context-menu-sub-content"]')
+		) {
+			return;
+		}
+		singleTabMenuDismissedByOutsideInteraction = true;
+	}
+
+	function handleSingleTabMenuOpenChange(open: boolean): void {
+		if (open) singleTabMenuDismissedByOutsideInteraction = false;
+	}
+
 	function restoreSingleTabMenuFocus(event: Event): void {
 		event.preventDefault();
-		tabViewport
-			?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
-			?.focus();
+		if (singleTabMenuDismissedByOutsideInteraction) {
+			return;
+		}
+		focusSelectedTab();
 	}
 </script>
 
@@ -448,7 +476,7 @@
 {/snippet}
 
 {#if singleTabMenuSurfaceId}
-	<ContextMenu>
+	<ContextMenu onOpenChange={handleSingleTabMenuOpenChange}>
 		<ContextMenuTrigger>
 			{#snippet child({ props })}
 				{@render tabList(props)}
@@ -464,6 +492,7 @@
 			{onSelect}
 			{surfaceMenuItems}
 			onContextMenuCloseAutoFocus={restoreSingleTabMenuFocus}
+			onContextMenuInteractOutside={handleSingleTabMenuInteractOutside}
 		/>
 	</ContextMenu>
 {:else}

@@ -50,6 +50,8 @@
 		readonly disabled?: boolean;
 		readonly busy?: boolean;
 	}
+	const ADD_ACTION_CONTROL_CLASS =
+		'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
@@ -96,10 +98,12 @@
 	]);
 	const inlineActions = $derived(eligibleActions.slice(0, inlineActionCount));
 	const menuActions = $derived(eligibleActions.slice(inlineActionCount));
-	const showMenu = $derived(menuActions.length > 0 || unplacedTerminalSessions.length > 0);
+	const hasUnplacedTerminalSessions = $derived(unplacedTerminalSessions.length > 0);
+	const showOverflowMenu = $derived(menuActions.length > 0);
 
 	$effect.pre(() => {
 		const focusedElement = focusedAddControl();
+		const terminalActionUsesMenu = hasUnplacedTerminalSessions;
 		const currentInlineCount = Math.min(
 			eligibleActions.length,
 			Math.max(
@@ -111,12 +115,13 @@
 			measure,
 			eligibleCount: eligibleActions.length,
 			currentInlineCount,
-			hasPersistentMenuContent: unplacedTerminalSessions.length > 0,
 		});
 		if (nextInlineCount !== untrack(() => inlineActionCount)) {
 			inlineActionCount = nextInlineCount;
 		}
-		if (focusedElement) void restoreAddControlFocus(focusedElement);
+		if (focusedElement) {
+			void restoreAddControlFocus(focusedElement, terminalActionUsesMenu);
+		}
 	});
 
 	function focusedAddControl(): HTMLElement | null {
@@ -129,16 +134,29 @@
 		return menu?.contains(focusedElement) ? focusedElement : null;
 	}
 
-	async function restoreAddControlFocus(previouslyFocused: HTMLElement): Promise<void> {
+	async function restoreAddControlFocus(
+		previouslyFocused: HTMLElement,
+		terminalActionUsesMenu: boolean,
+	): Promise<void> {
+		const terminalControlWasFocused = previouslyFocused.matches(
+			'[data-workspace-window-add-terminal-trigger], [data-workspace-window-add-inline="new-terminal"]',
+		);
 		await tick();
 		if (previouslyFocused.isConnected || document.activeElement !== document.body) return;
 		const trigger = addControlsElement?.querySelector<HTMLButtonElement>(
 			'[data-workspace-window-add-trigger]',
 		);
-		const firstInlineAction = addControlsElement?.querySelector<HTMLButtonElement>(
-			'[data-workspace-window-add-inline]:not(:disabled)',
+		let terminalControl: HTMLButtonElement | null | undefined = null;
+		if (terminalControlWasFocused) {
+			const terminalSelector = terminalActionUsesMenu
+				? '[data-workspace-window-add-terminal-trigger]'
+				: '[data-workspace-window-add-inline="new-terminal"]';
+			terminalControl = addControlsElement?.querySelector<HTMLButtonElement>(terminalSelector);
+		}
+		const fallbackControl = addControlsElement?.querySelector<HTMLButtonElement>(
+			'[data-workspace-window-add-inline]:not(:disabled), [data-workspace-window-add-terminal-trigger]',
 		);
-		(trigger ?? firstInlineAction)?.focus();
+		(trigger ?? terminalControl ?? fallbackControl)?.focus();
 	}
 
 	function canOffer(kind: PortableSingletonKind): boolean {
@@ -178,29 +196,76 @@
 	}
 </script>
 
+{#snippet addActionMenuItem(action: WorkspaceWindowAddAction)}
+	<DropdownMenuItem
+		disabled={action.disabled || action.busy}
+		aria-busy={action.busy || undefined}
+		title={action.disabled ? action.label : undefined}
+		onSelect={action.onclick}
+	>
+		<WorkspaceSurfaceIcon kind={action.kind} />
+		{action.label}
+	</DropdownMenuItem>
+{/snippet}
+
+{#snippet unplacedTerminalMenuItems()}
+	<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
+	{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
+		<DropdownMenuItem
+			onSelect={() => void workspace.openTerminalSession(session.metadata.terminalId, windowId)}
+		>
+			<WorkspaceSurfaceIcon kind="terminal" />
+			{terminalDisplayName(session.metadata)}
+		</DropdownMenuItem>
+	{/each}
+{/snippet}
+
 <div
 	bind:this={addControlsElement}
 	class="flex shrink-0 items-center gap-0.5"
 	data-workspace-window-add-controls={windowId}
 >
 	{#each inlineActions as action (action.id)}
-		<button
-			type="button"
-			class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-			aria-label={action.label}
-			title={action.label}
-			disabled={action.disabled}
-			aria-busy={action.busy || undefined}
-			data-workspace-window-add-inline={action.id}
-			onclick={action.busy ? undefined : action.onclick}
-		>
-			<WorkspaceSurfaceIcon kind={action.kind} />
-		</button>
+		{#if action.kind === 'terminal' && hasUnplacedTerminalSessions}
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					class={ADD_ACTION_CONTROL_CLASS}
+					aria-label={m.workspace_terminal_actions()}
+					title={m.workspace_terminal_actions()}
+					data-workspace-window-add-terminal-trigger={windowId}
+				>
+					<WorkspaceSurfaceIcon kind="terminal" />
+				</DropdownMenuTrigger>
+				<DropdownMenuContent
+					align="end"
+					class="w-64"
+					data-workspace-window-add-menu={windowId}
+					data-workspace-window-add-terminal-menu={windowId}
+				>
+					{@render addActionMenuItem(action)}
+					<DropdownMenuSeparator />
+					{@render unplacedTerminalMenuItems()}
+				</DropdownMenuContent>
+			</DropdownMenu>
+		{:else}
+			<button
+				type="button"
+				class={ADD_ACTION_CONTROL_CLASS}
+				aria-label={action.label}
+				title={action.label}
+				disabled={action.disabled}
+				aria-busy={action.busy || undefined}
+				data-workspace-window-add-inline={action.id}
+				onclick={action.busy ? undefined : action.onclick}
+			>
+				<WorkspaceSurfaceIcon kind={action.kind} />
+			</button>
+		{/if}
 	{/each}
-	{#if showMenu}
+	{#if showOverflowMenu}
 		<DropdownMenu>
 			<DropdownMenuTrigger
-				class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				class={ADD_ACTION_CONTROL_CLASS}
 				aria-label={m.workspace_add_to_window()}
 				title={m.workspace_add_to_window()}
 				data-workspace-window-add-trigger={windowId}
@@ -209,28 +274,11 @@
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" class="w-64" data-workspace-window-add-menu={windowId}>
 				{#each menuActions as action (action.id)}
-					<DropdownMenuItem
-						disabled={action.disabled || action.busy}
-						aria-busy={action.busy || undefined}
-						title={action.disabled ? action.label : undefined}
-						onSelect={action.onclick}
-					>
-						<WorkspaceSurfaceIcon kind={action.kind} />
-						{action.label}
-					</DropdownMenuItem>
+					{@render addActionMenuItem(action)}
 				{/each}
-				{#if unplacedTerminalSessions.length > 0}
-					{#if menuActions.length > 0}<DropdownMenuSeparator />{/if}
-					<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
-					{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
-						<DropdownMenuItem
-							onSelect={() =>
-								void workspace.openTerminalSession(session.metadata.terminalId, windowId)}
-						>
-							<WorkspaceSurfaceIcon kind="terminal" />
-							{terminalDisplayName(session.metadata)}
-						</DropdownMenuItem>
-					{/each}
+				{#if hasUnplacedTerminalSessions}
+					<DropdownMenuSeparator />
+					{@render unplacedTerminalMenuItems()}
 				{/if}
 			</DropdownMenuContent>
 		</DropdownMenu>

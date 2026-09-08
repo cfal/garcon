@@ -8,7 +8,6 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 				measure: null,
 				eligibleCount: 4,
 				currentInlineCount: 0,
-				hasPersistentMenuContent: false,
 			}),
 		).toBe(0);
 	});
@@ -19,20 +18,18 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 				measure: { naturalWidth: 200, viewportWidth: 318 },
 				eligibleCount: 5,
 				currentInlineCount: 0,
-				hasPersistentMenuContent: false,
 			}),
 		).toBe(3);
 	});
 
-	it('admits an action at the exact boundary with a persistent menu', () => {
+	it('admits an action prefix at the exact boundary with an overflow menu', () => {
 		expect(
 			resolveWorkspaceWindowInlineAddActionCount({
-				measure: { naturalWidth: 200, viewportWidth: 258 },
-				eligibleCount: 2,
+				measure: { naturalWidth: 200, viewportWidth: 260 },
+				eligibleCount: 4,
 				currentInlineCount: 0,
-				hasPersistentMenuContent: true,
 			}),
-		).toBe(1);
+		).toBe(2);
 	});
 
 	it('clamps spare capacity to the eligible action count', () => {
@@ -41,7 +38,6 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 				measure: { naturalWidth: 100, viewportWidth: 1_000 },
 				eligibleCount: 3,
 				currentInlineCount: 0,
-				hasPersistentMenuContent: false,
 			}),
 		).toBe(3);
 	});
@@ -52,7 +48,6 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 				measure: { naturalWidth: 200, viewportWidth: 200 },
 				eligibleCount: 5,
 				currentInlineCount: 3,
-				hasPersistentMenuContent: false,
 			}),
 		).toBe(3);
 	});
@@ -63,7 +58,6 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 				measure: { naturalWidth: 320, viewportWidth: 200 },
 				eligibleCount: 4,
 				currentInlineCount: 2,
-				hasPersistentMenuContent: false,
 			}),
 		).toBe(0);
 	});
@@ -74,7 +68,6 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 				measure: { naturalWidth: 100, viewportWidth: 0 },
 				eligibleCount: 8,
 				currentInlineCount: 8,
-				hasPersistentMenuContent: false,
 			}),
 		).toBe(0);
 	});
@@ -85,19 +78,7 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 				measure: { naturalWidth: 200, viewportWidth: 288 },
 				eligibleCount: 3,
 				currentInlineCount: 0,
-				hasPersistentMenuContent: false,
 			}),
 		).toBe(3);
-	});
-
-	it('keeps the menu button reserved for saved terminals', () => {
-		expect(
-			resolveWorkspaceWindowInlineAddActionCount({
-				measure: { naturalWidth: 200, viewportWidth: 288 },
-				eligibleCount: 3,
-				currentInlineCount: 0,
-				hasPersistentMenuContent: true,
-			}),
-		).toBe(2);
 	});
 });

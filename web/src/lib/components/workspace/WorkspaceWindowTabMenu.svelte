@@ -35,6 +35,7 @@
 		onSelect,
 		surfaceMenuItems,
 		onContextMenuCloseAutoFocus,
+		onContextMenuInteractOutside,
 	}: {
 		menu: MenuPrimitives;
 		windowId: WorkspaceWindowId;
@@ -45,6 +46,7 @@
 		onSelect: (surfaceId: string) => void;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 		onContextMenuCloseAutoFocus?: (event: Event) => void;
+		onContextMenuInteractOutside?: (event: PointerEvent) => void;
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
@@ -252,6 +254,7 @@
 		data-workspace-window-tab-context-menu={surfaceId}
 		data-workspace-window-tab-menu="context"
 		onCloseAutoFocus={onContextMenuCloseAutoFocus}
+		onInteractOutside={onContextMenuInteractOutside}
 	>
 		{@render menuItems()}
 	</ContextMenuContent>

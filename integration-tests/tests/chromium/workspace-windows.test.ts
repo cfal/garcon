@@ -816,6 +816,21 @@ describe('Chromium workspace windows', () => {
         .getAttribute('data-workspace-window-id');
       if (!windowId) throw new Error('Missing adaptive-action workspace window.');
 
+      const tabViewport = fixture.page.locator(`[data-workspace-window-tabs="${windowId}"]`);
+      expect(await tabViewport.getByRole('tab').count()).toBe(1);
+      const tabViewportBounds = await tabViewport.boundingBox();
+      if (!tabViewportBounds) throw new Error('Missing adaptive-action tab viewport bounds.');
+      await tabViewport.click({
+        button: 'right',
+        position: { x: tabViewportBounds.width - 4, y: tabViewportBounds.height / 2 },
+      });
+      const tabContextMenu = fixture.page.locator('[data-workspace-window-tab-context-menu]');
+      await tabContextMenu.waitFor({ state: 'visible' });
+      const composer = fixture.page.locator('textarea[placeholder="Reply..."]');
+      await composer.click();
+      await tabContextMenu.waitFor({ state: 'detached' });
+      expect(await composer.evaluate((element) => element === document.activeElement)).toBe(true);
+
       await fixture.page.waitForFunction((expectedWindowId) => {
         const workspaceWindow = document.querySelector<HTMLElement>(
           `[data-workspace-window-id="${expectedWindowId}"]`,
@@ -1750,7 +1765,9 @@ describe('Chromium workspace windows', () => {
       await terminalTab.hover();
       await closeButton.click();
       await closeButton.waitFor({ state: 'detached' });
-      await fixture.page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
+      await fixture.page
+        .locator(`[data-workspace-window-add-terminal-trigger="${windowId}"]`)
+        .click();
       await fixture.page
         .getByRole('menuitem', { name: terminalLabel, exact: true })
         .waitFor({ state: 'visible' });
