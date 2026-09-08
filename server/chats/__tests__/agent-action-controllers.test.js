@@ -50,7 +50,7 @@ function fixture(options = {}) {
     defaultSettings: { ownerId: 'test', schemaVersion: 1, values: {} },
   };
   const agents = { getAgentCatalogEntry: mock(async () => entry) };
-  const selection = new AgentStartSelectionService({ agents, apiProviders: { getCatalog: () => [] } });
+  const selection = new AgentStartSelectionService({ agents, apiProviders: { getCatalog: () => options.providers ?? [] } });
   const commands = { submitAgentCommandStartLocked: mock(async (input) => {
     events.push('start'); chats.set(input.chatId, {}); return { chat: { id: input.chatId }, turnId: 'child-turn' };
   }) };
@@ -66,6 +66,25 @@ function fixture(options = {}) {
 }
 
 describe('assistant action controllers', () => {
+  it.each([true, false])('rejects ambiguous provider names with a correlated result and no child admission (endpoint support: %s)', async (acceptsEndpoints) => {
+    const f = fixture({ providers: [
+      { id: 'first', label: 'Example Proxy', endpoints: [] },
+      { id: 'second', label: 'Example Proxy', endpoints: [] },
+    ] });
+    f.entry.acceptsApiProviderEndpoints = acceptsEndpoints;
+    f.start.request(SOURCE, { ...START, providerId: 'Example Proxy' });
+    await drain();
+    expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
+    expect(f.chats.size).toBe(1);
+    expect(f.notices).toHaveLength(1);
+    expect(f.replies).toHaveLength(1);
+    expect(parseGarconCommandResult(f.replies[0].input.content)).toEqual({
+      type: 'agent-start-outcome', ref: START.ref, async: true,
+      requestViewId: SOURCE.viewId, requestOrdinal: SOURCE.requestOrdinal,
+      status: 'rejected', reason: 'ambiguous-provider',
+    });
+  });
+
   it('acknowledges allocator exhaustion without admitting child work', async () => {
     const allocate = mock(() => { throw new Error('Synthetic allocator exhaustion'); });
     const f = fixture({ chatIds: { allocate } });
