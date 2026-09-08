@@ -314,7 +314,13 @@ describe('chat search', () => {
 
   test('maps disabled search to an actionable argument error', async () => {
     const output = { result() {}, diagnostic() {} } as CliOutput;
-    await expect(runChatSearch(command, {
+    const connectedCommand: SearchCliCommand = {
+      ...command,
+      workspace: "research'archive",
+      configDir: "/config/with space/it's",
+      serverUrl: 'https://garcon.example.test:8443',
+    };
+    await expect(runChatSearch(connectedCommand, {
       async listChats() { return chatList([]); },
       async searchChats() {
         throw new GarconHttpError(
@@ -327,7 +333,11 @@ describe('chat search', () => {
       },
     }, output)).rejects.toMatchObject({
       exitCode: 2,
-      message: expect.stringContaining('features.transcriptSearch.enabled'),
+      message: expect.stringContaining(
+        `garcon-cli --workspace 'research'"'"'archive' `
+          + `--config-dir '/config/with space/it'"'"'s' `
+          + `--server 'https://garcon.example.test:8443' transcript-search enable`,
+      ),
     } satisfies Partial<CliError>);
   });
 

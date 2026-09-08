@@ -212,7 +212,7 @@ export async function runChatSearch(
     if (error instanceof GarconHttpError && error.errorCode === 'TRANSCRIPT_SEARCH_DISABLED') {
       throw new CliError(
         'chat search',
-        'transcript search is disabled; enable features.transcriptSearch.enabled in Garcon settings',
+        `transcript search is disabled; run \`${formatTranscriptSearchEnableCommand(command)}\``,
         2,
         { cause: error },
       );
@@ -230,6 +230,21 @@ export async function runChatSearch(
   const result = buildChatSearchResult(command, chats, response, candidateChatCount);
   output.result(formatChatSearchResult(result, command.json, command));
   for (const diagnostic of searchDiagnostics(result)) output.diagnostic(diagnostic);
+}
+
+function formatTranscriptSearchEnableCommand(connection: CliConnectionOptions): string {
+  return [
+    'garcon-cli',
+    '--workspace',
+    shellQuote(connection.workspace),
+    '--config-dir',
+    shellQuote(connection.configDir),
+    ...(connection.serverUrl === undefined
+      ? []
+      : ['--server', shellQuote(connection.serverUrl)]),
+    'transcript-search',
+    'enable',
+  ].join(' ');
 }
 
 function formatReadCommand(

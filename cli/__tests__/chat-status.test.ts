@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import {
   AssistantMessage,
+  AskUserQuestionToolUseMessage,
   BashToolUseMessage,
   CliRowMessage,
   ErrorMessage,
@@ -196,6 +197,46 @@ describe('chat status', () => {
       `permission-decision '${CHAT_ID}' '${permissionOccurrenceId}' allow --run 'run-1' --server-instance 'instance-1'`,
     );
     expect(value).not.toContain('transcript:');
+  });
+
+  test('renders a typed answer template for structured permission requests', () => {
+    const permissionOccurrenceId = 'permission-occurrence-1';
+    const value = formatChatStatus(snapshot({
+      transientFeed: {
+        serverInstanceId: 'instance-1',
+        chatId: CHAT_ID,
+        transcriptViewId: 'view-1',
+        transientRevision: 1,
+        rows: [{
+          permissionOccurrenceId,
+          runId: 'run-1',
+          transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+          displayOrder: 2,
+          message: new PermissionRequestMessage(
+            TIMESTAMP,
+            permissionOccurrenceId,
+            new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-1', 'Choose a mode', [{
+              id: 'question-1',
+              prompt: 'Which mode?',
+              options: [{ id: 'option-1', label: 'Fast' }],
+            }]),
+          ),
+        }],
+      },
+    }), command);
+
+    expect(value).toContain('"id": "question-1"');
+    expect(value).toContain('"id": "option-1"');
+    expect(value).toContain(
+      `permission-answer '${CHAT_ID}' '${permissionOccurrenceId}' --answers `
+        + `'[{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"]}]' `
+        + `--run 'run-1' --server-instance 'instance-1'`,
+    );
+    expect(value).toContain(
+      `permission-decision '${CHAT_ID}' '${permissionOccurrenceId}' deny `
+        + `--run 'run-1' --server-instance 'instance-1'`,
+    );
+    expect(value).not.toContain('allow command:');
   });
 
   test('redacts images and data URLs while preserving unrelated data fields', () => {

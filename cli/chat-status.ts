@@ -3,7 +3,6 @@ import type { StatusCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
-import { PermissionRequestMessage } from '@garcon/common/chat-types';
 import { shellQuote } from './shell-quote.js';
 import {
   formatPermissionRequestedTool,
@@ -82,7 +81,6 @@ export function formatChatStatus(
     lines.push(`pending permissions: ${snapshot.transientFeed.rows.length}`);
     for (const row of snapshot.transientFeed.rows) {
       const message = row.message;
-      if (!(message instanceof PermissionRequestMessage)) continue;
       const structured = message.requestedTool.type === 'ask-user-question-tool-use'
         || message.requestedTool.type === 'cursor-ask-question-tool-use';
       lines.push(
@@ -95,11 +93,18 @@ export function formatChatStatus(
       );
       if (structured) {
         lines.push(
-          'action: answer this structured question in Garcon; allow does not supply question answers',
+          'action: use permission-answer with the exact question and option IDs above',
         );
       }
       if (connection) {
-        if (!structured) {
+        if (structured) {
+          lines.push(`answer command template: ${permissionAnswerCommand(
+            connection,
+            snapshot,
+            row.permissionOccurrenceId,
+            row.runId,
+          )}`);
+        } else {
           lines.push(`allow command: ${permissionDecisionCommand(
             connection,
             snapshot,
@@ -138,6 +143,26 @@ export function formatChatStatus(
   return lines.join('\n');
 }
 
+function permissionAnswerCommand(
+  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+  snapshot: ChatSnapshotResponse,
+  permissionOccurrenceId: string,
+  runId: string,
+): string {
+  return [
+    ...permissionCommandPrefix(connection),
+    'permission-answer',
+    shellQuote(snapshot.chat.id),
+    shellQuote(permissionOccurrenceId),
+    '--answers',
+    shellQuote('[{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"]}]'),
+    '--run',
+    shellQuote(runId),
+    '--server-instance',
+    shellQuote(snapshot.transientFeed.serverInstanceId),
+  ].join(' ');
+}
+
 function permissionDecisionCommand(
   connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
   snapshot: ChatSnapshotResponse,
@@ -146,14 +171,7 @@ function permissionDecisionCommand(
   decision: 'allow' | 'deny',
 ): string {
   return [
-    'garcon-cli',
-    '--workspace',
-    shellQuote(connection.workspace),
-    '--config-dir',
-    shellQuote(connection.configDir),
-    ...(connection.serverUrl === undefined
-      ? []
-      : ['--server', shellQuote(connection.serverUrl)]),
+    ...permissionCommandPrefix(connection),
     'permission-decision',
     shellQuote(snapshot.chat.id),
     shellQuote(permissionOccurrenceId),
@@ -163,4 +181,19 @@ function permissionDecisionCommand(
     '--server-instance',
     shellQuote(snapshot.transientFeed.serverInstanceId),
   ].join(' ');
+}
+
+function permissionCommandPrefix(
+  connection: Pick<StatusCliCommand, 'workspace' | 'configDir' | 'serverUrl'>,
+): string[] {
+  return [
+    'garcon-cli',
+    '--workspace',
+    shellQuote(connection.workspace),
+    '--config-dir',
+    shellQuote(connection.configDir),
+    ...(connection.serverUrl === undefined
+      ? []
+      : ['--server', shellQuote(connection.serverUrl)]),
+  ];
 }

@@ -905,8 +905,9 @@ describe('PUT /api/app/settings', () => {
     });
   });
 
-  it('forwards the complete agent command object through the transcript search coordinator', async () => {
+  it('forwards the complete agent command object through unbounded transcript search maintenance', async () => {
     const transcriptSearchSettings = { setEnabled: mock(async () => undefined) };
+    const server = { timeout: mock(() => undefined) };
     const routes = createWorkspaceRoutes(
       ctx.settings,
       ctx.agents,
@@ -922,8 +923,11 @@ describe('PUT /api/app/settings', () => {
       },
     }));
 
+    const request = makeRequest('http://localhost/api/app/settings', 'PUT', {});
     const response = await routes['/api/v1/app/settings'].PUT(
-      makeRequest('http://localhost/api/app/settings', 'PUT', {}),
+      request,
+      new URL(request.url),
+      server,
     );
 
     expect(response.status).toBe(200);
@@ -937,6 +941,7 @@ describe('PUT /api/app/settings', () => {
         schedule: true,
       },
     });
+    expect(server.timeout).toHaveBeenCalledWith(request, 0);
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 

@@ -1,4 +1,5 @@
 import type { ApiProtocol } from '@garcon/common/api-providers';
+import type { Preamble } from '@garcon/common/preambles';
 import { formatTextTable } from './text-table.js';
 
 export type CatalogQueryResult =
@@ -14,6 +15,11 @@ export type CatalogQueryResult =
         permissions: string[];
         reasoningEfforts: string[];
       }>;
+    }
+  | {
+      resource: 'preambles';
+      revision: number;
+      preambles: readonly Preamble[];
     }
   | {
       resource: 'providers';
@@ -61,12 +67,29 @@ export type CatalogQueryResult =
       reasoningEfforts: string[];
     };
 
+function preambleScopeLabel(preamble: Preamble): string {
+  if (preamble.scope.type === 'global') return 'global';
+  return preamble.scope.rules
+    .map((rule) => `${rule.projectPath}${rule.includeNested ? '/**' : ''}`)
+    .join(', ');
+}
+
 function humanListing(result: CatalogQueryResult): string {
   switch (result.resource) {
     case 'agents':
       return formatTextTable(
         ['AGENT', 'LABEL', 'DEFAULT MODEL'],
         result.agents.map((agent) => [agent.id, agent.label, agent.defaultModel]),
+      );
+    case 'preambles':
+      return formatTextTable(
+        ['ID', 'TITLE', 'ENABLED', 'SCOPE'],
+        result.preambles.map((preamble) => [
+          preamble.id,
+          preamble.title,
+          preamble.enabled ? 'yes' : 'no',
+          preambleScopeLabel(preamble),
+        ]),
       );
     case 'providers':
       return formatTextTable(

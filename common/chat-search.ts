@@ -145,6 +145,7 @@ export function parseChatSearchResponse(
 ): ChatSearchResponse {
   const response = chatSearchRecord(value);
   if (!response || typeof response.query !== 'string') invalidChatSearchResponse('response');
+  if (response.query !== request.query) invalidChatSearchResponse('query does not match request');
   const expectedMode = request.mode ?? 'page';
   const expectedSnippetLimit = request.snippetLimit ?? CHAT_SEARCH_MAX_SNIPPETS_PER_CHAT;
   const expectedOffset = request.offset ?? 0;
@@ -430,41 +431,186 @@ export type TranscriptSearchStatusResponse = TranscriptSearchStatusV1 & {
   readonly queryStats: TranscriptSearchQueryStatsV1;
 };
 
+export interface TranscriptSearchRebuildResponse {
+  readonly success: true;
+  readonly status: TranscriptSearchStatusResponse;
+}
+
+const TRANSCRIPT_SEARCH_STATUS_KEYS = [
+  'version',
+  'phase',
+  'chats',
+  'queuedJobs',
+  'resync',
+  'backlogRows',
+  'activeChat',
+  'lastErrorCode',
+  'updatedAt',
+] as const;
+
+const TRANSCRIPT_SEARCH_CHAT_KEYS = [
+  'total',
+  'indexed',
+  'pending',
+  'failed',
+  'unindexed',
+] as const;
+
+const TRANSCRIPT_SEARCH_PHASES: readonly TranscriptSearchPhase[] = [
+  'disabled',
+  'opening',
+  'rebuilding',
+  'ready',
+  'degraded',
+  'failed',
+];
+
+const TRANSCRIPT_SEARCH_QUERY_STAT_KEYS = [
+  'served',
+  'timedOut',
+  'rejectedBusy',
+  'p50Ms',
+  'p95Ms',
+  'maxMs',
+  'admissionP50Ms',
+  'admissionP95Ms',
+  'admissionMaxMs',
+  'totalP50Ms',
+  'totalP95Ms',
+  'totalMaxMs',
+] as const;
+
+export function parseTranscriptSearchStatusResponse(
+  value: unknown,
+): TranscriptSearchStatusResponse {
+  const response = chatSearchRecord(value);
+  if (!response || !hasExactChatSearchKeys(response, [
+    ...TRANSCRIPT_SEARCH_STATUS_KEYS,
+    'queryStats',
+  ])) {
+    throw new Error('Invalid transcript search status response: unexpected fields');
+  }
+  const { queryStats: rawQueryStats, ...rawStatus } = response;
+  if (!isTranscriptSearchStatusV1(rawStatus)) {
+    throw new Error('Invalid transcript search status response: invalid status');
+  }
+  if (!isTranscriptSearchQueryStatsV1(rawQueryStats)) {
+    throw new Error('Invalid transcript search status response: invalid query statistics');
+  }
+  return {
+    ...rawStatus,
+    queryStats: rawQueryStats,
+  };
+}
+
+export function parseTranscriptSearchRebuildResponse(
+  value: unknown,
+): TranscriptSearchRebuildResponse {
+  const response = chatSearchRecord(value);
+  if (!response || !hasExactChatSearchKeys(response, ['success', 'status'])) {
+    throw new Error('Invalid transcript search rebuild response: unexpected fields');
+  }
+  if (response.success !== true) {
+    throw new Error('Invalid transcript search rebuild response: rebuild was not accepted');
+  }
+  let status: TranscriptSearchStatusResponse;
+  try {
+    status = parseTranscriptSearchStatusResponse(response.status);
+  } catch (error) {
+    throw new Error('Invalid transcript search rebuild response: invalid status', { cause: error });
+  }
+  return {
+    success: true,
+    status,
+  };
+}
+
+function isTranscriptSearchQueryStatsV1(
+  value: unknown,
+): value is TranscriptSearchQueryStatsV1 {
+  const queryStats = chatSearchRecord(value);
+  return queryStats !== null
+    && hasExactChatSearchKeys(queryStats, TRANSCRIPT_SEARCH_QUERY_STAT_KEYS)
+    && TRANSCRIPT_SEARCH_QUERY_STAT_KEYS.every(
+      (key) => isNonNegativeSafeInteger(queryStats[key]),
+    );
+}
+
 export function isTranscriptSearchStatusV1(value: unknown): value is TranscriptSearchStatusV1 {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<TranscriptSearchStatusV1>;
-  const chats = candidate.chats;
-  const resync = candidate.resync;
-  const activeChat = candidate.activeChat;
-  return !!chats
-    && typeof chats === 'object'
-    && candidate.version === 1
-    && ['disabled', 'opening', 'rebuilding', 'ready', 'degraded', 'failed']
-      .includes(candidate.phase as TranscriptSearchPhase)
-    && [
-      chats.indexed,
-      chats.pending,
-      chats.failed,
-      chats.total,
-      chats.unindexed,
-      candidate.queuedJobs,
-      candidate.backlogRows,
-    ].every((count) => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)
-    && chats.indexed + chats.pending + chats.failed + chats.unindexed >= chats.total
-    && (resync === null
-      || (!!resync
-        && typeof resync === 'object'
-        && Number.isSafeInteger(resync.completedChats)
-        && Number.isSafeInteger(resync.totalChats)
-        && resync.completedChats >= 0
-        && resync.totalChats >= resync.completedChats))
-    && (activeChat === null
-      || (!!activeChat
-        && typeof activeChat === 'object'
-        && Number.isSafeInteger(activeChat.position)
-        && Number.isSafeInteger(activeChat.total)
-        && activeChat.position >= 0
-        && activeChat.total >= activeChat.position))
-    && (candidate.lastErrorCode === null || typeof candidate.lastErrorCode === 'string')
-    && typeof candidate.updatedAt === 'string';
+  const raw = chatSearchRecord(value);
+  if (!raw || !hasExactChatSearchKeys(raw, TRANSCRIPT_SEARCH_STATUS_KEYS)) return false;
+  return raw.version === 1
+    && isTranscriptSearchPhase(raw.phase)
+    && isTranscriptSearchChatCounts(raw.chats)
+    && isNonNegativeSafeInteger(raw.queuedJobs)
+    && isNonNegativeSafeInteger(raw.backlogRows)
+    && isTranscriptSearchResync(raw.resync)
+    && isTranscriptSearchActiveChat(raw.activeChat)
+    && isTranscriptSearchErrorCode(raw.lastErrorCode)
+    && isCanonicalChatSearchTimestamp(raw.updatedAt);
+}
+
+function isTranscriptSearchPhase(value: unknown): value is TranscriptSearchPhase {
+  return typeof value === 'string'
+    && TRANSCRIPT_SEARCH_PHASES.includes(value as TranscriptSearchPhase);
+}
+
+function isTranscriptSearchChatCounts(
+  value: unknown,
+): value is TranscriptSearchStatusV1['chats'] {
+  const chats = chatSearchRecord(value);
+  if (!chats || !hasExactChatSearchKeys(chats, TRANSCRIPT_SEARCH_CHAT_KEYS)) return false;
+  if (
+    !isNonNegativeSafeInteger(chats.total)
+    || !isNonNegativeSafeInteger(chats.indexed)
+    || !isNonNegativeSafeInteger(chats.pending)
+    || !isNonNegativeSafeInteger(chats.failed)
+    || !isNonNegativeSafeInteger(chats.unindexed)
+  ) {
+    return false;
+  }
+  return chats.indexed + chats.pending + chats.failed + chats.unindexed >= chats.total;
+}
+
+function isTranscriptSearchResync(
+  value: unknown,
+): value is TranscriptSearchStatusV1['resync'] {
+  if (value === null) return true;
+  const progress = chatSearchRecord(value);
+  return progress !== null
+    && hasExactChatSearchKeys(progress, ['completedChats', 'totalChats'])
+    && isNonNegativeSafeInteger(progress.completedChats)
+    && isNonNegativeSafeInteger(progress.totalChats)
+    && progress.totalChats >= progress.completedChats;
+}
+
+function isTranscriptSearchActiveChat(
+  value: unknown,
+): value is TranscriptSearchStatusV1['activeChat'] {
+  if (value === null) return true;
+  const progress = chatSearchRecord(value);
+  return progress !== null
+    && hasExactChatSearchKeys(progress, ['position', 'total'])
+    && isNonNegativeSafeInteger(progress.position)
+    && isNonNegativeSafeInteger(progress.total)
+    && progress.total >= progress.position;
+}
+
+function isTranscriptSearchErrorCode(value: unknown): value is string | null {
+  return value === null
+    || (typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/u.test(value));
+}
+
+function hasExactChatSearchKeys(
+  value: object,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
+function isCanonicalChatSearchTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }

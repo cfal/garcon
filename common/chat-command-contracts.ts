@@ -18,11 +18,24 @@ import type { ParentChatRef } from './chat-parentage.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
+import { normalizeAskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 
 export {
   parseDeleteChatCommandRequest,
   parseForkChatCommandRequest,
 } from './chat-fork-command-parsing.js';
+export {
+  ASK_USER_QUESTION_ID_MAX_BYTES,
+  ASK_USER_QUESTION_MAX_ANSWERS,
+  ASK_USER_QUESTION_MAX_SELECTED_OPTIONS,
+  ASK_USER_QUESTION_REASON_MAX_BYTES,
+  ASK_USER_QUESTION_RESPONSE_MAX_BYTES,
+  normalizeAskUserQuestionDecisionResponse,
+  type AskUserQuestionAnswerPayload,
+  type AskUserQuestionAnsweredResponse,
+  type AskUserQuestionDecisionResponse,
+  type AskUserQuestionSkippedResponse,
+} from './ask-user-question-response.js';
 import { isPreambleId, PREAMBLE_MAX_COUNT, type PreambleId } from './preambles.js';
 import {
   parseUserMessagePresentation,
@@ -377,25 +390,6 @@ export interface QueueMutationResponse {
   chatId: string;
   control: ChatExecutionControlState;
 }
-
-export interface AskUserQuestionAnswerPayload {
-  questionId: string;
-  selectedOptionIds: string[];
-}
-
-export interface AskUserQuestionAnsweredResponse extends Record<string, unknown> {
-  type: 'ask-user-question-response';
-  outcome: 'answered';
-  answers: AskUserQuestionAnswerPayload[];
-}
-
-export interface AskUserQuestionSkippedResponse extends Record<string, unknown> {
-  type: 'ask-user-question-response';
-  outcome: 'skipped';
-  reason?: string;
-}
-
-export type AskUserQuestionDecisionResponse = AskUserQuestionAnsweredResponse | AskUserQuestionSkippedResponse;
 
 export interface PermissionDecisionPayload {
   allow: boolean;
@@ -869,7 +863,14 @@ export function parsePermissionDecisionCommandRequest(value: unknown): Permissio
   const body = requestRecord(value);
   if (typeof body.allow !== 'boolean') throw new CommandRequestValidationError('allow must be a boolean');
   if (typeof body.alwaysAllow !== 'boolean') throw new CommandRequestValidationError('alwaysAllow must be a boolean');
-  const response = optionalRecord(body.response, 'response');
+  let response = optionalRecord(body.response, 'response');
+  if (response?.type === 'ask-user-question-response') {
+    const normalized = normalizeAskUserQuestionDecisionResponse(response);
+    if (!normalized) {
+      throw new CommandRequestValidationError('response contains an invalid structured answer');
+    }
+    response = normalized;
+  }
   const control = parseChatTransientControlAction(body.control);
   if (!control) throw new CommandRequestValidationError('control is invalid');
   const chatId = requiredChatId(body, 'chatId');
