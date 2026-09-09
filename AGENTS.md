@@ -245,6 +245,7 @@ Rules:
 - `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
 - `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
 - `web/src/lib/chat-map/` owns chat-lineage normalization and retained Chat Map surface state.
+- `web/src/lib/chat-canvas/` owns canvas documents, layout/membership rules, undo history, save coordination, and draft recovery. `server/chat-canvas/` persists provider-neutral canvas documents independently of chats and transcript ledgers; renderers and graph-engine adapters live in `components/chat-canvas`.
 - Their Svelte renderers remain in the corresponding `components` directories.
 
 ### Utilities Layer
@@ -429,7 +430,7 @@ A bug or flake first observed in a live suite or in production may only be close
 - Prefer lazy initialization for expensive integrations.
 - Avoid reactive churn from broad effects and unnecessary object recreation.
 - Lazy-load heavy vendor modules (e.g., CodeMirror language packs) via dynamic `import()` rather than static imports. See `web/src/lib/files/editor/language-loader.ts` for the established pattern.
-- Vendor chunk boundaries are defined in `vite.config.ts` (`manualChunks`). When adding a new heavy dependency, add a corresponding vendor chunk entry.
+- Vendor chunk boundaries are defined in `vite.config.ts` (`codeSplitting.groups`). When adding a new heavy dependency, add a corresponding vendor chunk entry.
 - Gate expensive fetches behind user intent -- defer API calls until the UI that needs the data is actually visible or activated.
 
 ## Error Handling and UX Consistency

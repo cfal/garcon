@@ -25,6 +25,9 @@
 	const chatMapRenderer = lazyRenderer(
 		() => import('$lib/components/chat-map/ChatMapPanel.svelte'),
 	);
+	const chatCanvasRenderer = lazyRenderer(
+		() => import('$lib/components/chat-canvas/ChatCanvasSurface.svelte'),
+	);
 	const chatBoardRenderer = lazyRenderer(
 		() => import('$lib/components/chat-board/ChatBoardPanel.svelte'),
 	);
@@ -212,6 +215,11 @@
 				{visible}
 				{presentation}
 			/>
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'chat-canvas'}
+		{@const controller = singletonSurfaces.chatCanvas()}
+		{#await chatCanvasRenderer() then ChatCanvasSurface}
+			<ChatCanvasSurface {controller} chats={sessions.orderedChats} {visible} {presentation} />
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'chat-board'}
 		{@const controller = singletonSurfaces.chatBoard()}

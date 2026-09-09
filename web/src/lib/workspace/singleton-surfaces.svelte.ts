@@ -12,6 +12,9 @@ import type { GitComparisonPreferences } from '$lib/git/review/git-comparison-pr
 import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
+import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
+import { CanvasExitGuard } from '$lib/chat-canvas/canvas-exit-guard.js';
+import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
 import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
@@ -51,6 +54,7 @@ export interface SingletonControllerByKind {
 	files: FilesSurfaceController;
 	commit: CommitController;
 	'chat-map': ChatMapController;
+	'chat-canvas': CanvasController;
 	'chat-board': ChatBoardController;
 }
 
@@ -79,11 +83,17 @@ export class SingletonSurfaceRegistry {
 		files: false,
 		commit: false,
 		'chat-map': false,
+		'chat-canvas': false,
 		'chat-board': false,
 	};
 	#hasVisibleProjectSurface = $state(false);
+	readonly #canvasExitGuard = new CanvasExitGuard(
+		browserCanvasRecovery,
+		() => this.chatCanvasIfPresent()?.session ?? null,
+	);
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
+		this.#canvasExitGuard.activate();
 		this.#factories = {
 			git: () => new GitWorkbenchSurfaceController(this.deps),
 			'git-history': () => new GitHistorySurfaceController(this.deps),
@@ -91,6 +101,7 @@ export class SingletonSurfaceRegistry {
 			files: () => new FilesSurfaceController(),
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
+			'chat-canvas': () => new CanvasController(),
 			'chat-board': () => {
 				if (!this.deps.createChatBoard) throw new Error('Chat Board factory is unavailable');
 				return this.deps.createChatBoard();
@@ -124,6 +135,16 @@ export class SingletonSurfaceRegistry {
 
 	chatMap(): ChatMapController {
 		return this.#controller('chat-map');
+	}
+
+	chatCanvas(): CanvasController {
+		return this.#controller('chat-canvas');
+	}
+
+	chatCanvasIfPresent(): CanvasController | null {
+		return (
+			(this.#controllers.get('chat-canvas')?.controller as CanvasController | undefined) ?? null
+		);
 	}
 
 	chatBoard(): ChatBoardController {
@@ -184,12 +205,16 @@ export class SingletonSurfaceRegistry {
 	#updateVisibleProjectSurface(): void {
 		this.#hasVisibleProjectSurface = PORTABLE_SINGLETON_KINDS.some(
 			(candidate) =>
-				candidate !== 'chat-map' && candidate !== 'chat-board' && this.#visible[candidate],
+				candidate !== 'chat-map' &&
+				candidate !== 'chat-canvas' &&
+				candidate !== 'chat-board' &&
+				this.#visible[candidate],
 		);
 	}
 
 	destroy(): void {
 		for (const kind of [...this.#controllers.keys()]) this.disposeSurface(kind);
+		this.#canvasExitGuard.dispose();
 	}
 
 	#controller<K extends PortableSingletonKind>(kind: K): SingletonControllerByKind[K] {

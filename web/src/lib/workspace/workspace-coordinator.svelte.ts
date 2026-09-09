@@ -137,8 +137,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			lastFocusedWindowId: () => this.#presentation.lastFocusedWindowId,
 			resolveWindowId: (snapshot, preferredWindowId) =>
 				this.#resolveWindowId(snapshot, preferredWindowId),
-			commitWithPresentationTarget: (mutations, resolveTarget) =>
-				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget),
+			commitWithPresentationTarget: (mutations, resolveTarget, options) =>
+				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget, options),
+			prepareChatSurfaceTransfer: (transfer) =>
+				this.#tabMovement.prepareChatSurfaceTransfer(transfer),
 			resolveSplitAdmission: deps.resolveSplitAdmission,
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
@@ -427,6 +429,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#chatPlacement.openInNewWindow(chatId, targetWindowId, edge);
 	}
 
+	async openChatBeside(
+		chatId: string,
+		targetWindowId?: WorkspaceWindowId,
+		edge: WorkspaceWindowEdge = 'right',
+	): Promise<WorkspaceWindowId> {
+		return this.#chatPlacement.openBeside(chatId, targetWindowId, edge);
+	}
+
 	async clearDeletedChat(chatId: string): Promise<void> {
 		await this.#presentation.commit((latest) =>
 			collectWindowNodes(latest.desktopRoot).flatMap((workspaceWindow) => {
@@ -561,7 +571,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const ownedFocus =
 			this.focusOwner.kind !== 'chat-list' && this.focusOwner.surfaceId === surfaceId;
 		this.#reservedSurfaceIds.add(surfaceId);
+		let releaseCanvasClose: (() => void) | null = null;
 		try {
+			if (surface.type === 'singleton' && surface.kind === 'chat-canvas') {
+				const canvas = this.#deps.singletons.chatCanvasIfPresent();
+				if (canvas) {
+					releaseCanvasClose = await canvas.prepareClose();
+					if (!releaseCanvasClose) return false;
+				}
+			}
 			if (surface.type === 'singleton' && surface.kind === 'commit') {
 				const commit = this.#deps.singletons.commitIfPresent();
 				if (commit && !commit.canClose) return false;
@@ -645,6 +663,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#presentation.focusPresentedSurface(fallbackSurfaceId);
 			return true;
 		} finally {
+			releaseCanvasClose?.();
 			this.#reservedSurfaceIds.delete(surfaceId);
 			if (surface.type === 'terminal') {
 				await this.#terminalPlacement.afterPlacementReleased(surface.terminalId);

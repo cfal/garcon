@@ -357,6 +357,7 @@ describe('workspace layout V2 schema', () => {
 							order: [
 								{ type: 'chat', chatId: 'chat-a' },
 								{ type: 'singleton', kind: 'chat-map' },
+								{ type: 'singleton', kind: 'chat-canvas' },
 								{ type: 'singleton', kind: 'chat-board' },
 							],
 							active: { type: 'singleton', kind: 'chat-map' },
@@ -368,6 +369,7 @@ describe('workspace layout V2 schema', () => {
 							order: [
 								{ type: 'chat', chatId: 'chat-b' },
 								{ type: 'singleton', kind: 'chat-map' },
+								{ type: 'singleton', kind: 'chat-canvas' },
 								{ type: 'singleton', kind: 'chat-board' },
 							],
 							active: { type: 'chat', chatId: 'chat-b' },
@@ -387,6 +389,12 @@ describe('workspace layout V2 schema', () => {
 			'singleton:chat-map',
 		);
 		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs.order).toContain(
+			'singleton:chat-canvas',
+		);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).not.toContain(
+			'singleton:chat-canvas',
+		);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs.order).toContain(
 			'singleton:chat-board',
 		);
 		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).not.toContain(
@@ -396,6 +404,7 @@ describe('workspace layout V2 schema', () => {
 			type: 'partition',
 		});
 		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-map');
+		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-canvas');
 		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-board');
 	});
 

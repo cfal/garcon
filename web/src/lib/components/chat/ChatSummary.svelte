@@ -6,7 +6,7 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn';
-	import { formatSidebarChatTimestamp } from '../sidebar/chat-timestamp.js';
+	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
 	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
 
 	interface ChatSummaryProps {
@@ -49,7 +49,7 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let activityTimestamp = $derived(session.lastActivityAt ?? session.createdAt);
 	let formattedTimestamp = $derived(
-		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null,
+		showTimestamp ? formatRelativeTimestamp(activityTimestamp, currentTime) : null,
 	);
 	let selectedForeground = $derived(isSidebar && isSelected);
 	let titleClass = $derived(

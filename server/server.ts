@@ -699,7 +699,7 @@ export async function startServer(): Promise<void> {
     });
 
     // Build route and WS handler tables
-    const routes = createAllRoutes({
+    const routes = createAllRoutes(workspaceDir, {
       registry: chatRegistry,
       settings,
       recentTitleIcons,

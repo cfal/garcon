@@ -9,6 +9,8 @@ import createGitRoutes from './git.js';
 import createGhRoutes from './gh.js';
 import createChatRoutes from './chats.js';
 import createSnippetRoutes from './snippets.js';
+import { createCanvasRoutes } from './chat-canvases.js';
+import { CanvasStore } from '../chat-canvas/store.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
@@ -61,7 +63,7 @@ import type { ChatBoardService } from '../chat-boards/service.js';
 import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 
-export default function createAllRoutes({
+export default function createAllRoutes(workspaceDir: string, {
   registry,
   settings,
   recentTitleIcons,
@@ -130,6 +132,7 @@ export default function createAllRoutes({
   transcriptExport: TranscriptExportService;
   handoffArtifact: HandoffArtifactService;
 }): RouteMap {
+  const canvases = new CanvasStore(workspaceDir);
   return {
     ...createRuntimeRoutes(runtimeState),
     ...createAgentTurnReceiptRoutes(commandLedger),
@@ -185,6 +188,7 @@ export default function createAllRoutes({
     ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),
+    ...createCanvasRoutes(canvases),
     ...createPreambleRoutes(preambles),
     ...createChatPreambleRoutes({
       selection: chatPreambleSelection,

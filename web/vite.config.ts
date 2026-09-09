@@ -92,33 +92,51 @@ export default defineConfig({
 	build: {
 		rollupOptions: {
 			output: {
-				manualChunks(id) {
-					if (id.includes('@xterm/')) return 'vendor-xterm';
-					if (id.includes('node_modules/katex')) return 'vendor-katex';
+				codeSplitting: {
+					groups: [
+						{
+							name: 'vendor-svelte',
+							test: (id) => id.includes('/node_modules/svelte/'),
+							// Reserves the shared runtime before lazy vendors collect their dependencies.
+							priority: 20,
+						},
+						{
+							name: 'vendor-canvas',
+							test: (id) => id.includes('@xyflow/') || id.includes('@svelte-put/shortcut'),
+							priority: 10,
+						},
+						{
+							name(id) {
+								if (id.includes('@xterm/')) return 'vendor-xterm';
+								if (id.includes('node_modules/katex')) return 'vendor-katex';
 
-					const languageChunk = codeMirrorLanguageChunk(id);
-					if (languageChunk) return languageChunk;
+								const languageChunk = codeMirrorLanguageChunk(id);
+								if (languageChunk) return languageChunk;
 
-					if (
-						id.includes('@codemirror/view') ||
-						id.includes('@codemirror/commands') ||
-						id.includes('@codemirror/merge') ||
-						id.includes('@codemirror/theme-one-dark')
-					)
-						return 'vendor-codemirror-editor';
+								if (
+									id.includes('@codemirror/view') ||
+									id.includes('@codemirror/commands') ||
+									id.includes('@codemirror/merge') ||
+									id.includes('@codemirror/theme-one-dark')
+								)
+									return 'vendor-codemirror-editor';
 
-					if (
-						id.includes('@codemirror/language') ||
-						id.includes('@codemirror/state') ||
-						id.includes('@lezer/highlight') ||
-						id.includes('@lezer/common') ||
-						id.includes('@lezer/lr')
-					)
-						return 'vendor-codemirror-core';
+								if (
+									id.includes('@codemirror/language') ||
+									id.includes('@codemirror/state') ||
+									id.includes('@lezer/highlight') ||
+									id.includes('@lezer/common') ||
+									id.includes('@lezer/lr')
+								)
+									return 'vendor-codemirror-core';
 
-					if (id.includes('@codemirror/') || id.includes('codemirror')) return 'vendor-codemirror';
+								if (id.includes('@codemirror/') || id.includes('codemirror'))
+									return 'vendor-codemirror';
 
-					if (id.includes('@atlaskit/pragmatic-drag-and-drop')) return 'vendor-dnd';
+								if (id.includes('@atlaskit/pragmatic-drag-and-drop')) return 'vendor-dnd';
+							},
+						},
+					],
 				},
 			},
 		},

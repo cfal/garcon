@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte.js';
 import {
 	resolveWorkspaceWindowCenterDropResult,
@@ -69,6 +69,58 @@ afterEach(() => {
 });
 
 describe('WorkspaceWindowDndController', () => {
+	it('routes sidebar drops to a registered content surface without replacing a workspace chat', () => {
+		const dnd = new WorkspaceWindowDndController(
+			twoWindowLayout(),
+			resolveUnmeasuredWorkspaceSplit,
+		);
+		const destination = windowElement('window-main');
+		const drop = vi.fn();
+		const unregister = dnd.registerChatDropTarget('window-main', destination, drop);
+		dnd.beginChatDrag('chat-a');
+		expect(dnd.hasChatDropTarget('window-main')).toBe(true);
+		dnd.handleWindowDragOver(
+			'window-main',
+			dragEvent('dragover', destination, { clientX: 50, clientY: 50 }),
+		);
+		expect(dnd.activeTarget).toBeNull();
+		expect(
+			dnd.handleWindowDrop(
+				'window-main',
+				dragEvent('drop', destination, { clientX: 50, clientY: 50 }),
+			),
+		).toBeNull();
+		expect(drop).toHaveBeenCalledWith('chat-a', { x: 50, y: 50 });
+		expect(dnd.payload).toBeNull();
+		unregister();
+		dnd.beginChatDrag('chat-b');
+		expect(dnd.hasChatDropTarget('window-main')).toBe(false);
+		expect(
+			dnd.handleWindowDrop(
+				'window-main',
+				dragEvent('drop', destination, { clientX: 50, clientY: 50 }),
+			),
+		).toMatchObject({ payload: { kind: 'chat', chatId: 'chat-b' } });
+	});
+
+	it('keeps a replacement content target when an old presentation unmounts', () => {
+		const dnd = new WorkspaceWindowDndController(
+			twoWindowLayout(),
+			resolveUnmeasuredWorkspaceSplit,
+		);
+		const destination = windowElement('window-main');
+		const old = dnd.registerChatDropTarget('window-main', destination, () => {});
+		const drop = vi.fn();
+		dnd.registerChatDropTarget('window-main', destination, drop);
+		old();
+		dnd.beginChatDrag('chat-a');
+		dnd.handleWindowDrop(
+			'window-main',
+			dragEvent('drop', destination, { clientX: 50, clientY: 50 }),
+		);
+		expect(drop).toHaveBeenCalledTimes(1);
+	});
+
 	it('returns a surface move and center destination before clearing drag state', () => {
 		const layout = twoWindowLayout();
 		const dnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);

@@ -1,6 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeResponse } from '$shared/file-contracts';
+import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery';
+import { canvas } from '$lib/chat-canvas/__tests__/canvas-fixtures';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
@@ -14,6 +16,7 @@ const registries: SingletonSurfaceRegistry[] = [];
 
 afterEach(() => {
 	cleanup();
+	sessionStorage.clear();
 	for (const registry of registries.splice(0)) registry.destroy();
 });
 
@@ -131,6 +134,30 @@ function createRegistry() {
 }
 
 describe('SingletonSurfaceRegistry', () => {
+	it('protects recovered drafts before opening Canvas', () => {
+		browserCanvasRecovery.write(canvas());
+		const { registry } = createRegistry();
+		expect(registry.chatCanvasIfPresent()).toBeNull();
+		const exit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(exit);
+		expect(exit.defaultPrevented).toBe(true);
+	});
+
+	it('keeps inactive Canvas drafts protected after closing the surface', () => {
+		const { registry } = createRegistry();
+		registry.chatCanvas();
+		browserCanvasRecovery.write(canvas());
+		registry.disposeSurface('chat-canvas');
+		expect(registry.chatCanvasIfPresent()).toBeNull();
+		const exit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(exit);
+		expect(exit.defaultPrevented).toBe(true);
+		registry.destroy();
+		const destroyedExit = new Event('beforeunload', { cancelable: true });
+		window.dispatchEvent(destroyedExit);
+		expect(destroyedExit.defaultPrevented).toBe(false);
+	});
+
 	it('retains singleton context while a selected draft resolves', () => {
 		const { registry, commits, pullRequestsStores } = createRegistry();
 		registry.setProjectState({
@@ -169,24 +196,30 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.setPresentationVisible('git', true);
 		registry.setPresentationVisible('files', true);
 		registry.setPresentationVisible('chat-map', true);
+		registry.setPresentationVisible('chat-canvas', true);
+		const chatCanvas = registry.chatCanvas();
 		registry.setPresentationVisible('chat-board', true);
 		const git = registry.gitWorkbench();
 		const files = registry.files();
 		const chatMap = registry.chatMap();
 		const chatBoard = registry.chatBoard();
 		chatMap.setQuery('retained query');
+		chatCanvas.view = 'list';
 		git.target.showTargetDialog = true;
 
 		registry.setPresentationVisible('git', false);
 		registry.setPresentationVisible('files', false);
 		registry.setPresentationVisible('chat-map', false);
+		registry.setPresentationVisible('chat-canvas', false);
 		registry.setPresentationVisible('chat-board', false);
 
 		expect(registry.gitWorkbench()).toBe(git);
 		expect(registry.files()).toBe(files);
 		expect(registry.chatMap()).toBe(chatMap);
+		expect(registry.chatCanvas()).toBe(chatCanvas);
 		expect(registry.chatBoard()).toBe(chatBoard);
 		expect(chatMap.query).toBe('retained query');
+		expect(chatCanvas.view).toBe('list');
 		expect(git.presentationVisible).toBe(false);
 		expect(git.target.showTargetDialog).toBe(false);
 		expect(files.presentationVisible).toBe(false);
@@ -231,6 +264,8 @@ describe('SingletonSurfaceRegistry', () => {
 		const firstPullRequests = registry.pullRequests();
 		const firstCommit = registry.commit();
 		const firstChatMap = registry.chatMap();
+		const firstChatCanvas = registry.chatCanvas();
+		const disposeChatCanvas = vi.spyOn(firstChatCanvas, 'dispose');
 		const firstChatBoard = registry.chatBoard();
 
 		registry.disposeSurface('git');
@@ -240,14 +275,30 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.disposeSurface('chat-map');
 		registry.disposeSurface('chat-board');
 
+		expect(registry.chatCanvas()).toBe(firstChatCanvas);
+		expect(disposeChatCanvas).not.toHaveBeenCalled();
+		registry.disposeSurface('chat-canvas');
+
 		expect(registry.gitWorkbench()).not.toBe(firstGit);
 		expect(registry.files()).not.toBe(firstFiles);
 		expect(registry.pullRequests()).not.toBe(firstPullRequests);
 		expect(registry.commit()).not.toBe(firstCommit);
 		expect(registry.chatMap()).not.toBe(firstChatMap);
+		expect(registry.chatCanvas()).not.toBe(firstChatCanvas);
+		expect(disposeChatCanvas).toHaveBeenCalledOnce();
 		expect(registry.chatBoard()).not.toBe(firstChatBoard);
 		expect(firstPullRequests.dispose).toHaveBeenCalledOnce();
 		expect(firstCommit.dispose).toHaveBeenCalledOnce();
+	});
+
+	it('does not classify Chat Map or Canvas as project surfaces', () => {
+		const { registry } = createRegistry();
+		registry.setPresentationVisible('chat-map', true);
+		registry.setPresentationVisible('chat-canvas', true);
+
+		expect(registry.hasVisibleProjectSurface).toBe(false);
+		registry.setPresentationVisible('git', true);
+		expect(registry.hasVisibleProjectSurface).toBe(true);
 	});
 
 	it('keeps Chat Board global and out of project-dependent visibility', () => {

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import WorkspaceWindowAddMenu from '../WorkspaceWindowAddMenu.svelte';
+import { WorkspaceWindowAddMenuState } from '../workspace-window-add-menu-state.svelte.js';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
@@ -609,9 +610,9 @@ describe('WorkspaceWindowTitleBar', () => {
 
 		await fireEvent.contextMenu(tablist, { clientX: 300, clientY: 12 });
 		const trailingSpaceMenu = await screen.findByRole('menu');
-		expect(
-			trailingSpaceMenu.getAttribute('data-workspace-window-tab-context-menu'),
-		).toBe(chatSurface.id);
+		expect(trailingSpaceMenu.getAttribute('data-workspace-window-tab-context-menu')).toBe(
+			chatSurface.id,
+		);
 		expect(
 			Array.from(
 				trailingSpaceMenu.querySelectorAll<HTMLElement>('[data-workspace-window-tab-action]'),
@@ -626,9 +627,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.contextMenu(tab);
 		await screen.findByRole('menuitem', { name: m.workspace_close_tab() });
 		expect(
-			document.querySelectorAll(
-				`[data-workspace-window-tab-context-menu="${chatSurface.id}"]`,
-			),
+			document.querySelectorAll(`[data-workspace-window-tab-context-menu="${chatSurface.id}"]`),
 		).toHaveLength(1);
 	});
 
@@ -838,6 +837,113 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
 
+	it.each([
+		{ kind: 'chat-map', label: m.workspace_open_chat_map },
+		{ kind: 'chat-canvas', label: m.workspace_open_chat_canvas },
+		{ kind: 'chat-board', label: m.workspace_open_chat_board },
+	] as const)(
+		'opens $kind through Chat Views in both titlebar layouts',
+		async ({ kind, label }) => {
+			const node = workspaceWindow([chatSurface.id]);
+			const rendered = render(WorkspaceWindowAddMenu, {
+				windowId: node.id,
+				tabs: node.tabs,
+				measure: { naturalWidth: 200, viewportWidth: 0 },
+			});
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+			expect(screen.queryByRole('menuitem', { name: label() })).toBeNull();
+			const submenuTrigger = screen.getByRole('menuitem', { name: m.workspace_chat_views() });
+			submenuTrigger.focus();
+			await fireEvent.keyDown(submenuTrigger, { key: 'ArrowRight' });
+			await fireEvent.click(await screen.findByRole('menuitem', { name: label() }));
+			expect(openSingletonAsTab).toHaveBeenLastCalledWith(kind, 'window-main');
+
+			await rendered.rerender({
+				windowId: node.id,
+				tabs: node.tabs,
+				measure: { naturalWidth: 100, viewportWidth: 1_000 },
+			});
+			const inlineTrigger = await screen.findByRole('button', { name: m.workspace_chat_views() });
+			expect(screen.queryByRole('button', { name: label() })).toBeNull();
+			await fireEvent.click(inlineTrigger);
+			expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+				m.workspace_open_chat_map(),
+				m.workspace_open_chat_canvas(),
+				m.workspace_open_chat_board(),
+			]);
+			await fireEvent.click(screen.getByRole('menuitem', { name: label() }));
+			expect(openSingletonAsTab).toHaveBeenCalledTimes(2);
+			expect(openSingletonAsTab).toHaveBeenLastCalledWith(kind, 'window-main');
+		},
+	);
+
+	it('omits Chat Views already in this window and removes an empty group', async () => {
+		const node = workspaceWindow([chatSurface.id, 'singleton:chat-map']);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		await fireEvent.click(await screen.findByRole('button', { name: m.workspace_chat_views() }));
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_map() })).toBeNull();
+		expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+			m.workspace_open_chat_canvas(),
+			m.workspace_open_chat_board(),
+		]);
+		const allViews = workspaceWindow([
+			...node.tabs.order,
+			'singleton:chat-canvas',
+			'singleton:chat-board',
+		]);
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: allViews.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		expect(screen.queryByRole('button', { name: m.workspace_chat_views() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_canvas() })).toBeNull();
+	});
+
+	it('restores Chat Views focus when its open submenu moves between layouts', async () => {
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_chat_views() }));
+		const canvasItem = await screen.findByRole('menuitem', {
+			name: m.workspace_open_chat_canvas(),
+		});
+		canvasItem.focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 100, viewportWidth: 1_000 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: m.workspace_chat_views() }),
+			),
+		);
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_canvas() })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_chat_views() }));
+		screen.getByRole('menuitem', { name: m.workspace_open_chat_board() }).focus();
+		await rendered.rerender({
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 0 },
+		});
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: m.workspace_add_to_window() }),
+			),
+		);
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_board() })).toBeNull();
+	});
+
 	it('keeps tab titles full while moving add actions in and out of the toolbar', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]));
@@ -955,8 +1061,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
-			m.workspace_open_chat_map(),
-			m.workspace_open_chat_board(),
+			m.workspace_chat_views(),
 			m.workspace_new_terminal(),
 		];
 
@@ -997,7 +1102,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(9),
+			).toHaveLength(8),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 
@@ -1077,12 +1182,63 @@ describe('WorkspaceWindowTitleBar', () => {
 			measure: { naturalWidth: 200, viewportWidth: 260 },
 		});
 		await waitFor(() =>
-			expect(document.activeElement).toBe(
-				screen.getByRole('button', { name: secondActionLabel }),
-			),
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: secondActionLabel })),
 		);
 		expect(screen.getByRole('button', { name: addLabel })).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: secondActionLabel })).toBeNull();
+	});
+
+	it('keeps retained action focus across an open menu focus-scope refresh', async () => {
+		const openAutoFocus = vi.spyOn(WorkspaceWindowAddMenuState.prototype, 'handleOpenAutoFocus');
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 200 },
+		});
+		try {
+			const trigger = screen.getByRole('button', { name: m.workspace_add_to_window() });
+			await fireEvent.click(trigger);
+			const menu = await screen.findByRole('menu');
+			await waitFor(() => expect(openAutoFocus).toHaveBeenCalled());
+			const owner = openAutoFocus.mock.contexts.at(-1);
+			if (!(owner instanceof WorkspaceWindowAddMenuState)) {
+				throw new Error('Missing mounted add-menu controller.');
+			}
+			const retainedAction = screen.getByRole('menuitem', { name: m.workspace_open_git_history() });
+			retainedAction.focus();
+
+			// Bits UI refreshes its focus scope with close/open callbacks while the menu stays open.
+			const refreshClose = new CustomEvent('focusScope.onCloseAutoFocus', { cancelable: true });
+			owner.handleCloseAutoFocus(refreshClose);
+			expect(refreshClose.defaultPrevented).toBe(true);
+			owner.handleOpenAutoFocus(
+				new CustomEvent('focusScope.onOpenAutoFocus', { cancelable: true }),
+			);
+			await rendered.rerender({
+				windowId: node.id,
+				tabs: node.tabs,
+				measure: { naturalWidth: 200, viewportWidth: 230 },
+			});
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			expect(
+				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+			).toHaveLength(1);
+			expect(screen.getByRole('menu')).toBe(menu);
+			expect(screen.getByRole('menuitem', { name: m.workspace_open_git_history() })).toBe(
+				retainedAction,
+			);
+			expect(document.activeElement).toBe(retainedAction);
+
+			await fireEvent.keyDown(retainedAction, { key: 'Escape' });
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			await waitFor(() => expect(document.activeElement).toBe(trigger));
+			const actualClose = new CustomEvent('focusScope.onCloseAutoFocus', { cancelable: true });
+			owner.handleCloseAutoFocus(actualClose);
+			expect(actualClose.defaultPrevented).toBe(false);
+		} finally {
+			openAutoFocus.mockRestore();
+		}
 	});
 
 	it('moves saved terminals into the inline terminal menu', async () => {
@@ -1099,7 +1255,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(8),
+			).toHaveLength(7),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 		const trigger = screen.getByRole('button', { name: m.workspace_terminal_actions() });
@@ -1163,6 +1319,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'files',
 			'commit',
 			'chat-map',
+			'chat-canvas',
 			'chat-board',
 		] as const;
 		const singletonSurfaces = kinds.map((kind) => portableSingletonDescriptor(kind));
@@ -1224,6 +1381,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'files',
 			'commit',
 			'chat-map',
+			'chat-canvas',
 			'chat-board',
 		] as const;
 		runtime.surfaces = Object.fromEntries(
@@ -1251,8 +1409,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
-			m.workspace_open_chat_map(),
-			m.workspace_open_chat_board(),
+			m.workspace_chat_views(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const newTerminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });
