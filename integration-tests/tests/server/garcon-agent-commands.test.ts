@@ -83,14 +83,15 @@ describe('assistant start and schedule commands', () => {
       expect((await fixture.client.getScheduledPrompts()).prompts).toEqual([]);
     });
   }, 120_000);
-  test('creates one independent child with persisted parentage and schedules wrapped input in the source chat', async () => {
-    await withIntegrationFixture('agent-command-creation', async (fixture) => {
+  test.each([false, true])('creates one independent child with persisted parentage and schedules wrapped input in the source chat (held acknowledgment: %s)', async (holdAcknowledgment) => {
+    await withIntegrationFixture(`agent-command-creation-${holdAcknowledgment}`, async (fixture) => {
       const agent = fixture.directAgents.openAi;
       const source = fixture.newChatId();
       const prompt = 'Start a synthetic child and schedule a follow-up.';
       const childPrompt = 'Perform the independent synthetic task.';
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: prompt });
       const child = fixture.fakeProviders.openAi.holdNext({ lastUserText: childPrompt });
+      const firstAcknowledgment = holdAcknowledgment ? fixture.fakeProviders.openAi.holdNext({}) : null;
       const cursor = fixture.client.markEvents();
       const started = await fixture.client.startDirectChat({ chatId: source, content: prompt, projectPath: fixture.dirs.project, agent });
       await held.received;
@@ -116,13 +117,28 @@ describe('assistant start and schedule commands', () => {
         prompt: '<garcon-schedule-action>\nReview task {{chat_id}} &amp; report.\n</garcon-schedule-action>',
       });
       await fixture.client.waitForTurnTerminal(source, started.turnId, { afterIndex: cursor });
-      await fixture.client.waitForProcessing(source, false, { afterIndex: cursor });
       const transcript = await fixture.client.getMessages(source);
       expect(userContents(transcript.messages)).toEqual([prompt]);
       expect(messagesOfType(transcript.messages, 'transcript-notice').filter((notice) => notice.detail?.type === 'agent-start-outcome')).toHaveLength(1);
       expect(messagesOfType(transcript.messages, 'transcript-notice').filter((notice) => notice.detail?.type === 'agent-schedule-outcome')).toHaveLength(1);
-      expect(fixture.fakeProviders.openAi.requests().some((request) => request.lastUserText.startsWith('<garcon-start-agent-result '))).toBe(true);
-      expect(fixture.fakeProviders.openAi.requests().some((request) => request.lastUserText.startsWith('<garcon-schedule-result '))).toBe(true);
+      const expectedStartResult = garconCommandResultContent(startOutcome);
+      const expectedScheduleResult = garconCommandResultContent(scheduleOutcome);
+      if (firstAcknowledgment) {
+        const firstRequest = await firstAcknowledgment.received;
+        expect([expectedStartResult, expectedScheduleResult]).toContain(firstRequest.lastUserText);
+        // The original turn's historical idle event is not an acknowledgment-delivery barrier.
+        await fixture.client.waitForProcessing(source, false, { afterIndex: cursor });
+        expect(fixture.fakeProviders.openAi.requests().filter((request) =>
+          request.lastUserText === expectedStartResult || request.lastUserText === expectedScheduleResult,
+        )).toHaveLength(1);
+        firstAcknowledgment.releaseText('Synthetic acknowledgment processed.');
+      }
+      const [startResult, scheduleResult] = await Promise.all([
+        fixture.fakeProviders.openAi.waitForRequest({ lastUserText: expectedStartResult }),
+        fixture.fakeProviders.openAi.waitForRequest({ lastUserText: expectedScheduleResult }),
+      ]);
+      expect(startResult.lastUserText).toBe(expectedStartResult);
+      expect(scheduleResult.lastUserText).toBe(expectedScheduleResult);
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === startOutcome.chatId)?.parentChat)
         .toEqual({ chatId: source, relation: 'delegation' });
