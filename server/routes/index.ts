@@ -24,6 +24,8 @@ import { createChatExportRoutes } from './chat-export.js';
 import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
 import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
 import { createProjectResolutionRoutes } from './project-resolution.js';
+import { createChatBoardRoutes } from './chat-boards.js';
+import { createChatTagRoutes } from './chat-tags.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -55,6 +57,9 @@ import type { TranscriptExportService } from '../chats/transcript-export/service
 import type { HandoffArtifactService } from '../chats/handoff-artifact/service.js';
 import type { PreambleService } from '../preambles/service.js';
 import type { ChatPreambleSelectionService } from '../preambles/chat-selection-service.js';
+import type { ChatBoardService } from '../chat-boards/service.js';
+import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
+import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 
 export default function createAllRoutes({
   registry,
@@ -78,6 +83,9 @@ export default function createAllRoutes({
   snippets,
   preambles,
   chatPreambleSelection,
+  chatBoards,
+  chatTags,
+  chatMutationLock,
   terminals,
   searchIndex,
   transcriptSearchSettings,
@@ -109,6 +117,9 @@ export default function createAllRoutes({
   snippets: SnippetService;
   preambles: PreambleService;
   chatPreambleSelection: ChatPreambleSelectionService;
+  chatBoards: ChatBoardService;
+  chatTags: ChatTagMutationService;
+  chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
   terminals: TerminalManager;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
@@ -151,7 +162,10 @@ export default function createAllRoutes({
       lastSelectedChat,
       searchIndex,
       transcriptSearchMaintenance: transcriptSearchSettings,
+      chatMutationLock,
     }),
+    ...createChatTagRoutes(chatTags),
+    ...createChatBoardRoutes(chatBoards),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     ...createFilesRoutes(registry),
     ...createCommandsRoutes({ registry, agents }),

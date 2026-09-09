@@ -132,6 +132,7 @@
 		onRenameChat: handleChatRenamed,
 		onProjectPathUpdated: handleChatProjectPathUpdated,
 		onUpsertServerChat: (entry) => sessions.upsertServerChat(entry),
+		replaceChatTags: (input) => sessions.replaceChatTags(input),
 		onReloadChat: handleReloadChat,
 		notifyError(message) {
 			notifications.error(message);
@@ -190,6 +191,7 @@
 		mobileActiveDescriptor?.type === 'file' ||
 			(mobileActiveDescriptor?.type === 'singleton' &&
 				(mobileActiveDescriptor.kind === 'commit' ||
+					mobileActiveDescriptor.kind === 'chat-board' ||
 					mobileActiveDescriptor.kind === 'git-history' ||
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
@@ -525,8 +527,12 @@
 		chatActionDialogs.requestTags(chat, m.sidebar_chats_new_chat());
 	}
 
-	async function confirmChatTags(chatId: string, tags: string[]): Promise<void> {
-		await chatActionController.updateTags(chatId, tags);
+	async function confirmChatTags(
+		chatId: string,
+		baseTags: readonly string[],
+		tags: string[],
+	): Promise<void> {
+		await chatActionController.updateTags(chatId, baseTags, tags);
 		chatActionDialogs.closeTagDialog();
 	}
 
@@ -808,8 +814,15 @@
 <SidebarTagDialog
 	tagDialog={chatActionDialogs.tagDialog}
 	allKnownTags={sidebarSearch.allKnownTags}
+	currentTags={chatActionDialogs.tagDialog
+		? sessions.byId[chatActionDialogs.tagDialog.chatId]?.tags
+		: undefined}
+	reconciliationKind={chatActionDialogs.tagDialog
+		? sessions.tagReconciliationKind(chatActionDialogs.tagDialog.chatId)
+		: null}
 	onClose={() => chatActionDialogs.closeTagDialog()}
 	onSave={confirmChatTags}
+	onRetryReconciliation={(chatId) => sessions.retryTagReconciliation(chatId)}
 />
 
 <ShareChatDialog

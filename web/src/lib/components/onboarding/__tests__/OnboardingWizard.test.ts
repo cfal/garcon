@@ -111,7 +111,7 @@ describe('OnboardingWizard', () => {
 
 		// Only the detailed layout renders the sample last-message line.
 		const sampleMessage = 'Draft the release notes and verify the upgrade path.';
-		expect(previewFor('default').textContent).toContain(sampleMessage);
+		expect(previewFor('detailed').textContent).toContain(sampleMessage);
 		expect(previewFor('compact').textContent).not.toContain(sampleMessage);
 		expect(previewFor('single-line').textContent).not.toContain(sampleMessage);
 		expect(document.body.textContent).not.toContain('/workspace/aurora');

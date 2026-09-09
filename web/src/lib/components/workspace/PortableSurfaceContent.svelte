@@ -25,6 +25,9 @@
 	const chatMapRenderer = lazyRenderer(
 		() => import('$lib/components/chat-map/ChatMapPanel.svelte'),
 	);
+	const chatBoardRenderer = lazyRenderer(
+		() => import('$lib/components/chat-board/ChatBoardPanel.svelte'),
+	);
 </script>
 
 <script lang="ts">
@@ -208,6 +211,19 @@
 				selectedChatId={sessions.selectedChatId}
 				{visible}
 				{presentation}
+			/>
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'chat-board'}
+		{@const controller = singletonSurfaces.chatBoard()}
+		{#await chatBoardRenderer() then ChatBoardPanel}
+			<ChatBoardPanel
+				{controller}
+				{sessions}
+				{presentation}
+				onOpenChat={(chatId) => {
+					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
+					else void workspace.showChatInWindow(chatId, presentation);
+				}}
 			/>
 		{/await}
 	{/if}

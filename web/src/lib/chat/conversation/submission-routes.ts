@@ -313,12 +313,15 @@ export async function submitRunRoute(
 		const response = await submission.submit();
 		if (handoff) {
 			if (!response.chat) throw new Error('Accepted handoff response omitted its chat projection');
-			deps.sessions.upsertServerChat(response.chat);
+			deps.sessions.reconcileAcceptedHandoffProjection(response.chat);
 			onHandoffAccepted(response.chat);
 		}
 		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
+		if (response.tagMutation) {
+			void deps.sessions.observeCommandTagMutation(context.chatId, response.tagMutation);
+		}
 		return 'accepted';
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {

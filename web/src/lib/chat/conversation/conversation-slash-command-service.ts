@@ -50,7 +50,9 @@ import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ReorderChatResponse } from '$shared/chat-order-contracts';
-import { normalizeTags } from '$shared/tags';
+import type { ApplyChatTagDeltaRequest, ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
+import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
+import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 
 interface SlashCommandSessions {
 	selectedChatId: string | null;
@@ -60,7 +62,8 @@ interface SlashCommandSessions {
 		chatId: string,
 		boundary: 'top' | 'bottom',
 	): Promise<ReorderChatResponse | null>;
-	setChatTags(chatId: string, tags: string[]): Promise<boolean>;
+	tagReconciliationKind(chatId: string): ChatTagReconciliationKind;
+	applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse>;
 	upsertServerChat(entry: ChatListEntry): void;
 	setSelectedChatId(chatId: string | null): void;
 }
@@ -441,19 +444,15 @@ export class ConversationSlashCommandService {
 			: null;
 
 		return this.#enqueueTagMutation(chatId, async () => {
-			const currentTags = normalizeTags(deps.sessions.byId[chatId]?.tags ?? chat.tags);
-			const requested = new Set(command.tags);
-			const nextTags =
-				command.action === 'add'
-					? normalizeTags([...currentTags, ...command.tags])
-					: currentTags.filter((tag) => !requested.has(tag));
-			const changedTags =
-				command.action === 'add'
-					? nextTags.filter((tag) => !currentTags.includes(tag))
-					: currentTags.filter((tag) => !nextTags.includes(tag));
-			const updated =
-				changedTags.length === 0 ? true : await deps.sessions.setChatTags(chatId, nextTags);
-			if (!updated) {
+			let mutation: ChatTagsMutationResponse;
+			try {
+				mutation = await deps.sessions.applyChatTagDelta({
+					chatId,
+					...(command.action === 'add'
+						? { addTags: command.tags }
+						: { removeTags: command.tags }),
+				});
+			} catch (error) {
 				this.#restoreComposerIfUntouched({
 					chatId,
 					ownsComposer,
@@ -461,8 +460,16 @@ export class ConversationSlashCommandService {
 					images: previousImages,
 					clearedContentRevision,
 				});
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					tagMutationFailureNotice(error, deps.sessions.tagReconciliationKind(chatId)),
+				);
 				return 'rejected';
 			}
+			const changedTags = command.action === 'add'
+				? mutation.addedTags
+				: mutation.removedTags;
 
 			if (deps.chatState.activeChatId === chatId) {
 				const content =
@@ -907,6 +914,20 @@ function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {
 		return changed ? m.chat_notice_move_top_success() : m.chat_notice_move_top_unchanged();
 	}
 	return changed ? m.chat_notice_move_bottom_success() : m.chat_notice_move_bottom_unchanged();
+}
+
+function tagMutationFailureNotice(error: unknown, kind: ChatTagReconciliationKind): string {
+	if (error instanceof ChatTagMutationBlockedError) return m.chat_tags_mutation_blocked();
+	switch (kind) {
+		case 'durability':
+			return m.chat_tags_confirmation_unknown();
+		case 'committed-refresh':
+			return m.chat_tags_refresh_required();
+		case 'conflict-refresh':
+			return m.chat_tags_conflict_refresh_required();
+		case null:
+			return m.notifications_update_chat_tags_failed();
+	}
 }
 
 function scheduleInErrorMessage(error: ScheduleInCommandError): string {

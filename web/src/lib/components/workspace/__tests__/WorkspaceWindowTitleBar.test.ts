@@ -956,6 +956,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_chat_map(),
+			m.workspace_open_chat_board(),
 			m.workspace_new_terminal(),
 		];
 
@@ -996,7 +997,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(8),
+			).toHaveLength(9),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 
@@ -1098,7 +1099,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(7),
+			).toHaveLength(8),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 		const trigger = screen.getByRole('button', { name: m.workspace_terminal_actions() });
@@ -1162,6 +1163,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'files',
 			'commit',
 			'chat-map',
+			'chat-board',
 		] as const;
 		const singletonSurfaces = kinds.map((kind) => portableSingletonDescriptor(kind));
 		runtime.surfaces = Object.fromEntries(
@@ -1222,6 +1224,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'files',
 			'commit',
 			'chat-map',
+			'chat-board',
 		] as const;
 		runtime.surfaces = Object.fromEntries(
 			[chatSurface, ...kinds.map((kind) => portableSingletonDescriptor(kind))].map((surface) => [
@@ -1249,6 +1252,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_chat_map(),
+			m.workspace_open_chat_board(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const newTerminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });
