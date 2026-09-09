@@ -43,8 +43,8 @@ export class StartSelectionError extends Error {
 
 export interface RequestedModelSelection {
   readonly model: string;
-  /** Accepts a canonical ID or an exact, unique display name. */
-  readonly providerId?: string;
+  /** A selector resolves by ID or exact unique name; null selects native models, omission searches all routes. */
+  readonly providerId?: string | null;
   readonly endpointId?: string;
 }
 
@@ -190,6 +190,12 @@ function resolveProviderAndEndpoint(
   agent: AgentCatalogEntry,
   requested: RequestedModelSelection,
 ): RequestedModelSelection {
+  if (requested.providerId === null) {
+    if (requested.endpointId !== undefined) {
+      fail('INCOMPATIBLE_ENDPOINT', 'native model selection cannot specify an API endpoint');
+    }
+    return requested;
+  }
   if (requested.providerId === undefined) return requested;
   const provider = requireCatalogProvider(catalog.catalog.apiProviders, requested.providerId);
   if (!agent.acceptsApiProviderEndpoints) {
@@ -221,7 +227,7 @@ function matchingModels(
   requested: RequestedModelSelection,
 ): AgentModelOption[] {
   const routed = models.filter((model) => (
-    (requested.providerId === undefined || model.apiProviderId === requested.providerId)
+    (requested.providerId === undefined || (model.apiProviderId ?? null) === requested.providerId)
     && (requested.endpointId === undefined || model.endpointId === requested.endpointId)
   ));
   const exact = routed.filter((model) => model.value === requested.model);
@@ -258,7 +264,7 @@ function resolveModelSelectionForAgent(
   }
   const selected = matches[0];
   if (!selected) {
-    if (requested.providerId || requested.endpointId || agent.requiresStrictModelDiscovery) {
+    if (requested.providerId !== undefined || requested.endpointId || agent.requiresStrictModelDiscovery) {
       fail('UNKNOWN_MODEL', `model ${requested.model} is not available for agent ${agent.id}`);
     }
     return {
