@@ -16,6 +16,9 @@ Options:
   --workspace-dir <directory>    Use an explicit workspace directory path.
   --workspace <name>             Use workspace name under config dir (workspace-<name>).
   --project-base-dir <directory> Restrict file access to a project root directory.
+  --tls-cert <pem-file>          Serve HTTPS using this certificate chain.
+  --tls-key <pem-file>           Private key for --tls-cert; both are required.
+  --tls-ca <pem-file>            Private CA for local CLI trust (named workspaces only).
   --rollback-carryover-migration Restore the pre-migration carryover workspace and exit.
 
 Environment Variables:
@@ -27,6 +30,9 @@ Environment Variables:
   GARCON_WORKSPACE                 Workspace suffix under config dir. Default: default
   GARCON_JWT_TOKEN_EXPIRY          JWT expiry for auth tokens. Default: 30d
   GARCON_PROJECT_BASE_DIR          Restricts project file access to this resolved path.
+  GARCON_TLS_CERT                  TLS certificate chain PEM file (opt-in HTTPS).
+  GARCON_TLS_KEY                   TLS private key PEM file (required with certificate).
+  GARCON_TLS_CA                    Private CA for local CLI trust; replaces system roots.
   GARCON_TERMINAL_SHELL            Shell executable for PTY sessions (non-Windows).
   GARCON_MAX_REQUEST_BODY_SIZE     HTTP request body size limit (bytes). Default: 52428800
   GARCON_MAX_CONNECTIONS           Max concurrent HTTP connections. Default: 1024
@@ -41,6 +47,10 @@ Environment Variables:
 Notes:
   Environment variables take precedence over CLI options where both are available.
   Server and PTY/agent subprocesses inherit the current process environment.
+  --tls-cert contains the leaf and intermediates; --tls-ca contains its private root.
+  Local CLI certificates must cover the advertised loopback hostname/IP.
+  A locally configured self-signed leaf is trusted automatically by CLI discovery.
+  --tls-ca changes CLI trust only; it does not enable client-certificate authentication.
 `;
   process.stdout.write(helpText);
 }

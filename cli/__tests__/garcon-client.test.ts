@@ -250,6 +250,35 @@ function validRemoteSettings(enabled: boolean): Record<string, unknown> {
 }
 
 describe('GarconClient', () => {
+  test('uses the same scoped TLS policy for requests, runtime verification, and recovery', async () => {
+    let requests = 0;
+    let probes = 0;
+    const client = new GarconClient({
+      ...connection, baseUrl: 'https://127.0.0.1:8443', tlsTrust: { kind: 'system-ca' },
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        expect(init?.tls).toEqual({ rejectUnauthorized: true });
+        expect(init?.redirect).toBe('error');
+        if (String(input).includes('/api/v1/runtime')) {
+          probes += 1;
+          expect(new Headers(init?.headers).has('Authorization')).toBe(false);
+          return runtimeResponse(input);
+        }
+        requests += 1;
+        expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${connection.localCapability}`);
+        if (requests === 1) throw new TypeError('connection reset');
+        return accepted(runRequest);
+      },
+    });
+    await client.runChat(runRequest);
+    expect(requests).toBe(2);
+    expect(probes).toBe(1);
+  });
+
+  test('rejects TLS trust on plaintext client connections', () => {
+    expect(() => new GarconClient({ ...connection, tlsTrust: { kind: 'system-ca' } })).toThrow('TLS trust requires HTTPS');
+  });
+
   test('fetches and validates the preamble catalog', async () => {
     const snapshot = {
       revision: 1,

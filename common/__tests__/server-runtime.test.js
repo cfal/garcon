@@ -9,6 +9,20 @@ const capability = `${LOCAL_CAPABILITY_PREFIX}${'a'.repeat(43)}`;
 const proof = 'b'.repeat(43);
 
 describe('server runtime contracts', () => {
+  it('accepts explicit trust only on HTTPS descriptors', () => {
+    const descriptor = {
+      schemaVersion: 1, instanceId: 'instance-1', workspaceDir: '/workspace',
+      startedAt: '2026-07-31T12:00:00.000Z', pid: 123,
+      baseUrl: 'https://127.0.0.1:8443', localCapability: capability,
+      tlsTrust: { kind: 'system-ca' },
+    };
+    expect(parseServerRuntimeDescriptor(descriptor)).toEqual(descriptor);
+    expect(() => parseServerRuntimeDescriptor({ ...descriptor, baseUrl: 'http://127.0.0.1:8080' }))
+      .toThrow('tlsTrust');
+    expect(() => parseServerRuntimeDescriptor({ ...descriptor, tlsTrust: { kind: 'insecure' } }))
+      .toThrow('tlsTrust');
+  });
+
   it('parses a runtime descriptor and normalizes its base URL', () => {
     expect(parseServerRuntimeDescriptor({
       schemaVersion: 1,

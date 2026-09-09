@@ -15,10 +15,16 @@ const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
 const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
 const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
 const originalHome = process.env.HOME;
+const tlsEnvNames = ['GARCON_TLS_CERT', 'GARCON_TLS_KEY', 'GARCON_TLS_CA'];
+const originalTlsEnv = tlsEnvNames.map((name) => process.env[name]);
 
 afterEach(() => {
   resetServerConfigForTests();
   process.argv = [...originalArgv];
+  for (const [index, name] of tlsEnvNames.entries()) {
+    if (originalTlsEnv[index] === undefined) delete process.env[name];
+    else process.env[name] = originalTlsEnv[index];
+  }
   if (originalPort === undefined) {
     delete process.env.GARCON_PORT;
   } else {
@@ -44,6 +50,63 @@ afterEach(() => {
   } else {
     process.env.HOME = originalHome;
   }
+});
+
+describe('TLS configuration', () => {
+  function configure(args = []) {
+    for (const name of tlsEnvNames) delete process.env[name];
+    process.argv = [...originalArgv, ...args];
+  }
+
+  it('keeps ordinary startup plaintext without TLS configuration', () => {
+    configure();
+    expect(initializeServerConfig().tls).toBeNull();
+  });
+
+  it('requires both files and rejects missing or empty flag values', () => {
+    for (const args of [['--tls-cert', 'cert.pem'], ['--tls-key', 'key.pem'],
+      ['--tls-cert'], ['--tls-key'], ['--tls-cert', '', '--tls-key', 'key.pem'],
+      ['--tls-cert', '--tls-key', 'key.pem']]) {
+      configure(args);
+      expect(() => initializeServerConfig()).toThrow();
+    }
+  });
+
+  it('resolves configured paths and gives environment settings precedence', () => {
+    configure(['--tls-cert', 'cert.pem', '--tls-key', 'key.pem']);
+    expect(initializeServerConfig().tls).toEqual({
+      certificatePath: path.resolve('cert.pem'), keyPath: path.resolve('key.pem'),
+    });
+    process.env.GARCON_TLS_CERT = 'env.pem';
+    process.env.GARCON_TLS_KEY = 'env.key';
+    expect(initializeServerConfig().tls).toEqual({
+      certificatePath: path.resolve('env.pem'), keyPath: path.resolve('env.key'),
+    });
+  });
+
+  it('accepts explicit private CLI trust with the same environment precedence', () => {
+    configure(['--tls-cert', 'cert.pem', '--tls-key', 'key.pem', '--tls-ca', 'root.pem']);
+    expect(initializeServerConfig().tls.caPath).toBe(path.resolve('root.pem'));
+    process.env.GARCON_TLS_CA = 'environment-root.pem';
+    expect(initializeServerConfig().tls.caPath).toBe(path.resolve('environment-root.pem'));
+  });
+
+  it('rejects unused, empty and option-valued CA configuration', () => {
+    for (const args of [
+      ['--tls-ca', 'root.pem'], ['--tls-ca'],
+      ['--tls-cert', 'cert.pem', '--tls-key', 'key.pem', '--tls-ca', ''],
+      ['--tls-cert', 'cert.pem', '--tls-key', 'key.pem', '--tls-ca', '--port', '0'],
+    ]) {
+      configure(args);
+      expect(() => initializeServerConfig()).toThrow();
+    }
+    configure(['--tls-cert', 'cert.pem', '--tls-key', 'key.pem', '--tls-ca', 'root.pem',
+      '--workspace-dir', '/synthetic/workspace']);
+    expect(() => initializeServerConfig()).toThrow('requires a named workspace');
+    configure(['--tls-cert', 'cert.pem', '--tls-key', 'key.pem']);
+    process.env.GARCON_TLS_CA = '   ';
+    expect(() => initializeServerConfig()).toThrow('TLS CA path must not be empty');
+  });
 });
 
 describe('getPort', () => {

@@ -12,6 +12,9 @@ const CLI_VALUE_FLAGS = {
   '--port': '<number>',
   '--bind-address': '<hostname-or-ip>',
   '--project-base-dir': '<directory>',
+  '--tls-cert': '<pem-file>',
+  '--tls-key': '<pem-file>',
+  '--tls-ca': '<pem-file>',
 } as const;
 
 type CliValueFlag = keyof typeof CLI_VALUE_FLAGS;
@@ -39,6 +42,13 @@ export interface ServerConfig {
   trustProxyEnabled: boolean;
   httpCompressionEnabled: boolean;
   rollbackCarryOverMigration: boolean;
+  tls: ServerTlsFiles | null;
+}
+
+export interface ServerTlsFiles {
+  readonly certificatePath: string;
+  readonly keyPath: string;
+  readonly caPath?: string;
 }
 
 let activeConfig: Readonly<ServerConfig> | null = null;
@@ -101,6 +111,10 @@ function parsePort(value: string, source: string): number {
 function parseServerConfig(): ServerConfig {
   const configDir = parseConfigDir();
   const workspace = parseWorkspace(configDir);
+  const tls = parseTlsFiles();
+  if (tls?.caPath && workspace.workspaceName === null) {
+    throw new Error('--tls-ca configures local CLI trust and requires a named workspace; --workspace-dir does not publish CLI discovery.');
+  }
   const maxWsClients = envInt('MAX_WS_CLIENTS', 128);
   if (maxWsClients < 1) {
     throw new Error('Invalid GARCON_MAX_WS_CLIENTS value: must be at least 1.');
@@ -128,6 +142,33 @@ function parseServerConfig(): ServerConfig {
     trustProxyEnabled: envBool('TRUST_PROXY', false),
     httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
     rollbackCarryOverMigration: process.argv.includes('--rollback-carryover-migration'),
+    tls,
+  };
+}
+
+function parseTlsFiles(): ServerTlsFiles | null {
+  const certificatePath = nonEmptyValue(
+    envValue('GARCON_TLS_CERT') ?? cliValue('--tls-cert'),
+    'TLS certificate path must not be empty.',
+  );
+  const keyPath = nonEmptyValue(
+    envValue('GARCON_TLS_KEY') ?? cliValue('--tls-key'),
+    'TLS key path must not be empty.',
+  );
+  const caPath = nonEmptyValue(
+    envValue('GARCON_TLS_CA') ?? cliValue('--tls-ca'),
+    'TLS CA path must not be empty.',
+  );
+  if (certificatePath === null && keyPath === null && caPath === null) return null;
+  if (certificatePath === null || keyPath === null) {
+    throw new Error('TLS requires both --tls-cert and --tls-key (or GARCON_TLS_CERT and GARCON_TLS_KEY).');
+  }
+  if (certificatePath.startsWith('--') || keyPath.startsWith('--') || caPath?.startsWith('--')) {
+    throw new Error('TLS flags require PEM file paths, not another option.');
+  }
+  return {
+    certificatePath: path.resolve(certificatePath), keyPath: path.resolve(keyPath),
+    ...(caPath === null ? {} : { caPath: path.resolve(caPath) }),
   };
 }
 

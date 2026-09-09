@@ -1,3 +1,5 @@
+import { parseControllerTlsTrust, type ControllerTlsTrust } from './controller-tls.js';
+
 export const SERVER_RUNTIME_SCHEMA_VERSION = 1 as const;
 export const SERVER_RUNTIME_FILENAME = 'server-runtime.json';
 export const LOCAL_CAPABILITY_PREFIX = 'garcon_local_';
@@ -20,6 +22,7 @@ export interface ServerRuntimeDescriptor extends ServerRuntimeIdentity {
   pid: number;
   baseUrl: string;
   localCapability: string;
+  tlsTrust?: ControllerTlsTrust;
 }
 
 export class ServerRuntimeContractError extends Error {
@@ -64,6 +67,10 @@ export function parseServerRuntimeDescriptor(value: unknown): ServerRuntimeDescr
   if (!isLocalCapability(localCapability)) {
     throw new ServerRuntimeContractError('localCapability is invalid');
   }
+  const tlsTrust = raw.tlsTrust === undefined ? undefined : parseControllerTlsTrust(raw.tlsTrust);
+  if (tlsTrust === null || (tlsTrust !== undefined && parsedUrl.protocol !== 'https:')) {
+    throw new ServerRuntimeContractError('tlsTrust requires a valid HTTPS trust policy');
+  }
   return {
     schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
     instanceId: requiredString(raw, 'instanceId'),
@@ -72,6 +79,7 @@ export function parseServerRuntimeDescriptor(value: unknown): ServerRuntimeDescr
     pid: Number(pid),
     baseUrl: parsedUrl.toString().replace(/\/$/, ''),
     localCapability,
+    ...(tlsTrust === undefined ? {} : { tlsTrust }),
   };
 }
 

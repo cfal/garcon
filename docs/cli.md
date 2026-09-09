@@ -19,6 +19,9 @@ Common options and environment variables:
 - `GARCON_WORKSPACE` / `--workspace`: named workspace under the config directory.
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
+- `GARCON_TLS_CERT` / `--tls-cert`: opt-in HTTPS certificate chain PEM file.
+- `GARCON_TLS_KEY` / `--tls-key`: matching private key; both TLS files are required.
+- `GARCON_TLS_CA` / `--tls-ca`: private CA bundle for local CLI trust, not client-certificate authentication.
 - `GARCON_TERMINAL_SHELL`: shell used by terminal sessions.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: native CLI overrides.
 - `GARCON_CODEX_CLI`: Codex CLI override.
@@ -28,6 +31,37 @@ Common options and environment variables:
 - `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
 
 Run `bun run help` for the complete server option list.
+
+### HTTPS And Local CLI Trust
+
+Without TLS options, startup remains HTTP. To serve HTTPS:
+
+```bash
+bun run start --port 8443 --bind-address 0.0.0.0 \
+  --tls-cert /private/controller-chain.pem --tls-key /private/controller.key
+```
+
+The certificate file contains the server leaf followed by its intermediate
+certificates. Keep the private key readable only by its owner. The protected
+local runtime descriptor carries public trust material, never the private key.
+
+A locally configured self-signed leaf is trusted automatically by CLI discovery.
+For a private CA, add `--tls-ca /private/root-ca.pem`. This certificate-only bundle
+must include a self-signed trust anchor, contains at most 16 certificates, and
+replaces system roots for this CLI connection only. It does not install trust
+globally or enable mutual TLS. A signed leaf/intermediate is not a trust anchor;
+without `--tls-ca`, signed certificate chains use system CAs. Including a root in
+the serving chain does not automatically select it as trusted.
+
+Hostname and expiry checks remain enabled. The local CLI uses loopback discovery,
+so its certificate needs the corresponding SAN, typically `IP:127.0.0.1`.
+A public certificate for a remote hostname cannot validate that loopback URL.
+Browser trust is configured separately; the runtime descriptor does not bypass
+browser certificate validation. No TLS failure falls back to plaintext or
+disabled verification.
+
+`--tls-ca` requires a named workspace because `--workspace-dir` intentionally
+does not publish a CLI discovery descriptor. TLS itself works with either mode.
 
 ## Start And Resume
 

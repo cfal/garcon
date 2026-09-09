@@ -87,6 +87,8 @@ import { normalizeRemoteSettingsSnapshot } from '@garcon/common/settings';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError, type CliErrorPhase } from './errors.js';
 import { probeRuntime, type RuntimeConnection } from './discovery.js';
+import { controllerTlsOptions, type ControllerTlsTrust } from '@garcon/common/controller-tls';
+import { verifyControllerTlsTrust } from '@garcon/common/controller-tls-node';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const HANDOFF_REQUEST_TIMEOUT_MS = 10 * 60_000;
@@ -318,6 +320,7 @@ export class GarconClient {
   readonly #capability: string;
   readonly #fetch: typeof fetch;
   readonly #submissionDelay: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+  readonly #tlsTrust: ControllerTlsTrust | undefined;
 
   constructor(options: GarconClientOptions) {
     this.#baseUrl = options.baseUrl;
@@ -325,6 +328,15 @@ export class GarconClient {
     this.#capability = options.localCapability;
     this.#fetch = options.fetch ?? fetch;
     this.#submissionDelay = options.submissionDelay ?? abortableDelay;
+    const https = new URL(options.baseUrl).protocol === 'https:';
+    if (options.tlsTrust && !https) {
+      throw new CliError('runtime verification', 'TLS trust requires HTTPS', 3);
+    }
+    try {
+      this.#tlsTrust = https ? verifyControllerTlsTrust(options.tlsTrust ?? { kind: 'system-ca' }) : undefined;
+    } catch (cause) {
+      throw new CliError('runtime verification', 'invalid controller TLS trust', 3, { cause });
+    }
   }
 
   get serverInstanceId(): string {
@@ -880,6 +892,7 @@ export class GarconClient {
       this.#capability,
       this.#fetch,
       signal,
+      this.#tlsTrust,
     );
   }
 
@@ -993,6 +1006,7 @@ export class GarconClient {
     let response: Response;
     try {
       response = await this.#fetch(`${this.#baseUrl}${route}`, {
+        ...(this.#tlsTrust ? { tls: controllerTlsOptions(this.#tlsTrust) } : {}),
         method,
         headers: {
           Accept: 'application/json',

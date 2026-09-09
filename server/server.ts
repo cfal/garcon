@@ -57,6 +57,7 @@ import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
 import { AgentCommandComposition } from './chats/agent-command-composition.js';
 import { AgentStartSelectionService } from './agents/agent-start-selection-service.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
+import { loadServerTls } from './lib/controller-tls.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
 import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
@@ -189,6 +190,7 @@ export async function startServer(): Promise<void> {
   let workspaceLease: WorkspaceLease | null = null;
   try {
     const config = initializeServerConfig();
+    const tlsMaterial = await loadServerTls(config.tls);
     workspaceLease = await acquireWorkspaceLease(config.workspaceDir, {
       onCompromised(error) {
         logger.error('Workspace lease was compromised:', errorMessage(error));
@@ -759,6 +761,7 @@ export async function startServer(): Promise<void> {
     const serveOptions = {
       port: listenPort,
       hostname: bindAddress,
+      ...(tlsMaterial ? { tls: tlsMaterial.listener } : {}),
       idleTimeout: config.httpIdleTimeoutSeconds,
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
@@ -876,11 +879,15 @@ export async function startServer(): Promise<void> {
     const server = Bun.serve<WsConnectionData>(serveOptions);
     webSocketPublisher = server;
     const actualPort = server.port ?? listenPort;
-    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort);
+    const protocol = tlsMaterial ? 'https:' : 'http:';
+    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort, protocol);
     let runtimeFilePath: string | null = null;
     if (config.workspaceName !== null) {
+      if (tlsMaterial?.trust.kind === 'system-ca') {
+        logger.warn(`Local CLI TLS at ${runtimeBaseUrl} uses system CAs. For a private CA, supply --tls-ca; the certificate must also cover this local address. Public certificates do not cover localhost or loopback IPs.`);
+      }
       try {
-        const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl);
+        const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl, tlsMaterial?.trust);
         runtimeFilePath = publishedRuntime.filePath;
         logger.info(
           `Published workspace ${config.workspaceName} runtime at ${runtimeFilePath} (${runtimeBaseUrl})`,
@@ -969,7 +976,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGINT', shutdown);
 
     logger.info(
-      `Started at ${listeningServerUrl(bindAddress, actualPort)}`,
+      `Started at ${listeningServerUrl(bindAddress, actualPort, protocol)}`,
     );
     logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
     if (

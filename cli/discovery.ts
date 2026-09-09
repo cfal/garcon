@@ -3,6 +3,8 @@ import fsPromises from 'node:fs/promises';
 import crypto from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
+import { controllerTlsOptions, type ControllerTlsTrust } from '@garcon/common/controller-tls';
+import { verifyControllerTlsTrust } from '@garcon/common/controller-tls-node';
 import {
   SERVER_RUNTIME_FILENAME,
   ServerRuntimeContractError,
@@ -22,6 +24,7 @@ export interface RuntimeConnection {
   instanceId: string;
   localCapability: string;
   workspaceDir: string;
+  tlsTrust?: ControllerTlsTrust;
 }
 
 export interface RuntimeDiscoveryOptions {
@@ -143,7 +146,18 @@ export async function probeRuntime(
   localCapability: string,
   fetchFn: typeof fetch = fetch,
   signal?: AbortSignal,
+  tlsTrust?: ControllerTlsTrust,
 ): Promise<boolean> {
+  const https = new URL(baseUrl).protocol === 'https:';
+  if (tlsTrust && !https) {
+    throw new CliError('runtime verification', 'TLS trust requires HTTPS', 3);
+  }
+  let tls: ReturnType<typeof controllerTlsOptions> | undefined;
+  try {
+    tls = https ? controllerTlsOptions(verifyControllerTlsTrust(tlsTrust ?? { kind: 'system-ca' })) : undefined;
+  } catch (cause) {
+    throw new CliError('runtime verification', 'invalid controller TLS trust', 3, { cause });
+  }
   const timeoutSignal = AbortSignal.timeout(RUNTIME_PROBE_TIMEOUT_MS);
   const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   const challenge = crypto.randomBytes(32).toString('base64url');
@@ -151,6 +165,7 @@ export async function probeRuntime(
   try {
     response = await fetchFn(`${baseUrl}/api/v1/runtime?challenge=${encodeURIComponent(challenge)}`, {
       headers: { Accept: 'application/json' },
+      ...(tls === undefined ? {} : { tls }),
       redirect: 'error',
       signal: requestSignal,
     });
@@ -210,6 +225,7 @@ export async function discoverRuntime(
       descriptor.localCapability,
       fetchFn,
       options.signal,
+      descriptor.tlsTrust,
     );
     if (verified) {
       return {
@@ -217,6 +233,7 @@ export async function discoverRuntime(
         instanceId: descriptor.instanceId,
         localCapability: descriptor.localCapability,
         workspaceDir,
+        ...(descriptor.tlsTrust === undefined ? {} : { tlsTrust: descriptor.tlsTrust }),
       };
     }
     if (attempt === 0) await wait(DESCRIPTOR_RECHECK_DELAY_MS, options.signal);

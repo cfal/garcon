@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import type { ControllerTlsTrust } from '@garcon/common/controller-tls';
 import {
   LOCAL_CAPABILITY_PREFIX,
   SERVER_RUNTIME_FILENAME,
@@ -39,21 +40,22 @@ export function createServerRuntimeProof(
     .digest('base64url');
 }
 
-export function advertisedServerUrl(bindAddress: string, port: number): string {
+export function advertisedServerUrl(bindAddress: string, port: number, protocol: 'http:' | 'https:' = 'http:'): string {
   let hostname = bindAddress;
   if (hostname === '0.0.0.0' || hostname === '::' || hostname === '[::]') hostname = '127.0.0.1';
-  return listeningServerUrl(hostname, port);
+  return listeningServerUrl(hostname, port, protocol);
 }
 
-export function listeningServerUrl(bindAddress: string, port: number): string {
+export function listeningServerUrl(bindAddress: string, port: number, protocol: 'http:' | 'https:' = 'http:'): string {
   let hostname = bindAddress;
   if (hostname.includes(':') && !hostname.startsWith('[')) hostname = `[${hostname}]`;
-  return `http://${hostname}:${port}`;
+  return `${protocol}//${hostname}:${port}`;
 }
 
 export async function publishServerRuntime(
   state: ServerRuntimeState,
   baseUrl: string,
+  tlsTrust?: ControllerTlsTrust,
 ): Promise<{ descriptor: ServerRuntimeDescriptor; filePath: string }> {
   const workspaceDir = await fs.realpath(state.identity.workspaceDir);
   const descriptor: ServerRuntimeDescriptor = {
@@ -62,6 +64,7 @@ export async function publishServerRuntime(
     pid: process.pid,
     baseUrl,
     localCapability: state.localCapability,
+    ...(tlsTrust === undefined ? {} : { tlsTrust }),
   };
   const filePath = path.join(workspaceDir, SERVER_RUNTIME_FILENAME);
   const tempPath = path.join(

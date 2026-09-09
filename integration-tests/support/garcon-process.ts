@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
 
-const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
+const SERVER_READY_PATTERN = /Started at (https?:\/\/[^\s]+)/;
 const LOG_CAPACITY = 2_000;
 
 export interface GarconProcessOptions {
@@ -18,6 +18,7 @@ export interface GarconProcessOptions {
   redactEnvironmentValues?: boolean;
   disableAuth?: boolean;
   port?: number;
+  bindAddress?: string;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -137,7 +138,7 @@ export class GarconProcess {
         '--port',
         String(options.port ?? 0),
         '--bind-address',
-        '127.0.0.1',
+        options.bindAddress ?? '127.0.0.1',
         ...(options.disableAuth === false ? [] : ['--disable-auth']),
         '--config-dir',
         options.configDir,

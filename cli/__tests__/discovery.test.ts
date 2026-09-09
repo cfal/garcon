@@ -55,6 +55,32 @@ async function fixture(overrides: Record<string, unknown> = {}): Promise<{
 }
 
 describe('discoverRuntime', () => {
+  test('retains connection-scoped HTTPS trust from the protected descriptor', async () => {
+    const testFixture = await fixture({ baseUrl: 'https://127.0.0.1:8443', tlsTrust: { kind: 'system-ca' } });
+    const connection = await discoverRuntime({ configDir: testFixture.configDir, workspace: 'review' }, {
+      fetch: async (input, init) => {
+        expect(init?.tls).toEqual({ rejectUnauthorized: true });
+        expect(init?.redirect).toBe('error');
+        expect(new Headers(init?.headers).has('Authorization')).toBe(false);
+        return Response.json({
+          schemaVersion: 1, instanceId: testFixture.descriptor.instanceId,
+          proof: runtimeProof(String(testFixture.descriptor.localCapability), String(testFixture.descriptor.instanceId), input),
+        });
+      },
+    });
+    expect(connection.tlsTrust).toEqual({ kind: 'system-ca' });
+    expect(connection.baseUrl).toBe('https://127.0.0.1:8443');
+  });
+
+  test('rejects a plaintext descriptor carrying a trust policy before any request', async () => {
+    const testFixture = await fixture({ tlsTrust: { kind: 'system-ca' } });
+    let requests = 0;
+    await expect(discoverRuntime({ configDir: testFixture.configDir, workspace: 'review' }, {
+      fetch: async () => { requests += 1; return Response.json({}); },
+    })).rejects.toThrow('secure runtime descriptor');
+    expect(requests).toBe(0);
+  });
+
   test('verifies the credential-free probe before returning the capability', async () => {
     const testFixture = await fixture();
     const authorizationHeaders: Array<string | null> = [];

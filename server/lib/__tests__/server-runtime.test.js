@@ -26,6 +26,7 @@ describe('server runtime publication', () => {
 
     expect(published.descriptor.instanceId).toBe(state.identity.instanceId);
     expect(published.descriptor.localCapability).toBe(state.localCapability);
+    expect(published.descriptor).not.toHaveProperty('tlsTrust');
     if (process.platform !== 'win32') {
       expect((await fs.lstat(published.filePath)).mode & 0o077).toBe(0);
     }
@@ -48,10 +49,12 @@ describe('server runtime publication', () => {
   it('advertises wildcard listeners through loopback', () => {
     expect(advertisedServerUrl('0.0.0.0', 8080)).toBe('http://127.0.0.1:8080');
     expect(advertisedServerUrl('::', 8080)).toBe('http://127.0.0.1:8080');
+    expect(advertisedServerUrl('0.0.0.0', 8443, 'https:')).toBe('https://127.0.0.1:8443');
   });
 
   it('reports the actual listener address', () => {
     expect(listeningServerUrl('0.0.0.0', 8080)).toBe('http://0.0.0.0:8080');
     expect(listeningServerUrl('::', 8080)).toBe('http://[::]:8080');
+    expect(listeningServerUrl('::', 8443, 'https:')).toBe('https://[::]:8443');
   });
 });
