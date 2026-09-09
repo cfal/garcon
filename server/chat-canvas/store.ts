@@ -78,7 +78,10 @@ export class CanvasStore {
     return this.#lock.runExclusive('catalog', () => this.#lock.runExclusive(`canvas:${id}`, async () => {
       try {
         const existing = await this.get(id);
-        if (JSON.stringify(existing.content) === JSON.stringify(content)) return existing;
+        if (JSON.stringify(existing.content) === JSON.stringify(content)) {
+          await syncDirectory(this.#directory);
+          return existing;
+        }
         throw new CanvasError('CANVAS_EXISTS', 'A canvas with this ID already exists', 409);
       } catch (error) {
         if (!(error instanceof CanvasError && error.status === 404)) throw error;
@@ -96,8 +99,11 @@ export class CanvasStore {
   async update(id: string, expectedRevision: number, content: CanvasContent): Promise<ChatCanvas> {
     return this.#lock.runExclusive(`canvas:${id}`, async () => {
       const current = await this.get(id);
-      // An identical retry reconciles a response lost after the atomic write.
-      if (JSON.stringify(current.content) === JSON.stringify(content)) return current;
+      // A retry also confirms durability after a post-rename directory sync failure.
+      if (JSON.stringify(current.content) === JSON.stringify(content)) {
+        await syncDirectory(this.#directory);
+        return current;
+      }
       this.#assertRevision(current, expectedRevision);
       if (current.revision === Number.MAX_SAFE_INTEGER) {
         throw new CanvasError('CANVAS_REVISION_EXHAUSTED', 'Canvas revision limit reached', 409);
@@ -111,7 +117,19 @@ export class CanvasStore {
 
   async remove(id: string, expectedRevision: number): Promise<void> {
     await this.#lock.runExclusive(`canvas:${id}`, async () => {
-      this.#assertRevision(await this.get(id), expectedRevision);
+      let canvas: ChatCanvas;
+      try {
+        canvas = await this.get(id);
+      } catch (error) {
+        if (!(error instanceof CanvasError && error.status === 404)) throw error;
+        // Clients accept 404 as a completed deletion, so prior unlinks must be durable.
+        try { await syncDirectory(this.#directory); }
+        catch (syncError) {
+          if (!hasNodeErrorCode(syncError, 'ENOENT')) throw syncError;
+        }
+        throw error;
+      }
+      this.#assertRevision(canvas, expectedRevision);
       await fs.unlink(this.#path(id));
       await syncDirectory(this.#directory);
     });

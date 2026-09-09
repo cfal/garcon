@@ -14,7 +14,73 @@ async function fixture() {
   return { dir, store: new CanvasStore(dir) };
 }
 
+function failDirectorySync(directory) {
+  const failure = Object.assign(new Error('Directory sync failed'), { code: 'EIO' });
+  const open = fs.open;
+  let failing = true;
+  let attempts = 0;
+  const mock = spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[0] === directory) {
+      const sync = handle.sync.bind(handle);
+      handle.sync = async () => {
+        attempts++;
+        if (failing) throw failure;
+        await sync();
+      };
+    }
+    return handle;
+  });
+  return {
+    failure,
+    get attempts() { return attempts; },
+    recover() { failing = false; },
+    restore() { mock.mockRestore(); },
+  };
+}
+
 describe('CanvasStore', () => {
+  it.each(['create', 'update'])('confirms directory durability before acknowledging an identical %s retry', async (operation) => {
+    const { dir, store } = await fixture();
+    if (operation === 'update') await store.create('board', content());
+    const fault = failDirectorySync(join(dir, 'chat-canvases'));
+    const invoke = (target) => operation === 'create'
+      ? target.create('board', content('Candidate'))
+      : target.update('board', 1, content('Candidate'));
+    try {
+      await expect(invoke(store)).rejects.toMatchObject({ renamed: true });
+      const candidate = await store.get('board');
+      expect(candidate.revision).toBe(operation === 'create' ? 1 : 2);
+      await expect(invoke(store)).rejects.toBe(fault.failure);
+      const reopened = new CanvasStore(dir);
+      await expect(invoke(reopened)).rejects.toBe(fault.failure);
+      fault.recover();
+      expect(await invoke(reopened)).toEqual(candidate);
+      expect(fault.attempts).toBe(4);
+    } finally { fault.restore(); }
+  });
+
+  it('confirms a prior unlink is durable before returning an accepted deletion 404', async () => {
+    const { dir, store } = await fixture();
+    await store.create('board', content());
+    const fault = failDirectorySync(join(dir, 'chat-canvases'));
+    try {
+      await expect(store.remove('board', 1)).rejects.toBe(fault.failure);
+      await expect(store.get('board')).rejects.toMatchObject({ status: 404 });
+      await expect(store.remove('board', 1)).rejects.toBe(fault.failure);
+      const reopened = new CanvasStore(dir);
+      await expect(reopened.remove('board', 1)).rejects.toBe(fault.failure);
+      fault.recover();
+      await expect(reopened.remove('board', 1)).rejects.toMatchObject({ status: 404 });
+      expect(fault.attempts).toBe(4);
+    } finally { fault.restore(); }
+  });
+
+  it('returns deletion 404 before any canvas directory exists', async () => {
+    const { store } = await fixture();
+    await expect(store.remove('absent', 1)).rejects.toMatchObject({ status: 404 });
+  });
+
   it('isolates directories and symlink loops named as canvas files', async () => {
     const { dir, store } = await fixture();
     await store.create('healthy', content());
