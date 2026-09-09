@@ -71,6 +71,19 @@ export interface AgentRunFailureDetail {
   readonly message?: string;
 }
 
+export interface AgentFinalResponse {
+  readonly type: 'text';
+  readonly text: string;
+}
+
+export type AgentRunEndedEvent =
+  | { readonly type: 'run-ended'; readonly runId: string; readonly outcome: 'finished';
+      readonly finalResponse?: AgentFinalResponse; readonly error?: never }
+  | { readonly type: 'run-ended'; readonly runId: string; readonly outcome: 'failed';
+      readonly error?: AgentRunFailureDetail; readonly finalResponse?: never }
+  | { readonly type: 'run-ended'; readonly runId: string; readonly outcome: 'interrupted';
+      readonly error?: never; readonly finalResponse?: never };
+
 export type AgentProducerEvent =
   | { readonly type: 'rows'; readonly rows: readonly AgentProducedRow[] }
   | { readonly type: 'session'; readonly session: AgentEstablishedSession }
@@ -85,12 +98,7 @@ export type AgentProducerEvent =
       readonly content: string;
       readonly title?: string;
     }
-  | {
-      readonly type: 'run-ended';
-      readonly runId: string;
-      readonly outcome: 'finished' | 'failed' | 'interrupted';
-      readonly error?: AgentRunFailureDetail;
-    };
+  | AgentRunEndedEvent;
 
 export interface AgentProducerSink {
   publish(event: AgentProducerEvent): void;

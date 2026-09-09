@@ -1,5 +1,4 @@
 import { ErrorMessage, PermissionExpiredMessage, type ChatMessage } from '@garcon/common/chat-types';
-import { createHash } from 'node:crypto';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import {
   publishFailed,
@@ -11,6 +10,7 @@ import {
 } from './operation-routes.js';
 import {
   AgentIntegrationError,
+  type AgentFinalResponse,
   type AgentSessionConfiguration,
   type AgentGoalControlHandoff,
   type AgentLogger,
@@ -65,6 +65,7 @@ import type {
 } from './protocol.js';
 import {
   buildCodexEnv,
+  codexSourceRuntimeIdentity,
   buildInjectedContextItems,
   buildThreadForkParams,
   buildThreadResumeParams,
@@ -128,6 +129,7 @@ export class CodexAppServerRuntime {
   #sources = new Map<CodexAppServerClient, RunningCodexSession>();
   #latestSourceByChat = new Map<string, RunningCodexSession>();
   #terminalOperations = new WeakSet<CodexOperation>();
+  #finalResponses = new WeakMap<CodexOperation, AgentFinalResponse>();
   #steerTargets = new WeakMap<AgentSteerTarget, {
     session: RunningCodexSession;
     turnId: string;
@@ -1318,6 +1320,13 @@ export class CodexAppServerRuntime {
       for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item);
       return;
     }
+    this.#finalResponses.delete(operation);
+    if (params.turn.status === 'completed') {
+      const message = params.turn.items.findLast((item) => item.type === 'agentMessage');
+      if (message?.type === 'agentMessage' && message.phase !== 'commentary') {
+        this.#finalResponses.set(operation, { type: 'text', text: message.text });
+      }
+    }
     if (this.#sessions.get(session.threadId) !== session || session.activeTurnId !== params.turn.id) {
       for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item);
       session.terminalTurnIds.add(params.turn.id);
@@ -1590,6 +1599,7 @@ export class CodexAppServerRuntime {
     operation: CodexOperation | null = null,
   ): void {
     if (this.#sessions.get(session.threadId) !== session) return;
+    if (operation && (opts.aborted || opts.failedMessage)) this.#finalResponses.delete(operation);
     cancelTurnStartWaiters(session, 'Codex session finished');
     if (session.activeDeliveryReservations > 0) {
       session.pendingFinish = mergeFinishOptions(session.pendingFinish, opts);
@@ -1669,7 +1679,9 @@ export class CodexAppServerRuntime {
   ): void {
     if (operation && this.#terminalOperations.has(operation)) return;
     if (operation) this.#terminalOperations.add(operation);
-    publishFinished(this.#logger, session.chatId, operation ?? undefined);
+    publishFinished(this.#logger, session.chatId, operation ?? undefined,
+      operation ? this.#finalResponses.get(operation) : undefined);
+    if (operation) this.#finalResponses.delete(operation);
   }
 
   #publishFailedOnce(
@@ -1679,6 +1691,7 @@ export class CodexAppServerRuntime {
   ): void {
     if (operation && this.#terminalOperations.has(operation)) return;
     if (operation) this.#terminalOperations.add(operation);
+    if (operation) this.#finalResponses.delete(operation);
     publishFailed(this.#logger, session.chatId, message, operation ?? undefined);
   }
 
@@ -1722,25 +1735,4 @@ class CodexSessionActivationFailure extends Error {
   ) {
     super('Codex session activation failed');
   }
-}
-
-function codexSourceRuntimeIdentity(
-  request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>,
-): string {
-  const source = stableStringify({
-    env: buildCodexEnv(request.envOverrides, request.codexConfig) ?? null,
-    config: request.codexConfig?.config ?? null,
-  });
-  return createHash('sha256').update(source).digest('hex');
-}
-
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(',')}}`;
 }

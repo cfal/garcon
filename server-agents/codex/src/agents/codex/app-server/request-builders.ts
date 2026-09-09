@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { createHash } from 'node:crypto';
 import os from 'os';
 import path from 'path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
@@ -13,6 +14,27 @@ import type {
   ThreadSettingsUpdateParams,
 } from './protocol.js';
 import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
+
+export function codexSourceRuntimeIdentity(
+  request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>,
+): string {
+  const source = stableStringify({
+    env: buildCodexEnv(request.envOverrides, request.codexConfig) ?? null,
+    config: request.codexConfig?.config ?? null,
+  });
+  return createHash('sha256').update(source).digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`;
+}
 
 // Matches a leading "/<name>" skill token with optional trailing arguments,
 // mirroring the composer's slash-command trigger.

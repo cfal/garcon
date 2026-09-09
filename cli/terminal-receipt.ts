@@ -7,7 +7,9 @@ export function requireCompletedTurnReceipt(
 ): Extract<AgentTurnReceipt, { state: 'completed' }> {
   if (receipt.state === 'completed') {
     if (receipt.output.availability === 'unavailable') {
-      const reason = receipt.output.reason === 'too-large'
+      const reason = receipt.output.reason === 'no-final-response'
+        ? 'the provider did not expose a final response'
+        : receipt.output.reason === 'too-large'
         ? 'its result is too large for the CLI receipt'
         : 'server retention pressure prevented the CLI from retaining its result';
       throw new CliError(
@@ -35,6 +37,6 @@ export function requireCompletedTurnReceipt(
 export function writeTerminalResult(receipt: AgentTurnReceipt, output: CliOutput): void {
   const completed = requireCompletedTurnReceipt(receipt);
   if (completed.output.availability === 'available') {
-    output.completed(completed.output.assistantMessages);
+    output.completed(completed.output.text);
   }
 }

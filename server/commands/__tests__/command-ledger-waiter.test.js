@@ -22,18 +22,18 @@ describe('CommandLedger terminal observation', () => {
     const second = ledger.waitForTurnTerminal(CHILD, record.turnId, signal);
     await ledger.settleTerminal(record.key, 'finished');
     expect(settled).toBe(false);
-    await ledger.appendAssistantMessages(CHILD, record.turnId, ['Synthetic answer.']);
+    await ledger.setTurnResult(CHILD, record.turnId, { type: 'text', text: 'Synthetic answer.' });
     await ledger.markPublicTerminal(CHILD, record.turnId);
     const fast = await ledger.waitForTurnTerminal(CHILD, record.turnId, signal);
-    expect(fast.assistantMessages).toEqual(['Synthetic answer.']);
+    expect(fast.turnResult.text).toBe('Synthetic answer.');
     const other = await accept(ledger, 'turn-2');
     await ledger.settleTerminal(other.key, 'finished');
     await ledger.markPublicTerminal(CHILD, other.turnId);
     expect(await ledger.getTurnRecord(CHILD, record.turnId)).toBeNull();
-    expect((await first).assistantMessages).toEqual(['Synthetic answer.']);
+    expect((await first).turnResult.text).toBe('Synthetic answer.');
     const independent = await second;
-    independent.assistantMessages.push('Mutated clone.');
-    expect((await first).assistantMessages).toEqual(['Synthetic answer.']);
+    independent.turnResult.text = 'Mutated clone.';
+    expect((await first).turnResult.text).toBe('Synthetic answer.');
     expect(remove).toHaveBeenCalledTimes(2);
     remove.mockRestore();
   });
@@ -93,10 +93,10 @@ describe('CommandLedger terminal observation', () => {
     const steer = (await ledger.accept({ commandType: 'steer', chatId: CHILD,
       clientRequestId: 'steer', turnId: record.turnId, payload: {} })).record;
     await ledger.settleTerminal(steer.key, 'finished', { retainedPrivateTerminal: true });
-    await ledger.appendAssistantMessages(CHILD, record.turnId, ['Original owner.']);
+    await ledger.setTurnResult(CHILD, record.turnId, { type: 'text', text: 'Original owner.' });
     await ledger.settleTerminal(record.key, 'finished');
     await ledger.markPublicTerminal(CHILD, record.turnId);
-    expect((await pending).assistantMessages).toEqual(['Original owner.']);
+    expect((await pending).turnResult.text).toBe('Original owner.');
     expect(await ledger.getTurnRecord(CHILD, record.turnId)).toBeNull();
   });
 
@@ -105,12 +105,12 @@ describe('CommandLedger terminal observation', () => {
     const record = await accept(ledger);
     const signal = new AbortController().signal;
     const pending = ledger.waitForTurnTerminal(CHILD, record.turnId, signal);
-    await ledger.appendAssistantMessages(CHILD, record.turnId, ['1234']);
+    await ledger.setTurnResult(CHILD, record.turnId, { type: 'text', text: '1234' });
     await ledger.settleTerminal(record.key, 'finished');
     await ledger.markPublicTerminal(CHILD, record.turnId);
     const other = await accept(ledger, 'turn-2');
-    await ledger.appendAssistantMessages(CHILD, other.turnId, ['5678']);
-    expect((await pending).assistantMessages).toEqual(['1234']);
-    expect((await ledger.waitForTurnTerminal(CHILD, record.turnId, signal)).turnResultAvailability).toBe('expired');
+    await ledger.setTurnResult(CHILD, other.turnId, { type: 'text', text: '5678' });
+    expect((await pending).turnResult.text).toBe('1234');
+    expect((await ledger.waitForTurnTerminal(CHILD, record.turnId, signal)).turnResult).toEqual({ availability: 'unavailable', reason: 'expired' });
   });
 });

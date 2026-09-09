@@ -14,10 +14,10 @@ export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'sink'>
 export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'sink'>;
 export type AgentRuntimeResumeRequest = Omit<AgentResumeRequestV5, 'sink'>;
 
-type ProviderRunEndedEvent = Omit<
+type ProviderRunEndedEvent = Exclude<
   Extract<AgentProducerEvent, { readonly type: 'run-ended' }>,
-  'outcome'
-> & { readonly outcome: 'finished' | 'failed' };
+  { readonly outcome: 'interrupted' }
+>;
 
 // Runtime publication is the provider event contract itself. The publisher a runtime was handed
 // is the route, so events carry no chat identity and require no adapter-specific dialect.

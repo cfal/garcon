@@ -255,12 +255,13 @@ describe('AmpCliRuntime lifecycle', () => {
     proc.pushJson({
       type: 'assistant',
       message: {
-        content: [{ type: 'text', text: 'updated response' }],
+        content: [{ type: 'text', text: 'updated response' }, { type: 'text', text: 'second part' }],
         stop_reason: 'end_turn',
       },
     });
     await Promise.resolve();
     expect(observed.events.map((event) => event.type)).toEqual(['rows', 'rows', 'run-ended']);
+    expect(observed.events.at(-1).finalResponse).toEqual({ type: 'text', text: 'updated response\n\nsecond part' });
     expect(proc.stdin.ended).toBe(true);
     proc.pushJson({ type: 'result', is_error: false });
     proc.close(0);

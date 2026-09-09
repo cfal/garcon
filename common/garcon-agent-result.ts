@@ -16,7 +16,7 @@ export type AgentChildRejectionReason = typeof AGENT_CHILD_REJECTION_REASONS[num
 
 export type AgentChildOutput =
   | { readonly availability: 'available'; readonly completeness: 'complete' | 'best-effort'; readonly text: string }
-  | { readonly availability: 'unavailable'; readonly reason: 'too-large' | 'retention-pressure' | 'invalid-text' };
+  | { readonly availability: 'unavailable'; readonly reason: 'no-final-response' | 'too-large' | 'retention-pressure' | 'invalid-text' };
 
 export type AgentChildAdmissionOutcome =
   | { readonly status: 'accepted'; readonly chatId: string }
@@ -66,7 +66,7 @@ function parseOutput(value: unknown): AgentChildOutput | null {
     return { availability: value.availability, completeness: value.completeness, text: value.text };
   }
   if (value.availability === 'unavailable' && onlyKeys(value, ['availability', 'reason'])
-    && (value.reason === 'too-large' || value.reason === 'retention-pressure' || value.reason === 'invalid-text')) {
+    && (value.reason === 'no-final-response' || value.reason === 'too-large' || value.reason === 'retention-pressure' || value.reason === 'invalid-text')) {
     return { availability: value.availability, reason: value.reason };
   }
   return null;
@@ -102,7 +102,8 @@ export function parseAgentChildOutcome(value: unknown): AgentChildOutcomeNoticeD
       outcome = { status: value.status, chatId, reason: value.reason };
     } else {
       const output = parseOutput(value.output);
-      if (!output) return null;
+      if (!output || ((value.status === 'failed' || value.status === 'interrupted')
+        && (output.availability !== 'unavailable' || output.reason !== 'no-final-response'))) return null;
       if (value.status === 'completed' && keys('chatId', 'output')) outcome = { status: value.status, chatId, output };
       else if (value.status === 'failed' && isErrorCode(value.errorCode) && keys('chatId', 'output', 'errorCode')) {
         outcome = { status: value.status, chatId, errorCode: value.errorCode, output };

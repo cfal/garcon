@@ -12,13 +12,11 @@ import {
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type { AmpConfig } from '../../config.js';
 import {
-  AssistantMessage,
-  ThinkingMessage,
   ToolResultMessage,
   UserMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
-import { convertAmpToolUse, isAmpHousekeepingToolUse } from "./tool-use-converter.js";
+import { convertAmpMessageToChatMessages, getAssistantContent, getUserText, type AmpCliMessage } from './amp-message.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
@@ -33,6 +31,7 @@ import { withSingleQueryControl } from '@garcon/server-agent-common/shared/singl
 import { buildAmpUserInput } from './amp-stream-input.js';
 import {
   type AgentLogger,
+  type AgentFinalResponse,
   type AgentSteerRequest,
   type AgentSteerResult,
   type AgentSteerTarget,
@@ -62,6 +61,7 @@ interface AmpTurnContext {
   stdinClosed: boolean;
   deliveryReservations: number;
   pendingEnd: boolean;
+  finalResponse?: AgentFinalResponse;
   readonly pendingInputEchoes: AmpPendingInputEcho[];
   readonly hiddenToolUseIds: Set<string>;
   resolve: (() => void) | null;
@@ -73,89 +73,12 @@ interface AmpPendingInputEcho {
   readonly settle?: (result: AgentSteerResult) => void;
 }
 
-// Represents a JSONL message emitted by the Amp CLI on stdout.
-interface AmpCliMessage {
-  type: string;
-  subtype?: string;
-  thread_id?: string;
-  session_id?: string;
-  is_error?: boolean;
-  error?: string;
-  content?: AmpCliContentPart[];
-  message?: {
-    content?: AmpCliContentPart[];
-    stop_reason?: string | null;
-  };
-}
-
-interface AmpCliContentPart {
-  type: string;
-  text?: string;
-  thinking?: string;
-  id?: string;
-  name?: string;
-  input?: Record<string, unknown>;
-  tool_use_id?: string;
-  content?: unknown;
-  is_error?: boolean;
-}
-
 const AMP_DEFAULT_FLAGS = [
   '--no-ide',
   '--no-color',
   '--no-jetbrains',
   '--no-notifications',
 ];
-
-// Extracts the content array from an Amp CLI assistant message,
-// handling both top-level and nested `.message.content` shapes.
-function getAssistantContent(msg: AmpCliMessage): AmpCliContentPart[] {
-  if (Array.isArray(msg.content)) return msg.content;
-  if (Array.isArray(msg.message?.content)) return msg.message!.content!;
-  return [];
-}
-
-function getUserText(msg: AmpCliMessage): string {
-  return getAssistantContent(msg)
-    .filter((part): part is AmpCliContentPart & { text: string } => (
-      part.type === 'text' && typeof part.text === 'string'
-    ))
-    .map((part) => part.text)
-    .join('\n');
-}
-
-function convertAmpMessageToChatMessages(
-  msg: AmpCliMessage,
-  hiddenToolUseIds: Set<string>,
-): ChatMessage[] {
-  if (msg.type !== 'assistant') return [];
-
-  const chatMessages: ChatMessage[] = [];
-  const now = new Date().toISOString();
-  const content = getAssistantContent(msg);
-
-  for (const part of content) {
-    if (part.type === 'text' && part.text?.trim()) {
-      chatMessages.push(new AssistantMessage(now, part.text));
-    }
-    if (part.type === 'thinking' && part.thinking) {
-      chatMessages.push(new ThinkingMessage(now, part.thinking));
-    }
-    if (part.type === 'tool_use') {
-      if (isAmpHousekeepingToolUse(part)) {
-        if (part.id) hiddenToolUseIds.add(part.id);
-        continue;
-      }
-      chatMessages.push(convertAmpToolUse(now, part));
-    }
-    if (part.type === 'tool_result') {
-      if (part.tool_use_id && hiddenToolUseIds.delete(part.tool_use_id)) continue;
-      chatMessages.push(new ToolResultMessage(now, part.tool_use_id || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
-    }
-  }
-
-  return chatMessages;
-}
 
 async function readAmpStdout(proc: ReturnType<typeof Bun.spawn>): Promise<string> {
   const chunks: Uint8Array[] = [];
@@ -449,6 +372,9 @@ class AmpCliRuntime {
         break;
 
       case 'assistant': {
+        const parts = getAssistantContent(msg).filter((part) => part.type === 'text' && typeof part.text === 'string');
+        turn.finalResponse = msg.message?.stop_reason === 'end_turn' && parts.length > 0
+          ? { type: 'text', text: parts.map((part) => part.text).join('\n\n') } : undefined;
         const chatMessages = convertAmpMessageToChatMessages(msg, turn.hiddenToolUseIds);
         if (chatMessages.length > 0) {
           this.#publishMessages(session, turn, chatMessages);
@@ -475,9 +401,11 @@ class AmpCliRuntime {
         if (text && expected?.text === text) {
           turn.pendingInputEchoes.shift();
           turn.pendingEnd = false;
+          turn.finalResponse = undefined;
           expected.settle?.({ kind: 'accepted' });
         } else if (text.trim()) {
           turn.pendingEnd = false;
+          turn.finalResponse = undefined;
           this.#publishMessages(session, turn, [new UserMessage(new Date().toISOString(), text)]);
         }
         const toolResults = content.flatMap((part) => part.type === 'tool_result'
@@ -582,6 +510,7 @@ class AmpCliRuntime {
       type: 'run-ended',
       runId: turn.operation.runId,
       outcome: 'finished',
+      ...(!turn.aborted && turn.finalResponse ? { finalResponse: turn.finalResponse } : {}),
     });
     this.#closeStdin(turn);
   }

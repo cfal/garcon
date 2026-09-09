@@ -22,9 +22,9 @@ describe('agent turn receipt contract', () => {
       output: {
         availability: 'available',
         completeness: 'complete',
-        assistantMessages: ['done'],
+        text: 'done',
       },
-    })).toMatchObject({ state: 'completed', output: { assistantMessages: ['done'] } });
+    })).toMatchObject({ state: 'completed', output: { text: 'done' } });
   });
 
   it('parses failed, interrupted, and unavailable output variants', () => {
@@ -34,7 +34,7 @@ describe('agent turn receipt contract', () => {
       settledAt: '2026-07-31T12:01:00.000Z',
       error: 'provider failed',
       errorCode: 'INTERNAL_ERROR',
-      output: { availability: 'unavailable', reason: 'too-large' },
+      output: { availability: 'unavailable', reason: 'no-final-response' },
     })).toMatchObject({
       state: 'failed',
       error: 'provider failed',
@@ -55,9 +55,8 @@ describe('agent turn receipt contract', () => {
       settledAt: '2026-07-31T12:01:00.000Z',
       reason: 'user-stop',
       output: {
-        availability: 'available',
-        completeness: 'best-effort',
-        assistantMessages: [],
+        availability: 'unavailable',
+        reason: 'no-final-response',
       },
     })).toMatchObject({ state: 'interrupted', reason: 'user-stop' });
   });
@@ -66,5 +65,17 @@ describe('agent turn receipt contract', () => {
     const { clientRequestId: _omitted, ...missingClientRequestId } = base;
     expect(() => parseAgentTurnReceipt({ ...missingClientRequestId, state: 'pending' }))
       .toThrow('clientRequestId');
+  });
+
+  it('preserves explicit empty finals and rejects legacy or unsuccessful text output', () => {
+    const receipt = { ...base, state: 'completed', settledAt: base.updatedAt,
+      output: { availability: 'available', completeness: 'complete', text: '' } };
+    expect(parseAgentTurnReceipt(receipt).output.text).toBe('');
+    expect(() => parseAgentTurnReceipt({ ...receipt,
+      output: { availability: 'available', completeness: 'complete', assistantMessages: ['old'] } })).toThrow('text');
+    expect(() => parseAgentTurnReceipt({ ...receipt, state: 'failed', error: 'failed', errorCode: 'INTERNAL_ERROR' }))
+      .toThrow('unsuccessful turns');
+    expect(() => parseAgentTurnReceipt({ ...receipt, state: 'interrupted', reason: 'user-stop' }))
+      .toThrow('unsuccessful turns');
   });
 });

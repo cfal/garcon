@@ -9,6 +9,7 @@ import {
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { convertPiToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
+import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 
 interface PiTextContent {
   type: 'text';
@@ -37,11 +38,22 @@ type PiContent = PiTextContent | PiThinkingContent | PiImageContent | PiToolCall
 
 interface PiMessage {
   role?: string;
+  stopReason?: string;
   content?: string | PiContent[];
   timestamp?: number | string;
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+}
+
+export function piFinalResponse(raw: unknown): AgentFinalResponse | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const message = raw as PiMessage;
+  if (message.role !== 'assistant' || (message.stopReason !== 'stop' && message.stopReason !== 'length')) return undefined;
+  if (typeof message.content === 'string') return { type: 'text', text: message.content };
+  const parts = contentParts(message.content)
+    .filter((part): part is PiTextContent & { text: string } => part.type === 'text' && typeof part.text === 'string');
+  return parts.length > 0 ? { type: 'text', text: parts.map((part) => part.text).join('\n\n') } : undefined;
 }
 
 interface ConvertPiMessageOptions {

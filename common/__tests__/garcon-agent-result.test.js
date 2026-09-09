@@ -9,9 +9,9 @@ const available = (text = 'A & B < C\n\nExact answer.\n') => ({ availability: 'a
 const terminals = [
   { status: 'completed', chatId, output: available() },
   { status: 'completed', chatId, output: available('') },
-  { status: 'failed', chatId, errorCode: 'INTERNAL_ERROR', output: { ...available(), completeness: 'best-effort' } },
-  { status: 'interrupted', chatId, reason: 'user-stop', output: available('partial') },
-  { status: 'interrupted', chatId, reason: 'chat-deleted', output: { availability: 'unavailable', reason: 'retention-pressure' } },
+  { status: 'failed', chatId, errorCode: 'INTERNAL_ERROR', output: { availability: 'unavailable', reason: 'no-final-response' } },
+  { status: 'interrupted', chatId, reason: 'user-stop', output: { availability: 'unavailable', reason: 'no-final-response' } },
+  { status: 'interrupted', chatId, reason: 'chat-deleted', output: { availability: 'unavailable', reason: 'no-final-response' } },
   { status: 'result-unavailable', chatId, reason: 'receipt-unavailable' },
   { status: 'result-unavailable', chatId, reason: 'receipt-expired' },
 ];
