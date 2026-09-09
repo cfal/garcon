@@ -70,12 +70,14 @@
 				</span>
 			{:else}
 				<span
-					class="shrink-0 text-xs font-medium text-muted-foreground"
+					class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
 					data-slot="new-chat-preambles-label"
 				>
 					{m.preambles_title()}
 				</span>
-				<span class="shrink-0 text-xs text-muted-foreground" aria-hidden="true">·</span>
+				<span class="hidden shrink-0 text-xs text-muted-foreground sm:inline" aria-hidden="true"
+					>·</span
+				>
 				<span class="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
 					{#each visiblePreambles as preamble, index (preamble.id)}
 						<svelte:boundary>
