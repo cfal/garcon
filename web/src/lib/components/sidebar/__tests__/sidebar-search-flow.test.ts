@@ -357,7 +357,7 @@ describe('sidebar search dialog flow', () => {
 
 		const detailedLayout = await screen.findByRole('menuitemradio', { name: 'Detailed' });
 		expect(detailedLayout.getAttribute('aria-checked')).toBe('true');
-		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
+		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('false');
 
 		await fireEvent.click(compactLayout);
@@ -380,7 +380,7 @@ describe('sidebar search dialog flow', () => {
 		await fireEvent.click(menuTrigger);
 
 		const singleLineLayout = await screen.findByRole('menuitemradio', {
-			name: 'Single-line chat items',
+			name: 'Single-line',
 		});
 		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
 

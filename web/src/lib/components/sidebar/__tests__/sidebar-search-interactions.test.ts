@@ -601,10 +601,10 @@ describe('sidebar search interactions', () => {
 		expect(items[9]?.textContent).toContain('Combine nested paths');
 		expect(screen.getByRole('menuitemradio', { name: 'Detailed' })).toBeTruthy();
 		expect(items[10]?.textContent).toContain('Detailed');
-		expect(screen.getByRole('menuitemradio', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[11]?.textContent).toContain('Compact chat items');
-		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
-		expect(items[12]?.textContent).toContain('Single-line chat items');
+		expect(screen.getByRole('menuitemradio', { name: 'Compact' })).toBeTruthy();
+		expect(items[11]?.textContent).toContain('Compact');
+		expect(screen.getByRole('menuitemradio', { name: 'Single-line' })).toBeTruthy();
+		expect(items[12]?.textContent).toContain('Single-line');
 		expect(items[13]?.textContent).toContain('Autohide sidebar');
 		expect(items[14]?.textContent).toContain('Dock sidebar on the right');
 		expect(items[15]?.textContent).toContain('Scheduled prompts');
@@ -687,14 +687,14 @@ describe('sidebar search interactions', () => {
 		const detailedLayout = screen.getByRole('menuitemradio', { name: 'Detailed' });
 		expect(detailedLayout.getAttribute('aria-checked')).toBe('false');
 		expect(items[8]?.textContent).toContain('Detailed');
-		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
+		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
-		expect(items[9]?.textContent).toContain('Compact chat items');
+		expect(items[9]?.textContent).toContain('Compact');
 		const singleLineLayout = screen.getByRole('menuitemradio', {
-			name: 'Single-line chat items',
+			name: 'Single-line',
 		});
 		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[10]?.textContent).toContain('Single-line chat items');
+		expect(items[10]?.textContent).toContain('Single-line');
 		const chatListAutohide = screen.getByRole('menuitemcheckbox', {
 			name: 'Autohide sidebar',
 		});
