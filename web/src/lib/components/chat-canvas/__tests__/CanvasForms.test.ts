@@ -37,6 +37,35 @@ const chat: ChatSessionRecord = {
 };
 
 describe('Canvas forms', () => {
+	it.each(['', 'same label'])(
+		'does not transfer an unapplied draft between edges labelled %j',
+		async (label) => {
+			const content = canvasContent();
+			content.connections = [
+				{ ...content.connections[0], label },
+				{ ...content.connections[0], id: 'other-edge', source: 'box-b', target: 'box-a', label },
+			];
+			const document = new CanvasDocumentState(content, vi.fn());
+			const view = render(CanvasInspector, {
+				document,
+				chats: {},
+				selectedIds: new Set(['edge']),
+				disabled: false,
+				onrename: vi.fn(),
+				onopen: vi.fn(),
+				onbeside: undefined,
+				onclose: vi.fn(),
+			});
+			await fireEvent.input(screen.getByLabelText('Connection label'), {
+				target: { value: 'First edge draft' },
+			});
+			await view.rerender({ selectedIds: new Set(['other-edge']) });
+			expect(screen.getByLabelText<HTMLInputElement>('Connection label').value).toBe(label);
+			await fireEvent.submit(screen.getByLabelText('Connection label').closest('form')!);
+			expect(document.content.connections.map((edge) => edge.label)).toEqual([label, label]);
+		},
+	);
+
 	it('rejects selected edges and endpoints removed while connecting', async () => {
 		const connect = vi.fn(() => true);
 		const view = render(CanvasConnectionDialog, {

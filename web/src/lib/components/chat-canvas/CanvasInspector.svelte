@@ -63,24 +63,26 @@
 					>{m.canvas_open_beside()}</button
 				>{/if}{/if}
 	{:else if edge}
-		<form
-			class="flex min-w-0 flex-1 items-center gap-2"
-			onsubmit={(event) => {
-				event.preventDefault();
-				if (disabled) return;
-				const data = new FormData(event.currentTarget);
-				document.labelConnection(edge.id, String(data.get('label') ?? ''));
-			}}
-		>
-			<input
-				name="label"
-				class="canvas-input"
-				aria-label={m.canvas_label()}
-				value={edge.label}
-				maxlength={CANVAS_LABEL_MAX_LENGTH}
-				{disabled}
-			/><button class="canvas-button" {disabled}>{m.canvas_apply()}</button>
-		</form>
+		{#key edge.id}
+			<form
+				class="flex min-w-0 flex-1 items-center gap-2"
+				onsubmit={(event) => {
+					event.preventDefault();
+					if (disabled) return;
+					const data = new FormData(event.currentTarget);
+					document.labelConnection(edge.id, String(data.get('label') ?? ''));
+				}}
+			>
+				<input
+					name="label"
+					class="canvas-input"
+					aria-label={m.canvas_label()}
+					value={edge.label}
+					maxlength={CANVAS_LABEL_MAX_LENGTH}
+					{disabled}
+				/><button class="canvas-button" {disabled}>{m.canvas_apply()}</button>
+			</form>
+		{/key}
 	{:else}<span class="text-xs text-muted-foreground"
 			>{m.canvas_selection_count({ count: selectedIds.size })}</span
 		>{/if}

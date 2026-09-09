@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type {
   ChatCanvas,
+  CanvasContent,
   CanvasListResponse,
 } from '../../../common/chat-canvas.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
@@ -103,3 +104,42 @@ describe('Lightpanda Chat Canvas', () => {
     });
   });
 });
+
+test('keeps unapplied connection labels scoped to the selected connection', async () => {
+  await withE2eFixture('canvas-inspector-label-selection', async (fixture) => {
+    const content: CanvasContent = {
+      title: 'Connection labels',
+      nodes: [
+        { id: 'a', type: 'box', title: 'Research', position: { x: 0, y: 0 } },
+        { id: 'b', type: 'box', title: 'Implementation', position: { x: 400, y: 0 } },
+        { id: 'c', type: 'box', title: 'Validation', position: { x: 800, y: 0 } },
+      ],
+      connections: [
+        { id: 'first', source: 'a', target: 'b', sourceSide: 'right', targetSide: 'left', label: '' },
+        { id: 'second', source: 'b', target: 'c', sourceSide: 'right', targetSide: 'left', label: '' },
+      ],
+    };
+    await fixture.integration.client.post(endpoint, { id: 'labels', content });
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1440, 900);
+    await app.open();
+    await fixture.waitForSpaWebSocket();
+    await app.selectWorkspaceWindowSurface('Open canvas');
+    await fixture.page.waitForSelector('[data-canvas-flow]');
+    await app.clickButton('List');
+    await app.clickButton('Research → Implementation');
+    const labelInput = '[aria-label="Connection label"]';
+    await fixture.page.waitForSelector(labelInput);
+    await app.fill(labelInput, 'Unapplied first label');
+    await app.clickButton('Implementation → Validation');
+    expect(await fixture.page.$eval(labelInput, (input) => (input as HTMLInputElement).value)).toBe('');
+    await app.fill(labelInput, 'Applied second label');
+    await app.clickButton('Apply');
+    await fixture.page.waitForFunction(() => document.querySelector('[data-canvas-panel] [role="status"]')?.textContent === 'Saved');
+    const saved = await fixture.integration.client.get<ChatCanvas>(`${endpoint}?id=labels`);
+    expect(saved.content.connections.map((edge) => [edge.id, edge.label])).toEqual([
+      ['first', ''], ['second', 'Applied second label'],
+    ]);
+    fixture.assertNoBrowserErrors();
+  });
+}, 60_000);
