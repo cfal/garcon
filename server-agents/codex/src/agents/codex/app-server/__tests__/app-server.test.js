@@ -7087,6 +7087,50 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(published.events).map((message) => message.content)).toEqual([
       'Recovered final line',
     ]);
+    expect(published.events.at(-1).finalResponse).toEqual({ type: 'text', text: 'Recovered final line' });
+  });
+
+  it.each([
+    ['completed', 'final_answer', 'Final A.\n\nFinal B.\r'],
+    ['completed', null, 'Unlabelled final.'],
+    ['completed', 'final_answer', ''],
+    ['completed', 'commentary', 'Progress only.'],
+    ['failed', 'final_answer', 'Failed draft.'],
+    ['interrupted', 'final_answer', 'Interrupted draft.'],
+  ])('selects the complete terminal message without commentary: %s %s %j', async (status, phase, text) => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent((event) => event.type === 'run-ended');
+    await provider.runTurn(makeRequest({ operation: published.operation }));
+    const commentary = { type: 'agentMessage', id: 'commentary', text: 'Earlier progress.', phase: 'commentary', memoryCitation: null };
+    const final = { type: 'agentMessage', id: 'final', text, phase, memoryCitation: null };
+    fake.emit('notification', { method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: commentary } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1',
+      turn: makeTurn({ id: 'turn-1', status, items: [commentary, final], itemsView: 'summary' }) } });
+    await finished;
+    expect(published.events.at(-1).finalResponse).toEqual(status === 'completed' && phase !== 'commentary'
+      ? { type: 'text', text } : undefined);
+    expect(publishedMessages(published.events).map((message) => message.content)).toEqual(['Earlier progress.', text].filter(Boolean));
+  });
+
+  it('retains the latest final answer when the terminal payload ends with commentary', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent((event) => event.type === 'run-ended');
+    await provider.runTurn(makeRequest({ operation: published.operation }));
+    const items = [
+      { type: 'agentMessage', id: 'earlier-final', text: 'Earlier final.', phase: 'final_answer', memoryCitation: null },
+      { type: 'agentMessage', id: 'latest-final', text: 'Latest final.', phase: 'final_answer', memoryCitation: null },
+      { type: 'agentMessage', id: 'commentary', text: 'Trailing commentary.', phase: 'commentary', memoryCitation: null },
+    ];
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1',
+      turn: makeTurn({ id: 'turn-1', status: 'completed', items, itemsView: 'summary' }) } });
+    await finished;
+    expect(published.events.at(-1).finalResponse).toEqual({ type: 'text', text: 'Latest final.' });
+    expect(publishedMessages(published.events).map((message) => message.content))
+      .toEqual(['Earlier final.', 'Latest final.', 'Trailing commentary.']);
   });
 
   it('does not append native-only interrupted tools behind live assistant output', async () => {

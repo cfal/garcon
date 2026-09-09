@@ -37,6 +37,7 @@ export function readProviderActivityWatermark(
             'inter-agent-send-request',
             'agent-start-request',
             'agent-resume-request',
+            'agent-stop-request',
             'agent-schedule-request',
             'inter-agent-message-received'
           )

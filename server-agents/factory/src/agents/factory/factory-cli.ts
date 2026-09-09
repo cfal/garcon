@@ -584,6 +584,8 @@ export class FactoryCliRuntime {
             type: 'run-ended',
             runId: turn.operation.runId,
             outcome: 'finished',
+            ...(!turn.aborted && 'finalText' in event && typeof event.finalText === 'string'
+              ? { finalResponse: { type: 'text' as const, text: visibleFactoryAssistantText(event.finalText) } } : {}),
           });
         }
         break;

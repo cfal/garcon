@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 import type { ChatStopOutcome } from '../../common/chat-types.js';
 import type { SteerDeliveryOutcome } from '../../common/chat-command-contracts.ts';
 
@@ -15,6 +16,11 @@ export interface ForkPreparationState {
   sourceChatId: string;
   sourceNextForkOrdinal?: number;
 }
+
+export type CommandTurnResult =
+  | { readonly availability: 'available'; readonly text: string; readonly bytes: number }
+  | { readonly availability: 'unavailable';
+      readonly reason: 'no-final-response' | 'too-large' | 'retention-pressure' | 'expired' };
 
 export interface CommandLedgerRecord {
   key: string;
@@ -33,13 +39,7 @@ export interface CommandLedgerRecord {
   deliveryOutcome?: SteerDeliveryOutcome;
   forkPreparation?: ForkPreparationState;
   stopOutcome?: ChatStopOutcome;
-  assistantMessages?: string[];
-  assistantBytes?: number;
-  turnResultAvailability?:
-    | 'available'
-    | 'too-large'
-    | 'retention-pressure'
-    | 'expired';
+  turnResult?: CommandTurnResult;
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
   retainedPrivateTerminal?: true;
@@ -76,8 +76,6 @@ export const LEDGER_RECORD_LIMIT = 1000;
 export const STEER_IDENTITY_LIMIT = 10_000;
 export const TURN_RESULT_BYTE_LIMIT = 4 * 1024 * 1024;
 export const TOTAL_TURN_RESULT_BYTE_LIMIT = 64 * 1024 * 1024;
-export const TURN_RESULT_MESSAGE_LIMIT = 4_096;
-export const TOTAL_TURN_RESULT_MESSAGE_LIMIT = 65_536;
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
 export const GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE = 'GOAL_CONTROL_OUTCOME_UNKNOWN';
 
@@ -93,8 +91,6 @@ export interface CommandLedgerOptions {
   recordLimit?: number;
   turnResultByteLimit?: number;
   totalTurnResultByteLimit?: number;
-  turnResultMessageLimit?: number;
-  totalTurnResultMessageLimit?: number;
 }
 
 const TERMINAL_COMMAND_STATUSES = new Set<CommandLedgerStatus>([
@@ -180,7 +176,7 @@ function cloneRecord(record: CommandLedgerRecord): CommandLedgerRecord {
     ...record,
     payload: { ...record.payload },
     ...(record.forkPreparation ? { forkPreparation: { ...record.forkPreparation } } : {}),
-    ...(record.assistantMessages ? { assistantMessages: [...record.assistantMessages] } : {}),
+    ...(record.turnResult ? { turnResult: { ...record.turnResult } } : {}),
   };
 }
 
@@ -200,10 +196,7 @@ export class CommandLedger {
   readonly #recordLimit: number;
   readonly #turnResultByteLimit: number;
   readonly #totalTurnResultByteLimit: number;
-  readonly #turnResultMessageLimit: number;
-  readonly #totalTurnResultMessageLimit: number;
   #resultBytes = 0;
-  #resultMessages = 0;
   #nextTerminalRetentionOrdinal = 0;
 
   constructor(_workspaceDir?: string, options: CommandLedgerOptions = {}) {
@@ -215,9 +208,6 @@ export class CommandLedger {
     this.#turnResultByteLimit = options.turnResultByteLimit ?? TURN_RESULT_BYTE_LIMIT;
     this.#totalTurnResultByteLimit = options.totalTurnResultByteLimit
       ?? TOTAL_TURN_RESULT_BYTE_LIMIT;
-    this.#turnResultMessageLimit = options.turnResultMessageLimit ?? TURN_RESULT_MESSAGE_LIMIT;
-    this.#totalTurnResultMessageLimit = options.totalTurnResultMessageLimit
-      ?? TOTAL_TURN_RESULT_MESSAGE_LIMIT;
   }
 
   async getRecord(key: string): Promise<CommandLedgerRecord | null> {
@@ -265,45 +255,27 @@ export class CommandLedger {
     });
   }
 
-  async appendAssistantMessages(
+  async setTurnResult(
     chatId: string,
     turnId: string,
-    messages: readonly string[],
+    response: AgentFinalResponse | null,
   ): Promise<CommandLedgerRecord | null> {
-    return this.#appendAssistantMessages(this.#recordForTurn(chatId, turnId), messages);
-  }
-
-  #appendAssistantMessages(
-    record: CommandLedgerRecord | undefined,
-    messages: readonly string[],
-  ): CommandLedgerRecord | null {
-    if (!record || record.publicTerminalAt || record.turnResultAvailability !== 'available') {
+    const record = this.#recordForTurn(chatId, turnId);
+    if (!record || record.publicTerminalAt || record.turnResult) {
       return record ? cloneRecord(record) : null;
     }
-    const appended = messages.filter((message) => typeof message === 'string' && message.length > 0);
-    if (appended.length === 0) return cloneRecord(record);
-    const additionalBytes = appended.reduce((total, message) => total + Buffer.byteLength(message), 0);
-    const currentBytes = record.assistantBytes ?? 0;
-    const currentMessages = record.assistantMessages?.length ?? 0;
-    if (
-      currentBytes + additionalBytes > this.#turnResultByteLimit
-      || currentMessages + appended.length > this.#turnResultMessageLimit
-    ) {
-      this.#discardResult(record);
-      record.turnResultAvailability = 'too-large';
+    const bytes = response === null ? 0 : Buffer.byteLength(response.text);
+    if (response === null || record.interruptionReason || record.status === 'failed' || record.status === 'rejected') {
+      record.turnResult = { availability: 'unavailable', reason: 'no-final-response' };
+    } else if (bytes > this.#turnResultByteLimit) {
+      record.turnResult = { availability: 'unavailable', reason: 'too-large' };
     } else {
-      this.#expireTerminalResults(additionalBytes, appended.length);
-      if (
-        this.#resultBytes + additionalBytes > this.#totalTurnResultByteLimit
-        || this.#resultMessages + appended.length > this.#totalTurnResultMessageLimit
-      ) {
-        this.#discardResult(record);
-        record.turnResultAvailability = 'retention-pressure';
+      this.#expireTerminalResults(bytes);
+      if (this.#resultBytes + bytes > this.#totalTurnResultByteLimit) {
+        record.turnResult = { availability: 'unavailable', reason: 'retention-pressure' };
       } else {
-        record.assistantMessages = [...(record.assistantMessages ?? []), ...appended];
-        record.assistantBytes = currentBytes + additionalBytes;
-        this.#resultBytes += additionalBytes;
-        this.#resultMessages += appended.length;
+        record.turnResult = { availability: 'available', text: response.text, bytes };
+        this.#resultBytes += bytes;
       }
     }
     record.updatedAt = new Date().toISOString();
@@ -322,6 +294,8 @@ export class CommandLedger {
       record.interruptionReason = interruptionReason;
       record.status = 'finished';
     }
+    this.#clearUnsuccessfulResult(record);
+    record.turnResult ??= { availability: 'unavailable', reason: 'no-final-response' };
     if (this.#pendingChatDeletions.has(chatId)) return cloneRecord(record);
     const now = new Date().toISOString();
     record.publicTerminalAt = now;
@@ -434,9 +408,7 @@ export class CommandLedger {
           errorCode: undefined,
           deliveryOutcome: undefined,
           forkPreparation: undefined,
-          assistantMessages: [],
-          assistantBytes: 0,
-          turnResultAvailability: 'available',
+          turnResult: undefined,
           interruptionReason: undefined,
           publicTerminalAt: undefined,
           retainedPrivateTerminal: undefined,
@@ -488,11 +460,6 @@ export class CommandLedger {
       updatedAt: now,
       turnId: input.turnId,
       entryId: input.entryId,
-      ...(input.turnId ? {
-        assistantMessages: [],
-        assistantBytes: 0,
-        turnResultAvailability: 'available' as const,
-      } : {}),
     };
     this.#assertTurnOwnerAvailable(record);
     this.#records.set(key, record);
@@ -510,6 +477,7 @@ export class CommandLedger {
     const existing = this.#records.get(key);
     if (!existing) return null;
     const next = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    this.#clearUnsuccessfulResult(next);
     this.#assignTerminalRetentionOrdinal(next);
     this.#records.set(key, next);
     this.#notifyTerminalWaiters(next);
@@ -557,6 +525,7 @@ export class CommandLedger {
       updatedAt: new Date().toISOString(),
       payload: {},
     };
+    this.#clearUnsuccessfulResult(record);
     this.#assignTerminalRetentionOrdinal(record);
     this.#records.set(key, record);
     this.#notifyTerminalWaiters(record);
@@ -638,10 +607,14 @@ export class CommandLedger {
   }
 
   #discardResult(record: CommandLedgerRecord): void {
-    this.#resultBytes -= record.assistantBytes ?? 0;
-    this.#resultMessages -= record.assistantMessages?.length ?? 0;
-    record.assistantMessages = undefined;
-    record.assistantBytes = 0;
+    if (record.turnResult?.availability === 'available') this.#resultBytes -= record.turnResult.bytes;
+    record.turnResult = undefined;
+  }
+
+  #clearUnsuccessfulResult(record: CommandLedgerRecord): void {
+    if (!record.interruptionReason && record.status !== 'failed' && record.status !== 'rejected') return;
+    this.#discardResult(record);
+    record.turnResult = { availability: 'unavailable', reason: 'no-final-response' };
   }
 
   #removeRecord(key: string): void {
@@ -664,24 +637,21 @@ export class CommandLedger {
     record.terminalRetentionOrdinal = this.#nextTerminalRetentionOrdinal;
   }
 
-  #expireTerminalResults(requiredBytes = 0, requiredMessages = 0): void {
-    while (
-      this.#resultBytes + requiredBytes > this.#totalTurnResultByteLimit
-      || this.#resultMessages + requiredMessages > this.#totalTurnResultMessageLimit
-    ) {
+  #expireTerminalResults(requiredBytes = 0): void {
+    while (this.#resultBytes + requiredBytes > this.#totalTurnResultByteLimit) {
       const oldest = [...this.#records.values()]
         .filter((record) => (
           record.publicTerminalAt !== undefined
           && record.terminalRetentionOrdinal !== undefined
-          && record.turnResultAvailability === 'available'
-          && ((record.assistantBytes ?? 0) > 0 || (record.assistantMessages?.length ?? 0) > 0)
+          && record.turnResult?.availability === 'available'
+          && record.turnResult.bytes > 0
         ))
         .sort((left, right) => (
           left.terminalRetentionOrdinal! - right.terminalRetentionOrdinal!
         ))[0];
       if (!oldest) return;
       this.#discardResult(oldest);
-      oldest.turnResultAvailability = 'expired';
+      oldest.turnResult = { availability: 'unavailable', reason: 'expired' };
     }
   }
 }

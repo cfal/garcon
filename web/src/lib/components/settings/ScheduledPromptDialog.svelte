@@ -65,10 +65,11 @@
 		if (!open) return;
 		const currentPrompt = scheduledPrompt;
 		const token = ++initialization;
-		const nextForm = createForm();
-		form = nextForm;
-		pickerOpen = false;
 		untrack(() => {
+			const nextForm = createForm();
+			form.dispose();
+			form = nextForm;
+			pickerOpen = false;
 			void nextForm.initialize(currentPrompt).catch((error) => {
 				if (token !== initialization || form !== nextForm) return;
 				nextForm.error =
@@ -78,9 +79,10 @@
 	});
 
 	$effect(() => {
-		if (!open || form.targetType !== 'new-chat') return;
-		void form.startup.trimmedPath;
-		form.startup.validatePath();
+		const activeForm = form;
+		if (!open || activeForm.targetType !== 'new-chat') return;
+		void activeForm.startup.trimmedPath;
+		untrack(() => activeForm.startup.validatePath());
 	});
 
 	$effect(() => {
@@ -106,21 +108,26 @@
 
 	onDestroy(() => {
 		initialization += 1;
+		form.dispose();
 	});
 
 	async function save(): Promise<void> {
-		if (!form.canSave || form.saving) return;
-		const definition = form.buildDefinition();
+		const submittingForm = form;
+		if (!submittingForm.canSave || submittingForm.saving) return;
+		const definition = submittingForm.buildDefinition();
 		if (!definition) return;
-		form.saving = true;
-		form.error = null;
+		submittingForm.saving = true;
+		submittingForm.error = null;
 		try {
 			await onSave(definition);
+			if (form !== submittingForm) return;
 			onClose();
 		} catch (error) {
-			form.error = error instanceof Error ? error.message : m.scheduled_prompts_save_error();
+			if (form !== submittingForm) return;
+			submittingForm.error =
+				error instanceof Error ? error.message : m.scheduled_prompts_save_error();
 		} finally {
-			form.saving = false;
+			if (form === submittingForm) submittingForm.saving = false;
 		}
 	}
 

@@ -12,7 +12,7 @@ import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('scheduled-prompts');
-const SCHEDULED_PROMPTS_FILE_VERSION = 3;
+const SCHEDULED_PROMPTS_FILE_VERSION = 4;
 
 interface ScheduledPromptsFile {
   version: typeof SCHEDULED_PROMPTS_FILE_VERSION;
@@ -69,7 +69,24 @@ function normalizeRevision(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function withLegacyPreambleChoice(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  const target = raw.target;
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return value;
+  const targetRecord = target as Record<string, unknown>;
+  if (targetRecord.type !== 'new-chat') return value;
+  return {
+    ...raw,
+    target: {
+      ...targetRecord,
+      preambleChoice: { mode: 'defaults' },
+    },
+  };
+}
+
 function normalizeLegacyScheduledPrompt(value: unknown, version: 1 | 2): ScheduledPrompt | null {
+  value = withLegacyPreambleChoice(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const schedule = raw.schedule;
@@ -109,7 +126,12 @@ function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
     };
   }
   const raw = value as Record<string, unknown>;
-  if (raw.version !== 1 && raw.version !== 2 && raw.version !== SCHEDULED_PROMPTS_FILE_VERSION) {
+  if (
+    raw.version !== 1
+    && raw.version !== 2
+    && raw.version !== 3
+    && raw.version !== SCHEDULED_PROMPTS_FILE_VERSION
+  ) {
     throw new Error(`Unsupported scheduled-prompts.json version: ${String(raw.version)}`);
   }
   const normalizedRevision = normalizeRevision(raw.revision);
@@ -119,10 +141,14 @@ function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
   let ignoredPromptCount = 0;
   if (Array.isArray(raw.prompts)) {
     for (const value of raw.prompts) {
-      const scheduledPrompt =
-        raw.version === 1 || raw.version === 2
-          ? normalizeLegacyScheduledPrompt(value, raw.version)
-          : normalizeScheduledPrompt(value);
+      let scheduledPrompt: ScheduledPrompt | null;
+      if (raw.version === 1 || raw.version === 2) {
+        scheduledPrompt = normalizeLegacyScheduledPrompt(value, raw.version);
+      } else if (raw.version === 3) {
+        scheduledPrompt = normalizeScheduledPrompt(withLegacyPreambleChoice(value));
+      } else {
+        scheduledPrompt = normalizeScheduledPrompt(value);
+      }
       if (!scheduledPrompt || seen.has(scheduledPrompt.id)) {
         ignoredPromptCount += 1;
         continue;

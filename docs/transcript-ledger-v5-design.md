@@ -1,10 +1,20 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 36 integrated design. Supersedes
+Status: revision 37 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 37 reconciles Direct history with the implementation shipped in
+[PR #549, commit `61ebb144a`](https://github.com/cfal/garcon/commit/61ebb144a68a64e5a446fea14b61e2aae2caf962).
+All three Direct integrations persist provider-owned native JSONL sessions,
+resume from that history, and expose native-session access and manual Reload.
+Their legacy-import, native-fork, and native-activity facets are null. Core
+still owns the sole serving ledger and supplies ledger-derived carried context
+when starting a new session, not prior context on every resumed turn. Direct
+Responses sessions also persist upstream response checkpoints. This revision
+corrects documentation only; it introduces no runtime or storage migration.
 
 Revision 36 adds ordered per-chat preamble selection while retaining the
 workspace catalog as the body, enablement, and project-scope authority. Every
@@ -263,9 +273,11 @@ Pre-V5 history migration is now a distinct nullable
 `legacyHistoryImport` capability, explicitly declared by every integration
 and consumed only by genesis adoption. It never falls back to or grants
 `nativeHistoryImport`, which remains the native-session import capability for
-explicit Reload and a successfully materialized native-fidelity fork. Direct
-uses the former to read released Garcon JSONL once and keeps the latter null;
-ordinary Direct turns reconstruct provider requests from the ledger. Adoption
+explicit Reload and a successfully materialized native-fidelity fork. At
+revision 18, Direct used the former to read released Garcon JSONL once, kept
+the latter null, and reconstructed provider requests from the ledger. PR #549
+superseded that Direct-specific model; revision 37 records the current native
+session behavior in section 13. Adoption
 commits no current view unless every required source was either read
 successfully or positively determined absent. An already-recorded carryover
 migration quarantine is known prior loss rather than an unknown read failure:
@@ -473,12 +485,13 @@ The decisions:
 ## 2. Invariants
 
 - **L1 Single serving authority.** One core-owned ledger per chat defines
-  rendered history. Paging, reconnect, search, preview, model context,
+  rendered history. Paging, reconnect, search, preview, context seeding,
   carryover, export, fork lookup, and command attribution consume its
   stored envelopes through the specified read folds (section 9); shares
   copy their content at publish time and never read the ledger again. No
-  read surface touches provider-native storage or any
-  integration-private storage.
+  ordinary core transcript read surface touches provider-native storage or any
+  integration-private storage. Integrations own their native execution history
+  and may read it to resume provider work; that is not transcript serving.
 - **L2 Append-only view.** Within a transcript view, stored rows are
   never modified, removed, reordered, or re-addressed. The view-wide
   ordinal is dense and never reused. Equal-content rows are distinct by
@@ -585,8 +598,8 @@ The decisions:
   ownership. A strictly newer tail may send a transient operational warning.
   The check appends no ledger row, stores no warning state, and never blocks
   the chat, gates resume, requires acknowledgement, or disables submission.
-- **L10 Explicit history imports.** Complete integration-owned history reads
-  occur only at genesis adoption through `legacyHistoryImport`, explicit
+- **L10 Explicit history imports.** Core imports integration-owned history
+  only at genesis adoption through `legacyHistoryImport`, explicit
   manual Reload through `nativeHistoryImport`, and native-fidelity target
   seeding through that same native-session facet after the integration has
   materialized a fork. The two nullable facets are declared independently and
@@ -1413,7 +1426,8 @@ private prefix. Core expands chat-ID tokens in matched catalog bodies, then
 frames and receipts the exact result. Core resolves file mentions in visible authored input first,
 then prepends the receipt-covered prefix once to the complete turn prompt.
 The provider integration still receives one ordinary opaque prompt string;
-the body never enters the ledger or any context fold.
+the body never enters the ledger or any ledger-derived context fold. The
+provider may retain that opaque prompt in its native execution history.
 
 V4's prepare/commit/promotion admission transaction, active-lifetime
 entries, and `input-not-sent` reset are deleted.
@@ -1463,16 +1477,19 @@ so the boundary is the request itself, not its lifecycle state), or a run that
 ended without interruption — a visible finish or failure is the user's cue to
 decide for themselves. Collected inputs and their
 attachments are combined into one prompt; the integration receives one
-prompt. Rows composed into the current outgoing prompt are excluded from
-the context fold supplied for that same request, so they appear exactly
-once (section 9).
+prompt. When starting a new native session, rows composed into the outgoing
+prompt are excluded from the ledger-derived carried context supplied with it,
+so they appear exactly once across that seed and prompt (section 9). A resumed
+session instead uses provider-owned history; resend can duplicate content
+already present there, as accepted in section 16.
 
 Opting out is ephemeral: the composer shows the to-be-resent rows as
 removable chips; removing a chip excludes that row from this composition
 only. Restart resets chips and the scan re-collects the row —
 duplication over omission, the chosen bias. An input the user declines
-to resend remains conversation history and still reaches stateless
-providers as prior context (section 9); history cannot be un-said.
+to resend remains ledger history and eligible for future context seeding
+(section 9). Opt-out also does not remove an input the provider already stored
+in native history; it is not a history edit.
 
 No interruption row is inferred or appended after a restart. Explicit
 user interruptions remain durable because they were appended when
@@ -1600,13 +1617,13 @@ type PermissionLifecycle =
 
 ## 9. Read Folds
 
-Every read surface consumes the ledger through one explicit row-kind
-matrix. "Conversational rows" below means `user-input` rows plus non-error
+Every core transcript read surface consumes the ledger through one explicit
+row-kind matrix. "Conversational rows" below means `user-input` rows plus non-error
 `provider-row` rows, in ordinal order. A provider `ErrorMessage` remains an
 integration-owned `provider-row` for provenance and native activity but is
 presentation-only in every consumer fold.
 
-| Kind | Rendering | Search | Preview | Model context / carryover | Share snapshot | Export |
+| Kind | Rendering | Search | Preview | Context seeding / carryover | Share snapshot | Export |
 | --- | --- | --- | --- | --- | --- | --- |
 | `user-input` | yes | yes | candidate | yes, excluding current-prompt rows | yes | yes |
 | conversational `provider-row` | yes | yes | candidate | yes | yes | yes |
@@ -1653,11 +1670,13 @@ model context, carryover, or export.
   unbounded complete match set.
 - **Preview** selects the latest conversational row; notices, provider errors,
   and lifecycle state are separate UI signals, never preview text.
-- **Model context and carryover** are the conversational fold, minus the
-  rows composed into the current outgoing prompt (which appear exactly
-  once, in the prompt). Conversational history is never excluded otherwise: a
-  message the user declined to resend remains history and reaches stateless
-  providers as context. The frozen projection has one display-only exception
+- **Context seeding and carryover** use the conversational fold. A new-session
+  seed excludes rows composed into the outgoing prompt so they appear exactly
+  once across that seed and prompt. A message the user declined to resend
+  remains eligible for this fold. Core does not supply this fold as prior
+  context on every resumed turn: integrations reconstruct execution context
+  from their own native state, including Direct's persisted history (section
+  13). The frozen projection has one display-only exception
   to the conversational matrix: it preserves carryover-quarantine and typed
   preamble-application notices. The former keeps permanent prior loss visible;
   the latter preserves immutable title snapshots next to copied boundary
@@ -1702,9 +1721,9 @@ model context, carryover, or export.
   Share stays a self-contained public snapshot copied at publish and never
   enters this export path.
 
-Because future queued inputs are not transcript rows, the ordinary
-conversational fold is already correct for direct-provider context; no
-turn-aware filtering exists.
+Because future queued inputs are not transcript rows, they cannot enter
+ledger-derived context seeding or carryover. Resumed provider context is not a
+second core read fold.
 
 ## 10. Native Sessions and the Native Drift Check
 
@@ -1712,9 +1731,12 @@ turn-aware filtering exists.
 
 Native history is provider execution state plus the source for explicit Reload
 and a materialized native-fidelity target. Garcon binds it via the `session`
-row, imports one concrete native session through `nativeHistoryImport` only for
-those two flows, and otherwise never reads it beyond the drift check's bounded
-tail. Pre-V5 history is a separate migration input behind
+row. Core imports one concrete native session through `nativeHistoryImport`
+only for those two flows; ordinary core transcript reads never use it. Native
+access also supports session resolution, source description, release, and the
+drift check's bounded tail. Integrations may read and write native history for
+their own execution lifecycle, including Direct resume. Pre-V5 history is a
+separate migration input behind
 `legacyHistoryImport`; it may be Garcon-owned legacy storage rather than
 provider-native state and is unreachable after genesis adoption.
 Ownership is concurrent-exclusive: while Garcon is actively executing or
@@ -1855,18 +1877,19 @@ or provider-storage branch. The facet is removed only after eager migration
 covers every registered pre-V5 chat or support for all pre-V5 workspaces is
 deliberately dropped.
 
-The facet split preserves every migration source supported before revision 18;
-it changes which core flow may invoke an importer, not whether released chats
-remain discoverable. Claude, Codex, Pi, Amp, Factory, and Cursor reuse their
-existing provider-owned import source and translation implementation behind
+The revision 18 facet split preserved the then-supported migration sources;
+subsequent capability changes must be explicit. Claude, Codex, Pi, Amp,
+Factory, and Cursor reuse their existing provider-owned import source and
+translation implementation behind
 both history facets, with thin occasion-specific wrappers where absence
 semantics differ. OpenCode does the same only for its supported
-directory-scoped source. The three Direct integrations expose their
-released-JSONL reader only as `legacyHistoryImport` and keep
-`nativeHistoryImport` null. A null legacy facet is valid only when the
-integration had no supported pre-V5 source; it cannot silently retire an
-existing migration path. Conformance asserts each facet's behavior, never
-object reference equality.
+directory-scoped source. PR #549 removed the old Direct legacy reader and
+relocation paths. All three Direct integrations now declare
+`legacyHistoryImport: null` and expose their current provider-owned JSONL
+through `nativeHistoryImport` (section 13). Core must neither substitute that
+native importer during genesis adoption nor restore the removed legacy path
+implicitly. Conformance asserts each facet's behavior, never object reference
+equality.
 
 ### 11.2 Manual full reload
 
@@ -1876,7 +1899,8 @@ session outside Garcon (or lost lines to a crash) and chooses to replace
 Garcon's displayed transcript with the complete history. It exists only
 for chats whose current binding has a native source and whose
 integration provides a non-null `nativeHistoryImport`; a chat with no
-native source (direct providers, no session yet) has no Reload action.
+native source, such as a chat with no session yet, has no Reload action.
+Direct chats with an established native session do support Reload.
 It is never automatic and is the sole full-transcript replacement path:
 
 1. Core acquires the per-chat execution reservation, requires no active
@@ -2201,35 +2225,86 @@ Carried forward from V4, with the 12.1 ordering and a narrowed fence:
 
 ## 13. Direct Providers
 
-Direct providers obey the same producer contract as every other
-integration. Because they are stateless at the upstream API boundary,
-each execution request needs prior conversation context:
+All three Direct integrations obey the same producer contract as other
+integrations while owning a separate durable native session. The V5 ledger
+remains the sole authority for served history; the native session supplies
+execution context and explicit Reload, not ordinary history, search, preview,
+or export.
 
-- Core derives the canonical provider-neutral context from the
-  conversational fold (section 9). Future queued inputs are not
-  transcript rows, so the ordinary fold is already correct.
-- Rows composed into the current outgoing prompt are excluded from that
-  context, so resent inputs and the newly submitted prompt appear
-  exactly once, never both in prior history and again as the prompt.
-- The direct integration translates the context into the
-  provider-specific request format on every turn: Chat Completions
-  `messages`, Responses `input` with `store: false`, or Anthropic
-  `messages`. Lifecycle and output return through the same sink.
-- `nativeHistoryImport` is null and there is no native source, so direct
-  chats have no Reload action (L10); their permission and lifecycle
-  history is never discarded by a pointless view rotation.
-- `legacyHistoryImport` is non-null while released pre-V5 Direct workspaces
-  remain supported. Each Direct package privately discovers, relocates when
-  required, and reads its released Garcon JSONL into the normalized import
-  stream exactly once during genesis adoption. The importer is not reachable
-  from ordinary serving or Reload.
+### 13.1 Native storage and execution context
 
-New V5 turns never write or read a parallel Direct JSONL.
-`DirectSessionStore` has no serving or writing role; only the narrowly scoped
-legacy reader survives until pre-V5 support is retired. Core never imports a
-Direct parser, names a Direct agent ID, or branches for Direct adoption.
-`direct-anthropic-compatible` participates in every shared suite alongside the
-other two Direct integrations.
+`DirectSessionStore` in `server-agents/common/src/direct/session-store.ts`
+stores one `<sessionId>.jsonl` in the owning integration's
+`direct-sessions-v1` storage namespace. The version-one header binds provider
+owner and session ID. User records retain the actual dispatched prompt and
+attachments; assistant records retain completed output and an optional
+Responses checkpoint. Native records carry provider-private `runId` values
+for sequence validation, not core ledger row identity or execution recovery.
+
+- Creation writes and syncs the mode-0600 file and containing directory before
+  publishing the session fact. Each turn's user record is persisted before the
+  upstream request. Completed assistant output and its checkpoint are appended
+  together and synced before the assistant row and terminal are published to
+  the core sink. Native persistence and ledger acceptance are separate writes;
+  there is no cross-store transaction or automatic reconciliation.
+- Core supplies ledger-derived `carriedContext` only when starting a new
+  session. It excludes current-prompt rows from that seed. Direct prepends the
+  seed to the first native user prompt and publishes its seed receipt through
+  the ordinary session fact. Resumed requests carry the exact native reference
+  and new prompt, not a universal ledger `priorContext` field.
+- Resume restores native history after restart or runtime-cache eviction and
+  appends the new prompt. Request projection preserves the first user record
+  and the bounded recent suffix; the default limit is 200 messages. That
+  in-memory/request bound does not truncate the durable native file.
+- Missing, corrupt, mismatched, symlinked, or non-regular selected native
+  storage fails closed with `TRANSCRIPT_UNAVAILABLE`; it is never regenerated
+  silently from V5 rows. Ordinary ledger reads remain independent of that
+  native failure. A valid unterminated final record is retained; an invalid
+  incomplete tail is ignored on load and truncated and synced before the next
+  append. Malformed complete records fail without repair.
+
+### 13.2 Import, lifecycle, and capabilities
+
+Each Direct integration declares `legacyHistoryImport: null`, a non-null
+`nativeHistoryImport`, and non-null `nativeSessions` providing exact-session
+resolution, source description, and release. The old legacy JSONL discovery
+and relocation modules were removed by PR #549; native import is not a fallback
+for them. `nativeActivity` and `forking` are null: Direct has no automatic drift
+probe and no native-fidelity fork, but does support manual Reload for an
+established session and ordinary ledger-seeded handoff forks.
+
+The native importer emits normalized user/assistant rows with native timestamps
+and attachments. Core applies its ordinary carried-context and preamble receipt
+sanitation before Reload cutover. Missing or corrupt native evidence preserves
+the current view. Handoff retains the outgoing native file; deleting the chat
+releases its current native file, not historical outgoing sessions.
+
+### 13.3 Responses checkpoints
+
+Interactive Direct Responses requests use `store: true`. A completed response
+ID is persisted in the same native assistant record as its text, together with
+the endpoint ID, endpoint fingerprint, and model. A compatible checkpoint on
+the immediately preceding assistant record sends only the current input plus
+`previous_response_id`; an absent or incompatible checkpoint sends the bounded
+native-history projection instead. An unresolved checkpoint before output
+permits one fallback request using that local projection without the previous
+ID. Unrelated failures, failures after output, or a failed fallback do not
+retry. One-shot `singleQuery` remains separate and uses `store: false`.
+
+Implementation and regression references:
+
+- `server-agents/common/src/direct/{session-store,direct-chat-runtime-base,execution,native-session,openai-compatible-responses-runtime}.ts`
+- `server-agents/{direct-openai-compatible,direct-openai-responses-compatible,direct-anthropic-compatible}/src/index.ts`
+- `server-agents/common/src/direct/__tests__/{session-store.test.ts,native-session.test.ts,execution.test.ts,openai-compatible-responses-runtime.test.js}`
+- `server/agents/__tests__/architecture-boundaries.test.js` and
+  `server/ledger/__tests__/adoption-architecture.test.js`
+- `integration-tests/tests/server/direct-native-history.test.ts` and
+  `integration-tests/tests/sacs/legacy-history-adoption.test.ts`
+
+Core never imports a Direct parser, branches on a Direct provider ID, or reads
+the native store to serve a transcript. `direct-anthropic-compatible`
+participates in the shared Direct conformance cases alongside the other two
+integrations.
 
 ## 14. Per-Provider Notes
 
@@ -2295,10 +2370,12 @@ relevant-entry definition under the 10.2 obligation.
   provide a reliable bounded native slice for its current binding may
   keep a private append-only import ledger; core never reads it.
 - **Direct (openai-compatible, openai-responses-compatible,
-  anthropic-compatible)**: context-fed producers per section 13;
-  integration-owned legacy JSONL import for genesis adoption;
-  `nativeHistoryImport` null; probe `unavailable`; drift check inert; no
-  Reload action and no post-adoption JSONL serving.
+  anthropic-compatible)**: provider-owned durable JSONL sessions and native
+  resume per section 13; assistant output persists before publication;
+  `nativeHistoryImport` and `nativeSessions` are non-null; `legacyHistoryImport`,
+  `nativeActivity`, and `forking` are null. Manual Reload is available, automatic
+  drift probing is absent, and ordinary serving remains ledger-only. Responses
+  checkpoints are private native execution state, not ledger delivery evidence.
 
 ## 15. Failure Semantics
 
@@ -2336,6 +2413,9 @@ relevant-entry definition under the 10.2 obligation.
 | Search query names an unadopted chat while maintenance is incomplete | No ledger access or adoption occurs on the request path. The chat contributes to `unindexedChatCount`, returns no result, and remains visible as incomplete coverage. |
 | Durable carryover migration quarantine | Positively known prior loss: adoption creates a usable first view with no quarantined prefix rows, one durable warning carrying the artifact reference and error code, the current session fact when present, and any successfully imported current-binding rows. The notice survives frozen-projection flows; the quarantine artifact remains available for support. |
 | Dispatch failure (start or steer rejected/thrown) | Best-effort kill; core appends `run-ended: failed` with optional sanitized error detail for a turn-starting failure; preceding inputs remain eligible for the next scan only if no conversational provider output or non-interrupted `run-ended` intervenes. |
+| Direct resume cannot load or validate its selected native history | The turn fails with `TRANSCRIPT_UNAVAILABLE` without an upstream request or ledger-to-native reconstruction; ordinary V5 history remains readable. |
+| Direct assistant/checkpoint is persisted but its ledger publication is lost | Native resume retains that execution history; the served view does not change automatically. Manual Reload can import it while the session is current; Direct has no drift probe. |
+| Direct Responses checkpoint is unresolved before output | One fallback request uses the bounded native-history projection without `previous_response_id`; unrelated errors, post-output errors, and fallback failure do not retry. |
 | User interrupt | Run marked stopped in memory; `run-ended: interrupted` appended immediately; provider abort best-effort; the interruption row is transparent to the resend scan. |
 | Interrupt when the run already ended | Idle no-op; nothing appended. |
 | Duplicate or stale `run-ended` (stopped or unknown `runId`) | Ignored; never becomes a row; cannot stop the current run. |
@@ -2398,8 +2478,8 @@ Every deliberate gap, in one place, so it is not "fixed" later:
    rows and no markers.
 7. Resend opt-out is ephemeral: restart resets composer chips and the
    scan re-collects trailing inputs — duplication over silent omission.
-   A declined input remains history and still reaches stateless
-   providers as prior context; history cannot be un-said.
+   A declined input remains ledger history eligible for future context seeding;
+   opt-out also does not remove any copy already in provider-native history.
 8. The resend scan can deliver the same input to a provider more than
    once across failures and restarts; same bias.
 9. A steer followed by already-in-flight output is not collected by a
@@ -2574,8 +2654,8 @@ The catalog cites this revision, but its inventory is not repeated here.
   entries run the scan; the insert-plus-scan method admits no
   interleaving; chip removal excludes for one composition only; restart
   recomputes the identical set; current-prompt rows excluded from
-  context exactly once; imported histories ending in unanswered user
-  rows are collected as intended.
+  new-session carried context exactly once; imported histories ending in
+  unanswered user rows are collected as intended.
 - **Permissions**: every owning integration generates one UUID-v4
   `permissionOccurrenceId` per concrete native occurrence and requested plus
   terminal events reuse it exactly; two simultaneous occurrences with the
@@ -2604,9 +2684,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   current-view query admission;
   preview selection; share snapshots copied at publish and unaffected by
   reload and view deletion; ordinary export stripping `providerMeta` and
-  session native refs with the raw support export separate; direct
-  providers receive resent inputs exactly once; late conversational content
-  participates normally in every fold while late errors remain display-only.
+  session native refs with the raw support export separate; new-session seeds
+  exclude current-prompt rows without imposing ledger-fed resume; late
+  conversational content participates normally in every fold while late errors
+  remain display-only.
   Search fixtures include a clause with 10,001 matching rows and assert the
   10,000-row ceiling, successor-derived `resultsTruncated`, newest-row
   selection, multi-clause intersection within the sample, and a later exact
@@ -2634,15 +2715,15 @@ The catalog cites this revision, but its inventory is not repeated here.
   frozen prefix, optional quarantine notice, current session fact at
   `content_start_ordinal`, and legacy rows. A pre-recorded carryover quarantine
   instead proves prior loss: adoption remains usable, preserves the warning
-  through frozen-projection flows, and retains the support artifact. Released
-  Direct JSONL is imported once by each Direct package and remains unreachable
-  from ordinary serving and Reload. Claude, Codex, Pi, Amp, Factory, and
-  Cursor reuse their existing provider-owned import implementation behind both
-  occasion-specific facets; OpenCode does the same for its directory-scoped
+  through frozen-projection flows, and retains the support artifact. Direct
+  declares no legacy importer; its current native JSONL supports execution and
+  Reload but remains unreachable from ordinary core serving. Claude, Codex, Pi,
+  Amp, Factory, and Cursor reuse their existing provider-owned import
+  implementation behind both occasion-specific facets; OpenCode does the same for its directory-scoped
   source. Tests assert capability and behavior rather than reference equality.
-  The seven scripted SACS drivers each prove supported-source absence and an
-  injected read failure that creates no view and retries from the beginning;
-  Amp, Factory, and unit-only Cursor prove the equivalent provider boundary at
+  The legacy-capable scripted SACS drivers each prove supported-source absence
+  and an injected read failure that creates no view and retries from the
+  beginning; Amp, Factory, and unit-only Cursor prove the equivalent provider boundary at
   their strongest deterministic tier. OpenCode adoption remains
   directory-scoped; directoryless discovery is a documented follow-up, not a
   runtime fallback. Static architecture tests allow Direct package imports
@@ -2652,9 +2733,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   paths, or Direct-specific adoption branches throughout core. The scan still
   inspects `default-agent-integrations.ts`; only its package-root Direct import
   declarations are excepted, and it may contain no Direct parser, store,
-  common/direct import, ID branch, or adoption logic. Provider-side tests also
-  lock that the restored legacy Direct module has no session-content JSONL
-  write/append surface; its separate versioned relocation hook remains allowed.
+  common/direct import, ID branch, or adoption logic. Provider-side tests lock
+  the absence of the old Direct legacy reader and relocation modules and the
+  presence of native session/import facets. The universal execution contract
+  has no ledger `priorContext`; core derives carried context only for start.
   The architecture tests assert the two facets are referenced only by their
   owning flows. Search-specific coverage creates a large synthetic registry
   with only a subset adopted, proves that resync and query requests create no
@@ -2696,8 +2778,21 @@ The catalog cites this revision, but its inventory is not repeated here.
   direct/queued serialization, REST/WS parsing, reconnect refresh, and shared
   New Chat/existing-chat picker behavior. `server-agents/**` contains no
   preamble-specific code.
+- **Direct native execution**: all three integrations persist and resume from
+  their provider-owned sessions. Store units cover mode-0600 creation,
+  fsynced appends, assistant/checkpoint atomicity, exact native references,
+  malformed complete records, incomplete-tail recovery, and idempotent release.
+  Runtime tests cover hydration, bounded request projection retaining the seed,
+  and publication only after native persistence. Responses tests cover durable
+  checkpoint reuse across restart, endpoint/fingerprint/model mismatch, one
+  unresolved-checkpoint fallback, and no retry after output or unrelated errors.
+  `integration-tests/tests/server/direct-native-history.test.ts` proves restart
+  context, missing/corrupt resume without an upstream request, running deletion,
+  outgoing-file retention, and carried-seed sanitation on Reload. Shared SACS
+  cases exercise exact Reload plus missing/corrupt preservation for every
+  Direct integration.
 - **Reload**: gated on a native-bound binding with a non-null
-  `nativeHistoryImport` (direct chats expose no Reload); staged build
+  `nativeHistoryImport` (including established Direct sessions); staged build
   under a `staging` view with schema-enforced uniqueness; the frozen
   projection (retained `clientMessageId`; carryover-quarantine notice and the
   one current-session row preserved; other lifecycle rows dropped; no origin
@@ -2790,7 +2885,8 @@ The catalog cites this revision, but its inventory is not repeated here.
   pending-input settlement readers and delivery-status tracking,
   transient-only permission control plumbing (replaced by durable typed
   permission history plus ephemeral overlay), and `DirectSessionStore`'s
-  serving role.
+  core transcript-serving role. Direct native execution storage remains
+  provider-owned as specified in section 13.
 - Tests asserting deleted semantics — anything framed in terms of
   answered state, delivery evidence, durable run or attempt attribution,
   send-time durability of queued inputs, resend markers or retraction
@@ -2809,6 +2905,9 @@ precede this revision. Released pre-V5 chats still require a one-time migration
 path, but revision 18 separates that occasion from Reload and closes the final
 stabilization defects. The current case inventory and gate status live in
 `docs/transcript-ledger-v5-cts.md`; this section fixes the architectural order.
+Revision 37 documents the already-shipped Direct correction from PR #549;
+section 13 and its regression references supersede the earlier ledger-fed
+Direct plan without requiring another implementation or migration.
 
 1. **Lock regressions before each production boundary moves.** Register the
    CTS and SACS cases for one permission UUID, codec compatibility, migration
@@ -2835,10 +2934,9 @@ stabilization defects. The current case inventory and gate status live in
    creates a usable view with its persistent warning. Native providers reuse
    their supported provider-owned source and translation implementation behind
    both occasion-specific facets where appropriate. The Direct integrations
-   share provider-side helpers for
-   released-JSONL discovery, relocation, parsing, and streaming only through
-   their legacy facets while leaving Reload null. OpenCode reuses only its
-   directory-scoped source; unscoped directoryless recovery is deferred.
+   instead retain the PR #549 native-session store and Reload importer, with
+   null legacy facets and no old discovery/relocation path. OpenCode reuses only
+   its directory-scoped source; unscoped directoryless recovery is deferred.
    Land provider-neutral static guards with this boundary.
 5. **Bound HTTP presentation work and finish browser retention.** Replace the
    server's presentation-sized scan loop with one raw keyset page and expose
@@ -2945,10 +3043,10 @@ stabilization defects. The current case inventory and gate status live in
     read aborts without a view, remains visibly unindexed or failed in search,
     and is retryable. An already-durable carryover quarantine is positively known
     prior loss: adoption creates a usable view with an empty history prefix and
-    persistent warning while retaining the artifact. Direct owns its released
-    JSONL reader behind the legacy facet, writes no V5 JSONL, and keeps Reload
-    null. OpenCode remains directory-scoped; released directoryless recovery
-    is deferred.
+    persistent warning while retaining the artifact. Direct declares a null
+    legacy facet and owns durable native JSONL, native resume, and Reload behind
+    the provider boundary (section 13). OpenCode remains directory-scoped;
+    released directoryless recovery is deferred.
 12. A successful active newest-history load returns before scheduling the
     native drift check for the current binding. No other read or execution
     path schedules it. Equal pending eligibility coalesces, changed exact

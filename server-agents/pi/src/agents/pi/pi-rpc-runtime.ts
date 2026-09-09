@@ -52,7 +52,7 @@ import {
   type PiStartRequest,
 } from './runtime-types.js';
 import { canonicalExistingPiSessionPath } from './pi-session-paths.js';
-import { convertPiMessage } from './message-converter.js';
+import { convertPiMessage, piFinalResponse } from './message-converter.js';
 import { terminatePiProcess } from './pi-process-lifecycle.js';
 import type {
   CapturedPiSteerTarget,
@@ -670,6 +670,8 @@ export class PiRpcRuntime {
         return;
       }
       const message = event.message as unknown;
+      turn.finalResponse = piFinalResponse(message);
+      turn.failureMessage = null;
       const role = message && typeof message === 'object'
         ? (message as Record<string, unknown>).role
         : null;
@@ -683,13 +685,12 @@ export class PiRpcRuntime {
       const stopReason = message && typeof message === 'object'
         ? (message as Record<string, unknown>).stopReason
         : null;
-      if (stopReason === 'error') {
+      if (stopReason === 'error' || stopReason === 'aborted') {
         const errorMessage = message && typeof message === 'object'
           ? (message as Record<string, unknown>).errorMessage
           : null;
-        this.#publishMessages(session, turn, [
-          new ErrorMessage(timestamp, typeof errorMessage === 'string' ? errorMessage : 'Pi turn failed.'),
-        ]);
+        turn.failureMessage = typeof errorMessage === 'string' ? errorMessage : `Pi turn ${stopReason}.`;
+        this.#publishMessages(session, turn, [new ErrorMessage(timestamp, turn.failureMessage)]);
       }
       return;
     }
@@ -749,7 +750,7 @@ export class PiRpcRuntime {
     const turn = session.turn;
     if (!turn) return;
     const steeringUnresolved = this.#hasUnresolvedSteering(turn);
-    this.#completeTurn(session, turn, 'finished');
+    this.#completeTurn(session, turn, turn.failureMessage ? 'failed' : 'finished', turn.failureMessage ?? undefined);
     if (steeringUnresolved) {
       this.#retireInBackground(session, 'steering remained uncertain at settle');
     }
@@ -799,6 +800,7 @@ export class PiRpcRuntime {
         type: 'run-ended',
         runId: turn.operation.runId,
         outcome: 'finished',
+        ...(turn.finalResponse ? { finalResponse: turn.finalResponse } : {}),
       });
     } else if (outcome === 'stopped') {
       this.#publishTurnEvent(session, turn, {

@@ -27,13 +27,13 @@ describe('agent turn receipt route', () => {
       updatedAt: expect.any(String),
     });
 
-    await ledger.appendAssistantMessages('chat-1', 'turn-1', ['done']);
+    await ledger.setTurnResult('chat-1', 'turn-1', { type: 'text', text: 'done' });
     await ledger.settleTerminal(accepted.record.key, 'finished');
     await ledger.markPublicTerminal('chat-1', 'turn-1');
     const completed = await getReceipt(ledger, 'chatId=chat-1&turnId=turn-1');
     expect(completed.body).toMatchObject({
       state: 'completed',
-      output: { availability: 'available', assistantMessages: ['done'] },
+      output: { availability: 'available', text: 'done' },
     });
   });
 
@@ -53,7 +53,7 @@ describe('agent turn receipt route', () => {
       turnId: 'turn-1',
       payload: { command: 'hello' },
     });
-    await ledger.appendAssistantMessages('chat-1', 'turn-1', ['done']);
+    await ledger.setTurnResult('chat-1', 'turn-1', { type: 'text', text: 'done' });
     await ledger.settleTerminal(accepted.record.key, 'finished');
     await ledger.markPublicTerminal('chat-1', 'turn-1');
     await ledger.accept({
@@ -63,7 +63,7 @@ describe('agent turn receipt route', () => {
       turnId: 'turn-2',
       payload: { command: 'hello' },
     });
-    await ledger.appendAssistantMessages('chat-2', 'turn-2', ['more']);
+    await ledger.setTurnResult('chat-2', 'turn-2', { type: 'text', text: 'more' });
     const expired = await getReceipt(ledger, 'chatId=chat-1&turnId=turn-1');
     expect(expired.response.status).toBe(410);
     expect(expired.body.errorCode).toBe('TURN_RESULT_EXPIRED');

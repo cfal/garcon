@@ -219,6 +219,13 @@ export interface AgentCommandResumeInput {
   readonly clientMessageId: string;
 }
 
+export interface AgentCommandStopInput {
+  readonly sourceChatId: string;
+  readonly sourceViewId: string;
+  readonly chatId: string;
+  readonly remove: boolean;
+}
+
 export interface ScheduledChatStartInput {
   chatId: ChatId;
   clientRequestId: string;
@@ -234,6 +241,7 @@ export interface ScheduledChatStartInput {
   thinkingMode: ThinkingMode;
   agentSettingsById: Record<string, AgentSettingsEnvelope>;
   tags: string[];
+  orderedPreambleIds?: readonly PreambleId[];
 }
 
 export interface NormalizedChatStart {

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type {
+  AgentFinalResponse,
   AgentPermissionLifecycle,
   AgentPermissionResponseCapability,
   AgentProducerEvent,
@@ -49,10 +50,12 @@ import {
   type AgentStartRequestSink,
   type AgentScheduleRequestSink,
   type AgentResumeRequestSink,
+  type AgentStopRequestSink,
   type InterAgentMessageRequestSink,
 } from './garcon-command-publication.js';
 import { PermissionNotActionableError } from './errors.js';
 import { ProducerLease } from './producer-lease.js';
+import { projectFinalResponse } from './final-response.js';
 import { TranscriptLedgerStore } from './store.js';
 
 export class TranscriptSinkClosedError extends Error {
@@ -94,6 +97,7 @@ export type TranscriptCommitEvent =
       readonly viewId: TranscriptViewId;
       readonly runId: string;
       readonly row: LedgerRunEndedRow;
+      readonly finalResponse: AgentFinalResponse | null;
     }
   | {
       readonly type: 'view-replaced';
@@ -113,6 +117,7 @@ export interface TranscriptLedgerServiceOptions {
   readonly interAgentMessages?: InterAgentMessageRequestSink;
   readonly agentStarts?: AgentStartRequestSink;
   readonly agentResumes?: AgentResumeRequestSink;
+  readonly agentStops?: AgentStopRequestSink;
   readonly agentSchedules?: AgentScheduleRequestSink;
 }
 
@@ -155,6 +160,7 @@ export class TranscriptLedgerService {
   readonly #interAgentMessages: InterAgentMessageRequestSink;
   readonly #agentStarts: AgentStartRequestSink;
   readonly #agentResumes: AgentResumeRequestSink;
+  readonly #agentStops: AgentStopRequestSink;
   readonly #agentSchedules: AgentScheduleRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
@@ -174,6 +180,7 @@ export class TranscriptLedgerService {
     this.#interAgentMessages = options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK;
     this.#agentStarts = options.agentStarts ?? { request: () => undefined };
     this.#agentResumes = options.agentResumes ?? { request: () => undefined };
+    this.#agentStops = options.agentStops ?? { request: () => undefined };
     this.#agentSchedules = options.agentSchedules ?? { request: () => undefined };
   }
 
@@ -595,20 +602,6 @@ export class TranscriptLedgerService {
     return this.#store.rowsThrough(chatId, watermark);
   }
 
-  assistantMessagesForSubmission(
-    chatId: string,
-    viewId: TranscriptViewId,
-    clientMessageId: string,
-    throughOrdinal: number,
-  ): readonly string[] {
-    return this.#store.assistantMessagesForSubmission(
-      chatId,
-      viewId,
-      clientMessageId,
-      throughOrdinal,
-    );
-  }
-
   conversationRows(chatId: string): readonly LedgerConversationRow[] {
     return this.#store.currentRows(chatId).filter(isConversationalLedgerRow);
   }
@@ -746,6 +739,7 @@ export class TranscriptLedgerService {
           interAgentMessages: this.#interAgentMessages,
           agentStarts: this.#agentStarts,
           agentResumes: this.#agentResumes,
+          agentStops: this.#agentStops,
           agentSchedules: this.#agentSchedules,
           committedRows: committed,
         });
@@ -831,6 +825,7 @@ export class TranscriptLedgerService {
           event.outcome,
           'provider',
           event.error,
+          event.outcome === 'finished' ? projectFinalResponse(event.finalResponse) : null,
         );
       }
     }
@@ -842,6 +837,7 @@ export class TranscriptLedgerService {
     outcome: LedgerRunEndedRow['outcome'],
     origin: LedgerRunEndedRow['origin'],
     error?: AgentRunFailureDetail,
+    finalResponse: AgentFinalResponse | null = null,
   ): LedgerRunEndedRow {
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
@@ -855,7 +851,7 @@ export class TranscriptLedgerService {
     }]);
     const ended = row as LedgerRunEndedRow;
     this.#clearRunPermissions(chatId, runId);
-    this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended });
+    this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended, finalResponse });
     return ended;
   }
 

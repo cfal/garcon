@@ -103,6 +103,10 @@ export class ScheduledPromptFormState {
 		);
 	}
 
+	dispose(): void {
+		this.startup.dispose();
+	}
+
 	async initialize(scheduledPrompt: ScheduledPrompt | null): Promise<void> {
 		this.error = null;
 		this.saving = false;
@@ -159,6 +163,7 @@ export class ScheduledPromptFormState {
 		this.startup.replaceAgentSettingsById(scheduledPrompt.target.agentSettingsById);
 		this.startup.chatTags = [...scheduledPrompt.target.tags];
 		this.startup.showTagInput = false;
+		this.startup.preambles.restoreChoice(scheduledPrompt.target.preambleChoice);
 		this.startup.validatePath();
 	}
 
@@ -193,6 +198,7 @@ export class ScheduledPromptFormState {
 				thinkingMode: this.startup.thinkingMode,
 				agentSettingsById: this.startup.agentSettingsById,
 				tags: [...this.startup.chatTags],
+				preambleChoice: this.startup.preambles.choiceSnapshot,
 			},
 			prompt: this.prompt.trim(),
 		};

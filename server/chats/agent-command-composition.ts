@@ -3,7 +3,7 @@ import type { StoredControlInputEntry } from '../chat-execution/control-state.js
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { errorMessage } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
-import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentScheduleRequestSink } from '../ledger/garcon-command-publication.js';
+import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentStopRequestSink, AgentScheduleRequestSink } from '../ledger/garcon-command-publication.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
@@ -13,6 +13,7 @@ import { InterAgentMessageComposition } from './inter-agent-message-composition.
 import type { ChatRegistry } from './store.js';
 import { AgentStartController } from './agent-start-controller.js';
 import { AgentResumeController } from './agent-resume-controller.js';
+import { AgentStopController } from './agent-stop-controller.js';
 import type { CommandLedger } from '../commands/command-ledger.js';
 import { AgentScheduleController } from './agent-schedule-controller.js';
 import type { AgentStartSelectionService } from '../agents/agent-start-selection-service.js';
@@ -43,6 +44,7 @@ export class AgentCommandComposition {
   #notices: TranscriptLedgerService | null = null;
   #starts: AgentStartController | null = null;
   #resumes: AgentResumeController | null = null;
+  #stops: AgentStopController | null = null;
   #schedules: AgentScheduleController | null = null;
 
   readonly agentStarts: AgentStartRequestSink = {
@@ -75,6 +77,13 @@ export class AgentCommandComposition {
     },
   };
 
+  readonly agentStops: AgentStopRequestSink = {
+    request: (source, command) => {
+      if (!this.#stops) throw new Error('Agent stop controller is not initialized');
+      this.#stops.request(source, command);
+    },
+  };
+
   readonly appendControlReceipt = (chatId: string, entry: StoredControlInputEntry): void => {
     if (entry.receipt === null) return;
     if (!this.#notices) throw new Error('Agent command notices are not initialized');
@@ -92,6 +101,10 @@ export class AgentCommandComposition {
       isEnabled: () => commandEnabled(options.settings, 'startAgent'),
     });
     this.#resumes = new AgentResumeController({
+      ...options,
+      isEnabled: () => commandEnabled(options.settings, 'resumeAgent'),
+    });
+    this.#stops = new AgentStopController({
       ...options,
       isEnabled: () => commandEnabled(options.settings, 'resumeAgent'),
     });
@@ -120,6 +133,7 @@ export class AgentCommandComposition {
   discardSource(chatId: string): void {
     this.#starts?.discardSource(chatId);
     this.#resumes?.discardSource(chatId);
+    this.#stops?.discardSource(chatId);
     this.#schedules?.discardSource(chatId);
     this.#chatIdDiscovery?.discard(chatId);
     this.interAgentMessages.discardSource(chatId);
@@ -128,6 +142,7 @@ export class AgentCommandComposition {
   shutdown(): void {
     this.#starts?.shutdown();
     this.#resumes?.shutdown();
+    this.#stops?.shutdown();
     this.#schedules?.shutdown();
   }
 }

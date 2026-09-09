@@ -45,7 +45,7 @@ describe('delegated snapshot turns and results', () => {
       if (interruption === 'chat-deleted') await fixture.client.deleteChat(admitted.chatId);
       else await fixture.client.stopChat({ chatId: admitted.chatId, clientRequestId: 'synthetic-stop' });
       const interrupted = await outcome(fixture, parent, 'interruption', 'interrupted', cursor);
-      expect(interrupted).toMatchObject({ chatId: admitted.chatId, reason: interruption, output: { availability: 'available', text: '' } });
+      expect(interrupted).toMatchObject({ chatId: admitted.chatId, reason: interruption, output: { availability: 'unavailable', reason: 'no-final-response' } });
       expect((await terminal.received).lastUserText).toBe(garconCommandResultContent(interrupted));
       terminal.releaseText('Synthetic interruption observed.');
       await fixture.client.waitForEvent(

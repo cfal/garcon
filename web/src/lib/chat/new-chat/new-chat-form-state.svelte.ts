@@ -34,7 +34,7 @@ import {
 	normalizeSupportedThinkingMode,
 } from '$shared/execution-defaults';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/chat/new-chat/new-chat-submit.js';
-import { NewChatPreambleSelectionState } from './new-chat-preamble-selection-state.svelte.js';
+import { NewChatPreambleSelectionState } from '$lib/preambles/new-chat-preamble-selection-state.svelte.js';
 import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
@@ -616,6 +616,15 @@ export class NewChatFormState {
 		if (nextTags.length === this.chatTags.length) return;
 		this.chatTags = nextTags;
 		this.preambles.automaticFiltersChanged();
+	}
+
+	dispose(): void {
+		if (this.#validationTimer) {
+			clearTimeout(this.#validationTimer);
+			this.#validationTimer = null;
+		}
+		this.#validationRequestVersion += 1;
+		this.preambles.invalidatePreview();
 	}
 
 	// Form submission

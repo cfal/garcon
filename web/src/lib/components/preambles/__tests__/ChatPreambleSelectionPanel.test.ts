@@ -197,6 +197,39 @@ describe('ChatPreambleSelectionPanel', () => {
 		await fireEvent.click(disabledSwitch);
 		expect(remove).toHaveBeenCalledWith(ID_DISABLED);
 	});
+
+	it('disables additional candidates when retained selections reach the limit', () => {
+		const ids = Array.from(
+			{ length: 101 },
+			(_, index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`,
+		);
+		const selectedIds = ids.slice(0, 100);
+		const catalogIds = [...selectedIds.slice(1), ids[100]!];
+		render(ChatPreambleSelectionTestHost, {
+			snapshot: {
+				revision: 4,
+				preambles: catalogIds.map((id, index) => preamble(id, `Preamble ${index + 1}`)),
+			},
+			draftIds: selectedIds,
+			projection: {
+				catalogRevision: 4,
+				eligiblePreambles: selectedIds.map((id, index) => ({
+					id,
+					title: `Preamble ${index + 1}`,
+				})),
+				unavailable: [],
+			},
+		});
+
+		expect(
+			screen.getByText('Maximum of 100 preambles selected. Remove one to add another.'),
+		).toBeTruthy();
+		const candidate = within(slots('chat-preamble-selection-row').at(-1)!).getByRole('switch');
+		expect((candidate as HTMLButtonElement).disabled).toBe(true);
+		expect(
+			document.getElementById(candidate.getAttribute('aria-describedby')!)?.textContent?.trim(),
+		).toBe('Maximum of 100 preambles selected. Remove one to add another.');
+	});
 });
 
 describe('NewChatPreamblePicker', () => {

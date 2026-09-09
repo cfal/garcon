@@ -1,6 +1,7 @@
 import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 import { convertClaudeToolUse } from './tool-use-converter.js';
 import { claudeToolResultContent } from './tool-result-converter.js';
 
@@ -145,6 +146,7 @@ export function claudeBackgroundTaskCount(message: ClaudeCLIMessage): number | n
 }
 
 export class ClaudeTurnState {
+  finalResponse: AgentFinalResponse | undefined;
   readonly inputUuid: string;
   #phase: ClaudeTurnPhase = 'submitted';
   #inputStarted = false;
@@ -299,6 +301,8 @@ export class ClaudeTurnState {
   }
 
   recordAcceptedResult(message: ClaudeCLIMessage): void {
+    this.finalResponse = !message.is_error && typeof message.result === 'string'
+      ? { type: 'text', text: message.result } : undefined;
     const isContinuation = this.hasAcceptedResult;
     this.#acceptedResultCount += 1;
     this.#lastResultAssistantContentVersion = this.#assistantContentVersion;

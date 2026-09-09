@@ -12,7 +12,7 @@ export interface GarconCommandEnvelope {
   readonly selfClosing: boolean;
 }
 
-export type GarconEnvelopeCommand = 'send-message' | 'start-agent' | 'resume-agent' | 'schedule';
+export type GarconEnvelopeCommand = 'send-message' | 'start-agent' | 'resume-agent' | 'stop-agent' | 'schedule';
 
 export interface GarconEnvelopeSpan {
   readonly command: GarconEnvelopeCommand;
@@ -21,7 +21,7 @@ export interface GarconEnvelopeSpan {
 }
 
 export function garconEnvelopeCommandAt(content: string, start: number): GarconEnvelopeCommand | null {
-  for (const command of ['send-message', 'start-agent', 'resume-agent', 'schedule'] as const) {
+  for (const command of ['send-message', 'start-agent', 'resume-agent', 'stop-agent', 'schedule'] as const) {
     const prefix = `<garcon-${command}`;
     if (content.startsWith(prefix, start) && /[\s/>]|^$/.test(content[start + prefix.length] ?? '')) return command;
   }

@@ -9,7 +9,7 @@ export type AsyncDelivery = 'new-turn' | 'steer';
 
 export interface CliOutput {
   accepted(handle: Pick<AgentTurnCommandResponse, 'chatId' | 'turnId'>): void;
-  completed(messages: readonly string[]): void;
+  completed(text: string): void;
   document(content: string): void;
   result(content: string): void;
   sent(chatId: string, delivery: AsyncDelivery, turnId: string): void;
@@ -25,10 +25,8 @@ export function createCliOutput(
     accepted({ chatId, turnId }) {
       stdout.write(`chat id: ${chatId}\nturn id: ${turnId}\n`);
     },
-    completed(messages) {
-      const nonEmpty = messages.filter((message) => message.trim().length > 0);
-      if (nonEmpty.length === 0) return;
-      stdout.write(`${nonEmpty.join('\n\n')}\n`);
+    completed(text) {
+      if (text.length > 0) stdout.write(`${text}\n`);
     },
     document(content) {
       stdout.write(content);

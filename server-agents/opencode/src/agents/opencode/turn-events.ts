@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { PermissionMode } from '@garcon/common/chat-modes';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { AgentFinalResponse, AgentLogger } from '@garcon/server-agent-interface';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import {
   isOpenCodeCompactionAssistant,
@@ -10,6 +10,7 @@ import {
 
 export interface OpenCodeTurnContext {
   operation: AgentRuntimeOperation;
+  finalResponse?: { readonly messageId: string; readonly response: AgentFinalResponse };
   // A manual compaction turn: the provider's summary assistant settles the turn
   // and its internals stay out of the transcript.
   compaction?: boolean;

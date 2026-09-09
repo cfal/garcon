@@ -41,6 +41,8 @@ export class ClaudeTurnPublisher {
       type: 'run-ended',
       runId: turn.operation.runId,
       outcome: 'finished',
+      ...(!turn.protocol.abortRequested && !turn.protocol.cleanAbortResultSeen && turn.protocol.finalResponse
+        ? { finalResponse: turn.protocol.finalResponse } : {}),
     });
   }
 

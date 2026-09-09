@@ -304,6 +304,7 @@ export async function startServer(): Promise<void> {
       interAgentMessages: agentCommands.interAgentMessages,
       agentStarts: agentCommands.agentStarts,
       agentResumes: agentCommands.agentResumes,
+      agentStops: agentCommands.agentStops,
       agentSchedules: agentCommands.agentSchedules,
     });
     const preparedCarryover = new PreparedCarryoverStore();
@@ -623,6 +624,7 @@ export async function startServer(): Promise<void> {
       dispatcher: new ScheduledPromptDispatcher({ commands: chatCommands, chatIds }),
       chats: chatRegistry,
       agents: agentRegistry,
+      preambles,
     });
 
     agentCommands.initialize({
@@ -679,17 +681,6 @@ export async function startServer(): Promise<void> {
         processing: chatProcessingActivity,
         metadata,
         currentTranscriptMessages: (chatId) => transcriptLedger.conversationMessages(chatId),
-        assistantMessagesForSubmission: (
-          chatId,
-          viewId,
-          clientMessageId,
-          throughOrdinal,
-        ) => transcriptLedger.assistantMessagesForSubmission(
-          chatId,
-          viewId,
-          clientMessageId,
-          throughOrdinal,
-        ),
         transientFeeds,
         commandLedger,
         shareStore,

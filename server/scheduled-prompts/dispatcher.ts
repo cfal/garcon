@@ -5,6 +5,7 @@ import {
 } from '../../common/scheduled-prompts.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
+import type { ScheduledChatStartInput } from '../commands/command-support.js';
 
 export interface ScheduledPromptDispatchOutcome {
   message: string;
@@ -47,7 +48,7 @@ export class ScheduledPromptDispatcher {
     }
 
     const chatId = this.deps.chatIds.allocate();
-    const result = await this.deps.commands.submitScheduledStart({
+    const startInput: ScheduledChatStartInput = {
       chatId,
       clientRequestId: requestId,
       clientMessageId: messageId,
@@ -62,7 +63,11 @@ export class ScheduledPromptDispatcher {
       thinkingMode: scheduledPrompt.target.thinkingMode,
       agentSettingsById: scheduledPrompt.target.agentSettingsById,
       tags: scheduledPrompt.target.tags,
-    });
+    };
+    if (scheduledPrompt.target.preambleChoice.mode === 'explicit') {
+      startInput.orderedPreambleIds = [...scheduledPrompt.target.preambleChoice.orderedPreambleIds];
+    }
+    const result = await this.deps.commands.submitScheduledStart(startInput);
     if (result.chatId !== chatId) {
       throw new Error('Scheduled chat start did not return the allocated chat ID');
     }
