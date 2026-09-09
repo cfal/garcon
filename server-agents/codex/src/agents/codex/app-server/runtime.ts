@@ -1322,8 +1322,9 @@ export class CodexAppServerRuntime {
     }
     this.#finalResponses.delete(operation);
     if (params.turn.status === 'completed') {
-      const message = params.turn.items.findLast((item) => item.type === 'agentMessage');
-      if (message?.type === 'agentMessage' && message.phase !== 'commentary') {
+      const message = params.turn.items.findLast((item) =>
+        item.type === 'agentMessage' && item.phase !== 'commentary');
+      if (message?.type === 'agentMessage') {
         this.#finalResponses.set(operation, { type: 'text', text: message.text });
       }
     }

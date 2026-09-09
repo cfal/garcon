@@ -7114,6 +7114,25 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(published.events).map((message) => message.content)).toEqual(['Earlier progress.', text].filter(Boolean));
   });
 
+  it('retains the latest final answer when the terminal payload ends with commentary', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    const finished = published.waitForEvent((event) => event.type === 'run-ended');
+    await provider.runTurn(makeRequest({ operation: published.operation }));
+    const items = [
+      { type: 'agentMessage', id: 'earlier-final', text: 'Earlier final.', phase: 'final_answer', memoryCitation: null },
+      { type: 'agentMessage', id: 'latest-final', text: 'Latest final.', phase: 'final_answer', memoryCitation: null },
+      { type: 'agentMessage', id: 'commentary', text: 'Trailing commentary.', phase: 'commentary', memoryCitation: null },
+    ];
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1',
+      turn: makeTurn({ id: 'turn-1', status: 'completed', items, itemsView: 'summary' }) } });
+    await finished;
+    expect(published.events.at(-1).finalResponse).toEqual({ type: 'text', text: 'Latest final.' });
+    expect(publishedMessages(published.events).map((message) => message.content))
+      .toEqual(['Earlier final.', 'Latest final.', 'Trailing commentary.']);
+  });
+
   it('does not append native-only interrupted tools behind live assistant output', async () => {
     const nativePath = path.join(tmpDir, 'interrupted-native-tail.jsonl');
     const liveCommand = {
