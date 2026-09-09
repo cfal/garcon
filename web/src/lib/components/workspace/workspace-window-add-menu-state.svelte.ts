@@ -115,6 +115,7 @@ export class WorkspaceWindowAddMenuState {
 	}
 
 	handleCloseAutoFocus(event: Event): void {
-		if (this.#pendingPromotedAction) event.preventDefault();
+		// Focus-scope refreshes may emit close callbacks while the menu remains open.
+		if (this.overflowMenuOpen || this.#pendingPromotedAction) event.preventDefault();
 	}
 }

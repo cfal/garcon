@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import WorkspaceWindowAddMenu from '../WorkspaceWindowAddMenu.svelte';
+import { WorkspaceWindowAddMenuState } from '../workspace-window-add-menu-state.svelte.js';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
@@ -1185,6 +1186,59 @@ describe('WorkspaceWindowTitleBar', () => {
 		);
 		expect(screen.getByRole('button', { name: addLabel })).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: secondActionLabel })).toBeNull();
+	});
+
+	it('keeps retained action focus across an open menu focus-scope refresh', async () => {
+		const openAutoFocus = vi.spyOn(WorkspaceWindowAddMenuState.prototype, 'handleOpenAutoFocus');
+		const node = workspaceWindow([chatSurface.id]);
+		const rendered = render(WorkspaceWindowAddMenu, {
+			windowId: node.id,
+			tabs: node.tabs,
+			measure: { naturalWidth: 200, viewportWidth: 200 },
+		});
+		try {
+			const trigger = screen.getByRole('button', { name: m.workspace_add_to_window() });
+			await fireEvent.click(trigger);
+			const menu = await screen.findByRole('menu');
+			await waitFor(() => expect(openAutoFocus).toHaveBeenCalled());
+			const owner = openAutoFocus.mock.contexts.at(-1);
+			if (!(owner instanceof WorkspaceWindowAddMenuState)) {
+				throw new Error('Missing mounted add-menu controller.');
+			}
+			const retainedAction = screen.getByRole('menuitem', { name: m.workspace_open_git_history() });
+			retainedAction.focus();
+
+			// Bits UI refreshes its focus scope with close/open callbacks while the menu stays open.
+			const refreshClose = new CustomEvent('focusScope.onCloseAutoFocus', { cancelable: true });
+			owner.handleCloseAutoFocus(refreshClose);
+			expect(refreshClose.defaultPrevented).toBe(true);
+			owner.handleOpenAutoFocus(
+				new CustomEvent('focusScope.onOpenAutoFocus', { cancelable: true }),
+			);
+			await rendered.rerender({
+				windowId: node.id,
+				tabs: node.tabs,
+				measure: { naturalWidth: 200, viewportWidth: 230 },
+			});
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			expect(
+				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+			).toHaveLength(1);
+			expect(screen.getByRole('menu')).toBe(menu);
+			expect(screen.getByRole('menuitem', { name: m.workspace_open_git_history() })).toBe(
+				retainedAction,
+			);
+			expect(document.activeElement).toBe(retainedAction);
+
+			await fireEvent.keyDown(retainedAction, { key: 'Escape' });
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			await waitFor(() => expect(document.activeElement).toBe(trigger));
+			const actualClose = new CustomEvent('focusScope.onCloseAutoFocus', { cancelable: true });
+			owner.handleCloseAutoFocus(actualClose);
+			expect(actualClose.defaultPrevented).toBe(false);
+		} finally {
+			openAutoFocus.mockRestore();
+		}
 	});
 
 	it('moves saved terminals into the inline terminal menu', async () => {

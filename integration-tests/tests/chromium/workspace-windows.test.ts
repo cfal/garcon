@@ -967,7 +967,10 @@ describe('Chromium workspace windows', () => {
         'data-workspace-window-add-action',
       );
       if (!promotedActionId) throw new Error('Overflow action has no stable identity.');
-      await promotedMenuAction.focus();
+      await menu.press('Home');
+      expect(
+        await promotedMenuAction.evaluate((element) => element === document.activeElement),
+      ).toBe(true);
       await titlebar.evaluate((element) => {
         const header = element as HTMLElement;
         header.style.width = `${header.getBoundingClientRect().width + 30}px`;
@@ -1017,7 +1020,12 @@ describe('Chromium workspace windows', () => {
         'data-workspace-window-add-action',
       );
       if (!retainedActionId) throw new Error('Retained overflow action has no stable identity.');
-      await retainedMenuAction.focus();
+      await retainedMenuAction.hover({ position: { x: 2, y: 10 } });
+      await menu.press('Home');
+      await fixture.page.keyboard.press('ArrowDown');
+      expect(
+        await retainedMenuAction.evaluate((element) => element === document.activeElement),
+      ).toBe(true);
       await titlebar.evaluate((element) => {
         const header = element as HTMLElement;
         header.style.width = `${header.getBoundingClientRect().width + 30}px`;
