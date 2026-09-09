@@ -6,6 +6,7 @@ import type {
   CreateChatBoardResponse,
 } from '../../../common/chat-boards.js';
 import type { ChatTagsMutationResponse } from '../../../common/chat-tag-mutations.js';
+import { normalizeTags } from '../../../common/tags.js';
 import {
   withChromiumFixture,
   type ChromiumFixture,
@@ -35,8 +36,18 @@ async function seedBoard(fixture: ChromiumFixture): Promise<void> {
     id: created.boardId,
     name: 'Delivery',
     columns: [
-      { id: READY_COLUMN_ID, name: 'Ready', match: 'all', tags: ['ready'] },
-      { id: REVIEW_COLUMN_ID, name: 'Review', match: 'all', tags: ['review'] },
+      {
+        id: READY_COLUMN_ID,
+        name: 'Ready',
+        match: 'all',
+        tags: normalizeTags(['ready', ...LONG_CARD_TAGS]),
+      },
+      {
+        id: REVIEW_COLUMN_ID,
+        name: 'Review',
+        match: 'all',
+        tags: normalizeTags(['review', ...LONG_CARD_TAGS]),
+      },
     ],
   };
   await fixture.integration.client.put<ChatBoardMutationResponse>('/api/v1/chat-boards', {

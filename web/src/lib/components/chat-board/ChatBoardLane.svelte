@@ -60,11 +60,11 @@
 		if (narrow) return 'w-full';
 		switch (layout) {
 			case 'single-line':
-				return 'basis-[clamp(280px,30vw,340px)] grow';
+				return 'w-[clamp(280px,30vw,340px)] grow';
 			case 'compact':
-				return 'basis-[clamp(304px,32vw,368px)] grow';
+				return 'w-[clamp(304px,32vw,368px)] grow';
 			case 'detailed':
-				return 'basis-[clamp(336px,36vw,416px)] grow';
+				return 'w-[clamp(336px,36vw,416px)] grow';
 		}
 	});
 
