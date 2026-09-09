@@ -844,6 +844,7 @@ describe('GarconClient', () => {
         turnId: 'turn-1',
         status: 'accepted',
         acceptedAt: new Date().toISOString(),
+        parentChat: null,
         tagMutation,
       }),
     });
@@ -909,11 +910,19 @@ describe('GarconClient', () => {
             changed: true,
           });
         }
+        if (url.includes('/api/v1/chats/tags?')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            tags: ['existing'],
+          });
+        }
         return Response.json({
           success: true,
           chatId: runRequest.chatId,
           tags: ['automation', 'review'],
-          changed: true,
+          addedTags: ['automation', 'review'],
+          removedTags: ['existing'],
         });
       },
     });
@@ -939,9 +948,18 @@ describe('GarconClient', () => {
         body: JSON.stringify({ chatId: runRequest.chatId, isArchived: true }),
       },
       {
+        url: `${connection.baseUrl}/api/v1/chats/tags?chatId=${encodeURIComponent(runRequest.chatId)}`,
+        method: 'GET',
+        body: 'undefined',
+      },
+      {
         url: `${connection.baseUrl}/api/v1/chats/tags`,
         method: 'PATCH',
-        body: JSON.stringify({ chatId: runRequest.chatId, tags: ['automation', 'review'] }),
+        body: JSON.stringify({
+          chatId: runRequest.chatId,
+          expectedTags: ['existing'],
+          tags: ['automation', 'review'],
+        }),
       },
     ]);
   });
