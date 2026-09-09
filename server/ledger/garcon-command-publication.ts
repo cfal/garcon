@@ -9,6 +9,7 @@ import {
 import type { LedgerRow, LedgerRowDraft, TranscriptViewId } from './contracts.js';
 import type { GarconStartAgentCommand } from '../../common/garcon-start-agent.js';
 import type { GarconResumeAgentCommand } from '../../common/garcon-resume-agent.js';
+import type { GarconStopAgentCommand } from '../../common/garcon-stop-agent.js';
 import type { GarconScheduleCommand } from '../../common/garcon-schedule.js';
 import {
   chatIdRequestNoticeDraft,
@@ -39,6 +40,10 @@ export interface AgentStartRequestSink {
 
 export interface AgentResumeRequestSink {
   request(source: AgentCommandSource, command: GarconResumeAgentCommand): void;
+}
+
+export interface AgentStopRequestSink {
+  request(source: AgentCommandSource, command: GarconStopAgentCommand): void;
 }
 
 export interface AgentScheduleRequestSink {
@@ -93,6 +98,7 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
       switch (command.type) {
         case 'start-agent':
         case 'resume-agent':
+        case 'stop-agent':
         case 'schedule':
           drafts.push(agentActionRequestNoticeDraft(row.message.timestamp, command));
           break;
@@ -132,6 +138,7 @@ export function dispatchGarconCommands(
     readonly interAgentMessages: InterAgentMessageRequestSink;
     readonly agentStarts: AgentStartRequestSink;
     readonly agentResumes: AgentResumeRequestSink;
+    readonly agentStops: AgentStopRequestSink;
     readonly agentSchedules: AgentScheduleRequestSink;
     readonly committedRows: readonly LedgerRow[];
   },
@@ -140,6 +147,7 @@ export function dispatchGarconCommands(
     switch (command.type) {
       case 'start-agent':
       case 'resume-agent':
+      case 'stop-agent':
       case 'schedule': {
         const requestRow = options.committedRows[requestDraftIndex];
         if (!requestRow) throw new Error('Committed Garcon request row is missing');
@@ -147,6 +155,7 @@ export function dispatchGarconCommands(
           requestOrdinal: requestRow.ordinal, runId: options.runId, at };
         if (command.type === 'start-agent') options.agentStarts.request(source, command);
         else if (command.type === 'resume-agent') options.agentResumes.request(source, command);
+        else if (command.type === 'stop-agent') options.agentStops.request(source, command);
         else options.agentSchedules.request(source, command);
         break;
       }

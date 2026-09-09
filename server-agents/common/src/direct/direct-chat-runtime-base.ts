@@ -336,7 +336,8 @@ export abstract class DirectChatRuntimeBase<
         rows: runtimeRows([new AssistantMessage(assistant.at, response)]),
       });
       this.#markSessionIdle(session);
-      operation.publish({ type: 'run-ended', runId: operation.runId, outcome: 'finished' });
+      operation.publish({ type: 'run-ended', runId: operation.runId, outcome: 'finished',
+        ...(!session.aborted ? { finalResponse: { type: 'text' as const, text: response } } : {}) });
     } catch (error) {
       if (session.aborted) {
         this.#finishAbortedTurn(session, operation);

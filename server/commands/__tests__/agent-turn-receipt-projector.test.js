@@ -13,9 +13,7 @@ function record(overrides = {}) {
     acceptedAt: '2026-07-31T12:00:00.000Z',
     updatedAt: '2026-07-31T12:00:00.000Z',
     turnId: 'turn-1',
-    assistantMessages: [],
-    assistantBytes: 0,
-    turnResultAvailability: 'available',
+    turnResult: { availability: 'available', text: '', bytes: 0 },
     ...overrides,
   };
 }
@@ -40,10 +38,10 @@ describe('agent turn receipt projection', () => {
     expect(projectAgentTurnReceipt(record({
       status: 'finished',
       publicTerminalAt,
-      assistantMessages: ['done'],
+      turnResult: { availability: 'available', text: 'done', bytes: 4 },
     }))).toMatchObject({
       kind: 'found',
-      receipt: { state: 'completed', output: { completeness: 'complete', assistantMessages: ['done'] } },
+      receipt: { state: 'completed', output: { completeness: 'complete', text: 'done' } },
     });
     expect(projectAgentTurnReceipt(record({
       status: 'failed',
@@ -56,7 +54,7 @@ describe('agent turn receipt projection', () => {
         state: 'failed',
         error: 'provider failed',
         errorCode: 'CARRYOVER_COMPACTION_FAILED',
-        output: { completeness: 'best-effort' },
+        output: { availability: 'unavailable', reason: 'no-final-response' },
       },
     });
     expect(projectAgentTurnReceipt(record({
@@ -67,7 +65,7 @@ describe('agent turn receipt projection', () => {
       kind: 'found',
       receipt: { state: 'interrupted', reason: 'user-stop' },
     });
-    expect(projectAgentTurnReceipt(record({ turnResultAvailability: 'expired' })))
+    expect(projectAgentTurnReceipt(record({ turnResult: { availability: 'unavailable', reason: 'expired' } })))
       .toEqual({ kind: 'expired' });
   });
 
@@ -75,8 +73,7 @@ describe('agent turn receipt projection', () => {
     expect(projectAgentTurnReceipt(record({
       status: 'finished',
       publicTerminalAt: '2026-07-31T12:01:00.000Z',
-      turnResultAvailability: 'too-large',
-      assistantMessages: undefined,
+      turnResult: { availability: 'unavailable', reason: 'too-large' },
     }))).toMatchObject({
       receipt: { output: { availability: 'unavailable', reason: 'too-large' } },
     });
@@ -86,7 +83,7 @@ describe('agent turn receipt projection', () => {
     expect(projectAgentTurnReceipt(record({
       status: 'finished',
       publicTerminalAt: '2026-07-31T12:01:00.000Z',
-      turnResultAvailability: 'retention-pressure',
+      turnResult: { availability: 'unavailable', reason: 'retention-pressure' },
     }))).toMatchObject({
       kind: 'found',
       receipt: { output: { availability: 'unavailable', reason: 'retention-pressure' } },

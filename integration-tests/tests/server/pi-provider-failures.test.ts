@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
 import {
   assistantContents,
   messagesOfType,
@@ -7,9 +8,8 @@ import {
   chatCompletionsText,
   type FakeChatCompletionsModel,
 } from '../../support/fake-chat-completions-model.js';
-import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 import {
-  expectFinished,
   LIVE_TURN_TIMEOUT_MS,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
@@ -21,7 +21,7 @@ import {
 } from '../../support/scripted-pi.js';
 
 // Locks Pi's provider-failure contract. Pi surfaces the final failure as an ErrorMessage and
-// the Garcon-visible run finishes only after agent_settled closes the four-attempt retry cycle.
+// the Garcon-visible run fails only after agent_settled closes the four-attempt retry cycle.
 const PI_ATTEMPTS_PER_PROCESS = 4;
 
 let environment: ScriptedPiTestEnvironment | undefined;
@@ -36,7 +36,7 @@ describe('scripted Pi provider failures', () => {
     environment = undefined;
   });
 
-  test('surfaces an HTTP 500 as an error message, finishes the turn, and recovers', async () => {
+  test('surfaces an HTTP 500 as an error message, fails the turn, and recovers', async () => {
     const testEnvironment = requireEnvironment();
     const prompt = marker('HTTP500_PROMPT');
     const faultMessage = 'scripted http failure';
@@ -62,7 +62,8 @@ describe('scripted Pi provider failures', () => {
         afterIndex: cursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      expectFinished(terminal.type);
+      expect(terminal.type).toBe('agent-run-failed');
+      await expectFailedReceipt(fixture, chatId, turn.turnId);
       const errors = messagesOfType(
         (await fixture.client.getMessages(chatId)).messages,
         'error',
@@ -121,7 +122,8 @@ describe('scripted Pi provider failures', () => {
         afterIndex: cursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      expectFinished(terminal.type);
+      expect(terminal.type).toBe('agent-run-failed');
+      await expectFailedReceipt(fixture, chatId, turn.turnId);
       expect(messagesOfType(
         (await fixture.client.getMessages(chatId)).messages,
         'error',
@@ -170,7 +172,8 @@ describe('scripted Pi provider failures', () => {
         afterIndex: cursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      expectFinished(terminal.type);
+      expect(terminal.type).toBe('agent-run-failed');
+      await expectFailedReceipt(fixture, chatId, turn.turnId);
       await fixture.client.waitForProcessing(chatId, false, {
         afterIndex: cursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -203,6 +206,17 @@ describe('scripted Pi provider failures', () => {
     }, withScriptedPi());
   }, 240_000);
 });
+
+async function expectFailedReceipt(fixture: IntegrationFixture, chatId: string, turnId: string | undefined): Promise<void> {
+  if (!turnId) throw new Error('Missing admitted turn');
+  const receipt = parseAgentTurnReceipt(await fixture.client.get(
+    `/api/v1/chats/turn-receipt?chatId=${chatId}&turnId=${turnId}`,
+  ));
+  expect(receipt).toMatchObject({
+    state: 'failed',
+    output: { availability: 'unavailable', reason: 'no-final-response' },
+  });
+}
 
 function requireEnvironment(): ScriptedPiTestEnvironment {
   if (!environment) throw new Error('Scripted Pi environment was not initialized.');

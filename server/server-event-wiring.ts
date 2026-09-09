@@ -5,7 +5,6 @@ import { isErrorCode } from '../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
 import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts.js';
-import type { TranscriptViewId } from './ledger/contracts.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
@@ -68,12 +67,6 @@ export interface ServerEventWiringDeps {
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
   currentTranscriptMessages(chatId: string): readonly ChatMessage[];
-  assistantMessagesForSubmission(
-    chatId: string,
-    viewId: TranscriptViewId,
-    clientMessageId: string,
-    throughOrdinal: number,
-  ): readonly string[];
   transientFeeds: ChatTransientFeedStore;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
@@ -110,7 +103,6 @@ export function wireServerEvents({
   processing,
   metadata,
   currentTranscriptMessages,
-  assistantMessagesForSubmission,
   transientFeeds,
   commandLedger,
   shareStore,
@@ -404,19 +396,7 @@ export function wireServerEvents({
       });
     }
     if (event.type !== 'run-ended') return;
-    const record = await commandLedger.getTurnRecord(event.chatId, event.runId);
-    const clientMessageId = record?.payload.clientMessageId;
-    if (typeof clientMessageId !== 'string') return;
-    await commandLedger.appendAssistantMessages(
-      event.chatId,
-      event.runId,
-      assistantMessagesForSubmission(
-        event.chatId,
-        event.viewId,
-        clientMessageId,
-        event.row.ordinal,
-      ),
-    );
+    await commandLedger.setTurnResult(event.chatId, event.runId, event.finalResponse);
   });
   const publishProcessing = (chatId: string) => {
     if (!chatExists(chatId)) return;

@@ -54,11 +54,7 @@ function terminalOutcome(record: CommandLedgerRecord | null, chatId: string): Ag
   if (projected.kind === 'expired') return { status: 'result-unavailable', chatId, reason: 'receipt-expired' };
   const { receipt } = projected;
   if (receipt.state === 'pending') return { status: 'result-unavailable', chatId, reason: 'receipt-unavailable' };
-  const output = receipt.output.availability === 'unavailable' ? receipt.output : {
-    availability: 'available' as const,
-    completeness: receipt.output.completeness,
-    text: receipt.output.assistantMessages.filter((message) => message.trim()).join('\n\n'),
-  };
+  const output = receipt.output;
   switch (receipt.state) {
     case 'completed': return { status: 'completed', chatId, output };
     case 'failed': return { status: 'failed', chatId, errorCode: receipt.errorCode, output };

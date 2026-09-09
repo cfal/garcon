@@ -40,7 +40,7 @@ const receipt: AgentTurnReceipt = {
   acceptedAt: accepted.acceptedAt,
   updatedAt: accepted.acceptedAt,
   settledAt: new Date().toISOString(),
-  output: { availability: 'available', completeness: 'complete', assistantMessages: ['Done'] },
+  output: { availability: 'available', completeness: 'complete', text: 'Done' },
 };
 
 function snapshot(): ChatSnapshotResponse {
@@ -123,13 +123,13 @@ const settings = {
 
 function output(): CliOutput & {
   acceptedHandles: Array<{ chatId: string; turnId: string }>;
-  messages: string[][];
+  messages: string[];
   diagnostics: string[];
 } {
   return {
     acceptedHandles: [], messages: [], diagnostics: [],
     accepted({ chatId, turnId }) { this.acceptedHandles.push({ chatId, turnId }); },
-    completed(messages) { this.messages.push([...messages]); },
+    completed(text) { this.messages.push(text); },
     result() {},
     sent() {},
     stopped() {},
@@ -243,7 +243,7 @@ describe('runConsultation', () => {
     });
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Implementation review' }]);
-    expect(testOutput.messages).toEqual([['Done']]);
+    expect(testOutput.messages).toEqual(['Done']);
   });
 
   test('retries a server-reported chat ID collision with entirely new identities', async () => {
@@ -386,7 +386,7 @@ describe('runConsultation', () => {
     })).resolves.toBeUndefined();
 
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
-    expect(testOutput.messages).toEqual([['Done']]);
+    expect(testOutput.messages).toEqual(['Done']);
     expect(submissions).toBe(1);
     if (diagnostic) {
       expect(testOutput.diagnostics).toHaveLength(1);
@@ -418,7 +418,7 @@ describe('runConsultation', () => {
 
     expect(receiptRead).toBe(true);
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
-    expect(testOutput.messages).toEqual([['Done']]);
+    expect(testOutput.messages).toEqual(['Done']);
   });
 
   test('validates resume overrides against the persisted agent catalog', async () => {
@@ -501,7 +501,7 @@ describe('runConsultation', () => {
       state: 'failed',
       error: 'provider failed',
       errorCode: 'INTERNAL_ERROR',
-      output: { availability: 'available', completeness: 'best-effort', assistantMessages: ['Partial'] },
+      output: { availability: 'unavailable', reason: 'no-final-response' },
     } as AgentTurnReceipt;
     const testOutput = output();
     try {

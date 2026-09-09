@@ -133,12 +133,12 @@ describe('CommandLedger', () => {
     const ledger = new CommandLedger();
     const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
 
-    await ledger.appendAssistantMessages('chat-1', 'turn-1', ['first', 'second']);
+    await ledger.setTurnResult('chat-1', 'turn-1', { type: 'text', text: 'first\n\nsecond' });
     await ledger.settleTerminal(accepted.record.key, 'finished');
     const terminal = await ledger.getTurnRecord('chat-1', 'turn-1');
     expect(terminal).toMatchObject({
       status: 'finished',
-      assistantMessages: ['first', 'second'],
+      turnResult: { availability: 'available', text: 'first\n\nsecond' },
       payload: {},
     });
     expect(terminal.publicTerminalAt).toBeUndefined();
@@ -146,7 +146,6 @@ describe('CommandLedger', () => {
     await ledger.markPublicTerminal('chat-1', 'turn-1');
     expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
       publicTerminalAt: expect.any(String),
-      turnResultAvailability: 'available',
     });
   });
 
@@ -192,38 +191,40 @@ describe('CommandLedger', () => {
     const ledger = new CommandLedger(undefined, { turnResultByteLimit: 5 });
     await ledger.accept(acceptedInput({ turnId: 'turn-large' }));
 
-    await ledger.appendAssistantMessages('chat-1', 'turn-large', ['1234']);
-    await ledger.appendAssistantMessages('chat-1', 'turn-large', ['56']);
+    await ledger.setTurnResult('chat-1', 'turn-large', { type: 'text', text: '123456' });
 
     expect(await ledger.getTurnRecord('chat-1', 'turn-large')).toMatchObject({
-      turnResultAvailability: 'too-large',
-      assistantBytes: 0,
+      turnResult: { availability: 'unavailable', reason: 'too-large' },
     });
-    expect((await ledger.getTurnRecord('chat-1', 'turn-large')).assistantMessages).toBeUndefined();
+    expect((await ledger.getTurnRecord('chat-1', 'turn-large')).turnResult.text).toBeUndefined();
   });
 
-  it('ignores empty assistant entries and bounds tiny-message arrays', async () => {
-    const ledger = new CommandLedger(undefined, {
-      turnResultByteLimit: 100,
-      totalTurnResultByteLimit: 100,
-      turnResultMessageLimit: 2,
-      totalTurnResultMessageLimit: 10,
-    });
-    await ledger.accept(acceptedInput({ turnId: 'turn-many' }));
+  it.each([null, { type: 'text', text: '' }, { type: 'text', text: 'Final answer.' }])(
+    'captures exactly once, distinguishing absent and empty finals: %j', async (response) => {
+      const ledger = new CommandLedger();
+      await ledger.accept(acceptedInput({ turnId: 'turn-one' }));
+      await ledger.setTurnResult('chat-1', 'turn-one', response);
+      await ledger.setTurnResult('chat-1', 'turn-one', { type: 'text', text: 'Late replacement.' });
+      expect((await ledger.getTurnRecord('chat-1', 'turn-one')).turnResult).toEqual(response === null
+        ? { availability: 'unavailable', reason: 'no-final-response' }
+        : { availability: 'available', text: response.text, bytes: Buffer.byteLength(response.text) });
+    },
+  );
 
-    await ledger.appendAssistantMessages('chat-1', 'turn-many', Array(10_000).fill(''));
-    expect(await ledger.getTurnRecord('chat-1', 'turn-many')).toMatchObject({
-      turnResultAvailability: 'available',
-      assistantMessages: [],
-      assistantBytes: 0,
+  it.each(['failed', 'rejected', 'interrupted'])('discards retained final text after %s and releases its budget', async (outcome) => {
+    const ledger = new CommandLedger(undefined, { totalTurnResultByteLimit: 4 });
+    const first = await ledger.accept(acceptedInput({ turnId: 'turn-first' }));
+    await ledger.setTurnResult('chat-1', 'turn-first', { type: 'text', text: '1234' });
+    if (outcome === 'interrupted') await ledger.markPublicTerminal('chat-1', 'turn-first', 'user-stop');
+    else await ledger.update(first.record.key, { status: outcome });
+    expect((await ledger.getTurnRecord('chat-1', 'turn-first')).turnResult).toEqual({
+      availability: 'unavailable', reason: 'no-final-response',
     });
-
-    await ledger.appendAssistantMessages('chat-1', 'turn-many', ['a', 'b', 'c']);
-    expect(await ledger.getTurnRecord('chat-1', 'turn-many')).toMatchObject({
-      turnResultAvailability: 'too-large',
-      assistantBytes: 0,
+    await ledger.accept(acceptedInput({ clientRequestId: 'second', turnId: 'turn-second' }));
+    await ledger.setTurnResult('chat-1', 'turn-second', { type: 'text', text: '5678' });
+    expect((await ledger.getTurnRecord('chat-1', 'turn-second')).turnResult).toEqual({
+      availability: 'available', text: '5678', bytes: 4,
     });
-    expect((await ledger.getTurnRecord('chat-1', 'turn-many')).assistantMessages).toBeUndefined();
   });
 
   it('expires the oldest public result under aggregate pressure', async () => {
@@ -232,20 +233,19 @@ describe('CommandLedger', () => {
       totalTurnResultByteLimit: 5,
     });
     const first = await ledger.accept(acceptedInput({ clientRequestId: 'first', turnId: 'turn-first' }));
-    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
+    await ledger.setTurnResult('chat-1', 'turn-first', { type: 'text', text: '1234' });
     await ledger.settleTerminal(first.record.key, 'finished');
     await ledger.markPublicTerminal('chat-1', 'turn-first');
     const second = await ledger.accept(acceptedInput({ clientRequestId: 'second', turnId: 'turn-second' }));
-    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+    await ledger.setTurnResult('chat-1', 'turn-second', { type: 'text', text: '5678' });
     await ledger.settleTerminal(second.record.key, 'finished');
     await ledger.markPublicTerminal('chat-1', 'turn-second');
 
     expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
-      turnResultAvailability: 'expired',
+      turnResult: { availability: 'unavailable', reason: 'expired' },
     });
     expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
-      turnResultAvailability: 'available',
-      assistantMessages: ['5678'],
+      turnResult: { availability: 'available', text: '5678' },
     });
   });
 
@@ -257,17 +257,14 @@ describe('CommandLedger', () => {
     await ledger.accept(acceptedInput({ clientRequestId: 'first', turnId: 'turn-first' }));
     await ledger.accept(acceptedInput({ clientRequestId: 'second', turnId: 'turn-second' }));
 
-    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
-    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+    await ledger.setTurnResult('chat-1', 'turn-first', { type: 'text', text: '1234' });
+    await ledger.setTurnResult('chat-1', 'turn-second', { type: 'text', text: '5678' });
 
     expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
-      turnResultAvailability: 'available',
-      assistantMessages: ['1234'],
-      assistantBytes: 4,
+      turnResult: { availability: 'available', text: '1234' },
     });
     expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
-      turnResultAvailability: 'retention-pressure',
-      assistantBytes: 0,
+      turnResult: { availability: 'unavailable', reason: 'retention-pressure' },
     });
   });
 
@@ -424,14 +421,14 @@ describe('CommandLedger', () => {
       clientRequestId: 'first',
       turnId: 'turn-first',
     }));
-    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
+    await ledger.setTurnResult('chat-1', 'turn-first', { type: 'text', text: '1234' });
     await ledger.settleTerminal(first.record.key, 'finished');
 
     const second = await ledger.accept(acceptedInput({
       clientRequestId: 'second',
       turnId: 'turn-second',
     }));
-    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+    await ledger.setTurnResult('chat-1', 'turn-second', { type: 'text', text: '5678' });
     await ledger.settleTerminal(second.record.key, 'finished');
     await ledger.markPublicTerminal('chat-1', 'turn-second');
     await ledger.markPublicTerminal('chat-1', 'turn-first');
@@ -440,16 +437,15 @@ describe('CommandLedger', () => {
       clientRequestId: 'third',
       turnId: 'turn-third',
     }));
-    await ledger.appendAssistantMessages('chat-1', 'turn-third', ['abcd']);
+    await ledger.setTurnResult('chat-1', 'turn-third', { type: 'text', text: 'abcd' });
     await ledger.settleTerminal(third.record.key, 'finished');
     await ledger.markPublicTerminal('chat-1', 'turn-third');
 
     expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
-      turnResultAvailability: 'expired',
+      turnResult: { availability: 'unavailable', reason: 'expired' },
     });
     expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
-      turnResultAvailability: 'available',
-      assistantMessages: ['1234'],
+      turnResult: { availability: 'available', text: '1234' },
     });
   });
 
@@ -605,17 +601,15 @@ describe('CommandLedger', () => {
       clientRequestId: 'steer-two',
       turnId: 'turn-shared',
     }));
-    await ledger.appendAssistantMessages('chat-1', 'turn-shared', ['first', 'second']);
+    await ledger.setTurnResult('chat-1', 'turn-shared', { type: 'text', text: 'first\n\nsecond' });
 
     expect(await ledger.getTurnRecord('chat-1', 'turn-shared')).toMatchObject({
       commandType: 'agent-run',
       clientRequestId: 'owner-request',
-      assistantMessages: ['first', 'second'],
+      turnResult: { availability: 'available', text: 'first\n\nsecond' },
     });
-    expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-one')))
-      .toMatchObject({ assistantMessages: [] });
-    expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-two')))
-      .toMatchObject({ assistantMessages: [] });
+    expect((await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-one'))).turnResult).toBeUndefined();
+    expect((await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-two'))).turnResult).toBeUndefined();
   });
 
   it('does not share records between process-lifetime ledger instances', async () => {

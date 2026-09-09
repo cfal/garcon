@@ -462,31 +462,6 @@ export class TranscriptLedgerStore {
     });
   }
 
-  assistantMessagesForSubmission(
-    chatId: string,
-    viewId: TranscriptViewId,
-    clientMessageId: string,
-    throughOrdinal: number,
-  ): readonly string[] {
-    return this.#read(chatId, (entry) => {
-      this.#assertCurrent(entry, viewId);
-      const input = readSubmission(entry.db, viewId, clientMessageId);
-      if (input?.kind !== 'user-input' || input.ordinal >= throughOrdinal) return [];
-      return entry.db.query<StoredLedgerRow, [string, number, number]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ? AND ordinal > ? AND ordinal < ? AND kind = 'provider-row'
-        ORDER BY ordinal
-      `).all(viewId, input.ordinal, throughOrdinal)
-        .map(decodeStoredLedgerRow)
-        .flatMap((row) => (
-          row.kind === 'provider-row' && row.message.type === 'assistant-message'
-            ? [row.message.content]
-            : []
-        ));
-    });
-  }
-
   currentRows(chatId: string): readonly LedgerRow[] {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);

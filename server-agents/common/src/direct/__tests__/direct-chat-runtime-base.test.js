@@ -375,10 +375,12 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
       'late first response',
     ]);
     expect(first.events[1]).toMatchObject({ type: 'run-ended', runId: 'run-1' });
+    expect(first.events[1]).not.toHaveProperty('finalResponse');
     expect(second.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
     expect(second.events[0].rows.map((row) => row.message.content)).toEqual([
       'second response',
     ]);
     expect(second.events[1]).toMatchObject({ type: 'run-ended', runId: 'run-2' });
+    expect(second.events[1].finalResponse).toEqual({ type: 'text', text: 'second response' });
   });
 });

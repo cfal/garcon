@@ -7,7 +7,7 @@ export type AgentTurnReceiptProjection =
   | { kind: 'expired' };
 
 export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnReceiptProjection {
-  if (record.turnResultAvailability === 'expired') return { kind: 'expired' };
+  if (record.turnResult?.availability === 'unavailable' && record.turnResult.reason === 'expired') return { kind: 'expired' };
   const base = {
     chatId: record.chatId,
     turnId: record.turnId ?? '',
@@ -18,7 +18,6 @@ export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnR
   if (!record.publicTerminalAt) {
     return { kind: 'found', receipt: { ...base, state: 'pending' } };
   }
-  const output = projectOutput(record);
   if (record.interruptionReason) {
     return {
       kind: 'found',
@@ -27,7 +26,7 @@ export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnR
         state: 'interrupted',
         settledAt: record.publicTerminalAt,
         reason: record.interruptionReason,
-        output,
+        output: { availability: 'unavailable', reason: 'no-final-response' },
       },
     };
   }
@@ -40,7 +39,7 @@ export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnR
         settledAt: record.publicTerminalAt,
         error: record.error ?? 'Agent turn failed',
         errorCode: isErrorCode(record.errorCode) ? record.errorCode : 'INTERNAL_ERROR',
-        output,
+        output: { availability: 'unavailable', reason: 'no-final-response' },
       },
     };
   }
@@ -50,23 +49,22 @@ export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnR
       ...base,
       state: 'completed',
       settledAt: record.publicTerminalAt,
-      output,
+      output: projectOutput(record),
     },
   };
 }
 
 function projectOutput(record: CommandLedgerRecord): AgentTurnOutput {
-  if (record.turnResultAvailability === 'too-large') {
-    return { availability: 'unavailable', reason: 'too-large' };
+  if (record.status !== 'finished' || record.interruptionReason || !record.turnResult) {
+    return { availability: 'unavailable', reason: 'no-final-response' };
   }
-  if (record.turnResultAvailability === 'retention-pressure') {
-    return { availability: 'unavailable', reason: 'retention-pressure' };
+  if (record.turnResult.availability === 'unavailable') {
+    return { availability: 'unavailable', reason: record.turnResult.reason === 'expired'
+      ? 'no-final-response' : record.turnResult.reason };
   }
   return {
     availability: 'available',
-    completeness: record.status === 'finished' && !record.interruptionReason
-      ? 'complete'
-      : 'best-effort',
-    assistantMessages: [...(record.assistantMessages ?? [])],
+    completeness: 'complete',
+    text: record.turnResult.text,
   };
 }
