@@ -24,7 +24,10 @@ function deferred() {
 async function drain() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 
 function fixture(options = {}) {
-  const parent = { projectPath: '/synthetic/project', permissionMode: 'bypassPermissions' };
+  const parent = {
+    agentId: 'test', model: 'test-model', thinkingMode: 'none', agentSettingsById: {},
+    projectPath: '/synthetic/project', permissionMode: 'bypassPermissions',
+  };
   const chats = new Map([[SOURCE.chatId, parent]]);
   let currentView = SOURCE.viewId;
   let enabled = true;
@@ -32,7 +35,7 @@ function fixture(options = {}) {
   const notices = [];
   const events = [];
   const context = {
-    registry: { getChat: (id) => chats.get(id) ?? null },
+    registry: { getChat: (id) => structuredClone(chats.get(id) ?? null) },
     notices: {
       existingCurrentView: () => ({ viewId: currentView }),
       appendNotice: mock((_chatId, _viewId, notice) => { events.push('notice'); notices.push(notice); }),
@@ -118,6 +121,67 @@ describe('assistant action controllers', () => {
     expect(f.events).toEqual(['start', 'notice', 'reply']);
     expect(f.replies[0].input.receipt).toBeNull();
     expect(parseGarconCommandResult(f.replies[0].input.content)).toMatchObject({ status: 'accepted', chatId: CHILD, requestViewId: SOURCE.viewId, requestOrdinal: 2 });
+  });
+
+  it('inherits the latest locked configuration after catalog discovery', async () => {
+    const f = fixture();
+    const discovered = deferred(); const release = deferred();
+    f.agents.getAgentCatalogEntry.mockImplementation(async () => {
+      discovered.resolve(); await release.promise; return f.entry;
+    });
+    f.start.request(SOURCE, { ...START, agentId: null, model: null });
+    await discovered.promise;
+    f.entry.models.push({ value: 'current-model', label: 'Current' });
+    Object.assign(f.parent, {
+      model: 'current-model', thinkingMode: 'high', permissionMode: 'default', projectPath: '/synthetic/current',
+      agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: { current: true } } },
+    });
+    release.resolve(); await drain();
+    expect(f.commands.submitAgentCommandStartLocked).toHaveBeenCalledTimes(1);
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).toMatchObject({
+      agentId: 'test', model: 'current-model', thinkingMode: 'high', permissionMode: 'default',
+      projectPath: '/synthetic/current', agentSettings: f.parent.agentSettingsById.test,
+    });
+  });
+
+  it.each([false, true])('rediscovers a changed parent agent outside locks (old discovery fails: %s)', async (fails) => {
+    const allocate = mock(() => CHILD);
+    const f = fixture({ chatIds: { allocate } });
+    const discovered = deferred(); const release = deferred();
+    const successor = { ...f.entry, id: 'successor', defaultSettings: { ownerId: 'successor', schemaVersion: 1, values: {} } };
+    f.agents.getAgentCatalogEntry.mockImplementation(async (agentId) => {
+      if (agentId === 'test') {
+        discovered.resolve(); await release.promise;
+        if (fails) throw new Error('Old discovery failed');
+        return f.entry;
+      }
+      await f.context.chatMutationLock.runExclusiveMany([`chat:${SOURCE.chatId}`, `chat:${CHILD}`], async () => {});
+      return successor;
+    });
+    f.start.request(SOURCE, { ...START, agentId: null, model: null });
+    await discovered.promise;
+    f.parent.agentId = 'successor';
+    release.resolve(); await drain();
+    expect(f.agents.getAgentCatalogEntry.mock.calls.map(([id]) => id)).toEqual(['test', 'successor']);
+    expect(allocate).toHaveBeenCalledTimes(1);
+    expect(f.commands.submitAgentCommandStartLocked).toHaveBeenCalledTimes(1);
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).toMatchObject({ agentId: 'successor', thinkingMode: 'none' });
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0].detail.status).toBe('accepted');
+  });
+
+  it('bounds rediscovery under repeated ownership changes without admitting a child', async () => {
+    const f = fixture();
+    f.agents.getAgentCatalogEntry.mockImplementation(async (agentId) => {
+      f.parent.agentId = `${agentId}-next`;
+      return f.entry;
+    });
+    f.start.request(SOURCE, { ...START, agentId: null, model: null });
+    await drain();
+    expect(f.agents.getAgentCatalogEntry).toHaveBeenCalledTimes(3);
+    expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason: 'action-failed' });
   });
 
   it.each([

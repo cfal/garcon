@@ -202,66 +202,75 @@ describe('scripted provider agent commands', () => {
   }
 
   for (const [agent, createsChild] of [['claude', true], ['codex', true], ['claude', false], ['codex', false], ['pi', false]] as const) {
-    test(`${agent} accepts ${createsChild ? 'a child start' : 'a schedule'} and receives its private result through its real binary`, async () => {
-      const environment = await environmentFor(agent);
-      try {
-        await withIntegrationFixture(`${agent}-scripted-agent-commands`, async (fixture) => {
-          const source = fixture.newChatId();
-          const start = environment.startRequest({ chatId: source, projectPath: fixture.dirs.project, command: 'Issue the synthetic command.' });
-          const childPrompt = 'Independent synthetic child task.';
-          const command = createsChild
-            ? `<garcon-start-agent ref="task" async="true" agent="${agent}" model="${escapeGarconXmlText(start.model)}" reasoning-effort="${start.thinkingMode}">${childPrompt}</garcon-start-agent>`
-            : '<garcon-schedule every="5m" busy="skip" />';
-          const received: string[] = [];
-          environment.script(() => command);
-          const reply = (input: string) => {
-            received.push(input);
-            return input.includes(childPrompt) ? 'Synthetic child complete.' : 'Synthetic result acknowledged.';
-          };
-          environment.script(reply);
-          if (createsChild) environment.script(reply);
-          const cursor = fixture.client.markEvents();
-          await fixture.client.startChat(start);
-          await fixture.client.waitForEvent(
-            (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === source
-              && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic result acknowledged.'),
-            'private action result acknowledged', { afterIndex: cursor, timeoutMs: 90_000 },
-          );
-          if (createsChild) {
+    for (const selection of createsChild ? ['explicit', 'inherited', 'model-only'] : ['explicit']) {
+      test(`${agent} accepts ${createsChild ? 'a child start' : 'a schedule'} with ${selection} selection and receives its private result through its real binary`, async () => {
+        const environment = await environmentFor(agent);
+        try {
+          await withIntegrationFixture(`${agent}-scripted-agent-commands`, async (fixture) => {
+            const source = fixture.newChatId();
+            const start = environment.startRequest({ chatId: source, projectPath: fixture.dirs.project, command: 'Issue the synthetic command.' });
+            const childPrompt = 'Independent synthetic child task.';
+            let selectionAttributes = '';
+            if (selection === 'explicit') selectionAttributes = `agent="${agent}" model="${escapeGarconXmlText(start.model)}" reasoning-effort="${start.thinkingMode}"`;
+            else if (selection === 'model-only') selectionAttributes = `model="${escapeGarconXmlText(start.model)}"`;
+            const command = createsChild
+              ? `<garcon-start-agent ref="task" async="true" ${selectionAttributes}>${childPrompt}</garcon-start-agent>`
+              : '<garcon-schedule every="5m" busy="skip" />';
+            const received: string[] = [];
+            environment.script(() => command);
+            const reply = (input: string) => {
+              received.push(input);
+              return input.includes(childPrompt) ? 'Synthetic child complete.' : 'Synthetic result acknowledged.';
+            };
+            environment.script(reply);
+            if (createsChild) environment.script(reply);
+            const cursor = fixture.client.markEvents();
+            await fixture.client.startChat(start);
             await fixture.client.waitForEvent(
-              (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId !== source
-                && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic child complete.'),
-              'independent child completed', { afterIndex: cursor, timeoutMs: 90_000 },
+              (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === source
+                && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic result acknowledged.'),
+              'private action result acknowledged', { afterIndex: cursor, timeoutMs: 90_000 },
             );
-          }
-          const transcript = await fixture.client.getMessages(source);
-          expect(userContents(transcript.messages)).toEqual([start.command]);
-          const outcomes = messagesOfType(transcript.messages, 'transcript-notice').filter((notice) =>
-            notice.detail?.type === (createsChild ? 'agent-start-outcome' : 'agent-schedule-outcome'));
-          expect(outcomes).toHaveLength(1);
-          expect(outcomes[0]!.detail).toMatchObject({ status: createsChild ? 'accepted' : 'created' });
-          const outcome = outcomes[0]!.detail;
-          if (outcome?.type !== 'agent-start-outcome' && outcome?.type !== 'agent-schedule-outcome') throw new Error('Missing typed outcome');
-          expect(received.some((input) => input.endsWith(garconCommandResultContent(outcome)))).toBe(true);
-          expect(JSON.stringify(transcript.messages)).not.toContain('<garcon-start-agent');
-          expect(JSON.stringify(transcript.messages)).not.toContain('<garcon-schedule');
-          if (createsChild) {
-            const chats = await fixture.client.listChats();
-            const child = chats.sessions.find((chat) => chat.id !== source);
-            expect(chats.sessions).toHaveLength(2);
-            expect(child?.parentChat).toEqual({ chatId: source, relation: 'delegation' });
-            expect(received.some((input) => input.endsWith(childPrompt))).toBe(true);
-            expect(userContents((await fixture.client.getMessages(child!.id)).messages)).toEqual([childPrompt]);
-          } else {
-            expect((await fixture.client.getScheduledPrompts()).prompts).toMatchObject([{
-              target: { type: 'existing-chat', chatId: source, busyBehavior: 'skip' },
-              schedule: { intervalMinutes: 5 }, prompt: '<garcon-schedule-action />',
-            }]);
-          }
-          environment.settled();
-        }, environment.fixtureOptions);
-      } finally { await environment.dispose(); }
-    }, 120_000);
+            if (createsChild) {
+              await fixture.client.waitForEvent(
+                (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId !== source
+                  && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic child complete.'),
+                'independent child completed', { afterIndex: cursor, timeoutMs: 90_000 },
+              );
+            }
+            const transcript = await fixture.client.getMessages(source);
+            expect(userContents(transcript.messages)).toEqual([start.command]);
+            const outcomes = messagesOfType(transcript.messages, 'transcript-notice').filter((notice) =>
+              notice.detail?.type === (createsChild ? 'agent-start-outcome' : 'agent-schedule-outcome'));
+            expect(outcomes).toHaveLength(1);
+            expect(outcomes[0]!.detail).toMatchObject({ status: createsChild ? 'accepted' : 'created' });
+            const outcome = outcomes[0]!.detail;
+            if (outcome?.type !== 'agent-start-outcome' && outcome?.type !== 'agent-schedule-outcome') throw new Error('Missing typed outcome');
+            expect(received.some((input) => input.endsWith(garconCommandResultContent(outcome)))).toBe(true);
+            expect(JSON.stringify(transcript.messages)).not.toContain('<garcon-start-agent');
+            expect(JSON.stringify(transcript.messages)).not.toContain('<garcon-schedule');
+            if (createsChild) {
+              const chats = await fixture.client.listChats();
+              const child = chats.sessions.find((chat) => chat.id !== source);
+              expect(chats.sessions).toHaveLength(2);
+              expect(child?.parentChat).toEqual({ chatId: source, relation: 'delegation' });
+              expect(child).toMatchObject({
+                agentId: start.agentId, model: start.model, apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+                thinkingMode: start.thinkingMode, permissionMode: start.permissionMode,
+              });
+              expect(received.some((input) => input.endsWith(childPrompt))).toBe(true);
+              expect(userContents((await fixture.client.getMessages(child!.id)).messages)).toEqual([childPrompt]);
+            } else {
+              expect((await fixture.client.getScheduledPrompts()).prompts).toMatchObject([{
+                target: { type: 'existing-chat', chatId: source, busyBehavior: 'skip' },
+                schedule: { intervalMinutes: 5 }, prompt: '<garcon-schedule-action />',
+              }]);
+            }
+            environment.settled();
+          }, environment.fixtureOptions);
+        } finally { await environment.dispose(); }
+      }, 120_000);
+    }
   }
 
   (process.platform === 'linux' ? test : test.skip)('opencode accepts a schedule and consumes its result at an active tool boundary', async () => {
