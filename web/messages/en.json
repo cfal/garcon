@@ -1602,6 +1602,7 @@
 	"settings_title": "Settings",
 	"preamble_selection_add_candidate": "Add {title}",
 	"preamble_selection_apply": "Apply",
+	"preamble_selection_clear": "Clear preambles",
 	"preamble_selection_conflict": "The saved preambles changed while editing. Review the list and save again.",
 	"preamble_selection_dialog_title": "Chat preambles",
 	"preamble_selection_edit": "Edit preambles",

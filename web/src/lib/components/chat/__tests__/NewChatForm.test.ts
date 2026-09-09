@@ -438,6 +438,54 @@ describe('NewChatForm', () => {
 		expect(wideOverflow?.textContent?.trim()).toBe('and 3 more');
 	});
 
+	it('clears all preambles immediately without submitting the form', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const preambleId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+		const clearedPreview = deferred<PreambleSelectionPreviewResponse>();
+		vi.mocked(preamblesApi.preambleSelectionPreview)
+			.mockResolvedValueOnce(previewResponse(1, preambleId, 'Repository conventions'))
+			.mockReturnValueOnce(clearedPreview.promise);
+		const onStartChat = vi.fn();
+
+		render(NewChatFormTestHost, { props: { onStartChat } });
+
+		expect(await screen.findByText('Repository conventions')).toBeTruthy();
+		const messageInput = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(messageInput, { target: { value: 'Start without preambles' } });
+		const start = screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement;
+		await waitFor(() => expect(start.disabled).toBe(false));
+		const edit = screen.getByRole('button', { name: 'Edit preambles' });
+		const clear = screen.getByRole('button', { name: 'Clear preambles' }) as HTMLButtonElement;
+		expect(clear.type).toBe('button');
+		expect(edit.nextElementSibling).toBe(clear);
+
+		await fireEvent.click(clear);
+
+		expect(onStartChat).not.toHaveBeenCalled();
+		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2));
+		expect(preamblesApi.preambleSelectionPreview).toHaveBeenLastCalledWith(
+			expect.objectContaining({ orderedPreambleIds: [] }),
+		);
+		await fireEvent.click(start);
+		expect(onStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({ orderedPreambleIds: [] }),
+			PROSPECTIVE_CHAT_ID,
+		);
+
+		clearedPreview.resolve({
+			success: true,
+			canonicalProjectPath: '/workspace/project',
+			orderedPreambleIds: [],
+			projection: { catalogRevision: 1, eligiblePreambles: [], unavailable: [] },
+		});
+		expect(await screen.findByText('No preambles will be applied')).toBeTruthy();
+	});
+
 	it('retries a failed automatic preamble preview without opening the picker', async () => {
 		stubMatchMedia(false);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(

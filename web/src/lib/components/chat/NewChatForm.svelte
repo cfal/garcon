@@ -747,6 +747,7 @@
 					configurable={form.preambles.configurable}
 					retryable={form.validationStatus === 'valid'}
 					onEdit={() => (preamblePickerOpen = true)}
+					onClear={() => form.preambles.setExplicit([])}
 					onRetry={() => void form.preambles.refreshPreview()}
 				/>
 

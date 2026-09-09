@@ -4,6 +4,7 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { PreambleSelectionProjection } from '$shared/preambles';
@@ -14,10 +15,11 @@
 		configurable: boolean;
 		retryable: boolean;
 		onEdit: () => void;
+		onClear: () => void;
 		onRetry: () => void;
 	}
 
-	let { preview, loading, configurable, retryable, onEdit, onRetry }: Props = $props();
+	let { preview, loading, configurable, retryable, onEdit, onClear, onRetry }: Props = $props();
 
 	const selectedCount = $derived(preview?.eligiblePreambles.length ?? 0);
 	const visiblePreambles = $derived(preview?.eligiblePreambles.slice(0, 2) ?? []);
@@ -149,5 +151,17 @@
 		onclick={onEdit}
 	>
 		<Pencil class="h-4 w-4" aria-hidden="true" />
+	</Button>
+	<Button
+		type="button"
+		variant="ghost"
+		size="icon-sm"
+		class="shrink-0"
+		data-slot="new-chat-preambles-clear"
+		aria-label={m.preamble_selection_clear()}
+		title={m.preamble_selection_clear()}
+		onclick={onClear}
+	>
+		<X class="h-4 w-4" aria-hidden="true" />
 	</Button>
 </div>
