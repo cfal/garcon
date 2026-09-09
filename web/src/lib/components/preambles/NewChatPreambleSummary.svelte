@@ -4,6 +4,7 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { PreambleSelectionProjection } from '$shared/preambles';
@@ -16,6 +17,7 @@
 		readyLabel?: string;
 		emptyLabel?: string;
 		onEdit: () => void;
+		onClear?: () => void;
 		onRetry: () => void;
 	}
 
@@ -27,6 +29,7 @@
 		readyLabel,
 		emptyLabel,
 		onEdit,
+		onClear,
 		onRetry,
 	}: Props = $props();
 
@@ -79,12 +82,14 @@
 				</span>
 			{:else}
 				<span
-					class="shrink-0 text-xs font-medium text-muted-foreground"
+					class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
 					data-slot="new-chat-preambles-label"
 				>
 					{readyLabel ?? m.preambles_title()}
 				</span>
-				<span class="shrink-0 text-xs text-muted-foreground" aria-hidden="true">·</span>
+				<span class="hidden shrink-0 text-xs text-muted-foreground sm:inline" aria-hidden="true"
+					>·</span
+				>
 				<span class="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
 					{#each visiblePreambles as preamble, index (preamble.id)}
 						<svelte:boundary>
@@ -161,4 +166,18 @@
 	>
 		<Pencil class="h-4 w-4" aria-hidden="true" />
 	</Button>
+	{#if onClear}
+		<Button
+			type="button"
+			variant="ghost"
+			size="icon-sm"
+			class="shrink-0"
+			data-slot="new-chat-preambles-clear"
+			aria-label={m.preamble_selection_clear()}
+			title={m.preamble_selection_clear()}
+			onclick={onClear}
+		>
+			<X class="h-4 w-4" aria-hidden="true" />
+		</Button>
+	{/if}
 </div>
