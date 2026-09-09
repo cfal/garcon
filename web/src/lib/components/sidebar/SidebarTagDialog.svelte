@@ -6,37 +6,69 @@
 	import X from '@lucide/svelte/icons/x';
 	import ColoredTag from '../shared/ColoredTag.svelte';
 	import { getTagColorClasses } from '$lib/utils/tag-colors';
+	import { normalizeTags } from '$shared/tags';
+	import {
+		isChatTagRefreshRequired,
+		type ChatTagReconciliationKind,
+	} from '$lib/chat/sessions/chat-sessions-contract.js';
+	import SidebarTagRecoveryNotice from './SidebarTagRecoveryNotice.svelte';
 
 	interface TagDialogState {
 		chatId: string;
 		chatTitle: string;
-		tags: string[];
+		baseTags: readonly string[];
+		editingTags: readonly string[];
 	}
 
 	interface SidebarTagDialogProps {
 		tagDialog: TagDialogState | null;
 		allKnownTags: string[];
+		currentTags?: readonly string[];
+		reconciliationKind?: ChatTagReconciliationKind;
 		onClose: () => void;
-		onSave: (chatId: string, tags: string[]) => Promise<void> | void;
+		onSave: (chatId: string, baseTags: readonly string[], tags: string[]) => Promise<void> | void;
+		onRetryReconciliation?: (chatId: string) => Promise<void> | void;
 	}
 
-	let { tagDialog, allKnownTags, onClose, onSave }: SidebarTagDialogProps = $props();
+	let {
+		tagDialog,
+		allKnownTags,
+		currentTags,
+		reconciliationKind = null,
+		onClose,
+		onSave,
+		onRetryReconciliation,
+	}: SidebarTagDialogProps = $props();
 
 	let isOpen = $derived(tagDialog !== null);
 	let editingTags = $state<string[]>([]);
 	let inputValue = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let isSaving = $state(false);
+	let isReconciling = $state(false);
 	let saveError = $state<string | null>(null);
+	let reconciliationError = $state<string | null>(null);
+	let baseTags = $state<string[]>([]);
 
 	$effect(() => {
 		if (tagDialog) {
-			editingTags = [...tagDialog.tags];
+			baseTags = [...tagDialog.baseTags];
+			editingTags = [...tagDialog.editingTags];
 			inputValue = '';
 			saveError = null;
+			reconciliationError = null;
 			isSaving = false;
+			isReconciling = false;
 		}
 	});
+
+	let latestTags = $derived(currentTags ?? tagDialog?.baseTags ?? []);
+	let baselineOutdated = $derived(
+		Boolean(tagDialog) && JSON.stringify(normalizeTags(baseTags)) !== JSON.stringify(normalizeTags(latestTags)),
+	);
+	let editsDisabled = $derived(
+		isSaving || isReconciling || reconciliationKind !== null || baselineOutdated,
+	);
 
 	let suggestions = $derived.by(() => {
 		const q = inputValue.trim().toLowerCase();
@@ -106,7 +138,7 @@
 		isSaving = true;
 		saveError = null;
 		try {
-			await onSave(tagDialog.chatId, tagsForSave());
+			await onSave(tagDialog.chatId, baseTags, tagsForSave());
 		} catch (error) {
 			saveError = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -114,8 +146,44 @@
 		}
 	}
 
+	async function retryReconciliation(): Promise<void> {
+		if (!tagDialog || !onRetryReconciliation || isReconciling || !reconciliationKind) return;
+		const requestedKind = reconciliationKind;
+		isReconciling = true;
+		reconciliationError = null;
+		try {
+			await onRetryReconciliation(tagDialog.chatId);
+			saveError = null;
+		} catch {
+			reconciliationError = isChatTagRefreshRequired(requestedKind)
+				? m.chat_tags_refresh_failed()
+				: m.chat_tags_confirmation_failed();
+		} finally {
+			isReconciling = false;
+		}
+	}
+
+	function reviewLatestTags(): void {
+		const normalizedBaseTags = normalizeTags(baseTags);
+		const normalizedDraftTags = normalizeTags(tagsForSave());
+		const normalizedLatestTags = normalizeTags(latestTags);
+		const baseTagSet = new Set(normalizedBaseTags);
+		const draftTagSet = new Set(normalizedDraftTags);
+		const removedTags = new Set(normalizedBaseTags.filter((tag) => !draftTagSet.has(tag)));
+		const addedTags = normalizedDraftTags.filter((tag) => !baseTagSet.has(tag));
+
+		baseTags = normalizedLatestTags;
+		editingTags = normalizeTags([
+			...normalizedLatestTags.filter((tag) => !removedTags.has(tag)),
+			...addedTags,
+		]);
+		inputValue = '';
+		saveError = null;
+		reconciliationError = null;
+	}
+
 	function requestClose() {
-		if (isSaving) return;
+		if (isSaving || isReconciling) return;
 		onClose();
 	}
 
@@ -127,9 +195,9 @@
 <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		class="max-w-md"
-		showCloseButton={!isSaving}
-		escapeKeydownBehavior={isSaving ? 'ignore' : 'close'}
-		interactOutsideBehavior={isSaving ? 'ignore' : 'close'}
+		showCloseButton={!isSaving && !isReconciling}
+		escapeKeydownBehavior={isSaving || isReconciling ? 'ignore' : 'close'}
+		interactOutsideBehavior={isSaving || isReconciling ? 'ignore' : 'close'}
 	>
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_tags_manage()}</Dialog.Title>
@@ -148,7 +216,7 @@
 								tag,
 							)}"
 							aria-label={m.sidebar_tags_remove({ tag })}
-							disabled={isSaving}
+							disabled={editsDisabled}
 							onclick={() => removeTag(tag)}
 						>
 							{tag}
@@ -165,7 +233,7 @@
 					placeholder={m.sidebar_tags_input_placeholder()}
 					aria-label={m.sidebar_tags_input_placeholder()}
 					bind:value={inputValue}
-					disabled={isSaving}
+					disabled={editsDisabled}
 					onkeydown={handleInputKeydown}
 					class="text-base sm:pointer-fine:text-sm"
 				/>
@@ -177,7 +245,7 @@
 							<button
 								type="button"
 								class="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors first:rounded-t-md last:rounded-b-md"
-								disabled={isSaving}
+								disabled={editsDisabled}
 								onclick={() => addTag(suggestion)}
 							>
 								{suggestion}
@@ -187,7 +255,7 @@
 				{/if}
 			</div>
 
-			{#if unassignedTags.length > 0 && !inputValue.trim()}
+			{#if unassignedTags.length > 0 && !inputValue.trim() && !editsDisabled}
 				<div class="space-y-1.5">
 					<span class="text-xs font-medium text-muted-foreground"
 						>{m.sidebar_tags_quick_assign()}</span
@@ -209,20 +277,29 @@
 				<p class="text-sm text-muted-foreground italic">{m.sidebar_tags_no_tags()}</p>
 			{/if}
 
+			<SidebarTagRecoveryNotice
+				{reconciliationKind}
+				{baselineOutdated}
+				reconciling={isReconciling}
+				{reconciliationError}
+				onRetry={() => void retryReconciliation()}
+				onReviewLatest={reviewLatestTags}
+			/>
+
 			{#if saveError}
-				<p class="text-sm text-destructive">{saveError}</p>
+				<p class="text-sm text-destructive" role="alert">{saveError}</p>
 			{/if}
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={requestClose} disabled={isSaving}
+			<Button variant="outline" onclick={requestClose} disabled={isSaving || isReconciling}
 				>{m.sidebar_actions_cancel()}</Button
 			>
 			<Button
 				onclick={() => {
 					void handleSave();
 				}}
-				disabled={isSaving}>{m.sidebar_actions_save()}</Button
+				disabled={editsDisabled}>{m.sidebar_actions_save()}</Button
 			>
 		</Dialog.Footer>
 	</Dialog.Content>

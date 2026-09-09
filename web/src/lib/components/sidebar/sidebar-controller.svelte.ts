@@ -9,7 +9,6 @@ import {
 	sortChatOrder,
 	getChatDetails,
 	forkChat,
-	setChatTags,
 	updateChatProjectPath,
 } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
@@ -22,7 +21,7 @@ import type {
 	SortChatOrderResponse,
 } from '$shared/chat-order-contracts';
 import type { ChatOrderSortKey } from '$shared/chat-order-sort';
-import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
+import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;
@@ -75,11 +74,6 @@ export class SidebarController {
 
 	async loadDetails(chatId: string) {
 		return getChatDetails(chatId);
-	}
-
-	async updateTags(chatId: string, tags: string[]): Promise<void> {
-		await setChatTags(chatId, tags);
-		await this.deps.onQuietRefresh();
 	}
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<ProjectPathPatchResponse> {

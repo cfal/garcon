@@ -19,6 +19,7 @@ function createFixture(overrides = {}) {
   const scheduled = {};
   const snippets = {};
   const preambles = {};
+  const chatBoards = {};
   const telegram = {};
   const published = [];
   let chatPresent = true;
@@ -123,6 +124,10 @@ function createFixture(overrides = {}) {
       onInvalidated: mock((callback) => { preambles.invalidated = callback; }),
       ...overrides.preambles,
     },
+    chatBoards: {
+      on: mock((_event, callback) => { chatBoards.invalidated = callback; }),
+      ...overrides.chatBoards,
+    },
     searchIndex,
   });
   return {
@@ -142,6 +147,7 @@ function createFixture(overrides = {}) {
     shareStore,
     snippets,
     preambles,
+    chatBoards,
     wiring,
     removeChat() { chatPresent = false; },
   };
@@ -186,6 +192,18 @@ const turn = {
 };
 
 describe('server event wiring', () => {
+  it('broadcasts revisioned Chat Board invalidations without catalog content', () => {
+    const fixture = createFixture();
+
+    fixture.chatBoards.invalidated(7, 'reordered');
+
+    expect(fixture.published).toEqual([{
+      type: 'chat-boards-invalidated',
+      revision: 7,
+      reason: 'reordered',
+    }]);
+  });
+
   it('broadcasts preamble catalog invalidations without catalog content', () => {
     const fixture = createFixture();
 

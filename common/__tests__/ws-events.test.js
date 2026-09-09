@@ -1,11 +1,38 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ChatOperationalNoticeMessage,
+  ChatBoardsInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
   PreamblesInvalidatedMessage,
   parseServerWsMessage,
   TranscriptSearchStatusMessage,
 } from '../ws-events.ts';
+
+describe('parseServerWsMessage chat-boards-invalidated', () => {
+  it('round-trips only canonical revisions and closed reasons', () => {
+    expect(parseServerWsMessage({
+      type: 'chat-boards-invalidated',
+      revision: 3,
+      reason: 'updated',
+    })).toEqual(new ChatBoardsInvalidatedMessage(3, 'updated'));
+    expect(parseServerWsMessage({
+      type: 'chat-boards-invalidated',
+      revision: -1,
+      reason: 'updated',
+    })).toBeNull();
+    expect(parseServerWsMessage({
+      type: 'chat-boards-invalidated',
+      revision: 3,
+      reason: 'changed',
+    })).toBeNull();
+    expect(parseServerWsMessage({
+      type: 'chat-boards-invalidated',
+      revision: 3,
+      reason: 'updated',
+      catalog: {},
+    })).toBeNull();
+  });
+});
 
 describe('parseServerWsMessage preambles-invalidated', () => {
   it('parses only the closed invalidation reasons', () => {

@@ -3,7 +3,7 @@ import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-
 import type {
 	ChatProcessingTransition,
 	ChatSessionsPort,
-} from '$lib/chat/sessions/chat-sessions.svelte.js';
+} from '$lib/chat/sessions/chat-sessions-contract.js';
 import type { ChatProcessingPhase } from '$shared/chat-types';
 import type {
 	ChatProcessingSnapshotSource,

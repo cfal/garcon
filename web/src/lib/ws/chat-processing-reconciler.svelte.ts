@@ -5,7 +5,7 @@ import {
 	parseServerWsMessage,
 	type ChatProcessingSnapshotResult,
 } from '$shared/ws-events';
-import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type {
 	ChatProcessingSnapshotSource,

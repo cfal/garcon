@@ -124,15 +124,16 @@ const settings = {
 function output(): CliOutput & {
   acceptedHandles: Array<{ chatId: string; turnId: string }>;
   messages: string[][];
+  diagnostics: string[];
 } {
   return {
-    acceptedHandles: [], messages: [],
+    acceptedHandles: [], messages: [], diagnostics: [],
     accepted({ chatId, turnId }) { this.acceptedHandles.push({ chatId, turnId }); },
     completed(messages) { this.messages.push([...messages]); },
     result() {},
     sent() {},
     stopped() {},
-    diagnostic() {},
+    diagnostic(message) { this.diagnostics.push(message); },
   };
 }
 
@@ -331,6 +332,68 @@ describe('runConsultation', () => {
       userMessagePresentation: { origin: 'cli', style: 'error' },
     });
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Follow-up review' }]);
+  });
+
+  test.each([
+    {
+      name: 'applied',
+      outcome: { status: 'applied', addedTags: ['follow-up'] } as const,
+      diagnostic: null,
+    },
+    {
+      name: 'not applied',
+      outcome: {
+        status: 'not-applied',
+        errorCode: 'CHAT_TAG_SAVE_FAILED',
+        retryable: true,
+      } as const,
+      diagnostic: 'The run was accepted, but its requested tags were not saved.',
+    },
+    {
+      name: 'unknown',
+      outcome: {
+        status: 'unknown',
+        errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+        recoveryRequired: true,
+      } as const,
+      diagnostic: 'The run was accepted, but its requested tags could not be confirmed.',
+    },
+  ])('preserves accepted execution when post-admission tags are $name', async ({ outcome, diagnostic }) => {
+    const testOutput = output();
+    let submissions = 0;
+    const testClient = client({
+      async runChat(request) {
+        submissions += 1;
+        return {
+          ...accepted,
+          commandType: 'agent-run',
+          clientRequestId: request.clientRequestId,
+          tagMutation: outcome,
+        };
+      },
+    });
+
+    await expect(runConsultation({
+      kind: 'resume',
+      workspace: 'default',
+      configDir: '/config',
+      chatId: CHAT_ID,
+      prompt: 'Continue',
+      readsPromptFromStdin: false,
+      additionalTags: ['follow-up'],
+    }, 'Continue', testClient, testOutput, undefined, {
+      createId: () => 'request',
+    })).resolves.toBeUndefined();
+
+    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
+    expect(testOutput.messages).toEqual([['Done']]);
+    expect(submissions).toBe(1);
+    if (diagnostic) {
+      expect(testOutput.diagnostics).toHaveLength(1);
+      expect(testOutput.diagnostics[0]?.startsWith(diagnostic)).toBe(true);
+    } else {
+      expect(testOutput.diagnostics).toEqual([]);
+    }
   });
 
   test('returns the agent result before surfacing a title update failure', async () => {

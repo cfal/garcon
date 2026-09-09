@@ -58,6 +58,29 @@ describe('VirtualListController', () => {
 		expect(test.controller.measuredSize('a')).toBe(5);
 	});
 
+	it('keeps the first row pinned while initial measurements settle at the start', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [30, 30, 30],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('a', 40);
+		test.mountItem('b', 40);
+		test.mountItem('c', 40);
+
+		test.environment.flushMicrotasks();
+
+		expect(test.viewport.scrollTop).toBe(0);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'mount',
+			anchorIndex: 0,
+			correction: 0,
+			scrollWrites: 0,
+		});
+	});
+
 	it('treats DOM bounds as provisional until the viewport is observed', () => {
 		const test = harness({ viewportSize: 0, initialViewportSize: 60, overscan: 0 });
 		test.controller.apply({

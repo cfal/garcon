@@ -12,6 +12,7 @@ import {
 } from '../../common/ask-user-question-response.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
+import { applyPostAdmissionChatTags } from '../chats/post-admission-chat-tags.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
 import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
@@ -100,8 +101,7 @@ export class SessionCommands {
     };
     const replay = await this.support.replayHttpRun(normalizedInput);
     if (replay) {
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return replay;
+      return applyPostAdmissionChatTags(replay, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
@@ -139,8 +139,7 @@ export class SessionCommands {
         normalizedInput,
         handoffCommand.preparation,
       );
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return result;
+      return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
@@ -191,8 +190,7 @@ export class SessionCommands {
     }
 
     const result = await this.support.submitHttpRun(normalizedInput);
-    if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-    return result;
+    return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {

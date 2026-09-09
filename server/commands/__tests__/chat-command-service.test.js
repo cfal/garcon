@@ -267,13 +267,6 @@ function makeService(overrides = {}) {
       sessions.set(chatId, { ...current, ...patch });
       return sessions.get(chatId);
     }),
-    addTags: mock((chatId, tags) => {
-      const current = sessions.get(chatId);
-      if (!current) return null;
-      const next = { ...current, tags: [...new Set([...current.tags, ...tags])].sort() };
-      sessions.set(chatId, next);
-      return { id: chatId, ...next };
-    }),
     updateProjectPath: mock((chatId, update) => {
       const current = sessions.get(chatId);
       if (!current) return Promise.resolve(null);
@@ -713,6 +706,28 @@ function makeService(overrides = {}) {
   const fileMentions = overrides.fileMentions ?? {
     resolve: mock(async (command) => command),
   };
+  const chatTags = {
+    applyDeltaWhileChatLocked: mock(async ({ chatId, addTags = [], removeTags = [] }) => {
+      const current = sessions.get(chatId);
+      if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
+      const removed = new Set(removeTags);
+      const tags = [...new Set([
+        ...current.tags.filter((tag) => !removed.has(tag)),
+        ...addTags,
+      ])].sort();
+      const before = new Set(current.tags);
+      const after = new Set(tags);
+      sessions.set(chatId, { ...current, tags });
+      return {
+        success: true,
+        chatId,
+        tags,
+        addedTags: tags.filter((tag) => !before.has(tag)),
+        removedTags: current.tags.filter((tag) => !after.has(tag)),
+      };
+    }),
+    ...overrides.chatTags,
+  };
   const dependencies = {
     chats,
     queue,
@@ -735,6 +750,7 @@ function makeService(overrides = {}) {
     preambles: overrides.preambles ?? {
       snapshot: () => ({ revision: 0, preambles: [] }),
     },
+    chatTags,
     chatMutationLock: overrides.chatMutationLock,
   };
   const service = new TestChatCommandService(dependencies);
@@ -755,6 +771,7 @@ function makeService(overrides = {}) {
     handoffPreparations,
     transcripts,
     support: new CommandSupport(dependencies),
+    chatTags,
   };
 }
 
@@ -2620,7 +2637,7 @@ describe('ChatCommandService', () => {
   });
 
   it('asserts the resume agent and adds tags only after admission', async () => {
-    const { service, chats, queue } = makeService();
+    const { service, chatTags, queue } = makeService();
 
     await expect(service.submitRun({
       chatId: SOURCE_CHAT_ID,
@@ -2631,7 +2648,7 @@ describe('ChatCommandService', () => {
       tagsToAdd: ['cli'],
     })).rejects.toMatchObject({ code: 'EXPECTED_AGENT_MISMATCH', status: 409 });
     expect(queue.admitUserInput).not.toHaveBeenCalled();
-    expect(chats.addTags).not.toHaveBeenCalled();
+    expect(chatTags.applyDeltaWhileChatLocked).not.toHaveBeenCalled();
 
     const result = await service.submitRun({
       chatId: SOURCE_CHAT_ID,
@@ -2643,8 +2660,68 @@ describe('ChatCommandService', () => {
     });
 
     expect(result.status).toBe('accepted');
-    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+    expect(chatTags.applyDeltaWhileChatLocked).toHaveBeenCalledWith({
+      chatId: SOURCE_CHAT_ID,
+      addTags: ['cli'],
+    });
     expect(queue.runReservedTurn.mock.calls.at(-1)[2]).not.toHaveProperty('contextTransition');
+  });
+
+  it('keeps accepted runs accepted when post-admission tag persistence fails', async () => {
+    const { service, queue } = makeService({
+      chatTags: {
+        applyDeltaWhileChatLocked: mock(async () => {
+          throw new DomainError('CHAT_TAG_SAVE_FAILED', 'disk full', 503, true);
+        }),
+      },
+    });
+
+    const result = await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-tag-save-failed',
+      clientMessageId: 'msg-tag-save-failed',
+      tagsToAdd: ['cli'],
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      tagMutation: {
+        status: 'not-applied',
+        errorCode: 'CHAT_TAG_SAVE_FAILED',
+        retryable: true,
+      },
+    });
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an accepted receipt with a recovery fence for unknown tag durability', async () => {
+    const applyDeltaWhileChatLocked = mock(async () => {
+      throw new DomainError('CHAT_TAG_SAVE_UNKNOWN', 'confirmation required', 503);
+    });
+    const { service, queue } = makeService({ chatTags: { applyDeltaWhileChatLocked } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-tag-save-unknown',
+      clientMessageId: 'msg-tag-save-unknown',
+      tagsToAdd: ['cli'],
+    };
+
+    const accepted = await service.submitRun(input);
+    const replay = await service.submitRun(input);
+
+    expect(accepted).toMatchObject({
+      status: 'accepted',
+      tagMutation: {
+        status: 'unknown',
+        errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+        recoveryRequired: true,
+      },
+    });
+    expect(replay).toMatchObject({ status: 'duplicate', tagMutation: { status: 'unknown' } });
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+    expect(applyDeltaWhileChatLocked).toHaveBeenCalledTimes(2);
   });
 
   it('commits one cross-agent handoff before scheduling the target run', async () => {
@@ -3510,7 +3587,7 @@ describe('ChatCommandService', () => {
   });
 
   it('keeps a failed admission private when deletion commits before its retry', async () => {
-    const { service, chats, ledger, queue } = makeService();
+    const { service, chatTags, ledger, queue } = makeService();
     const input = {
       chatId: SOURCE_CHAT_ID,
       command: 'continue after deletion',
@@ -3537,13 +3614,13 @@ describe('ChatCommandService', () => {
       retainedPrivateTerminal: true,
     });
     expect(record.publicTerminalAt).toBeUndefined();
-    expect(chats.addTags).not.toHaveBeenCalled();
+    expect(chatTags.applyDeltaWhileChatLocked).not.toHaveBeenCalled();
     expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
   });
 
   it('retries a failed admission normally when chat deletion rolls back', async () => {
-    const { service, chats, ledger, ownership, queue } = makeService({
+    const { service, chatTags, ledger, ownership, queue } = makeService({
       ownership: {
         delete: mock(async () => {
           throw new Error('journal append failed');
@@ -3569,8 +3646,11 @@ describe('ChatCommandService', () => {
 
     expect(retry.status).toBe('accepted');
     expect(ownership.delete).toHaveBeenCalledWith(SOURCE_CHAT_ID);
-    expect(chats.addTags).toHaveBeenCalledTimes(1);
-    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+    expect(chatTags.applyDeltaWhileChatLocked).toHaveBeenCalledTimes(1);
+    expect(chatTags.applyDeltaWhileChatLocked).toHaveBeenCalledWith({
+      chatId: SOURCE_CHAT_ID,
+      addTags: ['cli'],
+    });
     expect(queue.admitUserInput).toHaveBeenCalledTimes(2);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
     expect((await ledger.getRecord(

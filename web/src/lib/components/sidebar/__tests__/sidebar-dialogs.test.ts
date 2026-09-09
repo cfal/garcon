@@ -446,7 +446,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Folder bug hunt',
-				tags: ['existing'],
+				baseTags: ['existing'],
+				editingTags: ['existing'],
 			},
 			allKnownTags: [],
 			onClose: vi.fn(),
@@ -459,7 +460,164 @@ describe('Sidebar dialogs', () => {
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith('chat-1', ['existing', 'pending-tag']);
+				expect(onSave).toHaveBeenCalledWith(
+					'chat-1',
+					['existing'],
+					['existing', 'pending-tag'],
+				);
+			});
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('retries tag confirmation without discarding the staged edit', async () => {
+		const onRetryReconciliation = vi.fn()
+			.mockRejectedValueOnce(new TypeError('Offline'))
+			.mockResolvedValueOnce(undefined);
+		const onSave = vi.fn().mockResolvedValue(undefined);
+		const props = {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['existing'],
+				editingTags: ['existing', 'staged'],
+			},
+			allKnownTags: [],
+			currentTags: ['existing'],
+			reconciliationKind: 'durability' as const,
+			onClose: vi.fn(),
+			onSave,
+			onRetryReconciliation,
+		};
+		const rendered = render(SidebarTagDialog, props);
+
+		try {
+			const input = screen.getByRole('textbox', { name: 'Type a tag and press Enter' });
+			expect(input.hasAttribute('disabled')).toBe(true);
+			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
+			expect(await screen.findByText('Saved tags still could not be confirmed. Check your connection and try again.')).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Try confirmation again' }));
+			await waitFor(() => expect(onRetryReconciliation).toHaveBeenCalledTimes(2));
+			await rendered.rerender({
+				...props,
+				currentTags: ['saved'],
+				reconciliationKind: null,
+			});
+			expect(screen.getByRole('button', { name: 'Remove tag staged' })).toBeTruthy();
+			expect(screen.getByText('Tags changed since this editor opened. Review the latest saved tags before saving.')).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Review latest tags' }));
+			expect(screen.getByRole('button', { name: 'Remove tag saved' })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Remove tag staged' })).toBeTruthy();
+			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+			await waitFor(() => {
+				expect(onSave).toHaveBeenCalledWith('chat-1', ['saved'], ['saved', 'staged']);
+			});
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('distinguishes a required canonical tag refresh from durability confirmation', async () => {
+		const onRetryReconciliation = vi.fn().mockRejectedValue(new TypeError('Offline'));
+		const rendered = render(SidebarTagDialog, {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['existing'],
+				editingTags: ['existing', 'staged'],
+			},
+			allKnownTags: [],
+			currentTags: ['existing'],
+			reconciliationKind: 'committed-refresh',
+			onClose: vi.fn(),
+			onSave: vi.fn(),
+			onRetryReconciliation,
+		});
+
+		try {
+			expect(
+				screen.getByText(
+					'The tag change was saved, but the latest tags could not be loaded. Refresh them before editing again.',
+				),
+			).toBeTruthy();
+			await fireEvent.click(screen.getByRole('button', { name: 'Refresh saved tags' }));
+			expect(
+				await screen.findByText(
+					'Saved tags still could not be refreshed. Check your connection and try again.',
+				),
+			).toBeTruthy();
+			expect(onRetryReconciliation).toHaveBeenCalledWith('chat-1');
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('does not present a rejected tag replacement as saved', async () => {
+		const rendered = render(SidebarTagDialog, {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['existing'],
+				editingTags: ['existing', 'staged'],
+			},
+			allKnownTags: [],
+			currentTags: ['existing'],
+			reconciliationKind: 'conflict-refresh',
+			onClose: vi.fn(),
+			onSave: vi.fn(),
+			onRetryReconciliation: vi.fn(),
+		});
+
+		try {
+			expect(
+				screen.getByText(
+					'The tag change was rejected because tags changed elsewhere, but the latest tags could not be loaded. Refresh them before editing again.',
+				),
+			).toBeTruthy();
+			expect(screen.queryByText(/tag change was saved/)).toBeNull();
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('rebases staged tag edits onto unseen canonical changes before saving', async () => {
+		const onSave = vi.fn().mockResolvedValue(undefined);
+		const props = {
+			tagDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Folder bug hunt',
+				baseTags: ['ready'],
+				editingTags: ['ready', 'urgent'],
+			},
+			allKnownTags: [],
+			currentTags: ['ready'],
+			onClose: vi.fn(),
+			onSave,
+		};
+		const rendered = render(SidebarTagDialog, props);
+
+		try {
+			await rendered.rerender({ ...props, currentTags: ['approved', 'ready'] });
+			const saveButton = screen.getByRole('button', { name: 'Save' });
+			expect(saveButton.hasAttribute('disabled')).toBe(true);
+			await fireEvent.click(saveButton);
+			expect(onSave).not.toHaveBeenCalled();
+			await fireEvent.click(screen.getByRole('button', { name: 'Review latest tags' }));
+
+			expect(screen.getByRole('button', { name: 'Remove tag approved' })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Remove tag ready' })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Remove tag urgent' })).toBeTruthy();
+
+			await fireEvent.click(saveButton);
+			await waitFor(() => {
+				expect(onSave).toHaveBeenCalledWith(
+					'chat-1',
+					['approved', 'ready'],
+					['approved', 'ready', 'urgent'],
+				);
 			});
 		} finally {
 			await unmountDialog(rendered);
@@ -505,7 +663,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: [],
+				baseTags: [],
+				editingTags: [],
 			},
 			allKnownTags: [],
 			onClose: vi.fn(),
@@ -529,7 +688,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: [],
+				baseTags: [],
+				editingTags: [],
 			},
 			allKnownTags: ['ops', 'bugs'],
 			onClose: vi.fn(),
@@ -551,7 +711,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: [],
+				baseTags: [],
+				editingTags: [],
 			},
 			allKnownTags: ['ops'],
 			onClose: vi.fn(),
@@ -566,7 +727,7 @@ describe('Sidebar dialogs', () => {
 			// Save and verify 'ops' was included
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith('chat-1', ['ops']);
+				expect(onSave).toHaveBeenCalledWith('chat-1', [], ['ops']);
 			});
 		} finally {
 			await unmountDialog(rendered);
@@ -580,7 +741,8 @@ describe('Sidebar dialogs', () => {
 			tagDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Test chat',
-				tags: ['ops'],
+				baseTags: ['ops'],
+				editingTags: ['ops'],
 			},
 			allKnownTags: [],
 			onClose: vi.fn(),
@@ -595,7 +757,7 @@ describe('Sidebar dialogs', () => {
 			// Save should still only have the original 'ops', no duplicate
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledWith('chat-1', ['ops']);
+				expect(onSave).toHaveBeenCalledWith('chat-1', ['ops'], ['ops']);
 			});
 		} finally {
 			await unmountDialog(rendered);

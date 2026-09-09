@@ -829,6 +829,29 @@ describe('GarconClient', () => {
     expect(redirect).toBe('error');
   });
 
+  test.each([
+    { status: 'applied', addedTags: ['cli'] },
+    { status: 'not-applied', errorCode: 'CHAT_TAG_SAVE_FAILED', retryable: true },
+    { status: 'unknown', errorCode: 'CHAT_TAG_SAVE_UNKNOWN', recoveryRequired: true },
+  ] as const)('preserves the $status post-admission tag outcome', async (tagMutation) => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: true,
+        commandType: 'agent-run',
+        clientRequestId: runRequest.clientRequestId,
+        chatId: runRequest.chatId,
+        turnId: 'turn-1',
+        status: 'accepted',
+        acceptedAt: new Date().toISOString(),
+        parentChat: null,
+        tagMutation,
+      }),
+    });
+
+    await expect(client.runChat(runRequest)).resolves.toMatchObject({ tagMutation });
+  });
+
   test('updates a chat title through the existing workspace API', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
     const client = new GarconClient({
@@ -887,11 +910,19 @@ describe('GarconClient', () => {
             changed: true,
           });
         }
+        if (url.includes('/api/v1/chats/tags?')) {
+          return Response.json({
+            success: true,
+            chatId: runRequest.chatId,
+            tags: ['existing'],
+          });
+        }
         return Response.json({
           success: true,
           chatId: runRequest.chatId,
           tags: ['automation', 'review'],
-          changed: true,
+          addedTags: ['automation', 'review'],
+          removedTags: ['existing'],
         });
       },
     });
@@ -917,9 +948,18 @@ describe('GarconClient', () => {
         body: JSON.stringify({ chatId: runRequest.chatId, isArchived: true }),
       },
       {
+        url: `${connection.baseUrl}/api/v1/chats/tags?chatId=${encodeURIComponent(runRequest.chatId)}`,
+        method: 'GET',
+        body: 'undefined',
+      },
+      {
         url: `${connection.baseUrl}/api/v1/chats/tags`,
         method: 'PATCH',
-        body: JSON.stringify({ chatId: runRequest.chatId, tags: ['automation', 'review'] }),
+        body: JSON.stringify({
+          chatId: runRequest.chatId,
+          expectedTags: ['existing'],
+          tags: ['automation', 'review'],
+        }),
       },
     ]);
   });

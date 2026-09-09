@@ -15,6 +15,7 @@ import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ProjectTarget } from '$shared/project-resolution';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
+import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { windowIdOfSurface, windowNodeById } from '../window-tree.js';
 import {
 	MIN_WINDOW_WIDTH_PX,
@@ -111,6 +112,7 @@ function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
 	return {
 		services: createWorkspaceServices({
 			appShell: createAppShellStore(),
+			chatBoardInvalidations: createChatBoardInvalidationHub(),
 			chatSessions,
 			ghCapability,
 			localSettings,

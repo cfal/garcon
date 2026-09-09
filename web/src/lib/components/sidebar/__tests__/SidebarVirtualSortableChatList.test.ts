@@ -268,7 +268,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode,
 			},
 			onSortChatOrder: vi.fn(),
@@ -287,7 +287,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -339,7 +339,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 			collapsedProjectKeys: new Set([sidebarProjectKey('/tmp/project-a')]),
@@ -366,7 +366,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -388,7 +388,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: true,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -412,7 +412,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: true,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -458,7 +458,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'recent',
 			},
 		});
@@ -486,7 +486,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'recent',
 			},
 		});
@@ -565,7 +565,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			grouping: 'project-and-activity',
 			inactivityDuration: '3-days',
 			groupNestedProjectPaths: false,
-			chatItemLayout: 'default',
+			chatItemLayout: 'detailed',
 			sortMode: 'manual',
 		} as const;
 		let collapsedProjectKeys = new Set<string>();
@@ -776,7 +776,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'recent',
 			},
 		});
@@ -797,7 +797,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -823,7 +823,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -923,7 +923,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -954,7 +954,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -1005,7 +1005,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -1054,7 +1054,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -1099,7 +1099,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 		});
@@ -1407,7 +1407,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'recent',
 			},
 			onRegisterReorder: (value) => (registered.reorder = value),
@@ -1461,7 +1461,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'none',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'recent',
 			},
 			onRegisterReorder: (value) => (registered.reorder = value),
@@ -1797,7 +1797,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 			onPersistReorder: persist,
@@ -1842,7 +1842,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: {
 				grouping: 'project',
 				groupNestedProjectPaths: false,
-				chatItemLayout: 'default',
+				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
 			onPersistReorder: persist,

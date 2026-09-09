@@ -12,12 +12,14 @@ import type { GitComparisonPreferences } from '$lib/git/review/git-comparison-pr
 import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
+import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
 	createPullRequests(): PullRequestsStore;
 	comparisonPreferences: GitComparisonPreferences;
+	createChatBoard?(): ChatBoardController;
 }
 
 export class FilesSurfaceController implements PortableSingletonController {
@@ -49,6 +51,7 @@ export interface SingletonControllerByKind {
 	files: FilesSurfaceController;
 	commit: CommitController;
 	'chat-map': ChatMapController;
+	'chat-board': ChatBoardController;
 }
 
 type SingletonControllerFactories = {
@@ -76,6 +79,7 @@ export class SingletonSurfaceRegistry {
 		files: false,
 		commit: false,
 		'chat-map': false,
+		'chat-board': false,
 	};
 	#hasVisibleProjectSurface = $state(false);
 
@@ -87,6 +91,10 @@ export class SingletonSurfaceRegistry {
 			files: () => new FilesSurfaceController(),
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
+			'chat-board': () => {
+				if (!this.deps.createChatBoard) throw new Error('Chat Board factory is unavailable');
+				return this.deps.createChatBoard();
+			},
 			'pull-requests': () => {
 				const controller = this.deps.createPullRequests();
 				controller.setCapability(
@@ -116,6 +124,10 @@ export class SingletonSurfaceRegistry {
 
 	chatMap(): ChatMapController {
 		return this.#controller('chat-map');
+	}
+
+	chatBoard(): ChatBoardController {
+		return this.#controller('chat-board');
 	}
 
 	commit(): CommitController {
@@ -171,7 +183,8 @@ export class SingletonSurfaceRegistry {
 
 	#updateVisibleProjectSurface(): void {
 		this.#hasVisibleProjectSurface = PORTABLE_SINGLETON_KINDS.some(
-			(candidate) => candidate !== 'chat-map' && this.#visible[candidate],
+			(candidate) =>
+				candidate !== 'chat-map' && candidate !== 'chat-board' && this.#visible[candidate],
 		);
 	}
 

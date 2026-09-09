@@ -242,7 +242,7 @@ describe('Settings', () => {
 					'Places chats from nested project folders under the outer project group. Useful for worktrees and monorepos.',
 				),
 			).toBeNull();
-			expect(screen.queryByText('Compact chat items')).toBeNull();
+			expect(screen.queryByText('Compact')).toBeNull();
 			expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
 			expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
 			expect(screen.queryByText('Direct (Responses)')).toBeNull();

@@ -13,7 +13,7 @@
 		getSidebarSearch,
 		getRemoteSettings,
 	} from '$lib/context';
-	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions.svelte';
+	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
 		PersistedChatOrderGroup,
@@ -36,9 +36,9 @@
 	} from './sidebar-display-options';
 	import type {
 		SidebarChatGrouping,
-		SidebarChatItemLayout,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
+	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
@@ -389,7 +389,7 @@
 		localSettings.toggle('sidebarGroupNestedProjectPaths');
 	}
 
-	function handleSetChatItemLayout(layout: SidebarChatItemLayout): void {
+	function handleSetChatItemLayout(layout: ChatItemLayout): void {
 		localSettings.set('sidebarChatItemLayout', layout);
 	}
 
