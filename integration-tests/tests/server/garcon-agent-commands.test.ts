@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import type { ChatRegistrySnapshot } from '../../../server/chats/store.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { PreamblesMutationResponse } from '../../../common/preambles.js';
+import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
+import { INTEGRATION_OPENAI_API_KEY } from '../../support/openai-test-contract.js';
 
 async function waitForOutcome(fixture: IntegrationFixture, chatId: string, type: 'agent-start-outcome' | 'agent-schedule-outcome', cursor: number) {
   const event = await fixture.client.waitForEvent(
@@ -20,6 +22,70 @@ async function waitForOutcome(fixture: IntegrationFixture, chatId: string, type:
 }
 
 describe('assistant start and schedule commands', () => {
+  test.each(['inherited', 'model-only', 'provider-model', 'native-only'])('resolves delegated %s selection through the server and persistence', async (selection) => {
+    await withIntegrationFixture(`agent-command-selection-${selection}`, async (fixture) => {
+      const original = fixture.directAgents.openAi;
+      const provider = await fixture.client.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+        templateId: 'custom', label: 'Synthetic Selection', endpoint: {
+          protocol: 'openai-compatible', baseUrl: `${fixture.fakeProviders.openAi.baseUrl}/v1`,
+          apiKey: INTEGRATION_OPENAI_API_KEY, capabilities: { chatCompletions: true, responses: false },
+          defaultModel: original.provider.model,
+          models: [
+            { value: original.provider.model, label: 'Original' }, { value: 'synthetic-alternate', label: 'Alternate' },
+          ], supportsImages: false, modelDiscovery: 'none',
+        },
+      });
+      const endpoint = provider.endpoints[0]!;
+      const source = fixture.newChatId();
+      const prompt = 'Delegate using the selected configuration.';
+      const childPrompt = 'Synthetic selection child task.';
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: prompt });
+      const cursor = fixture.client.markEvents();
+      const parentRequest = fixture.client.directStartRequest({
+        chatId: source, content: prompt, projectPath: fixture.dirs.project, agent: original,
+      });
+      await fixture.client.startChat({ ...parentRequest, apiProviderId: provider.id, modelEndpointId: endpoint.id });
+      await held.received;
+      let attributes = '';
+      let expectedProvider = provider.id;
+      let expectedEndpoint = endpoint.id;
+      let expectedModel = original.provider.model;
+      if (selection === 'model-only') {
+        attributes = 'model="synthetic-alternate"'; expectedModel = 'synthetic-alternate';
+      } else if (selection === 'provider-model') {
+        attributes = `provider="${original.provider.providerId}" model="${original.provider.model}"`;
+        expectedProvider = original.provider.providerId; expectedEndpoint = original.provider.endpointId;
+      } else if (selection === 'native-only') {
+        attributes = `agent="${original.agentId}" model="${original.provider.model}"`;
+      }
+      held.releaseText(`<garcon-start-agent ref="selection" async="true" ${attributes}>${childPrompt}</garcon-start-agent>`);
+      const outcome = await waitForOutcome(fixture, source, 'agent-start-outcome', cursor);
+      if (selection === 'native-only') {
+        expect(outcome).toMatchObject({ status: 'rejected', reason: 'unknown-model' });
+      } else {
+        if (outcome.type !== 'agent-start-outcome' || outcome.status !== 'accepted') throw new Error('Missing selection child');
+        const request = await fixture.fakeProviders.openAi.waitForRequest({ lastUserText: childPrompt });
+        expect(request.body.model).toBe(expectedModel);
+        const persisted: ChatRegistrySnapshot = JSON.parse(await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'));
+        expect(persisted.sessions[outcome.chatId]).toMatchObject({
+          agentId: original.agentId, model: expectedModel,
+          apiProviderId: expectedProvider, modelEndpointId: expectedEndpoint, modelProtocol: original.provider.protocol,
+          thinkingMode: parentRequest.thinkingMode, permissionMode: parentRequest.permissionMode,
+          agentSettingsById: { [original.agentId]: original.agentSettings },
+          projectPath: fixture.dirs.project, parentChat: { chatId: source, relation: 'delegation' },
+          preambleSelection: { revision: 0, orderedPreambleIds: [] },
+        });
+      }
+      await fixture.fakeProviders.openAi.waitForRequest({ lastUserText: garconCommandResultContent(outcome) });
+      await fixture.restartGarcon();
+      expect((await fixture.client.listChats()).sessions).toHaveLength(selection === 'native-only' ? 1 : 2);
+      expect(userContents((await fixture.client.getMessages(source)).messages)).toEqual([prompt]);
+      if (selection === 'native-only') {
+        expect(fixture.fakeProviders.openAi.requests().some((request) => request.lastUserText === childPrompt)).toBe(false);
+      }
+    });
+  }, 60_000);
+
   test.each([false, true])('resolves provider display names before child admission (ambiguous: %s)', async (ambiguous) => {
     await withIntegrationFixture(`agent-command-provider-name-${ambiguous}`, async (fixture) => {
       const agent = fixture.directAgents.openAi;

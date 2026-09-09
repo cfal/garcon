@@ -7,9 +7,9 @@ export const GARCON_START_PROMPT_MAX_BYTES = GARCON_AGENT_PROMPT_MAX_BYTES;
 
 export interface GarconStartAgentCommand extends GarconAgentRequestOptions {
   readonly type: 'start-agent';
-  readonly agentId: string;
+  readonly agentId: string | null;
   readonly providerId: string | null;
-  readonly model: string;
+  readonly model: string | null;
   readonly reasoningEffort: string | null;
   readonly prompt: string;
   readonly fork: boolean;
@@ -26,15 +26,16 @@ export function parseGarconStartAgent(content: string): GarconStartAgentCommand 
   if (!options || attributes.fork !== undefined && attributes.fork !== 'true' && attributes.fork !== 'false') return null;
   let title: string | null;
   try { title = parseChatRowTitle(attributes.title) ?? null; } catch { return null; }
-  if (!attributes.agent || !attributes.model || new TextEncoder().encode(body).byteLength > GARCON_START_PROMPT_MAX_BYTES) return null;
+  if ((attributes.agent !== undefined || attributes.provider !== undefined) && attributes.model === undefined) return null;
+  if (new TextEncoder().encode(body).byteLength > GARCON_START_PROMPT_MAX_BYTES) return null;
   return {
     type: 'start-agent',
     ...options,
     fork: attributes.fork === 'true',
     title,
-    agentId: attributes.agent,
+    agentId: attributes.agent ?? null,
     providerId: attributes.provider ?? null,
-    model: attributes.model,
+    model: attributes.model ?? null,
     reasoningEffort: attributes['reasoning-effort'] ?? null,
     prompt: body,
   };

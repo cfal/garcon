@@ -91,6 +91,7 @@ interface LiveCodexTestEnvironmentOptions {
   // credential needs to exist in the environment.
   testingKey?: string;
   toolMode?: CodexTestToolMode;
+  model?: string;
 }
 
 type CodexProxyProcess = Bun.Subprocess<'pipe', 'ignore', 'ignore'>;
@@ -235,6 +236,7 @@ export async function startLiveCodexTestEnvironment(
         ...LIVE_MODEL_CATALOG,
         models: LIVE_MODEL_CATALOG.models.map((model) => ({
           ...model,
+          slug: options.model ?? model.slug,
           tool_mode: options.toolMode ?? model.tool_mode,
         })),
       };

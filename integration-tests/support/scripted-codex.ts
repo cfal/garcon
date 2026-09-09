@@ -16,6 +16,7 @@ export interface ScriptedCodexTestEnvironment extends LiveCodexTestEnvironment {
 
 export async function startScriptedCodexTestEnvironment(options: {
   readonly toolMode?: CodexTestToolMode;
+  readonly model?: string;
 } = {}): Promise<ScriptedCodexTestEnvironment> {
   const model = FakeCodexModel.start();
   let environment: LiveCodexTestEnvironment;
@@ -24,6 +25,7 @@ export async function startScriptedCodexTestEnvironment(options: {
       upstreamUrl: model.responsesUrl,
       testingKey: `garcon-scripted-codex-${crypto.randomUUID()}`,
       toolMode: options.toolMode,
+      model: options.model,
     });
   } catch (error) {
     model.stop();

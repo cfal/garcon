@@ -918,6 +918,7 @@ describe('ChatCommandService', () => {
       chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
       settings: { getExecutionDefaults: () => ({}) },
       selection: { catalog: async () => ({}), resolve: () => ({
+        agentId: agentSettings().ownerId,
         permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
       }) },
       notices: { existingCurrentView: () => ({ viewId }), appendNotice: (_id, _view, notice) => outcomes.push(notice.detail) },
@@ -1132,6 +1133,7 @@ describe('ChatCommandService', () => {
       chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
       settings: { getExecutionDefaults: () => ({}) },
       selection: { catalog: async () => ({}), resolve: () => ({
+        agentId: agentSettings().ownerId,
         permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
       }) },
       notices: { existingCurrentView: () => ({ viewId }), appendNotice: (_id, _view, notice) => {

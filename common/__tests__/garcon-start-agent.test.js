@@ -5,7 +5,7 @@ const start = (attributes = 'agent="codex" model="example-model"', body = 'Inspe
   `<garcon-start-agent ref="task" ${attributes}>\n${body}\n</garcon-start-agent>`;
 
 describe('single-child start grammar', () => {
-  it('requires only target selection and preserves decoded prompt text', () => {
+  it('preserves explicit target selection and decoded prompt text', () => {
     expect(parseGarconStartAgent(start())).toEqual({
       type: 'start-agent', ref: 'task', async: false, fork: false, title: null, agentId: 'codex', model: 'example-model',
       providerId: null, reasoningEffort: null, prompt: 'Inspect the parser.',
@@ -13,6 +13,31 @@ describe('single-child start grammar', () => {
     expect(parseGarconStartAgent(start('model="example-model" reasoning-effort="low" provider="example" agent="codex"',
       '\n  A &amp; B &lt; C &gt; D &quot;quote&quot; &apos;x&apos; &amp;lt;  \n'))).toMatchObject({
       providerId: 'example', reasoningEffort: 'low', prompt: '\n  A & B < C > D "quote" \'x\' &lt;  \n',
+    });
+  });
+
+  it.each([
+    ['', null, null, null],
+    ['model="example-model"', null, null, 'example-model'],
+    ['provider="example" model="example-model"', null, 'example', 'example-model'],
+    ['agent="example-agent" model="example-model"', 'example-agent', null, 'example-model'],
+    ['agent="example-agent" provider="example" model="example-model"', 'example-agent', 'example', 'example-model'],
+  ])('accepts the selection shape %s without filling in omitted values', (attributes, agentId, providerId, model) => {
+    expect(parseGarconStartAgent(start(attributes))).toMatchObject({ agentId, providerId, model });
+  });
+
+  it.each(['agent="example-agent"', 'provider="example"', 'agent="example-agent" provider="example"'])
+  ('requires a model when selecting %s', (attributes) => {
+    expect(parseGarconStartAgent(start(attributes))).toBeNull();
+  });
+
+  it.each(['agent', 'provider', 'model'])('rejects an explicitly empty %s', (attribute) => {
+    for (const value of ['', ' ']) expect(parseGarconStartAgent(start(`${attribute}="${value}"`))).toBeNull();
+  });
+
+  it('allows a reasoning override without overriding the inherited selection', () => {
+    expect(parseGarconStartAgent(start('reasoning-effort="low"'))).toMatchObject({
+      agentId: null, providerId: null, model: null, reasoningEffort: 'low',
     });
   });
 
@@ -28,7 +53,7 @@ describe('single-child start grammar', () => {
 
   it('rejects incomplete, duplicate, unquoted, nested, batch, and malformed text', () => {
     for (const content of [
-      start('model="example-model"'), start('agent="codex"'), start('agent="" model="example-model"'),
+      start('agent="codex"'), start('agent="" model="example-model"'),
       start('agent="codex" model="x" model="y"'), start("agent='codex' model=\"x\""),
       start('agent="codex" model="x"suffix'), start('agent="codex" model="x"', ''),
       start('agent="codex" model="x"', '<garcon-schedule in="1m" />'),
