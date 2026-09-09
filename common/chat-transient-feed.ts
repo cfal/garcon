@@ -1,7 +1,6 @@
 import {
   PermissionRequestMessage,
   parseChatMessage,
-  type ChatMessage,
 } from './chat-types';
 
 export interface TransientFeedRow {
@@ -12,7 +11,7 @@ export interface TransientFeedRow {
     readonly afterOrdinal: number;
   };
   readonly displayOrder: number;
-  readonly message: ChatMessage;
+  readonly message: PermissionRequestMessage;
 }
 
 export type ChatTransientFeedMutationBody =

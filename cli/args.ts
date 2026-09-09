@@ -24,8 +24,16 @@ import {
   type CliPresentation,
   type CliRowFormat,
 } from '@garcon/common/cli-presentation';
-import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
-import { isPreambleId, type PreambleId } from '@garcon/common/preambles';
+import {
+  isCommandCorrelationIdWithinLimit,
+  normalizeAskUserQuestionDecisionResponse,
+  type AskUserQuestionAnsweredResponse,
+} from '@garcon/common/chat-command-contracts';
+import {
+  isPreambleId,
+  PREAMBLE_MAX_COUNT,
+  type PreambleId,
+} from '@garcon/common/preambles';
 import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import {
   CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
@@ -81,6 +89,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] list <resource>
   garcon-cli [options] stop <chat-id> [--json]
   garcon-cli [connection options] permission-decision <chat-id> <occurrence-id> <allow|deny> --run <run-id> --server-instance <instance-id> [--json]
+  garcon-cli [connection options] permission-answer <chat-id> <occurrence-id> --answers <json> --run <run-id> --server-instance <instance-id> [--json]
   garcon-cli [connection options] archive|unarchive|pin|unpin <chat-id> [--json]
   garcon-cli [connection options] rename <chat-id> <title> [--json]
   garcon-cli [connection options] set-tags <chat-id> (--tag <tag>... | --clear) [--json]
@@ -88,6 +97,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] chats [--filter <expression>] [--limit <count>] [--offset <count>] [--json]
   garcon-cli [connection options] search <query> [--filter <expression>] [--sort <relevance|activity|created>] [--limit <count>] [--offset <count>] [--snippets <count>] [--json]
+  garcon-cli [connection options] transcript-search <enable|disable|rebuild|status> [--json]
   garcon-cli [connection options] read <chat-id> <ordinal> [-B <count>] [-A <count>] [--include <category>]... [--transcript-view-id <id>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
   garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
@@ -115,6 +125,7 @@ Reload and provider-native fork segments may drop Garcon-only presentation.
 
 List resources:
   agents
+  preambles                 Lists IDs, titles, enabled state, and scope
   providers                 Optionally filter with --agent or --provider
   endpoints                 Requires --provider; optionally filter with --agent or --endpoint
   models                    Requires --agent; optionally filter with --provider and --endpoint
@@ -156,6 +167,7 @@ Options:
   --allow-steer                With resume-async, steer the active turn when busy; never queues
   --run <run-id>               Exact permission request run fence
   --server-instance <id>       Exact permission request server-instance fence
+  --answers <json>             Structured question answers as typed JSON rows
   --clear                      Replace the complete tag set with no tags
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
@@ -242,6 +254,7 @@ export type CliInvocation = StartCliInvocation | ResumeCliInvocation;
 
 export const LIST_RESOURCE_VALUES = [
   'agents',
+  'preambles',
   'providers',
   'endpoints',
   'models',
@@ -283,6 +296,25 @@ export interface PermissionDecisionCliCommand extends CliConnectionOptions {
   readonly runId: string;
   readonly serverInstanceId: string;
   readonly allow: boolean;
+  readonly json: boolean;
+}
+
+export interface PermissionAnswerCliCommand extends CliConnectionOptions {
+  readonly kind: 'permission-answer';
+  readonly chatId: ChatId;
+  readonly permissionOccurrenceId: string;
+  readonly runId: string;
+  readonly serverInstanceId: string;
+  readonly response: AskUserQuestionAnsweredResponse;
+  readonly json: boolean;
+}
+
+const TRANSCRIPT_SEARCH_ACTIONS = ['enable', 'disable', 'rebuild', 'status'] as const;
+type TranscriptSearchAction = (typeof TRANSCRIPT_SEARCH_ACTIONS)[number];
+
+export interface TranscriptSearchCliCommand extends CliConnectionOptions {
+  readonly kind: 'transcript-search';
+  readonly action: TranscriptSearchAction;
   readonly json: boolean;
 }
 
@@ -395,6 +427,8 @@ export type ParsedCliCommand =
   | ResumeAsyncCliCommand
   | StopCliCommand
   | PermissionDecisionCliCommand
+  | PermissionAnswerCliCommand
+  | TranscriptSearchCliCommand
   | ChatOrderMutationCliCommand
   | RenameCliCommand
   | SetTagsCliCommand
@@ -442,6 +476,7 @@ const SINGLE_STRING_OPTIONS = [
   'transcript-view-id',
   'run',
   'server-instance',
+  'answers',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -568,6 +603,7 @@ type ControlCommandKind =
   | 'add-row'
   | 'read'
   | 'permission-decision'
+  | 'permission-answer'
   | ChatOrderMutationKind
   | 'rename'
   | 'set-tags';
@@ -600,6 +636,8 @@ const RESUME_ASYNC_OPTIONS = optionSet(
 );
 const STOP_OPTIONS = optionSet('json');
 const PERMISSION_DECISION_OPTIONS = optionSet('run', 'server-instance', 'json');
+const PERMISSION_ANSWER_OPTIONS = optionSet('run', 'server-instance', 'answers', 'json');
+const TRANSCRIPT_SEARCH_OPTIONS = optionSet('json');
 const CHAT_ORDER_MUTATION_OPTIONS = optionSet('json');
 const RENAME_OPTIONS = optionSet('json');
 const SET_TAGS_OPTIONS = optionSet('tag', 'clear', 'json');
@@ -749,6 +787,75 @@ function parsePermissionDecision(
   };
 }
 
+function parsePermissionAnswer(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): PermissionAnswerCliCommand {
+  rejectOptionsExcept(values, PERMISSION_ANSWER_OPTIONS, 'permission-answer');
+  if (parsed.positionals.length !== 3) {
+    throw argumentError('permission-answer requires a chat ID and permission occurrence ID');
+  }
+  const rawAnswers = values.answers;
+  if (typeof rawAnswers !== 'string') {
+    throw argumentError('permission-answer requires --answers with a JSON array');
+  }
+  let answers: unknown;
+  try {
+    answers = JSON.parse(rawAnswers);
+  } catch (error) {
+    throw argumentError('--answers must be valid JSON', { cause: error });
+  }
+  const response = normalizeAskUserQuestionDecisionResponse({
+    type: 'ask-user-question-response',
+    outcome: 'answered',
+    answers,
+  });
+  if (!response || response.outcome !== 'answered') {
+    throw argumentError(
+      '--answers must be a bounded array of unique question IDs and selected option IDs',
+    );
+  }
+  return {
+    kind: 'permission-answer',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'permission-answer'),
+    permissionOccurrenceId: parseOpaqueControlId(
+      parsed.positionals[2],
+      'permission occurrence ID',
+    ),
+    runId: parseOpaqueControlId(values.run, '--run'),
+    serverInstanceId: parseOpaqueControlId(values['server-instance'], '--server-instance'),
+    response,
+    json: values.json === true,
+  };
+}
+
+function parseTranscriptSearch(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): TranscriptSearchCliCommand {
+  rejectOptionsExcept(values, TRANSCRIPT_SEARCH_OPTIONS, 'transcript-search');
+  const action = parsed.positionals[1];
+  if (parsed.positionals.length !== 2 || !isTranscriptSearchAction(action)) {
+    throw argumentError(
+      'transcript-search requires one action: enable, disable, rebuild, or status',
+    );
+  }
+  return {
+    kind: 'transcript-search',
+    ...connection,
+    action,
+    json: values.json === true,
+  };
+}
+
+function isTranscriptSearchAction(value: unknown): value is TranscriptSearchAction {
+  return typeof value === 'string'
+    && TRANSCRIPT_SEARCH_ACTIONS.includes(value as TranscriptSearchAction);
+}
+
 function parseChatOrderMutation(
   kind: ChatOrderMutationKind,
   parsed: ReturnType<typeof parseArgs>,
@@ -820,6 +927,9 @@ function parsePreambleSelection(
   }
   if (noPreamble) return [];
   if (rawIds === undefined) return undefined;
+  if (rawIds.length > PREAMBLE_MAX_COUNT) {
+    throw argumentError(`--preamble may be specified at most ${PREAMBLE_MAX_COUNT} times`);
+  }
   const ids: PreambleId[] = [];
   const seen = new Set<string>();
   for (const rawId of rawIds) {
@@ -1304,6 +1414,7 @@ export function parseCliArgs(
         'transcript-view-id': { type: 'string' },
         run: { type: 'string' },
         'server-instance': { type: 'string' },
+        answers: { type: 'string' },
         force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
         'no-preamble': { type: 'boolean' },
@@ -1373,6 +1484,12 @@ export function parseCliArgs(
   if (commandName === 'permission-decision') {
     return parsePermissionDecision(parsed, values, connection);
   }
+  if (commandName === 'permission-answer') {
+    return parsePermissionAnswer(parsed, values, connection);
+  }
+  if (commandName === 'transcript-search') {
+    return parseTranscriptSearch(parsed, values, connection);
+  }
   if (
     commandName === 'archive'
     || commandName === 'unarchive'
@@ -1404,10 +1521,16 @@ export function parseCliArgs(
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
-    if (resource === 'agents') {
-      if (agentId !== undefined) throw argumentError('--agent cannot be used with list agents');
-      if (providerId !== undefined) throw argumentError('--provider cannot be used with list agents');
-      if (endpointId !== undefined) throw argumentError('--endpoint cannot be used with list agents');
+    if (resource === 'agents' || resource === 'preambles') {
+      if (agentId !== undefined) {
+        throw argumentError(`--agent cannot be used with list ${resource}`);
+      }
+      if (providerId !== undefined) {
+        throw argumentError(`--provider cannot be used with list ${resource}`);
+      }
+      if (endpointId !== undefined) {
+        throw argumentError(`--endpoint cannot be used with list ${resource}`);
+      }
     }
     if (resource === 'providers' && endpointId !== undefined) {
       throw argumentError('--endpoint cannot be used with list providers');

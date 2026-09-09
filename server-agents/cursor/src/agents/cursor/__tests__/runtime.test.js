@@ -881,10 +881,9 @@ describe('Cursor ACP runtime', () => {
     });
 
     const answered = {
-      outcome: {
-        outcome: 'answered',
-        answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
-      },
+      type: 'ask-user-question-response',
+      outcome: 'answered',
+      answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
     };
     const permission = await operation.waitForEvent((event) => event.type === 'permission');
     expect(permission.lifecycle.requestedTool).toBeInstanceOf(CursorAskQuestionToolUseMessage);
@@ -892,7 +891,12 @@ describe('Cursor ACP runtime', () => {
     await permission.decision.respond({ allow: true, response: answered });
 
     const response = await acp.waitForWrite((message) => message.id === 'question-1' && message.result);
-    expect(response.result).toEqual(answered);
+    expect(response.result).toEqual({
+      outcome: {
+        outcome: 'answered',
+        answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
+      },
+    });
 
     acp.finishPrompt();
     runtime.shutdown();

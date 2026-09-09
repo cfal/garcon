@@ -30,8 +30,12 @@ import {
 } from '@garcon/common/chat-view';
 import {
   parseChatSearchResponse,
+  parseTranscriptSearchStatusResponse,
+  parseTranscriptSearchRebuildResponse,
   type ChatSearchRequest,
   type ChatSearchResponse,
+  type TranscriptSearchStatusResponse,
+  type TranscriptSearchRebuildResponse,
 } from '@garcon/common/chat-search';
 import { stableJsonStringify } from '@garcon/common/json';
 import {
@@ -55,6 +59,10 @@ import {
   type SetChatTagsResponse,
 } from '@garcon/common/chat-tags-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
+import {
+  normalizePreamblesSnapshot,
+  type PreamblesSnapshot,
+} from '@garcon/common/preambles';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import {
   parseNativeSessionLookupResponse,
@@ -340,6 +348,21 @@ export class GarconClient {
     return settings;
   }
 
+  async getPreambles(signal?: AbortSignal): Promise<PreamblesSnapshot> {
+    const value = await this.#request(
+      'catalog resolution',
+      'GET',
+      '/api/v1/preambles',
+      undefined,
+      signal,
+    );
+    const snapshot = normalizePreamblesSnapshot(value);
+    if (!snapshot) {
+      throw new CliError('catalog resolution', 'server returned an invalid preamble catalog', 3);
+    }
+    return snapshot;
+  }
+
   async listChats(signal?: AbortSignal): Promise<ChatListResponse> {
     const value = await this.#request('chat discovery', 'GET', '/api/v1/chats', undefined, signal);
     try {
@@ -400,6 +423,69 @@ export class GarconClient {
         cause: error,
       });
     }
+  }
+
+  async getTranscriptSearchStatus(signal?: AbortSignal): Promise<TranscriptSearchStatusResponse> {
+    const value = await this.#request(
+      'chat search',
+      'GET',
+      '/api/v1/chats/search/status',
+      undefined,
+      signal,
+    );
+    try {
+      return parseTranscriptSearchStatusResponse(value);
+    } catch (error) {
+      throw new CliError('chat search', 'server returned an invalid transcript search status', 3, {
+        cause: error,
+      });
+    }
+  }
+
+  async rebuildTranscriptSearch(signal?: AbortSignal): Promise<TranscriptSearchRebuildResponse> {
+    const value = await this.#request(
+      'chat search',
+      'POST',
+      '/api/v1/chats/search/rebuild',
+      undefined,
+      signal,
+      null,
+    );
+    try {
+      return parseTranscriptSearchRebuildResponse(value);
+    } catch (error) {
+      throw new CliError('chat search', 'server returned an invalid transcript search rebuild response', 3, {
+        cause: error,
+      });
+    }
+  }
+
+  async setTranscriptSearchEnabled(
+    enabled: boolean,
+    signal?: AbortSignal,
+  ): Promise<RemoteSettingsSnapshot> {
+    const value = await this.#request(
+      'chat search',
+      'PUT',
+      '/api/v1/app/settings',
+      { features: { transcriptSearch: { enabled } } },
+      signal,
+      null,
+    );
+    const response = record(value);
+    const rawSettings = record(response?.settings);
+    const rawFeatures = record(rawSettings?.features);
+    const rawTranscriptSearch = record(rawFeatures?.transcriptSearch);
+    const settings = normalizeRemoteSettingsSnapshot(rawSettings);
+    if (
+      response?.success !== true
+      || rawTranscriptSearch?.enabled !== enabled
+      || !settings
+      || settings.features.transcriptSearch.enabled !== enabled
+    ) {
+      throw new CliError('chat search', 'server returned an invalid transcript search setting', 3);
+    }
+    return settings;
   }
 
   async getChatSnapshot(

@@ -312,7 +312,7 @@ export class AcpAgentRuntime {
     }
     pending.session.client.respond(
       pending.requestId,
-      decision.response ?? pending.responseForDecision(decision),
+      pending.responseForDecision(decision),
     );
     this.#pendingPermissions.delete(pending);
     pending.turn.pendingPermissions.delete(pending);

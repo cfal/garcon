@@ -1,4 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import {
+  ASK_USER_QUESTION_ID_MAX_BYTES,
+  ASK_USER_QUESTION_MAX_ANSWERS,
+  ASK_USER_QUESTION_MAX_SELECTED_OPTIONS,
+} from '@garcon/common/chat-command-contracts';
+import { PREAMBLE_MAX_COUNT } from '@garcon/common/preambles';
 import { CLI_HELP, parseCliArgs } from '../args.js';
 import { CliError } from '../errors.js';
 
@@ -132,6 +138,13 @@ describe('parseCliArgs', () => {
       configDir: '/home/test/.garcon',
       json: false,
     });
+    expect(parseCliArgs(['list', 'preambles', '--json'], ENV)).toEqual({
+      kind: 'list',
+      resource: 'preambles',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      json: true,
+    });
   });
 
   test('normalizes and deduplicates repeatable additional tags', () => {
@@ -210,6 +223,7 @@ describe('parseCliArgs', () => {
     { args: ['list', 'endpoints'], message: 'requires --provider' },
     { args: ['list', 'models', '--agent', 'codex', '--endpoint', 'east'], message: 'requires --provider' },
     { args: ['list', 'agents', '--agent', 'codex'], message: '--agent cannot be used' },
+    { args: ['list', 'preambles', '--provider', 'acme'], message: '--provider cannot be used' },
     { args: ['start', '--json', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--json cannot be used with start' },
     { args: ['list', 'agents', '--title', 'Review'], message: '--title cannot be used' },
     { args: ['start', '--title', '  ', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--title must not be empty' },
@@ -272,6 +286,24 @@ describe('parseCliArgs', () => {
       orderedPreambleIds: [],
       json: true,
     });
+  });
+
+  test('accepts at most the shared preamble selection limit', () => {
+    const preambleIds = Array.from(
+      { length: PREAMBLE_MAX_COUNT },
+      (_, index) => `3502b645-222b-49d2-ac39-${index.toString().padStart(12, '0')}`,
+    );
+    const selectionArgs = preambleIds.flatMap((id) => ['--preamble', id]);
+
+    expect(parseCliArgs([
+      'start', '--agent', 'codex', '--model', 'gpt', ...selectionArgs, 'Review',
+    ], ENV)).toMatchObject({ orderedPreambleIds: preambleIds });
+    expect(() => parseCliArgs([
+      'start', '--agent', 'codex', '--model', 'gpt',
+      ...selectionArgs,
+      '--preamble', '3502b645-222b-49d2-ac39-000000000100',
+      'Review',
+    ], ENV)).toThrow(`--preamble may be specified at most ${PREAMBLE_MAX_COUNT} times`);
   });
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
@@ -604,6 +636,31 @@ describe('parseCliArgs', () => {
       allow: true,
       json: true,
     });
+    expect(parseCliArgs([
+      'permission-answer', CHAT_ID, 'permission-1',
+      '--answers', JSON.stringify([{
+        questionId: 'question-1',
+        selectedOptionIds: ['option-1', 'option-2'],
+      }]),
+      '--run', 'run-1', '--server-instance', 'instance-1', '--json',
+    ], ENV)).toEqual({
+      kind: 'permission-answer',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      permissionOccurrenceId: 'permission-1',
+      runId: 'run-1',
+      serverInstanceId: 'instance-1',
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{
+          questionId: 'question-1',
+          selectedOptionIds: ['option-1', 'option-2'],
+        }],
+      },
+      json: true,
+    });
     expect(parseCliArgs(['unarchive', CHAT_ID], ENV)).toMatchObject({
       kind: 'unarchive', chatId: CHAT_ID, json: false,
     });
@@ -633,6 +690,73 @@ describe('parseCliArgs', () => {
     [['start', '--agent', 'codex', '--model', 'gpt', '--preamble', 'not-a-uuid', 'prompt'], 'canonical UUID v4'],
     [['resume', CHAT_ID, '--no-preamble', 'prompt'], '--no-preamble cannot be used with resume'],
   ])('rejects invalid automation arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test.each([
+    [undefined, 'requires --answers'],
+    ['not-json', 'valid JSON'],
+    [JSON.stringify({ questionId: 'question-1' }), 'bounded array'],
+    [JSON.stringify([
+      { questionId: 'question-1', selectedOptionIds: [] },
+      { questionId: 'question-1', selectedOptionIds: [] },
+    ]), 'bounded array'],
+    [JSON.stringify([{
+      questionId: 'question-1',
+      selectedOptionIds: ['option-1', 'option-1'],
+    }]), 'bounded array'],
+    [JSON.stringify(Array.from(
+      { length: ASK_USER_QUESTION_MAX_ANSWERS + 1 },
+      (_, index) => ({ questionId: `question-${index}`, selectedOptionIds: [] }),
+    )), 'bounded array'],
+    [JSON.stringify([{
+      questionId: 'question-1',
+      selectedOptionIds: Array.from(
+        { length: ASK_USER_QUESTION_MAX_SELECTED_OPTIONS + 1 },
+        (_, index) => `option-${index}`,
+      ),
+    }]), 'bounded array'],
+    [JSON.stringify([{
+      questionId: 'q'.repeat(ASK_USER_QUESTION_ID_MAX_BYTES + 1),
+      selectedOptionIds: [],
+    }]), 'bounded array'],
+  ])('rejects invalid structured permission answers', (answers, message) => {
+    const args = [
+      'permission-answer', CHAT_ID, 'permission-1',
+      '--run', 'run-1', '--server-instance', 'instance-1',
+    ];
+    if (answers !== undefined) args.push('--answers', answers);
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('rejects repeated structured permission answer payloads', () => {
+    expect(() => parseCliArgs([
+      'permission-answer', CHAT_ID, 'permission-1',
+      '--answers', '[]', '--answers', '[]',
+      '--run', 'run-1', '--server-instance', 'instance-1',
+    ], ENV)).toThrow('option may be specified only once: --answers');
+  });
+
+  test('parses transcript search administration actions', () => {
+    for (const action of ['enable', 'disable', 'rebuild', 'status'] as const) {
+      expect(parseCliArgs([
+        '--workspace', 'work', 'transcript-search', action, '--json',
+      ], ENV)).toEqual({
+        kind: 'transcript-search',
+        workspace: 'work',
+        configDir: '/home/test/.garcon',
+        action,
+        json: true,
+      });
+    }
+  });
+
+  test.each([
+    [['transcript-search'], 'requires one action'],
+    [['transcript-search', 'unknown'], 'requires one action'],
+    [['transcript-search', 'status', 'extra'], 'requires one action'],
+    [['transcript-search', 'enable', '--filter', 'tag:ops'], '--filter cannot be used'],
+  ])('rejects invalid transcript search administration arguments', (args, message) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 });

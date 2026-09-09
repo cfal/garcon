@@ -7,7 +7,10 @@ const SETTINGS_LOCK_KEY = 'transcript-search-setting';
 
 export class TranscriptSearchSettingsError extends Error {
   constructor(
-    public readonly code: 'TRANSCRIPT_SEARCH_ENABLE_FAILED' | 'TRANSCRIPT_SEARCH_CLEANUP_FAILED',
+    public readonly code:
+      | 'TRANSCRIPT_SEARCH_DISABLED'
+      | 'TRANSCRIPT_SEARCH_ENABLE_FAILED'
+      | 'TRANSCRIPT_SEARCH_CLEANUP_FAILED',
     message: string,
   ) {
     super(message);
@@ -42,21 +45,14 @@ export class TranscriptSearchSettingsCoordinator {
           if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
           await this.#disableAndDelete();
         } else {
-          try {
-            await this.#controller.start();
-          } catch (error) {
-            throw new TranscriptSearchSettingsError(
-              'TRANSCRIPT_SEARCH_ENABLE_FAILED',
-              error instanceof Error ? error.message : String(error),
-            );
-          }
+          await this.#start();
           if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
         }
         return;
       }
       if (enabled) {
         try {
-          await this.#controller.start();
+          await this.#start();
           await this.#settings.setFeatureSettings(featurePatch);
         } catch (error) {
           await this.#controller.disableAndDelete().catch(() => undefined);
@@ -71,6 +67,31 @@ export class TranscriptSearchSettingsCoordinator {
       await this.#settings.setFeatureSettings(featurePatch);
       await this.#disableAndDelete();
     });
+  }
+
+  async rebuild(): Promise<void> {
+    await this.#lock.runExclusive(SETTINGS_LOCK_KEY, async () => {
+      await this.#settings.confirmDurability();
+      if (!this.#settings.getFeatureSettings().transcriptSearch.enabled) {
+        throw new TranscriptSearchSettingsError(
+          'TRANSCRIPT_SEARCH_DISABLED',
+          'Transcript search must be enabled before rebuilding the index',
+        );
+      }
+      await this.#disableAndDelete();
+      await this.#start();
+    });
+  }
+
+  async #start(): Promise<void> {
+    try {
+      await this.#controller.start();
+    } catch (error) {
+      throw new TranscriptSearchSettingsError(
+        'TRANSCRIPT_SEARCH_ENABLE_FAILED',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   async #disableAndDelete(): Promise<void> {

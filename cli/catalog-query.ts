@@ -10,6 +10,7 @@ import {
   normalizeSupportedThinkingMode,
 } from '@garcon/common/execution-defaults';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
+import type { PreamblesSnapshot } from '@garcon/common/preambles';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import type { ListCliCommand } from './args.js';
 import {
@@ -27,6 +28,7 @@ import type { CliOutput } from './output.js';
 
 export interface CatalogQueryClient {
   getModelCatalog(agentId?: string, signal?: AbortSignal): Promise<ModelCatalogResponse>;
+  getPreambles(signal?: AbortSignal): Promise<PreamblesSnapshot>;
   getSettings(signal?: AbortSignal): Promise<RemoteSettingsSnapshot>;
 }
 
@@ -295,6 +297,14 @@ export async function runCatalogQuery(
   output: CliOutput,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (command.resource === 'preambles') {
+    const snapshot = await client.getPreambles(signal);
+    output.result(formatCatalogQueryResult({
+      resource: 'preambles',
+      ...snapshot,
+    }, command.json));
+    return;
+  }
   const needsSettings = command.resource === 'permissions'
     || command.resource === 'reasoning-efforts';
   const [catalog, settings] = await Promise.all([

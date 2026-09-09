@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  ASK_USER_QUESTION_MAX_ANSWERS,
+  ASK_USER_QUESTION_MAX_SELECTED_OPTIONS,
   COMMAND_CORRELATION_ID_MAX_BYTES,
   QUEUE_ENTRY_ID_MAX_BYTES,
   CommandRequestValidationError,
+  normalizeAskUserQuestionDecisionResponse,
   parseAgentRunCommandRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
@@ -497,6 +500,39 @@ describe('chat command request parsers', () => {
       ...request,
       control: { ...control, runId: '' },
     })).toThrow('control is invalid');
+  });
+
+  it('strictly normalizes bounded structured question answers', () => {
+    const response = {
+      type: 'ask-user-question-response',
+      outcome: 'answered',
+      answers: [{ questionId: 'question-1', selectedOptionIds: ['option-1', 'option-2'] }],
+    };
+    expect(normalizeAskUserQuestionDecisionResponse(response)).toEqual(response);
+
+    for (const invalid of [
+      { ...response, extra: true },
+      { ...response, answers: [{ ...response.answers[0], extra: true }] },
+      { ...response, answers: [{ questionId: '', selectedOptionIds: ['option-1'] }] },
+      { ...response, answers: [{ questionId: 'question-1', selectedOptionIds: ['same', 'same'] }] },
+      {
+        ...response,
+        answers: Array.from(
+          { length: ASK_USER_QUESTION_MAX_ANSWERS + 1 },
+          (_, index) => ({ questionId: `question-${index}`, selectedOptionIds: [] }),
+        ),
+      },
+      {
+        ...response,
+        answers: [{
+          questionId: 'question-1',
+          selectedOptionIds: Array.from(
+            { length: ASK_USER_QUESTION_MAX_SELECTED_OPTIONS + 1 },
+            (_, index) => `option-${index}`,
+          ),
+        }],
+      },
+    ]) expect(normalizeAskUserQuestionDecisionResponse(invalid)).toBeNull();
   });
 
   it('parses queue entry moves with explicit concurrency preconditions', () => {

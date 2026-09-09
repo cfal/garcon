@@ -145,23 +145,39 @@ describe('scripted Claude permissions', () => {
         'permission-resolved',
       )).toEqual([]);
 
-      const decision = await fixture.client.sendPermissionDecision({
-        clientRequestId: crypto.randomUUID(),
+      const invalidDecision = await runCli(fixture, [
+        'permission-answer', chatId, permissionOccurrenceId,
+        '--answers', JSON.stringify([{
+          questionId: 'Which database?',
+          selectedOptionIds: ['Unknown database'],
+        }]),
+        '--run', control.runId,
+        '--server-instance', control.serverInstanceId,
+        '--json',
+      ]);
+      expect(invalidDecision).toMatchObject({ exitCode: 2, stdout: '' });
+      expect(invalidDecision.stderr).toContain('unknown option ID');
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'permission-resolved',
+      )).toEqual([]);
+
+      const decision = await runCli(fixture, [
+        'permission-answer', chatId, permissionOccurrenceId,
+        '--answers', JSON.stringify([{
+          questionId: 'Which database?',
+          selectedOptionIds: ['Postgres'],
+        }]),
+        '--run', control.runId,
+        '--server-instance', control.serverInstanceId,
+        '--json',
+      ]);
+      expect(decision).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(decision.stdout)).toMatchObject({
+        commandType: 'permission-decision',
         chatId,
-        permissionOccurrenceId,
-        allow: true,
-        alwaysAllow: false,
-        control,
-        response: {
-          type: 'ask-user-question-response',
-          outcome: 'answered',
-          answers: [{
-            questionId: 'Which database?',
-            selectedOptionIds: ['Postgres'],
-          }],
-        },
+        status: 'accepted',
       });
-      expect(decision.status).toBe('accepted');
       await waitForVisibleResponse({
         fixture,
         chatId,
@@ -176,6 +192,7 @@ describe('scripted Claude permissions', () => {
         && entry.message.allowed)).toBe(true);
       testEnvironment.model.assertSettled();
     }, {
+      namedWorkspace: CLI_PERMISSION_WORKSPACE,
       serverEnvironment: testEnvironment.serverEnvironment,
     });
   }, 60_000);

@@ -3,12 +3,14 @@ import { describe, expect, it, mock } from 'bun:test';
 import { compareChatOrderNewestFirst } from '../../../common/chat-order-sort.js';
 import createChatRoutes from '../chats.js';
 import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
+import { TranscriptSearchSettingsError } from '../../chats/search/settings-coordinator.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 function createRoutesFixture({
   lastActivityAtByChat = {},
   createdAtByChat = {},
   withoutSearchIndex = false,
+  withoutSearchMaintenance = false,
 } = {}) {
   const sessions = {
     c1: {
@@ -169,6 +171,9 @@ function createRoutesFixture({
       removedStaleResultCount: 0,
     })),
   };
+  const searchMaintenance = {
+    rebuild: mock(async () => undefined),
+  };
   const chatListProjector = {
     buildMany: mock((entries) => new Map(
       entries.map(([chatId]) => [chatId, {
@@ -191,6 +196,7 @@ function createRoutesFixture({
     chatViews,
     agents,
     searchIndex: withoutSearchIndex ? undefined : searchIndex,
+    transcriptSearchMaintenance: withoutSearchMaintenance ? undefined : searchMaintenance,
     chatListProjector,
     commandService: createRouteCommandService({
       registry,
@@ -202,7 +208,7 @@ function createRoutesFixture({
     }),
   });
 
-  return { routes, searchIndex, registry, agents, chatListProjector };
+  return { routes, searchIndex, searchMaintenance, registry, agents, chatListProjector };
 }
 
 async function postSearch(routes, body, signal) {
@@ -220,6 +226,14 @@ async function getStatus(routes) {
   const request = new Request('http://localhost/api/v1/chats/search/status');
   const url = new URL(request.url);
   return routes['/api/v1/chats/search/status'].GET(request, url);
+}
+
+async function postRebuild(routes, server) {
+  const request = new Request('http://localhost/api/v1/chats/search/rebuild', {
+    method: 'POST',
+  });
+  const url = new URL(request.url);
+  return routes['/api/v1/chats/search/rebuild'].POST(request, url, server);
 }
 
 describe('POST /api/v1/chats/search', () => {
@@ -283,6 +297,22 @@ describe('POST /api/v1/chats/search', () => {
     expect(registry.listAllChats).not.toHaveBeenCalled();
     expect(registry.getChat.mock.calls.map(([chatId]) => chatId)).toEqual(['c2', 'missing']);
     expect(chatListProjector.buildMany.mock.calls[0][0].map(([chatId]) => chatId)).toEqual(['c2']);
+  });
+
+  it('echoes the exact submitted query while executing its normalized form', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+
+    const response = await postSearch(routes, {
+      query: '  needle  ',
+      textTokens: [' needle '],
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ query: '  needle  ' });
+    expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+      query: 'needle',
+      textTokens: ['needle'],
+    }));
   });
 
   it('includes chats without checking project path availability', async () => {
@@ -602,6 +632,86 @@ describe('GET /api/v1/chats/search/status', () => {
         totalP95Ms: 0,
         totalMaxMs: 0,
       },
+    });
+  });
+});
+
+describe('POST /api/v1/chats/search/rebuild', () => {
+  it('rebuilds the index and returns its immediate typed status', async () => {
+    const { routes, searchIndex, searchMaintenance } = createRoutesFixture();
+    const server = { timeout: mock(() => undefined) };
+
+    const response = await postRebuild(routes, server);
+
+    expect(response.status).toBe(200);
+    expect(searchMaintenance.rebuild).toHaveBeenCalledTimes(1);
+    expect(server.timeout).toHaveBeenCalledWith(expect.any(Request), 0);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      status: {
+        ...searchIndex.status(),
+        queryStats: searchIndex.queryStats(),
+      },
+    });
+  });
+
+  it('completes beyond a short Bun idle timeout', async () => {
+    const { routes, searchMaintenance } = createRoutesFixture();
+    searchMaintenance.rebuild.mockImplementationOnce(async () => {
+      await Bun.sleep(4_500);
+    });
+    const server = Bun.serve({
+      hostname: '0.0.0.0',
+      port: 0,
+      idleTimeout: 1,
+      fetch(request, bunServer) {
+        return routes['/api/v1/chats/search/rebuild'].POST(
+          request,
+          new URL(request.url),
+          bunServer,
+        );
+      },
+    });
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/v1/chats/search/rebuild`, {
+        method: 'POST',
+      });
+      expect(response.status).toBe(200);
+      expect(searchMaintenance.rebuild).toHaveBeenCalledTimes(1);
+    } finally {
+      await server.stop(true);
+    }
+  }, 10_000);
+
+  it('rejects rebuild when transcript search is disabled', async () => {
+    const { routes, searchMaintenance } = createRoutesFixture();
+    searchMaintenance.rebuild.mockRejectedValueOnce(new TranscriptSearchSettingsError(
+      'TRANSCRIPT_SEARCH_DISABLED',
+      'Transcript search must be enabled before rebuilding the index',
+    ));
+
+    const response = await postRebuild(routes);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      errorCode: 'TRANSCRIPT_SEARCH_DISABLED',
+      retryable: false,
+    });
+  });
+
+  it('reports unavailable rebuild infrastructure without invoking maintenance', async () => {
+    const { routes, searchMaintenance } = createRoutesFixture({
+      withoutSearchMaintenance: true,
+    });
+
+    const response = await postRebuild(routes);
+
+    expect(response.status).toBe(503);
+    expect(searchMaintenance.rebuild).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      errorCode: 'SEARCH_INDEX_UNAVAILABLE',
+      retryable: true,
     });
   });
 });

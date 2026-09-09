@@ -113,6 +113,39 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     });
   });
 
+  it('rebuilds an enabled derived index without changing its durable setting', async () => {
+    const harness = createHarness(true);
+
+    await harness.coordinator.rebuild();
+
+    expect(harness.events).toEqual(['delete', 'start']);
+    expect(harness.settings.setFeatureSettings).not.toHaveBeenCalled();
+  });
+
+  it('rejects rebuild while disabled before changing index lifecycle', async () => {
+    const harness = createHarness(false);
+
+    await expect(harness.coordinator.rebuild()).rejects.toMatchObject({
+      code: 'TRANSCRIPT_SEARCH_DISABLED',
+    });
+
+    expect(harness.controller.disableAndDelete).not.toHaveBeenCalled();
+    expect(harness.controller.start).not.toHaveBeenCalled();
+  });
+
+  it('reports rebuild admission failures through the existing typed error', async () => {
+    const harness = createHarness(true);
+    harness.controller.start.mockImplementationOnce(async () => {
+      harness.events.push('start');
+      throw new Error('reader unavailable');
+    });
+
+    await expect(harness.coordinator.rebuild()).rejects.toMatchObject({
+      code: 'TRANSCRIPT_SEARCH_ENABLE_FAILED',
+    });
+    expect(harness.events).toEqual(['delete', 'start']);
+  });
+
   it('keeps an additional feature patch when disabled cleanup fails', async () => {
     const harness = createHarness(false);
     harness.controller.disableAndDelete.mockImplementationOnce(async () => {

@@ -150,6 +150,7 @@ export default function createAllRoutes({
       chatListProjector,
       lastSelectedChat,
       searchIndex,
+      transcriptSearchMaintenance: transcriptSearchSettings,
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
     ...createFilesRoutes(registry),

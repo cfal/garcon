@@ -18,6 +18,7 @@ import {
   type JsonBody,
 } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { disableRequestIdleTimeout } from '../lib/http-route.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
@@ -365,7 +366,12 @@ export default function createWorkspaceRoutes(
     }
   }
 
-  async function putAppSettings(body: JsonBody): Promise<Response> {
+  async function putAppSettings(
+    body: JsonBody,
+    request: Request,
+    _url: URL,
+    server?: unknown,
+  ): Promise<Response> {
     try {
       const input = asJsonBody(body);
       const promptPatchError = generationPromptPatchError(input.ui);
@@ -405,6 +411,7 @@ export default function createWorkspaceRoutes(
       }
       if (transcriptSearchEnabled !== undefined) {
         if (transcriptSearchSettings) {
+          disableRequestIdleTimeout(request, server);
           await transcriptSearchSettings.setEnabled(transcriptSearchEnabled, featurePatch);
         } else {
           await settings.setFeatureSettings({

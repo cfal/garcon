@@ -6,6 +6,10 @@ import type {
   CommandAcceptedResponse,
   ProjectPathPatchResponse,
 } from '../../common/chat-command-contracts.js';
+import {
+  askUserQuestionDecisionValidationError,
+  normalizeAskUserQuestionDecisionResponse,
+} from '../../common/ask-user-question-response.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
@@ -207,7 +211,7 @@ export class SessionCommands {
     input: PermissionDecisionInput,
   ): Promise<CommandAcceptedResponse> {
     this.support.requireChat(input.chatId);
-    const ledger = await this.deps.ledger.accept({
+    const ledgerInput = {
       commandType: 'permission-decision',
       chatId: input.chatId,
       clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
@@ -219,15 +223,21 @@ export class SessionCommands {
         control: input.control,
         ...(input.response ? { response: input.response } : {}),
       },
-    });
+    };
+
+    if (input.response?.type === 'ask-user-question-response') {
+      const existing = await this.deps.ledger.observe(ledgerInput);
+      if (existing?.kind === 'duplicate') {
+        return this.replayPermissionDecision(existing.record);
+      }
+      if (existing) this.support.throwOnConflict(existing, 'Conflicting permission decision retry');
+      this.validateStructuredPermissionDecision(input);
+    }
+
+    const ledger = await this.deps.ledger.accept(ledgerInput);
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
     if (ledger.kind === 'duplicate') {
-      if (ledger.record.status === 'finished') return commandResultFromRecord(ledger.record, 'duplicate');
-      const failureCode = ledger.record.status === 'failed'
-        && ledger.record.errorCode === 'PERMISSION_NOT_ACTIONABLE'
-        ? 'PERMISSION_NOT_ACTIONABLE'
-        : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
-      throw permissionDecisionError(failureCode);
+      return this.replayPermissionDecision(ledger.record);
     }
     try {
       this.deps.transientFeeds.validateAction(input.control);
@@ -248,6 +258,43 @@ export class SessionCommands {
       throw failure;
     }
     return commandResultFromRecord(ledger.record);
+  }
+
+  private validateStructuredPermissionDecision(input: PermissionDecisionInput): void {
+    const response = normalizeAskUserQuestionDecisionResponse(input.response);
+    if (!response) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        'Permission response contains an invalid structured answer',
+      );
+    }
+
+    let pending;
+    try {
+      pending = this.deps.transientFeeds.validateAction(input.control);
+    } catch (error) {
+      if (error instanceof TransientControlActionError) {
+        throw permissionDecisionError('PERMISSION_NOT_ACTIONABLE');
+      }
+      throw error;
+    }
+    const validationError = askUserQuestionDecisionValidationError(
+      pending.message.requestedTool,
+      input.allow,
+      response,
+    );
+    if (validationError) {
+      throw new CommandValidationError('VALIDATION_FAILED', validationError);
+    }
+  }
+
+  private replayPermissionDecision(record: CommandLedgerRecord): CommandAcceptedResponse {
+    if (record.status === 'finished') return commandResultFromRecord(record, 'duplicate');
+    const failureCode = record.status === 'failed'
+      && record.errorCode === 'PERMISSION_NOT_ACTIONABLE'
+      ? 'PERMISSION_NOT_ACTIONABLE'
+      : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+    throw permissionDecisionError(failureCode);
   }
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {

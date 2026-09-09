@@ -87,8 +87,25 @@ describe('garcon-cli chat research', () => {
         .toBe('agent-run-finished');
       await fs.rm(projectPath, { recursive: true, force: true });
 
-      await fixture.client.updateSettings({
-        features: { transcriptSearch: { enabled: true } },
+      const enabled = await runCli(fixture, ['transcript-search', 'enable', '--json']);
+      expect(enabled).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(enabled.stdout)).toMatchObject({ enabled: true });
+      await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 60_000 });
+
+      const searchStatus = await runCli(fixture, ['transcript-search', 'status', '--json']);
+      expect(searchStatus).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(searchStatus.stdout)).toMatchObject({
+        version: 1,
+        phase: 'ready',
+        chats: { total: 2, indexed: 2, pending: 0, failed: 0, unindexed: 0 },
+        queryStats: { served: 0, timedOut: 0, rejectedBusy: 0 },
+      });
+
+      const rebuilt = await runCli(fixture, ['transcript-search', 'rebuild', '--json']);
+      expect(rebuilt).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(rebuilt.stdout)).toMatchObject({
+        success: true,
+        status: { version: 1 },
       });
       await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 60_000 });
 
@@ -188,6 +205,10 @@ describe('garcon-cli chat research', () => {
       expect(readResult.messages.some(
         (entry: { ordinal: number }) => entry.ordinal === snippet.ordinal,
       )).toBe(true);
+
+      const disabled = await runCli(fixture, ['transcript-search', 'disable', '--json']);
+      expect(disabled).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(disabled.stdout)).toMatchObject({ enabled: false });
     }, { namedWorkspace: WORKSPACE });
   }, 120_000);
 
@@ -196,7 +217,14 @@ describe('garcon-cli chat research', () => {
       const result = await runCli(fixture, ['search', 'needle', '--json']);
       expect(result.exitCode).toBe(2);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toContain('features.transcriptSearch.enabled');
+      expect(result.stderr).toContain([
+        'garcon-cli',
+        '--workspace', `'${WORKSPACE}'`,
+        '--config-dir', `'${fixture.dirs.config}'`,
+        '--server', `'${fixture.garcon.baseUrl}'`,
+        'transcript-search',
+        'enable',
+      ].join(' '));
     }, { namedWorkspace: WORKSPACE });
   });
 });
