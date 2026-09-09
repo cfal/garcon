@@ -1,6 +1,15 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
-import { ApiError, apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
+import {
+	ApiError,
+	ApiMutationOutcomeUnknownError,
+	apiGet,
+	apiPost,
+	apiPatch,
+	apiDelete,
+	apiPut,
+	type ApiFetchOptions,
+} from './client.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizePermissionMode,
@@ -66,6 +75,17 @@ import type {
 	QueueResumeRequest,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
+import {
+	normalizeChatTagConflictResponse,
+	normalizeChatTagsMutationResponse,
+	normalizeRecoverChatTagsResponse,
+	type ApplyChatTagDeltaRequest,
+	type ChatTagConflictResponse,
+	type ChatTagsMutationResponse,
+	type RecoverChatTagsResponse,
+	type ReplaceChatTagsRequest,
+	type TransitionChatTagsRequest,
+} from '$shared/chat-tag-mutations';
 import type {
 	GenerateChatTitleRequest,
 	GenerateChatTitleResponse,
@@ -506,13 +526,71 @@ export async function sortChatOrder(
 	return parsed;
 }
 
-export interface SetChatTagsResponse {
-	success: boolean;
-	chatId: string;
-	tags: string[];
+function isAmbiguousMutationStatus(status: number): boolean {
+	return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-/** Updates the tags for a chat session. */
-export async function setChatTags(chatId: string, tags: string[]): Promise<SetChatTagsResponse> {
-	return apiPatch<SetChatTagsResponse>('/api/v1/chats/tags', { chatId, tags });
+async function requestChatTagMutation(
+	request: () => Promise<unknown>,
+	invalidResponseMessage: string,
+): Promise<ChatTagsMutationResponse> {
+	try {
+		const response = await request();
+		const parsed = normalizeChatTagsMutationResponse(response);
+		if (!parsed) throw new ApiMutationOutcomeUnknownError(invalidResponseMessage);
+		return parsed;
+	} catch (error) {
+		if (error instanceof ApiMutationOutcomeUnknownError) throw error;
+		if (
+			error instanceof ApiError &&
+			(error.errorCode !== undefined || !isAmbiguousMutationStatus(error.status))
+		) {
+			throw error;
+		}
+		throw new ApiMutationOutcomeUnknownError(
+			'The chat tag mutation outcome could not be confirmed.',
+			{ cause: error },
+		);
+	}
+}
+
+export function getChatTagConflictResponse(error: unknown): ChatTagConflictResponse | null {
+	if (!(error instanceof ApiError) || error.errorCode !== 'CHAT_TAG_REVISION_CONFLICT') {
+		return null;
+	}
+	return normalizeChatTagConflictResponse(error.payload);
+}
+
+export async function replaceChatTags(
+	request: ReplaceChatTagsRequest,
+): Promise<ChatTagsMutationResponse> {
+	return requestChatTagMutation(
+		() => apiPatch<unknown>('/api/v1/chats/tags', request),
+		'Invalid chat tag mutation response',
+	);
+}
+
+export async function applyChatTagDelta(
+	request: ApplyChatTagDeltaRequest,
+): Promise<ChatTagsMutationResponse> {
+	return requestChatTagMutation(
+		() => apiPatch<unknown>('/api/v1/chats/tags/delta', request),
+		'Invalid chat tag mutation response',
+	);
+}
+
+export async function transitionChatTags(
+	request: TransitionChatTagsRequest,
+): Promise<ChatTagsMutationResponse> {
+	return requestChatTagMutation(
+		() => apiPost<unknown>('/api/v1/chats/tag-transition', request),
+		'Invalid chat tag transition response',
+	);
+}
+
+export async function recoverChatTags(chatId: string): Promise<RecoverChatTagsResponse> {
+	const response = await apiGet<unknown>(`/api/v1/chats/tags?chatId=${encodeURIComponent(chatId)}`);
+	const parsed = normalizeRecoverChatTagsResponse(response);
+	if (!parsed) throw new Error('Invalid chat tag recovery response');
+	return parsed;
 }

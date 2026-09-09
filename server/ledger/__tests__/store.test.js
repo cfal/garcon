@@ -901,33 +901,6 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one')).toHaveLength(1);
   });
 
-  it('reads assistant receipt output between the submitted input and terminal row', () => {
-    const view = store.initializeCurrentView('chat-one', {
-      viewId: transcriptViewId('view-one'),
-      contentStartOrdinal: 1,
-    });
-    store.append('chat-one', view.viewId, [provider('earlier')]);
-    store.appendInputAndCompose('chat-one', {
-      viewId: view.viewId,
-      at,
-      detail: inputDetail('message-one', 'prompt'),
-    });
-    store.append('chat-one', view.viewId, [
-      provider('first answer'),
-      { kind: 'provider-row', at, message: new BashToolUseMessage(at, 'tool-one', 'pwd') },
-      provider('second answer'),
-      runEnded('finished'),
-      provider('late answer'),
-    ]);
-
-    expect(store.assistantMessagesForSubmission(
-      'chat-one',
-      view.viewId,
-      'message-one',
-      6,
-    )).toEqual(['first answer', 'second answer']);
-  });
-
   it('composes unanswered inputs through interruptions and stops at provider engagement', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),

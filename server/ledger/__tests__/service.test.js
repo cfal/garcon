@@ -246,6 +246,60 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('publishes sanitized final text ephemerally without redispatching commands or storing it', async () => {
+    const requests = mock(() => undefined);
+    await withService(async ({ ledger, store }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const notifications = [];
+      ledger.subscribe((event) => notifications.push(event));
+      const text = '<garcon-get-chat-id />\n\nFinal part A.\n\nFinal part B.\r';
+      lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(TS, text) }] });
+      const response = { type: 'text', text };
+      lease.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished', finalResponse: response });
+      response.text = 'Mutated after publication.';
+      lease.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished', finalResponse: response });
+      await tick();
+      const terminals = notifications.filter((event) => event.type === 'run-ended');
+      expect(terminals).toHaveLength(1);
+      expect(terminals[0].finalResponse).toEqual({ type: 'text', text: 'Final part A.\n\nFinal part B.\r' });
+      expect(requests).toHaveBeenCalledTimes(1);
+      expect(ledger.currentRows('chat-1').at(-1)).not.toHaveProperty('finalResponse');
+      expect(JSON.stringify(store.currentRows('chat-1'))).not.toContain('finalResponse');
+    }, { chatIdRequests: { request: requests } });
+  });
+
+  it.each([undefined, null, {}, { type: 'text', text: 42 }, { type: 'other', text: 'wrong' }])(
+    'completes despite missing or malformed optional final metadata: %j', async (finalResponse) => {
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        const notifications = [];
+        ledger.subscribe((event) => notifications.push(event));
+        lease.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished', finalResponse });
+        await tick();
+        expect(notifications[0]).toMatchObject({ type: 'run-ended', finalResponse: null });
+        expect(ledger.activeRunId('chat-1')).toBeNull();
+      });
+    },
+  );
+
+  it.each(['failed', 'interrupted'])('drops optional final metadata on %s terminals', async (outcome) => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const notifications = [];
+      ledger.subscribe((event) => notifications.push(event));
+      lease.sink.publish({ type: 'run-ended', runId: 'run-1', outcome,
+        finalResponse: { type: 'text', text: 'Not a successful answer.' } });
+      await tick();
+      expect(notifications[0]).toMatchObject({ type: 'run-ended', finalResponse: null });
+    });
+  });
+
   it('notifies once for a fresh chat row and not for its exact retry', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');

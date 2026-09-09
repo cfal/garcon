@@ -14,7 +14,6 @@ vi.mock('$lib/api/chats', () => ({
 	forkChat: vi.fn(),
 	getChatDetails: vi.fn(),
 	reorderChat: vi.fn(),
-	setChatTags: vi.fn(),
 	toggleArchive: vi.fn(),
 	togglePinned: vi.fn(),
 	updateChatProjectPath: vi.fn(),
@@ -109,6 +108,13 @@ function createHarness(
 		onRenameChat: vi.fn(async () => undefined),
 		onProjectPathUpdated: vi.fn(),
 		onUpsertServerChat: vi.fn(),
+		replaceChatTags: vi.fn(async (input) => ({
+			success: true as const,
+			chatId: input.chatId,
+			tags: [...input.tags],
+			addedTags: [...input.tags],
+			removedTags: [],
+		})),
 		notifyError: vi.fn(),
 		requestComposerFocus: vi.fn(),
 		requestSidebarRecenter: vi.fn(),
@@ -158,11 +164,6 @@ beforeEach(() => {
 	vi.resetAllMocks();
 	vi.mocked(chatsApi.togglePinned).mockResolvedValue({ success: true, isPinned: true });
 	vi.mocked(chatsApi.toggleArchive).mockResolvedValue({ success: true, isArchived: true });
-	vi.mocked(chatsApi.setChatTags).mockResolvedValue({
-		success: true,
-		chatId: 'chat-1',
-		tags: ['review'],
-	});
 });
 
 describe('ChatActionController', () => {
@@ -370,11 +371,14 @@ describe('ChatActionController', () => {
 		});
 		const { controller, callbacks } = createHarness();
 
-		await controller.updateTags('chat-1', ['review']);
+		await controller.updateTags('chat-1', ['existing'], ['review']);
 		await controller.updateProjectPath('chat-1', ' /workspace/canonical ');
 
-		expect(chatsApi.setChatTags).toHaveBeenCalledWith('chat-1', ['review']);
-		expect(callbacks.onQuietRefresh).toHaveBeenCalledOnce();
+		expect(callbacks.replaceChatTags).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			expectedTags: ['existing'],
+			tags: ['review'],
+		});
 		expect(chatsApi.updateChatProjectPath).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			projectPath: ' /workspace/canonical ',

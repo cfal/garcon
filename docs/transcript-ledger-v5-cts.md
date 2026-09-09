@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 36 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 37 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -35,10 +35,17 @@ contracts become conformance obligations.
 Revision 35 makes automatic compaction boundaries visible as best-effort live
 provider rows without adding native Reload reconstruction.
 
+Revision 37 reconciles the governing design with the Direct native-session
+behavior already implemented in PR #549 (`61ebb144a`) and covered below:
+provider-owned durable JSONL and resume, native Reload, null legacy-import and
+native-activity facets, and persisted Responses checkpoints. Ledger context
+folds supply new-session seeds and carryover, not universal per-turn resume
+context. This documentation correction adds no cases or runtime obligations.
+
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 36, SHA-256
-  `731ccb33707b960ea7bec3e0868a93331e22d707ed4cd6fe756ad71c34e57eb3`
+- `docs/transcript-ledger-v5-design.md`, revision 37, SHA-256
+  `336cfef098ea91937230503fabad157fd6ff0cf11363add8c0070201888d0dcb`
 
 Current inventory: 419 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
@@ -276,7 +283,7 @@ routine local testing.
 | ID          | Obligation                                                                                                                 | Required evidence             |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | TLV5-L01.01 | Ordinary paging, snapshots, and reconnect read only the current ledger view.                                               | Unit, server black-box        |
-| TLV5-L01.02 | Rendering, search, preview, context, carryover, fork lookup, and command attribution consume their specified ledger folds. | Unit matrix, server black-box |
+| TLV5-L01.02 | Rendering, search, preview, context seeding, carryover, fork lookup, and command attribution consume their specified ledger folds. | Unit matrix, server black-box |
 | TLV5-L01.03 | A share is a self-contained snapshot and is unaffected by reload or view deletion.                                         | Unit, server black-box        |
 | TLV5-L01.04 | Ordinary serving never reads provider-native or integration-private history.                                               | Static, provider scripted     |
 
@@ -694,7 +701,7 @@ useful but do not replace this cross-surface matrix.
 | Rendering           | conversational, notice, provider error, switch, specialized permission; terminal as state | Ledger presentation and browser mixed ordering  | Covered                 |
 | Search              | conversational only                                                       | Search controller, worker, lazy-adoption server, and frontier-health tests | Covered |
 | Preview             | latest conversational only                                                | Registry cache and metadata tests               | Covered                 |
-| Model context       | conversational excluding current prompt                                   | Canonical all-kind matrix with current-prompt exclusion | Covered          |
+| Context seeding     | conversational excluding current prompt when starting a new native session | Canonical all-kind matrix with current-prompt exclusion | Covered          |
 | Carryover           | conversational, switch, and quarantine-notice frozen projection rules      | Canonical all-kind matrix plus handoff, fork, and reload tests | Covered |
 | Share               | rendering snapshot fixed at publish                                       | Native reload integration and share-store tests | Covered                 |
 | Fork lookup         | provider metadata passed unread to owner                                  | Fork units and scripted fork matrices           | Covered                 |

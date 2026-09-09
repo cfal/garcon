@@ -376,6 +376,7 @@ describe('Cursor ACP runtime', () => {
       const messages = publishedMessages(published.events).filter((message) => message.type === 'assistant-message');
       expect(messages).toHaveLength(1);
       expect(messages[0].content).toBe(content);
+      expect(published.events.at(-1).finalResponse).toEqual({ type: 'text', text: content });
       const parsed = extractGarconCommands(messages[0]);
       expect(parsed.issues).toEqual([]);
       expect(parsed.message).toBeNull();

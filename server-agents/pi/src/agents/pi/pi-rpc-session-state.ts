@@ -1,5 +1,6 @@
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 import type { PiRpcClient } from './pi-rpc-client.js';
+import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 
 export type PiRpcSessionState = 'starting' | 'idle' | 'prompting' | 'active' | 'retiring';
 
@@ -16,6 +17,7 @@ export interface PiActiveTurn {
   settleObserved: boolean;
   completion: 'pending' | 'finished' | 'failed' | 'stopped' | 'shutdown';
   failureMessage: string | null;
+  finalResponse?: AgentFinalResponse;
   readonly steerSubmissions: Set<PiSteerSubmission>;
   steeringQueue: readonly string[];
   settle(): void;

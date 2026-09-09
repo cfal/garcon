@@ -11,13 +11,13 @@ function writer(): { chunks: string[]; write(chunk: string): void } {
 }
 
 describe('createCliOutput', () => {
-  test('prints the stable chat line followed by assistant messages', () => {
+  test('prints the stable chat line followed by the complete final text', () => {
     const stdout = writer();
     const stderr = writer();
     const output = createCliOutput(stdout, stderr);
 
     output.accepted({ chatId: '1785337200123456', turnId: 'turn-1' });
-    output.completed(['First', '  ', 'Second']);
+    output.completed('First\n\nSecond');
 
     expect(stdout.chunks.join('')).toBe(
       'chat id: 1785337200123456\nturn id: turn-1\nFirst\n\nSecond\n',
@@ -39,7 +39,7 @@ describe('createCliOutput', () => {
     const output = createCliOutput(stdout, stderr);
 
     output.accepted({ chatId: '1785337200123456', turnId: 'turn-1' });
-    output.completed(['', '   ']);
+    output.completed('');
 
     expect(stdout.chunks.join('')).toBe('chat id: 1785337200123456\nturn id: turn-1\n');
     expect(stderr.chunks).toEqual([]);

@@ -15,6 +15,7 @@ import { parseChatTransientControlAction, type ChatTransientControlAction } from
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
 import type { ParentChatRef } from './chat-parentage.js';
+import type { CommandTagMutationOutcome } from './chat-tag-mutations.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
@@ -114,6 +115,7 @@ export type CommandErrorCode = Extract<
   | 'TRANSCRIPT_NOT_YET_PERSISTED'
   | 'STALE_TRANSCRIPT_VIEW'
   | 'AGENT_RESUME_NOT_DELEGATED'
+  | 'AGENT_STOP_NOT_DELEGATED'
   | 'PROJECT_PATH_UPDATE_UNSUPPORTED'
   | 'PROJECT_PATH_DESTINATION_REJECTED'
   | 'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN'
@@ -138,6 +140,7 @@ export interface CommandAcceptedResponse {
   turnId?: string;
   status: CommandStatus;
   acceptedAt: string;
+  tagMutation?: CommandTagMutationOutcome;
 }
 
 export interface AgentTurnCommandResponse extends CommandAcceptedResponse {

@@ -43,6 +43,10 @@ import {
   type TranscriptSearchStatusV1,
 } from './chat-search';
 import { InvalidChatIdError, parseChatId } from './chat-id';
+import {
+  CHAT_BOARD_INVALIDATION_REASONS,
+  type ChatBoardInvalidationReason,
+} from './chat-boards';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -289,6 +293,14 @@ export class ChatListRefreshRequestedMessage {
   ) {}
 }
 
+export class ChatBoardsInvalidatedMessage {
+  readonly type = 'chat-boards-invalidated' as const;
+  constructor(
+    public revision: number,
+    public reason: ChatBoardInvalidationReason,
+  ) {}
+}
+
 export class SettingsChangedMessage {
   readonly type = 'settings-changed' as const;
   constructor(public settings: RemoteSettingsSnapshot) {}
@@ -386,6 +398,7 @@ export type ServerWsMessage =
   | ChatSessionDeletedWsMessage
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
+  | ChatBoardsInvalidatedMessage
   | SettingsChangedMessage
   | TranscriptSearchStatusMessage
   | ScheduledPromptsInvalidatedMessage
@@ -784,6 +797,21 @@ export function parseServerWsMessage(
       const chatId = requiredStr(data.chatId);
       return reason && chatId
         ? new ChatListRefreshRequestedMessage(reason, chatId)
+        : null;
+    }
+    case 'chat-boards-invalidated': {
+      if (
+        Object.keys(data).length !== 3
+        || !Object.hasOwn(data, 'revision')
+        || !Object.hasOwn(data, 'reason')
+      ) return null;
+      const revision = nonNegativeInt(data.revision);
+      const reason = typeof data.reason === 'string'
+        && (CHAT_BOARD_INVALIDATION_REASONS as readonly string[]).includes(data.reason)
+        ? data.reason as ChatBoardInvalidationReason
+        : null;
+      return revision !== null && reason
+        ? new ChatBoardsInvalidatedMessage(revision, reason)
         : null;
     }
     case 'settings-changed': {

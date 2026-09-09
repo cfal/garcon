@@ -1,9 +1,11 @@
 // OpenCode SDK integration. Each provider operation owns its transcript publisher.
 
 import crypto from 'crypto';
+import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
+import { parseOpenCodePromptResponse } from './prompt-response.js';
 import {
   extractSessionId,
   extractTextParts,
@@ -632,11 +634,12 @@ export class OpenCodeRuntime {
     this.#publish(agentSessionId, operation, { type: 'rows', rows: runtimeRows(messages) });
   }
 
-  #publishFinished(agentSessionId: string, operation: AgentRuntimeOperation): void {
+  #publishFinished(agentSessionId: string, operation: AgentRuntimeOperation, finalResponse?: AgentFinalResponse): void {
     this.#publish(agentSessionId, operation, {
       type: 'run-ended',
       runId: operation.runId,
       outcome: 'finished',
+      ...(finalResponse ? { finalResponse } : {}),
     });
   }
 
@@ -769,7 +772,10 @@ export class OpenCodeRuntime {
     session.status = 'completed';
     session.lastActivityAt = Date.now();
     this.#resolveTurnWaiter(agentSessionId);
-    this.#publishFinished(agentSessionId, session.turn.operation);
+    const candidate = session.turn.finalResponse;
+    this.#publishFinished(agentSessionId, session.turn.operation,
+      candidate?.messageId === terminal.messageId ? candidate.response : undefined);
+    session.turn.finalResponse = undefined;
   }
 
   #releaseDeferredTerminal(agentSessionId: string, session: OpenCodeSession): void {
@@ -947,31 +953,18 @@ export class OpenCodeRuntime {
     result: unknown,
     route: OpenCodeOperationRoute,
   ): OpenCodeAssistantTerminal {
-    const response = isRecord(result) && isRecord(result.data) ? result.data : null;
-    const info = response && isRecord(response.info) ? response.info : null;
-    if (info?.role !== 'assistant' || typeof info.id !== 'string' || !info.id) {
-      throw new Error('OpenCode prompt response is missing its assistant message');
-    }
-
-    const messageEvent: SSEEvent = {
-      type: 'message.updated',
-      properties: { sessionID: route.sessionId, info },
-    };
-    const responseParentId = typeof info.parentID === 'string' && info.parentID
-      ? info.parentID
-      : null;
-    if (!this.#operationRoutes.activateFromResponse(route, responseParentId ?? info.id)) {
+    const { messageId, responseParentId, messageEvent, parts, isCompaction, finalResponse } = parseOpenCodePromptResponse(result, route.sessionId);
+    if (!this.#operationRoutes.activateFromResponse(route, responseParentId ?? messageId)) {
       throw new Error('OpenCode operation route retired before prompt completion');
     }
     if (responseParentId) route.turn.providerContinuationMessageIds.add(responseParentId);
     this.#operationRoutes.observe(route, messageEvent);
-    const isCompaction = isOpenCodeCompactionAssistant(info);
     if (!isCompaction) {
-      route.turn.assistantMessageIds.add(info.id);
+      route.turn.assistantMessageIds.add(messageId);
       this.#dispatchOpenCodeEvent(messageEvent, route);
     }
 
-    const parts = response && Array.isArray(response.parts) ? response.parts : [];
+    route.turn.finalResponse = finalResponse;
     for (const part of isCompaction ? [] : parts) {
       if (!isRecord(part)) continue;
       const partEvent: SSEEvent = {
@@ -983,7 +976,7 @@ export class OpenCodeRuntime {
     }
 
     return openCodeAssistantTerminal(messageEvent)
-      ?? { outcome: 'finished', messageId: info.id };
+      ?? { outcome: 'finished', messageId };
   }
 
   async #completePromptRequest(

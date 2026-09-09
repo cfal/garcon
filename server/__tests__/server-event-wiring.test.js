@@ -19,6 +19,7 @@ function createFixture(overrides = {}) {
   const scheduled = {};
   const snippets = {};
   const preambles = {};
+  const chatBoards = {};
   const telegram = {};
   const published = [];
   let chatPresent = true;
@@ -70,7 +71,7 @@ function createFixture(overrides = {}) {
     getTurnRecord: mock(async (_chatId, turnId) => (
       turnId === 'turn-1' ? { payload: { clientMessageId: 'message-1' } } : null
     )),
-    appendAssistantMessages: mock(async () => undefined),
+    setTurnResult: mock(async () => undefined),
     settleTerminal: mock(async () => undefined),
     markPublicTerminal: mock(async () => undefined),
     markChatInterrupted: mock(async () => undefined),
@@ -101,7 +102,6 @@ function createFixture(overrides = {}) {
     processing,
     metadata,
     currentTranscriptMessages: overrides.currentTranscriptMessages ?? (() => []),
-    assistantMessagesForSubmission: overrides.assistantMessagesForSubmission ?? (() => []),
     transientFeeds: new ChatTransientFeedStore('server-instance-test'),
     commandLedger,
     shareStore,
@@ -123,6 +123,10 @@ function createFixture(overrides = {}) {
       onInvalidated: mock((callback) => { preambles.invalidated = callback; }),
       ...overrides.preambles,
     },
+    chatBoards: {
+      on: mock((_event, callback) => { chatBoards.invalidated = callback; }),
+      ...overrides.chatBoards,
+    },
     searchIndex,
   });
   return {
@@ -142,6 +146,7 @@ function createFixture(overrides = {}) {
     shareStore,
     snippets,
     preambles,
+    chatBoards,
     wiring,
     removeChat() { chatPresent = false; },
   };
@@ -186,6 +191,18 @@ const turn = {
 };
 
 describe('server event wiring', () => {
+  it('broadcasts revisioned Chat Board invalidations without catalog content', () => {
+    const fixture = createFixture();
+
+    fixture.chatBoards.invalidated(7, 'reordered');
+
+    expect(fixture.published).toEqual([{
+      type: 'chat-boards-invalidated',
+      revision: 7,
+      reason: 'reordered',
+    }]);
+  });
+
   it('broadcasts preamble catalog invalidations without catalog content', () => {
     const fixture = createFixture();
 
@@ -297,16 +314,12 @@ describe('server event wiring', () => {
     );
   });
 
-  it('captures committed assistant output for the command receipt before terminal settlement', async () => {
+  it('captures only the committed final response before terminal settlement', async () => {
     const calls = [];
     const fixture = createFixture({
-      assistantMessagesForSubmission: mock((chatId, viewId, clientMessageId, throughOrdinal) => {
-        calls.push(['read', chatId, viewId, clientMessageId, throughOrdinal]);
-        return ['answer'];
-      }),
       commandLedger: {
-        appendAssistantMessages: mock(async (chatId, turnId, messages) => {
-          calls.push(['append', chatId, turnId, messages]);
+        setTurnResult: mock(async (chatId, turnId, response) => {
+          calls.push(['capture', chatId, turnId, response]);
         }),
         settleTerminal: mock(async () => {
           calls.push(['settle']);
@@ -314,13 +327,12 @@ describe('server event wiring', () => {
       },
     });
 
-    await fixture.agent.transcript(terminalCommit());
+    await fixture.agent.transcript({ ...terminalCommit(), finalResponse: { type: 'text', text: 'answer' } });
     fixture.agent.finished('chat-1', 0, turn, 'finished');
     await fixture.wiring.waitForIdle();
 
     expect(calls).toEqual([
-      ['read', 'chat-1', 'view-1', 'message-1', 3],
-      ['append', 'chat-1', 'turn-1', ['answer']],
+      ['capture', 'chat-1', 'turn-1', { type: 'text', text: 'answer' }],
       ['settle'],
     ]);
   });

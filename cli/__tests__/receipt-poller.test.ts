@@ -20,7 +20,7 @@ const completed: AgentTurnReceipt = {
   acceptedAt: TIMESTAMP,
   updatedAt: TIMESTAMP,
   settledAt: TIMESTAMP,
-  output: { availability: 'available', completeness: 'complete', assistantMessages: ['Done'] },
+  output: { availability: 'available', completeness: 'complete', text: 'Done' },
 };
 const pending: AgentTurnReceipt = {
   state: 'pending',

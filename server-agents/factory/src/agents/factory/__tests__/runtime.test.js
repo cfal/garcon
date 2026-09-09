@@ -632,13 +632,14 @@ describe('FactoryCliRuntime lifecycle', () => {
       timestamp: '2026-03-29T00:00:00.000Z',
       session_id: 'factory-session-2',
     });
-    proc.pushJson({ type: 'completion', session_id: 'factory-session-2' });
+    proc.pushJson({ type: 'completion', session_id: 'factory-session-2', finalText: 'hidden reasoning</think>Final A.\n\nFinal B.' });
     proc.close(0);
 
     await turnPromise;
 
     expect(observed.events.map((event) => event.type)).toEqual(['rows', 'run-ended']);
     expect(observed.events[0].rows[0].message.content).toBe('factory reply');
+    expect(observed.events.at(-1).finalResponse).toEqual({ type: 'text', text: 'Final A.\n\nFinal B.' });
     expect(runningWhenFinished).toBe(false);
     expect(spawnMock.mock.calls[0][1].env.FACTORY_AIRGAP_ENABLED).toBeUndefined();
   });

@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 class MalformedJsonError extends Error {
-  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+  constructor() {
+    super('Malformed JSON');
+    this.name = 'MalformedJsonError';
+  }
 }
 
 mock.module('../../lib/http-request.js', () => ({
@@ -9,216 +12,42 @@ mock.module('../../lib/http-request.js', () => ({
   MalformedJsonError,
 }));
 
-mock.module('../../chats/title-generator.js', () => ({
-  maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
-  generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: '123', title: 'Generated Title' })),
-  TitleGenerationError: class TitleGenerationError extends Error {},
-}));
-
-import createChatRoutes from '../chats.js';
-import { ChatRegistryDurabilityUnknownError } from '../../chats/store.js';
-import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
+import { createChatTagRoutes } from '../chat-tags.js';
 
-const registry = {
-  getChat: mock(() => undefined),
-  hasChat: mock((chatId) => registry.getChat(chatId) != null),
-  addChat: mock(() => undefined),
-  updateChat: mock(() => Promise.resolve({ id: '100', tags: [] })),
-  setTags: mock((chatId, tags) => Promise.resolve({
-    entry: { id: chatId, tags: [...tags] },
-    durability: 'durable',
-    changed: true,
-  })),
-  removeChat: mock(() => undefined),
-  listAllChats: mock(() => ({})),
-};
-const settings = {
-  getChatName: mock(() => null),
-  setSessionName: mock(() => Promise.resolve(undefined)),
-  removeSessionName: mock(() => Promise.resolve(undefined)),
-  getPinnedChatIds: mock(() => []),
-  getNormalChatIds: mock(() => []),
-  getArchivedChatIds: mock(() => []),
-  removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
-  insertNormalChatIdTop: mock(() => Promise.resolve(undefined)),
-  ensureInNormal: mock(() => Promise.resolve(undefined)),
-  togglePin: mock(() => Promise.resolve({ isPinned: true })),
-  toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-  reorderChat: mock(() => Promise.resolve({
-    success: true,
-    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
-  })),
-  recordChatStartup: mock(() => Promise.resolve(undefined)),
-};
-const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const metadata = {
-  addNewChatMetadata: mock(() => undefined),
-  listAllChatMetadata: mock(() => new Map()),
-  getChatMetadata: mock(() => null),
-};
-const chatViews = {
-  page: mock(() => Promise.resolve({
-    transcriptViewId: 'view-1',
-    messages: [],
-    lastOrdinal: 0,
-    pageOldestOrdinal: 0,
-    pageNewestOrdinal: 0,
-    hasMore: false,
-  })),
-};
-const agents = {
-  startSession: mock(() => undefined),
-  isAgentSessionRunning: mock(() => false),
-  runSingleQuery: mock(() => Promise.resolve('')),
-};
-
-const commandLedger = createRouteCommandLedger('tag-normalization');
-const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
-
-const chatsRoutes = createChatRoutes({
-  registry,
-  settings,
-  queue,
-  processing: { phase: mock(() => null) },
-  metadata,
-  chatViews,
-  agents,
-	chatListProjector,
-  commandService: createRouteCommandService({
-    registry,
-    queue,
-    settings,
-    metadata,
-    agents,
-    commandLedger,
-		chatListProjector,
-  }),
-});
-const handler = chatsRoutes['/api/v1/chats/tags'].PATCH;
+const replace = mock(async (input) => ({
+  success: true,
+  chatId: input.chatId,
+  tags: input.tags,
+  addedTags: input.tags,
+  removedTags: [],
+}));
+const handler = createChatTagRoutes({ replace })['/api/v1/chats/tags'].PATCH;
 
 describe('PATCH /api/v1/chats/tags – tag normalization', () => {
   beforeEach(() => {
-    registry.getChat.mockClear();
-    registry.updateChat.mockClear();
-    registry.setTags.mockClear();
-    registry.setTags.mockImplementation((chatId, tags) => Promise.resolve({
-      entry: { id: chatId, tags: [...tags] },
-      durability: 'durable',
-      changed: true,
-    }));
+    replace.mockClear();
     parseJsonBody.mockClear();
   });
 
-  it('converts spaces to hyphens', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['hello world'] });
+  it.each([
+    ['converts spaces to hyphens', ['hello world'], ['hello-world']],
+    ['removes special characters', ['ops!@#$'], ['ops']],
+    ['collapses multiple hyphens', ['a---b'], ['a-b']],
+    ['removes leading/trailing hyphens', ['-leading-trailing-'], ['leading-trailing']],
+    ['excludes tags that become empty after normalization', ['!!!', 'valid'], ['valid']],
+    ['deduplicates tags case-insensitively', ['Ops', 'ops', 'OPS'], ['ops']],
+    ['sorts the result', ['zebra', 'alpha', 'mid'], ['alpha', 'mid', 'zebra']],
+  ])('%s', async (_name, tags, expectedTags) => {
+    parseJsonBody.mockResolvedValue({ chatId: '100', expectedTags: [], tags });
 
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
+    const response = await handler(
+      new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }),
+    );
 
-    expect(body.tags).toEqual(['hello-world']);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ tags: expectedTags });
+    expect(replace).toHaveBeenCalledWith({ chatId: '100', expectedTags: [], tags: expectedTags });
   });
 
-  it('removes special characters', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['ops!@#$'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
-
-    expect(body.tags).toEqual(['ops']);
-  });
-
-  it('collapses multiple hyphens', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['a---b'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
-
-    expect(body.tags).toEqual(['a-b']);
-  });
-
-  it('removes leading/trailing hyphens', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['-leading-trailing-'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
-
-    expect(body.tags).toEqual(['leading-trailing']);
-  });
-
-  it('excludes tags that become empty after normalization', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['!!!', 'valid'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
-
-    expect(body.tags).toEqual(['valid']);
-  });
-
-  it('deduplicates tags case-insensitively', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['Ops', 'ops', 'OPS'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
-
-    expect(body.tags).toEqual(['ops']);
-  });
-
-  it('sorts the result', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: [] });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['zebra', 'alpha', 'mid'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
-
-    expect(body.tags).toEqual(['alpha', 'mid', 'zebra']);
-  });
-
-  it('requires an explicit array instead of treating malformed input as clear', async () => {
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', tags: ['keep'] });
-    parseJsonBody.mockResolvedValue({ chatId: '100' });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-
-    expect(res.status).toBe(400);
-    expect(registry.setTags).not.toHaveBeenCalled();
-  });
-
-  it('does not persist an already-satisfied normalized tag set', async () => {
-    registry.setTags.mockResolvedValueOnce({
-      entry: { id: '100', tags: ['ops', 'review'] },
-      durability: 'durable',
-      changed: false,
-    });
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['Review', 'ops'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-    const body = await res.json();
-
-    expect(body.changed).toBe(false);
-    expect(registry.setTags).toHaveBeenCalledWith('100', ['ops', 'review']);
-  });
-
-  it('reports unconfirmed tag durability as a typed retryable failure', async () => {
-    registry.setTags.mockRejectedValueOnce(new ChatRegistryDurabilityUnknownError(
-      'injected unknown durability',
-    ));
-    parseJsonBody.mockResolvedValue({ chatId: '100', tags: ['replacement'] });
-
-    const res = await handler(new Request('http://localhost/api/v1/chats/tags', { method: 'PATCH' }));
-
-    expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({
-      success: false,
-      error: 'Chat tag save durability could not be confirmed. Retry after storage recovers.',
-      errorCode: 'CHAT_TAGS_SAVE_UNKNOWN',
-      retryable: true,
-    });
-  });
 });

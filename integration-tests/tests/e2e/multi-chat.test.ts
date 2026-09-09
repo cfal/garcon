@@ -9,7 +9,7 @@ describe('Lightpanda multi-chat isolation', () => {
     await withE2eFixture('multi-chat', async (fixture) => {
       // Sidebar previews are asserted, so pin the detailed chat-item layout.
       await fixture.page.evaluateOnNewDocument(seedLocalSettings, {
-        sidebarChatItemLayout: 'default',
+        sidebarChatItemLayout: 'detailed',
       });
       const app = new SpaDriver(fixture.page, fixture.integration);
       const first = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-multi-a' });

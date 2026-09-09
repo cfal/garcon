@@ -5,7 +5,6 @@ import { isErrorCode } from '../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
 import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts.js';
-import type { TranscriptViewId } from './ledger/contracts.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
@@ -21,6 +20,7 @@ import type { TelegramSettingsStore } from './notifications/telegram-settings-st
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import type { SnippetService } from './snippets/service.js';
 import type { PreambleService } from './preambles/service.js';
+import type { ChatBoardService } from './chat-boards/service.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
@@ -44,6 +44,7 @@ import {
   SnippetsInvalidatedMessage,
   PreamblesInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
+  ChatBoardsInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -66,12 +67,6 @@ export interface ServerEventWiringDeps {
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
   currentTranscriptMessages(chatId: string): readonly ChatMessage[];
-  assistantMessagesForSubmission(
-    chatId: string,
-    viewId: TranscriptViewId,
-    clientMessageId: string,
-    throughOrdinal: number,
-  ): readonly string[];
   transientFeeds: ChatTransientFeedStore;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
@@ -80,6 +75,7 @@ export interface ServerEventWiringDeps {
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
   preambles: PreambleService;
+  chatBoards: ChatBoardService;
   searchIndex?: ChatSearchEventIndex;
 }
 
@@ -107,7 +103,6 @@ export function wireServerEvents({
   processing,
   metadata,
   currentTranscriptMessages,
-  assistantMessagesForSubmission,
   transientFeeds,
   commandLedger,
   shareStore,
@@ -116,6 +111,7 @@ export function wireServerEvents({
   scheduledPrompts,
   snippets,
   preambles,
+  chatBoards,
   searchIndex,
 }: ServerEventWiringDeps): ServerEventWiring {
   const broadcast = (payload: unknown) =>
@@ -127,6 +123,10 @@ export function wireServerEvents({
   let firstChatTaskError: unknown;
   let hasChatTaskError = false;
   const processFailureDedupeMs = 30_000;
+
+  chatBoards.on('invalidated', (revision, reason) => {
+    broadcast(new ChatBoardsInvalidatedMessage(revision, reason));
+  });
 
   // Serializes per-chat view work and lifecycle broadcasts so turn messages precede
   // terminal-driven processing, stop, and run-terminal events. Synchronous lifecycle
@@ -396,19 +396,7 @@ export function wireServerEvents({
       });
     }
     if (event.type !== 'run-ended') return;
-    const record = await commandLedger.getTurnRecord(event.chatId, event.runId);
-    const clientMessageId = record?.payload.clientMessageId;
-    if (typeof clientMessageId !== 'string') return;
-    await commandLedger.appendAssistantMessages(
-      event.chatId,
-      event.runId,
-      assistantMessagesForSubmission(
-        event.chatId,
-        event.viewId,
-        clientMessageId,
-        event.row.ordinal,
-      ),
-    );
+    await commandLedger.setTurnResult(event.chatId, event.runId, event.finalResponse);
   });
   const publishProcessing = (chatId: string) => {
     if (!chatExists(chatId)) return;

@@ -746,10 +746,33 @@ describe('PiRpcRuntime', () => {
       type: 'run-ended',
       runId: 'run-turn',
       outcome: 'finished',
+      finalResponse: { type: 'text', text: 'done' },
     }]);
     expect(published.events.flatMap((event) => event.type === 'rows' ? event.rows : []))
       .toHaveLength(3);
     await runtime.shutdown();
+  });
+
+  it.each(['stop', 'toolUse', 'error', 'aborted'])('captures multipart finals only from a successful last assistant: %s', async (stopReason) => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    const runtime = createRuntime();
+    const published = collectOperation('run-final');
+    try {
+      const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
+      await waitForActive(runtime);
+      const fake = fakes[0]!;
+      fake.pushEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop',
+        content: [{ type: 'text', text: 'Earlier progress.' }] } });
+      fake.pushEvent({ type: 'message_end', message: { role: 'assistant', stopReason,
+        content: [{ type: 'text', text: 'Final A.' }, { type: 'thinking', thinking: 'Private reasoning.' },
+          { type: 'text', text: 'Final B.\r' }] } });
+      fake.pushEvent({ type: 'agent_settled' });
+      await turn;
+      const terminal = published.events.at(-1)!;
+      expect(terminal).toMatchObject({ type: 'run-ended', outcome: stopReason === 'error' || stopReason === 'aborted' ? 'failed' : 'finished' });
+      expect('finalResponse' in terminal ? terminal.finalResponse : undefined).toEqual(stopReason === 'stop'
+        ? { type: 'text', text: 'Final A.\n\nFinal B.\r' } : undefined);
+    } finally { await runtime.shutdown(); }
   });
 
   it('publishes successful live compactions through the active turn', async () => {

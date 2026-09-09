@@ -231,8 +231,8 @@ describe('ChatSessionsStore', () => {
 	});
 
 	it('updates draft tags without calling the server', async () => {
-		const setChatTags = vi.fn();
-		const store = new ChatSessionsStore({ setChatTags });
+		const replaceChatTags = vi.fn();
+		const store = new ChatSessionsStore({ replaceChatTags });
 		store.createDraft({
 			id: 'draft-1',
 			projectPath: '/repo',
@@ -246,11 +246,15 @@ describe('ChatSessionsStore', () => {
 			},
 		});
 
-		await expect(store.setChatTags('draft-1', ['urgent'])).resolves.toBe(true);
+		await expect(store.replaceChatTags({
+			chatId: 'draft-1',
+			expectedTags: [],
+			tags: ['urgent'],
+		})).resolves.toMatchObject({ success: true });
 
 		expect(store.byId['draft-1'].tags).toEqual(['urgent']);
 		expect(store.startupByChatId['draft-1'].tags).toEqual(['urgent']);
-		expect(setChatTags).not.toHaveBeenCalled();
+		expect(replaceChatTags).not.toHaveBeenCalled();
 	});
 
 	it('selectedChat derives from selectedChatId and byId', () => {

@@ -146,7 +146,7 @@ The skills resolve `garcon-cli` from `PATH`, `$HOME/garcon`, or `/garcon`. Inter
 
 Under the hood, `<garcon-get-chat-id />` gives an agent its runtime identity and `<garcon-send-message>` delivers a bounded message to up to 16 explicit chat IDs. Garcon infers the visible sender, supports deliberate anonymity, and creates no automatic replies.
 
-Agents can also start one delegated child, resume that child, or schedule a prompt back to their own chat:
+Agents can also start a delegated child, resume or stop that child, or schedule a prompt back to their own chat:
 
 ```xml
 <garcon-start-agent ref="parser-review" agent="codex" model="gpt-5.4-nano" reasoning-effort="low" title="Parser review">
@@ -156,6 +156,9 @@ Review the parser tests and report missing cases.
 <garcon-resume-agent ref="parser-followup" chat-id="1111111111111111">
 Review the revised error handling.
 </garcon-resume-agent>
+
+<garcon-stop-agent chat-id="1111111111111111" />
+<garcon-stop-agent chat-id="1111111111111111" remove="true" />
 
 <garcon-schedule in="15m">Check whether the build finished.</garcon-schedule>
 <garcon-schedule every="5m" busy="skip" />
@@ -167,13 +170,15 @@ Starts have **no preambles**: neither new-chat defaults nor the parent's selecti
 
 Resume requires `chat-id` and `ref`. Only the requesting chat's direct `delegation` children qualify, whether created by markup or CLI `--parent`; ordinary fork/handoff relations do not. Resume uses the child's current saved settings, including later user changes and preamble configuration. It accepts no overrides and never steers, queues, interrupts, or unpauses: a busy child rejects the request.
 
-Both commands acknowledge admission with their respective `<garcon-start-agent-result>` or `<garcon-resume-agent-result>` envelope. By default, a second envelope reports the exact admitted turn's completion, failure, or interruption without blocking the parent. `async="true"` disables only this terminal result. Required refs match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` and are echoed unchanged; they are not aliases, authorization, or deduplication keys. Results also carry the original request's view and ordinal, but no turn ID. Available output joins that turn's nonblank assistant messages, including commentary; it is not a task-success judgment. Oversized, invalid, expired, or unavailable output is reported explicitly, never silently truncated.
+Start and resume acknowledge admission with their respective `<garcon-start-agent-result>` or `<garcon-resume-agent-result>` envelope. By default, a second envelope reports the exact admitted turn's completion, failure, or interruption without blocking the parent. `async="true"` disables only this terminal result. Required refs match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` and are echoed unchanged; they are not aliases, authorization, or deduplication keys. Results also carry the original request's view and ordinal, but no turn ID. Available output contains the integration-selected final assistant response, preserving all its text parts; intermediary commentary stays in the transcript. An explicitly empty final remains available. Failed or interrupted turns and successful turns without an identifiable final report `no-final-response`. Oversized, invalid, expired, or unavailable output is reported explicitly, never silently truncated. Completion is not a task-success judgment.
+
+Stop requires only `chat-id` and accepts optional `remove="true"` or `remove="false"` (the default). It can affect only direct `delegation` children, including CLI-created relationships. A retained stop preserves history and queued inputs; pending work remains paused, and resume stays busy until the user resolves that queue. Without pending work, the parent can resume the stopped child normally. Removal uses the ordinary deletion path to stop active work and remove the chat, transcript, queued inputs, and workspace settings. Stop/remove sends no acknowledgment, result envelope, or model input. Request evidence stays private; imported history never executes it. No `ref`, `async`, or body is accepted.
 
 Scheduling accepts `in` (1 minute–365 days) or a minute-aligned `at` timestamp with an explicit timezone. Optional `every` repeats at a fixed interval of 1 minute–3,650 days; without `in` or `at`, the first run follows one interval. Durations use ordered whole `d`, `h`, and `m` components, such as `1h30m`. Optional `until` is inclusive and requires recurrence. `busy` defaults to `queue`; `skip` avoids accumulating work while busy. Schedules target only the requesting chat and use its current configuration when executed. The saved prompt is delivered inside `<garcon-schedule-action>…</garcon-schedule-action>`, or exactly `<garcon-schedule-action />` when empty. Manage saved schedules through **Scheduled prompts** in the sidebar menu; the recurrence editor supports minutes, hours, and days.
 
 Existing hourly/day schedules migrate to minute-based storage version 3 with a private, byte-exact source backup. Their cadence and next occurrence are preserved. Older binaries cannot read version 3; do not downgrade without preserving schedules created or edited since migration.
 
-Remote Settings provides independent start/resume/schedule toggles under the agent-command master switch. Disabling commands does not cancel accepted work or pending results. Scheduling returns one creation outcome; child commands return admission and, unless async, terminal outcomes. A resume blocked by the child's current preambles identifies the retained child. An unknown outcome requires inspecting existing work before retrying. Separate emissions may create separate work even with the same ref; imported history never re-executes commands. Saved schedules, child transcripts, titles, and delegation edges survive restart, but queued inputs and pending callbacks do not. Source deletion or transcript replacement cancels reporting without stopping accepted child work. Result delivery is best-effort and never retried after an ambiguous acknowledgment.
+Remote Settings provides independent start, child lifecycle (resume/stop/remove), and schedule toggles under the agent-command master switch. Disabling commands does not cancel accepted work or pending results. Scheduling returns one creation outcome; child start/resume commands return admission and, unless async, terminal outcomes. A resume blocked by the child's current preambles identifies the retained child. An unknown outcome requires inspecting existing work before retrying. Separate emissions may create separate work even with the same ref; imported history never re-executes commands. Saved schedules, child transcripts, titles, and delegation edges survive restart, but queued inputs and pending callbacks do not. Source deletion or transcript replacement cancels reporting without stopping accepted child work. Result delivery is best-effort and never retried after an ambiguous acknowledgment.
 
 ## Trusted Local Use
 

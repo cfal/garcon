@@ -82,6 +82,7 @@
 		files: m.workspace_surface_files,
 		commit: m.workspace_surface_commit,
 		'chat-map': m.workspace_surface_chat_map,
+		'chat-board': m.workspace_surface_chat_board,
 	};
 	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => [
 		...availableSingletonKinds.map((kind) => ({
@@ -218,6 +219,7 @@
 		if (kind === 'git-history') return m.workspace_open_git_history();
 		if (kind === 'git-compare') return m.workspace_open_git_compare();
 		if (kind === 'chat-map') return m.workspace_open_chat_map();
+		if (kind === 'chat-board') return m.workspace_open_chat_board();
 		return m.workspace_open_surface({ surface: singletonLabels[kind]() });
 	}
 

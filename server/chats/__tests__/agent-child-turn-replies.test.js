@@ -54,9 +54,9 @@ function fixture(mode) {
     : new AgentResumeController({ ...context, commands: { submitAgentCommandResumeLocked: admit } });
   const command = mode === 'start' ? START : RESUME;
   const wait = spyOn(turns, 'waitForTurnTerminal');
-  const finish = async (messages = ['First answer.', '  ', 'Second answer.'], status = 'finished', fields = {}) => {
+  const finish = async (text = 'First answer.\n\nSecond answer.', status = 'finished', fields = {}) => {
     const record = admissions.at(-1);
-    await turns.appendAssistantMessages(CHILD, record.turnId, messages);
+    await turns.setTurnResult(CHILD, record.turnId, text === null ? null : { type: 'text', text });
     await turns.settleTerminal(record.key, status, fields);
     await turns.markPublicTerminal(CHILD, record.turnId);
   };
@@ -106,7 +106,7 @@ for (const mode of ['start', 'resume']) describe(`${mode} terminal reporting`, (
     const originalAdmit = f.admit.getMockImplementation();
     f.admit.mockImplementation(async (input) => {
       const accepted = await originalAdmit(input);
-      await f.finish(['Captured before admission returns.']);
+      await f.finish('Captured before admission returns.');
       return accepted;
     });
     f.controller.request(SOURCE, f.command);
@@ -128,7 +128,7 @@ for (const mode of ['start', 'resume']) describe(`${mode} terminal reporting`, (
     f.context.notices.appendNotice.mockImplementationOnce(() => { throw new Error('Synthetic notice failure'); });
     f.controller.request(SOURCE, f.command);
     await until(() => f.wait.mock.calls.length === 1);
-    await f.finish(['Recovered completion.']);
+    await f.finish('Recovered completion.');
     await until(() => f.deliveries.length === 1);
     expect(f.deliveries[0].status).toBe('completed');
     expect(f.admit).toHaveBeenCalledTimes(1);
@@ -159,13 +159,24 @@ for (const mode of ['start', 'resume']) describe(`${mode} terminal reporting`, (
     ['failed', { errorCode: 'INTERNAL_ERROR' }, 'failed'],
     ['finished', { interruptionReason: 'user-stop' }, 'interrupted'],
     ['finished', { interruptionReason: 'chat-deleted' }, 'interrupted'],
-  ])('reports public %s receipt with partial output', async (status, fields, expected) => {
+  ])('reports public %s receipt without partial output', async (status, fields, expected) => {
     const f = fixture(mode);
     f.controller.request(SOURCE, f.command);
     await until(() => f.deliveries.length === 1);
-    await f.finish(['Partial answer.'], status, fields);
+    await f.finish('Partial answer.', status, fields);
     await until(() => f.deliveries.length === 2);
-    expect(f.deliveries[1]).toMatchObject({ status: expected, output: { completeness: 'best-effort', text: 'Partial answer.' } });
+    expect(f.deliveries[1]).toMatchObject({ status: expected, output: { availability: 'unavailable', reason: 'no-final-response' } });
+  });
+
+  it.each(['', null])('preserves empty versus missing final responses: %j', async (text) => {
+    const f = fixture(mode);
+    f.controller.request(SOURCE, f.command);
+    await until(() => f.deliveries.length === 1);
+    await f.finish(text);
+    await until(() => f.deliveries.length === 2);
+    expect(f.deliveries[1].output).toEqual(text === null
+      ? { availability: 'unavailable', reason: 'no-final-response' }
+      : { availability: 'available', completeness: 'complete', text: '' });
   });
 });
 

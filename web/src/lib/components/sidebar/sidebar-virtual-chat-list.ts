@@ -1,6 +1,6 @@
 import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
-import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 export const DESKTOP_CHAT_ROW_HEIGHT = 88;
@@ -79,7 +79,7 @@ export interface SidebarRowModel {
 
 export function estimateSidebarVirtualRowSize(
 	row: SidebarVirtualRow | undefined,
-	chatItemLayout: SidebarChatItemLayout,
+	chatItemLayout: ChatItemLayout,
 ): number {
 	if (row?.type === 'project-header' || row?.type === 'section-header') {
 		return PROJECT_HEADER_ROW_HEIGHT;

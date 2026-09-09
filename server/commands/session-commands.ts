@@ -12,6 +12,7 @@ import {
 } from '../../common/ask-user-question-response.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
+import { applyPostAdmissionChatTags } from '../chats/post-admission-chat-tags.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
 import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
@@ -30,6 +31,7 @@ import {
   commandResultFromRecord,
   type CompactInput,
   type AgentCommandResumeInput,
+  type AgentCommandStopInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
   type StopInput,
@@ -77,6 +79,26 @@ export class SessionCommands {
     });
   }
 
+  async submitAgentCommandStopLocked(input: AgentCommandStopInput, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (!this.deps.chats.getChat(input.sourceChatId)
+      || !isDirectDelegatedChild(input.sourceChatId, input.chatId, this.deps.chats.getChat(input.chatId))) {
+      throw new CommandValidationError('AGENT_STOP_NOT_DELEGATED', 'Only a directly delegated child can be stopped or removed', 403);
+    }
+    if (this.deps.transcripts.existingCurrentView(input.sourceChatId)?.viewId !== input.sourceViewId) {
+      throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
+    }
+    this.deps.handoffs.cancelPreparation(input.chatId);
+    if (input.remove) {
+      await this.deleteChatLocked(input.chatId);
+      return;
+    }
+    const result = await this.deps.queue.stopActiveTurn(input.chatId);
+    if (!isStopSatisfied(result.outcome)) {
+      throw new CommandValidationError('SESSION_BUSY', 'The delegated child could not be stopped', 409);
+    }
+  }
+
   private async submitRunLocked(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {
     await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
     const normalizedInput = {
@@ -100,8 +122,7 @@ export class SessionCommands {
     };
     const replay = await this.support.replayHttpRun(normalizedInput);
     if (replay) {
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return replay;
+      return applyPostAdmissionChatTags(replay, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
@@ -139,8 +160,7 @@ export class SessionCommands {
         normalizedInput,
         handoffCommand.preparation,
       );
-      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-      return result;
+      return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
@@ -191,8 +211,7 @@ export class SessionCommands {
     }
 
     const result = await this.support.submitHttpRun(normalizedInput);
-    if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
-    return result;
+    return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {

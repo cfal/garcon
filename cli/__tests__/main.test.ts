@@ -499,7 +499,7 @@ describe('main', () => {
           output: {
             availability: 'available',
             completeness: 'complete',
-            assistantMessages: ['Done'],
+            text: 'Done',
           },
         });
       },

@@ -10,6 +10,7 @@ import {
   type AgentRuntimePublisher,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type {
+  AgentFinalResponse,
   AgentLogger,
   AgentPermissionResponseCapability,
 } from '@garcon/server-agent-interface';
@@ -100,8 +101,10 @@ export function publishFinished(
   logger: AgentLogger,
   chatId: string,
   operation: CodexOperation | undefined,
+  finalResponse?: AgentFinalResponse,
 ): void {
-  publish(logger, chatId, operation, (runId) => ({ type: 'run-ended', runId, outcome: 'finished' }));
+  publish(logger, chatId, operation, (runId) => ({ type: 'run-ended', runId, outcome: 'finished',
+    ...(finalResponse ? { finalResponse } : {}) }));
 }
 
 export function publishFailed(

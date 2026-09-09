@@ -260,6 +260,27 @@ function startOptions(overrides = {}) {
 }
 
 describe('ClaudeCliRuntime stdout protocol handling', () => {
+  it.each(['Final part A.\n\nFinal part B.\r', '', undefined])('captures only the last correlated terminal result: %j', async (text) => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    const runtime = createRuntime();
+    const published = collectOperation('run-final');
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
+      const input = await enqueueInputStarted(fake);
+      enqueueAssistantAndResult(fake, input.uuid, 'Intermediate commentary.');
+      enqueueCliMessage(fake, { type: 'assistant', message: { role: 'assistant', content: [
+        { type: 'text', text: 'Final part A.' }, { type: 'text', text: 'Final part B.\r' },
+      ] } });
+      enqueueCliMessage(fake, { type: 'result', subtype: 'success', is_error: false,
+        ...(text === undefined ? {} : { result: text }), user_message_uuid: input.uuid });
+      enqueueProviderState(fake, 'idle');
+      await start;
+      expect(published.events.at(-1).finalResponse).toEqual(text === undefined ? undefined : { type: 'text', text });
+      expect(publishedMessages(published.events).some((message) => message.content === 'Intermediate commentary.')).toBe(true);
+    } finally { await runtime.shutdown(); Bun.spawn = originalSpawn; }
+  });
   it('publishes live automatic compaction metadata without exposing the synthetic user message', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();

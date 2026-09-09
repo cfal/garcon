@@ -5,15 +5,20 @@ export type AgentTurnOutputCompleteness = 'complete' | 'best-effort';
 export interface AgentTurnOutputAvailable {
   availability: 'available';
   completeness: AgentTurnOutputCompleteness;
-  assistantMessages: string[];
+  text: string;
 }
 
 export interface AgentTurnOutputUnavailable {
   availability: 'unavailable';
-  reason: 'too-large' | 'retention-pressure';
+  reason: 'no-final-response' | 'too-large' | 'retention-pressure';
 }
 
 export type AgentTurnOutput = AgentTurnOutputAvailable | AgentTurnOutputUnavailable;
+
+export interface AgentTurnNoFinalResponse {
+  availability: 'unavailable';
+  reason: 'no-final-response';
+}
 
 interface AgentTurnReceiptBase {
   chatId: string;
@@ -38,14 +43,14 @@ export interface FailedAgentTurnReceipt extends AgentTurnReceiptBase {
   settledAt: string;
   error: string;
   errorCode: ErrorCode;
-  output: AgentTurnOutput;
+  output: AgentTurnNoFinalResponse;
 }
 
 export interface InterruptedAgentTurnReceipt extends AgentTurnReceiptBase {
   state: 'interrupted';
   settledAt: string;
   reason: 'user-stop' | 'chat-deleted';
-  output: AgentTurnOutput;
+  output: AgentTurnNoFinalResponse;
 }
 
 export type AgentTurnReceipt =
@@ -85,7 +90,7 @@ export function parseAgentTurnReceipt(value: unknown): AgentTurnReceipt {
       settledAt,
       error: requiredString(raw, 'error'),
       errorCode: raw.errorCode,
-      output: parseOutput(raw.output),
+      output: parseUnsuccessfulOutput(raw.output),
     };
   }
   if (raw.state === 'interrupted') {
@@ -97,7 +102,7 @@ export function parseAgentTurnReceipt(value: unknown): AgentTurnReceipt {
       state: 'interrupted',
       settledAt,
       reason: raw.reason,
-      output: parseOutput(raw.output),
+      output: parseUnsuccessfulOutput(raw.output),
     };
   }
   throw new AgentTurnReceiptContractError('turn receipt state is invalid');
@@ -109,6 +114,7 @@ function parseOutput(value: unknown): AgentTurnOutput {
     if (
       raw.reason !== 'too-large'
       && raw.reason !== 'retention-pressure'
+      && raw.reason !== 'no-final-response'
     ) {
       throw new AgentTurnReceiptContractError('turn output reason is invalid');
     }
@@ -120,15 +126,22 @@ function parseOutput(value: unknown): AgentTurnOutput {
   if (raw.completeness !== 'complete' && raw.completeness !== 'best-effort') {
     throw new AgentTurnReceiptContractError('turn output completeness is invalid');
   }
-  if (!Array.isArray(raw.assistantMessages)
-    || !raw.assistantMessages.every((message) => typeof message === 'string')) {
-    throw new AgentTurnReceiptContractError('assistantMessages must be a string array');
+  if (typeof raw.text !== 'string') {
+    throw new AgentTurnReceiptContractError('text must be a string');
   }
   return {
     availability: 'available',
     completeness: raw.completeness,
-    assistantMessages: [...raw.assistantMessages],
+    text: raw.text,
   };
+}
+
+function parseUnsuccessfulOutput(value: unknown): AgentTurnNoFinalResponse {
+  const output = parseOutput(value);
+  if (output.availability !== 'unavailable' || output.reason !== 'no-final-response') {
+    throw new AgentTurnReceiptContractError('unsuccessful turns cannot expose a final response');
+  }
+  return { availability: 'unavailable', reason: 'no-final-response' };
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

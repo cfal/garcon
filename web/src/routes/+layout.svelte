@@ -94,6 +94,8 @@
 	} from '$lib/workspace/terminal-launcher-dismissal.js';
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
 	import { ThemeController } from '$lib/theme/theme-controller.svelte.js';
+	import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
+	import { ChatBoardsRouter } from '$lib/events/chat-boards-router.svelte.js';
 
 	let { children } = $props();
 
@@ -104,6 +106,7 @@
 	const scheduledPrompts = createScheduledPromptsStore();
 	const preambles = createPreamblesStore();
 	const chatPreambleSelectionInvalidationHub = createChatPreambleSelectionInvalidationHub();
+	const chatBoardInvalidations = createChatBoardInvalidationHub();
 	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
@@ -127,6 +130,7 @@
 		notifications,
 		terminalIdentity,
 		ws,
+		chatBoardInvalidations,
 		getRouteIdentity: () => page.url.pathname,
 		onTerminalLauncherDismissed: () => {
 			if (!terminalIdentity.clientId) return;
@@ -267,11 +271,13 @@
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
 	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
+	const chatBoardsRouter = new ChatBoardsRouter(ws, chatBoardInvalidations);
 	settingsRouter.start();
 	transcriptSearchStatusRouter.start();
 	scheduledPromptsRouter.start();
 	preamblesRouter.start();
 	snippetsRouter.start();
+	chatBoardsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
@@ -279,6 +285,7 @@
 		scheduledPromptsRouter.tick();
 		preamblesRouter.tick();
 		snippetsRouter.tick();
+		chatBoardsRouter.tick();
 	});
 
 	$effect(() => {
@@ -295,6 +302,7 @@
 		// A reconnect also refreshes an already-open chat selection editor;
 		// its dirty draft is preserved by the controller's refresh path.
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
+		untrack(() => chatBoardInvalidations.publishReconnect());
 	});
 
 	onMount(() => {
@@ -385,6 +393,7 @@
 		scheduledPromptsRouter.destroy();
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
+		chatBoardsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		minuteClock.destroy();

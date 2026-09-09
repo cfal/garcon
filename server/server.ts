@@ -107,6 +107,7 @@ import {
   SnippetService,
 } from './snippets/service.js';
 import { initializeChatPreambleSelectionService, initializePreambleService } from './preambles/setup.js';
+import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import {
   ledgerRowsToMessages,
   TranscriptAdoptionService,
@@ -303,6 +304,7 @@ export async function startServer(): Promise<void> {
       interAgentMessages: agentCommands.interAgentMessages,
       agentStarts: agentCommands.agentStarts,
       agentResumes: agentCommands.agentResumes,
+      agentStops: agentCommands.agentStops,
       agentSchedules: agentCommands.agentSchedules,
     });
     const preparedCarryover = new PreparedCarryoverStore();
@@ -394,6 +396,7 @@ export async function startServer(): Promise<void> {
       transcriptAdoption,
     );
     const preambles = await initializePreambleService(workspaceDir);
+    const chatBoardRuntime = await initializeChatBoardRuntime({ workspaceDir, registry: chatRegistry, chatMutationLock, archiveState: settings });
     const chatPreambleSelection = initializeChatPreambleSelectionService({
       preambles,
       registry: chatRegistry,
@@ -612,6 +615,7 @@ export async function startServer(): Promise<void> {
       handoffs,
       transientFeeds,
       preambles,
+      chatTags: chatBoardRuntime.chatTags,
       chatMutationLock,
     });
     const scheduledPrompts = new ScheduledPromptScheduler({
@@ -677,17 +681,6 @@ export async function startServer(): Promise<void> {
         processing: chatProcessingActivity,
         metadata,
         currentTranscriptMessages: (chatId) => transcriptLedger.conversationMessages(chatId),
-        assistantMessagesForSubmission: (
-          chatId,
-          viewId,
-          clientMessageId,
-          throughOrdinal,
-        ) => transcriptLedger.assistantMessagesForSubmission(
-          chatId,
-          viewId,
-          clientMessageId,
-          throughOrdinal,
-        ),
         transientFeeds,
         commandLedger,
         shareStore,
@@ -696,6 +689,7 @@ export async function startServer(): Promise<void> {
         scheduledPrompts,
         snippets,
         preambles,
+        chatBoards: chatBoardRuntime.chatBoards,
         searchIndex: chatSearch,
       }),
       startScheduledPrompts: () => scheduledPrompts.start(),
@@ -727,6 +721,7 @@ export async function startServer(): Promise<void> {
       snippets,
       preambles,
       chatPreambleSelection,
+      ...chatBoardRuntime,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,

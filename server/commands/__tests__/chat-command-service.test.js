@@ -267,13 +267,6 @@ function makeService(overrides = {}) {
       sessions.set(chatId, { ...current, ...patch });
       return sessions.get(chatId);
     }),
-    addTags: mock((chatId, tags) => {
-      const current = sessions.get(chatId);
-      if (!current) return null;
-      const next = { ...current, tags: [...new Set([...current.tags, ...tags])].sort() };
-      sessions.set(chatId, next);
-      return { id: chatId, ...next };
-    }),
     updateProjectPath: mock((chatId, update) => {
       const current = sessions.get(chatId);
       if (!current) return Promise.resolve(null);
@@ -713,6 +706,28 @@ function makeService(overrides = {}) {
   const fileMentions = overrides.fileMentions ?? {
     resolve: mock(async (command) => command),
   };
+  const chatTags = {
+    applyDeltaWhileChatLocked: mock(async ({ chatId, addTags = [], removeTags = [] }) => {
+      const current = sessions.get(chatId);
+      if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
+      const removed = new Set(removeTags);
+      const tags = [...new Set([
+        ...current.tags.filter((tag) => !removed.has(tag)),
+        ...addTags,
+      ])].sort();
+      const before = new Set(current.tags);
+      const after = new Set(tags);
+      sessions.set(chatId, { ...current, tags });
+      return {
+        success: true,
+        chatId,
+        tags,
+        addedTags: tags.filter((tag) => !before.has(tag)),
+        removedTags: current.tags.filter((tag) => !after.has(tag)),
+      };
+    }),
+    ...overrides.chatTags,
+  };
   const dependencies = {
     chats,
     queue,
@@ -735,6 +750,7 @@ function makeService(overrides = {}) {
     preambles: overrides.preambles ?? {
       snapshot: () => ({ revision: 0, preambles: [] }),
     },
+    chatTags,
     chatMutationLock: overrides.chatMutationLock,
   };
   const service = new TestChatCommandService(dependencies);
@@ -755,6 +771,7 @@ function makeService(overrides = {}) {
     handoffPreparations,
     transcripts,
     support: new CommandSupport(dependencies),
+    chatTags,
   };
 }
 
@@ -987,6 +1004,80 @@ describe('ChatCommandService', () => {
     expect(f.chats.updateChat).not.toHaveBeenCalled();
     expect(f.queue.captureSteerTarget).not.toHaveBeenCalled();
     expect(f.queue.createChatQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('stops a saved delegation through existing lifecycle cleanup, remove=%s', async (remove) => {
+    const locks = new KeyedPromiseLock();
+    const f = makeService({ chatMutationLock: locks });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    await locks.runExclusiveMany([`chat:${SOURCE_CHAT_ID}`, `chat:${TARGET_CHAT_ID}`], () =>
+      f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID, sourceViewId: 'view-1',
+        chatId: TARGET_CHAT_ID, remove }, new AbortController().signal));
+    expect(f.handoffs.cancelPreparation).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(f.queue.stopActiveTurn).toHaveBeenCalledTimes(remove ? 0 : 1);
+    expect(f.queue.abortForChatDeletion).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.ownership.delete).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.settings.removeSessionName).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.queue.deleteChatQueueFile).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.sessions.has(TARGET_CHAT_ID)).toBe(!remove);
+    expect(f.sessions.has(SOURCE_CHAT_ID)).toBe(true);
+  });
+
+  it.each(['self', 'missing', 'unrelated', 'grandchild', 'fork', 'handoff', 'stale', 'aborted'])('refuses delegated stop before side effects: %s', async (invalid) => {
+    const f = makeService();
+    const abort = new AbortController();
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: invalid === 'grandchild' ? CLI_CHAT_ID : SOURCE_CHAT_ID,
+        relation: invalid === 'fork' || invalid === 'handoff' ? invalid : 'delegation' } });
+    if (invalid === 'unrelated') f.sessions.get(TARGET_CHAT_ID).parentChat = null;
+    if (invalid === 'missing') f.sessions.delete(TARGET_CHAT_ID);
+    if (invalid === 'aborted') abort.abort();
+    await expect(f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: invalid === 'stale' ? 'stale' : 'view-1',
+      chatId: invalid === 'self' ? SOURCE_CHAT_ID : TARGET_CHAT_ID, remove: true }, abort.signal)).rejects.toBeDefined();
+    expect(f.handoffs.cancelPreparation).not.toHaveBeenCalled();
+    expect(f.queue.stopActiveTurn).not.toHaveBeenCalled();
+    expect(f.queue.abortForChatDeletion).not.toHaveBeenCalled();
+    expect(f.ownership.delete).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('retains a delegated child when retirement fails, remove=%s', async (remove) => {
+    const f = makeService({ queue: {
+      stopActiveTurn: mock(async () => ({ outcome: 'failed', control: storedQueue() })),
+      abortForChatDeletion: mock(async () => false),
+    } });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    await expect(f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'view-1', chatId: TARGET_CHAT_ID, remove }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(f.ownership.delete).not.toHaveBeenCalled();
+    expect(f.sessions.has(TARGET_CHAT_ID)).toBe(true);
+  });
+
+  it('retained stop preserves pending user and control inputs and keeps delegated resume busy', async () => {
+    const projection = makeInputProjection();
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const queueService = makeRealQueue(projection, {}, undefined, repository);
+    const f = makeService({ queueService });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    await queueService.createChatQueueEntry(TARGET_CHAT_ID, 'Synthetic pending input.');
+    repository.save(TARGET_CHAT_ID, { ...repository.load(TARGET_CHAT_ID), controlEntries: [controlEntry('synthetic-control')] });
+    const pending = await queueService.readChatExecutionControl(TARGET_CHAT_ID);
+    await f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'view-1', chatId: TARGET_CHAT_ID, remove: false }, new AbortController().signal);
+    const stopped = await queueService.readChatExecutionControl(TARGET_CHAT_ID);
+    expect(stopped.entries).toEqual(pending.entries);
+    expect(stopped.controlEntries).toEqual(pending.controlEntries);
+    expect(stopped.pause).toMatchObject({ kind: 'manual' });
+    await expect(f.service.submitAgentCommandResumeLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'view-1', chatId: TARGET_CHAT_ID, command: 'Synthetic resume.',
+      clientRequestId: 'stop-resume', clientMessageId: 'stop-resume-input' }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(projection.admitInput).not.toHaveBeenCalled();
+    expect((await queueService.readChatExecutionControl(TARGET_CHAT_ID)).pause).toEqual(stopped.pause);
   });
 
   it.each(['paused', 'queued', 'control'])('rejects delegated resume with %s execution control without admitting input', async (blocked) => {
@@ -2653,7 +2744,7 @@ describe('ChatCommandService', () => {
   });
 
   it('asserts the resume agent and adds tags only after admission', async () => {
-    const { service, chats, queue } = makeService();
+    const { service, chatTags, queue } = makeService();
 
     await expect(service.submitRun({
       chatId: SOURCE_CHAT_ID,
@@ -2664,7 +2755,7 @@ describe('ChatCommandService', () => {
       tagsToAdd: ['cli'],
     })).rejects.toMatchObject({ code: 'EXPECTED_AGENT_MISMATCH', status: 409 });
     expect(queue.admitUserInput).not.toHaveBeenCalled();
-    expect(chats.addTags).not.toHaveBeenCalled();
+    expect(chatTags.applyDeltaWhileChatLocked).not.toHaveBeenCalled();
 
     const result = await service.submitRun({
       chatId: SOURCE_CHAT_ID,
@@ -2676,8 +2767,68 @@ describe('ChatCommandService', () => {
     });
 
     expect(result.status).toBe('accepted');
-    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+    expect(chatTags.applyDeltaWhileChatLocked).toHaveBeenCalledWith({
+      chatId: SOURCE_CHAT_ID,
+      addTags: ['cli'],
+    });
     expect(queue.runReservedTurn.mock.calls.at(-1)[2]).not.toHaveProperty('contextTransition');
+  });
+
+  it('keeps accepted runs accepted when post-admission tag persistence fails', async () => {
+    const { service, queue } = makeService({
+      chatTags: {
+        applyDeltaWhileChatLocked: mock(async () => {
+          throw new DomainError('CHAT_TAG_SAVE_FAILED', 'disk full', 503, true);
+        }),
+      },
+    });
+
+    const result = await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-tag-save-failed',
+      clientMessageId: 'msg-tag-save-failed',
+      tagsToAdd: ['cli'],
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      tagMutation: {
+        status: 'not-applied',
+        errorCode: 'CHAT_TAG_SAVE_FAILED',
+        retryable: true,
+      },
+    });
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an accepted receipt with a recovery fence for unknown tag durability', async () => {
+    const applyDeltaWhileChatLocked = mock(async () => {
+      throw new DomainError('CHAT_TAG_SAVE_UNKNOWN', 'confirmation required', 503);
+    });
+    const { service, queue } = makeService({ chatTags: { applyDeltaWhileChatLocked } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-tag-save-unknown',
+      clientMessageId: 'msg-tag-save-unknown',
+      tagsToAdd: ['cli'],
+    };
+
+    const accepted = await service.submitRun(input);
+    const replay = await service.submitRun(input);
+
+    expect(accepted).toMatchObject({
+      status: 'accepted',
+      tagMutation: {
+        status: 'unknown',
+        errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+        recoveryRequired: true,
+      },
+    });
+    expect(replay).toMatchObject({ status: 'duplicate', tagMutation: { status: 'unknown' } });
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+    expect(applyDeltaWhileChatLocked).toHaveBeenCalledTimes(2);
   });
 
   it('commits one cross-agent handoff before scheduling the target run', async () => {
@@ -3543,7 +3694,7 @@ describe('ChatCommandService', () => {
   });
 
   it('keeps a failed admission private when deletion commits before its retry', async () => {
-    const { service, chats, ledger, queue } = makeService();
+    const { service, chatTags, ledger, queue } = makeService();
     const input = {
       chatId: SOURCE_CHAT_ID,
       command: 'continue after deletion',
@@ -3570,13 +3721,13 @@ describe('ChatCommandService', () => {
       retainedPrivateTerminal: true,
     });
     expect(record.publicTerminalAt).toBeUndefined();
-    expect(chats.addTags).not.toHaveBeenCalled();
+    expect(chatTags.applyDeltaWhileChatLocked).not.toHaveBeenCalled();
     expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
   });
 
   it('retries a failed admission normally when chat deletion rolls back', async () => {
-    const { service, chats, ledger, ownership, queue } = makeService({
+    const { service, chatTags, ledger, ownership, queue } = makeService({
       ownership: {
         delete: mock(async () => {
           throw new Error('journal append failed');
@@ -3602,8 +3753,11 @@ describe('ChatCommandService', () => {
 
     expect(retry.status).toBe('accepted');
     expect(ownership.delete).toHaveBeenCalledWith(SOURCE_CHAT_ID);
-    expect(chats.addTags).toHaveBeenCalledTimes(1);
-    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+    expect(chatTags.applyDeltaWhileChatLocked).toHaveBeenCalledTimes(1);
+    expect(chatTags.applyDeltaWhileChatLocked).toHaveBeenCalledWith({
+      chatId: SOURCE_CHAT_ID,
+      addTags: ['cli'],
+    });
     expect(queue.admitUserInput).toHaveBeenCalledTimes(2);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
     expect((await ledger.getRecord(

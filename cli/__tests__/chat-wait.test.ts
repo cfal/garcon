@@ -28,13 +28,13 @@ const completed: AgentTurnReceipt = {
   output: {
     availability: 'available',
     completeness: 'complete',
-    assistantMessages: ['Done'],
+    text: 'Done',
   },
 };
 
 function output(): CliOutput & {
   handles: Array<{ chatId: string; turnId: string }>;
-  messages: string[][];
+  messages: string[];
   results: string[];
 } {
   return {
@@ -42,7 +42,7 @@ function output(): CliOutput & {
     messages: [],
     results: [],
     accepted({ chatId, turnId }) { this.handles.push({ chatId, turnId }); },
-    completed(messages) { this.messages.push([...messages]); },
+    completed(text) { this.messages.push(text); },
     result(content) { this.results.push(content); },
     sent() {},
     stopped() {},
@@ -67,7 +67,7 @@ describe('runChatWait', () => {
 
     expect(reads).toBe(1);
     expect(capture.handles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
-    expect(capture.messages).toEqual([['Done']]);
+    expect(capture.messages).toEqual(['Done']);
   });
 
   test('emits one terminal receipt document in JSON mode', async () => {
@@ -89,9 +89,8 @@ describe('runChatWait', () => {
       error: 'provider failed',
       errorCode: 'INTERNAL_ERROR',
       output: {
-        availability: 'available',
-        completeness: 'best-effort',
-        assistantMessages: ['Partial'],
+        availability: 'unavailable',
+        reason: 'no-final-response',
       },
     };
     const capture = output();

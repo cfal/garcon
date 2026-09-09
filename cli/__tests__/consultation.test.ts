@@ -40,7 +40,7 @@ const receipt: AgentTurnReceipt = {
   acceptedAt: accepted.acceptedAt,
   updatedAt: accepted.acceptedAt,
   settledAt: new Date().toISOString(),
-  output: { availability: 'available', completeness: 'complete', assistantMessages: ['Done'] },
+  output: { availability: 'available', completeness: 'complete', text: 'Done' },
 };
 
 function snapshot(): ChatSnapshotResponse {
@@ -123,16 +123,17 @@ const settings = {
 
 function output(): CliOutput & {
   acceptedHandles: Array<{ chatId: string; turnId: string }>;
-  messages: string[][];
+  messages: string[];
+  diagnostics: string[];
 } {
   return {
-    acceptedHandles: [], messages: [],
+    acceptedHandles: [], messages: [], diagnostics: [],
     accepted({ chatId, turnId }) { this.acceptedHandles.push({ chatId, turnId }); },
-    completed(messages) { this.messages.push([...messages]); },
+    completed(text) { this.messages.push(text); },
     result() {},
     sent() {},
     stopped() {},
-    diagnostic() {},
+    diagnostic(message) { this.diagnostics.push(message); },
   };
 }
 
@@ -242,7 +243,7 @@ describe('runConsultation', () => {
     });
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Implementation review' }]);
-    expect(testOutput.messages).toEqual([['Done']]);
+    expect(testOutput.messages).toEqual(['Done']);
   });
 
   test('retries a server-reported chat ID collision with entirely new identities', async () => {
@@ -333,6 +334,68 @@ describe('runConsultation', () => {
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Follow-up review' }]);
   });
 
+  test.each([
+    {
+      name: 'applied',
+      outcome: { status: 'applied', addedTags: ['follow-up'] } as const,
+      diagnostic: null,
+    },
+    {
+      name: 'not applied',
+      outcome: {
+        status: 'not-applied',
+        errorCode: 'CHAT_TAG_SAVE_FAILED',
+        retryable: true,
+      } as const,
+      diagnostic: 'The run was accepted, but its requested tags were not saved.',
+    },
+    {
+      name: 'unknown',
+      outcome: {
+        status: 'unknown',
+        errorCode: 'CHAT_TAG_SAVE_UNKNOWN',
+        recoveryRequired: true,
+      } as const,
+      diagnostic: 'The run was accepted, but its requested tags could not be confirmed.',
+    },
+  ])('preserves accepted execution when post-admission tags are $name', async ({ outcome, diagnostic }) => {
+    const testOutput = output();
+    let submissions = 0;
+    const testClient = client({
+      async runChat(request) {
+        submissions += 1;
+        return {
+          ...accepted,
+          commandType: 'agent-run',
+          clientRequestId: request.clientRequestId,
+          tagMutation: outcome,
+        };
+      },
+    });
+
+    await expect(runConsultation({
+      kind: 'resume',
+      workspace: 'default',
+      configDir: '/config',
+      chatId: CHAT_ID,
+      prompt: 'Continue',
+      readsPromptFromStdin: false,
+      additionalTags: ['follow-up'],
+    }, 'Continue', testClient, testOutput, undefined, {
+      createId: () => 'request',
+    })).resolves.toBeUndefined();
+
+    expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
+    expect(testOutput.messages).toEqual(['Done']);
+    expect(submissions).toBe(1);
+    if (diagnostic) {
+      expect(testOutput.diagnostics).toHaveLength(1);
+      expect(testOutput.diagnostics[0]?.startsWith(diagnostic)).toBe(true);
+    } else {
+      expect(testOutput.diagnostics).toEqual([]);
+    }
+  });
+
   test('returns the agent result before surfacing a title update failure', async () => {
     const testOutput = output();
     let receiptRead = false;
@@ -355,7 +418,7 @@ describe('runConsultation', () => {
 
     expect(receiptRead).toBe(true);
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
-    expect(testOutput.messages).toEqual([['Done']]);
+    expect(testOutput.messages).toEqual(['Done']);
   });
 
   test('validates resume overrides against the persisted agent catalog', async () => {
@@ -438,7 +501,7 @@ describe('runConsultation', () => {
       state: 'failed',
       error: 'provider failed',
       errorCode: 'INTERNAL_ERROR',
-      output: { availability: 'available', completeness: 'best-effort', assistantMessages: ['Partial'] },
+      output: { availability: 'unavailable', reason: 'no-final-response' },
     } as AgentTurnReceipt;
     const testOutput = output();
     try {

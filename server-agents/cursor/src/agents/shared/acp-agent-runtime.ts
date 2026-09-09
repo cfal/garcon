@@ -496,9 +496,8 @@ export class AcpAgentRuntime {
         failureMessage = humanizeError(error);
       }
     } finally {
-      if (executionStarted) {
-        this.#emitFlushedMessages(turn);
-      }
+      const finalMessages = executionStarted ? this.#emitFlushedMessages(turn)
+        .filter((message) => message.type === 'assistant-message') : [];
       if (turn.aborted) {
         session.state = 'aborted';
       } else if (admissionClosed) {
@@ -514,6 +513,8 @@ export class AcpAgentRuntime {
           type: 'run-ended',
           runId: turn.operation.runId,
           outcome: 'finished',
+          ...(finalMessages.length > 0 ? { finalResponse: { type: 'text' as const,
+            text: finalMessages.map((message) => message.content).join('\n\n') } } : {}),
         });
       } else if (!turn.aborted && !admissionClosed && failureMessage && !turn.sourceRetired) {
         this.#publishMessages(turn, [
@@ -805,12 +806,13 @@ export class AcpAgentRuntime {
     if (session.activeTurn === turn) session.activeTurn = null;
   }
 
-  #emitFlushedMessages(turn: AcpTurnContext): void {
+  #emitFlushedMessages(turn: AcpTurnContext): ChatMessage[] {
     const messages = this.#converter.endTurn?.(
       turn.session.id,
       this.#sessionUpdateContext(turn),
     ) ?? [];
     this.#publishMessages(turn, messages);
+    return messages;
   }
 
   #publishMessages(

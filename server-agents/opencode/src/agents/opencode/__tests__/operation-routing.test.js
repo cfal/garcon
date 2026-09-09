@@ -12,9 +12,9 @@ function createEventStream() {
   const promptRequestsByMessage = new Map();
   const promptRequestsBySession = new Map();
   let closed = false;
-  const resolvePrompt = (info) => {
+  const resolvePrompt = (info, parts = []) => {
     const request = promptRequestsByMessage.get(info.parentID);
-    if (request) setImmediate(() => request.resolve({ data: { info, parts: [] } }));
+    if (request) setImmediate(() => request.resolve({ data: { info, parts } }));
   };
   const observe = (event, completePrompt) => {
     if (event.type === 'message.part.updated') {
@@ -301,6 +301,28 @@ function compactionWarningCodes(warnings) {
 }
 
 describe('OpenCode operation routing', () => {
+  it('captures only the final HTTP assistant multipart response, independently of streamed parts', async () => {
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1']);
+    const events = [];
+    try {
+      await runtime.startSession({ command: 'Synthetic task.', chatId: 'chat-1', projectPath: '/repo',
+        permissionMode: 'default', operation: operation('run-final', events) });
+      pushPrompt(eventStream, { eventId: 'event-prompt', messageId: 'user-prompt',
+        partId: promptPart(promptAsync, 0), sessionId: 'session-1', text: 'Synthetic task.' });
+      pushAssistant(eventStream, { eventNumber: 2, messageId: 'commentary', parentId: 'user-prompt',
+        sessionId: 'session-1', text: 'Progress only.' });
+      const info = { id: 'final-message', role: 'assistant', parentID: 'user-prompt',
+        finish: 'stop', time: { completed: 1 } };
+      eventStream.resolvePrompt(info, [
+        { id: 'final-a', messageID: info.id, type: 'text', text: 'Final A.' },
+        { id: 'thinking', messageID: info.id, type: 'reasoning', text: 'Private reasoning.' },
+        { id: 'final-b', messageID: info.id, type: 'text', text: 'Final B.\r' },
+      ]);
+      await waitFor(() => events.some((event) => event.type === 'run-ended'));
+      expect(events.at(-1).finalResponse).toEqual({ type: 'text', text: 'Final A.\n\nFinal B.\r' });
+      expect(JSON.stringify(events)).toContain('Progress only.');
+    } finally { eventStream.close(); await runtime.shutdown(); }
+  });
   it('[TLV5-L07.07-OPENCODE-UNIT-01] preserves an established operation when a replacement start fails', async () => {
     const { create, eventStream, promptAsync, runtime } = createRuntime(['session-1']);
     const establishedEvents = [];
