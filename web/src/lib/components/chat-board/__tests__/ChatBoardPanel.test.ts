@@ -136,7 +136,6 @@ function createController(initial: ChatBoardCatalog) {
 			},
 			pruneActiveColumns() {},
 		},
-		sidebarLayout: () => 'compact',
 	});
 	return {
 		controller,

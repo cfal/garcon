@@ -71,7 +71,6 @@ async function setup() {
 			setActiveColumnId() {},
 			pruneActiveColumns() {},
 		},
-		sidebarLayout: () => 'compact',
 	});
 	await controller.refresh(true);
 	return {

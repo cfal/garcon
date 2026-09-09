@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Columns3 from '@lucide/svelte/icons/columns-3';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -46,28 +45,12 @@
 	};
 </script>
 
-<header class="shrink-0 border-b border-border/80 bg-card/95 px-3 py-2.5 backdrop-blur sm:px-4">
-	<div class="flex min-w-0 flex-wrap items-center gap-2">
-		<div class="mr-auto flex min-w-0 items-center gap-2.5">
-			<div
-				class="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground"
-			>
-				<Columns3 class="size-4" aria-hidden="true" />
-			</div>
-			<div class="min-w-0">
-				<h1 class="truncate text-sm font-semibold tracking-tight">
-					{m.workspace_surface_chat_board()}
-				</h1>
-				<p class="hidden truncate text-[11px] text-muted-foreground sm:block">
-					{m.chat_board_description()}
-				</p>
-			</div>
-		</div>
-
+<header class="shrink-0 border-b border-border/80 bg-card/95 px-3 py-1.5 backdrop-blur sm:px-4">
+	<div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
 		{#if selectedBoard}
 			<DropdownMenu>
 				<DropdownMenuTrigger
-					class="inline-flex h-8 min-w-36 max-w-64 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring sm:flex-none"
+					class="mr-auto inline-flex h-8 min-w-36 max-w-64 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring sm:flex-none"
 					data-chat-board-selector
 				>
 					<span class="min-w-0 flex-1 truncate text-left" title={selectedBoard.name}

@@ -62,4 +62,30 @@ describe('ChatSummary', () => {
 			layout,
 		);
 	});
+
+	it('wraps board titles while keeping sidebar titles truncated', () => {
+		const board = render(ChatSummary, {
+			session: chat({ isProcessing: false, processingPhase: null }),
+			variant: 'board',
+			chatItemLayout: 'single-line',
+		});
+		const boardTitle = board.container.querySelector<HTMLElement>(
+			'[data-variant="board"] [title="Polished board card"]',
+		);
+		expect(boardTitle?.classList.contains('line-clamp-2')).toBe(true);
+		expect(boardTitle?.classList.contains('whitespace-normal')).toBe(true);
+		expect(boardTitle?.classList.contains('break-words')).toBe(true);
+		expect(boardTitle?.classList.contains('truncate')).toBe(false);
+
+		const sidebar = render(ChatSummary, {
+			session: chat({ isProcessing: false, processingPhase: null }),
+			variant: 'sidebar',
+			chatItemLayout: 'single-line',
+		});
+		const sidebarTitle = sidebar.container.querySelector<HTMLElement>(
+			'[data-variant="sidebar"] [title="Polished board card"]',
+		);
+		expect(sidebarTitle?.classList.contains('truncate')).toBe(true);
+		expect(sidebarTitle?.classList.contains('line-clamp-2')).toBe(false);
+	});
 });

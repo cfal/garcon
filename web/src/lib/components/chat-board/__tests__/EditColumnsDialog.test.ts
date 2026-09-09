@@ -54,7 +54,6 @@ async function setup(initialBoard = board) {
 			setActiveColumnId() {},
 			pruneActiveColumns() {},
 		},
-		sidebarLayout: () => 'compact',
 	});
 	await controller.refresh(true);
 	return {

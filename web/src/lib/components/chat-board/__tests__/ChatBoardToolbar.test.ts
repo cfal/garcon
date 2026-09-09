@@ -22,19 +22,22 @@ describe('ChatBoardToolbar', () => {
 			onEditColumns: vi.fn(),
 			onCreateBoard: vi.fn(),
 			onManageBoards: vi.fn(),
-				onSetLayout,
-			});
+			onSetLayout,
+		});
 
 		expect(screen.getByRole('button', { name: 'Edit columns' }).getAttribute('title')).toBe(
 			'Edit columns',
 		);
 		expect(screen.getByRole('button', { name: 'View' }).getAttribute('title')).toBe('View');
+		expect(screen.queryByText('Chat Board')).toBeNull();
+		expect(screen.queryByText('Live chats, organized by your tags')).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Delivery' }));
 		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'By owner' }));
 		expect(onSelectBoard).toHaveBeenCalledWith(boards[1]!.id);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'View' }));
+		expect(await screen.findByRole('menuitemradio', { name: 'Title only' })).toBeTruthy();
 		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Detailed' }));
 		await waitFor(() => expect(onSetLayout).toHaveBeenCalledWith('detailed'));
 	});

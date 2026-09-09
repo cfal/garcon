@@ -303,7 +303,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 						deps.localSettings.pruneChatBoardActiveColumns(boards);
 					},
 				},
-				sidebarLayout: () => deps.localSettings.sidebarChatItemLayout,
 			}),
 		createCommit: () =>
 			new CommitController({

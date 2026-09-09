@@ -81,7 +81,6 @@ async function controller() {
 			setActiveColumnId() {},
 			pruneActiveColumns() {},
 		},
-		sidebarLayout: () => 'compact',
 	});
 	await value.refresh(true);
 	return value;
@@ -183,9 +182,9 @@ describe('ChatBoardTransitionDialog', () => {
 
 	it('reports when reconciliation blocks submission before dispatch', async () => {
 		const sessions = new ChatSessionsStore({
-			transitionChatTags: vi.fn().mockRejectedValue(
-				new ChatTagMutationBlockedError('committed-refresh'),
-			),
+			transitionChatTags: vi
+				.fn()
+				.mockRejectedValue(new ChatTagMutationBlockedError('committed-refresh')),
 		});
 		sessions.byId = { 'chat-1': chat() };
 		sessions.order = ['chat-1'];

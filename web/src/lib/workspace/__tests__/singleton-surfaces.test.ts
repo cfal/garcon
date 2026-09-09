@@ -111,7 +111,6 @@ function createRegistry() {
 					setActiveColumnId() {},
 					pruneActiveColumns() {},
 				},
-				sidebarLayout: () => 'compact',
 			});
 			chatBoards.push({
 				setProjectState: vi.spyOn(controller, 'setProjectState'),

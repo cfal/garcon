@@ -52,6 +52,9 @@
 		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null,
 	);
 	let selectedForeground = $derived(isSidebar && isSelected);
+	let titleClass = $derived(
+		isSidebar ? 'min-w-0 truncate' : 'min-w-0 line-clamp-2 whitespace-normal break-words',
+	);
 	let singleLineStatusClass = $derived(
 		cn(
 			'ml-auto shrink-0',
@@ -87,7 +90,7 @@
 				selectedForeground ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>
-			<span class={cn('min-w-0 truncate', isUnread ? 'font-bold' : 'font-medium')} title={chatName}>
+			<span class={cn(titleClass, isUnread ? 'font-bold' : 'font-medium')} title={chatName}>
 				{chatName}
 			</span>
 			{#if isUnread}
@@ -131,7 +134,7 @@
 					selectedForeground ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 				)}
 			>
-				<span class={cn('min-w-0 truncate', isUnread ? 'font-bold' : 'font-medium')} title={chatName}>
+				<span class={cn(titleClass, isUnread ? 'font-bold' : 'font-medium')} title={chatName}>
 					{chatName}
 				</span>
 				{#if isUnread}
@@ -195,7 +198,9 @@
 						'mb-1 mt-0.5 text-[13px] italic',
 						isSidebar ? 'truncate' : 'line-clamp-2 min-h-[2.4em] whitespace-pre-wrap break-words',
 						isUnread ? 'font-semibold' : 'font-normal',
-						selectedForeground ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
+						selectedForeground
+							? 'text-sidebar-chat-item-selected-foreground/90'
+							: 'text-foreground/80',
 					)}
 				>
 					{lastMessage || '\u00A0'}

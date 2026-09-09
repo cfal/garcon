@@ -86,7 +86,6 @@ function harness(initialCatalog = catalog(1), initialActiveColumns: Record<strin
 		api,
 		invalidations,
 		preferences,
-		sidebarLayout: () => 'compact',
 	});
 	return {
 		controller,
@@ -108,7 +107,7 @@ function harness(initialCatalog = catalog(1), initialActiveColumns: Record<strin
 }
 
 describe('ChatBoardController', () => {
-	it('loads lazily on workspace visibility and inherits sidebar density once', async () => {
+	it('loads lazily on workspace visibility and initializes the Detailed layout once', async () => {
 		const test = harness();
 		expect(test.api.load).not.toHaveBeenCalled();
 		test.controller.setPresentationVisible(true);
@@ -117,7 +116,7 @@ describe('ChatBoardController', () => {
 		expect(test.controller.status).toBe('ready');
 		expect(test.controller.selectedBoard?.id).toBe(first.id);
 		expect(test.selectedBoardId).toBe(first.id);
-		expect(test.itemLayout).toBe('compact');
+		expect(test.itemLayout).toBe('detailed');
 
 		test.controller.setItemLayout('detailed');
 		test.controller.setPresentationVisible(false);

@@ -14,6 +14,7 @@ import type { ChatBoardInvalidationHub } from './chat-board-invalidation-hub.js'
 export type ChatBoardLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 const CHAT_BOARD_CATCH_UP_REQUEST_LIMIT = 3;
+const DEFAULT_CHAT_BOARD_ITEM_LAYOUT: ChatItemLayout = 'detailed';
 
 export interface ChatBoardPreferencesPort {
 	get selectedBoardId(): string | null;
@@ -29,7 +30,6 @@ export interface ChatBoardControllerDeps {
 	readonly api: ChatBoardApi;
 	readonly invalidations: ChatBoardInvalidationHub;
 	readonly preferences: ChatBoardPreferencesPort;
-	readonly sidebarLayout: () => ChatItemLayout;
 }
 
 export class ChatBoardController implements PortableSingletonController {
@@ -69,7 +69,7 @@ export class ChatBoardController implements PortableSingletonController {
 	}
 
 	get itemLayout(): ChatItemLayout {
-		return this.deps.preferences.itemLayout ?? this.deps.sidebarLayout();
+		return this.deps.preferences.itemLayout ?? DEFAULT_CHAT_BOARD_ITEM_LAYOUT;
 	}
 
 	get selectedBoard(): ChatBoard | null {
@@ -98,7 +98,7 @@ export class ChatBoardController implements PortableSingletonController {
 		this.#presentationVisible = visible;
 		if (!visible) return;
 		if (this.deps.preferences.itemLayout === null) {
-			this.deps.preferences.setItemLayout(this.deps.sidebarLayout());
+			this.deps.preferences.setItemLayout(DEFAULT_CHAT_BOARD_ITEM_LAYOUT);
 		}
 		if (this.#status === 'idle' || this.#needsRefresh) void this.refresh(this.#status === 'idle');
 	}
