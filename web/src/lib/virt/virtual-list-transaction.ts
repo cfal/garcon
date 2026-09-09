@@ -549,6 +549,12 @@ export class VirtualListTransaction {
 		const logicalOffset = this.#pendingCommit
 			? this.#logicalOffsetForTarget(this.#pendingCommit.target, dom)
 			: dom.scrollTop - dom.leadingOffset + this.#deviation.value;
+		if (logicalOffset <= 0) {
+			const firstItem = this.geometry.item(0);
+			return firstItem
+				? { kind: 'item', key: firstItem.key, index: firstItem.index, start: firstItem.start }
+				: { kind: 'none' };
+		}
 		let item =
 			this.geometry.itemAtOffset(logicalOffset) ?? this.geometry.item(this.geometry.count - 1);
 		if (item && firstMeasurements?.has(item.key)) {
