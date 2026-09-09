@@ -15,6 +15,7 @@ export interface SidebarVirtualProjectHeaderRow {
 	type: 'project-header';
 	key: string;
 	projectKey: string;
+	collapseKey: string;
 	projectPath: string;
 	count: number;
 	chatIds: string[];
@@ -27,6 +28,10 @@ export type SidebarChatSection = 'active' | 'inactive' | 'archived';
 // the project collapse store's key space.
 export function sidebarSectionKey(section: SidebarChatSection): string {
 	return `section:${section}`;
+}
+
+export function sidebarSectionProjectKey(section: SidebarChatSection, projectKey: string): string {
+	return `${sidebarSectionKey(section)}:project:${projectKey}`;
 }
 
 export const SIDEBAR_SECTION_COLLAPSE_KEYS: readonly string[] = [
@@ -60,9 +65,7 @@ export interface SidebarVirtualChatRow {
 }
 
 export type SidebarVirtualRow =
-	| SidebarVirtualProjectHeaderRow
-	| SidebarVirtualSectionHeaderRow
-	| SidebarVirtualChatRow;
+	SidebarVirtualProjectHeaderRow | SidebarVirtualSectionHeaderRow | SidebarVirtualChatRow;
 
 export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
 

@@ -26,7 +26,10 @@
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$shared/chat-filter-query';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
-	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
+	import {
+		SIDEBAR_SECTION_COLLAPSE_KEYS,
+		sidebarSectionProjectKey,
+	} from './sidebar-virtual-chat-list';
 	import {
 		sidebarGroupingUsesProjects,
 		type SidebarDisplayOptions,
@@ -176,6 +179,9 @@
 			displayedChats: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 		});
+		projectKeys.push(
+			...projectKeys.map((projectKey) => sidebarSectionProjectKey('inactive', projectKey)),
+		);
 		// Activity sections collapse through the same store; their keys stay in
 		// the pruning allowlist regardless of mode so section collapse
 		// preferences survive grouping-mode switches, like project keys do.

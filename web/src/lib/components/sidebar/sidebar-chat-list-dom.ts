@@ -11,7 +11,9 @@ export function pointIsInsideViewport(
 	clientY: number,
 ): boolean {
 	const rect = viewport.getBoundingClientRect();
-	return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+	return (
+		clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+	);
 }
 
 export function mountedRowAtPoint(clientX: number, clientY: number): HTMLElement | null {
@@ -41,7 +43,7 @@ export function closestEdgeForRow(rowEl: HTMLElement, clientY: number): Edge {
 export interface SidebarScrollTarget {
 	index: number;
 	chatId?: string;
-	projectKey?: string;
+	projectCollapseKey?: string;
 	sectionKey?: string;
 }
 
@@ -54,16 +56,20 @@ export function sidebarScrollTargetForChat(
 	const chatIndex = rows.findIndex((row) => row.type === 'chat' && row.chat.id === chatId);
 	if (chatIndex >= 0) return { index: chatIndex, chatId };
 
-	const headerIndex = rows.findIndex(
-		(row) =>
-			(row.type === 'project-header' || row.type === 'section-header') && row.chatIds.includes(chatId),
+	const projectHeaderIndex = rows.findIndex(
+		(row) => row.type === 'project-header' && row.chatIds.includes(chatId),
 	);
-	const headerRow = headerIndex >= 0 ? rows[headerIndex] : null;
-	if (headerRow?.type === 'project-header') {
-		return { index: headerIndex, projectKey: headerRow.projectKey };
+	const projectHeader = projectHeaderIndex >= 0 ? rows[projectHeaderIndex] : null;
+	if (projectHeader?.type === 'project-header') {
+		return { index: projectHeaderIndex, projectCollapseKey: projectHeader.collapseKey };
 	}
-	if (headerRow?.type === 'section-header') {
-		return { index: headerIndex, sectionKey: sidebarSectionKey(headerRow.section) };
+
+	const sectionHeaderIndex = rows.findIndex(
+		(row) => row.type === 'section-header' && row.chatIds.includes(chatId),
+	);
+	const sectionHeader = sectionHeaderIndex >= 0 ? rows[sectionHeaderIndex] : null;
+	if (sectionHeader?.type === 'section-header') {
+		return { index: sectionHeaderIndex, sectionKey: sidebarSectionKey(sectionHeader.section) };
 	}
 	return null;
 }
@@ -74,13 +80,28 @@ export function mountedElementForScrollTarget(
 ): HTMLElement | null {
 	if (!viewport) return null;
 	if (target.chatId) {
-		return findMountedElement(viewport, '[data-sidebar-virtual-row]', 'sidebarVirtualRow', target.chatId);
+		return findMountedElement(
+			viewport,
+			'[data-sidebar-virtual-row]',
+			'sidebarVirtualRow',
+			target.chatId,
+		);
 	}
-	if (target.projectKey) {
-		return findMountedElement(viewport, '[data-sidebar-project-key]', 'sidebarProjectKey', target.projectKey);
+	if (target.projectCollapseKey) {
+		return findMountedElement(
+			viewport,
+			'[data-sidebar-project-collapse-key]',
+			'sidebarProjectCollapseKey',
+			target.projectCollapseKey,
+		);
 	}
 	if (target.sectionKey) {
-		return findMountedElement(viewport, '[data-sidebar-section-key]', 'sidebarSectionKey', target.sectionKey);
+		return findMountedElement(
+			viewport,
+			'[data-sidebar-section-key]',
+			'sidebarSectionKey',
+			target.sectionKey,
+		);
 	}
 	return null;
 }
@@ -88,7 +109,8 @@ export function mountedElementForScrollTarget(
 function findMountedElement(
 	viewport: HTMLElement,
 	selector: string,
-	datasetKey: 'sidebarVirtualRow' | 'sidebarProjectKey' | 'sidebarSectionKey',
+	datasetKey:
+		'sidebarVirtualRow' | 'sidebarProjectKey' | 'sidebarProjectCollapseKey' | 'sidebarSectionKey',
 	value: string,
 ): HTMLElement | null {
 	return (
