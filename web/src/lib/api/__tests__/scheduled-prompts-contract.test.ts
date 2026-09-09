@@ -121,9 +121,10 @@ describe('scheduled new-chat target normalization', () => {
 		agentSettingsById: {
 			codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
 		},
+		preambleChoice: { mode: 'defaults' },
 	};
 
-	it('normalizes tags and defaults legacy targets to an empty list', () => {
+	it('normalizes tags and preserves the required preamble choice', () => {
 		expect(normalizeScheduledPromptTarget(target)).toMatchObject({ tags: [] });
 		expect(
 			normalizeScheduledPromptTarget({

@@ -485,20 +485,29 @@ describe('preambles', () => {
 
   test('applies preambles to scheduled new chats', async () => {
     await withIntegrationFixture('scheduled-preambles', async (fixture) => {
-      const body = 'SYNTHETIC_SCHEDULED_PREAMBLE_BODY';
-      await createPreamble(fixture, 0, {
+      const firstBody = 'SYNTHETIC_SCHEDULED_FIRST_BODY';
+      const secondBody = 'SYNTHETIC_SCHEDULED_SECOND_BODY';
+      let catalog = await createPreamble(fixture, 0, {
         enabled: true,
-        title: 'Scheduled instructions',
-        content: body,
+        title: 'Scheduled first',
+        content: firstBody,
         scope: { type: 'global' },
       });
+      catalog = await createPreamble(fixture, catalog.snapshot.revision, {
+        enabled: true,
+        title: 'Scheduled second',
+        content: secondBody,
+        scope: { type: 'global' },
+      });
+      const [firstId, secondId] = catalog.snapshot.preambles.map((preamble) => preamble.id);
 
       const agent = fixture.directAgents.openAi;
       const initial = await fixture.client.getScheduledPrompts();
-      await fixture.client.createScheduledPrompt({
+      const runAtUtc = nextScheduledRun();
+      const automatic = await fixture.client.createScheduledPrompt({
         expectedRevision: initial.revision,
         scheduledPrompt: {
-          schedule: { type: 'once', runAtUtc: nextScheduledRun() },
+          schedule: { type: 'once', runAtUtc },
           target: {
             type: 'new-chat',
             agentId: agent.agentId,
@@ -510,31 +519,78 @@ describe('preambles', () => {
             permissionMode: 'default',
             thinkingMode: 'none',
             agentSettingsById: { [agent.agentId]: agent.agentSettings },
-            tags: ['scheduled-preamble'],
+            tags: ['scheduled-default-preambles'],
+            preambleChoice: { mode: 'defaults' },
           },
-          prompt: 'scheduled visible prompt',
+          prompt: 'scheduled defaults prompt',
+        },
+      });
+      await fixture.client.createScheduledPrompt({
+        expectedRevision: automatic.snapshot.revision,
+        scheduledPrompt: {
+          schedule: { type: 'once', runAtUtc },
+          target: {
+            type: 'new-chat',
+            agentId: agent.agentId,
+            projectPath: fixture.dirs.project,
+            model: agent.provider.model,
+            apiProviderId: agent.provider.providerId,
+            modelEndpointId: agent.provider.endpointId,
+            modelProtocol: agent.provider.protocol,
+            permissionMode: 'default',
+            thinkingMode: 'none',
+            agentSettingsById: { [agent.agentId]: agent.agentSettings },
+            tags: ['scheduled-explicit-preambles'],
+            preambleChoice: { mode: 'explicit', orderedPreambleIds: [secondId!, firstId!] },
+          },
+          prompt: 'scheduled explicit prompt',
         },
       });
 
-      const providerRequest = await fixture.fakeProviders.openAi.waitForRequest(
+      const firstRequest = await fixture.fakeProviders.openAi.waitForRequest(
         { model: agent.provider.model },
         { timeoutMs: 90_000 },
       );
-      expect(providerRequest.lastUserText).toContain(body);
-      expect(providerRequest.lastUserText).toEndWith('scheduled visible prompt');
+      const secondRequest = await fixture.fakeProviders.openAi.waitForRequest(
+        { model: agent.provider.model },
+        { afterId: firstRequest.id, timeoutMs: 90_000 },
+      );
+      const requests = [firstRequest, secondRequest];
+      const defaultsRequest = requests.find((request) =>
+        request.lastUserText.endsWith('scheduled defaults prompt'));
+      const explicitRequest = requests.find((request) =>
+        request.lastUserText.endsWith('scheduled explicit prompt'));
+      if (!defaultsRequest || !explicitRequest) throw new Error('Scheduled provider requests were not found.');
+      expect(defaultsRequest.lastUserText).toContain(firstBody);
+      expect(defaultsRequest.lastUserText).toContain(secondBody);
+      expect(defaultsRequest.lastUserText.indexOf(firstBody)).toBeLessThan(
+        defaultsRequest.lastUserText.indexOf(secondBody),
+      );
+      expect(explicitRequest.lastUserText).toContain(firstBody);
+      expect(explicitRequest.lastUserText).toContain(secondBody);
+      expect(explicitRequest.lastUserText.indexOf(secondBody)).toBeLessThan(
+        explicitRequest.lastUserText.indexOf(firstBody),
+      );
 
-      const chat = (await fixture.client.listChats()).sessions.find((entry) => (
-        entry.tags.includes('scheduled-preamble')
-      ));
-      if (!chat) throw new Error('Scheduled preamble chat was not created.');
-      const history = await fixture.client.getMessages(chat.id);
-      expectApplicationImmediatelyBefore(history, 'scheduled visible prompt', [
-        'Scheduled instructions',
+      const chats = (await fixture.client.listChats()).sessions;
+      const defaultsChat = chats.find((entry) => entry.tags.includes('scheduled-default-preambles'));
+      const explicitChat = chats.find((entry) => entry.tags.includes('scheduled-explicit-preambles'));
+      if (!defaultsChat || !explicitChat) throw new Error('Scheduled preamble chats were not created.');
+      expectApplicationImmediatelyBefore(
+        await fixture.client.getMessages(defaultsChat.id),
+        'scheduled defaults prompt',
+        ['Scheduled first', 'Scheduled second'],
+      );
+      const explicitHistory = await fixture.client.getMessages(explicitChat.id);
+      expectApplicationImmediatelyBefore(explicitHistory, 'scheduled explicit prompt', [
+        'Scheduled second',
+        'Scheduled first',
       ]);
-      const garconOwnedRows = history.messages.filter(({ message }) => (
+      const garconOwnedRows = explicitHistory.messages.filter(({ message }) => (
         message.type === 'transcript-notice' || message.type === 'user-message'
       ));
-      expect(JSON.stringify(garconOwnedRows)).not.toContain(body);
+      expect(JSON.stringify(garconOwnedRows)).not.toContain(firstBody);
+      expect(JSON.stringify(garconOwnedRows)).not.toContain(secondBody);
     });
   }, 120_000);
 });

@@ -28,14 +28,23 @@ function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date) {
 }
 
 describe('ScheduledPromptRow', () => {
-  it.each([
-    ['<garcon-schedule-action />', 'Scheduled action'],
-    ['<garcon-schedule-action>\nReview A &amp; B\nSecond line\n</garcon-schedule-action>', 'Review A & B'],
-    ['<garcon-schedule-action>\nMalformed &unknown;\n</garcon-schedule-action>', '<garcon-schedule-action>'],
-  ])('renders the action title for %s', (prompt, title) => {
-    renderRow({ ...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), prompt }, new Date('2030-01-01T00:00:00.000Z'));
-    expect(screen.getByRole('heading', { name: title })).toBeTruthy();
-  });
+	it.each([
+		['<garcon-schedule-action />', 'Scheduled action'],
+		[
+			'<garcon-schedule-action>\nReview A &amp; B\nSecond line\n</garcon-schedule-action>',
+			'Review A & B',
+		],
+		[
+			'<garcon-schedule-action>\nMalformed &unknown;\n</garcon-schedule-action>',
+			'<garcon-schedule-action>',
+		],
+	])('renders the action title for %s', (prompt, title) => {
+		renderRow(
+			{ ...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), prompt },
+			new Date('2030-01-01T00:00:00.000Z'),
+		);
+		expect(screen.getByRole('heading', { name: title })).toBeTruthy();
+	});
 	it('shows new-chat agent and tags below the target row', () => {
 		const scheduledPrompt: ScheduledPrompt = {
 			...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:03:59.000Z' }),
@@ -53,6 +62,7 @@ describe('ScheduledPromptRow', () => {
 					codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
 				},
 				tags: ['qa', 'review-needed', 'frontend'],
+				preambleChoice: { mode: 'defaults' },
 			},
 		};
 
@@ -63,6 +73,7 @@ describe('ScheduledPromptRow', () => {
 		expect(screen.getByText('qa')).toBeTruthy();
 		expect(screen.getByText('review-needed')).toBeTruthy();
 		expect(screen.getByText('+1')).toBeTruthy();
+		expect(screen.getByText('Automatic preambles')).toBeTruthy();
 		expect(target.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 

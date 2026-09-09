@@ -5,11 +5,11 @@ import {
 import type { PathValidationStatus } from '$lib/chat/new-chat/new-chat-submit.js';
 import { normalizeTags } from '$lib/utils/tags.js';
 import type { AgentId } from '$shared/agents';
-import type { PreambleId, PreambleSelectionProjection } from '$shared/preambles';
-
-export type NewChatPreambleChoice =
-	| { readonly mode: 'defaults' }
-	| { readonly mode: 'explicit'; readonly orderedPreambleIds: readonly PreambleId[] };
+import type {
+	PreambleId,
+	PreambleSelectionChoice,
+	PreambleSelectionProjection,
+} from '$shared/preambles';
 
 interface NewChatPreambleSelectionStateOptions {
 	readonly trimmedPath: string;
@@ -18,8 +18,16 @@ interface NewChatPreambleSelectionStateOptions {
 	readonly chatTags: readonly string[];
 }
 
+function copyPreambleSelectionChoice(choice: PreambleSelectionChoice): PreambleSelectionChoice {
+	if (choice.mode === 'defaults') return { mode: 'defaults' };
+	return {
+		mode: 'explicit',
+		orderedPreambleIds: [...choice.orderedPreambleIds],
+	};
+}
+
 export class NewChatPreambleSelectionState {
-	choice = $state<NewChatPreambleChoice>({ mode: 'defaults' });
+	choice = $state<PreambleSelectionChoice>({ mode: 'defaults' });
 	preview = $state<PreambleSelectionProjection | null>(null);
 	previewLoading = $state(false);
 	canonicalProjectPath = $state('');
@@ -52,6 +60,16 @@ export class NewChatPreambleSelectionState {
 			return { orderedPreambleIds: [...this.choice.orderedPreambleIds] };
 		}
 		return {};
+	}
+
+	get choiceSnapshot(): PreambleSelectionChoice {
+		return copyPreambleSelectionChoice(this.choice);
+	}
+
+	restoreChoice(choice: PreambleSelectionChoice): void {
+		this.choice = copyPreambleSelectionChoice(choice);
+		this.#choiceVersion += 1;
+		this.invalidatePreview();
 	}
 
 	setExplicit(orderedPreambleIds: readonly PreambleId[]): void {

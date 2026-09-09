@@ -35,6 +35,7 @@ describe('scheduled prompt chat ID variables', () => {
             thinkingMode: 'none',
             agentSettingsById: { [agent.agentId]: agent.agentSettings },
             tags: ['scheduled'],
+            preambleChoice: { mode: 'defaults' },
           },
           prompt: rawPrompt,
         },

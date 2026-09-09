@@ -9,6 +9,7 @@
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import FileText from '@lucide/svelte/icons/file-text';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -86,6 +87,14 @@
 	let newChatTarget = $derived(
 		scheduledPrompt.target.type === 'new-chat' ? scheduledPrompt.target : null,
 	);
+	let preambleLabel = $derived.by(() => {
+		if (!newChatTarget) return '';
+		return newChatTarget.preambleChoice.mode === 'defaults'
+			? m.scheduled_prompts_preamble_defaults()
+			: m.scheduled_prompts_preamble_count({
+					count: newChatTarget.preambleChoice.orderedPreambleIds.length,
+				});
+	});
 </script>
 
 <article class="rounded-md border border-border bg-card p-3">
@@ -98,7 +107,17 @@
 			</p>
 			<p class="truncate text-xs text-muted-foreground" title={target}>{target}</p>
 			{#if newChatTarget}
-				<ChatAgentTags agentId={newChatTarget.agentId} tags={newChatTarget.tags} class="mt-1" />
+				<div class="mt-1 flex flex-wrap items-center gap-1.5">
+					<ChatAgentTags agentId={newChatTarget.agentId} tags={newChatTarget.tags} />
+					<span
+						class="inline-flex min-w-0 items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+						data-slot="scheduled-prompt-preamble-choice"
+						title={preambleLabel}
+					>
+						<FileText class="h-3 w-3 shrink-0" aria-hidden="true" />
+						<span class="truncate">{preambleLabel}</span>
+					</span>
+				</div>
 			{/if}
 		</div>
 		<div class="grid shrink-0 grid-cols-2 gap-1 sm:flex">
