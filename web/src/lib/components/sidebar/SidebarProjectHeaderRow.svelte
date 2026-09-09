@@ -16,7 +16,7 @@
 	let displayLabel = $derived(formatCompactProjectPath(fullLabel));
 
 	function handleToggle(): void {
-		onToggle?.(row.projectKey);
+		onToggle?.(row.collapseKey);
 	}
 </script>
 
@@ -33,6 +33,7 @@
 		onclick={handleToggle}
 		data-sidebar-project-header={row.projectPath || fullLabel}
 		data-sidebar-project-key={row.projectKey}
+		data-sidebar-project-collapse-key={row.collapseKey}
 		data-sidebar-project-collapsed={row.isCollapsed ? 'true' : 'false'}
 	>
 		<SidebarGroupHeaderContent

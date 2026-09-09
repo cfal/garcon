@@ -8,6 +8,7 @@ import {
 	sidebarProjectKey,
 } from '../sidebar-row-model';
 import { SIDEBAR_INACTIVITY_DURATION_MS } from '../chat-inactivity';
+import { sidebarSectionProjectKey } from '../sidebar-virtual-chat-list';
 import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -462,7 +463,7 @@ describe('sidebar row model with project activity grouping', () => {
 		];
 	}
 
-	it('moves inactive and archived chats into cross-project sections', () => {
+	it('groups inactive chats by project inside the inactive section', () => {
 		const chats = timeGroupedChats();
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
@@ -478,7 +479,9 @@ describe('sidebar row model with project activity grouping', () => {
 			'header:/p2',
 			'active-p2',
 			'section:inactive',
+			'header:/p1',
 			'inactive-p1',
+			'header:/p2',
 			'inactive-p2',
 			'section:archived',
 			'archived-recent-p1',
@@ -504,8 +507,8 @@ describe('sidebar row model with project activity grouping', () => {
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'inactive-p2'),
 		).toMatchObject({
 			list: 'normal',
-			reorderScopeKey: 'normal:section:inactive',
-			showProjectPathInGroup: true,
+			reorderScopeKey: 'normal:section:inactive:project:path:/p2',
+			showProjectPathInGroup: false,
 		});
 		expect(
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'archived-old-p2'),
@@ -514,7 +517,8 @@ describe('sidebar row model with project activity grouping', () => {
 			reorderScopeKey: 'archived:section:archived',
 			showProjectPathInGroup: true,
 		});
-		expect(model.reorderScopesByChatId.get('inactive-p1')).toEqual(['inactive-p1', 'inactive-p2']);
+		expect(model.reorderScopesByChatId.get('inactive-p1')).toEqual(['inactive-p1']);
+		expect(model.reorderScopesByChatId.get('inactive-p2')).toEqual(['inactive-p2']);
 		expect(model.reorderScopesByChatId.get('archived-recent-p1')).toEqual([
 			'archived-recent-p1',
 			'archived-old-p2',
@@ -524,7 +528,103 @@ describe('sidebar row model with project activity grouping', () => {
 			normal: ['active-p1', 'active-p2', 'inactive-p1', 'inactive-p2'],
 			archived: ['archived-recent-p1', 'archived-old-p2'],
 		});
+	});
+
+	it('collapses inactive project groups independently from active project groups', () => {
+		const chats = [
+			chat('active-p1', '/p1', { status: 'running', lastActivityAt: activeActivity }),
+			chat('inactive-p1', '/p1', { status: 'running', lastActivityAt: inactiveActivity }),
+			chat('inactive-p2', '/p2', { status: 'running', lastActivityAt: inactiveActivity }),
+		];
+		const inactiveProjectKey = sidebarSectionProjectKey('inactive', sidebarProjectKey('/p1'));
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity',
+			currentTime: TEST_NOW,
+			collapsedProjectKeys: new Set([inactiveProjectKey]),
 		});
+
+		expect(rowLabels(model)).toEqual([
+			'header:/p1',
+			'active-p1',
+			'section:inactive',
+			'header:/p1',
+			'header:/p2',
+			'inactive-p2',
+		]);
+		expect(model.visibleChatIds).toEqual(['active-p1', 'inactive-p2']);
+		expect(
+			model.rows.find(
+				(row) => row.type === 'project-header' && row.projectKey === sidebarProjectKey('/p1'),
+			),
+		).toMatchObject({
+			collapseKey: sidebarProjectKey('/p1'),
+			isCollapsed: false,
+		});
+		expect(
+			model.rows.find(
+				(row) => row.type === 'project-header' && row.collapseKey === inactiveProjectKey,
+			),
+		).toMatchObject({
+			projectKey: sidebarProjectKey('/p1'),
+			collapseKey: inactiveProjectKey,
+			isCollapsed: true,
+		});
+	});
+
+	it('keeps nested inactive folders in their shared project group', () => {
+		const chats = [
+			chat('active-root', '/workspace/repo', {
+				status: 'running',
+				lastActivityAt: activeActivity,
+			}),
+			chat('inactive-app', '/workspace/repo/packages/app', {
+				status: 'running',
+				lastActivityAt: inactiveActivity,
+			}),
+			chat('inactive-cli', '/workspace/repo/packages/cli', {
+				status: 'running',
+				lastActivityAt: inactiveActivity,
+			}),
+			chat('inactive-other', '/workspace/other', {
+				status: 'running',
+				lastActivityAt: inactiveActivity,
+			}),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity',
+			currentTime: TEST_NOW,
+			groupNestedProjectPaths: true,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'header:/workspace/repo',
+			'active-root',
+			'section:inactive',
+			'header:/workspace/other',
+			'inactive-other',
+			'header:/workspace/repo',
+			'inactive-app',
+			'inactive-cli',
+		]);
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'inactive-app'),
+		).toMatchObject({
+			groupProjectPath: '/workspace/repo',
+			showProjectPathInGroup: true,
+			reorderScopeIds: ['inactive-app', 'inactive-cli'],
+		});
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'inactive-cli'),
+		).toMatchObject({
+			groupProjectPath: '/workspace/repo',
+			showProjectPathInGroup: true,
+			reorderScopeIds: ['inactive-app', 'inactive-cli'],
+		});
+	});
 
 	it('groups all chats by activity while preserving persisted order boundaries', () => {
 		const chats = timeGroupedChats();
@@ -757,6 +857,7 @@ describe('sidebar row model with project activity grouping', () => {
 			'header:/p1',
 			'active-p1',
 			'section:inactive',
+			'header:/p2',
 			'inactive-p2',
 		]);
 		expect(model.projectKeys).toEqual([sidebarProjectKey('/p1')]);
@@ -786,12 +887,6 @@ describe('sidebar row model with project activity grouping', () => {
 				currentTime: TEST_NOW,
 				collapsedProjectKeys: new Set(['section:archived']),
 			}),
-		).toEqual([
-			'pinned-old-p1',
-			'active-p1',
-			'active-p2',
-			'inactive-p1',
-			'inactive-p2',
-		]);
+		).toEqual(['pinned-old-p1', 'active-p1', 'active-p2', 'inactive-p1', 'inactive-p2']);
 	});
 });
