@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
 import { parseGarconCommandResult } from '../../../common/garcon-command-results.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
+import { CODEX_MODELS } from '../../../common/models.js';
 import type { StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
@@ -26,8 +27,9 @@ interface FinalResponseEnvironment {
 
 async function environmentFor(agent: string): Promise<FinalResponseEnvironment> {
   if (agent === 'codex') {
-    const environment = await startScriptedCodexTestEnvironment();
-    return { options: environment, start: liveCodexStartRequest,
+    const model = CODEX_MODELS.DEFAULT;
+    const environment = await startScriptedCodexTestEnvironment({ model });
+    return { options: environment, start: (input) => ({ ...liveCodexStartRequest(input), model }),
       script(commentary, final) {
         environment.model.scriptTurn([{ ...codexAssistantMessage(commentary), phase: 'commentary' },
           codexExecCommandCall('synthetic_tool', 'printf synthetic')]);
@@ -36,7 +38,7 @@ async function environmentFor(agent: string): Promise<FinalResponseEnvironment> 
   }
   if (agent === 'claude') {
     const environment = await startScriptedClaudeTestEnvironment();
-    return { options: environment, start: liveClaudeStartRequest,
+    return { options: environment, start: (input) => ({ ...liveClaudeStartRequest(input), model: 'haiku' }),
       script(commentary, final) {
         environment.model.scriptTurn([claudeText(commentary), claudeToolUse('synthetic_tool', 'Bash', { command: 'printf synthetic' })]);
         environment.model.scriptTurn([claudeText(final)]);

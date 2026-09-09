@@ -6,6 +6,7 @@ import type { AgentStartOutcomeNoticeDetail } from '../../../common/garcon-agent
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
+import { CODEX_MODELS } from '../../../common/models.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
 import { claudeText } from '../../support/fake-claude-model.js';
@@ -29,14 +30,15 @@ interface ScriptedCommands {
 
 async function environmentFor(agent: string): Promise<ScriptedCommands> {
   if (agent === 'codex') {
-    const environment = await startScriptedCodexTestEnvironment();
-    return { fixtureOptions: environment, startRequest: liveCodexStartRequest,
+    const model = CODEX_MODELS.DEFAULT;
+    const environment = await startScriptedCodexTestEnvironment({ model });
+    return { fixtureOptions: environment, startRequest: (input) => ({ ...liveCodexStartRequest(input), model }),
       script: (reply) => environment.model.scriptTurn(async (request) => [codexAssistantMessage(await reply(request.lastUserText))]),
       settled: () => environment.model.assertSettled(), dispose: () => environment.dispose() };
   }
   if (agent === 'claude') {
     const environment = await startScriptedClaudeTestEnvironment();
-    return { fixtureOptions: environment, startRequest: liveClaudeStartRequest,
+    return { fixtureOptions: environment, startRequest: (input) => ({ ...liveClaudeStartRequest(input), model: 'haiku' }),
       script: (reply) => environment.model.scriptTurn(async (request) => [claudeText(await reply(request.lastUserText))]),
       settled: () => environment.model.assertSettled(), dispose: () => environment.dispose() };
   }
