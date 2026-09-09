@@ -4,13 +4,15 @@ import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.sv
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { SessionAgentId } from '$lib/types/app';
+import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 
 vi.mock(
 	'$lib/components/model-selector/ComposerModelSelector.svelte',
 	async () => import('./ComposerModelSelectorTestStub.svelte'),
 );
 
-const ScheduledNewChatComposer = (await import('../ScheduledNewChatComposer.svelte')).default;
+const ScheduledNewChatComposerTestHost = (await import('./ScheduledNewChatComposerTestHost.svelte'))
+	.default;
 
 function makeStartup(modelSelectionError: string | null = null): NewChatFormState {
 	return {
@@ -60,6 +62,19 @@ function makeStartup(modelSelectionError: string | null = null): NewChatFormStat
 		setAgentSetting: vi.fn(),
 		selectAgent: vi.fn(),
 		selectModel: vi.fn(),
+		preambles: {
+			choice: { mode: 'defaults' },
+			preview: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
+			previewLoading: false,
+			configurable: true,
+			canLoadAutomaticPreview: true,
+			canonicalProjectPath: '/workspace/project',
+			catalogChanged: vi.fn(),
+			refreshPreview: vi.fn(),
+			setExplicit: vi.fn(),
+			resetToDefaults: vi.fn(),
+			loadAutomaticPreview: vi.fn(),
+		},
 	} as unknown as NewChatFormState;
 }
 
@@ -70,6 +85,7 @@ function renderComposer(
 		modelSelectionError?: string | null;
 		selectableAgentIds?: readonly SessionAgentId[];
 		isMobile?: boolean;
+		onAppShell?: (appShell: AppShellStore) => void;
 	} = {},
 ) {
 	const onPromptChange = vi.fn();
@@ -82,7 +98,7 @@ function renderComposer(
 		snapshot: { recentAgentSettings: [] },
 	} as unknown as RemoteSettingsStore;
 
-	const result = render(ScheduledNewChatComposer, {
+	const result = render(ScheduledNewChatComposerTestHost, {
 		startup,
 		modelCatalog,
 		remoteSettings,
@@ -93,6 +109,7 @@ function renderComposer(
 		isMobile: overrides.isMobile ?? false,
 		onPromptChange,
 		onPromptKeydown,
+		onAppShell: overrides.onAppShell,
 	});
 
 	return { ...result, startup, onPromptChange, onPromptKeydown };
@@ -108,6 +125,7 @@ describe('ScheduledNewChatComposer', () => {
 		const projectPath = screen.getByRole('textbox', { name: 'Project Path' });
 		const selectWorktree = screen.getByRole('button', { name: 'Select a different worktree' });
 		const addTags = screen.getByRole('button', { name: 'Add tags' });
+		const preambles = container.querySelector('[data-slot="scheduled-new-chat-preambles"]');
 
 		expect(configuration).toBeTruthy();
 		expect(composer).toBeTruthy();
@@ -118,11 +136,34 @@ describe('ScheduledNewChatComposer', () => {
 		expect(controls?.contains(modelSelector)).toBe(true);
 		expect(modelSelector.dataset.selectableAgentIds).toBe('claude,codex');
 		expect(composer?.contains(projectPath)).toBe(false);
+		expect(preambles).toBeTruthy();
+		expect(
+			screen.getByText('Defaults are evaluated when each scheduled chat is created.'),
+		).toBeTruthy();
+		expect(screen.getByText('No preambles currently apply')).toBeTruthy();
 
 		await fireEvent.click(selectWorktree);
 		expect(startup.openWorktreeModal).toHaveBeenCalledOnce();
 		await fireEvent.click(addTags);
 		expect(startup.toggleTagInput).toHaveBeenCalledOnce();
+	});
+
+	it('opens the shared picker and preserves the scheduled editor while managing the catalog', async () => {
+		let appShell!: AppShellStore;
+		renderComposer({ onAppShell: (value) => (appShell = value) });
+		appShell.openScheduledPrompts();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
+		expect(screen.getByRole('dialog', { name: 'Chat preambles' })).toBeTruthy();
+		expect(
+			screen.getByText(
+				'Choose the preambles for chats created by this task. Defaults are evaluated at each run.',
+			),
+		).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Manage preambles' }));
+
+		expect(appShell.showScheduledPrompts).toBe(true);
+		expect(appShell.showPreambles).toBe(true);
 	});
 
 	it('forwards prompt input and keyboard events and renders validation feedback', async () => {

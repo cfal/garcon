@@ -112,6 +112,46 @@ describe('scheduled prompt persistence', () => {
     await store.init();
 
     expect(store.list()[0].target.tags).toEqual([]);
+    expect(store.list()[0].target.preambleChoice).toEqual({ mode: 'defaults' });
+  });
+
+  it('migrates version-three new-chat targets to execution-time defaults', async () => {
+    const dir = await tempDir();
+    const filePath = await seedScheduledPrompts(dir, {
+      version: 3,
+      revision: 8,
+      prompts: [{
+        id: 'legacy-new-chat',
+        schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
+        target: {
+          type: 'new-chat',
+          agentId: 'codex',
+          projectPath: '/workspace/project',
+          model: 'gpt-5',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          agentSettingsById: { codex: { ownerId: 'codex', schemaVersion: 1, values: {} } },
+          tags: ['scheduled'],
+        },
+        prompt: 'Review the project',
+        createdAt: '2029-01-01T00:00:00.000Z',
+        updatedAt: '2029-01-01T00:00:00.000Z',
+      }],
+    });
+
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+
+    expect(store.list()[0].target.preambleChoice).toEqual({ mode: 'defaults' });
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toMatchObject({
+      version: 4,
+      revision: 8,
+      prompts: [{ target: { preambleChoice: { mode: 'defaults' } } }],
+    });
+    expect(await scheduledPromptBackupPaths(dir, 3)).toHaveLength(1);
   });
 
   it('atomically migrates the saved day-based recurring prompts without dropping records', async () => {
@@ -140,7 +180,7 @@ describe('scheduled prompt persistence', () => {
     expect(prompts.map((entry) => entry.schedule.intervalMinutes)).toEqual([14 * 1440, 14 * 1440, 21 * 1440, 7 * 1440, 1440]);
     expect(prompts[0].schedule.endAt).toBe('2030-12-31T09:00:00.000Z');
     const migrated = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    expect(migrated.version).toBe(3);
+    expect(migrated.version).toBe(4);
     expect(migrated.revision).toBe(50);
     expect(migrated.prompts).toHaveLength(5);
     expect(migrated.prompts[0].schedule.endAt).toBe('2030-12-31T09:00:00.000Z');
@@ -426,7 +466,7 @@ describe('scheduled prompt persistence', () => {
         '[scheduled-prompts]',
         `Ignored 1 invalid or duplicate scheduled prompt record while loading scheduled-prompts.json. Original file backed up to ${backupPaths[0]}.`,
       );
-      expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({ version: 3, revision: 9, prompts: [] });
+      expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({ version: 4, revision: 9, prompts: [] });
 
       await fs.chmod(backupPaths[0], 0o400);
       await new ScheduledPromptStore(dir).init();
@@ -454,7 +494,7 @@ describe('scheduled prompt persistence', () => {
       {
         value: [scheduledPrompt('array-record', { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' })],
         expectedRevision: 0,
-        sourceVersion: 3,
+        sourceVersion: 4,
       },
       {
         value: {
@@ -476,7 +516,7 @@ describe('scheduled prompt persistence', () => {
         value: { version: 1, revision: '5', prompts: [] },
         expectedRevision: 0,
         sourceVersion: 1,
-        expectedVersionAfterInit: 3,
+        expectedVersionAfterInit: 4,
       },
     ];
     const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -540,7 +580,7 @@ describe('scheduled prompt persistence', () => {
         nextRunAt: prompt.schedule.nextRunAt, endAt: null,
       },
     }))]);
-    expect(JSON.parse(await fs.readFile(filePath, 'utf8')).version).toBe(3);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8')).version).toBe(4);
     const backups = await scheduledPromptBackupPaths(dir, 2);
     expect(backups).toHaveLength(1);
     expect(await fs.readFile(backups[0])).toEqual(original);
@@ -552,7 +592,7 @@ describe('scheduled prompt persistence', () => {
     expect(await scheduledPromptBackupPaths(dir, 3)).toEqual([]);
   });
 
-  it('backs up invalid v3 interval aliases before normalizing and reuses the backup', async () => {
+  it('backs up invalid v3 interval aliases while migrating and reuses the backup', async () => {
     const dir = await tempDir();
     const source = { version: 3, revision: 1, prompts: [scheduledPrompt('invalid', {
       type: 'recurring', intervalMinutes: 5, intervalHours: 1,
@@ -566,7 +606,7 @@ describe('scheduled prompt persistence', () => {
     const backups = await scheduledPromptBackupPaths(dir, 3);
     expect(backups).toHaveLength(1);
     expect(await fs.readFile(backups[0])).toEqual(original);
-    expect(await fs.readFile(filePath)).toEqual(original);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({ version: 4, revision: 1, prompts: [] });
     await fs.chmod(backups[0], 0o400);
     await new ScheduledPromptStore(dir).init();
     expect(await scheduledPromptBackupPaths(dir, 3)).toEqual(backups);
@@ -601,9 +641,9 @@ describe('scheduled prompt persistence', () => {
 
   it('rejects future scheduled prompt file versions', async () => {
     const dir = await tempDir();
-    await seedScheduledPrompts(dir, { version: 4, revision: 0, prompts: [] });
+    await seedScheduledPrompts(dir, { version: 5, revision: 0, prompts: [] });
 
-    await expect(new ScheduledPromptStore(dir).init()).rejects.toThrow('Unsupported scheduled-prompts.json version: 4');
+    await expect(new ScheduledPromptStore(dir).init()).rejects.toThrow('Unsupported scheduled-prompts.json version: 5');
   });
 
   it('claims once and recurring occurrences before dispatch', async () => {

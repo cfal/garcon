@@ -13,11 +13,22 @@
 		loading: boolean;
 		configurable: boolean;
 		retryable: boolean;
+		readyLabel?: string;
+		emptyLabel?: string;
 		onEdit: () => void;
 		onRetry: () => void;
 	}
 
-	let { preview, loading, configurable, retryable, onEdit, onRetry }: Props = $props();
+	let {
+		preview,
+		loading,
+		configurable,
+		retryable,
+		readyLabel,
+		emptyLabel,
+		onEdit,
+		onRetry,
+	}: Props = $props();
 
 	const selectedCount = $derived(preview?.eligiblePreambles.length ?? 0);
 	const visiblePreambles = $derived(preview?.eligiblePreambles.slice(0, 2) ?? []);
@@ -64,14 +75,14 @@
 			/>
 			{#if selectedCount === 0}
 				<span class="min-w-0 truncate text-xs text-muted-foreground">
-					{m.preamble_selection_none_will_apply()}
+					{emptyLabel ?? m.preamble_selection_none_will_apply()}
 				</span>
 			{:else}
 				<span
 					class="shrink-0 text-xs font-medium text-muted-foreground"
 					data-slot="new-chat-preambles-label"
 				>
-					{m.preambles_title()}
+					{readyLabel ?? m.preambles_title()}
 				</span>
 				<span class="shrink-0 text-xs text-muted-foreground" aria-hidden="true">·</span>
 				<span class="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">

@@ -65,6 +65,7 @@ function newChatDefinition(firstRunAtUtc, thinkingMode = 'none') {
         amp: { ownerId: 'amp', schemaVersion: 2, values: {} },
       },
       tags: [],
+      preambleChoice: { mode: 'defaults' },
     },
     prompt: 'Continue the work',
   };
@@ -89,6 +90,10 @@ function agentCapabilities(supportedThinkingModes = ['none', 'high']) {
       }
     },
   };
+}
+
+function preambleCatalog(preambles = []) {
+  return { snapshot: () => ({ revision: 1, preambles }) };
 }
 
 class FakeCron {
@@ -116,6 +121,7 @@ async function sameChatScheduler() {
   const cron = new FakeCron();
   const scheduler = new ScheduledPromptScheduler({
     store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
+    preambles: preambleCatalog(),
     chats: { getChat: (chatId) => chatId === '123' ? {} : null },
     dispatcher: { dispatch: async () => ({ message: 'sent' }) },
   });
@@ -185,6 +191,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       agents: agentCapabilities(),
+      preambles: preambleCatalog(),
       cron,
     });
     await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));
@@ -222,6 +229,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       agents: agentCapabilities(),
+      preambles: preambleCatalog(),
       cron,
     });
     await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));
@@ -259,6 +267,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       agents: agentCapabilities(),
+      preambles: preambleCatalog(),
       cron,
     });
     const invalidations = [];
@@ -301,6 +310,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       agents: agentCapabilities(),
+      preambles: preambleCatalog(),
       cron: new FakeCron(),
     });
     const now = new Date('2029-07-10T12:00:45.000Z');
@@ -427,6 +437,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       agents: agentCapabilities([]),
+      preambles: preambleCatalog(),
       cron: new FakeCron(),
     });
 
@@ -453,6 +464,41 @@ describe('scheduled prompt scheduler', () => {
     scheduler.stop();
   });
 
+  it('rejects an unsafe explicit preamble composition before persistence', async () => {
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    const ids = [
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000002',
+    ];
+    const definition = newChatDefinition('2030-01-01T09:00:00.000Z');
+    definition.target.preambleChoice = { mode: 'explicit', orderedPreambleIds: ids };
+    const scheduler = new ScheduledPromptScheduler({
+      store,
+      runLog: new ScheduledPromptRunLog(),
+      dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+      chats: { getChat: () => null },
+      agents: agentCapabilities(),
+      preambles: preambleCatalog(ids.map((id, index) => ({
+        id,
+        enabled: true,
+        title: `Preamble ${index + 1}`,
+        content: 'x'.repeat(32_000),
+        scope: { type: 'global' },
+        agentIds: [],
+        tagFilter: { mode: 'any', tags: [] },
+        createdAt: '2029-01-01T00:00:00.000Z',
+        updatedAt: '2029-01-01T00:00:00.000Z',
+      }))),
+      cron: new FakeCron(),
+    });
+
+    await expect(scheduler.create({ expectedRevision: 0, scheduledPrompt: definition }))
+      .rejects.toMatchObject({ code: 'PREAMBLE_SELECTION_COMPOSITION_INVALID', status: 422 });
+    expect(store.list()).toEqual([]);
+  });
+
   it('keeps the current cron handle active when an edit conflicts', async () => {
     const dir = await tempDir();
     const store = new ScheduledPromptStore(dir);
@@ -473,6 +519,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       agents: agentCapabilities(),
+      preambles: preambleCatalog(),
       cron,
     });
     await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));
@@ -510,6 +557,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       agents: agentCapabilities(),
+      preambles: preambleCatalog(),
       cron,
     });
     await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));

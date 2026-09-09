@@ -7,6 +7,7 @@ import {
 } from './chat-modes.js';
 import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-integration.js';
 import { CHAT_ID_LENGTH } from './chat-id.js';
+import { normalizePreambleSelectionChoice, type PreambleSelectionChoice } from './preambles.js';
 import { normalizeTags } from './tags.js';
 import {
   CHAT_ID_TEMPLATE_TOKEN,
@@ -67,6 +68,7 @@ export interface NewChatScheduledPromptTarget {
   thinkingMode: ThinkingMode;
   agentSettingsById: Record<string, AgentSettingsEnvelope>;
   tags: string[];
+  preambleChoice: PreambleSelectionChoice;
 }
 
 export interface ExistingChatScheduledPromptTarget {
@@ -233,7 +235,15 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
   const apiProviderId = nullableString(raw.apiProviderId);
   const modelEndpointId = nullableString(raw.modelEndpointId);
   const modelProtocol = normalizeApiProtocol(raw.modelProtocol);
-  const tags = raw.tags === undefined ? [] : Array.isArray(raw.tags) ? normalizeTags(raw.tags) : null;
+  let tags: string[] | null;
+  if (raw.tags === undefined) {
+    tags = [];
+  } else if (Array.isArray(raw.tags)) {
+    tags = normalizeTags(raw.tags);
+  } else {
+    tags = null;
+  }
+  const preambleChoice = normalizePreambleSelectionChoice(raw.preambleChoice);
   if (
     !agentId ||
     !projectPath ||
@@ -242,6 +252,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
     modelEndpointId === undefined ||
     modelProtocol === undefined ||
     tags === null ||
+    !preambleChoice ||
     !isPermissionMode(raw.permissionMode) ||
     !isThinkingMode(raw.thinkingMode) ||
     !isAgentSettingsById(raw.agentSettingsById)
@@ -260,6 +271,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
     thinkingMode: raw.thinkingMode,
     agentSettingsById: raw.agentSettingsById,
     tags,
+    preambleChoice,
   };
 }
 
@@ -281,6 +293,7 @@ export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptT
   if (!raw) return null;
   if (raw.type === 'new-chat') return normalizeNewChatTarget(raw);
   if (raw.type !== 'existing-chat') return null;
+  if ('preambleChoice' in raw) return null;
   const chatId = requiredString(raw.chatId);
   if (!chatId || (raw.busyBehavior !== 'queue' && raw.busyBehavior !== 'skip')) return null;
   return { type: 'existing-chat', chatId, busyBehavior: raw.busyBehavior };

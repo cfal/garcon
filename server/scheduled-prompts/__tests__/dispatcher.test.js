@@ -24,7 +24,9 @@ function prompt(target, text = 'Review the current work') {
   return {
     id: 'prompt-a',
     schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
-    target,
+    target: target.type === 'new-chat'
+      ? { preambleChoice: { mode: 'defaults' }, ...target }
+      : target,
     prompt: text,
     createdAt: '2029-01-01T00:00:00.000Z',
     updatedAt: '2029-01-01T00:00:00.000Z',
@@ -59,6 +61,13 @@ describe('scheduled prompt dispatcher', () => {
       thinkingMode: 'high',
       agentSettingsById: AGENT_SETTINGS_BY_ID,
       tags: ['qa', 'review-needed'],
+      preambleChoice: {
+        mode: 'explicit',
+        orderedPreambleIds: [
+          '00000000-0000-4000-8000-000000000002',
+          '00000000-0000-4000-8000-000000000001',
+        ],
+      },
     };
 
     const outcome = await dispatcher.dispatch(
@@ -71,7 +80,7 @@ describe('scheduled prompt dispatcher', () => {
 
     expect(calls).toHaveLength(1);
     expect(allocate).toHaveBeenCalledTimes(1);
-    const { type: _type, ...chatConfig } = target;
+    const { type: _type, preambleChoice: _preambleChoice, ...chatConfig } = target;
     expect(calls[0]).toMatchObject({
       ...chatConfig,
       chatId: CREATED_CHAT_ID,
@@ -80,6 +89,7 @@ describe('scheduled prompt dispatcher', () => {
     expect(calls[0].clientRequestId).toBe('scheduled:prompt-a:2030-01-01T09:00:00.000Z');
     expect(calls[0].clientMessageId).toBe('scheduled-message:prompt-a:2030-01-01T09:00:00.000Z');
     expect(calls[0].tags).toEqual(['qa', 'review-needed']);
+    expect(calls[0].orderedPreambleIds).toEqual(target.preambleChoice.orderedPreambleIds);
     expect(calls[0]).not.toHaveProperty('images');
     expect(outcome.message).toContain(CREATED_CHAT_ID);
     expect(outcome.message).not.toContain('Review');
@@ -218,6 +228,43 @@ describe('scheduled prompt dispatcher', () => {
     );
 
     expect(calls[0].command).toBe('Review the current work');
+    expect(calls[0]).not.toHaveProperty('orderedPreambleIds');
+  });
+
+  it('preserves an explicit empty preamble selection', async () => {
+    const calls = [];
+    const dispatcher = new ScheduledPromptDispatcher({
+      chatIds: { allocate: () => CREATED_CHAT_ID },
+      commands: {
+        async submitScheduledStart(input) {
+          calls.push(input);
+          return { chatId: CREATED_CHAT_ID };
+        },
+        async submitScheduledExistingChat() {
+          throw new Error('unexpected');
+        },
+      },
+    });
+
+    await dispatcher.dispatch(
+      prompt({
+        type: 'new-chat',
+        agentId: 'codex',
+        projectPath: '/workspace/project',
+        model: 'gpt-5',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+        permissionMode: 'default',
+        thinkingMode: 'default',
+        agentSettingsById: AGENT_SETTINGS_BY_ID,
+        tags: [],
+        preambleChoice: { mode: 'explicit', orderedPreambleIds: [] },
+      }),
+      '2030-01-01T09:00:00.000Z',
+    );
+
+    expect(calls[0].orderedPreambleIds).toEqual([]);
   });
 
   it('allocates and renders a fresh chat ID for each recurring occurrence', async () => {

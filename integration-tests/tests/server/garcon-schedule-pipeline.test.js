@@ -89,6 +89,7 @@ async function withPipeline(run) {
   }));
   const scheduler = new ScheduledPromptScheduler({ store: schedules, cron, chats: registry,
     agents: { hasAgent: () => true, assertExecutionModeSelectionSupported: () => {} },
+    preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
     runLog: new ScheduledPromptRunLog(),
     dispatcher: new ScheduledPromptDispatcher({
       commands: { submitScheduledExistingChat: (input) => commands.submitScheduledExistingChat(input),

@@ -24,6 +24,12 @@ import { errorMessage } from '../lib/errors.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { createLogger } from '../lib/log.js';
+import { isDomainError } from '../lib/domain-error.js';
+import type { PreambleService } from '../preambles/service.js';
+import {
+  CHAT_ID_VALIDATION_SAMPLE,
+  resolveNewChatPreambleSelection,
+} from '../preambles/selection.js';
 import type { ScheduledPromptDispatcher } from './dispatcher.js';
 import { ScheduledPromptRunLog } from './run-log.js';
 import { ScheduledPromptDomainError, ScheduledPromptStore } from './store.js';
@@ -128,6 +134,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         AgentRegistryServiceContract,
         'hasAgent' | 'assertExecutionModeSelectionSupported'
       >;
+      preambles: Pick<PreambleService, 'snapshot'>;
       cron?: CronRuntime;
     },
   ) {
@@ -305,9 +312,10 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       permissionMode: definition.target.permissionMode,
       thinkingMode: definition.target.thinkingMode,
     });
+    let canonicalProjectPath: string;
     try {
-      const resolved = await assertRealWithinProjectBase(definition.target.projectPath);
-      if (!(await fs.stat(resolved)).isDirectory()) throw new Error('Project path is not a directory');
+      canonicalProjectPath = await assertRealWithinProjectBase(definition.target.projectPath);
+      if (!(await fs.stat(canonicalProjectPath)).isDirectory()) throw new Error('Project path is not a directory');
     } catch (error) {
       if (isProjectBoundaryError(error)) {
         throw new ScheduledPromptDomainError(
@@ -317,6 +325,21 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         );
       }
       throw new ScheduledPromptDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
+    }
+    if (definition.target.preambleChoice.mode === 'explicit') {
+      try {
+        resolveNewChatPreambleSelection({
+          catalog: this.deps.preambles.snapshot(),
+          canonicalProjectPath,
+          agentId: definition.target.agentId,
+          tags: definition.target.tags,
+          chatId: CHAT_ID_VALIDATION_SAMPLE,
+          orderedPreambleIds: definition.target.preambleChoice.orderedPreambleIds,
+        });
+      } catch (error) {
+        if (!isDomainError(error)) throw error;
+        throw new ScheduledPromptDomainError(error.code, error.message, error.status, error.retryable);
+      }
     }
     return definition;
   }
