@@ -7,6 +7,7 @@ import {
   type AgentSteerTarget,
   type AgentExecutionHandle,
   type AgentEstablishedSession,
+  type AgentEmissionSink,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -27,6 +28,7 @@ import { createLogger } from '../lib/log.js';
 import type { TurnReceiptOwner } from '../lib/turn-identity.js';
 import { DomainError, transcriptUnavailableMessage } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
+import { localEmissionSink } from './local-emission.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
 import type {
@@ -57,6 +59,11 @@ const logger = createLogger('agents:runtime-router');
 interface TurnOperation extends TurnReceiptOwner {
   readonly clientMessageId: string | null;
   readonly turnOwner: TurnReceiptOwner;
+}
+
+interface LocalProducerBinding {
+  readonly lease: TranscriptProducerLease;
+  readonly output: AgentEmissionSink;
 }
 
 export interface AgentRuntimeRouterOptions {
@@ -116,7 +123,7 @@ export class AgentRuntimeRouter {
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
-  readonly #producerLeases = new Map<string, TranscriptProducerLease>();
+  readonly #producerLeases = new Map<string, LocalProducerBinding>();
   readonly #executionHandles = new Map<string, {
     readonly agentId: string;
     readonly runId: string;
@@ -195,7 +202,7 @@ export class AgentRuntimeRouter {
       }
       const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
-        sink: producer.sink,
+        output: producer.output,
         prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
@@ -245,7 +252,7 @@ export class AgentRuntimeRouter {
     try {
       const handle = await integration.execution.resume({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
-        sink: producer.sink,
+        output: producer.output,
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt: prepared.outboundPrompt,
@@ -334,7 +341,7 @@ export class AgentRuntimeRouter {
     const producer = this.#producer(chatId);
     return integration.goals.submitControl({
       ...this.#executionContextV5(chatId, entry, selection, operation.turnId, opts),
-      sink: producer.sink,
+      output: producer.output,
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
@@ -389,7 +396,7 @@ export class AgentRuntimeRouter {
     try {
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
-        sink: producer.sink,
+        output: producer.output,
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt,
@@ -795,24 +802,25 @@ export class AgentRuntimeRouter {
     }
   }
 
-  #producer(chatId: string): TranscriptProducerLease {
+  #producer(chatId: string): LocalProducerBinding {
     const existing = this.#producerLeases.get(chatId);
-    if (existing && !existing.closed) return existing;
+    if (existing && !existing.lease.closed) return existing;
     if (this.#hasPendingOwnershipTransfer(chatId)) throw ownershipTransferPendingError();
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     const lease = this.#ledger.openProducer(chatId, entry.agentId);
-    this.#producerLeases.set(chatId, lease);
-    return lease;
+    const binding = { lease, output: localEmissionSink(lease.sink) };
+    this.#producerLeases.set(chatId, binding);
+    return binding;
   }
 
   reopenProducer(chatId: string): void {
-    this.#producerLeases.get(chatId)?.close();
+    this.#producerLeases.get(chatId)?.lease.close();
     this.#producerLeases.delete(chatId);
     this.#producer(chatId);
   }
 
   publishSessionFact(chatId: string, session: AgentEstablishedSession): void {
-    this.#producer(chatId).sink.publish({ type: 'session', session });
+    this.#producer(chatId).lease.sink.publish({ type: 'session', session });
   }
 
   #executionContextV5(

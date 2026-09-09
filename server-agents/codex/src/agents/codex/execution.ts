@@ -34,7 +34,7 @@ interface CodexRuntimeConfiguration {
   readonly codexConfig?: CodexProviderConfig;
 }
 
-type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'sink'>;
+type CodexGoalControlRuntimeRequest = Omit<AgentGoalControlRequest, 'output'>;
 
 export class CodexExecution implements AgentRuntimeExecution {
   constructor(

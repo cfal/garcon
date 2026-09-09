@@ -6,7 +6,7 @@ import {
 import type {
   AgentLogger,
   AgentProducerEvent,
-  AgentProducerSink,
+  AgentEmissionSink,
   AgentStartRequestV5,
 } from '@garcon/server-agent-interface';
 import {
@@ -20,7 +20,30 @@ import { createAgentProducerAdapter } from '../producer-adapter.js';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('createAgentProducerAdapter', () => {
-  it('publishes sessions, normalized rows, and terminal events through the supplied sink', async () => {
+  it('keeps fallback session emission scoped to one exact output capability', async () => {
+    const fixture = createFixture();
+    fixture.runtime.start = async () => ({ agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null });
+    await fixture.adapter.execution.start(fixture.request);
+    await fixture.adapter.execution.start({ ...fixture.request, runId: 'run-2' });
+    expect(fixture.events.map((event) => event.type)).toEqual(['session']);
+    const replacementEvents: AgentProducerEvent[] = [];
+    await fixture.adapter.execution.start({
+      ...fixture.request, output: { emit: (event) => { replacementEvents.push(event); } },
+    });
+    expect(replacementEvents.map((event) => event.type)).toEqual(['session']);
+  });
+
+  it('does not retry a reported session when local emission rejects', async () => {
+    const fixture = createFixture(() => undefined);
+    let attempts = 0;
+    await fixture.adapter.execution.start({
+      ...fixture.request, output: { emit() { attempts += 1; throw new Error('output retired'); } },
+    });
+    expect(attempts).toBe(1);
+    expect(fixture.warnings).toHaveLength(1);
+  });
+
+  it('publishes sessions, normalized rows, and terminal events through the supplied output', async () => {
     const fixture = createFixture();
     const handle = await fixture.adapter.execution.start(fixture.request);
 
@@ -172,7 +195,7 @@ describe('createAgentProducerAdapter', () => {
     expect(JSON.stringify(fixture.events)).not.toContain('sensitive-command-must-not-be-logged');
   });
 
-  it('[TLV5-L07.08-ADAPTER-UNIT-01] drops provider events for an unavailable sink without failing its event stream', async () => {
+  it('[TLV5-L07.08-ADAPTER-UNIT-01] drops provider events for an unavailable output without failing its event stream', async () => {
     const fixture = createFixture(({ publish }) => {
       fixture.closeSink();
       publish({
@@ -245,9 +268,9 @@ it('publishes a runExisting operation through the same capability as a run', asy
   let published = false;
 
   const outcome = await fixture.adapter.runExisting(
-    { chatId: 'chat-1', agentSessionId: 'session-1', sink: fixture.request.sink },
+    { chatId: 'chat-1', agentSessionId: 'session-1', output: fixture.request.output },
     async (request, publish) => {
-      expect(request).not.toHaveProperty('sink');
+      expect(request).not.toHaveProperty('output');
       publish({
         type: 'rows',
         rows: runtimeRows([new AssistantMessage(TS, 'compacted')]),
@@ -263,19 +286,19 @@ it('publishes a runExisting operation through the same capability as a run', asy
 });
 
 // The reported failure: a provider callback that outlived the transcript it was started
-// against. Sink A is closed and replaced by sink B, then A's delayed callback fires. The event
-// must reach A's closed sink and be dropped, never B's open one.
-it('keeps a delayed callback on its own sink after a replacement takes over the chat', async () => {
-  const delivered: Array<{ sink: 'a' | 'b'; event: AgentProducerEvent }> = [];
+// against. Sink A is closed and replaced by output B, then A's delayed callback fires. The event
+// must reach A's closed output and be dropped, never B's open one.
+it('keeps a delayed callback on its own output after a replacement takes over the chat', async () => {
+  const delivered: Array<{ output: 'a' | 'b'; event: AgentProducerEvent }> = [];
   let closedA = false;
-  const sinkA: AgentProducerSink = {
-    publish: (event) => {
-      if (closedA) throw new Error('Transcript producer sink is closed');
-      delivered.push({ sink: 'a', event });
+  const outputA: AgentEmissionSink = {
+    emit: (event) => {
+      if (closedA) throw new Error('Transcript producer output is closed');
+      delivered.push({ output: 'a', event });
     },
   };
-  const sinkB: AgentProducerSink = {
-    publish: (event) => { delivered.push({ sink: 'b', event }); },
+  const outputB: AgentEmissionSink = {
+    emit: (event) => { delivered.push({ output: 'b', event }); },
   };
   const warnings: string[] = [];
   let delayed: (() => void) | null = null;
@@ -311,15 +334,15 @@ it('keeps a delayed callback on its own sink after a replacement takes over the 
     carriedContext: null,
   };
 
-  await adapter.execution.start({ ...baseRequest, runId: 'run-a', sink: sinkA } satisfies AgentStartRequestV5);
+  await adapter.execution.start({ ...baseRequest, runId: 'run-a', output: outputA } satisfies AgentStartRequestV5);
   closedA = true;
-  await adapter.execution.start({ ...baseRequest, runId: 'run-b', sink: sinkB } satisfies AgentStartRequestV5);
+  await adapter.execution.start({ ...baseRequest, runId: 'run-b', output: outputB } satisfies AgentStartRequestV5);
   delivered.length = 0;
 
   delayed?.();
 
   expect(delivered).toEqual([]);
-  expect(warnings.some((warning) => warning.includes('unavailable transcript sink'))).toBeTrue();
+  expect(warnings.some((warning) => warning.includes('unavailable output'))).toBeTrue();
 });
 
 function createFixture(
@@ -361,9 +384,9 @@ function createFixture(
     runningSessions() { return []; },
   };
   let sinkClosed = false;
-  const sink: AgentProducerSink = {
-    publish: (event) => {
-      if (sinkClosed) throw new Error('Transcript producer sink is closed');
+  const output: AgentEmissionSink = {
+    emit: (event) => {
+      if (sinkClosed) throw new Error('Transcript producer output is closed');
       events.push(event);
     },
   };
@@ -384,7 +407,7 @@ function createFixture(
     settings: { ownerId: 'test', schemaVersion: 1, values: {} },
     endpoint: null,
     runId: 'run-1',
-    sink,
+    output,
     admission: {
       signal: new AbortController().signal,
       async markStarted() {},

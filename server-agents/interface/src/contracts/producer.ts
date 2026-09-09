@@ -116,5 +116,11 @@ export type AgentProducerEvent =
   | AgentRunEndedEvent;
 
 export interface AgentProducerSink {
+  // Returns only after synchronous controller ledger acceptance.
   publish(event: AgentProducerEvent): void;
+}
+
+export interface AgentEmissionSink {
+  // Captures normalized output locally; remote emission does not imply ledger acceptance.
+  emit(event: AgentProducerEvent): void;
 }

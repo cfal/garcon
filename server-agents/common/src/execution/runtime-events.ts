@@ -10,9 +10,9 @@ import type {
 } from '@garcon/server-agent-interface';
 import { providerMetadata } from '../native-session/provider-metadata.js';
 
-export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'sink'>;
-export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'sink'>;
-export type AgentRuntimeResumeRequest = Omit<AgentResumeRequestV5, 'sink'>;
+export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'output'>;
+export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'output'>;
+export type AgentRuntimeResumeRequest = Omit<AgentResumeRequestV5, 'output'>;
 
 type ProviderRunEndedEvent = Exclude<
   Extract<AgentProducerEvent, { readonly type: 'run-ended' }>,

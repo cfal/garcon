@@ -7,7 +7,7 @@ only through `@garcon/server-agent-interface`.
 
 ```text
 Garcon core -> AgentIntegration v5 -> server-agents/<id>
-provider operation -> captured publisher -> core sink -> per-chat ledger
+provider operation -> captured publisher -> output emission -> core sink -> per-chat ledger
 ledger suffix -> shared indexer Worker -> derived search database
 ```
 
@@ -125,8 +125,9 @@ not additional contracts.
 
 ## Transcript Publication
 
-`AgentExecutionV5.start()` and `resume()` receive a core-owned producer sink.
-The common adapter constructs a publisher that closes over that sink. A
+`AgentExecutionV5.start()` and `resume()` receive a binding-scoped
+`AgentEmissionSink` as `output`. The common adapter constructs a publisher
+that closes over that output capability. A
 provider captures the publisher on the concrete request, turn, or callback
 that can emit events; it never resolves a publisher from current chat,
 session, run, or mutable metadata when an event arrives.
@@ -147,8 +148,10 @@ The producer surface is deliberately small:
   capability. Provider-native request IDs remain integration-private.
 - `run-ended` carries `runId`, outcome, and an optional sanitized failure.
 
-The sink commits synchronously. Providers absorb a closed or fenced sink
-rejection at their event-dispatch boundary so one chat cannot fail a shared
+Local emission calls the controller's `AgentProducerSink.publish()` inline;
+only that controller publisher promises synchronous ledger acceptance. The
+emission contract itself promises local output capture, not remote durability.
+Providers absorb output rejection at their event-dispatch boundary so one chat cannot fail a shared
 provider stream. Do not add content, timestamp, token, or fuzzy deduplication.
 Provider stream redelivery may be deduplicated only by a real immutable
 provider-issued identity inside the owning integration.

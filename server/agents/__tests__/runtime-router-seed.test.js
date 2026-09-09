@@ -42,7 +42,7 @@ function makeRouter(overrides = {}) {
     currentView: overrides.currentView,
   });
   const start = overrides.start ?? mock(async (request) => {
-    request.sink.publish({
+    request.output.emit({
       type: 'session',
       session: {
         agentSessionId: 'native-1',
@@ -50,11 +50,11 @@ function makeRouter(overrides = {}) {
         nativeSeedReceipt: null,
       },
     });
-    request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+    request.output.emit({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
     return { id: 'start-handle' };
   });
   const resume = overrides.resume ?? mock(async (request) => {
-    request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+    request.output.emit({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
     return { id: 'resume-handle' };
   });
   const submitGoalControl = overrides.submitGoalControl ?? mock(async () => true);
@@ -166,7 +166,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
         prefix: expect.stringContaining('prior context'),
       }),
       runId: 'turn-1',
-      sink: expect.objectContaining({ publish: expect.any(Function) }),
+      output: expect.objectContaining({ emit: expect.any(Function) }),
     }));
     expect(start.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
@@ -267,7 +267,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const summary = 'Objective\n\n  Preserve this indentation.';
     const start = mock(async (request) => {
       order.push('provider-start');
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      request.output.emit({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'start-handle' };
     });
     const { router, transcript } = makeRouter({
@@ -300,7 +300,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const order = [];
     const start = mock(async (request) => {
       order.push('provider-start');
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      request.output.emit({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'start-handle' };
     });
     const { router, transcript } = makeRouter({
@@ -369,7 +369,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const start = mock(async (request) => {
       attempt += 1;
       if (attempt === 1) throw new Error('provider start failed');
-      request.sink.publish({
+      request.output.emit({
         type: 'session',
         session: {
           agentSessionId: 'native-1',
@@ -377,7 +377,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
           nativeSeedReceipt: null,
         },
       });
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      request.output.emit({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'start-handle' };
     });
     const { router, transcript } = makeRouter({
@@ -592,7 +592,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const order = [];
     const resume = mock(async (request) => {
       order.push('resume');
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      request.output.emit({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: 'resume-handle' };
     });
     const { router, transcript } = makeRouter({
@@ -689,8 +689,8 @@ describe('AgentRuntimeRouter producer boundary', () => {
   it('replaces the producer capability before the next run', async () => {
     const sinks = [];
     const start = mock(async (request) => {
-      sinks.push(request.sink);
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      sinks.push(request.output);
+      request.output.emit({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
       return { id: `handle-${sinks.length}` };
     });
     const { router } = makeRouter({ start });
@@ -698,7 +698,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await router.runAgentTurn('chat-1', 'first', { turnId: 'turn-1' });
     router.reopenProducer('chat-1');
 
-    expect(() => sinks[0].publish({ type: 'rows', rows: [] })).toThrow('sink closed');
+    expect(() => sinks[0].emit({ type: 'rows', rows: [] })).toThrow('sink closed');
     await router.runAgentTurn('chat-1', 'second', { turnId: 'turn-2' });
     expect(sinks[1]).not.toBe(sinks[0]);
   });
