@@ -18,23 +18,31 @@ export class AgentStopController {
   request(source: AgentCommandSource, command: GarconStopAgentCommand): void {
     this.#operations.launch(source, async (signal) => {
       if (signal.aborted) return;
-      const delegated = this.#delegated(source.chatId, command.chatId);
-      const keys = delegated ? [source.chatId, command.chatId] : [source.chatId];
-      await this.options.chatMutationLock.runExclusiveMany(keys.map((id) => `chat:${id}`), async () => {
-        if (!this.#operations.current(source, signal) || !this.options.isEnabled()
-          || !delegated || !this.#delegated(source.chatId, command.chatId)) return;
+      const delegated = this.#isDirectDelegatedChild(source.chatId, command.chatId);
+      const chatIds = delegated ? [source.chatId, command.chatId] : [source.chatId];
+      const lockKeys = chatIds.map((id) => `chat:${id}`);
+      await this.options.chatMutationLock.runExclusiveMany(lockKeys, async () => {
+        if (!this.#operations.current(source, signal) || !this.options.isEnabled()) return;
+        if (!delegated || !this.#isDirectDelegatedChild(source.chatId, command.chatId)) return;
         await this.options.commands.submitAgentCommandStopLocked({
-          sourceChatId: source.chatId, sourceViewId: source.viewId,
-          chatId: command.chatId, remove: command.remove,
+          sourceChatId: source.chatId,
+          sourceViewId: source.viewId,
+          chatId: command.chatId,
+          remove: command.remove,
         }, signal);
       });
     });
   }
 
-  #delegated(sourceChatId: string, targetChatId: string): boolean {
+  #isDirectDelegatedChild(sourceChatId: string, targetChatId: string): boolean {
     return isDirectDelegatedChild(sourceChatId, targetChatId, this.options.registry.getChat(targetChatId));
   }
 
-  discardSource(chatId: string): void { this.#operations.discardSource(chatId); }
-  shutdown(): void { this.#operations.shutdown(); }
+  discardSource(chatId: string): void {
+    this.#operations.discardSource(chatId);
+  }
+
+  shutdown(): void {
+    this.#operations.shutdown();
+  }
 }

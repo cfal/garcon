@@ -77,12 +77,27 @@ export interface AgentFinalResponse {
 }
 
 export type AgentRunEndedEvent =
-  | { readonly type: 'run-ended'; readonly runId: string; readonly outcome: 'finished';
-      readonly finalResponse?: AgentFinalResponse; readonly error?: never }
-  | { readonly type: 'run-ended'; readonly runId: string; readonly outcome: 'failed';
-      readonly error?: AgentRunFailureDetail; readonly finalResponse?: never }
-  | { readonly type: 'run-ended'; readonly runId: string; readonly outcome: 'interrupted';
-      readonly error?: never; readonly finalResponse?: never };
+  | {
+      readonly type: 'run-ended';
+      readonly runId: string;
+      readonly outcome: 'finished';
+      readonly finalResponse?: AgentFinalResponse;
+      readonly error?: never;
+    }
+  | {
+      readonly type: 'run-ended';
+      readonly runId: string;
+      readonly outcome: 'failed';
+      readonly error?: AgentRunFailureDetail;
+      readonly finalResponse?: never;
+    }
+  | {
+      readonly type: 'run-ended';
+      readonly runId: string;
+      readonly outcome: 'interrupted';
+      readonly error?: never;
+      readonly finalResponse?: never;
+    };
 
 export type AgentProducerEvent =
   | { readonly type: 'rows'; readonly rows: readonly AgentProducedRow[] }

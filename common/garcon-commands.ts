@@ -177,11 +177,23 @@ function parseEnvelopeSpan(content: string, span: GarconEnvelopeSpan): ParsedEdg
   if (span.end === null) return { kind: 'malformed', command: span.command, candidateStart: span.start };
   const envelope = content.slice(span.start, span.end);
   const openerEnd = garconEnvelopeOpenerEnd(envelope);
-  const command = span.command === 'start-agent' ? parseGarconStartAgent(envelope)
-    : span.command === 'resume-agent' ? parseGarconResumeAgent(envelope)
-    : span.command === 'stop-agent' ? parseGarconStopAgent(envelope)
-    : span.command === 'schedule' ? parseGarconSchedule(envelope)
-    : parseSendMessage(envelope.slice(0, openerEnd), envelope.slice(openerEnd, -GARCON_SEND_MESSAGE_CLOSE.length));
+  let command: GarconEdgeCommand | null;
+  switch (span.command) {
+    case 'start-agent':
+      command = parseGarconStartAgent(envelope);
+      break;
+    case 'resume-agent':
+      command = parseGarconResumeAgent(envelope);
+      break;
+    case 'stop-agent':
+      command = parseGarconStopAgent(envelope);
+      break;
+    case 'schedule':
+      command = parseGarconSchedule(envelope);
+      break;
+    default:
+      command = parseSendMessage(envelope.slice(0, openerEnd), envelope.slice(openerEnd, -GARCON_SEND_MESSAGE_CLOSE.length));
+  }
   return command
     ? { kind: 'valid', command, start: span.start, end: span.end }
     : { kind: 'malformed', command: span.command, candidateStart: span.start };

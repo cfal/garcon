@@ -88,12 +88,13 @@ export class SessionCommands {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
     }
     this.deps.handoffs.cancelPreparation(input.chatId);
-    if (input.remove) await this.deleteChatLocked(input.chatId);
-    else {
-      const result = await this.deps.queue.stopActiveTurn(input.chatId);
-      if (!isStopSatisfied(result.outcome)) {
-        throw new CommandValidationError('SESSION_BUSY', 'The delegated child could not be stopped', 409);
-      }
+    if (input.remove) {
+      await this.deleteChatLocked(input.chatId);
+      return;
+    }
+    const result = await this.deps.queue.stopActiveTurn(input.chatId);
+    if (!isStopSatisfied(result.outcome)) {
+      throw new CommandValidationError('SESSION_BUSY', 'The delegated child could not be stopped', 409);
     }
   }
 

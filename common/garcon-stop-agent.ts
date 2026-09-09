@@ -13,6 +13,12 @@ export function parseGarconStopAgent(content: string): GarconStopAgentCommand | 
   const remove = envelope.attributes.remove;
   if (remove !== undefined && remove !== 'true' && remove !== 'false') return null;
   try {
-    return { type: 'stop-agent', chatId: parseChatId(envelope.attributes['chat-id']), remove: remove === 'true' };
-  } catch { return null; }
+    return {
+      type: 'stop-agent',
+      chatId: parseChatId(envelope.attributes['chat-id']),
+      remove: remove === 'true',
+    };
+  } catch {
+    return null;
+  }
 }

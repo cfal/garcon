@@ -13,8 +13,13 @@ export function parseOpenCodePromptResponse(result: unknown, sessionId: string) 
   };
   const isCompaction = isOpenCodeCompactionAssistant(info);
   const parts: unknown[] = response && Array.isArray(response.parts) ? response.parts : [];
-  const textParts = parts.flatMap((part) => isRecord(part) && part.type === 'text'
-    && part.messageID === info.id && typeof part.text === 'string' ? [part.text] : []);
+  const textParts: string[] = [];
+  for (const part of parts) {
+    if (isRecord(part) && part.type === 'text'
+      && part.messageID === info.id && typeof part.text === 'string') {
+      textParts.push(part.text);
+    }
+  }
   const finalResponse: OpenCodeTurnContext['finalResponse'] = !isCompaction && textParts.length > 0
     ? { messageId: info.id, response: { type: 'text', text: textParts.join('\n\n') } }
     : undefined;

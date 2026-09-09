@@ -1,17 +1,24 @@
-import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import type { AgentTurnOutputUnavailable, AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
+
+function unavailableResultReason(reason: AgentTurnOutputUnavailable['reason']): string {
+  switch (reason) {
+    case 'no-final-response':
+      return 'the provider did not expose a final response';
+    case 'too-large':
+      return 'its result is too large for the CLI receipt';
+    default:
+      return 'server retention pressure prevented the CLI from retaining its result';
+  }
+}
 
 export function requireCompletedTurnReceipt(
   receipt: AgentTurnReceipt,
 ): Extract<AgentTurnReceipt, { state: 'completed' }> {
   if (receipt.state === 'completed') {
     if (receipt.output.availability === 'unavailable') {
-      const reason = receipt.output.reason === 'no-final-response'
-        ? 'the provider did not expose a final response'
-        : receipt.output.reason === 'too-large'
-        ? 'its result is too large for the CLI receipt'
-        : 'server retention pressure prevented the CLI from retaining its result';
+      const reason = unavailableResultReason(receipt.output.reason);
       throw new CliError(
         'receipt polling',
         `the turn completed, but ${reason}; view the complete transcript in Garcon`,

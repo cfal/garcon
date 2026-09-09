@@ -18,7 +18,6 @@ export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnR
   if (!record.publicTerminalAt) {
     return { kind: 'found', receipt: { ...base, state: 'pending' } };
   }
-  const output = projectOutput(record);
   if (record.interruptionReason) {
     return {
       kind: 'found',
@@ -50,7 +49,7 @@ export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnR
       ...base,
       state: 'completed',
       settledAt: record.publicTerminalAt,
-      output,
+      output: projectOutput(record),
     },
   };
 }
