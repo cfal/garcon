@@ -232,6 +232,7 @@ export interface ScheduledChatStartInput {
   thinkingMode: ThinkingMode;
   agentSettingsById: Record<string, AgentSettingsEnvelope>;
   tags: string[];
+  orderedPreambleIds?: readonly PreambleId[];
 }
 
 export interface NormalizedChatStart {

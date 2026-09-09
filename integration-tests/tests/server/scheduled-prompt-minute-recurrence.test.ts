@@ -34,6 +34,7 @@ describe("scheduled prompt minute recurrence", () => {
             thinkingMode: "none",
             agentSettingsById: { [agent.agentId]: agent.agentSettings },
             tags: [],
+            preambleChoice: { mode: 'defaults' },
           },
           prompt: "Continue the work",
         },

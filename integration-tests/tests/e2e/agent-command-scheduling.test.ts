@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Page } from 'puppeteer-core';
+import type { PreamblesSnapshot } from '../../../common/preambles.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -11,6 +12,26 @@ async function selectRadio(page: Page, name: string, value: string): Promise<voi
     if (!input) throw new Error(`Missing radio option: ${value}`);
     (input as HTMLInputElement).click();
   }, value);
+}
+
+async function waitForTextSequence(
+  page: Page,
+  selector: string,
+  expectedTexts: readonly string[],
+): Promise<void> {
+  await page.waitForFunction(
+    ({ selector, expectedTexts }) => {
+      const actualTexts = [...document.querySelectorAll<HTMLElement>(selector)].map((element) =>
+        element.textContent?.trim(),
+      );
+      return (
+        actualTexts.length === expectedTexts.length &&
+        actualTexts.every((text, index) => text === expectedTexts[index])
+      );
+    },
+    { timeout: 20_000 },
+    { selector, expectedTexts },
+  );
 }
 
 describe('Lightpanda minute scheduling', () => {
@@ -84,6 +105,192 @@ describe('Lightpanda minute scheduling', () => {
       await openSchedules();
       await app.waitForText('Every 5 minutes');
       await app.waitForText('Synthetic five-minute follow-up.');
+      fixture.assertNoBrowserErrors();
+    });
+  }, 90_000);
+
+  test('configures and restores an ordered preamble selection for scheduled new chats', async () => {
+    await withE2eFixture('scheduled-preamble-selection', async (fixture) => {
+      let catalog = await fixture.integration.client
+        .post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
+          expectedRevision: 0,
+          preamble: {
+            enabled: true,
+            title: 'Scheduled alpha rules',
+            content: 'SYNTHETIC_SCHEDULED_ALPHA_BODY',
+            scope: { type: 'global' },
+          },
+        })
+        .then((response) => response.snapshot);
+      catalog = await fixture.integration.client
+        .post<{ snapshot: PreamblesSnapshot }>('/api/v1/preambles', {
+          expectedRevision: catalog.revision,
+          preamble: {
+            enabled: true,
+            title: 'Scheduled beta rules',
+            content: 'SYNTHETIC_SCHEDULED_BETA_BODY',
+            scope: { type: 'global' },
+          },
+        })
+        .then((response) => response.snapshot);
+      const alphaId = catalog.preambles.find(
+        (preamble) => preamble.title === 'Scheduled alpha rules',
+      )!.id;
+      const betaId = catalog.preambles.find(
+        (preamble) => preamble.title === 'Scheduled beta rules',
+      )!.id;
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await fixture.page.setViewport({ width: 1_280, height: 2_000 });
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.clickButton('More actions');
+      await app.waitForMenuItemEnabled('Scheduled prompts');
+      await app.clickMenuItem('Scheduled prompts');
+      await app.waitForButtonEnabled('Add Prompt');
+      await app.clickButton('Add Prompt');
+      await fixture.page.waitForFunction(
+        (projectPath) =>
+          document.querySelector<HTMLInputElement>('#scheduled-project-path')?.value ===
+          projectPath,
+        { timeout: 20_000 },
+        fixture.integration.dirs.project,
+      );
+      await app.waitForText('Defaults are evaluated when each scheduled chat is created.');
+      await app.waitForText('Current preview');
+      await waitForTextSequence(fixture.page, '[data-slot="new-chat-preamble-pill"]', [
+        'Scheduled alpha rules',
+        'Scheduled beta rules',
+      ]);
+      await app.fill(
+        '[data-slot="scheduled-prompt-field"] textarea',
+        'Synthetic scheduled preamble task.',
+      );
+
+      await fixture.page.$eval('[data-slot="new-chat-preambles-configure"]', (element) =>
+        (element as HTMLButtonElement).click(),
+      );
+      await waitForTextSequence(fixture.page, '[data-slot="chat-preamble-selection-row-title"]', [
+        'Scheduled alpha rules',
+        'Scheduled beta rules',
+      ]);
+      await fixture.page.evaluate(() => {
+        const betaRow = [
+          ...document.querySelectorAll<HTMLElement>('[data-slot="chat-preamble-selection-row"]'),
+        ].find(
+          (element) =>
+            element
+              .querySelector('[data-slot="chat-preamble-selection-row-title"]')
+              ?.textContent?.trim() === 'Scheduled beta rules',
+        );
+        const moveUp = betaRow?.querySelector<HTMLButtonElement>(
+          '[data-slot="chat-preamble-selection-move-up"]',
+        );
+        if (!moveUp || moveUp.disabled) throw new Error('Missing scheduled preamble move action');
+        moveUp.click();
+      });
+      await fixture.page.waitForFunction(
+        () => {
+          const rows = [
+            ...document.querySelectorAll<HTMLElement>('[data-slot="chat-preamble-selection-row"]'),
+          ];
+          const rowFor = (title: string) =>
+            rows.find(
+              (row) =>
+                row
+                  .querySelector('[data-slot="chat-preamble-selection-row-title"]')
+                  ?.textContent?.trim() === title,
+            );
+          return (
+            rowFor('Scheduled beta rules')?.querySelector<HTMLButtonElement>(
+              '[data-slot="chat-preamble-selection-move-up"]',
+            )?.disabled === true &&
+            rowFor('Scheduled alpha rules')?.querySelector<HTMLButtonElement>(
+              '[data-slot="chat-preamble-selection-move-down"]',
+            )?.disabled === true
+          );
+        },
+        { timeout: 20_000 },
+      );
+
+      await app.clickButton('Manage preambles');
+      await fixture.page.waitForSelector('[data-slot="preambles-scroll-body"]');
+      expect(await fixture.page.$('[data-slot="scheduled-prompt-field"] textarea')).not.toBeNull();
+      await app.clickButton('Close', { last: true });
+      await fixture.page.waitForFunction(
+        () => {
+          const rows = [
+            ...document.querySelectorAll<HTMLElement>('[data-slot="chat-preamble-selection-row"]'),
+          ];
+          const betaRow = rows.find(
+            (row) =>
+              row
+                .querySelector('[data-slot="chat-preamble-selection-row-title"]')
+                ?.textContent?.trim() === 'Scheduled beta rules',
+          );
+          return (
+            betaRow?.querySelector<HTMLButtonElement>(
+              '[data-slot="chat-preamble-selection-move-up"]',
+            )?.disabled === true &&
+            document.activeElement?.matches('[data-slot="new-chat-preamble-manage-catalog"]') ===
+              true
+          );
+        },
+        { timeout: 20_000 },
+      );
+      await app.clickButton('Apply');
+      await waitForTextSequence(fixture.page, '[data-slot="new-chat-preamble-pill"]', [
+        'Scheduled beta rules',
+        'Scheduled alpha rules',
+      ]);
+      await app.waitForText(
+        'This ordered selection is reused when each scheduled chat is created.',
+      );
+      await app.waitForButtonEnabled('Save Prompt');
+      await app.clickButton('Save Prompt');
+      await app.waitForText('Synthetic scheduled preamble task.');
+      await app.waitForText('2 preambles selected');
+
+      const saved = (await fixture.integration.client.getScheduledPrompts()).prompts.find(
+        (prompt) => prompt.prompt === 'Synthetic scheduled preamble task.',
+      );
+      expect(saved?.target).toMatchObject({
+        type: 'new-chat',
+        preambleChoice: {
+          mode: 'explicit',
+          orderedPreambleIds: [betaId, alphaId],
+        },
+      });
+
+      await app.clickButton('Edit prompt');
+      await app.waitForText(
+        'This ordered selection is reused when each scheduled chat is created.',
+      );
+      await waitForTextSequence(fixture.page, '[data-slot="new-chat-preamble-pill"]', [
+        'Scheduled beta rules',
+        'Scheduled alpha rules',
+      ]);
+      await fixture.page.$eval('[data-slot="new-chat-preambles-configure"]', (element) =>
+        (element as HTMLButtonElement).click(),
+      );
+      await fixture.page.waitForFunction(
+        () => {
+          const betaRow = [
+            ...document.querySelectorAll<HTMLElement>('[data-slot="chat-preamble-selection-row"]'),
+          ].find(
+            (row) =>
+              row
+                .querySelector('[data-slot="chat-preamble-selection-row-title"]')
+                ?.textContent?.trim() === 'Scheduled beta rules',
+          );
+          return (
+            betaRow?.querySelector<HTMLButtonElement>(
+              '[data-slot="chat-preamble-selection-move-up"]',
+            )?.disabled === true
+          );
+        },
+        { timeout: 20_000 },
+      );
       fixture.assertNoBrowserErrors();
     });
   }, 90_000);

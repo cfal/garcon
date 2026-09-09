@@ -620,6 +620,7 @@ export async function startServer(): Promise<void> {
       dispatcher: new ScheduledPromptDispatcher({ commands: chatCommands, chatIds }),
       chats: chatRegistry,
       agents: agentRegistry,
+      preambles,
     });
 
     agentCommands.initialize({

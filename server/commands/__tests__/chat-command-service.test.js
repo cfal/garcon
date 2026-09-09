@@ -1745,6 +1745,39 @@ describe('ChatCommandService', () => {
     );
   });
 
+  it('preserves an explicit scheduled preamble order, including unavailable references', async () => {
+    const ids = ['scheduled-second', 'scheduled-missing', 'scheduled-first'];
+    const f = makeService({ preambles: { snapshot: () => ({ revision: 7, preambles: [
+      { id: 'scheduled-first', enabled: true, title: 'First', content: 'First body', scope: { type: 'global' },
+        agentIds: [], tagFilter: { mode: 'any', tags: [] } },
+      { id: 'scheduled-second', enabled: true, title: 'Second', content: 'Second body', scope: { type: 'global' },
+        agentIds: [], tagFilter: { mode: 'any', tags: [] } },
+    ] }) } });
+
+    await f.service.submitScheduledStart({
+      chatId: SCHEDULED_CHAT_ID,
+      clientRequestId: 'req-scheduled-preambles',
+      clientMessageId: 'msg-scheduled-preambles',
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'review with scheduled preambles',
+      model: 'opus',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettingsById: { claude: agentSettings() },
+      tags: [],
+      orderedPreambleIds: ids,
+    });
+
+    expect(f.sessions.get(SCHEDULED_CHAT_ID).preambleSelection).toEqual({
+      revision: 0,
+      orderedPreambleIds: ids,
+    });
+  });
+
   it('holds the chat mutation lock and execution reservation throughout session start', async () => {
     let releaseStart;
     let markStartEntered;

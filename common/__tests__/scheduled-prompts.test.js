@@ -9,8 +9,11 @@ import {
   renderScheduledPrompt,
   scheduledPromptFitsRenderedLimit,
 } from '../scheduled-prompts.js';
+import { PREAMBLE_MAX_COUNT } from '../preambles.js';
 
 const CHAT_ID = '1783725900000000';
+const PREAMBLE_A = '00000000-0000-4000-8000-000000000001';
+const PREAMBLE_B = '00000000-0000-4000-8000-000000000002';
 
 function definition(prompt) {
   return {
@@ -19,6 +22,66 @@ function definition(prompt) {
     prompt,
   };
 }
+
+function newChatDefinition(preambleChoice) {
+  return {
+    schedule: { type: 'once', runAtUtc: '2030-01-01T09:00:00.000Z' },
+    target: {
+      type: 'new-chat',
+      agentId: 'codex',
+      projectPath: '/workspace/project',
+      model: 'gpt-5',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettingsById: {
+        codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      },
+      tags: [],
+      ...(preambleChoice === undefined ? {} : { preambleChoice }),
+    },
+    prompt: 'Review the project',
+  };
+}
+
+describe('scheduled new-chat preamble choices', () => {
+  it('preserves defaults and explicit ordered selections, including explicit none', () => {
+    for (const preambleChoice of [
+      { mode: 'defaults' },
+      { mode: 'explicit', orderedPreambleIds: [] },
+      { mode: 'explicit', orderedPreambleIds: [PREAMBLE_B, PREAMBLE_A] },
+    ]) {
+      expect(normalizeScheduledPromptDefinitionInput(newChatDefinition(preambleChoice))?.target)
+        .toMatchObject({ preambleChoice });
+    }
+  });
+
+  it('rejects missing and malformed choices without repairing them', () => {
+    const tooMany = Array.from({ length: PREAMBLE_MAX_COUNT + 1 }, (_, index) => (
+      `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
+    ));
+    for (const preambleChoice of [
+      undefined,
+      { mode: 'defaults', orderedPreambleIds: [] },
+      { mode: 'explicit' },
+      { mode: 'explicit', orderedPreambleIds: ['invalid'] },
+      { mode: 'explicit', orderedPreambleIds: [PREAMBLE_A, PREAMBLE_A] },
+      { mode: 'explicit', orderedPreambleIds: tooMany },
+      { mode: 'unknown' },
+    ]) {
+      expect(normalizeScheduledPromptDefinitionInput(newChatDefinition(preambleChoice))).toBeNull();
+    }
+  });
+
+  it('rejects a preamble choice on an existing-chat target', () => {
+    const value = definition('Continue the work');
+    value.target.preambleChoice = { mode: 'defaults' };
+
+    expect(normalizeScheduledPromptDefinitionInput(value)).toBeNull();
+  });
+});
 
 function recurringDefinition(intervalMinutes) {
   return {

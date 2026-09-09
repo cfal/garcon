@@ -33,8 +33,7 @@
 	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
-	import NewChatPreamblePicker from '../preambles/NewChatPreamblePicker.svelte';
-	import NewChatPreambleSummary from '../preambles/NewChatPreambleSummary.svelte';
+	import NewChatPreambleControls from '../preambles/NewChatPreambleControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';
 	import {
@@ -44,7 +43,6 @@
 		getRemoteSettings,
 		getChatSessions,
 		getNotifications,
-		getPreambles,
 		getSnippets,
 		getTransientLayers,
 		getWorkspaceLayout,
@@ -95,7 +93,6 @@
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
-	const preamblesCatalog = getPreambles();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
@@ -135,19 +132,9 @@
 	});
 
 	let isMobile = $state(false);
-	let preamblePickerOpen = $state(false);
 	let pendingTextareaFocus = $state(true);
 	let prospectiveChatId = $state<ChatId | null>(null);
-	let observedPreambleCatalogRevision: number | null = null;
-	let refreshedPreambleCatalogRevision: number | null = null;
-	let observedPreambleInvalidationVersion = preamblesCatalog.invalidationVersion;
 	const initialContentReady = $derived(form.settingsLoaded);
-	const preambleSummaryLoading = $derived(
-		form.trimmedPath.length > 0 &&
-			(form.validationStatus === 'idle' ||
-				form.validationStatus === 'checking' ||
-				form.preambles.previewLoading),
-	);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
 	);
@@ -239,30 +226,6 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
-	// Keeps the preview at or ahead of the loaded catalog without refetching its first match.
-	$effect(() => {
-		const revision = preamblesCatalog.snapshot?.revision;
-		const previewRevision = form.preambles.preview?.catalogRevision;
-		if (revision === undefined) return;
-
-		const revisionChanged =
-			observedPreambleCatalogRevision !== null && revision !== observedPreambleCatalogRevision;
-		observedPreambleCatalogRevision = revision;
-		const previewIsStale = previewRevision !== undefined && previewRevision < revision;
-		if (!revisionChanged && !previewIsStale) return;
-		if (refreshedPreambleCatalogRevision === revision) return;
-		refreshedPreambleCatalogRevision = revision;
-		untrack(() => form.preambles.catalogChanged());
-	});
-
-	$effect(() => {
-		const invalidationVersion = preamblesCatalog.invalidationVersion;
-		if (invalidationVersion === observedPreambleInvalidationVersion) return;
-		observedPreambleInvalidationVersion = invalidationVersion;
-		if (preamblesCatalog.hasLoaded) return;
-		untrack(() => form.preambles.catalogChanged());
-	});
-
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
 		if (
@@ -310,6 +273,7 @@
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
 		form.revokeAllImageUrls();
+		form.dispose();
 	});
 
 	function openImagePicker(): void {
@@ -741,28 +705,10 @@
 					onClose={() => (form.showTagInput = false)}
 				/>
 
-				<NewChatPreambleSummary
-					preview={form.preambles.preview}
-					loading={preambleSummaryLoading}
-					configurable={form.preambles.configurable}
-					retryable={form.validationStatus === 'valid'}
-					onEdit={() => (preamblePickerOpen = true)}
-					onRetry={() => void form.preambles.refreshPreview()}
-				/>
-
-				<NewChatPreamblePicker
-					open={preamblePickerOpen}
-					choice={form.preambles.choice}
-					defaultsIds={(form.preambles.preview?.eligiblePreambles ?? []).map((entry) => entry.id)}
-					previewLoading={form.preambles.previewLoading}
-					canLoadAutomaticPreview={form.preambles.canLoadAutomaticPreview}
-					canonicalProjectPath={form.preambles.canonicalProjectPath || form.trimmedPath}
-					projection={form.preambles.preview}
-					onClose={() => (preamblePickerOpen = false)}
-					onApplyExplicit={(ids) => form.preambles.setExplicit(ids)}
-					onApplyDefaults={() => form.preambles.resetToDefaults()}
-					onLoadAutomaticPreview={() => form.preambles.loadAutomaticPreview()}
-					onRefreshPreview={() => form.preambles.refreshPreview()}
+				<NewChatPreambleControls
+					selection={form.preambles}
+					trimmedPath={form.trimmedPath}
+					validationStatus={form.validationStatus}
 				/>
 
 				{#if displayedFormError}
