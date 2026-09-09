@@ -425,11 +425,11 @@ describe('ChatRegistry', () => {
     expect(registry.getChat(SECOND_CHAT_ID)).toBeNull();
   });
 
-  it('returns null for desired tag updates targeting inherited session properties', async () => {
+  it('reports inherited session properties as unavailable mutation targets', () => {
     registry.addChat(newChat());
 
     for (const chatId of ['__proto__', 'constructor', 'toString']) {
-      await expect(registry.setTags(chatId, ['review'])).resolves.toBeNull();
+      expect(registry.chatMutationDurability(chatId)).toBe('unavailable');
     }
   });
 

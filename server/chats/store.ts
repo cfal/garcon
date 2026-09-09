@@ -711,7 +711,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   chatMutationDurability(id: string): ChatMutationDurability {
     const registry = this.getRegistry();
-    if (!registry.sessions[id]) return 'unavailable';
+    if (!Object.hasOwn(registry.sessions, id)) return 'unavailable';
     return this.#unknownDurabilityChats.has(id) ? 'unknown' : 'confirmed';
   }
 
