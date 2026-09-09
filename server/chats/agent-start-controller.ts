@@ -14,6 +14,8 @@ import type { SettingsStore } from '../settings/store.js';
 import type { ChatIdAllocator } from './chat-id-allocator.js';
 import { AgentChildTurnReplies, type AgentChildTurnReplyOptions } from './agent-child-turn-replies.js';
 
+const MAX_CATALOG_DISCOVERIES = 3;
+
 export interface AgentStartControllerOptions extends AgentChildTurnReplyOptions {
   readonly selection: Pick<AgentStartSelectionService, 'catalog' | 'resolve'>;
   readonly settings: Pick<SettingsStore, 'getExecutionDefaults'>;
@@ -45,7 +47,7 @@ export class AgentStartController {
         });
       }
       const rediscover = Symbol('rediscover');
-      for (let attempt = 0; ; attempt++) {
+      for (let discoveryAttempt = 1; ; discoveryAttempt++) {
         if (!this.#replies.current(source, signal)) return null;
         const agentId = command.agentId ?? this.options.registry.getChat(source.chatId)!.agentId;
         const catalog = await this.options.selection.catalog(agentId).then(
@@ -59,7 +61,7 @@ export class AgentStartController {
           let turnId: string | null = null;
           if (!this.options.isEnabled()) outcome = { status: 'rejected', reason: 'disabled' };
           else if (agentChanged) {
-            if (attempt < 2) return rediscover;
+            if (discoveryAttempt < MAX_CATALOG_DISCOVERIES) return rediscover;
             outcome = { status: 'rejected', reason: 'action-failed' };
           } else if ('error' in catalog) {
             this.#replies.report(source, 'selection', catalog.error);
@@ -86,15 +88,7 @@ export class AgentStartController {
               turnId = result.turnId;
               outcome = { status: 'accepted', chatId: allocated };
             } catch (error) {
-              const child = childChatId ? this.options.registry.getChat(childChatId) : null;
-              if (error instanceof AgentStartCompensatedError) outcome = { status: 'rejected', reason: startFailureReason(error.cause) };
-              else if (child && isRecoverablePreambleAdmissionError(error)) {
-                outcome = { status: 'preamble-rejected', chatId: childChatId!,
-                  reason: error.code === 'PREAMBLE_SLASH_COMMAND_BLOCKED' ? 'slash-command-blocked' : 'composition-invalid' };
-              } else if (child) outcome = { status: 'outcome-unknown', chatId: childChatId! };
-              else if (childChatId && (error instanceof AggregateError || error instanceof AtomicJsonWriteError && error.renamed)) {
-                outcome = { status: 'outcome-unknown', chatId: childChatId };
-              } else outcome = { status: 'rejected', reason: startFailureReason(error) };
+              outcome = this.#admissionFailureOutcome(error, childChatId);
               this.#replies.report(source, 'admission', error, {
                 type: 'agent-start-outcome', ref: command.ref, async: command.async,
                 requestViewId: source.viewId, requestOrdinal: source.requestOrdinal, ...outcome,
@@ -115,6 +109,25 @@ export class AgentStartController {
 
   discardSource(chatId: string): void { this.#replies.discardSource(chatId); }
   shutdown(): void { this.#replies.shutdown(); }
+
+  #admissionFailureOutcome(error: unknown, chatId: string | undefined): AgentChildAdmissionOutcome {
+    const child = chatId ? this.options.registry.getChat(chatId) : null;
+    if (error instanceof AgentStartCompensatedError) {
+      return { status: 'rejected', reason: startFailureReason(error.cause) };
+    }
+    if (chatId) {
+      if (child && isRecoverablePreambleAdmissionError(error)) {
+        return {
+          status: 'preamble-rejected', chatId,
+          reason: error.code === 'PREAMBLE_SLASH_COMMAND_BLOCKED' ? 'slash-command-blocked' : 'composition-invalid',
+        };
+      }
+      if (child || error instanceof AggregateError || error instanceof AtomicJsonWriteError && error.renamed) {
+        return { status: 'outcome-unknown', chatId };
+      }
+    }
+    return { status: 'rejected', reason: startFailureReason(error) };
+  }
 }
 
 function startFailureReason(error: unknown): AgentChildRejectionReason {

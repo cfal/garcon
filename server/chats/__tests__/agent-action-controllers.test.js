@@ -4,6 +4,8 @@ import { AgentScheduleController } from '../agent-schedule-controller.js';
 import { AgentStartSelectionService } from '../../agents/agent-start-selection-service.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import { DomainError } from '../../lib/domain-error.js';
+import { AtomicJsonWriteError } from '../../lib/json-file-store.js';
+import { AgentStartCompensatedError } from '../../commands/agent-start-compensated-error.js';
 import { resolveStartProjectPath } from '../../lib/command-project-path.js';
 import { ScheduledPromptCreationOutcomeUnknownError } from '../../scheduled-prompts/scheduler.js';
 import { ScheduledPromptDomainError } from '../../scheduled-prompts/store.js';
@@ -197,16 +199,28 @@ describe('assistant action controllers', () => {
     expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason });
   });
 
-  it('distinguishes compensated and uncertain retained starts', async () => {
-    for (const [error, retained, status] of [
-      [new Error('failed start'), false, 'rejected'],
-      [new Error('post-admission failure'), true, 'outcome-unknown'],
-      [new AggregateError([new Error('rollback flush failed')]), false, 'outcome-unknown'],
+  it('preserves admission failure precedence and retained-child outcomes', async () => {
+    for (const [error, retained, outcome] of [
+      [new Error('failed start'), false, { status: 'rejected', reason: 'action-failed' }],
+      [new Error('post-admission failure'), true, { status: 'outcome-unknown', chatId: CHILD }],
+      [new AggregateError([new Error('rollback flush failed')]), false, { status: 'outcome-unknown', chatId: CHILD }],
+      [new AtomicJsonWriteError('write failed', false), false, { status: 'rejected', reason: 'action-failed' }],
+      [new AtomicJsonWriteError('directory sync failed', true), false, { status: 'outcome-unknown', chatId: CHILD }],
+      [new DomainError('PREAMBLE_SLASH_COMMAND_BLOCKED', 'blocked'), true,
+        { status: 'preamble-rejected', chatId: CHILD, reason: 'slash-command-blocked' }],
+      [new DomainError('PREAMBLE_SELECTION_COMPOSITION_INVALID', 'invalid'), true,
+        { status: 'preamble-rejected', chatId: CHILD, reason: 'composition-invalid' }],
+      [new DomainError('PREAMBLE_SLASH_COMMAND_BLOCKED', 'blocked'), false, { status: 'rejected', reason: 'action-failed' }],
+      [new AgentStartCompensatedError(new DomainError('UNSUPPORTED_AGENT', 'unsupported')), true,
+        { status: 'rejected', reason: 'unsupported-agent' }],
     ]) {
       const f = fixture();
       f.commands.submitAgentCommandStartLocked.mockImplementation(async () => { if (retained) f.chats.set(CHILD, {}); throw error; });
       f.start.request(SOURCE, START); await drain();
-      expect(f.notices[0].detail.status).toBe(status);
+      expect(f.notices[0].detail).toEqual({
+        type: 'agent-start-outcome', ref: START.ref, async: START.async,
+        requestViewId: SOURCE.viewId, requestOrdinal: SOURCE.requestOrdinal, ...outcome,
+      });
     }
   });
 
