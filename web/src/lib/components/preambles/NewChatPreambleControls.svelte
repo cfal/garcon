@@ -13,6 +13,7 @@
 		pickerDescription?: string;
 		summaryReadyLabel?: string;
 		summaryEmptyLabel?: string;
+		onClear?: () => void;
 		onOpenCatalog?: (returnFocus: () => void) => void;
 	}
 
@@ -23,6 +24,7 @@
 		pickerDescription,
 		summaryReadyLabel,
 		summaryEmptyLabel,
+		onClear,
 		onOpenCatalog,
 	}: Props = $props();
 	const preamblesCatalog = getPreambles();
@@ -89,6 +91,7 @@
 		readyLabel={summaryReadyLabel}
 		emptyLabel={summaryEmptyLabel}
 		onEdit={() => (pickerOpen = true)}
+		{onClear}
 		onRetry={() => void selection.refreshPreview()}
 	/>
 

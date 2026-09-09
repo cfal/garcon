@@ -709,6 +709,7 @@
 					selection={form.preambles}
 					trimmedPath={form.trimmedPath}
 					validationStatus={form.validationStatus}
+					onClear={() => form.preambles.setExplicit([])}
 				/>
 
 				{#if displayedFormError}
