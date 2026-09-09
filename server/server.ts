@@ -303,6 +303,7 @@ export async function startServer(): Promise<void> {
       interAgentMessages: agentCommands.interAgentMessages,
       agentStarts: agentCommands.agentStarts,
       agentResumes: agentCommands.agentResumes,
+      agentStops: agentCommands.agentStops,
       agentSchedules: agentCommands.agentSchedules,
     });
     const preparedCarryover = new PreparedCarryoverStore();

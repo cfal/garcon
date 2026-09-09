@@ -217,6 +217,13 @@ export interface AgentCommandResumeInput {
   readonly clientMessageId: string;
 }
 
+export interface AgentCommandStopInput {
+  readonly sourceChatId: string;
+  readonly sourceViewId: string;
+  readonly chatId: string;
+  readonly remove: boolean;
+}
+
 export interface ScheduledChatStartInput {
   chatId: ChatId;
   clientRequestId: string;

@@ -989,6 +989,80 @@ describe('ChatCommandService', () => {
     expect(f.queue.createChatQueueEntry).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('stops a saved delegation through existing lifecycle cleanup, remove=%s', async (remove) => {
+    const locks = new KeyedPromiseLock();
+    const f = makeService({ chatMutationLock: locks });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    await locks.runExclusiveMany([`chat:${SOURCE_CHAT_ID}`, `chat:${TARGET_CHAT_ID}`], () =>
+      f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID, sourceViewId: 'view-1',
+        chatId: TARGET_CHAT_ID, remove }, new AbortController().signal));
+    expect(f.handoffs.cancelPreparation).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(f.queue.stopActiveTurn).toHaveBeenCalledTimes(remove ? 0 : 1);
+    expect(f.queue.abortForChatDeletion).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.ownership.delete).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.settings.removeSessionName).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.queue.deleteChatQueueFile).toHaveBeenCalledTimes(remove ? 1 : 0);
+    expect(f.sessions.has(TARGET_CHAT_ID)).toBe(!remove);
+    expect(f.sessions.has(SOURCE_CHAT_ID)).toBe(true);
+  });
+
+  it.each(['self', 'missing', 'unrelated', 'grandchild', 'fork', 'handoff', 'stale', 'aborted'])('refuses delegated stop before side effects: %s', async (invalid) => {
+    const f = makeService();
+    const abort = new AbortController();
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: invalid === 'grandchild' ? CLI_CHAT_ID : SOURCE_CHAT_ID,
+        relation: invalid === 'fork' || invalid === 'handoff' ? invalid : 'delegation' } });
+    if (invalid === 'unrelated') f.sessions.get(TARGET_CHAT_ID).parentChat = null;
+    if (invalid === 'missing') f.sessions.delete(TARGET_CHAT_ID);
+    if (invalid === 'aborted') abort.abort();
+    await expect(f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: invalid === 'stale' ? 'stale' : 'view-1',
+      chatId: invalid === 'self' ? SOURCE_CHAT_ID : TARGET_CHAT_ID, remove: true }, abort.signal)).rejects.toBeDefined();
+    expect(f.handoffs.cancelPreparation).not.toHaveBeenCalled();
+    expect(f.queue.stopActiveTurn).not.toHaveBeenCalled();
+    expect(f.queue.abortForChatDeletion).not.toHaveBeenCalled();
+    expect(f.ownership.delete).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('retains a delegated child when retirement fails, remove=%s', async (remove) => {
+    const f = makeService({ queue: {
+      stopActiveTurn: mock(async () => ({ outcome: 'failed', control: storedQueue() })),
+      abortForChatDeletion: mock(async () => false),
+    } });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    await expect(f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'view-1', chatId: TARGET_CHAT_ID, remove }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(f.ownership.delete).not.toHaveBeenCalled();
+    expect(f.sessions.has(TARGET_CHAT_ID)).toBe(true);
+  });
+
+  it('retained stop preserves pending user and control inputs and keeps delegated resume busy', async () => {
+    const projection = makeInputProjection();
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const queueService = makeRealQueue(projection, {}, undefined, repository);
+    const f = makeService({ queueService });
+    f.sessions.set(TARGET_CHAT_ID, { ...f.sessions.get(SOURCE_CHAT_ID),
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' } });
+    await queueService.createChatQueueEntry(TARGET_CHAT_ID, 'Synthetic pending input.');
+    repository.save(TARGET_CHAT_ID, { ...repository.load(TARGET_CHAT_ID), controlEntries: [controlEntry('synthetic-control')] });
+    const pending = await queueService.readChatExecutionControl(TARGET_CHAT_ID);
+    await f.service.submitAgentCommandStopLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'view-1', chatId: TARGET_CHAT_ID, remove: false }, new AbortController().signal);
+    const stopped = await queueService.readChatExecutionControl(TARGET_CHAT_ID);
+    expect(stopped.entries).toEqual(pending.entries);
+    expect(stopped.controlEntries).toEqual(pending.controlEntries);
+    expect(stopped.pause).toMatchObject({ kind: 'manual' });
+    await expect(f.service.submitAgentCommandResumeLocked({ sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'view-1', chatId: TARGET_CHAT_ID, command: 'Synthetic resume.',
+      clientRequestId: 'stop-resume', clientMessageId: 'stop-resume-input' }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(projection.admitInput).not.toHaveBeenCalled();
+    expect((await queueService.readChatExecutionControl(TARGET_CHAT_ID)).pause).toEqual(stopped.pause);
+  });
+
   it.each(['paused', 'queued', 'control'])('rejects delegated resume with %s execution control without admitting input', async (blocked) => {
     const projection = makeInputProjection();
     const repository = new InMemoryChatExecutionControlRepository('server-instance-test');

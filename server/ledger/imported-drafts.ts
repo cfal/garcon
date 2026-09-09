@@ -72,6 +72,7 @@ function importedDraftFor(
         switch (command.type) {
           case 'start-agent':
           case 'resume-agent':
+          case 'stop-agent':
           case 'schedule':
             return agentActionRequestNoticeDraft(at, command);
           case 'get-chat-id':

@@ -30,6 +30,7 @@ import {
   commandResultFromRecord,
   type CompactInput,
   type AgentCommandResumeInput,
+  type AgentCommandStopInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
   type StopInput,
@@ -75,6 +76,25 @@ export class SessionCommands {
       chatId: input.chatId, transcriptViewId, command: input.command, images: [],
       clientRequestId: input.clientRequestId, clientMessageId: input.clientMessageId,
     });
+  }
+
+  async submitAgentCommandStopLocked(input: AgentCommandStopInput, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (!this.deps.chats.getChat(input.sourceChatId)
+      || !isDirectDelegatedChild(input.sourceChatId, input.chatId, this.deps.chats.getChat(input.chatId))) {
+      throw new CommandValidationError('AGENT_STOP_NOT_DELEGATED', 'Only a directly delegated child can be stopped or removed', 403);
+    }
+    if (this.deps.transcripts.existingCurrentView(input.sourceChatId)?.viewId !== input.sourceViewId) {
+      throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
+    }
+    this.deps.handoffs.cancelPreparation(input.chatId);
+    if (input.remove) await this.deleteChatLocked(input.chatId);
+    else {
+      const result = await this.deps.queue.stopActiveTurn(input.chatId);
+      if (!isStopSatisfied(result.outcome)) {
+        throw new CommandValidationError('SESSION_BUSY', 'The delegated child could not be stopped', 409);
+      }
+    }
   }
 
   private async submitRunLocked(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {

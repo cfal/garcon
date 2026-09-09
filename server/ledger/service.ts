@@ -50,6 +50,7 @@ import {
   type AgentStartRequestSink,
   type AgentScheduleRequestSink,
   type AgentResumeRequestSink,
+  type AgentStopRequestSink,
   type InterAgentMessageRequestSink,
 } from './garcon-command-publication.js';
 import { PermissionNotActionableError } from './errors.js';
@@ -116,6 +117,7 @@ export interface TranscriptLedgerServiceOptions {
   readonly interAgentMessages?: InterAgentMessageRequestSink;
   readonly agentStarts?: AgentStartRequestSink;
   readonly agentResumes?: AgentResumeRequestSink;
+  readonly agentStops?: AgentStopRequestSink;
   readonly agentSchedules?: AgentScheduleRequestSink;
 }
 
@@ -158,6 +160,7 @@ export class TranscriptLedgerService {
   readonly #interAgentMessages: InterAgentMessageRequestSink;
   readonly #agentStarts: AgentStartRequestSink;
   readonly #agentResumes: AgentResumeRequestSink;
+  readonly #agentStops: AgentStopRequestSink;
   readonly #agentSchedules: AgentScheduleRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
@@ -177,6 +180,7 @@ export class TranscriptLedgerService {
     this.#interAgentMessages = options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK;
     this.#agentStarts = options.agentStarts ?? { request: () => undefined };
     this.#agentResumes = options.agentResumes ?? { request: () => undefined };
+    this.#agentStops = options.agentStops ?? { request: () => undefined };
     this.#agentSchedules = options.agentSchedules ?? { request: () => undefined };
   }
 
@@ -735,6 +739,7 @@ export class TranscriptLedgerService {
           interAgentMessages: this.#interAgentMessages,
           agentStarts: this.#agentStarts,
           agentResumes: this.#agentResumes,
+          agentStops: this.#agentStops,
           agentSchedules: this.#agentSchedules,
           committedRows: committed,
         });

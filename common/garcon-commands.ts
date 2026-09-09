@@ -4,6 +4,7 @@ import { normalizeGarconCommandBody } from './garcon-command-text.js';
 import { garconEnvelopeOpenerEnd, garconEnvelopeSpanAt, scanGarconEnvelopeSpans, type GarconEnvelopeSpan } from './garcon-command-envelope.js';
 import { parseGarconStartAgent, type GarconStartAgentCommand } from './garcon-start-agent.js';
 import { parseGarconResumeAgent, type GarconResumeAgentCommand } from './garcon-resume-agent.js';
+import { parseGarconStopAgent, type GarconStopAgentCommand } from './garcon-stop-agent.js';
 import { parseGarconSchedule, type GarconScheduleCommand } from './garcon-schedule.js';
 
 export const GARCON_GET_CHAT_ID = '<garcon-get-chat-id />';
@@ -24,6 +25,7 @@ const utf8Encoder = new TextEncoder();
 export type GarconEdgeCommand =
   | GarconStartAgentCommand
   | GarconResumeAgentCommand
+  | GarconStopAgentCommand
   | GarconScheduleCommand
   | { readonly type: 'get-chat-id' }
   | {
@@ -34,7 +36,7 @@ export type GarconEdgeCommand =
     };
 
 export interface GarconCommandIssue {
-  readonly command: 'send-message' | 'start-agent' | 'resume-agent' | 'schedule';
+  readonly command: 'send-message' | 'start-agent' | 'resume-agent' | 'stop-agent' | 'schedule';
   readonly reason: 'malformed';
   readonly edge: 'leading' | 'trailing';
 }
@@ -177,6 +179,7 @@ function parseEnvelopeSpan(content: string, span: GarconEnvelopeSpan): ParsedEdg
   const openerEnd = garconEnvelopeOpenerEnd(envelope);
   const command = span.command === 'start-agent' ? parseGarconStartAgent(envelope)
     : span.command === 'resume-agent' ? parseGarconResumeAgent(envelope)
+    : span.command === 'stop-agent' ? parseGarconStopAgent(envelope)
     : span.command === 'schedule' ? parseGarconSchedule(envelope)
     : parseSendMessage(envelope.slice(0, openerEnd), envelope.slice(openerEnd, -GARCON_SEND_MESSAGE_CLOSE.length));
   return command

@@ -14,6 +14,7 @@ import {
   type ChatStartInput,
   type AgentCommandStartInput,
   type AgentCommandResumeInput,
+  type AgentCommandStopInput,
   type CompactInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
@@ -81,6 +82,10 @@ export class ChatCommandService {
 
   submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal) {
     return this.#session.submitAgentCommandResumeLocked(input, signal);
+  }
+
+  submitAgentCommandStopLocked(input: AgentCommandStopInput, signal: AbortSignal) {
+    return this.#session.submitAgentCommandStopLocked(input, signal);
   }
 
   submitRun(input: SubmitRunInput) {

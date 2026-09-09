@@ -15,6 +15,7 @@ const LATER = '2030-01-01T01:00:00.000Z';
 const START = '<garcon-start-agent ref="task" async="true" agent="codex" model="example">Inspect.</garcon-start-agent>';
 const SCHEDULE = '<garcon-schedule every="5m" />';
 const RESUME = '<garcon-resume-agent ref="followup" chat-id="2000000000000000">Continue.</garcon-resume-agent>';
+const STOP = '<garcon-stop-agent chat-id="2000000000000000" remove="true" />';
 
 async function withLedger(run, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'garcon-command-evidence-'));
@@ -25,6 +26,33 @@ async function withLedger(run, options = {}) {
 }
 
 describe('agent command durable evidence', () => {
+  it('commits private stop evidence before dispatch and imports it without dispatch or visible outcomes', async () => {
+    const request = mock();
+    await withLedger(async ({ ledger, store }) => {
+      const view = ledger.initializeChat(CHAT);
+      const lease = ledger.openProducer(CHAT, 'test');
+      request.mockImplementation((source, command) => {
+        expect(ledger.currentRows(CHAT)).toHaveLength(2);
+        expect(source).toMatchObject({ chatId: CHAT, viewId: view.viewId, requestOrdinal: 2 });
+        expect(command).toMatchObject({ type: 'stop-agent', chatId: '2000000000000000', remove: true });
+      });
+      lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, `Retained\n${STOP}`) }] });
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT))).toEqual([
+        { ordinal: 1, message: new AssistantMessage(AT, 'Retained') },
+      ]);
+      request.mockClear();
+      const drafts = importedDrafts([{ message: new AssistantMessage(LATER, STOP), providerMeta: null }], () => AT);
+      const staged = ledger.stageView(CHAT, drafts, 1);
+      ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
+      store.closeChat(CHAT);
+      expect(ledger.currentRows(CHAT)).toHaveLength(1);
+      expect(ledger.currentRows(CHAT)[0].detail.type).toBe('agent-stop-request');
+      expect(ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT))).toEqual([]);
+      expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 1, at: LATER });
+      expect(request).not.toHaveBeenCalled();
+    }, { agentStops: { request } });
+  });
   it.each([
     ['agent-start-outcome', 'Start agent'],
     ['agent-resume-outcome', 'Resume agent'],
@@ -122,10 +150,10 @@ describe('agent command durable evidence', () => {
       const lease = ledger.openProducer(CHAT, 'test');
       const append = spyOn(store, 'append').mockImplementation(() => { throw new Error('commit failed'); });
       try {
-        expect(() => lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, `${START}\n${RESUME}\n${SCHEDULE}`) }] })).toThrow();
+        expect(() => lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, `${START}\n${RESUME}\n${STOP}\n${SCHEDULE}`) }] })).toThrow();
         expect(request).not.toHaveBeenCalled();
       } finally { append.mockRestore(); }
-    }, { agentStarts: { request }, agentResumes: { request }, agentSchedules: { request } });
+    }, { agentStarts: { request }, agentResumes: { request }, agentStops: { request }, agentSchedules: { request } });
   });
 
   it('imports requests without actions and preserves historical correlation when ordinals shift', async () => {
