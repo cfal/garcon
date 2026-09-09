@@ -114,14 +114,16 @@ describe('patched Canvas provider lifecycle', () => {
 	});
 
 	it.each([
-		{ pointer: 'mouse', removed: 'node' },
-		{ pointer: 'mouse', removed: 'handle' },
-		{ pointer: 'touch', removed: null },
-		{ pointer: 'touch', removed: 'node' },
-		{ pointer: 'touch', removed: 'handle' },
+		{ pointer: 'mouse', removed: 'node', releaseOrder: null },
+		{ pointer: 'mouse', removed: 'handle', releaseOrder: null },
+		{ pointer: 'touch', removed: null, releaseOrder: null },
+		{ pointer: 'touch', removed: null, releaseOrder: 'primary-first' },
+		{ pointer: 'touch', removed: null, releaseOrder: 'secondary-first' },
+		{ pointer: 'touch', removed: 'node', releaseOrder: null },
+		{ pointer: 'touch', removed: 'handle', releaseOrder: null },
 	] as const)(
-		'completes $pointer connections with removed target $removed',
-		({ pointer, removed }) => {
+		'finalizes $pointer connections with removed target $removed and secondary touch $releaseOrder',
+		({ pointer, removed, releaseOrder }) => {
 			const host = document.createElement('div');
 			const source = document.createElement('div');
 			const target = document.createElement('div');
@@ -133,7 +135,7 @@ describe('patched Canvas provider lifecycle', () => {
 			host.append(source, target);
 			document.body.append(host);
 			vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 600));
-			vi.spyOn(document, 'elementFromPoint').mockReturnValue(target);
+			const hitTest = vi.spyOn(document, 'elementFromPoint').mockReturnValue(target);
 			const from = internalNode('a', 0);
 			const to = internalNode('b', 300);
 			const lookup = new Map([
@@ -147,6 +149,7 @@ describe('patched Canvas provider lifecycle', () => {
 			const addListener = vi.spyOn(document, 'addEventListener');
 			const removeListener = vi.spyOn(document, 'removeEventListener');
 			const reset = vi.fn();
+			const cancelled = vi.fn();
 			const touch = (type: string, x: number, ended = false) => {
 				const contact = new Touch({ identifier: 1, target: source, clientX: x, clientY: 50 });
 				return new TouchEvent(type, { touches: ended ? [] : [contact], changedTouches: [contact] });
@@ -173,12 +176,50 @@ describe('patched Canvas provider lifecycle', () => {
 				onConnect: connect,
 				onConnectEnd: end,
 				onReconnectEnd: reconnectEnd,
+				onCancel: cancelled,
 				updateConnection: update,
 				getTransform: () => [0, 0, 1],
 				getFromHandle: () => from.internals.handleBounds!.source![0],
 				handleDomNode: source,
 			});
 			try {
+				if (releaseOrder) {
+					hitTest.mockReturnValue(host);
+					document.dispatchEvent(touch('touchmove', 150));
+					const primary = new Touch({ identifier: 1, target: source, clientX: 150, clientY: 50 });
+					const secondary = new Touch({ identifier: 2, target: host, clientX: 300, clientY: 50 });
+					host.dispatchEvent(
+						new TouchEvent('touchstart', {
+							bubbles: true,
+							touches: [primary, secondary],
+							changedTouches: [secondary],
+						}),
+					);
+					hitTest.mockReturnValue(target);
+					const [ended, remaining] =
+						releaseOrder === 'primary-first' ? [primary, secondary] : [secondary, primary];
+					document.dispatchEvent(
+						new TouchEvent('touchend', {
+							touches: [remaining],
+							changedTouches: [ended],
+						}),
+					);
+					document.dispatchEvent(
+						new TouchEvent('touchend', {
+							touches: [],
+							changedTouches: [remaining],
+						}),
+					);
+					expect(connect).not.toHaveBeenCalled();
+					expect(end).not.toHaveBeenCalled();
+					expect(reconnectEnd).not.toHaveBeenCalled();
+					expect(cancelled).toHaveBeenCalledExactlyOnceWith({ kind: 'reconnect' });
+					expect(reset).toHaveBeenCalledTimes(1);
+					for (const args of addListener.mock.calls) {
+						expect(removeListener).toHaveBeenCalledWith(...args);
+					}
+					return;
+				}
 				document.dispatchEvent(
 					pointer === 'touch'
 						? touch('touchmove', 300)
@@ -195,8 +236,8 @@ describe('patched Canvas provider lifecycle', () => {
 						: new MouseEvent('mouseup', { clientX: 300, clientY: 50 }),
 				);
 				expect(reset).toHaveBeenCalledTimes(1);
-				for (const [type, listener] of addListener.mock.calls) {
-					expect(removeListener).toHaveBeenCalledWith(type, listener);
+				for (const args of addListener.mock.calls) {
+					expect(removeListener).toHaveBeenCalledWith(...args);
 				}
 				if (removed) expect(connect).not.toHaveBeenCalled();
 				else {

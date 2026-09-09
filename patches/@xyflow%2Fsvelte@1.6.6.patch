@@ -11,10 +11,10 @@ index 9ad68e6ec2726219b0ffeb821b85c5f77069f162..ff733001b0db789b699a61b9cce61d90
          onDragStart,
          onDragStop,
 diff --git a/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte b/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte
-index 3d48da2bc7d8dc8b1e4dfb576ebe9ac144b39200..178725949cebadca03e88d44c09831f9553aee2c 100644
+index 3d48da2bc7d8dc8b1e4dfb576ebe9ac144b39200..6ef5b8ef69ea867903cfb9f6775ae7ee3907291a 100644
 --- a/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte
 +++ b/dist/lib/components/EdgeReconnectAnchor/EdgeReconnectAnchor.svelte
-@@ -1,4 +1,7 @@
+@@ -1,8 +1,11 @@
  <script lang="ts">
 +  import { onDestroy } from 'svelte';
 +  let cancelPointer: (() => void) | undefined;
@@ -22,6 +22,22 @@ index 3d48da2bc7d8dc8b1e4dfb576ebe9ac144b39200..178725949cebadca03e88d44c09831f9
    import { useStore } from '../../store/index.js';
    import { getEdgeIdContext } from '../../store/context.js';
    import type { Edge } from '../../types/index.js';
+-  import { XYHandle, type HandleType, type OnConnectStart } from '@xyflow/system';
++  import { XYHandle, isMouseEvent, type HandleType, type OnConnectStart } from '@xyflow/system';
+   import { EdgeLabel } from '../EdgeLabel/index.js';
+   import type { EdgeReconnectAnchorProps } from './types.js';
+ 
+@@ -23,8 +26,8 @@
+     'EdgeReconnectAnchor must be used within a Custom Edge component'
+   );
+ 
+-  const onPointerDown = (event: PointerEvent) => {
+-    if (event.button !== 0) {
++  const onPointerDown = (event: MouseEvent | TouchEvent) => {
++    if (isMouseEvent(event) && event.button !== 0) {
+       return;
+     }
+ 
 @@ -63,7 +66,8 @@
              type: 'target' as HandleType
            };
@@ -40,6 +56,16 @@ index 3d48da2bc7d8dc8b1e4dfb576ebe9ac144b39200..178725949cebadca03e88d44c09831f9
        handleDomNode: event.currentTarget as HTMLElement
      });
    };
+@@ -117,7 +122,8 @@
+     store.noPanClass,
+     className
+   ]}
+-  onpointerdown={onPointerDown}
++  onmousedown={onPointerDown}
++  ontouchstart={onPointerDown}
+   transparent
+   {...rest}
+ >
 diff --git a/dist/lib/components/Handle/Handle.svelte b/dist/lib/components/Handle/Handle.svelte
 index 024f21ea2f8864fb2049ce30b6f3d65617c34c65..7930286e2ac6d3ea09976856578625f6bb69ed01 100644
 --- a/dist/lib/components/Handle/Handle.svelte

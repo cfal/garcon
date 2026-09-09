@@ -14,7 +14,7 @@ declare global {
 async function openBoard({ page, integration }: ChromiumFixture) {
   await page.addInitScript(() => {
     const observed = new Map<EventTarget, Map<string, Set<EventListenerOrEventListenerObject>>>();
-    const types = new Set(['mousemove', 'mouseup', 'touchmove', 'touchend', 'touchcancel', 'dragstart', 'selectstart']);
+    const types = new Set(['mousemove', 'mouseup', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'dragstart', 'selectstart']);
     const add = EventTarget.prototype.addEventListener;
     const remove = EventTarget.prototype.removeEventListener;
     EventTarget.prototype.addEventListener = function (type, listener, options) {
@@ -204,6 +204,47 @@ test('completes and saves a native touch connection without retaining gesture li
     }
   });
 }, 120_000);
+
+for (const releaseOrder of ['primary-first', 'secondary-first'] as const) {
+  test(`cancels a native connection when a stationary second touch appears (${releaseOrder})`, async () => {
+    await withChromiumFixture(`canvas-touch-connection-${releaseOrder}`, async (fixture) => {
+      const { page, integration } = fixture;
+      await openBoard(fixture);
+      const baseline = await page.evaluate(() => window.canvasGestureListeners());
+      const start = await point(handle(page, 'a'));
+      const target = await point(handle(page, 'b'));
+      const primary = { x: start.x + 50, y: start.y + 40, id: 1 };
+      const secondary = { x: target.x + 10, y: target.y, id: 2 };
+      expect(await page.evaluate(({ x, y }) =>
+        document.elementFromPoint(x, y)?.closest('.svelte-flow__node') === null,
+      secondary)).toBe(true);
+      const protocol = await page.context().newCDPSession(page);
+      try {
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 1 }] });
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [primary] });
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [primary, secondary] });
+        const remaining = releaseOrder === 'primary-first' ? secondary : primary;
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [remaining] });
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await settle(page);
+        expect(await page.locator('.svelte-flow__edge').count()).toBe(0);
+        expect(await page.locator('.svelte-flow__connection').count()).toBe(0);
+        expect(await page.evaluate(() => window.canvasGestureListeners())).toEqual(baseline);
+        const nextTarget = await point(handle(page, 'c'));
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...target, id: 3 }] });
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...nextTarget, id: 3 }] });
+        await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await page.waitForFunction(() => document.querySelector('[data-canvas-panel] [role="status"]')?.textContent === 'Saved');
+        const saved = await integration.client.get<ChatCanvas>('/api/v1/chat-canvases?id=diagram');
+        expect(saved.content.connections).toMatchObject([{ source: 'b', target: 'c' }]);
+        expect(await page.evaluate(() => window.canvasGestureListeners())).toEqual(baseline);
+        fixture.assertNoBrowserErrors();
+      } finally {
+        await protocol.detach();
+      }
+    });
+  }, 120_000);
+}
 
 test('turning mobile editing off cancels an armed connection', async () => {
   await withChromiumFixture('canvas-abort-mobile-editing', async (fixture) => {
