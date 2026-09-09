@@ -2,16 +2,20 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell, getPreambles } from '$lib/context';
-	import type { NewChatPreambleChoice } from '$lib/chat/new-chat/new-chat-preamble-selection-state.svelte.js';
 	import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles.js';
 	import ChatPreambleSelectionPanel from './ChatPreambleSelectionPanel.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { PreambleId, PreambleSelectionProjection } from '$shared/preambles';
+	import {
+		PREAMBLE_MAX_COUNT,
+		type PreambleId,
+		type PreambleSelectionChoice,
+		type PreambleSelectionProjection,
+	} from '$shared/preambles';
 	import { tick, untrack } from 'svelte';
 
 	interface Props {
 		open: boolean;
-		choice: NewChatPreambleChoice;
+		choice: PreambleSelectionChoice;
 		defaultsIds: readonly PreambleId[];
 		previewLoading: boolean;
 		canLoadAutomaticPreview: boolean;
@@ -22,6 +26,8 @@
 		onApplyDefaults: () => void;
 		onLoadAutomaticPreview: () => Promise<PreambleSelectionPreviewResponse>;
 		onRefreshPreview: () => void | Promise<void>;
+		description?: string;
+		onOpenCatalog?: (returnFocus: () => void) => void;
 	}
 
 	type AutomaticPreviewState =
@@ -43,21 +49,24 @@
 		onApplyDefaults,
 		onLoadAutomaticPreview,
 		onRefreshPreview,
+		description,
+		onOpenCatalog,
 	}: Props = $props();
 
 	const appShell = getAppShell();
 	const preamblesCatalog = getPreambles();
 	let draftIds = $state<PreambleId[]>([]);
-	let draftMode = $state<NewChatPreambleChoice['mode']>('defaults');
+	let draftMode = $state<PreambleSelectionChoice['mode']>('defaults');
 	let hasManualChanges = $state(false);
 	let automaticPreview = $state<AutomaticPreviewState>({ status: 'parent' });
 	let automaticPreviewVersion = 0;
 	let observedPreambleCatalogRevision: number | null = null;
 	let refreshedAutomaticDraftCatalogRevision: number | null = null;
 	let wasOpen = false;
+	let manageCatalogButton: HTMLButtonElement | null = $state(null);
 
 	function initialDraftIds(
-		currentChoice: NewChatPreambleChoice,
+		currentChoice: PreambleSelectionChoice,
 		currentDefaults: readonly PreambleId[],
 	): PreambleId[] {
 		if (currentChoice.mode === 'explicit') return [...currentChoice.orderedPreambleIds];
@@ -152,6 +161,7 @@
 	}
 
 	function add(id: PreambleId): void {
+		if (draftIds.length >= PREAMBLE_MAX_COUNT) return;
 		draftMode = 'explicit';
 		hasManualChanges = true;
 		if (!draftIds.includes(id)) draftIds = [...draftIds, id];
@@ -183,17 +193,16 @@
 	}
 
 	function openCatalog(): void {
-		appShell.openPreambles(() => {
+		const returnFocus = () => {
 			void restorePickerAfterCatalog();
-		});
+		};
+		if (onOpenCatalog) onOpenCatalog(returnFocus);
+		else appShell.openPreambles(returnFocus);
 	}
 
 	async function restorePickerAfterCatalog(): Promise<void> {
 		await tick();
-		const opener = document.querySelector<HTMLElement>(
-			'[data-slot="new-chat-preamble-manage-catalog"]',
-		);
-		opener?.focus({ preventScroll: true });
+		manageCatalogButton?.focus({ preventScroll: true });
 	}
 
 	async function loadAutomaticDraft(): Promise<void> {
@@ -250,7 +259,7 @@
 				{m.preamble_selection_dialog_title()}
 			</Dialog.Title>
 			<Dialog.Description class="sr-only">
-				{m.preamble_selection_next_message_hint()}
+				{description ?? m.preamble_selection_next_message_hint()}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -300,6 +309,7 @@
 			onsubmit={handleApplySubmit}
 		>
 			<Button
+				bind:ref={manageCatalogButton}
 				variant="ghost"
 				size="sm"
 				data-slot="new-chat-preamble-manage-catalog"

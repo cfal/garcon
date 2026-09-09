@@ -100,6 +100,14 @@ export class AppShellStore {
 		this.showPreambles = true;
 	}
 
+	openPreamblesOverScheduledPrompts(returnFocus?: () => void): void {
+		this.dismissSnippets();
+		this.showSettings = false;
+		this.showOnboardingWizard = false;
+		this.#preamblesReturnFocus = returnFocus ?? null;
+		this.showPreambles = true;
+	}
+
 	closePreambles(): void {
 		this.showPreambles = false;
 		const returnFocus = this.#preamblesReturnFocus;

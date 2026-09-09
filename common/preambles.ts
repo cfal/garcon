@@ -61,6 +61,38 @@ export function isPreambleId(value: unknown): value is PreambleId {
   return typeof value === 'string' && PREAMBLE_ID_PATTERN.test(value);
 }
 
+export type PreambleSelectionChoice =
+  | { readonly mode: 'defaults' }
+  | {
+      readonly mode: 'explicit';
+      readonly orderedPreambleIds: readonly PreambleId[];
+    };
+
+export function normalizeOrderedPreambleIds(value: unknown): readonly PreambleId[] | null {
+  if (!Array.isArray(value) || value.length > PREAMBLE_MAX_COUNT) return null;
+  const ids: PreambleId[] = [];
+  const seen = new Set<PreambleId>();
+  for (const id of value) {
+    if (!isPreambleId(id) || seen.has(id)) return null;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+export function normalizePreambleSelectionChoice(value: unknown): PreambleSelectionChoice | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  if (raw.mode === 'defaults') {
+    if (!hasOnlyKeys(raw, ['mode'])) return null;
+    return { mode: 'defaults' };
+  }
+  if (raw.mode !== 'explicit' || !hasOnlyKeys(raw, ['mode', 'orderedPreambleIds'])) return null;
+  const orderedPreambleIds = normalizeOrderedPreambleIds(raw.orderedPreambleIds);
+  if (!orderedPreambleIds) return null;
+  return { mode: 'explicit', orderedPreambleIds };
+}
+
 export interface ChatPreambleSelection {
   readonly revision: number;
   readonly orderedPreambleIds: readonly PreambleId[];
@@ -279,16 +311,9 @@ export function normalizeChatPreambleSelection(value: unknown): ChatPreambleSele
     || !hasOnlyKeys(raw, ['revision', 'orderedPreambleIds'])
     || !Number.isSafeInteger(raw.revision)
     || (raw.revision as number) < 0
-    || !Array.isArray(raw.orderedPreambleIds)
-    || raw.orderedPreambleIds.length > PREAMBLE_MAX_COUNT
   ) return null;
-  const orderedPreambleIds: PreambleId[] = [];
-  const seen = new Set<PreambleId>();
-  for (const id of raw.orderedPreambleIds) {
-    if (!isPreambleId(id) || seen.has(id)) return null;
-    seen.add(id);
-    orderedPreambleIds.push(id);
-  }
+  const orderedPreambleIds = normalizeOrderedPreambleIds(raw.orderedPreambleIds);
+  if (!orderedPreambleIds) return null;
   return { revision: raw.revision as number, orderedPreambleIds };
 }
 

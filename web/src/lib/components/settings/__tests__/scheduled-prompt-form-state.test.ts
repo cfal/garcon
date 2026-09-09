@@ -75,12 +75,13 @@ function existingPrompt(schedule: ScheduledPrompt['schedule']): ScheduledPrompt 
 }
 
 function newChatPrompt(
-	target: Extract<ScheduledPrompt['target'], { type: 'new-chat' }>,
+	target: Omit<Extract<ScheduledPrompt['target'], { type: 'new-chat' }>, 'preambleChoice'> &
+		Partial<Pick<Extract<ScheduledPrompt['target'], { type: 'new-chat' }>, 'preambleChoice'>>,
 ): ScheduledPrompt {
 	return {
 		id: 'prompt-new-chat',
 		schedule: { type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' },
-		target,
+		target: { preambleChoice: { mode: 'defaults' }, ...target },
 		prompt: 'Continue the work',
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
@@ -88,6 +89,25 @@ function newChatPrompt(
 }
 
 describe('ScheduledPromptFormState', () => {
+	it('builds new schedules with execution-time preamble defaults', () => {
+		const form = createForm();
+		form.targetType = 'new-chat';
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		form.startup.agentId = 'codex';
+		form.startup.projectPath = '/workspace/project';
+		form.startup.selectedModelsByAgent = { codex: 'gpt-5' };
+		form.date = '2030-01-02';
+		form.time = '09:00';
+		form.prompt = 'Review the project';
+
+		const definition = form.buildDefinition(new Date('2030-01-01T00:00:00.000Z'));
+
+		expect(definition?.target).toMatchObject({
+			type: 'new-chat',
+			preambleChoice: { mode: 'defaults' },
+		});
+	});
 	it('rejects ineligible agents for new-chat targets', () => {
 		let selectableAgentIds: readonly SessionAgentId[] = ['claude', 'codex'];
 		const form = createForm(new Set(['123']), () => selectableAgentIds);
@@ -469,6 +489,10 @@ describe('ScheduledPromptFormState', () => {
 	});
 
 	it('hydrates and rebuilds new-chat tags when editing a scheduled prompt', async () => {
+		const orderedPreambleIds = [
+			'00000000-0000-4000-8000-000000000002',
+			'00000000-0000-4000-8000-000000000001',
+		];
 		const form = createForm();
 		form.startup.selectAgent = vi.fn();
 		form.startup.setPermissionMode = vi.fn();
@@ -492,6 +516,7 @@ describe('ScheduledPromptFormState', () => {
 					codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
 				},
 				tags: ['qa', 'review-needed'],
+				preambleChoice: { mode: 'explicit', orderedPreambleIds },
 			},
 			prompt: 'Review the project',
 			createdAt: '2029-01-01T00:00:00.000Z',
@@ -501,6 +526,10 @@ describe('ScheduledPromptFormState', () => {
 		await form.initialize(scheduledPrompt);
 
 		expect(form.startup.chatTags).toEqual(['qa', 'review-needed']);
+		expect(form.startup.preambles.choice).toEqual({
+			mode: 'explicit',
+			orderedPreambleIds,
+		});
 		form.startup.settingsLoaded = true;
 		form.startup.validationStatus = 'valid';
 		form.startup.agentId = 'codex';
@@ -509,6 +538,7 @@ describe('ScheduledPromptFormState', () => {
 		expect(definition?.target).toMatchObject({
 			type: 'new-chat',
 			tags: ['qa', 'review-needed'],
+			preambleChoice: { mode: 'explicit', orderedPreambleIds },
 		});
 	});
 });

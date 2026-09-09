@@ -661,7 +661,13 @@ describe('agent integration core-record migration', () => {
 
       const store = new ScheduledPromptStore(workspaceDir);
       await store.init();
-      expect(store.list()).toEqual(migrated.prompts);
+      expect(store.list()).toEqual([{
+        ...migrated.prompts[0],
+        target: {
+          ...migrated.prompts[0].target,
+          preambleChoice: { mode: 'defaults' },
+        },
+      }]);
       expect(warn).toHaveBeenCalledWith(
         '[agents:core-record-migration]',
         'Unknown agent integration "removed-agent" in scheduled prompt "scheduled-removed"; preserving the record.',

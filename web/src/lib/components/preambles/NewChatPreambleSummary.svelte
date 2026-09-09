@@ -14,12 +14,24 @@
 		loading: boolean;
 		configurable: boolean;
 		retryable: boolean;
+		readyLabel?: string;
+		emptyLabel?: string;
 		onEdit: () => void;
-		onClear: () => void;
+		onClear?: () => void;
 		onRetry: () => void;
 	}
 
-	let { preview, loading, configurable, retryable, onEdit, onClear, onRetry }: Props = $props();
+	let {
+		preview,
+		loading,
+		configurable,
+		retryable,
+		readyLabel,
+		emptyLabel,
+		onEdit,
+		onClear,
+		onRetry,
+	}: Props = $props();
 
 	const selectedCount = $derived(preview?.eligiblePreambles.length ?? 0);
 	const visiblePreambles = $derived(preview?.eligiblePreambles.slice(0, 2) ?? []);
@@ -66,14 +78,14 @@
 			/>
 			{#if selectedCount === 0}
 				<span class="min-w-0 truncate text-xs text-muted-foreground">
-					{m.preamble_selection_none_will_apply()}
+					{emptyLabel ?? m.preamble_selection_none_will_apply()}
 				</span>
 			{:else}
 				<span
 					class="hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline"
 					data-slot="new-chat-preambles-label"
 				>
-					{m.preambles_title()}
+					{readyLabel ?? m.preambles_title()}
 				</span>
 				<span class="hidden shrink-0 text-xs text-muted-foreground sm:inline" aria-hidden="true"
 					>·</span
@@ -154,16 +166,18 @@
 	>
 		<Pencil class="h-4 w-4" aria-hidden="true" />
 	</Button>
-	<Button
-		type="button"
-		variant="ghost"
-		size="icon-sm"
-		class="shrink-0"
-		data-slot="new-chat-preambles-clear"
-		aria-label={m.preamble_selection_clear()}
-		title={m.preamble_selection_clear()}
-		onclick={onClear}
-	>
-		<X class="h-4 w-4" aria-hidden="true" />
-	</Button>
+	{#if onClear}
+		<Button
+			type="button"
+			variant="ghost"
+			size="icon-sm"
+			class="shrink-0"
+			data-slot="new-chat-preambles-clear"
+			aria-label={m.preamble_selection_clear()}
+			title={m.preamble_selection_clear()}
+			onclick={onClear}
+		>
+			<X class="h-4 w-4" aria-hidden="true" />
+		</Button>
+	{/if}
 </div>

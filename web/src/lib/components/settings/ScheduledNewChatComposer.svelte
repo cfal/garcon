@@ -8,6 +8,7 @@
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import NewChatPreambleControls from '$lib/components/preambles/NewChatPreambleControls.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
@@ -26,6 +27,7 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getAppShell } from '$lib/context';
 
 	interface Props {
 		startup: NewChatFormState;
@@ -53,6 +55,7 @@
 		onPromptKeydown,
 	}: Props = $props();
 	let textarea: HTMLTextAreaElement | null = $state(null);
+	const appShell = getAppShell();
 
 	const permissionOptions = $derived(buildPermissionOptions(startup.permissionModes));
 	const thinkingOptions = $derived(buildThinkingOptions(startup.thinkingModes, startup.modelValue));
@@ -191,6 +194,23 @@
 		{#if startup.modelSelectionError}
 			<p class="text-sm text-destructive">{startup.modelSelectionError}</p>
 		{/if}
+	</div>
+
+	<div class="space-y-1.5" data-slot="scheduled-new-chat-preambles">
+		<NewChatPreambleControls
+			selection={startup.preambles}
+			trimmedPath={startup.trimmedPath}
+			validationStatus={startup.validationStatus}
+			pickerDescription={m.scheduled_prompts_preamble_selection_description()}
+			summaryReadyLabel={m.scheduled_prompts_preamble_preview_label()}
+			summaryEmptyLabel={m.scheduled_prompts_preamble_none_current()}
+			onOpenCatalog={(returnFocus) => appShell.openPreamblesOverScheduledPrompts(returnFocus)}
+		/>
+		<p class="px-1 text-xs text-muted-foreground" data-slot="scheduled-new-chat-preamble-hint">
+			{startup.preambles.choice.mode === 'defaults'
+				? m.scheduled_prompts_preamble_defaults_hint()
+				: m.scheduled_prompts_preamble_explicit_hint()}
+		</p>
 	</div>
 
 	<ScheduledPromptField

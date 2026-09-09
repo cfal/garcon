@@ -10,11 +10,12 @@
 		projectDraftSelection,
 	} from '$lib/preambles/selection-projection.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import type {
-		Preamble,
-		PreambleId,
-		PreambleSelectionProjection,
-		PreambleSelectionUnavailableReason,
+	import {
+		PREAMBLE_MAX_COUNT,
+		type Preamble,
+		type PreambleId,
+		type PreambleSelectionProjection,
+		type PreambleSelectionUnavailableReason,
 	} from '$shared/preambles';
 
 	interface Props {
@@ -56,6 +57,8 @@
 	const selectionIndexes = $derived(new Map(draftIds.map((id, index) => [id, index] as const)));
 	const catalogIds = $derived(new Set(catalog.preambles.map((preamble) => preamble.id)));
 	const missingRows = $derived(draftProjection.rows.filter((row) => !catalogIds.has(row.id)));
+	const selectionLimitReached = $derived(draftIds.length >= PREAMBLE_MAX_COUNT);
+	const selectionLimitDescriptionId = `${componentId}-preamble-selection-limit`;
 
 	function reasonLabel(reason: PreambleSelectionUnavailableReason): string {
 		switch (reason) {
@@ -81,6 +84,16 @@
 
 	function reasonDescriptionId(preambleId: PreambleId): string {
 		return `${componentId}-preamble-selection-reason-${preambleId}`;
+	}
+
+	function selectionDescriptionId(
+		preambleId: PreambleId,
+		selected: boolean,
+		reason: PreambleSelectionUnavailableReason | null,
+	): string | undefined {
+		if (reason) return reasonDescriptionId(preambleId);
+		if (!selected && selectionLimitReached) return selectionLimitDescriptionId;
+		return undefined;
 	}
 </script>
 
@@ -115,6 +128,16 @@
 		{#if draftProjection.eligibleCount === 0}
 			<p class="text-sm text-muted-foreground" data-slot="chat-preamble-selection-empty">
 				{m.preamble_selection_none_enabled()}
+			</p>
+		{/if}
+		{#if selectionLimitReached}
+			<p
+				id={selectionLimitDescriptionId}
+				class="text-xs text-muted-foreground"
+				role="status"
+				data-slot="chat-preamble-selection-limit"
+			>
+				{m.preamble_selection_limit_reached({ count: PREAMBLE_MAX_COUNT })}
 			</p>
 		{/if}
 
@@ -167,11 +190,11 @@
 						<Switch
 							data-slot="chat-preamble-selection-checkbox"
 							checked={selected}
-							disabled={disabled || (!selected && reason !== null)}
+							disabled={disabled || (!selected && (reason !== null || selectionLimitReached))}
 							aria-label={selected
 								? m.preamble_selection_remove({ title: preamble.title })
 								: m.preamble_selection_add_candidate({ title: preamble.title })}
-							aria-describedby={reason ? reasonDescriptionId(preamble.id) : undefined}
+							aria-describedby={selectionDescriptionId(preamble.id, selected, reason)}
 							onCheckedChange={(checked) => toggleSelection(preamble.id, checked)}
 						/>
 					</div>
