@@ -686,7 +686,7 @@
 			class="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-3"
 			data-chat-board-viewport
 		>
-			<div class="flex h-full min-w-max gap-3">
+			<div class="flex h-full w-max min-w-full gap-3">
 				{#each lanes as lane (lane.column.id)}
 					<ChatBoardLane
 						{lane}

@@ -235,7 +235,7 @@
 	bind:this={viewportRef}
 	{@attach virtual.viewport}
 	{@attach scrollRegion}
-	class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2"
+	class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 pb-2"
 	style:overflow-anchor="none"
 	data-chat-board-lane-list={columnId}
 	onscroll={rememberScrollPosition}

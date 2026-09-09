@@ -10,6 +10,7 @@ import {
   withChromiumFixture,
   type ChromiumFixture,
 } from '../../support/chromium-fixture.js';
+import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 
 const READY_COLUMN_ID = '22222222-2222-4222-8222-222222222222';
 const REVIEW_COLUMN_ID = '33333333-3333-4333-8333-333333333333';
@@ -70,10 +71,7 @@ async function openBoard(fixture: ChromiumFixture, chatId: string): Promise<void
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page
-    .locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]')
-    .click();
-  await fixture.page.getByRole('menuitem', { name: 'Open Chat Board', exact: true }).click();
+  await clickWorkspaceWindowAddAction(fixture.page, 'Open Chat Board');
   await fixture.page.locator('[data-chat-board-panel]').waitFor({ state: 'visible' });
   await fixture.page.locator(`[data-chat-board-lane-list="${READY_COLUMN_ID}"]`).waitFor();
 }
@@ -260,6 +258,40 @@ describe('Chromium Chat Board interactions', () => {
 
       markPhase('opening the board and cancelling a transition');
       await openBoard(fixture, firstChatId);
+
+      markPhase('expanding columns equally and scrolling the board from a lane');
+      await constrainBoardWidth(fixture, 1_000);
+      await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
+      const expandedGeometry = await fixture.page.locator('[data-chat-board-viewport]').evaluate((viewport) => {
+        const widths = Array.from(
+          viewport.querySelectorAll<HTMLElement>(':scope > div > [data-chat-board-column-id]'),
+          (lane) => lane.getBoundingClientRect().width,
+        );
+        return { widths, clientWidth: viewport.clientWidth, scrollWidth: viewport.scrollWidth };
+      });
+      expect(expandedGeometry.widths).toHaveLength(2);
+      expect(Math.abs(expandedGeometry.widths[0]! - expandedGeometry.widths[1]!)).toBeLessThan(1);
+      expect(expandedGeometry.widths[0]!).toBeGreaterThan(416);
+      expect(expandedGeometry.scrollWidth).toBe(expandedGeometry.clientWidth);
+
+      await constrainBoardWidth(fixture, 700);
+      await fixture.page.locator('[data-chat-board-panel][data-presentation-band="medium"]').waitFor();
+      const boardViewport = fixture.page.locator('[data-chat-board-viewport]');
+      const constrainedGeometry = await boardViewport.evaluate((viewport) => {
+        viewport.scrollLeft = 0;
+        return { clientWidth: viewport.clientWidth, scrollWidth: viewport.scrollWidth };
+      });
+      expect(constrainedGeometry.scrollWidth).toBeGreaterThan(constrainedGeometry.clientWidth);
+      await fixture.page.locator(`[data-chat-board-lane-list="${READY_COLUMN_ID}"]`).hover();
+      await fixture.page.mouse.wheel(300, 0);
+      await fixture.page.waitForFunction(
+        () => (document.querySelector<HTMLElement>('[data-chat-board-viewport]')?.scrollLeft ?? 0) > 0,
+      );
+
+      await constrainBoardWidth(fixture, null);
+      await fixture.page
+        .locator('[data-chat-board-panel]:not([data-presentation-band="narrow"])')
+        .waitFor();
       const invoker = fixture.page
         .locator(
           `[data-chat-board-column-id="${READY_COLUMN_ID}"] [data-chat-board-occurrence] button[aria-label="Transition…"]`,
@@ -365,7 +397,10 @@ describe('Chromium Chat Board interactions', () => {
       );
       await offscreenTransition.waitFor();
       await offscreenTransition.focus();
-      const remountedReadyScrollTop = await setLaneScroll(fixture, READY_COLUMN_ID, 0);
+      await fixture.page.locator(`[data-chat-board-lane-list="${READY_COLUMN_ID}"]`).hover();
+      await fixture.page.mouse.wheel(0, -10_000);
+      const remountedReadyScrollTop = await settledLaneScrollTop(fixture, READY_COLUMN_ID);
+      expect(remountedReadyScrollTop).toBe(0);
       await fixture.page.setViewportSize({ width: 390, height: 600 });
       const mobilePanel = fixture.page.locator(
         '[data-chat-board-panel][data-presentation="mobile"][data-presentation-band="narrow"]',
