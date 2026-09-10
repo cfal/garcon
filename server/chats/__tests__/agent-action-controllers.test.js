@@ -4,6 +4,8 @@ import { AgentScheduleController } from '../agent-schedule-controller.js';
 import { AgentStartSelectionService } from '../../agents/agent-start-selection-service.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import { DomainError } from '../../lib/domain-error.js';
+import { AtomicJsonWriteError } from '../../lib/json-file-store.js';
+import { AgentStartCompensatedError } from '../../commands/agent-start-compensated-error.js';
 import { resolveStartProjectPath } from '../../lib/command-project-path.js';
 import { ScheduledPromptCreationOutcomeUnknownError } from '../../scheduled-prompts/scheduler.js';
 import { ScheduledPromptDomainError } from '../../scheduled-prompts/store.js';
@@ -24,7 +26,10 @@ function deferred() {
 async function drain() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 
 function fixture(options = {}) {
-  const parent = { projectPath: '/synthetic/project', permissionMode: 'bypassPermissions' };
+  const parent = {
+    agentId: 'test', model: 'test-model', thinkingMode: 'none', agentSettingsById: {},
+    projectPath: '/synthetic/project', permissionMode: 'bypassPermissions',
+  };
   const chats = new Map([[SOURCE.chatId, parent]]);
   let currentView = SOURCE.viewId;
   let enabled = true;
@@ -32,7 +37,7 @@ function fixture(options = {}) {
   const notices = [];
   const events = [];
   const context = {
-    registry: { getChat: (id) => chats.get(id) ?? null },
+    registry: { getChat: (id) => structuredClone(chats.get(id) ?? null) },
     notices: {
       existingCurrentView: () => ({ viewId: currentView }),
       appendNotice: mock((_chatId, _viewId, notice) => { events.push('notice'); notices.push(notice); }),
@@ -120,6 +125,67 @@ describe('assistant action controllers', () => {
     expect(parseGarconCommandResult(f.replies[0].input.content)).toMatchObject({ status: 'accepted', chatId: CHILD, requestViewId: SOURCE.viewId, requestOrdinal: 2 });
   });
 
+  it('inherits the latest locked configuration after catalog discovery', async () => {
+    const f = fixture();
+    const discovered = deferred(); const release = deferred();
+    f.agents.getAgentCatalogEntry.mockImplementation(async () => {
+      discovered.resolve(); await release.promise; return f.entry;
+    });
+    f.start.request(SOURCE, { ...START, agentId: null, model: null });
+    await discovered.promise;
+    f.entry.models.push({ value: 'current-model', label: 'Current' });
+    Object.assign(f.parent, {
+      model: 'current-model', thinkingMode: 'high', permissionMode: 'default', projectPath: '/synthetic/current',
+      agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: { current: true } } },
+    });
+    release.resolve(); await drain();
+    expect(f.commands.submitAgentCommandStartLocked).toHaveBeenCalledTimes(1);
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).toMatchObject({
+      agentId: 'test', model: 'current-model', thinkingMode: 'high', permissionMode: 'default',
+      projectPath: '/synthetic/current', agentSettings: f.parent.agentSettingsById.test,
+    });
+  });
+
+  it.each([false, true])('rediscovers a changed parent agent outside locks (old discovery fails: %s)', async (fails) => {
+    const allocate = mock(() => CHILD);
+    const f = fixture({ chatIds: { allocate } });
+    const discovered = deferred(); const release = deferred();
+    const successor = { ...f.entry, id: 'successor', defaultSettings: { ownerId: 'successor', schemaVersion: 1, values: {} } };
+    f.agents.getAgentCatalogEntry.mockImplementation(async (agentId) => {
+      if (agentId === 'test') {
+        discovered.resolve(); await release.promise;
+        if (fails) throw new Error('Old discovery failed');
+        return f.entry;
+      }
+      await f.context.chatMutationLock.runExclusiveMany([`chat:${SOURCE.chatId}`, `chat:${CHILD}`], async () => {});
+      return successor;
+    });
+    f.start.request(SOURCE, { ...START, agentId: null, model: null });
+    await discovered.promise;
+    f.parent.agentId = 'successor';
+    release.resolve(); await drain();
+    expect(f.agents.getAgentCatalogEntry.mock.calls.map(([id]) => id)).toEqual(['test', 'successor']);
+    expect(allocate).toHaveBeenCalledTimes(1);
+    expect(f.commands.submitAgentCommandStartLocked).toHaveBeenCalledTimes(1);
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).toMatchObject({ agentId: 'successor', thinkingMode: 'none' });
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0].detail.status).toBe('accepted');
+  });
+
+  it('bounds rediscovery under repeated ownership changes without admitting a child', async () => {
+    const f = fixture();
+    f.agents.getAgentCatalogEntry.mockImplementation(async (agentId) => {
+      f.parent.agentId = `${agentId}-next`;
+      return f.entry;
+    });
+    f.start.request(SOURCE, { ...START, agentId: null, model: null });
+    await drain();
+    expect(f.agents.getAgentCatalogEntry).toHaveBeenCalledTimes(3);
+    expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason: 'action-failed' });
+  });
+
   it.each([
     ['unsupported-permission-mode', (f) => { f.entry.supportedPermissionModes = ['default']; }, START],
     ['unsupported-reasoning-effort', () => {}, { ...START, reasoningEffort: 'invalid' }],
@@ -133,16 +199,28 @@ describe('assistant action controllers', () => {
     expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason });
   });
 
-  it('distinguishes compensated and uncertain retained starts', async () => {
-    for (const [error, retained, status] of [
-      [new Error('failed start'), false, 'rejected'],
-      [new Error('post-admission failure'), true, 'outcome-unknown'],
-      [new AggregateError([new Error('rollback flush failed')]), false, 'outcome-unknown'],
+  it('preserves admission failure precedence and retained-child outcomes', async () => {
+    for (const [error, retained, outcome] of [
+      [new Error('failed start'), false, { status: 'rejected', reason: 'action-failed' }],
+      [new Error('post-admission failure'), true, { status: 'outcome-unknown', chatId: CHILD }],
+      [new AggregateError([new Error('rollback flush failed')]), false, { status: 'outcome-unknown', chatId: CHILD }],
+      [new AtomicJsonWriteError('write failed', false), false, { status: 'rejected', reason: 'action-failed' }],
+      [new AtomicJsonWriteError('directory sync failed', true), false, { status: 'outcome-unknown', chatId: CHILD }],
+      [new DomainError('PREAMBLE_SLASH_COMMAND_BLOCKED', 'blocked'), true,
+        { status: 'preamble-rejected', chatId: CHILD, reason: 'slash-command-blocked' }],
+      [new DomainError('PREAMBLE_SELECTION_COMPOSITION_INVALID', 'invalid'), true,
+        { status: 'preamble-rejected', chatId: CHILD, reason: 'composition-invalid' }],
+      [new DomainError('PREAMBLE_SLASH_COMMAND_BLOCKED', 'blocked'), false, { status: 'rejected', reason: 'action-failed' }],
+      [new AgentStartCompensatedError(new DomainError('UNSUPPORTED_AGENT', 'unsupported')), true,
+        { status: 'rejected', reason: 'unsupported-agent' }],
     ]) {
       const f = fixture();
       f.commands.submitAgentCommandStartLocked.mockImplementation(async () => { if (retained) f.chats.set(CHILD, {}); throw error; });
       f.start.request(SOURCE, START); await drain();
-      expect(f.notices[0].detail.status).toBe(status);
+      expect(f.notices[0].detail).toEqual({
+        type: 'agent-start-outcome', ref: START.ref, async: START.async,
+        requestViewId: SOURCE.viewId, requestOrdinal: SOURCE.requestOrdinal, ...outcome,
+      });
     }
   });
 

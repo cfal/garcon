@@ -33,7 +33,6 @@ import {
   normalizeChatRegistryEntry,
   normalizeMigrationQuarantine,
   normalizeNativeSeedReceipt,
-  normalizeNextForkOrdinal,
   normalizePreambleSelection,
   normalizeRegistryModes,
   parseCarryOverSegmentRefs,
@@ -76,7 +75,6 @@ const ALLOWED_PATCH_FIELDS = [
   'agentSettingsById',
   'tags',
   'agentSessionId',
-  'nextForkOrdinal',
   'model',
   'apiProviderId',
   'modelEndpointId',
@@ -119,7 +117,6 @@ export interface ChatRegistryEntry {
   projectPath: string;
   tags: string[];
   agentSessionId: string | null;
-  nextForkOrdinal?: number;
   model: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -173,7 +170,6 @@ export interface NewChatRegistryEntry {
   agentSettingsById?: Record<string, AgentSettingsEnvelope>;
   tags?: string[];
   agentSessionId?: string | null;
-  nextForkOrdinal?: number;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
@@ -441,7 +437,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     agentSettingsById = {},
     tags = [],
     agentSessionId = null,
-    nextForkOrdinal = 1,
     apiProviderId = null,
     modelEndpointId = null,
     modelProtocol = null,
@@ -489,7 +484,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       projectPath,
       tags: [...tags],
       agentSessionId,
-      nextForkOrdinal: normalizeNextForkOrdinal(nextForkOrdinal) ?? 1,
       model,
       apiProviderId,
       modelEndpointId,
@@ -582,9 +576,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     }
     if ('thinkingMode' in normalizedPatch) {
       normalizedPatch.thinkingMode = normalizeThinkingMode(normalizedPatch.thinkingMode);
-    }
-    if ('nextForkOrdinal' in normalizedPatch) {
-      normalizedPatch.nextForkOrdinal = normalizeNextForkOrdinal(normalizedPatch.nextForkOrdinal);
     }
     if ('nativeSession' in normalizedPatch && normalizedPatch.nativeSession?.ownerId !== (normalizedPatch.agentId ?? existing.agentId)) {
       if (normalizedPatch.nativeSession !== null) throw new Error(`Native session owner mismatch for ${id}`);

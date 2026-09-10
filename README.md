@@ -57,6 +57,8 @@ Garcon keeps the full loop together:
 - **Move context deliberately.** Fork where the provider supports it, export complete Markdown or XML transcripts, create token-budgeted handoff artifacts, or delegate into a fresh chat.
 - **Close the loop from anywhere.** Work with branches, worktrees, history, pull requests, commits, and pushes from desktop or phone, with optional Telegram alerts when attention is needed.
 
+Forks and `/handoff` continuations append the first unused numeric suffix to the source's visible title, checking all chats in the workspace, including archived chats. Deleted names can be reused. Existing suffixes remain literal: forking `Topic (1)` produces `Topic (1) (1)`, not `Topic (2)`.
+
 ## See It In Action
 
 <p align="center"><strong>Agents that can coordinate</strong></p>
@@ -150,7 +152,7 @@ Under the hood, `<garcon-get-chat-id />` gives an agent its runtime identity and
 Agents can also start a delegated child, resume or stop that child, or schedule a prompt back to their own chat:
 
 ```xml
-<garcon-start-agent ref="parser-review" agent="codex" model="gpt-5.4-nano" reasoning-effort="low" title="Parser review">
+<garcon-start-agent ref="parser-review" title="Parser review">
 Review the parser tests and report missing cases.
 </garcon-start-agent>
 
@@ -165,7 +167,19 @@ Review the revised error handling.
 <garcon-schedule every="5m" busy="skip" />
 ```
 
-Place each command at an assistant message's leading or trailing edge, outside code fences. Attribute values use double quotes; escape body text with `&amp;` and `&lt;`. Starts require `agent`, `model`, and `ref`; optional `provider` selects a configured provider by ID or exact, case-sensitive display name, and optional `reasoning-effort` selects a supported effort. IDs take precedence; duplicate provider names reject with `ambiguous-provider` and require an ID, even with an exact model selection. Children inherit the parent's current project path and permission mode, use target-agent execution defaults, and retain a delegation edge. Commands cannot override permissions, paths, tags, or preambles. Unsupported inherited permissions reject the start.
+Place each command at an assistant message's leading or trailing edge, outside code fences. Attribute values use double quotes; escape body text with `&amp;` and `&lt;`. Starts require `ref` and a nonblank prompt. Selection attributes follow this hierarchy:
+
+| Attributes supplied | Child selection |
+| --- | --- |
+| None | Parent's current agent, model, and exact route |
+| `model` | Parent's agent and exact route, with the requested model |
+| `provider`, `model` | Parent's agent, with the requested provider and model |
+| `agent`, `provider`, `model` | Fully explicit selection |
+| `agent`, `model` | Requested agent's native route, without a configured API provider |
+
+Providing `agent` or `provider` requires `model`; empty attributes are invalid. An explicit `agent` without `provider` always selects native execution, even when it names the parent's agent. Native routing uses that agent's own authentication/configuration, not a configured provider's display label. It requires a known native catalog model; endpoint-only agents and unknown models reject instead of falling back to another route. Inherited routing pins the parent's provider, endpoint, and protocol; unavailable or incompatible selections reject. An explicit provider does not borrow the parent's endpoint to resolve ambiguity.
+
+`provider` accepts a configured provider ID or exact, case-sensitive display name. IDs take precedence; duplicate names reject with `ambiguous-provider` and require an ID, even with an exact model selection. With `agent` omitted, children inherit the parent's current reasoning effort and active agent settings. An explicit `agent` uses target-agent execution defaults instead; optional `reasoning-effort` overrides either choice and must be supported. Every child inherits the parent's current project path and permission mode and retains a delegation edge. Commands cannot override permissions, paths, tags, or preambles. Unsupported inherited modes reject the start. These defaults apply to markup commands; CLI start still requires explicit agent/model selection and retains its existing catalog search when `--provider` is omitted.
 
 Starts have **no preambles**: neither new-chat defaults nor the parent's selection applies. Optional `fork="true"` copies the parent's committed transcript through the requesting row into a fresh child, including across agents. It never clones a native session or filesystem, and the parent continues independently. Historical preamble notices remain history, not newly applied prefixes. Optional `title` sets a custom name before dispatch and bypasses automatic title generation; omitted titles follow ordinary generation policy.
 

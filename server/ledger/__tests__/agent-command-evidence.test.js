@@ -26,6 +26,34 @@ async function withLedger(run, options = {}) {
 }
 
 describe('agent command durable evidence', () => {
+  it.each(['', 'model="example"', 'provider="example" model="example"'])
+  ('preserves omitted start selections through commit and native import: %s', async (attributes) => {
+    const request = mock();
+    const content = `<garcon-start-agent ref="inherited" ${attributes}>Synthetic child task.</garcon-start-agent>`;
+    await withLedger(async ({ ledger, store }) => {
+      const view = ledger.initializeChat(CHAT);
+      const lease = ledger.openProducer(CHAT, 'test');
+      request.mockImplementation((source, command) => {
+        const [row] = ledger.currentRows(CHAT);
+        expect(source.requestOrdinal).toBe(row.ordinal);
+        expect(row.detail.command).toEqual(command);
+        expect(command.agentId).toBeNull();
+        expect(command.model).toBe(attributes ? 'example' : null);
+      });
+      lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, content) }] });
+      expect(request).toHaveBeenCalledTimes(1);
+      const committed = ledger.currentRows(CHAT)[0].detail;
+      request.mockClear();
+      const drafts = importedDrafts([{ message: new AssistantMessage(AT, content), providerMeta: null }], () => AT);
+      const staged = ledger.stageView(CHAT, drafts, 1);
+      ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
+      store.closeChat(CHAT);
+      expect(ledger.currentRows(CHAT)[0].detail).toEqual(committed);
+      expect(ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT))).toEqual([]);
+      expect(request).not.toHaveBeenCalled();
+    }, { agentStarts: { request } });
+  });
+
   it('commits private stop evidence before dispatch and imports it without dispatch or visible outcomes', async () => {
     const request = mock();
     await withLedger(async ({ ledger, store }) => {

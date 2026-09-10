@@ -1,10 +1,15 @@
-import type { PermissionMode } from '../../common/chat-modes.js';
+import { normalizeAgentSettings } from '../../common/agent-settings.js';
 import type { GarconStartAgentCommand } from '../../common/garcon-start-agent.js';
 import type { ModelCatalogResponse } from '../../common/model-catalog.js';
 import type { RemoteExecutionDefaults } from '../../common/settings.js';
-import { resolveStartSelection } from '../../common/start-selection.js';
+import { requireCatalogAgent, resolveStartSelection, StartSelectionError } from '../../common/start-selection.js';
 import type { ApiProviderService } from '../api-providers/service.js';
+import type { ChatRegistryEntry } from '../chats/store.js';
 import type { AgentRegistryServiceContract } from './registry.js';
+
+type ParentSelection = Pick<ChatRegistryEntry,
+  'agentId' | 'model' | 'apiProviderId' | 'modelEndpointId' | 'modelProtocol'
+  | 'permissionMode' | 'thinkingMode' | 'agentSettingsById'>;
 
 export class AgentStartSelectionService {
   constructor(private readonly deps: {
@@ -25,14 +30,47 @@ export class AgentStartSelectionService {
     catalog: ModelCatalogResponse,
     command: GarconStartAgentCommand,
     executionDefaults: RemoteExecutionDefaults,
-    permissionMode: PermissionMode,
+    parent: ParentSelection,
   ) {
-    return resolveStartSelection(catalog, { executionDefaults }, {
-      agentId: command.agentId,
-      model: command.model,
-      permissionMode,
-      ...(command.providerId === null ? {} : { providerId: command.providerId }),
-      ...(command.reasoningEffort === null ? {} : { thinkingMode: command.reasoningEffort }),
+    const agentId = command.agentId ?? parent.agentId;
+    const inheritAgent = command.agentId === null;
+    const inheritRoute = inheritAgent && command.providerId === null;
+    const inheritedProvider = parent.apiProviderId ?? null;
+    const inheritedEndpoint = parent.modelEndpointId ?? null;
+    const inheritedProtocol = parent.modelProtocol ?? null;
+    if (inheritRoute) {
+      const native = inheritedProvider === null && inheritedEndpoint === null && inheritedProtocol === null;
+      const routed = inheritedProvider !== null && inheritedEndpoint !== null && inheritedProtocol !== null;
+      if (!native && !routed) {
+        throw new StartSelectionError('INCOMPATIBLE_ENDPOINT', 'parent model routing is incomplete');
+      }
+      if (inheritedProvider !== null && !catalog.catalog.apiProviders.some((entry) => entry.id === inheritedProvider)) {
+        throw new StartSelectionError('UNKNOWN_PROVIDER', 'parent API provider is no longer available');
+      }
+    }
+    const thinkingMode = command.reasoningEffort ?? (inheritAgent ? parent.thinkingMode : undefined);
+    const selection = resolveStartSelection(catalog, { executionDefaults }, {
+      agentId,
+      model: command.model ?? parent.model,
+      permissionMode: parent.permissionMode,
+      providerId: inheritRoute ? inheritedProvider : command.providerId,
+      ...(inheritRoute && inheritedEndpoint !== null ? { endpointId: inheritedEndpoint } : {}),
+      ...(thinkingMode === undefined ? {} : { thinkingMode }),
     });
+    if (inheritRoute && (
+      selection.apiProviderId !== inheritedProvider
+      || selection.modelEndpointId !== inheritedEndpoint
+      || selection.modelProtocol !== inheritedProtocol
+      || (command.model === null && selection.model !== parent.model)
+    )) {
+      throw new StartSelectionError('INCOMPATIBLE_ENDPOINT', 'parent model routing is no longer available');
+    }
+    return {
+      ...selection,
+      agentId,
+      agentSettings: inheritAgent ? normalizeAgentSettings(
+        agentId, parent.agentSettingsById[agentId], requireCatalogAgent(catalog, agentId).defaultSettings,
+      ) : selection.agentSettings,
+    };
   }
 }

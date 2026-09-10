@@ -207,7 +207,6 @@ describe('Codex fork while a turn is running', () => {
               projectPath: directories.project,
               tags: [],
               agentSessionId: sourceAgentSessionId,
-              nextForkOrdinal: 1,
               model: 'gpt-5.6-sol',
               apiProviderId: null,
               modelEndpointId: null,

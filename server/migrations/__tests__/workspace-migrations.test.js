@@ -36,6 +36,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', migrate);
     await runner.run('agent-integration-settings-refresh', migrate);
     await runner.run('agent-execution-mode-refresh', migrate);
+    await runner.run('fork-ordinal-cleanup', migrate);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -69,6 +70,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', async () => { events.push('carryover-segment'); });
     await runner.run('agent-integration-settings-refresh', async () => { events.push('settings-refresh'); });
     await runner.run('agent-execution-mode-refresh', async () => { events.push('execution-mode-refresh'); });
+    await runner.run('fork-ordinal-cleanup', async () => { events.push('fork-ordinal-cleanup'); });
     await runner.finish();
 
     expect(events).toEqual([
@@ -79,6 +81,7 @@ describe('WorkspaceMigrationRunner', () => {
       'carryover-segment',
       'settings-refresh',
       'execution-mode-refresh',
+      'fork-ordinal-cleanup',
     ]);
     await expect(fs.stat(queuesDir)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(path.join(workspaceDir, 'pending-user-inputs.json'))).rejects.toMatchObject({
@@ -109,10 +112,11 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', cleanup);
     await runner.run('agent-integration-settings-refresh', cleanup);
     await runner.run('agent-execution-mode-refresh', cleanup);
+    await runner.run('fork-ordinal-cleanup', cleanup);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
-    expect(cleanup).toHaveBeenCalledTimes(5);
+    expect(cleanup).toHaveBeenCalledTimes(6);
     expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 
@@ -133,10 +137,40 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-segment-migration', previous);
     await runner.run('agent-integration-settings-refresh', previous);
     await runner.run('agent-execution-mode-refresh', executionModeRefresh);
+    await runner.run('fork-ordinal-cleanup', async () => undefined);
     await runner.finish();
 
     expect(previous).not.toHaveBeenCalled();
     expect(executionModeRefresh).toHaveBeenCalledOnce();
+    expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
+  });
+
+  it('runs only fork ordinal cleanup for version 7 and stamps only after success', async () => {
+    await fs.writeFile(path.join(workspaceDir, 'workspace-version.json'), JSON.stringify({ version: 7 }));
+    const previous = mock(async () => undefined);
+    const cleanup = mock(async () => { throw new Error('cleanup failed'); });
+
+    for (const attempt of [1, 2]) {
+      const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+      await runner.run('chat-id-migration', previous);
+      await runner.run('core-record-migration', previous);
+      await runner.run('ephemeral-queue-state-cleanup', previous);
+      await runner.run('carryover-node-migration', previous);
+      await runner.run('carryover-segment-migration', previous);
+      await runner.run('agent-integration-settings-refresh', previous);
+      await runner.run('agent-execution-mode-refresh', previous);
+      if (attempt === 1) {
+        await expect(runner.run('fork-ordinal-cleanup', cleanup)).rejects.toThrow('cleanup failed');
+        expect(await readVersion()).toEqual({ version: 7 });
+        cleanup.mockImplementation(async () => undefined);
+      } else {
+        await runner.run('fork-ordinal-cleanup', cleanup);
+        await runner.finish();
+      }
+    }
+
+    expect(previous).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledTimes(2);
     expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 

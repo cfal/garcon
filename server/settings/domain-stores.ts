@@ -1,4 +1,5 @@
 import type { IChatRegistry } from '../chats/store.js';
+import { resolveChatTitle, type DerivedChatNameInput } from '../chats/chat-title.js';
 import { createLogger } from '../lib/log.js';
 import { isRecord } from '../../common/json.js';
 
@@ -264,6 +265,25 @@ export class ChatNameStore {
       if (settings.chatNames?.[String(chatId)]) return false;
       await this.#persistSessionName(settings, chatId, title);
       return true;
+    });
+  }
+
+  async setDerivedSessionName(input: DerivedChatNameInput): Promise<string> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const titleFor = (chatId: string) => resolveChatTitle(
+        settings.chatNames[chatId],
+        input.metadata.getChatMetadata(chatId)?.firstMessage,
+      );
+      const sourceTitle = titleFor(input.sourceChatId);
+      const occupiedTitles = new Set(input.registry.listChatIds()
+        .filter((chatId) => chatId !== input.chatId)
+        .map(titleFor));
+      let suffix = 1;
+      while (occupiedTitles.has(`${sourceTitle} (${suffix})`)) suffix += 1;
+      const title = `${sourceTitle} (${suffix})`;
+      await this.#persistSessionName(settings, input.chatId, title);
+      return title;
     });
   }
 
