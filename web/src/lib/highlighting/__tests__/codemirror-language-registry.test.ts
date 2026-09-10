@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { collectFixture } from '../../../test/collect-fixture.js';
 
 import {
 	canHighlightCodeFenceLanguage,
@@ -7,6 +8,66 @@ import {
 	loadLanguageExtension,
 	normalizeCodeFenceLanguage,
 } from '../codemirror-language-registry';
+
+// Loads parser fixtures during collection so Vite compilation is outside per-test deadlines.
+const codeFenceCases = await collectFixture(
+	Promise.all(
+		[
+			['yaml', 'yaml'],
+			['bash', 'shell'],
+			['csharp', 'c#'],
+			['rb', 'ruby'],
+			['swift', 'swift'],
+			['kt', 'kotlin'],
+			['angular', 'angular template'],
+		].map(async ([language, expectedKey]) => ({
+			language,
+			expectedKey,
+			loaded: await loadCodeFenceLanguage(language),
+		})),
+	),
+	'CodeMirror code-fence fixtures',
+);
+
+const editorCases = await collectFixture(
+	Promise.all(
+		[
+			'main.go',
+			'config.yaml',
+			'script.sh',
+			'Program.cs',
+			'lib/foo.rb',
+			'main.swift',
+			'App.kt',
+			'style.scss',
+			'theme.less',
+			'Component.vue',
+			'template.liquid',
+			'template.jinja',
+			'Dockerfile',
+			'settings.toml',
+			'Counter.svelte',
+			'Containerfile',
+		].map(async (filePath) => ({ filePath, extensions: await loadLanguageExtension(filePath) })),
+	),
+	'CodeMirror editor fixtures',
+);
+
+const filenameCases = await collectFixture(
+	Promise.all(
+		[
+			['src/main.ts', 'typescript'],
+			['src/main.py', 'python'],
+			['Containerfile', 'dockerfile'],
+			['src/Counter.svelte', 'html'],
+		].map(async ([filePath, expectedKey]) => ({
+			filePath,
+			expectedKey,
+			loaded: await loadCodeMirrorLanguageForFile(filePath),
+		})),
+	),
+	'CodeMirror filename fixtures',
+);
 
 describe('normalizeCodeFenceLanguage', () => {
 	it('normalizes common aliases and info-string forms', () => {
@@ -49,20 +110,14 @@ describe('canHighlightCodeFenceLanguage', () => {
 });
 
 describe('loadCodeFenceLanguage', () => {
-	it.each([
-		['yaml', 'yaml'],
-		['bash', 'shell'],
-		['csharp', 'c#'],
-		['rb', 'ruby'],
-		['swift', 'swift'],
-		['kt', 'kotlin'],
-		['angular', 'angular template'],
-	])('loads %s through CodeMirror language-data', async (language, expectedKey) => {
-		const loaded = await loadCodeFenceLanguage(language);
-		expect(loaded?.key).toBe(expectedKey);
-		expect(loaded?.language.parser).toBeTruthy();
-		expect(loaded?.extensions.length).toBeGreaterThan(0);
-	});
+	it.each(codeFenceCases)(
+		'loads $language through CodeMirror language-data',
+		({ loaded, expectedKey }) => {
+			expect(loaded?.key).toBe(expectedKey);
+			expect(loaded?.language.parser).toBeTruthy();
+			expect(loaded?.extensions.length).toBeGreaterThan(0);
+		},
+	);
 
 	it('does not load a parser for manual diff highlighting', async () => {
 		await expect(loadCodeFenceLanguage('diff')).resolves.toBeNull();
@@ -70,25 +125,7 @@ describe('loadCodeFenceLanguage', () => {
 });
 
 describe('loadLanguageExtension', () => {
-	it.each([
-		'main.go',
-		'config.yaml',
-		'script.sh',
-		'Program.cs',
-		'lib/foo.rb',
-		'main.swift',
-		'App.kt',
-		'style.scss',
-		'theme.less',
-		'Component.vue',
-		'template.liquid',
-		'template.jinja',
-		'Dockerfile',
-		'settings.toml',
-		'Counter.svelte',
-		'Containerfile',
-	])('loads editor support for %s', async (filePath) => {
-		const extensions = await loadLanguageExtension(filePath);
+	it.each(editorCases)('loads editor support for $filePath', ({ extensions }) => {
 		expect(extensions.length).toBeGreaterThan(0);
 	});
 
@@ -107,14 +144,7 @@ describe('loadLanguageExtension', () => {
 });
 
 describe('loadCodeMirrorLanguageForFile', () => {
-	it.each([
-		['src/main.ts', 'typescript'],
-		['src/main.py', 'python'],
-		['Containerfile', 'dockerfile'],
-		['src/Counter.svelte', 'html'],
-	])('loads %s as %s', async (filePath, expectedKey) => {
-		const loaded = await loadCodeMirrorLanguageForFile(filePath);
-
+	it.each(filenameCases)('loads $filePath as $expectedKey', ({ loaded, expectedKey }) => {
 		expect(loaded?.key).toBe(expectedKey);
 		expect(loaded?.language.parser).toBeTruthy();
 		expect(loaded?.extensions.length).toBeGreaterThan(0);

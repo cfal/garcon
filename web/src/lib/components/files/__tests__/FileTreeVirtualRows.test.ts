@@ -1,15 +1,23 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, setup, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import FileTreeVirtualRows from '../FileTreeVirtualRows.svelte';
 import type { FileTreeViewMode } from '../file-tree-view-profile.js';
+import { collectFixture } from '../../../../test/collect-fixture.js';
 import {
 	FILE_TREE_COARSE_ROW_HEIGHT,
 	FILE_TREE_HEADER_HEIGHT,
 	FILE_TREE_ROW_HEIGHT,
 } from '../FileTreeVirtualController.svelte.js';
+
+// Compiles Testing Library's lazy wrapper outside the first hook timeout.
+try {
+	await collectFixture(setup(), 'Testing Library Svelte wrapper');
+} finally {
+	cleanup();
+}
 
 function entries(count: number): FileTreeEntry[] {
 	return Array.from({ length: count }, (_, index) => {
