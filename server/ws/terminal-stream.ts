@@ -4,10 +4,10 @@ import {
 } from "../../common/terminal.js";
 import type { ServerPrincipal } from "../lib/http-route-types.js";
 import {
-  TerminalManager,
-  TerminalManagerError,
+  WorkspaceTerminalError,
+  type WorkspaceTerminalService,
   type TerminalStreamPeer,
-} from "../terminals/terminal-manager.js";
+} from "../execution-nodes/workspace-terminals.js";
 import {
   expandTerminalMessageForDelivery,
   serializeTerminalMessage,
@@ -38,6 +38,7 @@ type TerminalSocket = import("bun").ServerWebSocket<TerminalWebSocketData>;
 
 interface SocketRuntime {
   peer: TerminalStreamPeer;
+  lifetime: AbortController;
   expiryTimer: ReturnType<typeof setTimeout> | null;
   terminalAuthorized: boolean;
   closed: boolean;
@@ -49,7 +50,7 @@ function sendError(
   error: unknown,
   terminalId?: string,
 ): void {
-  if (error instanceof TerminalManagerError) {
+  if (error instanceof WorkspaceTerminalError) {
     peer.sendTerminalMessage({
       type: "terminal-error",
       ...(terminalId ? { terminalId } : {}),
@@ -70,7 +71,10 @@ export class TerminalStreamHandler {
   readonly #runtimeBySocket = new WeakMap<TerminalSocket, SocketRuntime>();
 
   constructor(
-    readonly manager: TerminalManager,
+    readonly manager: Pick<
+      WorkspaceTerminalService,
+      'attach' | 'input' | 'resize' | 'detachPeer' | 'detachTerminal'
+    >,
     readonly now: () => number = Date.now,
   ) {}
 
@@ -85,16 +89,19 @@ export class TerminalStreamHandler {
   }
 
   open(socket: TerminalSocket): void {
-    const peer: TerminalStreamPeer = {
+    const lifetime = new AbortController();
+    const peer: TerminalStreamPeer = Object.freeze({
       connectionId: socket.data.connectionId,
-      ownedTerminalIds: new Set(),
+      signal: lifetime.signal,
       sendTerminalMessage: (message: TerminalStreamServerMessage) => {
         const current = this.#runtimeBySocket.get(socket);
-        if (current) this.#sendTerminalMessage(socket, current, message);
+        if (current === runtime)
+          this.#sendTerminalMessage(socket, current, message);
       },
-    };
+    });
     const runtime: SocketRuntime = {
       peer,
+      lifetime,
       expiryTimer: null,
       terminalAuthorized: true,
       closed: false,
@@ -103,7 +110,7 @@ export class TerminalStreamHandler {
     this.#runtimeBySocket.set(socket, runtime);
   }
 
-  async message(socket: TerminalSocket, data: unknown): Promise<void> {
+  message(socket: TerminalSocket, data: unknown): void {
     const runtime = this.#runtimeBySocket.get(socket);
     if (!runtime || runtime.closed) return;
     if (!runtime.terminalAuthorized) return;
@@ -148,7 +155,11 @@ export class TerminalStreamHandler {
 
   drain(socket: TerminalSocket): void {
     const runtime = this.#runtimeBySocket.get(socket);
-    if (!runtime || runtime.closed) return;
+    if (!runtime || runtime.closed || !runtime.terminalAuthorized) return;
+    if (this.#isExpired(socket)) {
+      this.#expireTerminal(socket, runtime);
+      return;
+    }
     runtime.outputQueue.markDrained();
     this.#flushPendingMessages(socket, runtime);
   }
@@ -157,6 +168,7 @@ export class TerminalStreamHandler {
     const runtime = this.#runtimeBySocket.get(socket);
     if (!runtime || runtime.closed) return;
     runtime.closed = true;
+    runtime.lifetime.abort();
     if (runtime.expiryTimer) clearTimeout(runtime.expiryTimer);
     runtime.expiryTimer = null;
     runtime.outputQueue.clear();
@@ -177,9 +189,13 @@ export class TerminalStreamHandler {
     message: TerminalStreamServerMessage,
   ): void {
     if (runtime.closed || !runtime.terminalAuthorized) return;
+    if (this.#isExpired(socket)) {
+      this.#expireTerminal(socket, runtime);
+      return;
+    }
     for (const deliveryMessage of expandTerminalMessageForDelivery(message)) {
-      if (runtime.closed) return;
-      this.#sendDeliveryMessage(socket, runtime, deliveryMessage);
+      if (runtime.closed || !runtime.terminalAuthorized) return;
+      if (!this.#sendDeliveryMessage(socket, runtime, deliveryMessage)) return;
     }
   }
 
@@ -187,7 +203,7 @@ export class TerminalStreamHandler {
     socket: TerminalSocket,
     runtime: SocketRuntime,
     message: TerminalStreamServerMessage,
-  ): void {
+  ): boolean {
     const pending = serializeTerminalMessage(message);
     if (runtime.outputQueue.shouldEnqueue) {
       if (runtime.outputQueue.enqueue(message, pending) === "overflow") {
@@ -226,10 +242,12 @@ export class TerminalStreamHandler {
             TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
           );
         }
+        return false;
       }
-      return;
+      return true;
     }
     this.#sendPayload(socket, runtime, pending.payload);
+    return !runtime.closed;
   }
 
   #flushPendingMessages(socket: TerminalSocket, runtime: SocketRuntime): void {
@@ -316,13 +334,15 @@ export class TerminalStreamHandler {
     if (runtime.expiryTimer) clearTimeout(runtime.expiryTimer);
     runtime.expiryTimer = null;
     runtime.outputQueue.clear();
-    runtime.peer.sendTerminalMessage({
+    this.#sendDeliveryMessage(socket, runtime, {
       type: "terminal-error",
       code: "terminal-auth-expired",
       message: "Terminal authorization expired.",
     });
     runtime.terminalAuthorized = false;
-    this.manager.detachPeer(socket.data.principal, runtime.peer);
+    runtime.lifetime.abort();
+    if (!runtime.closed)
+      this.manager.detachPeer(socket.data.principal, runtime.peer);
   }
 }
 

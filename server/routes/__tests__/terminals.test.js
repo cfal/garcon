@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import createTerminalRoutes from '../terminals.ts';
-import { TerminalManagerError } from '../../terminals/terminal-manager.ts';
+import { WorkspaceTerminalError } from '../../execution-nodes/workspace-terminals.js';
 
 const principal = {
   mode: 'authenticated',
@@ -131,13 +131,12 @@ describe('terminal routes', () => {
     const manager = {
       list: () => [],
       create: async () => {
-        throw new TerminalManagerError('terminal-limit', 'Limit reached.', 409);
+        throw new WorkspaceTerminalError('terminal-limit', 'Limit reached.');
       },
       rename: () => {
-        throw new TerminalManagerError(
+        throw new WorkspaceTerminalError(
           'terminal-not-found',
           'Terminal not found.',
-          404,
         );
       },
     };

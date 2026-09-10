@@ -3,7 +3,9 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { randomUUID } from "crypto";
-import { TerminalManager, TerminalManagerError } from "../terminal-manager.ts";
+import { LocalWorkspaceTerminalService } from "../local-workspace-terminals.js";
+import { WorkspaceTerminalError } from "../../execution-nodes/workspace-terminals.js";
+import { resolveRealWithinBase } from "../../lib/path-boundary.js";
 
 class FakePty {
   dataListeners = [];
@@ -58,7 +60,7 @@ function principal(key) {
 function peer(connectionId) {
   return {
     connectionId,
-    ownedTerminalIds: new Set(),
+    signal: new AbortController().signal,
     messages: [],
     sendTerminalMessage(message) {
       this.messages.push(message);
@@ -67,29 +69,35 @@ function peer(connectionId) {
 }
 
 let projectPath;
-let originalProjectBaseDir;
+const services = [];
+
+function createService(options) {
+  const service = new LocalWorkspaceTerminalService({
+    projectBasePath: projectPath,
+    assertProjectPathAllowed: (target) => resolveRealWithinBase(projectPath, target),
+    shell: '/bin/sh', environment: {}, ...options,
+  });
+  services.push(service);
+  return service;
+}
 
 beforeEach(async () => {
-  originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
   projectPath = path.join(
     os.tmpdir(),
     `garcon-terminal-manager-${randomUUID()}`,
   );
   await fs.mkdir(projectPath, { recursive: true });
-  process.env.GARCON_PROJECT_BASE_DIR = projectPath;
 });
 
 afterEach(async () => {
-  if (originalProjectBaseDir === undefined)
-    delete process.env.GARCON_PROJECT_BASE_DIR;
-  else process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+  await Promise.all(services.splice(0).map((service) => service.shutdown()));
   await fs.rm(projectPath, { recursive: true, force: true });
 });
 
-describe("TerminalManager", () => {
+describe("LocalWorkspaceTerminalService", () => {
   it("creates idempotently, isolates principals, and retains exited sessions", async () => {
     const ptys = [];
-    const manager = new TerminalManager({
+    const manager = createService({
       spawnPty: () => {
         const pty = new FakePty();
         ptys.push(pty);
@@ -118,7 +126,7 @@ describe("TerminalManager", () => {
 
   it("renames running and exited sessions and broadcasts the current metadata", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({ spawnPty: () => pty });
+    const manager = createService({ spawnPty: () => pty });
     const alice = principal("alice");
     const bob = principal("bob");
     const created = await manager.create(alice, {
@@ -135,7 +143,7 @@ describe("TerminalManager", () => {
     });
     expect(manager.list(alice)[0].title).toBe("Build logs");
     expect(() => manager.rename(bob, terminalId, "Other")).toThrow(
-      TerminalManagerError,
+      WorkspaceTerminalError,
     );
 
     const browser = peer("socket-1");
@@ -165,7 +173,7 @@ describe("TerminalManager", () => {
 
   it("settles the operation chain when the error notification send fails", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({ spawnPty: () => pty });
+    const manager = createService({ spawnPty: () => pty });
     const alice = principal("alice");
     const created = await manager.create(alice, {
       requestId: "create-1",
@@ -199,7 +207,7 @@ describe("TerminalManager", () => {
   });
 
   it("enforces the principal cap under concurrent creation", async () => {
-    const manager = new TerminalManager({ spawnPty: () => new FakePty() });
+    const manager = createService({ spawnPty: () => new FakePty() });
     const alice = principal("alice");
     for (let index = 0; index < 7; index += 1) {
       await manager.create(alice, {
@@ -222,14 +230,14 @@ describe("TerminalManager", () => {
       results.filter((result) => result.status === "fulfilled"),
     ).toHaveLength(1);
     const rejection = results.find((result) => result.status === "rejected");
-    expect(rejection.reason).toBeInstanceOf(TerminalManagerError);
+    expect(rejection.reason).toBeInstanceOf(WorkspaceTerminalError);
     expect(rejection.reason.code).toBe("terminal-limit");
     expect(manager.list(alice)).toHaveLength(8);
   });
 
   it("replays retained output, reports truncation, and transfers attachment ownership", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({
+    const manager = createService({
       spawnPty: () => pty,
       replayBytes: 4,
     });
@@ -273,7 +281,7 @@ describe("TerminalManager", () => {
         afterSequence: 3,
         intent: "restore",
       }),
-    ).toThrow(TerminalManagerError);
+    ).toThrow(WorkspaceTerminalError);
     manager.attach(alice, secondPeer, {
       type: "terminal-attach",
       terminalId,
@@ -286,12 +294,12 @@ describe("TerminalManager", () => {
       terminalId,
       replacementClientId: "client-2",
     });
-    expect(firstPeer.ownedTerminalIds.has(terminalId)).toBe(false);
-    expect(secondPeer.ownedTerminalIds.has(terminalId)).toBe(true);
+    expect(() => manager.input(alice, firstPeer, terminalId, "")).toThrow(WorkspaceTerminalError);
+    expect(() => manager.input(alice, secondPeer, terminalId, "")).not.toThrow(WorkspaceTerminalError);
   });
 
   it("restores an attachment from a replacement peer with the same client identity", async () => {
-    const manager = new TerminalManager({ spawnPty: () => new FakePty() });
+    const manager = createService({ spawnPty: () => new FakePty() });
     const alice = principal("alice");
     const created = await manager.create(alice, {
       requestId: "create-1",
@@ -316,8 +324,8 @@ describe("TerminalManager", () => {
       intent: "restore",
     });
 
-    expect(priorPeer.ownedTerminalIds.has(terminalId)).toBe(false);
-    expect(replacementPeer.ownedTerminalIds.has(terminalId)).toBe(true);
+    expect(() => manager.input(alice, priorPeer, terminalId, "")).toThrow(WorkspaceTerminalError);
+    expect(() => manager.input(alice, replacementPeer, terminalId, "")).not.toThrow(WorkspaceTerminalError);
     expect(
       priorPeer.messages.some(
         (message) => message.type === "terminal-taken-over",
@@ -330,7 +338,7 @@ describe("TerminalManager", () => {
 
   it("broadcasts process exit status to every subscribed browser", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({ spawnPty: () => pty });
+    const manager = createService({ spawnPty: () => pty });
     const alice = principal("alice");
     const created = await manager.create(alice, {
       requestId: "create-1",
@@ -355,7 +363,7 @@ describe("TerminalManager", () => {
         afterSequence: 0,
         intent: "restore",
       }),
-    ).toThrow(TerminalManagerError);
+    ).toThrow(WorkspaceTerminalError);
     manager.attach(alice, attachedBrowser, {
       type: "terminal-attach",
       terminalId,
@@ -384,7 +392,7 @@ describe("TerminalManager", () => {
 
   it("reports process exit when no subscribed browser owns the attachment", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({ spawnPty: () => pty });
+    const manager = createService({ spawnPty: () => pty });
     const alice = principal("alice");
     const created = await manager.create(alice, {
       requestId: "create-1",
@@ -425,7 +433,7 @@ describe("TerminalManager", () => {
 
   it("orders input, coalesces resize, detaches without killing, and terminates idempotently", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({ spawnPty: () => pty });
+    const manager = createService({ spawnPty: () => pty });
     const alice = principal("alice");
     const terminal = await manager.create(alice, {
       requestId: "create-1",
@@ -458,7 +466,7 @@ describe("TerminalManager", () => {
   });
 
   it("notifies attached and displaced browsers when another client terminates a session", async () => {
-    const manager = new TerminalManager({ spawnPty: () => new FakePty() });
+    const manager = createService({ spawnPty: () => new FakePty() });
     const alice = principal("alice");
     const created = await manager.create(alice, {
       requestId: "create-1",
@@ -482,7 +490,7 @@ describe("TerminalManager", () => {
         afterSequence: 0,
         intent: "restore",
       }),
-    ).toThrow(TerminalManagerError);
+    ).toThrow(WorkspaceTerminalError);
     const replacementBrowser = peer("socket-2");
     manager.attach(alice, replacementBrowser, {
       type: "terminal-attach",
@@ -498,12 +506,12 @@ describe("TerminalManager", () => {
       type: "terminal-terminated",
       terminalId,
     });
-    expect(attachedBrowser.ownedTerminalIds.has(terminalId)).toBe(false);
+    expect(() => manager.input(alice, attachedBrowser, terminalId, "")).toThrow(WorkspaceTerminalError);
     expect(replacementBrowser.messages.at(-1)).toEqual({
       type: "terminal-terminated",
       terminalId,
     });
-    expect(replacementBrowser.ownedTerminalIds.has(terminalId)).toBe(false);
+    expect(() => manager.input(alice, replacementBrowser, terminalId, "")).toThrow(WorkspaceTerminalError);
     expect(passiveBrowser.messages.at(-1)).toEqual({
       type: "terminal-terminated",
       terminalId,
@@ -511,7 +519,7 @@ describe("TerminalManager", () => {
   });
 
   it("bounds idempotency results per principal without evicting valid retries", async () => {
-    const manager = new TerminalManager({
+    const manager = createService({
       spawnPty: () => new FakePty(),
       requestResultsPerPrincipal: 2,
       requestResultsTotal: 4,
@@ -525,7 +533,6 @@ describe("TerminalManager", () => {
       manager.terminate(alice, "missing-3", "terminate-3"),
     ).rejects.toMatchObject({
       code: "terminal-backpressure",
-      status: 429,
     });
     expect(
       await manager.terminate(alice, "missing-1", "terminate-1"),
@@ -539,7 +546,7 @@ describe("TerminalManager", () => {
 
   it("scopes terminate idempotency to the terminal and request IDs", async () => {
     const ptys = [];
-    const manager = new TerminalManager({
+    const manager = createService({
       spawnPty: () => {
         const pty = new FakePty();
         ptys.push(pty);
@@ -572,7 +579,7 @@ describe("TerminalManager", () => {
 
   it("drops queued input when attachment ownership changes before execution", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({ spawnPty: () => pty });
+    const manager = createService({ spawnPty: () => pty });
     const alice = principal("alice");
     const created = await manager.create(alice, {
       requestId: "create-1",
@@ -603,7 +610,7 @@ describe("TerminalManager", () => {
   });
 
   it("detaches one terminal without affecting another subscription on the peer", async () => {
-    const manager = new TerminalManager({ spawnPty: () => new FakePty() });
+    const manager = createService({ spawnPty: () => new FakePty() });
     const alice = principal("alice");
     const browser = peer("socket-1");
     const first = await manager.create(alice, {
@@ -626,8 +633,8 @@ describe("TerminalManager", () => {
 
     manager.detachTerminal(alice, browser, first.terminal.terminalId);
 
-    expect(browser.ownedTerminalIds.has(first.terminal.terminalId)).toBe(false);
-    expect(browser.ownedTerminalIds.has(second.terminal.terminalId)).toBe(true);
+    expect(() => manager.input(alice, browser, first.terminal.terminalId, "")).toThrow(WorkspaceTerminalError);
+    expect(() => manager.input(alice, browser, second.terminal.terminalId, "")).not.toThrow(WorkspaceTerminalError);
     expect(manager.list(alice)).toEqual([
       expect.objectContaining({
         terminalId: first.terminal.terminalId,
@@ -642,7 +649,7 @@ describe("TerminalManager", () => {
 
   it("coalesces only adjacent resizes without crossing an input boundary", async () => {
     const pty = new FakePty();
-    const manager = new TerminalManager({ spawnPty: () => pty });
+    const manager = createService({ spawnPty: () => pty });
     const alice = principal("alice");
     const created = await manager.create(alice, {
       requestId: "create-1",
@@ -668,7 +675,7 @@ describe("TerminalManager", () => {
 
   it("kills every remaining PTY during shutdown", async () => {
     const ptys = [];
-    const manager = new TerminalManager({
+    const manager = createService({
       spawnPty: () => {
         const pty = new FakePty();
         ptys.push(pty);

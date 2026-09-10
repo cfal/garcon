@@ -47,7 +47,7 @@ import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
-import type { TerminalManager } from '../terminals/terminal-manager.js';
+import type { WorkspaceTerminalService } from '../execution-nodes/workspace-terminals.js';
 import type { TranscriptSearchController } from '../chats/search/controller.js';
 import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
@@ -127,7 +127,7 @@ export default function createAllRoutes(workspaceDir: string, {
   chatBoards: ChatBoardService;
   chatTags: ChatTagMutationService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
-  terminals: TerminalManager;
+  terminals: WorkspaceTerminalService;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
   runtimeState: ServerRuntimeState;

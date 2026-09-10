@@ -7,34 +7,15 @@ import {
 import { jsonError } from '../lib/http-error.js';
 import type { HttpRouteContext, RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
-import {
-  TerminalManager,
-  TerminalManagerError,
-} from '../terminals/terminal-manager.js';
-
-function terminalError(error: unknown): Response {
-  if (error instanceof TerminalManagerError) {
-    return jsonError(
-      error.message,
-      error.status,
-      error.code,
-      error.status >= 500,
-    );
-  }
-  return jsonError(
-    'Terminal operation failed.',
-    500,
-    'terminal-internal',
-    true,
-  );
-}
+import type { WorkspaceTerminalService } from '../execution-nodes/workspace-terminals.js';
+import { terminalErrorResponse } from './terminal-http-error.js';
 
 function requirePrincipal(context?: HttpRouteContext) {
   return context?.principal ?? null;
 }
 
 export default function createTerminalRoutes(
-  manager: TerminalManager,
+  manager: Pick<WorkspaceTerminalService, 'list' | 'create' | 'rename' | 'terminate'>,
 ): RouteMap {
   return {
     '/api/v1/terminals': {
@@ -46,10 +27,14 @@ export default function createTerminalRoutes(
             401,
             'terminal-validation',
           );
-        return Response.json({
-          success: true,
-          terminals: manager.list(principal),
-        } satisfies TerminalListResponse);
+        try {
+          return Response.json({
+            success: true,
+            terminals: manager.list(principal),
+          } satisfies TerminalListResponse);
+        } catch (error) {
+          return terminalErrorResponse(error);
+        }
       },
       POST: withJsonBody(
         async (body: unknown, _request, _url, _server, context) => {
@@ -72,7 +57,7 @@ export default function createTerminalRoutes(
               status: 201,
             });
           } catch (error) {
-            return terminalError(error);
+            return terminalErrorResponse(error);
           }
         },
       ),
@@ -97,7 +82,7 @@ export default function createTerminalRoutes(
               manager.rename(principal, input.terminalId, input.title),
             );
           } catch (error) {
-            return terminalError(error);
+            return terminalErrorResponse(error);
           }
         },
       ),
@@ -126,7 +111,7 @@ export default function createTerminalRoutes(
               ),
             );
           } catch (error) {
-            return terminalError(error);
+            return terminalErrorResponse(error);
           }
         },
       ),

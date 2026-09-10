@@ -33,8 +33,7 @@ import {
 } from './chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';
 import { queueDrainOptions } from './chats/chat-execution-options.js';
-import { TerminalManager } from './terminals/terminal-manager.js';
-import { TerminalStreamHandler } from './ws/terminal-stream.js';
+import { initializeTerminalRuntime } from './terminals/setup.js';
 import { PrimaryWsHandler } from './ws/primary.js';
 import {
   PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS,
@@ -212,8 +211,7 @@ export async function startServer(): Promise<void> {
         logger.warn('chat-title: failed to record recent icons:', errorMessage(error));
       }
     });
-    const terminalManager = new TerminalManager();
-    const terminalStream = new TerminalStreamHandler(terminalManager);
+    const terminals = initializeTerminalRuntime(config, process.env);
     const wsAdmission = new WebSocketAdmissionController(config.maxWsClients);
 
     await initAuthStore();
@@ -724,7 +722,7 @@ export async function startServer(): Promise<void> {
       preambles,
       chatPreambleSelection,
       ...chatBoardRuntime,
-      terminals: terminalManager,
+      terminals: terminals.service,
       searchIndex: chatSearch,
       transcriptSearchSettings,
       runtimeState,
@@ -752,7 +750,7 @@ export async function startServer(): Promise<void> {
       transientFeeds,
       registry: chatRegistry,
     });
-    const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);
+    const primaryWs = new PrimaryWsHandler(chatHandler, terminals.stream);
 
     const listenPort = config.port;
     const bindAddress = config.bindAddress;
@@ -903,6 +901,7 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
+      const terminalCleanup = terminals.shutdown();
       agentCommands.shutdown();
       carryOverGarbageCollector.shutdown();
       logger.info('server: shutting down...');
@@ -947,13 +946,13 @@ export async function startServer(): Promise<void> {
         await chatSearch.close();
         await integrationRegistry.stop();
         transcriptLedger.close();
-        terminalManager.shutdown();
         await metadata.flush();
         await chatRegistry.flush();
       } catch (err) {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       } finally {
+        if (!(await terminalCleanup)) cleanupFailed = true;
         if (runtimeFilePath) {
           try {
             await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);

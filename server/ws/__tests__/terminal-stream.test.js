@@ -1,4 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
+import { LocalWorkspaceTerminalService } from "../../execution-node/local-workspace-terminals.js";
 import {
   TERMINAL_STREAM_MAX_PENDING_MESSAGES_PER_SESSION,
   TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
@@ -85,6 +88,44 @@ function manager() {
       ]);
     },
   };
+}
+
+const cleanups = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+
+async function ownerFixture() {
+  const children = [];
+  const owner = new LocalWorkspaceTerminalService({
+    projectBasePath: homedir(), assertProjectPathAllowed: realpath,
+    shell: '/bin/sh', environment: {}, replayBytes: 4 * 1024 * 1024,
+    spawnPty: () => {
+      const child = {
+        writes: [],
+        write(data) { this.writes.push(data); },
+        resize() {}, kill() {},
+        onData(listener) { this.emit = listener; },
+        onExit() {},
+      };
+      children.push(child);
+      return child;
+    },
+  });
+  cleanups.push(() => owner.shutdown());
+  const handler = new TerminalStreamHandler(owner);
+  const ws = socket();
+  handler.open(ws);
+  cleanups.push(() => handler.close(ws));
+  const terminals = [];
+  for (const requestId of ['first', 'second']) {
+    terminals.push((await owner.create(ws.data.principal, { requestId, requestedInitialWorkingDirectory: null })).terminal);
+  }
+  const attach = (terminalId) => handler.message(ws, {
+    type: 'terminal-attach', terminalId, clientId: 'synthetic-tab', afterSequence: 0, intent: 'restore',
+  });
+  const input = (terminalId, data) => handler.message(ws, { type: 'terminal-input', terminalId, data });
+  return { owner, handler, ws, children, terminals, attach, input };
 }
 
 describe("TerminalStreamHandler", () => {
@@ -352,5 +393,102 @@ describe("TerminalStreamHandler", () => {
     expect(Math.max(...ws.sentByteLengths)).toBeLessThanOrEqual(
       TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
     );
+  });
+
+  it('aborts an immutable peer before detach and fences its output after reopening', () => {
+    const terminals = manager();
+    const handler = new TerminalStreamHandler(terminals);
+    const ws = socket();
+    cleanups.push(() => handler.close(ws));
+    const attach = () => handler.message(ws, {
+      type: 'terminal-attach', terminalId: 'terminal-1', clientId: 'tab', afterSequence: 0, intent: 'restore',
+    });
+    handler.open(ws);
+    attach();
+    const retired = terminals.peer;
+    expect(Object.isFrozen(retired)).toBe(true);
+    let abortedAtDetach = false;
+    terminals.detachPeer = (_principal, peer) => { abortedAtDetach = peer.signal.aborted; };
+    handler.close(ws);
+    expect(abortedAtDetach).toBe(true);
+    handler.open(ws);
+    attach();
+    retired.sendTerminalMessage({ type: 'terminal-output', terminalId: 'terminal-1', sequence: 1, data: 'stale' });
+    terminals.peer.sendTerminalMessage({ type: 'terminal-output', terminalId: 'terminal-1', sequence: 2, data: 'current' });
+    expect(ws.sent).toEqual([{ type: 'terminal-output', terminalId: 'terminal-1', sequence: 2, data: 'current' }]);
+  });
+
+  it.each(['drain', 'output'])('checks authorization expiry on %s before the expiry timer runs', (callback) => {
+    let now = 0;
+    const terminals = manager();
+    const handler = new TerminalStreamHandler(terminals, () => now);
+    const ws = socket(60_000);
+    cleanups.push(() => handler.close(ws));
+    handler.open(ws);
+    handler.message(ws, { type: 'terminal-attach', terminalId: 'terminal-1', clientId: 'tab', afterSequence: 0, intent: 'restore' });
+    ws.sendResults.push(-1);
+    const output = (sequence) => terminals.peer.sendTerminalMessage({
+      type: 'terminal-output', terminalId: 'terminal-1', sequence, data: 'synthetic',
+    });
+    output(1);
+    output(2);
+    ws.sent.length = 0;
+    now = 60_000;
+    if (callback === 'drain') handler.drain(ws);
+    else output(3);
+    handler.drain(ws);
+    expect(terminals.peer.signal.aborted).toBe(true);
+    expect(ws.sent).toEqual([{
+      type: 'terminal-error', code: 'terminal-auth-expired', message: 'Terminal authorization expired.',
+    }]);
+    expect(ws.closes).toEqual([]);
+  });
+
+  it('admits same-tick attach/input and discards queued input on close', async () => {
+    const { handler, ws, children, terminals, attach, input } = await ownerFixture();
+    expect(attach(terminals[0].terminalId)).toBeUndefined();
+    expect(input(terminals[0].terminalId, 'accepted')).toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(children[0].writes).toEqual(['accepted']);
+    input(terminals[0].terminalId, 'closed');
+    handler.close(ws);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(children[0].writes).toEqual(['accepted']);
+  });
+
+  it('a send failure during attach detaches ownership before the next input', async () => {
+    const { owner, ws, children, terminals, attach, input } = await ownerFixture();
+    ws.sendResults.push(0);
+    attach(terminals[0].terminalId);
+    input(terminals[0].terminalId, 'closed');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(children[0].writes).toEqual([]);
+    expect(owner.list(ws.data.principal)[0].attachmentStatus).toBe('detached');
+    expect(ws.closes).toEqual([{ code: 1011, reason: 'TERMINAL_STREAM_SEND_FAILED' }]);
+  });
+
+  it.each(['live output', 'attach replay'])('stops an overflowing %s expansion and preserves the other terminal', async (delivery) => {
+    const { owner, handler, ws, children, terminals, attach, input } = await ownerFixture();
+    const noisy = terminals[0].terminalId;
+    const other = terminals[1].terminalId;
+    attach(other);
+    if (delivery === 'live output') attach(noisy);
+    ws.sent.length = 0;
+    ws.sendResults.push(-1);
+    children[1].emit('blocked');
+    children[0].emit('x'.repeat(2 * 1024 * 1024));
+    if (delivery === 'attach replay') attach(noisy);
+    expect(owner.list(ws.data.principal).map((terminal) => terminal.attachmentStatus)).toEqual(['detached', 'attached']);
+    handler.drain(ws);
+    expect(ws.sent.filter((message) => message.terminalId === noisy)).toEqual([{
+      type: 'terminal-error', terminalId: noisy, code: 'terminal-backpressure',
+      message: 'Terminal output exceeded this client connection capacity.',
+    }]);
+    input(noisy, 'rejected');
+    input(other, 'accepted');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(children.map((child) => child.writes)).toEqual([[], ['accepted']]);
+    expect(ws.sent.at(-1)).toMatchObject({ type: 'terminal-error', terminalId: noisy, code: 'terminal-not-attached' });
+    expect(ws.closes).toEqual([]);
   });
 });
