@@ -158,11 +158,21 @@ describe("Lightpanda Chat Board", () => {
         const select = document.querySelector<HTMLSelectElement>(
           '[role="dialog"] select',
         );
-        if (!select) throw new Error("Missing transition destination select");
-        Object.getOwnPropertyDescriptor(
-          HTMLSelectElement.prototype,
-          "value",
-        )?.set?.call(select, "none");
+        const option = select?.querySelector<HTMLOptionElement>(
+          'option[value="none"]',
+        );
+        if (!select || !option || option.disabled) {
+          throw new Error("Missing enabled None action");
+        }
+        select.value = option.value;
+        if (select.value !== option.value) {
+          // Lightpanda 0.3.5 omits optgroup descendants from native select accessors.
+          Object.defineProperty(select, "value", {
+            configurable: true,
+            writable: true,
+            value: option.value,
+          });
+        }
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
       await app.waitForDialogButtonEnabled("Apply tag changes");
