@@ -116,6 +116,7 @@ export async function runOpenAiResponsesSingleQuery(
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       }),
       signal: directSingleQuerySignal(options, controller.signal),
+      timeout: false,
     });
 
     if (!response.ok) {
