@@ -62,6 +62,11 @@ export class E2eFixture {
       context = await browser.createBrowserContext();
       const page = await context.newPage();
       await installLightpandaWorkspaceGeometry(page);
+      if (integration.authToken) {
+        await page.evaluateOnNewDocument((token) => {
+          globalThis.localStorage.setItem('bearer-token', token);
+        }, integration.authToken);
+      }
       await page.evaluateOnNewDocument(() => {
         const localSettingsKey = 'pref_local_settings';
         try {

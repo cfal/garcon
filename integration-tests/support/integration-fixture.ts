@@ -27,6 +27,7 @@ import {
   type DirectTestAgents,
 } from './garcon-client.js';
 import { GarconProcess } from './garcon-process.js';
+import { loginFixtureAccount, prepareFixtureAccount, type FixtureAccount } from './fixture-account.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'server');
@@ -52,6 +53,8 @@ export interface IntegrationDirectories {
 }
 
 export interface IntegrationFixtureOptions {
+  bindAddress?: string;
+  authentication?: 'account';
   chatTitleEnabled?: boolean;
   chatTitleAgent?: keyof DirectTestAgents;
   forbiddenPersistedValues?: readonly string[];
@@ -71,6 +74,7 @@ export interface IntegrationFixtureOptions {
   redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
   namedWorkspace?: string;
+  preloadModules?: readonly string[];
 }
 
 const SENSITIVE_ENVIRONMENT_NAME =
@@ -188,10 +192,18 @@ export class IntegrationFixture {
   readonly #forbiddenPersistedValues: readonly string[];
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #serverEnvironment: Record<string, string>;
+  readonly #preloadModules: readonly string[];
   readonly #workspaceName: string | undefined;
+  readonly #bindAddress: string | undefined;
+  readonly #account: FixtureAccount | null;
+  #authToken: string | undefined;
   readonly #afterGarconStop?: (directories: IntegrationDirectories) => Promise<void>;
   readonly #extraDiagnostics?: (directories: IntegrationDirectories) => Record<string, unknown>;
   garcon: GarconProcess;
+
+  get authToken(): string | undefined {
+    return this.#authToken;
+  }
   client: GarconTestClient;
   readonly #clients = new Map<string, GarconTestClient>();
   readonly #completedRuns: IntegrationProcessRunDiagnostics[] = [];
@@ -206,7 +218,11 @@ export class IntegrationFixture {
     forbiddenPersistedValues?: readonly string[];
     redactSensitiveDiagnostics?: boolean;
     serverEnvironment?: Record<string, string>;
+    preloadModules?: readonly string[];
     workspaceName?: string;
+    bindAddress?: string;
+    account?: FixtureAccount | null;
+    authToken?: string;
     afterGarconStop?: (directories: IntegrationDirectories) => Promise<void>;
     extraDiagnostics?: (directories: IntegrationDirectories) => Record<string, unknown>;
   }) {
@@ -219,7 +235,11 @@ export class IntegrationFixture {
     this.#forbiddenPersistedValues = [...(input.forbiddenPersistedValues ?? [])];
     this.#redactSensitiveDiagnostics = input.redactSensitiveDiagnostics === true;
     this.#serverEnvironment = { ...(input.serverEnvironment ?? {}) };
+    this.#preloadModules = [...(input.preloadModules ?? [])];
     this.#workspaceName = input.workspaceName;
+    this.#bindAddress = input.bindAddress;
+    this.#account = input.account ?? null;
+    this.#authToken = input.authToken;
     this.#afterGarconStop = input.afterGarconStop;
     this.#extraDiagnostics = input.extraDiagnostics;
   }
@@ -251,6 +271,7 @@ export class IntegrationFixture {
       // preparation. Resolver values still win on conflicts.
       const resolvedEnvironment = options.resolveServerEnvironment?.(dirs) ?? {};
       await options.prepareWorkspace?.(dirs);
+      const account = options.authentication === 'account' ? await prepareFixtureAccount(dirs.config) : null;
       const serverEnvironment = {
         ...(options.serverEnvironment ?? {}),
         ...resolvedEnvironment,
@@ -260,12 +281,17 @@ export class IntegrationFixture {
         configDir: dirs.config,
         workspaceDir: dirs.workspace,
         workspaceName: options.namedWorkspace,
+        bindAddress: options.bindAddress,
+        disableAuth: account ? false : undefined,
         projectDir: dirs.project,
         homeDir: dirs.home,
         environment: serverEnvironment,
+        preloadModules: options.preloadModules,
         redactEnvironmentValues: options.redactSensitiveDiagnostics,
       });
+      const authToken = account ? await loginFixtureAccount(garcon.baseUrl, account) : undefined;
       client = await GarconTestClient.connect(garcon.baseUrl, {
+        authToken,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
       });
       await client.ping();
@@ -312,7 +338,11 @@ export class IntegrationFixture {
         forbiddenPersistedValues: options.forbiddenPersistedValues,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
         serverEnvironment,
+        preloadModules: options.preloadModules,
         workspaceName: options.namedWorkspace,
+        bindAddress: options.bindAddress,
+        account,
+        authToken,
         afterGarconStop: options.afterGarconStop,
         extraDiagnostics: options.extraDiagnostics,
       });
@@ -348,6 +378,7 @@ export class IntegrationFixture {
       throw new Error(`Integration client already exists: ${normalizedName}`);
     }
     const observer = await GarconTestClient.connect(this.garcon.baseUrl, {
+      authToken: this.#authToken,
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
     });
     try {
@@ -609,13 +640,18 @@ export class IntegrationFixture {
       configDir: this.dirs.config,
       workspaceDir: this.dirs.workspace,
       workspaceName: this.#workspaceName,
+      bindAddress: this.#bindAddress,
+      disableAuth: this.#account ? false : undefined,
       projectDir: this.dirs.project,
       homeDir: this.dirs.home,
       environment: this.#serverEnvironment,
+      preloadModules: this.#preloadModules,
       redactEnvironmentValues: this.#redactSensitiveDiagnostics,
       port,
     });
+    this.#authToken = this.#account ? await loginFixtureAccount(this.garcon.baseUrl, this.#account) : undefined;
     this.client = await GarconTestClient.connect(this.garcon.baseUrl, {
+      authToken: this.#authToken,
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
     });
     this.#clients.set('primary', this.client);

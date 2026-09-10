@@ -16,3 +16,16 @@ export async function prepareFixtureAccount(configDirectory: string): Promise<Fi
   }), { mode: 0o600 });
   return account;
 }
+
+export async function loginFixtureAccount(baseUrl: string, account: FixtureAccount): Promise<string> {
+  const response = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(account),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`Fixture login failed with HTTP ${response.status}`);
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== 'object' || !('token' in payload) || typeof payload.token !== 'string') {
+    throw new Error('Fixture login returned no token');
+  }
+  return payload.token;
+}

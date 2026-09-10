@@ -112,6 +112,7 @@ import {
   type ClientWsMessage,
 } from '../../common/ws-requests.js';
 import { Deferred, withTimeout } from './deferred.js';
+import { webSocketProtocolsForAuth } from '../../common/ws-auth.js';
 import { INTEGRATION_ANTHROPIC_API_KEY } from './anthropic-test-contract.js';
 import { INTEGRATION_OPENAI_API_KEY } from './openai-test-contract.js';
 
@@ -202,6 +203,7 @@ interface GarconWebSocket {
 }
 
 export interface GarconTestClientOptions {
+  authToken?: string;
   createWebSocket?: (url: string) => GarconWebSocket;
   redactSensitiveDiagnostics?: boolean;
 }
@@ -314,6 +316,7 @@ async function responseBody(response: Response): Promise<unknown> {
 
 export class GarconTestClient {
   readonly #baseUrl: string;
+  readonly #authToken: string | undefined;
   readonly #createWebSocket: (url: string) => GarconWebSocket;
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #exchanges: HttpExchange[] = [];
@@ -325,7 +328,9 @@ export class GarconTestClient {
 
   private constructor(baseUrl: string, options: GarconTestClientOptions) {
     this.#baseUrl = baseUrl.replace(/\/$/, '');
-    this.#createWebSocket = options.createWebSocket ?? ((url) => new WebSocket(url));
+    this.#authToken = options.authToken;
+    this.#createWebSocket = options.createWebSocket ?? ((url) => options.authToken
+      ? new WebSocket(url, webSocketProtocolsForAuth(options.authToken)) : new WebSocket(url));
     this.#redactSensitiveDiagnostics = options.redactSensitiveDiagnostics === true;
   }
 
@@ -1174,7 +1179,10 @@ export class GarconTestClient {
   ): Promise<{ response: Response; parsed: unknown }> {
     const response = await fetch(`${this.#baseUrl}${path}`, {
       method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      headers: {
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(this.#authToken ? { Authorization: `Bearer ${this.#authToken}` } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const parsed = await responseBody(response);

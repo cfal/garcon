@@ -15,6 +15,7 @@ export interface GarconProcessOptions {
   homeDir: string;
   startupTimeoutMs?: number;
   environment?: Record<string, string>;
+  preloadModules?: readonly string[];
   redactEnvironmentValues?: boolean;
   disableAuth?: boolean;
   port?: number;
@@ -134,6 +135,7 @@ export class GarconProcess {
     const child = Bun.spawn({
       cmd: [
         process.execPath,
+        ...(options.preloadModules ?? []).flatMap((modulePath) => ['--preload', modulePath]),
         'server/main.ts',
         '--port',
         String(options.port ?? 0),
