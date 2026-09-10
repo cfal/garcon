@@ -36,6 +36,7 @@ import type {
   StartedAgentSession,
 } from './session-types.js';
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
+import type { AgentInstanceDirectory } from './instance-directory.js';
 import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import {
@@ -183,7 +184,7 @@ interface CompactSessionOptions {
 export class AgentRegistry implements AgentRegistryServiceContract {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
-  readonly #instances: AgentRuntimeRouterOptions['instances'];
+  readonly #instances: AgentRuntimeRouterOptions['instances'] & Pick<AgentInstanceDirectory, 'catalogForInstance'>;
   readonly #localNodeId: string;
   readonly #catalog: AgentCatalogService;
   readonly #events: AgentEventBus;
@@ -206,7 +207,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   constructor(args: {
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
-    instances: AgentRuntimeRouterOptions['instances'];
+    instances: AgentRuntimeRouterOptions['instances'] & Pick<AgentInstanceDirectory, 'catalogForInstance'>;
     localNodeId: string;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
@@ -227,7 +228,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#instances = args.instances;
     this.#localNodeId = args.localNodeId;
     this.#catalog = new AgentCatalogService({
-      directory: this.#directory,
+      instances: this.#instances,
+      localNodeId: this.#localNodeId,
+      defaultAgentIds: this.#directory.list().map((integration) => integration.descriptor.id),
       endpointResolver: args.endpointResolver,
     });
     this.#events = new AgentEventBus();

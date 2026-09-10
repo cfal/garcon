@@ -3,13 +3,15 @@ import type {
   AgentModelOption,
 } from "../../common/agents.js";
 import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-resolver.js";
-import type { AgentDirectory } from "./directory.js";
+import { executionInstanceKey, type ExecutionInstanceRef } from "../../common/execution-location.js";
+import type { AgentInstanceDirectory } from "./instance-directory.js";
 import { createLogger } from "../lib/log.js";
 
 const logger = createLogger("agents:catalog-service");
 
 export interface AgentModelQuery {
-  strict?: boolean;
+  readonly strict?: boolean;
+  readonly signal?: AbortSignal;
 }
 
 function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
@@ -22,11 +24,13 @@ function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
 }
 
 export class AgentCatalogService {
-  readonly #requiresStrictByAgent = new Map<string, boolean>();
+  readonly #requiresStrictByInstance = new Map<string, boolean>();
 
   constructor(
     private readonly deps: {
-      directory: AgentDirectory;
+      instances: Pick<AgentInstanceDirectory, 'catalogForInstance' | 'defaultFor' | 'require'>;
+      localNodeId: string;
+      defaultAgentIds: readonly string[];
       endpointResolver: ApiProviderEndpointResolver;
     },
   ) {}
@@ -35,9 +39,23 @@ export class AgentCatalogService {
     agentId: string,
     query: AgentModelQuery = {},
   ): Promise<AgentModelOption[]> {
-    const integration = this.deps.directory.get(agentId);
-    if (!integration) return [];
-    return [...(await this.#snapshot(agentId, query)).models];
+    const signal = query.signal;
+    signal?.throwIfAborted();
+    const ref = this.deps.instances.defaultFor(this.deps.localNodeId, agentId);
+    const models = ref ? await this.getModelsForInstance(ref, query) : [];
+    signal?.throwIfAborted();
+    return models;
+  }
+
+  async getModelsForInstance(
+    ref: ExecutionInstanceRef,
+    query: AgentModelQuery = {},
+  ): Promise<AgentModelOption[]> {
+    const signal = query.signal;
+    signal?.throwIfAborted();
+    const snapshot = await this.#snapshot(ref, query);
+    signal?.throwIfAborted();
+    return [...snapshot.models];
   }
 
   async modelSupportsImages(input: {
@@ -46,8 +64,9 @@ export class AgentCatalogService {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean> {
-    const integration = this.deps.directory.get(input.agentId);
-    if (!integration) return false;
+    const ref = this.deps.instances.defaultFor(this.deps.localNodeId, input.agentId);
+    if (!ref) return false;
+    const integration = this.deps.instances.require(ref);
     if (!input.apiProviderId || !input.modelEndpointId)
       return integration.descriptor.supportsImages;
     return this.deps.endpointResolver.modelSupportsImages(input);
@@ -58,16 +77,37 @@ export class AgentCatalogService {
   }
 
   requiresStrictModelDiscovery(agentId: string): boolean {
-    return this.#requiresStrictByAgent.get(agentId) ?? false;
+    const ref = this.deps.instances.defaultFor(this.deps.localNodeId, agentId);
+    return ref ? this.requiresStrictModelDiscoveryForInstance(ref) : false;
+  }
+
+  requiresStrictModelDiscoveryForInstance(ref: ExecutionInstanceRef): boolean {
+    this.deps.instances.require(ref);
+    return this.#requiresStrictByInstance.get(executionInstanceKey(ref)) ?? false;
   }
 
   async getAgentCatalogEntry(
     agentId: string,
     query: AgentModelQuery = {},
   ): Promise<AgentCatalogEntry | null> {
-    const integration = this.deps.directory.get(agentId);
-    if (!integration) return null;
-    const snapshot = await this.#snapshot(agentId, query);
+    const signal = query.signal;
+    signal?.throwIfAborted();
+    const ref = this.deps.instances.defaultFor(this.deps.localNodeId, agentId);
+    const entry = ref ? await this.getAgentCatalogEntryForInstance(ref, query) : null;
+    signal?.throwIfAborted();
+    return entry;
+  }
+
+  async getAgentCatalogEntryForInstance(
+    ref: ExecutionInstanceRef,
+    query: AgentModelQuery = {},
+  ): Promise<AgentCatalogEntry> {
+    const signal = query.signal;
+    signal?.throwIfAborted();
+    const integration = this.deps.instances.require(ref);
+    const agentId = integration.descriptor.id;
+    const snapshot = await this.#snapshot(ref, query);
+    signal?.throwIfAborted();
     const endpointModels = integration.endpoints
       ? this.deps.endpointResolver.getModelOptions(agentId)
       : [];
@@ -103,11 +143,7 @@ export class AgentCatalogService {
   async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
     const entries = (
       await Promise.all(
-        this.deps.directory
-          .list()
-          .map((integration) =>
-            this.getAgentCatalogEntry(integration.descriptor.id),
-          ),
+        this.deps.defaultAgentIds.map((agentId) => this.getAgentCatalogEntry(agentId)),
       )
     ).filter((entry): entry is AgentCatalogEntry => entry !== null);
     const priorities = new Set<number>();
@@ -123,26 +159,28 @@ export class AgentCatalogService {
     return entries;
   }
 
-  async #snapshot(agentId: string, query: AgentModelQuery) {
-    const integration = this.deps.directory.require(agentId);
-    const signal = new AbortController().signal;
+  async #snapshot(ref: ExecutionInstanceRef, query: AgentModelQuery) {
+    const { nodeId, instanceId } = ref;
+    const key = executionInstanceKey({ nodeId, instanceId });
+    const catalog = this.deps.instances.catalogForInstance({ nodeId, instanceId });
+    const signal = query.signal ?? new AbortController().signal;
+    const strict = query.strict ?? false;
     try {
-      const snapshot = await integration.catalog.snapshot({
-        strict: query.strict ?? false,
-        signal,
-      });
-      this.#requiresStrictByAgent.set(
-        agentId,
+      const snapshot = await catalog.snapshot({ strict }, signal);
+      signal.throwIfAborted();
+      this.#requiresStrictByInstance.set(
+        key,
         snapshot.requiresStrictModelDiscovery,
       );
       return snapshot;
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof Error && error.name === 'AbortError') throw error;
-      if (query.strict) throw error;
+      if (strict) throw error;
       logger.warn('Agent catalog snapshot failed.', {
         code: 'CATALOG_SNAPSHOT_FAILED',
-        integrationId: agentId,
+        nodeId,
+        instanceId,
       });
       return {
         models: [] as AgentModelOption[],

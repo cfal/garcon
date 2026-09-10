@@ -4,6 +4,8 @@ import type { ConfiguredAgentInstance } from '../../common/execution-nodes.js';
 import { DomainError } from '../lib/domain-error.js';
 import { LocalProviderConfigurationService } from '../execution-node/local-provider-configuration.js';
 import type { ProviderConfigurationService } from '../execution-nodes/provider-configuration.js';
+import { LocalProviderCatalogService } from '../execution-node/local-provider-catalog.js';
+import type { ProviderCatalogService } from '../execution-nodes/provider-catalog.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -15,6 +17,7 @@ export class AgentInstanceDirectory {
   readonly #instances = new Map<string, ExecutableAgentInstance>();
   readonly #defaults = new Map<string, ExecutionInstanceRef>();
   readonly #configurationServices = new WeakMap<AgentIntegration, ProviderConfigurationService>();
+  readonly #catalogServices = new Map<string, ProviderCatalogService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -63,6 +66,17 @@ export class AgentInstanceDirectory {
 
   configurationForInstance(ref: ExecutionInstanceRef): ProviderConfigurationService {
     return this.#configurationService(this.require(ref));
+  }
+
+  catalogForInstance(ref: ExecutionInstanceRef): ProviderCatalogService {
+    const integration = this.require(ref);
+    const key = executionInstanceKey(ref);
+    let service = this.#catalogServices.get(key);
+    if (!service) {
+      service = new LocalProviderCatalogService(integration);
+      this.#catalogServices.set(key, service);
+    }
+    return service;
   }
 
   #configurationService(integration: AgentIntegration): ProviderConfigurationService {

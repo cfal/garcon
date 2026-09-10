@@ -91,4 +91,37 @@ describe('instance-qualified executable directory', () => {
     expect(() => directory.configurationFor({ ...owner, executionLocation: { ...owner.executionLocation, nodeId: 'offline' } }))
       .toThrow('unavailable');
   });
+
+  test('binds catalogs to the exact node and instance without provider fallback', async () => {
+    const work = instance('node-a', 'work', true);
+    const personal = instance('node-a', 'personal');
+    const otherNode = instance('node-b', 'work', true);
+    const removed = instance('node-a', 'removed');
+    removed.configuration.removedAt = '2026-09-09T00:00:00.000Z';
+    for (const entry of [work, personal, otherNode, removed]) {
+      const model = `${entry.configuration.nodeId}/${entry.configuration.id}`;
+      entry.integration.catalog = {
+        snapshot: async () => ({
+          models: [{ value: model, label: model, supportsImages: false }],
+          defaultModel: model, requiresStrictModelDiscovery: false, generation: null,
+        }),
+      };
+    }
+    const directory = new AgentInstanceDirectory([work, personal, otherNode, removed]);
+    const signal = new AbortController().signal;
+    for (const entry of [work, personal, otherNode]) {
+      const ref = { nodeId: entry.configuration.nodeId, instanceId: entry.configuration.id };
+      const catalog = directory.catalogForInstance(ref);
+      expect(directory.catalogForInstance({ ...ref })).toBe(catalog);
+      expect((await catalog.snapshot({ strict: false }, signal)).defaultModel)
+        .toBe(`${entry.configuration.nodeId}/${entry.configuration.id}`);
+    }
+    for (const ref of [
+      { nodeId: 'node-a', instanceId: 'missing' },
+      { nodeId: 'node-a', instanceId: 'removed' },
+      { nodeId: 'offline', instanceId: 'work' },
+    ]) {
+      expect(() => directory.catalogForInstance(ref)).toThrow('unavailable');
+    }
+  });
 });

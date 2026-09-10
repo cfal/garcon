@@ -22,13 +22,15 @@ import type {
 import type { AgentMigrationStore } from './host.js';
 import type { AgentNativeSessionRef } from './transcript.js';
 
+export interface AgentCatalogSnapshot {
+  readonly models: readonly AgentModelOption[];
+  readonly defaultModel: string;
+  readonly requiresStrictModelDiscovery: boolean;
+  readonly generation: { readonly priority: number; readonly model: string } | null;
+}
+
 export interface AgentCatalog {
-  snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
-    readonly models: readonly AgentModelOption[];
-    readonly defaultModel: string;
-    readonly requiresStrictModelDiscovery: boolean;
-    readonly generation: { readonly priority: number; readonly model: string } | null;
-  }>;
+  snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<AgentCatalogSnapshot>;
 }
 
 export interface AgentAttachments {
