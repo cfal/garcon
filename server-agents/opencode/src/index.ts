@@ -81,6 +81,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly textGeneration = null;
 
   constructor(host: AgentHost) {
     const config = createOpenCodeConfig(host.environment);

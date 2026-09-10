@@ -61,6 +61,7 @@ const integration = {
   goals: null,
   endpoints: null,
   singleQuery: null,
+  textGeneration: null,
 } satisfies AgentIntegration & { readonly legacyHistoryImport: null };
 
 describe('validateAgentIntegration', () => {
@@ -115,6 +116,7 @@ describe('validateAgentIntegration', () => {
       'goals',
       'endpoints',
       'singleQuery',
+      'textGeneration',
       'nativeHistoryImport',
       'nativeActivity',
       'nativeSessions',
@@ -149,6 +151,7 @@ describe('validateAgentIntegration', () => {
       ['goals', {}],
       ['endpoints', {}],
       ['singleQuery', {}],
+      ['textGeneration', {}],
       ['singleQuery', { run: async () => '', runsToolsWithoutPermission: false }],
       ['singleQuery', { run: async () => '', runsToolsWithoutPermission: undefined }],
       ['legacyHistoryImport', {}],

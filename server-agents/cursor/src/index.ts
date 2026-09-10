@@ -90,6 +90,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly textGeneration = null;
 
   constructor(
     host: AgentHost,

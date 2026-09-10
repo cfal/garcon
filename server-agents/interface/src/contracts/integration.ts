@@ -12,6 +12,7 @@ import type {
   AgentMigration,
   AgentSettings,
   AgentSingleQuery,
+  AgentTextGeneration,
   AgentSteering,
 } from './services.js';
 import type { AgentNativeFork } from './native-fork.js';
@@ -42,6 +43,7 @@ export interface AgentIntegration {
   readonly goals: AgentGoals | null;
   readonly endpoints: AgentEndpoints | null;
   readonly singleQuery: AgentSingleQuery | null;
+  readonly textGeneration: AgentTextGeneration | null;
   readonly legacyHistoryImport: AgentHistoryImport | null;
   readonly nativeHistoryImport: AgentHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;

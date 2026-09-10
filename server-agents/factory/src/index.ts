@@ -70,6 +70,7 @@ export default class FactoryAgentIntegration implements AgentIntegration {
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly textGeneration = null;
 
   constructor(host: AgentHost) {
     const config = createFactoryConfig(host.environment);

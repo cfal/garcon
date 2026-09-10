@@ -88,7 +88,7 @@ function createIntegration(profile) {
       translateLegacySettings: async () => null,
     },
     commands: { discover: mock(async () => [{ name: `${profile}-command`, source: 'command' }]) },
-    attachments: null, auth: null, endpoints: null, singleQuery: null, nativeActivity: null,
+    attachments: null, auth: null, endpoints: null, singleQuery: null, textGeneration: null, nativeActivity: null,
   };
   return { integration, handle, target, preparation };
 }

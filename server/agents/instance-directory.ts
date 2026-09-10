@@ -20,6 +20,8 @@ import { LocalProviderNativeForkService } from '../execution-node/local-provider
 import type { ProviderNativeForkService } from '../execution-nodes/provider-native-fork.js';
 import { LocalProviderSingleQueryService } from '../execution-node/local-provider-single-query.js';
 import type { ProviderSingleQueryService } from '../execution-nodes/provider-single-query.js';
+import { LocalProviderTextGenerationService } from '../execution-node/local-provider-text-generation.js';
+import type { ProviderTextGenerationService } from '../execution-nodes/provider-text-generation.js';
 
 export interface ExecutableAgentInstance {
   readonly configuration: ConfiguredAgentInstance;
@@ -40,6 +42,7 @@ export class AgentInstanceDirectory {
   readonly #nativeHistoryImportServices = new Map<string, ProviderHistoryImportService>();
   readonly #nativeForkServices = new Map<string, ProviderNativeForkService>();
   readonly #singleQueryServices = new Map<string, ProviderSingleQueryService>();
+  readonly #textGenerationServices = new Map<string, ProviderTextGenerationService>();
 
   constructor(instances: readonly ExecutableAgentInstance[]) {
     const executables = new Set<AgentIntegration>();
@@ -191,6 +194,18 @@ export class AgentInstanceDirectory {
     if (!service) {
       service = new LocalProviderSingleQueryService(integration, integration.singleQuery);
       this.#singleQueryServices.set(key, service);
+    }
+    return service;
+  }
+
+  textGenerationForInstance(ref: ExecutionInstanceRef): ProviderTextGenerationService | null {
+    const integration = this.require(ref);
+    if (!integration.textGeneration) return null;
+    const key = executionInstanceKey(ref);
+    let service = this.#textGenerationServices.get(key);
+    if (!service) {
+      service = new LocalProviderTextGenerationService(integration, integration.textGeneration);
+      this.#textGenerationServices.set(key, service);
     }
     return service;
   }

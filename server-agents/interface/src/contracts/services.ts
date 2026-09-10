@@ -170,8 +170,8 @@ export interface AgentSingleQuery {
   // that feed it untrusted text, such as transcript compaction, must refuse the
   // integration outright: the prompt would otherwise be able to act on the
   // workspace. Absent means the one-shot is not known to bypass permissions, not
-  // that it is guaranteed tool-free; expressing that guarantee needs a tool
-  // policy on the request, which no provider carries yet.
+  // that it is guaranteed tool-free. The independent textGeneration facet
+  // carries that stronger contract.
   readonly runsToolsWithoutPermission?: true;
 }
 
@@ -183,5 +183,23 @@ export interface AgentSingleQueryRequest {
   readonly timeoutMs?: number;
   readonly settings: AgentSettingsEnvelope;
   readonly endpoint: AgentEndpointSelection | null;
+  readonly signal: AbortSignal;
+}
+
+/** Generates text without invoking tools or accessing a project, including for tool-seeking input. */
+export interface AgentTextGeneration {
+  run(request: AgentTextGenerationRequest): Promise<string>;
+}
+
+export const MAX_TEXT_GENERATION_TIMEOUT_MS = 5 * 60_000;
+
+export interface AgentTextGenerationRequest {
+  readonly prompt: string;
+  readonly model: string;
+  readonly thinkingMode: ThinkingMode;
+  readonly settings: AgentSettingsEnvelope;
+  readonly endpoint: AgentEndpointSelection | null;
+  /** Positive integer milliseconds, at most MAX_TEXT_GENERATION_TIMEOUT_MS. */
+  readonly timeoutMs: number;
   readonly signal: AbortSignal;
 }

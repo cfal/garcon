@@ -18,6 +18,7 @@ import {
 } from '@garcon/server-agent-common/direct/native-session';
 import { createDirectOpenAiChatRuntime } from '@garcon/server-agent-common/direct/router';
 import { DirectSessionStore } from '@garcon/server-agent-common/direct/session-store';
+import { createDirectTextGeneration } from '@garcon/server-agent-common/direct/text-generation';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
@@ -65,6 +66,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly textGeneration: NonNullable<AgentIntegration['textGeneration']>;
 
   constructor(host: AgentHost) {
     const sessions = new DirectSessionStore({ host });
@@ -74,6 +76,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
     });
     this.nativeHistoryImport = createDirectNativeHistoryImport(sessions);
     this.nativeSessions = createDirectNativeSessionAccess(sessions);
+    this.textGeneration = createDirectTextGeneration(host, runtime);
 
     this.settings = createVersionedSettings({
       ownerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,

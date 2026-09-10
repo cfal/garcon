@@ -91,6 +91,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly goals: NonNullable<AgentIntegration['goals']>;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+  readonly textGeneration = null;
 
   constructor(host: AgentHost) {
     const config = createCodexConfig(host.environment);

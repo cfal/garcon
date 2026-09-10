@@ -22,6 +22,7 @@ const NULLABLE_FACET_METHODS = {
   goals: ['submitControl'],
   endpoints: ['validate'],
   singleQuery: ['run'],
+  textGeneration: ['run'],
   legacyHistoryImport: ['load'],
   nativeHistoryImport: ['load'],
   nativeActivity: ['lastActivity'],

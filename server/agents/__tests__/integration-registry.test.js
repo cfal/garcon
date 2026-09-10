@@ -68,6 +68,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     transientControls: null,
     endpoints: null,
     singleQuery: null,
+    textGeneration: null,
     testHost: host,
   };
 }

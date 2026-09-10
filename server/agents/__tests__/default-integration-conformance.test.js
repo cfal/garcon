@@ -45,5 +45,11 @@ describe('default agent integration conformance', () => {
     expect(registry.list().map((integration) => integration.descriptor.id)).toHaveLength(
       defaultAgentIntegrations.length,
     );
+    expect(registry.list().filter((integration) => integration.textGeneration !== null)
+      .map((integration) => integration.descriptor.id).sort()).toEqual([
+      'direct-anthropic-compatible',
+      'direct-openai-compatible',
+      'direct-openai-responses-compatible',
+    ]);
   });
 });
